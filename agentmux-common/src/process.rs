@@ -20,18 +20,48 @@
 //! Every function is scoped strictly to the given PID (and, on Windows,
 //! its tree via `/T`) — **never** by image name. Killing by image name is
 //! the cross-instance hazard CLAUDE.md bans outright.
+//!
+//! ## The `pid_t` guard
+//!
+//! Callers hand us a `u32`; POSIX `kill(2)` takes a signed `pid_t`. A raw
+//! `as` cast of a value above `i32::MAX` wraps **negative**, and a negative
+//! argument to `kill` means *"signal this process group"* — so a bogus PID
+//! would silently become a live group-kill (ReAgent P1 on PR #3033 caught
+//! exactly this in the first version of this module's own tests:
+//! `u32::MAX - 1` wrapped to `-2`, targeting process group 2, and the group
+//! variant negated it to signal PID 2). Both functions therefore refuse any
+//! PID that does not fit `pid_t`, and [`kill_process_group`] additionally
+//! refuses `pid <= 0`: a group id of `0` would mean *the caller's own
+//! group*. Real PIDs never approach `i32::MAX` on any supported platform
+//! (Linux `pid_max` caps at 4194304; Windows PIDs are small multiples of
+//! 4), so the guard costs nothing in practice and closes the hazard
+//! entirely.
 
 use std::io;
+
+/// Convert a caller-supplied PID to a signed `pid_t`, refusing anything
+/// that would wrap. Shared by both public functions so the guard can't
+/// drift between them.
+fn checked_pid(pid: u32) -> io::Result<i32> {
+    i32::try_from(pid).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("pid {pid} does not fit in pid_t — refusing (would wrap negative)"),
+        )
+    })
+}
 
 /// Terminate one process by PID — `SIGTERM` on Unix; `taskkill /F /T /PID`
 /// on Windows (which also takes the tree, since Windows has no
 /// process-group signal).
 ///
-/// Returns `Err` if the signal/command could not be delivered; a process
-/// that has already exited surfaces as an error too (Unix `ESRCH`, Windows
-/// non-zero `taskkill` exit) — callers treating "already gone" as success
-/// should ignore the result, which is what every prior copy did.
+/// Returns `Err` if the PID is out of range for `pid_t` (see the module doc),
+/// or if the signal/command could not be delivered. A process that has
+/// already exited surfaces as an error too (Unix `ESRCH`, Windows non-zero
+/// `taskkill` exit) — callers treating "already gone" as success should
+/// ignore the result, which is what every prior copy did.
 pub fn kill_pid(pid: u32) -> io::Result<()> {
+    let pid = checked_pid(pid)?;
     #[cfg(windows)]
     {
         let status = taskkill_tree(pid).status()?;
@@ -43,8 +73,10 @@ pub fn kill_pid(pid: u32) -> io::Result<()> {
     }
     #[cfg(unix)]
     {
-        // SAFETY: kill(2) is a well-defined POSIX syscall on any pid value.
-        let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        // SAFETY: kill(2) is a well-defined POSIX syscall; `pid` is a
+        // range-checked positive pid_t, so this can only ever address one
+        // process, never a group.
+        let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
         if ret != 0 {
             return Err(io::Error::last_os_error());
         }
@@ -61,17 +93,25 @@ pub fn kill_pid(pid: u32) -> io::Result<()> {
 /// (`process_group(0)` / `setsid`) for the negative-pid signal to reach
 /// its descendants; that is the contract every prior copy relied on.
 /// Best-effort: nothing is returned because there is nothing useful a
-/// caller can do about a failed kill of an already-dying group.
+/// caller can do about a failed kill of an already-dying group. A PID
+/// that is out of range for `pid_t`, or `0`, is a **no-op** — never a
+/// signal to the wrong group (see the module doc).
 pub fn kill_process_group(pid: u32) {
+    let Ok(pgid) = checked_pid(pid) else { return };
+    if pgid <= 0 {
+        // `kill(-0, …)` == `kill(0, …)` == "the caller's own process
+        // group". Refuse rather than ever signal ourselves.
+        return;
+    }
     #[cfg(windows)]
     {
-        let _ = taskkill_tree(pid).status();
+        let _ = taskkill_tree(pgid).status();
     }
     #[cfg(unix)]
     {
-        let pgid = pid as libc::pid_t;
-        // SAFETY: kill(2) is a well-defined POSIX syscall; a negative pid
-        // targets the process group.
+        // SAFETY: kill(2) is a well-defined POSIX syscall; `pgid` is a
+        // range-checked strictly-positive pid_t, so `-pgid` addresses
+        // exactly that group and can never be 0 or wrap.
         unsafe { libc::kill(-pgid, libc::SIGTERM) };
         std::thread::sleep(std::time::Duration::from_millis(300));
         unsafe { libc::kill(-pgid, libc::SIGKILL) };
@@ -81,7 +121,7 @@ pub fn kill_process_group(pid: u32) {
 /// `taskkill /F /T /PID <pid>` with stdio detached and the console flash
 /// suppressed — the one Windows kill command, built once.
 #[cfg(windows)]
-fn taskkill_tree(pid: u32) -> std::process::Command {
+fn taskkill_tree(pid: i32) -> std::process::Command {
     use std::os::windows::process::CommandExt;
     let mut cmd = std::process::Command::new("taskkill");
     cmd.args(["/F", "/T", "/PID", &pid.to_string()])
@@ -96,22 +136,48 @@ fn taskkill_tree(pid: u32) -> std::process::Command {
 mod tests {
     use super::*;
 
-    /// Killing a PID that cannot exist must fail cleanly, not panic — the
-    /// helpers run in teardown paths where a panic would mask the real
-    /// error. PID 0 is never a valid target on either platform (Unix:
-    /// `kill(0, …)` would hit the *caller's* group, which the helper never
-    /// does because it targets `pid` itself for `kill_pid`; we use a
-    /// clearly-dead high PID instead).
+    /// The overflow case ReAgent caught: `u32::MAX - 1` cast to `i32` is
+    /// `-2`, which `kill(2)` reads as "process group 2". The guard must
+    /// reject it *before* any syscall, on every platform.
     #[test]
-    fn kill_pid_on_dead_pid_is_an_error_not_a_panic() {
-        // u32::MAX - 1 is not a live PID on any supported platform.
-        let r = kill_pid(u32::MAX - 1);
-        assert!(r.is_err());
+    fn kill_pid_refuses_a_pid_that_would_wrap_negative() {
+        let err = kill_pid(u32::MAX - 1).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput, "{err}");
+        assert!(err.to_string().contains("does not fit"), "{err}");
+    }
+
+    /// Same input through the group variant: wrapping to `-2` and then
+    /// negating would have signalled PID 2. Must be a silent no-op.
+    #[test]
+    fn kill_process_group_refuses_a_pid_that_would_wrap_negative() {
+        kill_process_group(u32::MAX - 1);
+    }
+
+    /// pgid 0 means "the caller's own group" to `kill(2)`; refusing it is
+    /// the difference between a no-op and killing the test runner.
+    #[test]
+    fn kill_process_group_refuses_zero() {
+        kill_process_group(0);
+    }
+
+    /// The boundary itself: `i32::MAX` fits `pid_t`, so the guard must
+    /// pass it through — and it cannot be a live process on any supported
+    /// platform (Linux pid_max ≤ 4194304; Windows PIDs are small multiples
+    /// of 4), so the OS rejects it cleanly (`ESRCH` / non-zero `taskkill`).
+    /// This is the real "nonexistent PID fails cleanly, not by panic" test.
+    #[test]
+    fn kill_pid_on_a_nonexistent_in_range_pid_is_an_error_not_a_panic() {
+        let err = kill_pid(i32::MAX as u32).unwrap_err();
+        assert_ne!(err.kind(), io::ErrorKind::InvalidInput, "guard should NOT have fired: {err}");
     }
 
     #[test]
-    fn kill_process_group_on_dead_pid_does_not_panic() {
-        kill_process_group(u32::MAX - 1);
+    fn checked_pid_boundaries() {
+        assert_eq!(checked_pid(0).unwrap(), 0);
+        assert_eq!(checked_pid(1).unwrap(), 1);
+        assert_eq!(checked_pid(i32::MAX as u32).unwrap(), i32::MAX);
+        assert!(checked_pid(i32::MAX as u32 + 1).is_err());
+        assert!(checked_pid(u32::MAX).is_err());
     }
 
     #[cfg(windows)]
