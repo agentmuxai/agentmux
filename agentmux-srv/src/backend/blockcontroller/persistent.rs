@@ -3027,10 +3027,31 @@ impl PersistentSubprocessController {
                         // `global()` is `None` in tests that don't call
                         // `subagent_watcher::set_global` — a safe no-op, same
                         // pattern `process_tracker::registry` already uses.
+                        //
+                        // On a BLOCKING thread, not this one. Reconciliation
+                        // used to be a pure in-memory status flip under a
+                        // mutex (O(1)), but as of the completion-detection
+                        // fix (#3007) it reads the parent transcript from
+                        // disk — routinely tens of MB, plus per-line JSON
+                        // parsing — to decide whether each member actually
+                        // returned. Doing that inline would block a tokio
+                        // worker thread for the whole read, and this fires on
+                        // EVERY turn-end, so several blocks finishing at once
+                        // could stall the runtime (reagent P1 on #3007).
+                        //
+                        // Fire-and-forget: the result is a status correction
+                        // broadcast to whoever's listening, not something this
+                        // stdout-reader task consumes, so there is nothing to
+                        // await. The backfill call site (`scan_session_
+                        // subagents`) needs no equivalent — it already runs in
+                        // a blocking context that walks up to 200 files.
                         let session_id_snapshot = inner_read.lock().unwrap().session_id.clone();
                         if let Some(sid) = session_id_snapshot {
                             if let Some(watcher) = subagent_watcher::global() {
-                                watcher.reconcile_stale_subagents(&block_id_read, &sid);
+                                let block_id = block_id_read.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    watcher.reconcile_stale_subagents(&block_id, &sid);
+                                });
                             }
                         }
                     }

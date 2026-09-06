@@ -156,9 +156,14 @@ pub(super) fn parent_tool_results_at(parent_jsonl: &Path) -> HashMap<String, boo
 /// draws is *returned* vs *cut off*, and a dispatch that reported an error
 /// returned. Folding failures into `Abandoned` would recreate the same
 /// conflation this fix exists to remove, just with a smaller blast radius.
+///
 /// Surfacing the error state itself needs a status the enum doesn't have yet
-/// (and a matching frontend union) — tracked as follow-up in the report above;
-/// `is_error` is logged at the call site meanwhile so it isn't silently lost.
+/// (and a matching frontend union) — tracked as follow-up in the report above.
+/// **Nothing reads the `is_error` flag today** — this function only asks
+/// `contains_key`. It is parsed and carried in `parent_results` purely so the
+/// follow-up has it available without re-reading every transcript; do not
+/// mistake that for it being surfaced or logged anywhere (reagent P2 on
+/// #3007, on an earlier version of this comment that claimed otherwise).
 pub(super) fn terminal_status(
     tool_use_id: Option<&str>,
     parent_results: &HashMap<String, bool>,
