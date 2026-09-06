@@ -13,7 +13,7 @@ on:
         # frontend/app/view/agent/providers/pin-consistency.test.ts.
         description: 'Claude Code version to pin (empty = latest)'
         required: false
-        default: '2.1.247'
+        default: '2.1.263'
 
 env:
   REGISTRY: ghcr.io

@@ -33,7 +33,7 @@ RUN usermod -l agent -d /home/agent -m node \
 
 # Claude Code — version pinned at build time for reproducible images.
 # Managed by rebuilding with a new CLAUDE_VERSION arg, not npm update.
-ARG CLAUDE_VERSION=2.1.247
+ARG CLAUDE_VERSION=2.1.263
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
 
 # Prevent in-container auto-updates — version is managed at the image level.

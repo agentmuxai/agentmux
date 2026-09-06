@@ -201,9 +201,9 @@ fn detect_cli(name: &str) -> CliDetectionResult {
 // frontend/app/view/agent/providers/index.ts `pinnedVersion`, and
 // .github/workflows/container-image.yml `claude_version` default — enforced by
 // frontend/app/view/agent/providers/pin-consistency.test.ts.
-const CLAUDE_VERSION: &str = "2.1.247";
-const CODEX_VERSION: &str = "0.116.0";
-const GEMINI_VERSION: &str = "0.32.1";
+const CLAUDE_VERSION: &str = "2.1.263";
+const CODEX_VERSION: &str = "0.153.4";
+const GEMINI_VERSION: &str = "0.58.0";
 
 fn get_provider_install_dir(data_dir: &str, provider: &str) -> Result<std::path::PathBuf, String> {
     Ok(std::path::PathBuf::from(data_dir)
