@@ -197,6 +197,29 @@ fn query_peers_concurrently<'a>(
     futures
 }
 
+/// Pure predicate behind `LanDiscovery::resolves_to_this_instance`, split out
+/// so it can be tested without standing up an mDNS `ServiceDaemon`.
+///
+/// `any` rather than `all` on the address match: a resolution for our own
+/// service can legitimately carry an address that interface enumeration missed
+/// (they race), and requiring every address to be ours would let that one
+/// stray entry resurrect the phantom. `any` cannot produce a false positive —
+/// combined with the port equality, a genuine remote peer would have to be
+/// listening on our port *at one of our own interface addresses*, which it
+/// cannot be. Another AgentMux instance on this same host does share our
+/// addresses, but never our port.
+fn is_self_resolution(
+    resolved_port: u16,
+    resolved_addrs: &[IpAddr],
+    own_port: u16,
+    own_addrs: &std::collections::HashSet<IpAddr>,
+) -> bool {
+    if resolved_port != own_port || own_addrs.is_empty() {
+        return false;
+    }
+    resolved_addrs.iter().any(|a| own_addrs.contains(a))
+}
+
 pub struct LanDiscovery {
     daemon: ServiceDaemon,
     instances: Arc<RwLock<HashMap<String, LanInstance>>>,
@@ -443,6 +466,23 @@ impl LanDiscovery {
         }
     }
 
+    /// True when a resolved service is really this instance, reached over one
+    /// of this host's own addresses.
+    ///
+    /// Both conditions are required. The port alone is far too weak (two hosts
+    /// can land on the same ephemeral port), and an address alone is too weak
+    /// while several AgentMux instances share a machine — but no remote peer
+    /// can be listening on OUR port at an address that is OURS.
+    fn resolves_to_this_instance(&self, info: &ServiceInfo) -> bool {
+        let addrs: Vec<IpAddr> = info.get_addresses().iter().copied().collect();
+        is_self_resolution(
+            info.get_port(),
+            &addrs,
+            self.port,
+            &crate::backend::lan_listeners::all_local_addresses(),
+        )
+    }
+
     fn handle_event(&self, event: ServiceEvent) {
         match event {
             ServiceEvent::ServiceResolved(info) => {
@@ -462,6 +502,39 @@ impl LanDiscovery {
                 // was inserted as a phantom peer that could never self-heal
                 // (see the instance_id-preservation fix below for why).
                 if fullname == self.service_fullname {
+                    return;
+                }
+
+                // Belt-and-braces on the fullname check above, which was
+                // measured NOT to be sufficient on 2026-09-06: this instance
+                // was still inserting itself as a peer. The srv log showed
+                // four `LAN peer discovered` events, all `peer_id=""`, all on
+                // port 55019 — this instance's own port — at 192.168.1.230,
+                // 172.23.176.1 and fe80::5c1e:c2bb:b5bc:9655, every one of
+                // them an address of this very host. They collapse into a
+                // single phantom map entry (the map is keyed by fullname), so
+                // `DiscoverAgents` reported one LAN "peer" that was really us,
+                // with empty agents/hostname/instance_id.
+                //
+                // Why the fullname check misses them is not established —
+                // plausibly mdns-sd conflict-renaming when several AgentMux
+                // instances share this host, or a re-registration under
+                // `enable_addr_auto()`. Rather than guess at that, this checks
+                // the thing we can state with certainty: a service on OUR port
+                // at an address that belongs to THIS machine is us. A genuine
+                // remote peer cannot satisfy both — it would have to be
+                // reachable at one of our own interface addresses.
+                //
+                // Cost of the phantom, and why it is worth a second guard:
+                // `find_agent` now fans out concurrently to every known peer,
+                // so each LAN lookup spent a request asking ourselves a
+                // question we had already answered locally.
+                if self.resolves_to_this_instance(&info) {
+                    tracing::debug!(
+                        address = %info.get_addresses().iter().next().map(|a| a.to_string()).unwrap_or_default(),
+                        port = info.get_port(),
+                        "skipping mDNS resolution of this instance's own service"
+                    );
                     return;
                 }
 
@@ -1615,5 +1688,88 @@ mod peer_fanout_tests {
         let http = reqwest::Client::new();
         let inflight = query_peers_concurrently(&peers, "agent-x", &http);
         assert_eq!(inflight.len(), 0, "neither peer is eligible to be queried");
+    }
+}
+
+/// `is_self_resolution` — the guard that stops this instance inserting itself
+/// as a LAN peer.
+///
+/// The scenario these encode was measured on 2026-09-06, not imagined: four
+/// `LAN peer discovered` events, all `peer_id=""`, all on this instance's own
+/// port 55019, at 192.168.1.230 / 172.23.176.1 / fe80::5c1e:c2bb:b5bc:9655 —
+/// every one an address of this host. The pre-existing fullname-based self-skip
+/// did not catch them.
+#[cfg(test)]
+mod self_resolution_tests {
+    use super::is_self_resolution;
+    use std::collections::HashSet;
+    use std::net::IpAddr;
+
+    fn own() -> HashSet<IpAddr> {
+        ["192.168.1.230", "172.23.176.1", "fe80::5c1e:c2bb:b5bc:9655", "127.0.0.1"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect()
+    }
+
+    fn ip(s: &str) -> IpAddr {
+        s.parse().unwrap()
+    }
+
+    /// The exact observed case, one per address the log showed.
+    #[test]
+    fn our_own_addresses_on_our_own_port_are_self() {
+        for addr in ["192.168.1.230", "172.23.176.1", "fe80::5c1e:c2bb:b5bc:9655"] {
+            assert!(
+                is_self_resolution(55019, &[ip(addr)], 55019, &own()),
+                "{addr}:55019 is this host on this instance's port — must be skipped"
+            );
+        }
+    }
+
+    /// A real peer: different machine, so its addresses are not ours. Sharing
+    /// our ephemeral port by coincidence must NOT be enough to discard it —
+    /// that would silently drop a genuine peer, which is far worse than the
+    /// phantom this guard exists to remove.
+    #[test]
+    fn a_remote_peer_on_a_coincidentally_equal_port_is_not_self() {
+        assert!(!is_self_resolution(55019, &[ip("192.168.1.77")], 55019, &own()));
+    }
+
+    /// Another AgentMux instance on THIS host does share our addresses — it is
+    /// the port that distinguishes it. Two instances never hold the same port.
+    #[test]
+    fn a_sibling_instance_on_this_host_is_not_self() {
+        assert!(
+            !is_self_resolution(51095, &[ip("192.168.1.230")], 55019, &own()),
+            "same host, different port — a real sibling instance, not us"
+        );
+    }
+
+    /// `any`, not `all`: interface enumeration and mDNS resolution race, so a
+    /// resolution of our own service can carry one address we didn't enumerate.
+    /// Requiring every address to match would let that stray entry resurrect
+    /// the phantom.
+    #[test]
+    fn one_matching_address_is_enough_even_beside_an_unknown_one() {
+        assert!(is_self_resolution(
+            55019,
+            &[ip("10.99.99.99"), ip("172.23.176.1")],
+            55019,
+            &own()
+        ));
+    }
+
+    /// Enumeration failing means "we cannot prove any address is ours". Degrade
+    /// to the old behaviour (a phantom peer) rather than to something worse —
+    /// an empty set must never make everything look like self.
+    #[test]
+    fn an_empty_own_set_never_claims_self() {
+        assert!(!is_self_resolution(55019, &[ip("192.168.1.230")], 55019, &HashSet::new()));
+    }
+
+    #[test]
+    fn a_resolution_with_no_addresses_is_not_self() {
+        assert!(!is_self_resolution(55019, &[], 55019, &own()));
     }
 }
