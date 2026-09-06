@@ -42,7 +42,7 @@ import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import { extractToolDetail } from "../stream-parser";
 import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
@@ -128,9 +128,30 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
     canceled: "⏹",
 };
 
-const PREVIEW_ZOOM_STEP = 0.05;
-const PREVIEW_ZOOM_MIN = 0.7;
-const PREVIEW_ZOOM_MAX = 2.0;
+// The tool preview used to carry its OWN Ctrl+wheel zoom here — a local
+// `previewFontScale` signal applied as `font-size: N%` on the overlay-log
+// wrapper. Removed 2026-09-06; see
+// docs/reports/REPORT_ZOOM_BINDINGS_AUDIT_2026_09_06.md for the full audit.
+//
+// Short version: it could not work, and deleting it makes previews zoom
+// MORE, not less. Pane zoom is CSS `zoom` on the pane root, which scales the
+// whole box tree; the preview's font-size percentage only reached
+// descendants authored in `em`/`%`, and `_document-nodes.scss` is 66
+// hardcoded-px font-size rules against 8 relative ones. So it moved ~11% of
+// the type in the panel, and whether it appeared to do anything at all
+// depended on which renderer you happened to be looking at (DiffViewer,
+// BashOutputViewer, HighlightedCode and CompactResult never referenced the
+// scale). That is the "sometimes it doesn't even work" this removes.
+//
+// It also fought the pane: the same Ctrl+wheel did different things a few
+// pixels apart (an `overPreviewBody` hit-test with no visual cue), the two
+// scales composed multiplicatively under different clamps (0.5–2.0 vs
+// 0.7–2.0), and the scale lived in a component-local signal inside a
+// VIRTUALIZED list — so it silently reset on scroll, and `<Index>` slot
+// reuse could land a stale scale on an unrelated tool block.
+//
+// Ctrl+wheel over a preview now simply zooms the pane, which already
+// scales previews correctly, hardcoded pixels included.
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Drives the peek tooltip's live "time ago" text (§2.3 of
@@ -139,35 +160,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // the tooltip is actually open, since Tooltip doesn't expose that state
     // to its caller.
     const peekTick = useTick(1000);
-
-    // Independent font-scale for the tool preview panel. Ctrl+Scroll inside the
-    // panel zooms only the preview; the pane-level zoom (block.meta["term:zoom"])
-    // is unaffected. Ephemeral — not persisted to block meta.
-    const [previewFontScale, setPreviewFontScale] = createSignal(1.0);
-    let panelRef: HTMLDivElement | undefined;
-    onMount(() => {
-        if (!panelRef) return;
-        const onWheel = (e: WheelEvent) => {
-            if (!e.ctrlKey) return;
-            // Only zoom the PREVIEW when the pointer is over the preview body.
-            // Over the file-path header (or anywhere else in the panel), let
-            // Ctrl+wheel bubble through to the pane zoom (term:zoom) — the header
-            // belongs to the pane, not the preview. Without this gate, Ctrl+wheel
-            // over the filename zoomed the preview, and there was no way to zoom
-            // the whole pane while hovering the tool block.
-            const t = e.target as HTMLElement | null;
-            const overPreviewBody =
-                !!t?.closest(".agent-tool-overlay-log") &&
-                !t.closest(".agent-tool-file-path, .agent-tool-file-path-row");
-            if (!overPreviewBody) return; // fall through → pane zoom
-            e.preventDefault();
-            e.stopPropagation();
-            const delta = e.deltaY < 0 ? PREVIEW_ZOOM_STEP : -PREVIEW_ZOOM_STEP;
-            setPreviewFontScale((prev) => Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, prev + delta)));
-        };
-        panelRef.addEventListener("wheel", onWheel, { passive: false });
-        onCleanup(() => panelRef?.removeEventListener("wheel", onWheel));
-    });
 
     // A tool stays expanded after completing live until its row scrolls off the
     // top — the "post-completion hold" now lives in `documentState.expandedTools`
@@ -521,7 +513,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                  * remove it from the focus/a11y tree when hidden.
                  */}
                 <div
-                    ref={panelRef}
                     class={clsx("agent-tool-panel", {
                         "agent-tool-panel--hidden": panelMode() === "hidden",
                         "agent-tool-panel--flow": panelMode() === "flow",
@@ -537,7 +528,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     aria-hidden={!expanded()}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <ToolBlockOverlay node={props.node} previewFontScale={previewFontScale} dispatchMatch={props.dispatchMatch} />
+                    <ToolBlockOverlay node={props.node} dispatchMatch={props.dispatchMatch} />
                 </div>
             </div>
         </Show>
