@@ -13,6 +13,82 @@ use std::sync::Arc;
 use super::types::{SubagentEvent, SubagentEventType};
 use super::SubagentWatcher;
 
+// ── Tool-call display summaries ─────────────────────────────────────────
+//
+// Both limits are in CHARS. They used to be bare `200`/`500` literals that
+// tested a BYTE length (`s.len()`) and then cut by CHAR index — agreeing for
+// ASCII and disagreeing for anything else (a string over 200 bytes but under
+// 200 chars took the truncation branch, found no 200th char, and fell through
+// to no truncation at all). See
+// docs/reports/REPORT_TOOL_SUMMARY_FORMATTING_ARCHITECTURE_2026_09_06.md §4.1.
+
+/// Chars of a tool call's input kept for the Swarm feed's collapsed row.
+const MAX_INPUT_SUMMARY_CHARS: usize = 200;
+
+/// Chars of a tool result kept for the same feed. Larger than the input
+/// budget because a result is the thing a reader is usually scanning.
+const MAX_RESULT_PREVIEW_CHARS: usize = 500;
+
+/// Cut to `max` CHARS (never mid-codepoint), appending an ellipsis when it
+/// actually cut something.
+fn truncate_chars(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((byte_idx, _)) => format!("{}...", &s[..byte_idx]),
+        None => s.to_string(),
+    }
+}
+
+/// The human-meaningful field of a tool call's `input`, by tool name.
+///
+/// Mirrors the frontend's `extractToolDetail`
+/// (`frontend/app/view/agent/stream-parser.ts`), which is what the Agent pane,
+/// the Activity Dock and the tool blocks have always used. The Swarm feed
+/// instead showed `serde_json::Value::to_string()` — the whole input object as
+/// compact JSON, cut mid-token — because summarising happens here, at parse
+/// time, and the structured input is dropped before it ever reaches a view
+/// that could format it properly.
+///
+/// **This duplicates the mapping in a second language, deliberately and
+/// temporarily.** It buys the readable output now; the real fix is to carry
+/// the structured input across the boundary and let the frontend's existing
+/// extractor (and its renderer registry) handle it, which deletes this
+/// function. Phases 1 and 2 of the report above.
+///
+/// Unknown tools fall back to compact JSON rather than an empty string: for a
+/// tool this doesn't know, the raw object is genuinely more useful than
+/// nothing, and `mcp__*`/provider-specific names are open-ended by design.
+/// (The frontend's version returns `""` there because its callers have the
+/// full node to fall back on; here there is nothing else to show.)
+fn tool_input_detail(tool: &str, input: &serde_json::Value) -> String {
+    let field = |key: &str| input.get(key).and_then(|v| v.as_str());
+    let pick = match tool {
+        "Read" | "Edit" | "Write" | "NotebookEdit" => field("file_path"),
+        "Bash" | "BashOutput" => field("command"),
+        "Grep" | "Glob" => field("pattern"),
+        "Agent" | "Task" => field("description").or_else(|| field("prompt")),
+        "Workflow" => field("title").or_else(|| field("description")),
+        "WebSearch" | "web_search" => field("query"),
+        "WebFetch" | "web_fetch" => field("url"),
+        _ => None,
+    };
+    match pick {
+        Some(s) if !s.is_empty() => s.to_string(),
+        // Either an unknown tool, or a known one whose expected field is
+        // missing/empty/non-string — in both cases the object beats nothing.
+        _ => input.to_string(),
+    }
+}
+
+/// A tool result's text. A plain string is used as-is; anything else (the
+/// common `[{"type":"text","text":…}]` block array, or a bare object) falls
+/// back to compact JSON, same as before.
+fn result_content_text(content: &serde_json::Value) -> String {
+    match content.as_str() {
+        Some(s) => s.to_string(),
+        None => content.to_string(),
+    }
+}
+
 // ── Block-delete cascade subscriber ─────────────────────────────────────
 
 /// Subscribe to the reducer's `srv_events_tx` broadcast and prune `watcher`'s
@@ -260,15 +336,7 @@ pub(super) fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEven
                 .to_string();
             let input_summary = value
                 .get("input")
-                .map(|v| {
-                    let s = v.to_string();
-                    if s.len() > 200 {
-                        let end = s.char_indices().nth(200).map_or(s.len(), |(i, _)| i);
-                        format!("{}...", &s[..end])
-                    } else {
-                        s
-                    }
-                })
+                .map(|v| truncate_chars(&tool_input_detail(&name, v), MAX_INPUT_SUMMARY_CHARS))
                 .unwrap_or_default();
             Some(SubagentEventType::ToolUse {
                 name,
@@ -283,19 +351,7 @@ pub(super) fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEven
             let preview = value
                 .get("content")
                 .or_else(|| value.get("output"))
-                .map(|v| {
-                    let s = if let Some(s) = v.as_str() {
-                        s.to_string()
-                    } else {
-                        v.to_string()
-                    };
-                    if s.len() > 500 {
-                        let end = s.char_indices().nth(500).map_or(s.len(), |(i, _)| i);
-                        format!("{}...", &s[..end])
-                    } else {
-                        s
-                    }
-                })
+                .map(|v| truncate_chars(&result_content_text(v), MAX_RESULT_PREVIEW_CHARS))
                 .unwrap_or_default();
             Some(SubagentEventType::ToolResult { is_error, preview })
         }
@@ -554,4 +610,106 @@ pub fn resolve_claude_config_dir(
                 .map(PathBuf::from)
         })
         .or_else(|| derive_claude_config_dir(agent_id))
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use serde_json::json;
+
+    // The flagship case, taken verbatim from the transcript that prompted
+    // docs/reports/REPORT_TOOL_SUMMARY_FORMATTING_ARCHITECTURE_2026_09_06.md —
+    // the Swarm feed rendered the whole input object as escaped JSON.
+    #[test]
+    fn a_bash_call_shows_its_command_not_the_json_object() {
+        let input = json!({
+            "command": "ls /c/Users/area54/ 2>/dev/null | head -50",
+            "description": "List home directory contents",
+        });
+        let got = tool_input_detail("Bash", &input);
+        assert_eq!(got, "ls /c/Users/area54/ 2>/dev/null | head -50");
+        assert!(!got.contains('{'), "must not be a JSON dump: {got}");
+        assert!(!got.contains('"'), "must not carry JSON quoting: {got}");
+    }
+
+    #[test]
+    fn file_tools_show_the_path() {
+        for tool in ["Read", "Edit", "Write"] {
+            let input = json!({ "file_path": "/x/y.rs", "old_string": "…" });
+            assert_eq!(tool_input_detail(tool, &input), "/x/y.rs", "tool {tool}");
+        }
+    }
+
+    #[test]
+    fn search_tools_show_the_pattern() {
+        let input = json!({ "pattern": "fn main", "path": "/repo" });
+        assert_eq!(tool_input_detail("Grep", &input), "fn main");
+        assert_eq!(tool_input_detail("Glob", &input), "fn main");
+    }
+
+    #[test]
+    fn a_dispatch_prefers_its_description_over_the_whole_prompt() {
+        // An Agent prompt runs to tens of KB; the description is the one-line
+        // human summary the caller already wrote.
+        let input = json!({ "description": "Research the thing", "prompt": "x".repeat(5000) });
+        assert_eq!(tool_input_detail("Agent", &input), "Research the thing");
+    }
+
+    #[test]
+    fn a_dispatch_falls_back_to_the_prompt_when_undescribed() {
+        let input = json!({ "prompt": "do the thing" });
+        assert_eq!(tool_input_detail("Agent", &input), "do the thing");
+    }
+
+    #[test]
+    fn an_unknown_tool_keeps_the_raw_object_rather_than_showing_nothing() {
+        // Open-ended by design (`mcp__*`, provider-specific). The object is
+        // worse than a real field but strictly better than blank.
+        let input = json!({ "anything": 1 });
+        assert_eq!(tool_input_detail("mcp__whatever__do", &input), input.to_string());
+    }
+
+    #[test]
+    fn a_known_tool_missing_its_field_also_falls_back() {
+        // Guards the `Some(s) if !s.is_empty()` arm: a Bash call with no
+        // command must not render as an empty row.
+        assert_eq!(
+            tool_input_detail("Bash", &json!({ "description": "no command here" })),
+            json!({ "description": "no command here" }).to_string()
+        );
+        assert_eq!(
+            tool_input_detail("Bash", &json!({ "command": "" })),
+            json!({ "command": "" }).to_string()
+        );
+    }
+
+    #[test]
+    fn a_string_result_is_used_verbatim() {
+        assert_eq!(result_content_text(&json!("plain output")), "plain output");
+    }
+
+    #[test]
+    fn a_block_array_result_falls_back_to_json() {
+        let content = json!([{ "type": "text", "text": "hi" }]);
+        assert_eq!(result_content_text(&content), content.to_string());
+    }
+
+    #[test]
+    fn truncation_counts_chars_and_marks_that_it_cut() {
+        assert_eq!(truncate_chars("abcdef", 3), "abc...");
+        assert_eq!(truncate_chars("abc", 3), "abc", "exact length must not gain an ellipsis");
+        assert_eq!(truncate_chars("ab", 3), "ab");
+    }
+
+    #[test]
+    fn truncation_never_splits_a_multibyte_char() {
+        // The old code tested byte length and cut by char index, so a string
+        // over the byte budget but under the char budget silently escaped
+        // truncation entirely (§4.1 of the report).
+        let s = "é".repeat(150); // 300 bytes, 150 chars
+        assert_eq!(truncate_chars(&s, 200), s, "under the CHAR budget — unchanged");
+        let long = "é".repeat(250);
+        let got = truncate_chars(&long, 200);
+        assert_eq!(got.chars().count(), 203, "200 chars + the three-dot marker");
+    }
 }
