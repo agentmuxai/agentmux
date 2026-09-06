@@ -53,6 +53,7 @@
 //! `SubagentWatcher` struct definition and its lifecycle methods (`new`/
 //! `spawn`/`watch_agent`/`unwatch_agent`/`prune_block*`).
 
+mod completion;
 mod jsonl;
 mod parse;
 mod query;
