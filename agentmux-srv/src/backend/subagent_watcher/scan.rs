@@ -293,18 +293,31 @@ impl SubagentWatcher {
                     })
                     .unwrap_or_default()
             };
-            // One parent-transcript read for the whole pass, not one per
-            // member — they all share a session, so they all share a parent.
-            let parent_results = candidates
-                .first()
-                .map(|(_, path)| completion::parent_tool_results_for(path))
-                .unwrap_or_default();
+            // Each candidate resolves its OWN parent transcript, with reads
+            // cached per distinct path. Resolving once from an arbitrary
+            // member and reusing it for the rest was wrong twice over
+            // (reagent P1 on #3007): Workflow-tool members sit one level
+            // deeper (`subagents/workflows/<run-id>/`) so they don't all
+            // share a resolution, and `candidates` comes from a HashMap with
+            // unspecified iteration order — so in a mixed batch an
+            // unresolvable member landing first would zero the map and drag
+            // every Solo member into `Abandoned` too, non-deterministically.
+            let mut results_by_parent: HashMap<PathBuf, HashMap<String, bool>> = HashMap::new();
             candidates
                 .into_iter()
                 .map(|(agent_id, path)| {
-                    let tool_use_id = completion::tool_use_id_for(&path);
-                    let status =
-                        completion::terminal_status(tool_use_id.as_deref(), &parent_results);
+                    let status = match completion::parent_transcript_for(&path) {
+                        Some(parent) => {
+                            let results = results_by_parent
+                                .entry(parent.clone())
+                                .or_insert_with(|| completion::parent_tool_results_at(&parent));
+                            let tool_use_id = completion::tool_use_id_for(&path);
+                            completion::terminal_status(tool_use_id.as_deref(), results)
+                        }
+                        // No `subagents` ancestor — unrecognised layout.
+                        // Fall back to the historical inference.
+                        None => SubAgentStatus::Abandoned,
+                    };
                     (agent_id, status)
                 })
                 .collect()

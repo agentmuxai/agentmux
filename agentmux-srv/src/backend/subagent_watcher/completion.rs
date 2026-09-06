@@ -62,14 +62,26 @@ fn sidecar_path(subagent_jsonl: &Path) -> Option<PathBuf> {
 /// The parent session transcript for a subagent transcript.
 ///
 /// Claude Code lays these out as `…/<session-id>.jsonl` alongside a
-/// `…/<session-id>/subagents/agent-<id>.jsonl` tree, so the parent is the
-/// grandparent directory's path plus `.jsonl`. Returns `None` if the path
-/// isn't that shape, rather than guessing.
+/// `…/<session-id>/subagents/` tree, but members are NOT all at the same
+/// depth inside it (`scan_subagents_dir`'s own doc comment):
+///
+/// ```text
+/// <session-id>/subagents/agent-<id>.jsonl                      ← Task-tool (solo)
+/// <session-id>/subagents/workflows/<run-id>/agent-<id>.jsonl   ← Workflow-tool member
+/// ```
+///
+/// So this walks up to the `subagents` directory rather than assuming it is
+/// the immediate parent. Checking only the immediate parent silently excluded
+/// every Workflow-tool member — they could never resolve a completion and
+/// stayed permanently "interrupted", i.e. exactly the bug this module exists
+/// to fix, left unfixed for that dispatch kind (reagent P1 on #3007).
+///
+/// Returns `None` when there is no `subagents` ancestor at all, rather than
+/// guessing at a path and reading some unrelated file as a transcript.
 pub(super) fn parent_transcript_for(subagent_jsonl: &Path) -> Option<PathBuf> {
-    let subagents_dir = subagent_jsonl.parent()?;
-    if subagents_dir.file_name()?.to_str()? != "subagents" {
-        return None;
-    }
+    let subagents_dir = subagent_jsonl
+        .ancestors()
+        .find(|a| a.file_name().and_then(|n| n.to_str()) == Some("subagents"))?;
     let session_dir = subagents_dir.parent()?;
     let session_id = session_dir.file_name()?.to_str()?;
     Some(session_dir.with_file_name(format!("{session_id}.jsonl")))
@@ -78,11 +90,12 @@ pub(super) fn parent_transcript_for(subagent_jsonl: &Path) -> Option<PathBuf> {
 /// Every `tool_use_id` the parent transcript has recorded a `tool_result` for,
 /// mapped to that result's `is_error` flag.
 ///
-/// Scanned once per reconcile pass rather than once per subagent: a parent
-/// transcript is routinely tens of MB (26 MB / 15k lines on the session that
-/// surfaced this), and the reconcile loop can hold many subagents. The cheap
-/// `contains` pre-filter keeps the JSON parse off the ~99% of lines that carry
-/// no tool result at all.
+/// The caller reads once per DISTINCT parent transcript, not once per
+/// subagent: a transcript is routinely tens of MB (26 MB / 15k lines on the
+/// session that surfaced this) and a pass can hold many members, but they do
+/// not all resolve to the same parent (see [`parent_transcript_for`]). The
+/// cheap `contains` pre-filter keeps the JSON parse off the ~99% of lines that
+/// carry no tool result at all.
 pub(super) fn parent_tool_results(reader: impl BufRead) -> HashMap<String, bool> {
     let mut out = HashMap::new();
     for line in reader.lines().map_while(Result::ok) {
@@ -116,15 +129,17 @@ pub(super) fn parent_tool_results(reader: impl BufRead) -> HashMap<String, bool>
     out
 }
 
-/// Read the parent transcript for `subagent_jsonl`'s session, if it can be
-/// located and opened. An unreadable/absent parent yields an empty map, which
-/// makes [`terminal_status`] fall back to the old `Abandoned` inference for
-/// every member — conservative, and identical to pre-fix behaviour.
-pub(super) fn parent_tool_results_for(subagent_jsonl: &Path) -> HashMap<String, bool> {
-    let Some(parent) = parent_transcript_for(subagent_jsonl) else {
-        return HashMap::new();
-    };
-    let Ok(file) = std::fs::File::open(parent) else {
+/// Read an already-resolved parent transcript. An unreadable/absent file
+/// yields an empty map, which makes [`terminal_status`] fall back to the old
+/// `Abandoned` inference — conservative, and identical to pre-fix behaviour.
+///
+/// Takes the resolved path rather than a subagent path so the caller can
+/// cache one read per distinct parent: members of a reconcile pass do not all
+/// resolve to the same transcript (see [`parent_transcript_for`]), so
+/// resolving once from an arbitrary member and reusing it for the rest is
+/// wrong — that was reagent's P1 on #3007.
+pub(super) fn parent_tool_results_at(parent_jsonl: &Path) -> HashMap<String, bool> {
+    let Ok(file) = std::fs::File::open(parent_jsonl) else {
         return HashMap::new();
     };
     parent_tool_results(std::io::BufReader::new(file))
@@ -169,6 +184,30 @@ mod tests {
             parent_transcript_for(sub),
             Some(PathBuf::from("/p/C--proj/468e2051-abc.jsonl"))
         );
+    }
+
+    #[test]
+    fn a_workflow_member_resolves_to_the_same_session_transcript() {
+        // Workflow-tool members sit one level deeper than Task-tool ones
+        // (subagents/workflows/<run-id>/). Requiring `subagents` to be the
+        // IMMEDIATE parent excluded every one of them, so they could never
+        // resolve a completion and stayed permanently "interrupted" —
+        // reagent P1 on #3007. No fixture on the dev machine had a workflow
+        // run, which is why the original tests missed it.
+        let sub = Path::new("/p/C--proj/468e2051-abc/subagents/workflows/wf_9/agent-a5cb.jsonl");
+        assert_eq!(
+            parent_transcript_for(sub),
+            Some(PathBuf::from("/p/C--proj/468e2051-abc.jsonl"))
+        );
+    }
+
+    #[test]
+    fn solo_and_workflow_members_of_one_session_agree_on_the_parent() {
+        // The mixed-batch case: both must resolve to the SAME transcript, or
+        // a pass containing both silently mis-resolves half of them.
+        let solo = Path::new("/p/C--proj/sess-1/subagents/agent-solo.jsonl");
+        let member = Path::new("/p/C--proj/sess-1/subagents/workflows/wf_1/agent-m.jsonl");
+        assert_eq!(parent_transcript_for(solo), parent_transcript_for(member));
     }
 
     #[test]

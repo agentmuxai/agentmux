@@ -74,8 +74,13 @@ pub enum SubAgentStatus {
     /// Two writers (the second added by PR #2837; this comment previously
     /// said `reconcile_stale_subagents` was the only one — reagentx P2):
     ///
-    /// 1. `reconcile_stale_subagents` (`scan.rs`) — downgrades `Active`
-    ///    entries once the parent turn is confirmed idle. Never promotes.
+    /// 1. `reconcile_stale_subagents` (`scan.rs`) — resolves `Active` entries
+    ///    once the parent turn is confirmed idle. As of the completion-
+    ///    detection fix (#3007) this is no longer a blanket downgrade: it
+    ///    asks `completion.rs` whether the PARENT recorded a `tool_result`
+    ///    for the member's `tool_use_id` and writes `Completed` when it did,
+    ///    `Abandoned` only when it did not (or when the correlation can't be
+    ///    made at all). It still never promotes anything back to `Active`.
     /// 2. `process_jsonl_change` (`jsonl.rs`) at INSERT time, for a
     ///    cold-backfill replay (`live == false`) whose parent turn is already
     ///    confirmed idle. Avoids asserting `Active` for something the replay
