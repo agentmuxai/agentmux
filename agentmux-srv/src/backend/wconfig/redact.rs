@@ -35,7 +35,7 @@ const REDACTED_PLACEHOLDER: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2
 
 /// Redact known-secret keys in-place on an already-serialized full-config
 /// JSON value. Call this on every path that sends config to a renderer;
-/// never on the in-memory `ConfigWatcher` state or the on-disk file.
+/// never on the in-memory `ConfigState` state or the on-disk file.
 pub fn redact_full_config_for_renderer(v: &mut Value) {
     let Some(settings) = v.get_mut("settings").and_then(|s| s.as_object_mut()) else {
         return;

@@ -15,7 +15,7 @@ use tokio::time::MissedTickBehavior;
 use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
-use crate::backend::wconfig::ConfigWatcher;
+use crate::backend::wconfig::ConfigState;
 use crate::backend::wps::{Broker, WaveEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
@@ -961,7 +961,7 @@ fn get_disk_data(disks: &Disks, elapsed_secs: f64, values: &mut HashMap<String, 
 }
 
 /// Read the telemetry interval from config, clamped to [MIN, MAX].
-fn get_interval_secs(config_watcher: &ConfigWatcher) -> f64 {
+fn get_interval_secs(config_watcher: &ConfigState) -> f64 {
     let val = config_watcher.get_settings().telemetry_interval;
     if val <= 0.0 {
         return DEFAULT_INTERVAL_SECS;
@@ -972,7 +972,7 @@ fn get_interval_secs(config_watcher: &ConfigWatcher) -> f64 {
 /// Run the sysinfo collection loop. Uses `tokio::time::interval` for steady
 /// tick rate regardless of refresh duration. Interval is re-read from config
 /// each tick and the timer is reset if it changes.
-pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWatcher>, conn_name: String) {
+pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigState>, conn_name: String) {
     let mut sys = sysinfo::System::new_all();
     let mut networks = Networks::new_with_refreshed_list();
     let mut net_state = NetState::new();

@@ -136,7 +136,7 @@ pub struct AppState {
     pub broker: Arc<Broker>,
     pub reactive_handler: &'static ReactiveHandler,
     pub poller: Arc<Poller>,
-    pub config_watcher: Arc<wconfig::ConfigWatcher>,
+    pub config_watcher: Arc<wconfig::ConfigState>,
     pub messagebus: Arc<MessageBus>,
     pub subagent_watcher: Arc<SubagentWatcher>,
     pub history_service: Arc<HistoryService>,
@@ -708,7 +708,14 @@ async fn handle_lan_instances(State(state): State<AppState>) -> Json<serde_json:
 ///   - `host.agents`: this host's agent directory (SQLite `instance_list`),
 ///     each flagged `addressable` iff its name is in the reachable set.
 ///   - `lan`: Tier-3 mDNS peers (each `LanInstance` carries its own `agents`).
-///   - `wan.subscribed_agents`: Tier-4 cloud subscriptions (empty when no token).
+///   - `wan.local_agents_subscribed`: **this host's own** agents that are
+///     subscribed to the Tier-4 cloud relay (empty when no token). It is NOT a
+///     list of remote agents reachable over WAN — nothing here can answer that
+///     question, because the relay exposes no directory. Named
+///     `wan.subscribed_agents` until 2026-09-06, which read as "agents
+///     reachable via cloud" under a heading called `wan` in a response whose
+///     whole purpose is reachability, and produced a wrong diagnosis. See
+///     REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §6.
 /// Addressing is case-insensitive (registration lowercases the key). Authed like
 /// the other reactive routes; agents reach it via AGENTMUX_LOCAL_URL + X-AuthKey.
 /// See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
@@ -786,7 +793,7 @@ async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Val
             "cross_channel": cross_channel,
         },
         "lan": lan,
-        "wan": { "subscribed_agents": wan_agents },
+        "wan": { "local_agents_subscribed": wan_agents },
     }))
 }
 

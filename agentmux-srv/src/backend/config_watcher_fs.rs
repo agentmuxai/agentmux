@@ -19,7 +19,7 @@ use tokio::sync::broadcast;
 
 use super::eventbus::{EventBus, WSEventType, WS_EVENT_RPC};
 use super::fs_watch::{FsWatchEvent, FsWatchEventKind, FsWatchPool};
-use super::wconfig::{self, ConfigWatcher, SettingsType};
+use super::wconfig::{self, ConfigState, SettingsType};
 
 /// Resolve the directory containing settings.json.
 ///
@@ -65,9 +65,9 @@ pub fn resolve_settings_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".agentmux")
 }
 
-/// Load settings.json from disk into the ConfigWatcher.
+/// Load settings.json from disk into the ConfigState.
 /// Called once at startup so the backend has the user's saved settings.
-pub fn load_settings_from_disk(config_watcher: &ConfigWatcher) {
+pub fn load_settings_from_disk(config_watcher: &ConfigState) {
     let settings_dir = resolve_settings_dir();
     let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
 
@@ -130,7 +130,7 @@ fn is_settings_file_event(event: &FsWatchEvent) -> bool {
 /// caller to keep alive: the pool itself owns that now.
 pub fn spawn_settings_watcher(
     pool: Arc<FsWatchPool>,
-    config_watcher: Arc<ConfigWatcher>,
+    config_watcher: Arc<ConfigState>,
     event_bus: Arc<EventBus>,
 ) {
     let settings_dir = resolve_settings_dir();
@@ -199,7 +199,7 @@ pub fn spawn_settings_watcher(
 /// Merge new keys into the current in-memory SettingsType and return the result.
 /// Used by the setconfig handler to update in-memory state before the fs watcher fires.
 pub fn merge_settings_into_current(
-    config_watcher: &wconfig::ConfigWatcher,
+    config_watcher: &wconfig::ConfigState,
     new_keys: serde_json::Map<String, serde_json::Value>,
 ) -> wconfig::SettingsType {
     let mut current = config_watcher.get_settings();
@@ -241,7 +241,7 @@ pub fn merge_settings_to_disk(new_keys: serde_json::Map<String, serde_json::Valu
 
 fn reload_and_broadcast(
     settings_path: &PathBuf,
-    config_watcher: &Arc<ConfigWatcher>,
+    config_watcher: &Arc<ConfigState>,
     event_bus: &Arc<EventBus>,
 ) {
     tracing::info!(path = %settings_path.display(), "settings.json changed, reloading");
@@ -285,7 +285,7 @@ mod tests {
 
     /// End-to-end regression for the migration onto `FsWatchPool`: a real
     /// on-disk settings.json change is detected via the shared pool,
-    /// debounced, reloaded, and lands in `ConfigWatcher`. This is new
+    /// debounced, reloaded, and lands in `ConfigState`. This is new
     /// coverage — `spawn_settings_watcher` had no test before this module
     /// existed to migrate onto.
     #[tokio::test]
@@ -304,7 +304,7 @@ mod tests {
         std::fs::write(&settings_path, wconfig::SETTINGS_TEMPLATE).unwrap();
 
         let pool = FsWatchPool::new();
-        let config_watcher = Arc::new(ConfigWatcher::new());
+        let config_watcher = Arc::new(ConfigState::new());
         let event_bus = Arc::new(EventBus::new());
         spawn_settings_watcher(pool.clone(), config_watcher.clone(), event_bus.clone());
 
