@@ -137,27 +137,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
-    let broker = state.broker.clone();
-    let event_bus = state.event_bus.clone();
-    let filestore = state.filestore.clone();
-    // Capture the whole (Arc-backed, Clone) AppState so the block can be created
-    // through the reducer (#1681) — see the create-block site below.
     let app_state = state.clone();
 
     engine.register_handler(
         COMMAND_AGENT_OPEN,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
-            let broker = broker.clone();
-            let event_bus = event_bus.clone();
-            let filestore = filestore.clone();
             let app_state = app_state.clone();
             Box::pin(async move {
                 let cmd: CommandAgentOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.open: {e}"))?;
+                let result = open_agent_impl(&app_state, cmd).await?;
+                Ok(Some(serde_json::to_value(&result).unwrap()))
+            })
+        }),
+    );
+}
 
-                tracing::info!(agent_id = %cmd.agent_id, "agent.open");
+/// The `agent.open` implementation — load the definition, resolve the
+/// provider/CLI, create the block, enqueue the layout insert, and register
+/// the controller. Extracted from the RPC closure so the HTTP surface
+/// (`POST /api/v1/agent/open`, backing the `OpenAgent` MCP tool) shares this
+/// exact code path instead of re-deriving it: the TOCTOU serialization via
+/// `AGENT_OPEN_LOCKS` (reagent P1 on PR #2059), the ABF provider shadowing,
+/// the resume-session seeding guard, and the CLI path resolution all live
+/// here once. Same extraction shape as `open_pane` / `handle_pane_open`.
+/// See docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
+pub(crate) async fn open_agent_impl(
+    state: &AppState,
+    cmd: CommandAgentOpenData,
+) -> Result<AgentOpenResult, String> {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    let event_bus = state.event_bus.clone();
+    let filestore = state.filestore.clone();
+    // Owned handle so the reducer-dispatch sites below read exactly as they
+    // did inside the RPC closure (which captured an owned clone).
+    let app_state = state.clone();
+
+    tracing::info!(agent_id = %cmd.agent_id, "agent.open");
 
                 // 1. Load the agent definition (by id or name)
                 let agents = wstore.agent_def_list()
@@ -219,7 +236,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let status = blockcontroller::get_block_controller_status(&existing.oid)
                         .map(|s| s.shellprocstatus)
                         .unwrap_or_else(|| "init".to_string());
-                    return Ok(Some(serde_json::to_value(&AgentOpenResult {
+                    return Ok(AgentOpenResult {
                         block_id: existing.oid,
                         tab_id,
                         agent_id: cmd.agent_id,
@@ -227,7 +244,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         controller_type: provider.controller_type_str().to_string(),
                         status,
                         created: false,
-                    }).unwrap()));
+                    });
                 }
 
                 // 5. Resolve CLI path.
@@ -609,7 +626,13 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         nodesize: None,
                         nodesizefraction: None,
                         indexarr: None,
-                        focused: true,
+                        // Honors the request's `focus` (default true — the UI
+                        // flow's behavior). Was hardcoded `true` while the RPC
+                        // surface was the only caller and nothing set the
+                        // field; this PR documents `focus`/`--no-focus` on
+                        // OpenAgent/muxopen, so ignoring it would silently
+                        // contradict their own help text. reagent P1, PR #3032.
+                        focused: cmd.focus.unwrap_or(true),
                         magnified: false,
                         ephemeral: false,
                         targetblockid: String::new(),
@@ -690,7 +713,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     event_bus.broadcast_wave_obj_updates(&updates);
                 }
 
-                Ok(Some(serde_json::to_value(&AgentOpenResult {
+                Ok(AgentOpenResult {
                     block_id,
                     tab_id,
                     agent_id: cmd.agent_id,
@@ -698,10 +721,7 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     controller_type: controller_type.to_string(),
                     status: "init".to_string(),
                     created: true,
-                }).unwrap()))
-            })
-        }),
-    );
+                })
 }
 
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.

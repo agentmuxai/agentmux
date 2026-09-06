@@ -25,6 +25,11 @@ const MUXLOG_JS: &str = include_str!("shellintegration/muxlog.mjs");
 /// at `<shell>/muxspect.mjs`; every shell's `muxspect` function delegates to
 /// it. See docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md.
 const MUXSPECT_JS: &str = include_str!("shellintegration/muxspect.mjs");
+/// muxopen — launch an agent into a pane from a terminal (the constructive
+/// sibling of the stop verbs; REPORT_AGENT_OPEN_API_GAP_2026_09_06.md).
+/// Deployed beside muxlog.mjs/muxspect.mjs; shell `muxopen` functions
+/// delegate here.
+const MUXOPEN_JS: &str = include_str!("shellintegration/muxopen.mjs");
 
 /// Deployment marker: `<package version>-<content hash>`, NOT the bare
 /// package version alone (codex P2 on PR #2380). Local/dev builds routinely
@@ -132,6 +137,11 @@ pub fn deploy_scripts(wave_data_dir: &Path) {
     let muxspect_path = shell_base.join("muxspect.mjs");
     if let Err(e) = std::fs::write(&muxspect_path, MUXSPECT_JS) {
         tracing::warn!("shell integration: failed to write {}: {}", muxspect_path.display(), e);
+    }
+    // muxopen deploys the same way, next to its two siblings.
+    let muxopen_path = shell_base.join("muxopen.mjs");
+    if let Err(e) = std::fs::write(&muxopen_path, MUXOPEN_JS) {
+        tracing::warn!("shell integration: failed to write {}: {}", muxopen_path.display(), e);
         all_ok = false;
     }
 
@@ -287,8 +297,10 @@ mod tests {
         let shell_base = tmp.join("shell");
         let muxlog = shell_base.join("muxlog.mjs");
         let muxspect = shell_base.join("muxspect.mjs");
+        let muxopen = shell_base.join("muxopen.mjs");
         assert!(muxlog.exists(), "muxlog.mjs should be deployed");
         assert!(muxspect.exists(), "muxspect.mjs should be deployed alongside it");
+        assert!(muxopen.exists(), "muxopen.mjs should be deployed alongside them");
         assert_eq!(std::fs::read_to_string(&muxspect).unwrap(), MUXSPECT_JS);
 
         let _ = std::fs::remove_dir_all(&tmp);
