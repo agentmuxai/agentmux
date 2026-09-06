@@ -17,7 +17,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use flate2::Compression;
 use flate2::read::GzDecoder;
