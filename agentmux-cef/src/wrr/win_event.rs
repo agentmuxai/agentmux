@@ -386,17 +386,35 @@ fn should_quit_on_last_window(armed: bool, draining: bool, visible: usize, regis
 }
 
 /// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
-/// §7): true iff `registered == 0 && !draining` is the INTENTIONAL
-/// background-service resting state, not a desync. With background-service
-/// mode on, `should_begin_drain` (reducer/quit.rs) permanently declines to
-/// arm a `LastWindowClosed` drain, so `host` can sit at zero registered
-/// windows with `QuitState::Running` (`!draining`) indefinitely — the
-/// designed steady state once the user closes their last window, not a
-/// missed `request_drain` consumption site. `registered > 0` is excluded
-/// deliberately: a live window nobody asked to close is still a real desync
-/// regardless of this mode.
-fn is_background_service_resting(background_service_enabled: bool, draining: bool, registered: usize) -> bool {
-    background_service_enabled && registered == 0 && !draining
+/// §7): true iff "the OS sees no visible windows" is the INTENTIONAL
+/// background-service resting state rather than grounds to quit. With the mode
+/// on, `should_begin_drain` (reducer/quit.rs) permanently declines to arm a
+/// `LastWindowClosed` drain, so `host` sits at `QuitState::Running`
+/// (`!draining`) with no visible windows indefinitely — the designed steady
+/// state once the user closes their last window.
+///
+/// **`registered` is deliberately NOT considered.** It was, and that was
+/// wrong: the old form required `registered == 0`, so a reducer whose count
+/// had not yet caught up left this false and let the watchdog force a quit.
+/// Found live, 2026-09-06, closing 21 windows at once in background-service
+/// mode: `[wrr] quit watchdog fired: 0 visible for 3000ms (retries=3) but
+/// reducer disagrees (registered=21 draining=false)` — the whole instance
+/// exited, which is exactly what this mode exists to prevent. Three retries of
+/// 3s is not a bound the reducer can be relied on to beat while unregistering
+/// a burst of windows.
+///
+/// The old doc argued `registered > 0` "is still a real desync regardless of
+/// this mode". Detecting a desync is fine; the disagreement is about the
+/// REMEDY. Killing the process is only a sane remedy when the process is
+/// supposed to be exiting anyway. Here nobody asked to quit (`!draining`), and
+/// the user is running a background service precisely so it survives having no
+/// windows — so the watchdog stands down and the desync is logged instead.
+///
+/// `!draining` is still required: an explicit quit (tray "Quit AgentMux" →
+/// `quit_app` → `LauncherRequested` drain) that wedges must stay bounded, and
+/// that is the one case where forcing the loop closed is the right remedy.
+fn is_background_service_resting(background_service_enabled: bool, draining: bool) -> bool {
+    background_service_enabled && !draining
 }
 
 /// Companion pure decision: the OS says every window is gone but the reducer
@@ -415,7 +433,7 @@ fn is_reducer_lagging_os(
     registered: usize,
     background_service_enabled: bool,
 ) -> bool {
-    if is_background_service_resting(background_service_enabled, draining, registered) {
+    if is_background_service_resting(background_service_enabled, draining) {
         return false;
     }
     armed && visible == 0 && (registered > 0 || !draining)
@@ -533,12 +551,24 @@ cef::wrap_task! {
             // forced `quit_message_loop()` below, which would otherwise defeat
             // the whole point of the mode a few seconds after every last-window
             // close.
-            if is_background_service_resting(background_service_enabled, draining, registered) {
+            if is_background_service_resting(background_service_enabled, draining) {
                 WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
-                tracing::info!(
-                    target: "wrr",
-                    "[wrr] quit watchdog: 0 visible, 0 registered, background-service mode — standing down (resting, not quitting)",
-                );
+                if registered > 0 {
+                    // Not a reason to quit (see `is_background_service_resting`),
+                    // but still worth surfacing: the reducer disagreeing with the
+                    // OS is the desync this watchdog was built to notice.
+                    tracing::warn!(
+                        target: "wrr",
+                        registered,
+                        "[wrr] quit watchdog: 0 visible but reducer still counts {} window(s) — standing down (background-service mode, nobody asked to quit). Investigate if it persists.",
+                        registered
+                    );
+                } else {
+                    tracing::info!(
+                        target: "wrr",
+                        "[wrr] quit watchdog: 0 visible, background-service mode — standing down (resting, not quitting)",
+                    );
+                }
                 return;
             }
             // PLAN_WRR_QUIT_WATCHDOG_LAG_RETRY_2026_08_03.md: `registered > 0
@@ -726,23 +756,46 @@ mod should_quit_tests {
     #[test]
     fn watchdog_does_not_arm_for_background_service_resting_state() {
         use super::is_reducer_lagging_os;
-        // Workstream 0 Phase 1: the exact "Flavor 2" combination above
-        // (0 registered, not draining) is the intentional background-service
+        // Workstream 0 Phase 1: 0 registered + not draining is the intentional
         // resting state when the mode is on — must not arm the watchdog.
         assert!(!is_reducer_lagging_os(true, false, 0, 0, true));
-        // A genuinely live, un-asked-to-close window still lags regardless of
-        // background-service mode — that flavor is never excused.
-        assert!(is_reducer_lagging_os(true, false, 0, 1, true));
+        // An explicit quit that wedges must STILL be bounded: `draining` means
+        // somebody asked to exit, so forcing the loop closed is the right
+        // remedy even in background-service mode.
         assert!(is_reducer_lagging_os(true, true, 0, 1, true));
     }
 
+    /// Regression, found live on 2026-09-06: closing 21 windows at once in
+    /// background-service mode killed the whole instance —
+    /// `quit watchdog fired: 0 visible for 3000ms (retries=3) but reducer
+    /// disagrees (registered=21 draining=false)`.
+    ///
+    /// The previous version of this file asserted the OPPOSITE
+    /// (`assert!(is_reducer_lagging_os(true, false, 0, 1, true))`) on the
+    /// reasoning that a live un-closed window is a desync "regardless of this
+    /// mode". It is a desync — but quitting is only a sane remedy when the
+    /// process is meant to be exiting, and here nobody asked it to.
     #[test]
-    fn is_background_service_resting_requires_all_three_conditions() {
+    fn a_lagging_reducer_does_not_quit_a_background_service_nobody_asked_to_stop() {
+        use super::is_reducer_lagging_os;
+        // The observed case: many windows still registered, none visible.
+        assert!(!is_reducer_lagging_os(true, false, 0, 21, true));
+        // …and it must not depend on the exact count.
+        assert!(!is_reducer_lagging_os(true, false, 0, 1, true));
+        // Without background-service mode the legacy behaviour is unchanged:
+        // this really is a desync worth force-quitting.
+        assert!(is_reducer_lagging_os(true, false, 0, 21, false));
+    }
+
+    #[test]
+    fn is_background_service_resting_needs_the_mode_on_and_no_quit_requested() {
         use super::is_background_service_resting;
-        assert!(is_background_service_resting(true, false, 0));
-        assert!(!is_background_service_resting(false, false, 0), "mode must be on");
-        assert!(!is_background_service_resting(true, true, 0), "not while draining");
-        assert!(!is_background_service_resting(true, false, 1), "not with a live window");
+        assert!(is_background_service_resting(true, false));
+        assert!(!is_background_service_resting(false, false), "mode must be on");
+        assert!(
+            !is_background_service_resting(true, true),
+            "an explicit quit must stay bounded"
+        );
     }
 
     #[test]
