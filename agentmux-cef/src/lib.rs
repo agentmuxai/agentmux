@@ -615,15 +615,15 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // Dev builds inherit AGENTMUX_DATA_DIR from the parent pane they were
     // launched from. Writing ipc-port there would overwrite the parent
     // instance's port:token and break its single-instance forwarding.
-    // In dev mode there is no launcher so port forwarding isn't wired
-    // anyway — use the dev data dir directly.
-    let port_file_dir = if agentmux_common::is_dev_build_exe(&host_exe_dir) {
-        data_dir.clone()
-    } else {
-        std::env::var_os("AGENTMUX_DATA_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| data_dir.clone())
-    };
+    // That hazard is real ONLY when no launcher spawned us; see
+    // `port_file_dir` for why the launcher's presence is the deciding
+    // factor rather than "is this a dev build".
+    let port_file_dir = port_file_dir(
+        std::env::var_os("AGENTMUX_IPC_HASH").is_some_and(|h| !h.is_empty()),
+        std::env::var_os("AGENTMUX_DATA_DIR").map(std::path::PathBuf::from),
+        agentmux_common::is_dev_build_exe(&host_exe_dir),
+        &data_dir,
+    );
     let _ = std::fs::create_dir_all(&port_file_dir);
     // Use a version-scoped filename so two concurrent release versions
     // don't overwrite each other's port file (codex P1 on #1227).
@@ -1320,3 +1320,111 @@ pub unsafe extern "system" fn RunWinMain(
     run(sandbox_info)
 }
 
+/// Which directory the host publishes its `ipc-port-<hash>` file into.
+///
+/// This MUST agree with where the launcher reads it — `paths.data_dir`, used by
+/// `second_instance::forward_host_cmd` (single-instance window forwarding) and
+/// by `tray::windows::service_reachable` (the tray's running-indicator). When the
+/// two diverge the failure is silent: forwarding reports a transient read error
+/// and the tray icon simply claims the service is down forever.
+///
+/// The deciding factor is **whether a launcher spawned us**, not whether this
+/// is a dev build. `AGENTMUX_IPC_HASH` is set by the launcher and by nothing
+/// else (`supervisor/windows.rs`, `supervisor/unix.rs`), and whenever it is
+/// set, `AGENTMUX_DATA_DIR` came from that same launcher via
+/// `paths.common.to_env_vars()` — so it is that instance's own data dir, not
+/// some other instance's.
+///
+/// Keying on `is_dev_build_exe` instead was wrong, on a premise stated in the
+/// old comment: "in dev mode there is no launcher". `task dev` DOES run the
+/// launcher — only `task dev:standalone` bypasses it. So a dev build under a
+/// launcher wrote the port file to its host-local data dir while the launcher
+/// looked in the instance data dir, and the tray indicator was stuck at "not
+/// running" for the whole session. Verified live, not theorised: the file
+/// landed in `<instance>/cef-cache/` while the tray probed `<instance>/data/`.
+///
+/// The parent-pane hazard the old branch guarded against is still guarded:
+/// with no launcher there is no `AGENTMUX_IPC_HASH`, so a dev build falls
+/// through to its own data dir and cannot clobber the port file of the parent
+/// AgentMux instance whose env it inherited.
+fn port_file_dir(
+    launcher_managed: bool,
+    env_data_dir: Option<std::path::PathBuf>,
+    is_dev_build: bool,
+    host_data_dir: &std::path::Path,
+) -> std::path::PathBuf {
+    match (launcher_managed, env_data_dir) {
+        // A launcher spawned us: its data dir is authoritative, dev or not.
+        (true, Some(dir)) => dir,
+        // No launcher (or it told us nothing): a dev build must not touch the
+        // inherited parent instance's port file.
+        (_, inherited) => {
+            if is_dev_build {
+                host_data_dir.to_path_buf()
+            } else {
+                inherited.unwrap_or_else(|| host_data_dir.to_path_buf())
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod port_file_dir_tests {
+    use super::port_file_dir;
+    use std::path::{Path, PathBuf};
+
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
+
+    /// The bug this function exists to fix. Under `task dev` a launcher IS
+    /// present, so the port file must go where the launcher reads it —
+    /// otherwise the tray's running-indicator is stuck false forever.
+    #[test]
+    fn a_dev_build_under_a_launcher_writes_where_the_launcher_reads() {
+        assert_eq!(
+            port_file_dir(
+                true,
+                Some(p("/instance/data")),
+                true,
+                Path::new("/instance/cef-cache")
+            ),
+            p("/instance/data")
+        );
+    }
+
+    /// The hazard the old dev branch was protecting against, kept intact:
+    /// `dev:standalone` inherits the PARENT instance's `AGENTMUX_DATA_DIR`, and
+    /// writing there would break that parent's single-instance forwarding.
+    #[test]
+    fn a_standalone_dev_build_does_not_clobber_the_parent_instances_port_file() {
+        assert_eq!(
+            port_file_dir(false, Some(p("/parent/data")), true, Path::new("/dev/cef-cache")),
+            p("/dev/cef-cache")
+        );
+    }
+
+    #[test]
+    fn a_release_build_uses_the_launcher_supplied_data_dir() {
+        assert_eq!(
+            port_file_dir(true, Some(p("/prod/data")), false, Path::new("/prod/cef-cache")),
+            p("/prod/data")
+        );
+    }
+
+    /// An absent/empty `AGENTMUX_IPC_HASH` means no launcher, so a release
+    /// build still honours an inherited data dir rather than losing it.
+    #[test]
+    fn a_release_build_without_a_launcher_still_honours_the_env_data_dir() {
+        assert_eq!(
+            port_file_dir(false, Some(p("/prod/data")), false, Path::new("/prod/cef-cache")),
+            p("/prod/data")
+        );
+    }
+
+    #[test]
+    fn nothing_configured_falls_back_to_the_host_data_dir() {
+        assert_eq!(port_file_dir(true, None, false, Path::new("/fallback")), p("/fallback"));
+        assert_eq!(port_file_dir(false, None, true, Path::new("/fallback")), p("/fallback"));
+    }
+}
