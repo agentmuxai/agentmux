@@ -3,12 +3,17 @@
 
 //! LAN-facing listener management.
 //!
-//! Background: `bootstrap.rs` resolves the srv bind address **once at
-//! startup** — `0.0.0.0` when `network:lan_discovery` is on, `127.0.0.1`
-//! otherwise. Toggling the setting at runtime therefore starts/stops mDNS
-//! (live, via `LanDiscoveryController::apply`) but leaves the listeners where
-//! they were, producing the worst possible state: peers discover this instance
-//! and then cannot reach it. See
+//! Background (the bug this module fixes): `bootstrap.rs` used to resolve the
+//! srv bind address **once at startup** — `0.0.0.0` when
+//! `network:lan_discovery` was on, `127.0.0.1` otherwise. Toggling the setting
+//! at runtime therefore started/stopped mDNS (live, via
+//! `LanDiscoveryController::apply`) but left the listeners where they were,
+//! producing the worst possible state: peers discover this instance and then
+//! cannot reach it.
+//!
+//! That conditional is now gone. Startup binds [`STARTUP_BIND_ADDR`]
+//! (loopback) unconditionally and this module owns every LAN-facing socket, so
+//! the setting takes effect live in both directions. See
 //! `docs/reports/REPORT_LAN_TOGGLE_WITHOUT_RESTART_2026_09_06.md` and
 //! `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md`.
 //!
@@ -33,6 +38,21 @@
 //! behaviour. Binding specific addresses has no such ambiguity anywhere. See
 //! `wildcard_vs_loopback_conflict_is_platform_dependent`.
 
+/// The address srv's own startup listeners bind, unconditionally.
+///
+/// **Loopback-only is load-bearing, not a default.** This module is the sole
+/// owner of every LAN-facing socket; startup must not pre-empt it with a
+/// wildcard bind. A `0.0.0.0:PORT` socket holding the port makes
+/// [`LanListenerSupervisor::spawn_pair`]'s per-address binds fail with
+/// `EADDRINUSE` on Linux/macOS, which leaves `active` empty and drives
+/// [`LanListenerSupervisor::sync_advertising`] to switch mDNS *off* — silently
+/// disabling LAN on every restart for users who had already enabled it. (On
+/// Windows the binds succeed instead and you get two sockets on one port with
+/// ambiguous accept — see `wildcard_vs_loopback_conflict_is_platform_dependent`
+/// and `wildcard_then_specific_conflict_is_platform_dependent`.)
+/// [reagent #3021 P0]
+pub const STARTUP_BIND_ADDR: &str = "127.0.0.1:0";
+
 /// Every non-loopback address this host is currently reachable on.
 ///
 /// Used to decide which addresses to bind LAN listeners on. Enumerates real
@@ -49,21 +69,6 @@
 /// - **IPv6 link-local (`fe80::/10`)** — requires a scope id to be usable as a
 ///   bind/connect target, and peers advertise reachable addresses via mDNS
 ///   anyway. Including them would produce listeners nothing can dial.
-/// The address srv's own startup listeners bind, unconditionally.
-///
-/// **Loopback-only is load-bearing, not a default.** This supervisor is the
-/// sole owner of every LAN-facing socket; startup must not pre-empt it with a
-/// wildcard bind. A `0.0.0.0:PORT` socket holding the port makes
-/// [`LanListenerSupervisor::spawn_pair`]'s per-address binds fail with
-/// `EADDRINUSE` on Linux/macOS, which leaves `active` empty and drives
-/// [`LanListenerSupervisor::sync_advertising`] to switch mDNS *off* — silently
-/// disabling LAN on every restart for users who had already enabled it. (On
-/// Windows the binds succeed instead and you get two sockets on one port with
-/// ambiguous accept — see `wildcard_vs_loopback_conflict_is_platform_dependent`
-/// and `wildcard_then_specific_conflict_is_platform_dependent` below.)
-/// [reagent #3021 P0]
-pub const STARTUP_BIND_ADDR: &str = "127.0.0.1:0";
-
 pub fn lan_bind_addresses() -> Vec<std::net::IpAddr> {
     let Ok(ifaces) = if_addrs::get_if_addrs() else {
         tracing::warn!("could not enumerate network interfaces; no LAN listeners will bind");
