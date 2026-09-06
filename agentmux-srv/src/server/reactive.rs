@@ -1078,10 +1078,118 @@ pub(super) async fn handle_reactive_inject(
                 ForwardOutcome::Inconclusive => {}
             }
         }
+
+        // Tier 4: cloud relay (muxbus store-and-forward). Runs when no local,
+        // same-host or LAN tier could place the message.
+        //
+        // This tier used to be a comment here delegating to a "muxbus-client"
+        // that the callers agents actually use are not — the MCP `SendMessage`
+        // tool POSTs to this very endpoint and bails on `success != true`, so
+        // the chain silently stopped at three while that tool's description
+        // promised "local → LAN → cloud". Owning it here means every caller
+        // inherits it. See `crate::muxbus::relay` and
+        // REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §5.
+        if let Some(body) = try_cloud_relay(&state, &req).await {
+            return Json(body);
+        }
     }
 
-    // 4. Return original error (muxbus-client will fall back to cloud relay).
+    // 5. Every tier declined — return the original local error.
     Json(serde_json::to_value(&resp).unwrap_or_default())
+}
+
+/// Tier 4. `Some(body)` when the cloud accepted the injection (and the sender
+/// echo has been emitted); `None` when tier 4 doesn't apply or didn't take,
+/// leaving the caller to return its original error.
+///
+/// **Queued is not delivered.** The cloud persists the message and wakes
+/// subscribed sidecars; the recipient's srv picks it up on its next sync, which
+/// may be seconds away or never if that instance is offline. `success: true`
+/// here therefore means "handed to the relay" — which is the strongest claim
+/// any WAN tier can make, and is what `DELIVERY=wan` on the echoed marker
+/// already tells the sender.
+async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<serde_json::Value> {
+    // Never re-relay something that ARRIVED over the cloud. An agent unknown to
+    // every instance would otherwise bounce between the relay and each
+    // subscriber indefinitely, re-queueing on every hop. `forward_hops` cannot
+    // catch this: the cloud hands the message to a fresh inbound request with
+    // the count reset, so this tier needs its own guard.
+    if req.delivery_tier.as_deref() == Some("wan") {
+        return None;
+    }
+
+    // The cloud route derives the sender from `X-Agent-ID` and 400s without it,
+    // so a caller with no source agent (cron, external bridge) has no tier 4.
+    let source = req.source_agent.as_deref().filter(|s| !s.is_empty())?;
+
+    let token = crate::muxbus::relay::relay_token(source, &state.wstore, &state.http_client).await;
+    let Some(token) = token else {
+        tracing::debug!(
+            target = %req.target_agent,
+            "cloud relay skipped: not logged in to muxbus"
+        );
+        return None;
+    };
+
+    let priority = req.priority.as_deref().unwrap_or("normal");
+    let outcome = crate::muxbus::relay::relay_inject(
+        &crate::muxbus::relay::rest_base_url(),
+        &state.http_client,
+        &token,
+        source,
+        &req.target_agent,
+        &req.message,
+        priority,
+    )
+    .await;
+
+    match outcome {
+        crate::muxbus::relay::RelayOutcome::Queued { injection_id } => {
+            let request_id = injection_id.unwrap_or_default();
+            tracing::info!(
+                target = %req.target_agent,
+                injection_id = %request_id,
+                "cloud relay: queued for WAN delivery"
+            );
+            echo_jekt_to_sender(
+                state,
+                Some(source),
+                &req.target_agent,
+                &req.message,
+                &request_id,
+                None, // no receiver-side escalation to mirror: nobody has
+                None, // seen the message yet, so neither field is known
+                EchoTrust {
+                    delivery_tier: "wan",
+                    // Signing on this path is issue #2586's unbuilt WAN half —
+                    // an outbound relay carries no proof of sender identity, and
+                    // claiming otherwise here would put a TRUST value on the
+                    // echoed marker that the receiving side will not agree with.
+                    sig_verified: None,
+                    reagent_verified: None,
+                    lan_verified: None,
+                },
+                priority,
+            );
+            let body = crate::backend::reactive::types::InjectionResponse {
+                success: true,
+                request_id,
+                block_id: None,
+                error: None,
+                timestamp: now_unix_secs().max(0) as u64,
+                // No receiver has seen the message yet, so there is no applied
+                // tier or STOP decision to report — deliberately left unset
+                // rather than guessed at.
+                effective_tier: None,
+                requires_stop: None,
+            };
+            Some(serde_json::to_value(&body).unwrap_or_default())
+        }
+        crate::muxbus::relay::RelayOutcome::Failed(e) => {
+            tracing::warn!(target = %req.target_agent, error = %e, "cloud relay failed");
+            None
+        }
+    }
 }
 
 pub(super) async fn handle_reactive_agents(
@@ -2592,5 +2700,72 @@ mod forward_inject_tests {
         let r = req();
         let out = forward_inject_to_peer(&state, &r, &r, peer(&url)).await;
         assert!(matches!(out, ForwardOutcome::Stale), "expected Stale");
+    }
+}
+
+/// Tier-4 (cloud relay) gating tests.
+///
+/// These cover the decisions `try_cloud_relay` makes *before* it would touch
+/// the network — the guards that keep it from firing when it must not. The
+/// wire contract itself (headers, body shape, status handling) is tested
+/// against a stub relay in `crate::muxbus::relay`'s own test module.
+///
+/// A `test_state()` has no muxbus credential, so any path that reaches token
+/// resolution returns `None` and no request is ever made — which is also why
+/// these assert `None` rather than mocking the relay: the point is *which*
+/// guard stopped it, and each test isolates one.
+#[cfg(test)]
+mod cloud_relay_gate_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn req(source: Option<&str>, delivery_tier: Option<&str>) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: "nobody-anywhere".to_string(),
+            message: "hello".to_string(),
+            source_agent: source.map(str::to_string),
+            delivery_tier: delivery_tier.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// **The loop guard.** A message that arrived over the cloud must never be
+    /// pushed back to it: an agent unknown to every subscribed instance would
+    /// otherwise bounce between the relay and each sidecar forever, re-queueing
+    /// on every hop. `forward_hops` cannot catch this — the cloud delivers each
+    /// message as a fresh inbound request with the count reset — so tier 4
+    /// carries its own guard, and this is the test that pins it.
+    #[tokio::test]
+    async fn a_message_that_arrived_over_wan_is_never_re_relayed() {
+        let state = test_state();
+        let out = try_cloud_relay(&state, &req(Some("agent2"), Some("wan"))).await;
+        assert!(out.is_none(), "a wan-delivered message must not re-enter tier 4");
+    }
+
+    /// The cloud route derives the sender from `X-Agent-ID` and 400s without
+    /// it, so a caller with no source agent (cron, an external bridge) has no
+    /// tier 4 at all — better to skip than to burn a round trip on a request
+    /// that cannot succeed.
+    #[tokio::test]
+    async fn a_caller_with_no_source_agent_has_no_tier_4() {
+        let state = test_state();
+        assert!(try_cloud_relay(&state, &req(None, Some("host"))).await.is_none());
+        assert!(
+            try_cloud_relay(&state, &req(Some(""), Some("host")))
+                .await
+                .is_none(),
+            "an empty source_agent is as unusable as a missing one"
+        );
+    }
+
+    /// Host- and LAN-tier messages are eligible; with no muxbus credential
+    /// present this still ends in `None`, but via token resolution rather than
+    /// an early guard — i.e. these are not accidentally excluded.
+    #[tokio::test]
+    async fn host_and_lan_messages_are_eligible_but_need_a_credential() {
+        let state = test_state();
+        assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("host"))).await.is_none());
+        assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("lan"))).await.is_none());
+        assert!(try_cloud_relay(&state, &req(Some("agent2"), None)).await.is_none());
     }
 }

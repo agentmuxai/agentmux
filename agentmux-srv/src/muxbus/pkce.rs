@@ -28,15 +28,12 @@ pub struct PkceResult {
     pub credentials: MuxBusCredentials,
 }
 
-/// Base URL of the muxbus REST API hosting the login relay. The env override
-/// exists for tests and for running against a local muxbus server
-/// (`http://localhost:3100`, registered in the dev Cognito app client).
-fn relay_base_url() -> String {
-    std::env::var("AGENTMUX_MUXBUS_REST_URL")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| crate::muxbus::cloud_subscriber::MUXBUS_REST_URL.to_string())
-}
+/// Base URL of the muxbus REST API hosting the login relay.
+///
+/// Single definition shared with the tier-4 outbound relay
+/// (`crate::muxbus::relay::rest_base_url`) — two copies of "where is the
+/// cloud" is precisely the drift the network DRYness pass set out to remove.
+use crate::muxbus::relay::rest_base_url as relay_base_url;
 
 // Only one login flow may exist per process. Two concurrent flows both bind
 // the fixed callback port, and (on Windows, where SO_REUSEADDR permits binding

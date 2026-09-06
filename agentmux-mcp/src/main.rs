@@ -110,7 +110,7 @@ const SHELL_STATUS_TOOL: &str = r#"{
 
 const SEND_MESSAGE_TOOL: &str = r#"{
   "name": "SendMessage",
-  "description": "Send a message to another agent by name. The message is injected as input into the target agent's active conversation. Use for agent-to-agent coordination — handoff, task delegation, status notifications. Delivery is best-effort and tries local → LAN → cloud in order. Returns once delivery is confirmed or all tiers have failed.",
+  "description": "Send a message to another agent by name. The message is injected as input into the target agent's active conversation. Use for agent-to-agent coordination — handoff, task delegation, status notifications. Delivery is best-effort and tries local → same-host → LAN → cloud in order. The first three tiers return only once the message has actually been injected; the cloud tier is store-and-forward, so success there means the relay accepted it and the recipient's AgentMux will pick it up when it next syncs (which never happens if that instance stays offline). Returns once one tier has taken the message or all have failed.",
   "inputSchema": {
     "type": "object",
     "properties": {
