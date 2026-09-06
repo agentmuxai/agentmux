@@ -168,6 +168,17 @@ pub struct HostState {
     /// re-launch the exe and confirm a window comes back.
     pub background_service_enabled: bool,
 
+    /// Issue #2977 WS4 — is the instance currently running unobserved?
+    ///
+    /// Lives here, under the `host_state` lock, so the audit transition can be
+    /// decided AND recorded atomically with the window-count change that
+    /// caused it. Holding it anywhere else meant two concurrent dispatches
+    /// could apply out of order and drop a transition.
+    ///
+    /// Seeded from the persisted log at startup, so an unattended period that
+    /// began before a host crash is still correctly open.
+    pub background_unattended: bool,
+
     /// H.6 — top-level window creation runner state (queue, in-flight,
     /// history). Event-driven; no watchdog. **Currently DORMANT** — the
     /// reducer arms (`EnqueueTopLevelWindow`, `TopLevelCallbackFired`,
@@ -232,6 +243,7 @@ impl Default for HostState {
             quit_state: QuitState::default(),
             saw_live_user_window: false,
             background_service_enabled: std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
+            background_unattended: false,
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
@@ -981,6 +993,29 @@ pub struct DispatchOutput {
     /// concurrent pool-refill race (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md).
     pub request_drain: Option<crate::state::QuitReason>,
 
+    /// Issue #2977 WS4 — the instance crossed the attended/unattended
+    /// boundary on this dispatch. `Some(true)` = the last window closed and
+    /// the instance is now running unobserved; `Some(false)` = a window
+    /// opened and it is observed again. `None` for everything else, including
+    /// every dispatch when background-service mode is off (where zero windows
+    /// means exiting, not resting).
+    ///
+    /// Consumed by `AppState::host_dispatch`, which records it into the
+    /// background audit log for surfacing when a window next opens.
+    pub background_attention: Option<bool>,
+
+    /// Set `true` by `RegisterBrowser` when a live USER window registered
+    /// while `QuitState` had already left `Running` — i.e. a window creation
+    /// that was already in flight when a quit began (ReAgent P1 on PR #2996).
+    ///
+    /// The caller (`client::on_after_created`) MUST close that browser
+    /// immediately. The pre-checks on the creation paths narrow this race but
+    /// cannot close it — registration is the last step, so this is the only
+    /// point that cannot be raced. Leaving it open means a live window
+    /// stranded in a draining host, which the WRR watchdog then force-kills
+    /// seconds later in front of the user.
+    pub registered_during_drain: bool,
+
     /// Set `true` by `RelabelBrowser` when the rename succeeded (or was a
     /// no-op because `old_label == new_label`). Stays `false` on failure
     /// (old label absent, or new label already registered — e.g. a
@@ -1035,7 +1070,18 @@ mod top_level;
 /// Shared with `AppState::count_live_user_windows` (the live last-window quit
 /// gate) so the count has a single definition. (`is_live_user_window` stays
 /// internal to `quit` — used by `count_live_user_windows` and its tests.)
-pub(crate) use quit::count_live_user_windows;
+/// Test-only re-export so `background_audit`'s tests can mirror the exact
+/// decision `update` makes, rather than duplicating the rule and drifting.
+#[cfg(test)]
+pub(crate) fn background_attention_transition_for_test(
+    enabled: bool,
+    currently_unattended: bool,
+    live_after: usize,
+) -> Option<bool> {
+    quit::background_attention_transition(enabled, currently_unattended, live_after)
+}
+
+pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
 
 /// Whether a command can change the quit decision's inputs — the live
 /// user-window count (`browsers`), pending user-initiated creations, or
@@ -1068,6 +1114,7 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
 
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     let quit_relevant = is_quit_relevant(&cmd);
+
     let mut out = match cmd {
         HostCommand::EnqueuePendingWindowCreation { entry } => {
             handle_enqueue_pending_window_creation(state, entry)
@@ -1169,6 +1216,22 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     // once Draining/Quit it returns None, so this can't re-fire or loop.
     if quit_relevant {
         out.request_drain = quit::reconcile_quit(state);
+        // WS4 audit log: report crossing the attended/unattended boundary, so
+        // the host can record what the user missed and surface it when a
+        // window next opens. Computed here rather than at the close/open call
+        // sites for the same reason `request_drain` is — one place that sees
+        // every transition, instead of N sites that each have to remember.
+        out.background_attention = quit::background_attention_transition(
+            state.background_service_enabled,
+            state.background_unattended,
+            quit::count_live_user_windows(state),
+        );
+        // Update the flag HERE, under the same lock that decided it, so the
+        // decision and the state it is based on can never be applied out of
+        // order by two concurrent dispatches.
+        if let Some(now_unattended) = out.background_attention {
+            state.background_unattended = now_unattended;
+        }
     }
     out
 }

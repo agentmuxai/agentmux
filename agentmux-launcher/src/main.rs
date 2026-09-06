@@ -23,6 +23,7 @@
     windows_subsystem = "windows"
 )]
 
+mod autostart;
 mod binary_resolution;
 mod data_dir;
 mod diag;
@@ -40,6 +41,7 @@ mod saga;
 mod second_instance;
 mod supervisor;
 mod teardown_backstop;
+mod tray;
 mod ui_liveness;
 #[cfg(target_os = "windows")]
 mod splash;
@@ -106,6 +108,17 @@ fn main() {
     if std::env::args().any(|a| a == "--splash-selftest") {
         splash_selftest();
         return;
+    }
+
+    // Auto-start control verbs (issue #2977 WS2). Handled before any heavy
+    // startup work — they must not spawn srv/host or disturb a running
+    // instance. Gives an uninstaller a callable removal path, which is what
+    // Workstream 4 requires.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if autostart::handle_cli(&args) {
+            return;
+        }
     }
 
     // macOS: paint the splash FIRST, on the main thread, before any heavy work

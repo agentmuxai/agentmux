@@ -372,6 +372,29 @@ pub(crate) fn open_window_with_kind(
         return Err("a pane is currently closing; retry shortly".to_string());
     }
 
+    // Refuse once the instance has decided to quit. Without this, a window
+    // creation racing an explicit `quit_app` would register AFTER the drain
+    // began — `handle_register_browser` has no draining guard — leaving a
+    // live, visible window in a draining host that the quit's own snapshot
+    // never knew to close (Codex P2 on PR #2996). The existing quit watchdog
+    // would eventually force the exit, but only by killing a window the user
+    // is looking at, several seconds later.
+    //
+    // Cheap and unconditional: this is not specific to background-service
+    // mode. `QuitState` is monotonic, so once it leaves `Running` no new
+    // top-level window is ever wanted, by any caller — user, reproject, or
+    // pool fallback.
+    if !matches!(
+        state.host_state.lock().quit_state,
+        crate::state::QuitState::Running
+    ) {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] open_window refused — instance is draining/quitting"
+        );
+        return Err("the app is shutting down".to_string());
+    }
+
     let window_id = uuid::Uuid::new_v4();
     let label = format!("window-{}", window_id.simple());
 

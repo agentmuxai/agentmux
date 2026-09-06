@@ -30,6 +30,100 @@ use crate::state::AppState;
 #[cfg(target_os = "windows")]
 use cef::{ImplBrowser, ImplBrowserHost};
 
+/// Explicit, user-initiated application quit — issue #2977 Workstream 1, the
+/// tray's "Quit AgentMux" item.
+///
+/// **Why this cannot go through the ordinary last-window path.** Background-
+/// service mode (`AGENTMUX_BACKGROUND_SERVICE`, PR #2983) makes
+/// `should_begin_drain` refuse to arm a `LastWindowClosed` drain — that is the
+/// entire point of the mode, and it also makes the launcher's
+/// `Event::HostShouldQuit` a no-op, since the host's orphan reconciler routes
+/// through that same verdict. So a background-mode instance has no automatic
+/// route to quitting, by design; an explicit request needs one that bypasses
+/// the gate rather than fighting it.
+///
+/// `QuitReason::LauncherRequested` is exactly that route, and this is its
+/// first production use. As documented on `should_begin_drain`, the
+/// `LauncherRequested`/`External` reasons are dispatched *straight* to
+/// `handle_begin_drain` and never consult `should_begin_drain`, so the
+/// background-service gate cannot suppress them.
+///
+/// **Order matters, and composes with the Stage-2 gates rather than working
+/// around them.** Draining is flipped FIRST, then every live user window is
+/// closed. Each window then runs its normal `on_before_close` (so
+/// `backend_close_window` still tells srv to clean up its
+/// window/workspace/tabs — a quit that skipped that would leak rows and
+/// resurrect ghost windows on next launch). Because `QuitState` is already
+/// `Draining` by the time the last one closes, both Stage-2 gates —
+/// `client::lifecycle::is_last_window_close` and WRR's
+/// `should_quit_on_last_window`, which each require `draining` — fire
+/// normally. Nothing here special-cases the quit; it just supplies the drain
+/// decision those gates were already waiting for.
+///
+/// Runs on the IPC thread (see `promote_pool_window`'s own note that the
+/// promote path runs there, not on the UI thread). The drain flip is done
+/// synchronously here because it only needs the `host_state` lock; the CEF
+/// window work — pool cascade and per-window closes — is posted, because that
+/// genuinely is UI-thread-only.
+pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    // 1. Flip QuitState -> Draining{LauncherRequested} FIRST, synchronously,
+    //    on this thread. `BeginDrain` is a pure reducer arm — it only needs
+    //    the `host_state` lock, not the UI thread — and doing it here rather
+    //    than inside the posted task is what makes step 2 gapless.
+    //
+    //    ORDERING IS LOAD-BEARING (ReAgent P1 on PR #2996). Posting the flip
+    //    and then snapshotting left a hole: a creation that had already
+    //    queued its `CreateWindowTask` on the UI thread would run BEFORE the
+    //    posted drain task, so it registered while `quit_state` was still
+    //    `Running` — not flagged by `should_close_on_arrival`, and not in the
+    //    snapshot either, because it had not registered when the snapshot was
+    //    taken. An explicit Quit could silently leave that window open.
+    //
+    //    Flipping first closes it by construction: registration
+    //    (`handle_register_browser`) and this flip both go through the same
+    //    `host_state` mutex, so every user window is on exactly one side of
+    //    it — already registered (and therefore in step 2's snapshot), or
+    //    registering later (and therefore flagged for close-on-arrival).
+    //    There is no interval where a window is neither.
+    state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
+        reason: crate::state::QuitReason::LauncherRequested,
+    });
+
+    // 2. Snapshot AFTER the flip — see above for why the order matters.
+    let labels: Vec<String> = {
+        let st = state.host_state.lock();
+        crate::reducer::live_user_window_labels(&st)
+    };
+
+    tracing::warn!(
+        target: "wrr",
+        window_count = labels.len(),
+        "[quit] explicit quit requested (tray/launcher) — drained with LauncherRequested"
+    );
+
+    // 3. Cascade-close the warm pool and re-run the Stage-2 gate. Posted:
+    //    that part IS UI-thread-only. Its own `BeginDrain` is idempotent
+    //    (`handle_begin_drain` returns early when not `Running`), so
+    //    re-dispatching after step 1 is a no-op.
+    //
+    //    This also completes the quit when there are no user windows at all
+    //    (background-service mode resting at zero — the case the tray exists
+    //    for): `BeginDrainCascadeTask` ends in `reevaluate_last_window_quit`,
+    //    which is why that re-check lives inside it.
+    let mut drain = crate::ui_tasks::BeginDrainCascadeTask::new(
+        state.clone(),
+        crate::state::QuitReason::LauncherRequested,
+    );
+    cef::post_task(cef::ThreadId::UI, Some(&mut drain));
+
+    // 4. Close the user's windows.
+    for label in &labels {
+        crate::ui_tasks::post_close_window(state, label);
+    }
+
+    Ok(serde_json::json!({ "closing": labels.len() }))
+}
+
 /// Close the window. Args: optional `{ "label": string }`; defaults to "main".
 /// Routes by label via `resolve_window_hwnd` — without that the floater
 /// (owned, drawn above its owner in Z-order) would always swallow the

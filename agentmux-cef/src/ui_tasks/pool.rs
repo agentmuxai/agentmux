@@ -495,3 +495,52 @@ pub fn post_resize_mother_window_win32(state: &Arc<AppState>, hwnd: isize, new_w
     let mut task = ResizeMotherWindowWin32Task::new(state.clone(), hwnd, new_w_dip);
     post_task(ThreadId::UI, Some(&mut task));
 }
+
+/// Issue #2977 WS3 — mark a window always-on-top.
+///
+/// The tray panel is specified as a "small, separate, **always-on-top** CEF
+/// window" (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §2). Without
+/// it the panel drops behind whatever the user was working in the moment they
+/// click back into it, which defeats a companion surface (Codex P2 on PR
+/// #3002).
+///
+/// Uses the CEF Views `Window::set_always_on_top` rather than a Win32
+/// `HWND_TOPMOST` call so it works identically on every platform and needs no
+/// HWND resolution — and so it applies equally to a pool-promoted window
+/// (HWND already exists) and a cold-path one (HWND does not exist until CEF
+/// creates it). Posted, because Views calls are UI-thread-only.
+pub fn post_set_always_on_top(state: &Arc<AppState>, label: &str) {
+    let mut task = SetAlwaysOnTopTask::new(state.clone(), label.to_string());
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
+wrap_task! {
+    pub struct SetAlwaysOnTopTask {
+        state: Arc<AppState>,
+        label: String,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            // Resolve on the UI thread: for the cold path the window may not
+            // have existed when this task was posted. A miss is logged, not
+            // fatal — a panel that is merely not-topmost is still usable,
+            // whereas panicking here would take down the UI thread.
+            match super::get_window_on_ui(&self.state, &self.label) {
+                Some(window) => {
+                    window.set_always_on_top(1);
+                    tracing::info!(
+                        target: "tray:panel",
+                        label = %self.label,
+                        "[panel] set always-on-top"
+                    );
+                }
+                None => tracing::warn!(
+                    target: "tray:panel",
+                    label = %self.label,
+                    "[panel] window not resolvable yet — not set always-on-top"
+                ),
+            }
+        }
+    }
+}

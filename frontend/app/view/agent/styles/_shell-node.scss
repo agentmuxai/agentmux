@@ -90,13 +90,29 @@
 }
 
 .agent-shell-title {
-    flex: 0 0 auto;
+    // flex: 1 1 40% (was flex: 0 0 auto + max-width: 40%, a fixed ceiling
+    // regardless of what siblings actually needed — left visible dead
+    // space whenever .agent-shell-live-tail's content was short/absent).
+    // A proportional flex-basis, not an absolute one: when the tail is
+    // absent/short, this is the only (or least-hungry) flexible item, so
+    // flex-grow: 1 lets it claim the freed space and render in full —
+    // fixing the reported dead-space bug. When the tail genuinely also
+    // has long content, both items' 40/60 flex-basis split gives the
+    // flexbox shrink distribution a fair, nonzero weight for EACH side
+    // (shrink amount is proportional to flex-shrink x flex-basis), so
+    // the tail keeps some visible width instead of being starved to
+    // zero — codex P2 on PR #2995: an earlier `flex: 0 1 auto` cut here
+    // gave the tail's flex-basis: 0 a zero shrink-weight, so a genuinely
+    // long title consumed 100% of the shrink budget and zeroed the tail
+    // out entirely, losing its status info even in wide panes.
+    // See SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §2.1.
+    flex: 1 1 40%;
+    min-width: 0;
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 40%;
 }
 
 .agent-shell-elapsed {
@@ -107,7 +123,9 @@
 }
 
 .agent-shell-live-tail {
-    flex: 1 1 0;
+    // flex-basis 60% (was 0) — paired with .agent-shell-title's 40% above,
+    // see that rule's comment for why a nonzero basis here matters.
+    flex: 1 1 60%;
     font-size: 11px;
     color: var(--secondary-text-color);
     white-space: nowrap;
@@ -250,14 +268,19 @@
 }
 
 .agent-activity-title {
-    flex: 0 0 auto;
+    // See .agent-shell-title's identical comment above — same fix, same
+    // reasoning (proportional 40% flex-basis, not an absolute max-width,
+    // so the tail keeps a fair nonzero shrink-weight instead of being
+    // starved to zero when the title is genuinely long — codex P2 on
+    // PR #2995). SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §2.
+    flex: 1 1 40%;
+    min-width: 0;
     font-size: 12px;
     font-weight: 600;
     color: var(--main-text-color);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 40%;
 }
 
 .agent-activity-elapsed {
@@ -280,7 +303,8 @@
 }
 
 .agent-activity-tail {
-    flex: 1 1 0;
+    // flex-basis 60% (was 0) — see .agent-activity-title's comment above.
+    flex: 1 1 60%;
     min-width: 0;
     font-size: 11px;
     color: var(--main-text-color);
