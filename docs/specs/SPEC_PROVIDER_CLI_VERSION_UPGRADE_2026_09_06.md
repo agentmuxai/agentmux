@@ -67,6 +67,23 @@ consistency even though nothing currently machine-checks them.
 New pins: claude `2.1.263`, codex `0.153.4`, gemini `0.58.0`, qwen `0.23.0`,
 openclaw `2026.9.2`, copilot `1.0.83`.
 
+## 4.1. Codex default-model re-verification (ReAgent finding on this PR)
+
+`frontend/app/view/agent/buildRuntimeArgs.ts`'s `CODEX_DEFAULT_MODEL`
+comment explicitly instructs: "re-verify ChatGPT-account availability when
+bumping the codex CLI pin" — codex 0.116.0's own baked default
+(`gpt-5.3-codex`) was rejected for ChatGPT-account auth, which is why
+AgentMux overrides it to `gpt-5.5` in the first place. The initial version
+of this spec (and PR) missed this check entirely. Re-verified 2026-09-06
+against OpenAI's own Codex model documentation: `gpt-5.5` **remains fully
+supported for ChatGPT sign-in auth** under the new pin (0.153.4) — it's
+now described as the "previous-generation flagship" (superseded at the top
+by `gpt-6-astra`, launched 2026-09-03, but that rollout is staged to a
+limited set of organizations as of this check, not yet broadly available),
+not retired or rejected. **No `CODEX_DEFAULT_MODEL` change is needed.**
+See the updated comment at `buildRuntimeArgs.ts:34-42` for the same note
+inline.
+
 ## 5. Non-goals
 
 - No change to `muxcode`/`antigravity`/`kimi`/`pi` pins (§3, and pi/kimi
@@ -84,6 +101,7 @@ openclaw `2026.9.2`, copilot `1.0.83`.
 - `npx tsc --noEmit -p .`
 - `cargo check -p agentmux-srv -p agentmux-cef` (or `task build:backend`) to
   confirm the Rust pin literals compile.
-- Manual: none required — pin bumps don't change install/launch behavior
-  beyond which concrete version string is passed to `npm install -g
-  <pkg>@<version>`.
+- Manual: pin bumps mostly only change which concrete version string is
+  passed to `npm install -g <pkg>@<version>` — but see §4.1 for the one
+  exception found on review (codex's hardcoded default model), which was
+  checked and confirmed safe, not just assumed.
