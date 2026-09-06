@@ -920,7 +920,6 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-/// Get an offset position for a new window: 30px right and 30px down from the current window.
 /// Cascade anchor: 30px down-right of an existing top-level window of ours.
 ///
 /// `None` when we have no window open — which is the NORMAL case in
