@@ -513,11 +513,40 @@ impl SubagentWatcher {
     /// merges is only "push the correction to an already-open Swarm pane
     /// immediately" (an already-open pane still picks up the correction on
     /// its next unrelated reload in the meantime).
-    /// Same `subagent:completed` event `jsonl.rs` emits when it observes a
-    /// completion live, so a client needs no new handling for the reconcile
-    /// path — it just stops being told "abandoned" for dispatches that
-    /// actually returned. `parentAgent` is omitted (unlike the live emitter's
-    /// payload): reconcile is keyed on the block, and no consumer reads it.
+    fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "subagent:abandoned",
+                    "data": {
+                        "parentBlockId": parent_block_id,
+                        "agentIds": agent_ids,
+                    }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
+    }
+
+    /// The `Completed` counterpart to `broadcast_subagents_abandoned` above,
+    /// for members reconciliation resolved as having actually returned (see
+    /// `completion.rs`). Emits the same `subagent:completed` event `jsonl.rs`
+    /// already sends when it observes a completion live, so a client needs no
+    /// new handling for the reconcile path — it just stops being told
+    /// "abandoned" for dispatches that returned.
+    ///
+    /// Per-agent rather than batched, unlike its `Abandoned` sibling: the
+    /// payload carries per-member fields (`totalEvents`, `dispatchId`) that a
+    /// batched shape has nowhere to put, and matching `jsonl.rs`'s existing
+    /// event exactly is worth more here than saving a broadcast — a reconcile
+    /// pass typically resolves a handful of completions, not the dozens the
+    /// batching rationale above was written for.
+    ///
+    /// `parentAgent` is omitted (the live emitter includes it): reconcile is
+    /// keyed on the block, and no consumer reads that field.
     fn broadcast_subagent_completed(
         &self,
         parent_block_id: &str,
@@ -537,24 +566,6 @@ impl SubagentWatcher {
                         "parentBlockId": parent_block_id,
                         "totalEvents": total_events,
                         "dispatchId": dispatch_id,
-                    }
-                }
-            })),
-        };
-        self.event_bus.broadcast_event(&event);
-    }
-
-    fn broadcast_subagents_abandoned(&self, parent_block_id: &str, agent_ids: &[String]) {
-        let event = WSEventType {
-            eventtype: WS_EVENT_RPC.to_string(),
-            oref: String::new(),
-            data: Some(json!({
-                "command": "eventrecv",
-                "data": {
-                    "event": "subagent:abandoned",
-                    "data": {
-                        "parentBlockId": parent_block_id,
-                        "agentIds": agent_ids,
                     }
                 }
             })),
