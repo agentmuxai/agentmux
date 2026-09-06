@@ -212,7 +212,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
-    pinned_version: "2.1.247",
+    pinned_version: "2.1.263",
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
@@ -243,7 +243,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@openai/codex",
-    pinned_version: "0.116.0",
+    pinned_version: "0.153.4",
     base_url_env_var: None,
     supported_vendors: &["openai"],
     // Confirmed: SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md §10.2 —
@@ -269,7 +269,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("GEMINI_FORCE_FILE_STORAGE", "true")],
     unset_env: &[],
     npm_package: "@google/gemini-cli",
-    pinned_version: "0.32.1",
+    pinned_version: "0.58.0",
     base_url_env_var: None,
     supported_vendors: &["google"],
     // Confirmed: Gemini CLI docs — context files default to GEMINI.md;
@@ -308,7 +308,7 @@ static QWEN: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
-    pinned_version: "0.19.2",
+    pinned_version: "0.23.0",
     // Note: qwen's default backend already routes through an OpenAI-compatible
     // endpoint (see comment above) as a fixed part of its auth setup — but
     // that's baked-in default routing, not a confirmed user-configurable
@@ -394,7 +394,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "openclaw",
-    pinned_version: "2026.6.10",
+    pinned_version: "2026.9.2",
     base_url_env_var: None,
     supported_vendors: &["openai", "anthropic", "google"],
     // Confirmed convention, UNCONFIRMED path: docs.openclaw.ai/reference/AGENTS.default
@@ -495,7 +495,7 @@ static COPILOT: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@github/copilot",
-    pinned_version: "1.0.65",
+    pinned_version: "1.0.83",
     base_url_env_var: None,
     supported_vendors: &["github"],
     // Confirmed: GitHub Copilot CLI custom-instructions docs — supports
