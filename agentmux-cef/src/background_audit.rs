@@ -300,11 +300,7 @@ fn write_entry(path: &std::path::Path, watermark: &std::path::Path, entry: &Audi
         let _ = std::fs::create_dir_all(parent);
     }
     compact_if_oversized(path, watermark);
-    let line = format!(
-        "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
-        entry.at_ms,
-        entry.kind.as_str()
-    );
+    let line = entry_line(entry);
     match std::fs::OpenOptions::new().create(true).append(true).open(path) {
         Ok(mut f) => {
             if let Err(e) = f.write_all(line.as_bytes()) {
@@ -315,40 +311,62 @@ fn write_entry(path: &std::path::Path, watermark: &std::path::Path, entry: &Audi
     }
 }
 
+/// One log line, including its trailing newline. Shared by the append path
+/// and by compaction so the on-disk format has exactly one definition.
+fn entry_line(entry: &AuditEntry) -> String {
+    format!(
+        "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
+        entry.at_ms,
+        entry.kind.as_str()
+    )
+}
+
 /// Bound the log by dropping the OLDEST entries, in place.
 ///
 /// Deliberately a single file rather than rotating to a `.jsonl.1` archive.
 /// Rotation via `rename` replaces the archive wholesale, so the SECOND
-/// rotation silently discarded everything the first one had archived —
-/// including entries the watermark had never advanced past. That is the same
-/// under-reporting bug as before, just deferred to `2 * MAX_LINES` entries,
-/// and the first-rotation-only test did not reach it (ReAgent P1 on #3001).
+/// rotation silently discarded everything the first one had archived.
 /// One file with an explicit retention rule has no second copy to clobber.
 ///
-/// The watermark is shifted down by exactly the number of lines dropped so
-/// surfacing positions stay aligned. Dropping entries the user has never been
-/// shown is possible only if they have not opened a window in `KEEP_LINES`
-/// transitions; that is logged loudly rather than passing silently, because
-/// silent loss is the failure mode this whole function keeps getting wrong.
+/// **Everything here is counted in PARSED ENTRIES, never raw lines.** The
+/// watermark is written by `take_unsurfaced` in units of valid entries
+/// (`entries_unlocked` filters unparseable lines out), so measuring the drop
+/// in raw lines made the two diverge by the number of malformed lines
+/// involved — silently re-surfacing an already-shown entry, or skipping one
+/// permanently, depending on the values. A torn line from a mid-append crash
+/// is a case this module explicitly supports, so that divergence was
+/// reachable in normal operation (ReAgent P1 on #3001).
+///
+/// Compaction also REWRITES from parsed entries, so it heals any torn line
+/// rather than leaving it to sit in the file until it happens to fall inside
+/// a future dropped range. After a compaction, raw lines and valid entries
+/// are identical again by construction.
+///
+/// Dropping entries the user has never seen is possible only if they have not
+/// opened a window in `KEEP_LINES` transitions; that is logged loudly rather
+/// than passing silently.
 fn compact_if_oversized(path: &std::path::Path, watermark: &std::path::Path) {
     let Ok(text) = std::fs::read_to_string(path) else { return };
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.len() < MAX_LINES {
+    // Trigger on RAW size, because that is what actually bounds the file on
+    // disk — a file full of unparseable junk still needs compacting.
+    if text.lines().count() < MAX_LINES {
         return;
     }
 
-    let dropped = lines.len().saturating_sub(KEEP_LINES);
+    // ...but measure and retain in PARSED ENTRIES, matching the watermark.
+    let entries: Vec<AuditEntry> = text.lines().filter_map(parse_line).collect();
+    let dropped = entries.len().saturating_sub(KEEP_LINES);
     let surfaced: usize = std::fs::read_to_string(watermark)
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
     let unsurfaced_dropped = dropped.saturating_sub(surfaced);
 
-    let kept = lines[dropped..].join("\n");
-    // Write via a temp file + rename so a crash mid-compaction leaves either
-    // the old log or the new one, never a half-written one.
+    let kept: String = entries[dropped..].iter().map(entry_line).collect();
+    // Temp + rename so a crash mid-compaction leaves either the old log or
+    // the new one, never a half-written one.
     let tmp = path.with_extension("jsonl.compacting");
-    if std::fs::write(&tmp, format!("{}\n", kept)).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+    if std::fs::write(&tmp, kept).is_ok() && std::fs::rename(&tmp, path).is_ok() {
         write_atomic(watermark, &surfaced.saturating_sub(dropped).to_string());
         if unsurfaced_dropped > 0 {
             tracing::warn!(
@@ -684,6 +702,75 @@ mod background_audit_tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("watermark left the log permanently un-surfacable");
+    }
+
+    /// A torn line (mid-append crash) coexisting with a compaction cycle.
+    ///
+    /// The watermark counts PARSED entries; compaction used to count RAW
+    /// lines. With an unparseable line in the file the two diverge, and the
+    /// post-compaction watermark lands off by that many — re-showing an
+    /// already-surfaced entry, or skipping one forever (ReAgent P1 on #3001).
+    /// Every other compaction test writes only well-formed entries, so none
+    /// of them could reach this.
+    #[test]
+    fn a_torn_line_does_not_skew_the_watermark_across_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("background-audit.jsonl");
+
+        // Seed a file that already contains a malformed line among valid ones.
+        let mut seed = String::new();
+        for i in 0..10u64 {
+            seed.push_str(&format!(
+                "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
+                i,
+                if i % 2 == 0 { "went_unattended" } else { "observed" }
+            ));
+        }
+        seed.push_str("{\"at_ms\":999,\"ki\n"); // torn write
+        std::fs::write(&log_path, seed).unwrap();
+
+        let mut log = BackgroundAudit::default();
+        let (tx, _seeded) = log.init(dir.path()).unwrap();
+
+        // Surface what is there, so the watermark is non-zero and in
+        // valid-entry units.
+        let first = log.take_unsurfaced();
+        assert_eq!(first.len(), 10, "the torn line must not be surfaced");
+        let already: std::collections::HashSet<u64> =
+            first.iter().map(|e| e.at_ms).collect();
+
+        // Drive past the compaction threshold.
+        for i in 0..(MAX_LINES + 50) {
+            let at = 1_000 + i as u64;
+            tx.send(AuditEntry {
+                at_ms: at,
+                kind: if i % 2 == 0 { AuditKind::WentUnattended } else { AuditKind::Observed },
+            })
+            .unwrap();
+        }
+        for _ in 0..400 {
+            if log.entries().len() >= KEEP_LINES {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Nothing already shown may come back.
+        let after = log.take_unsurfaced();
+        for e in &after {
+            assert!(
+                !already.contains(&e.at_ms),
+                "at_ms {} was surfaced twice — watermark skewed by the torn line",
+                e.at_ms
+            );
+        }
+        // And compaction should have healed the file: no unparseable lines left.
+        let raw = std::fs::read_to_string(&log_path).unwrap();
+        assert_eq!(
+            raw.lines().count(),
+            log.entries().len(),
+            "after compaction every raw line must parse"
+        );
     }
 
     #[test]
