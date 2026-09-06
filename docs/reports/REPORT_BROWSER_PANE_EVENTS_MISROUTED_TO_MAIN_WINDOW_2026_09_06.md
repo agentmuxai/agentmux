@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-06
 **Author:** AgentX
-**Status:** root-caused and fixed in this repo's `main` (fix PR linked in §5). Not yet live-verified in the reporting instance — the fix is host-side (Rust) and needs a rebuilt host to take effect.
+**Status:** root-caused; fix in PR #3035 (§5), pending review and merge. Not yet live-verified in the reporting instance — the fix is host-side (Rust) and needs a rebuilt host to take effect.
 **Instance:** `channel:local-main-b28b7a-2cd6e3d7`, v0.55.37, Windows 11.
 **Platform:** all — the misrouted call sites are platform-independent Rust.
 
@@ -70,7 +70,7 @@ Tests added (`agentmux-cef/src/reducer/tests.rs`):
 - `browser_pane_event_target_is_the_owning_window_not_main` — pane registered in `window-pool-930b71ac` resolves to that label.
 - `browser_pane_event_target_is_none_for_unknown_or_windowless_pane` — unknown block and legacy empty-label entry both return `None` (fallback path).
 
-**Fix PR:** see the PR that introduced this report (linked below once opened).
+**Fix PR:** #3035 — https://github.com/agentmuxai/agentmux/pull/3035
 
 ## 6. Workaround in a running unpatched instance
 
