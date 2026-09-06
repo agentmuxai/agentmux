@@ -23,7 +23,7 @@ describe("PaneRow", () => {
         expect(screen.getByText("⑂")).toBeInTheDocument();
         expect(screen.getByText("pr-422-review")).toBeInTheDocument();
         expect(screen.getByText("[0:42]")).toBeInTheDocument();
-        // Tail is prefixed with the ↳ glyph in the same element.
+        // Tail is prefixed with the → glyph in the same element.
         expect(screen.getByText(/ready on :5173/)).toBeInTheDocument();
     });
 
