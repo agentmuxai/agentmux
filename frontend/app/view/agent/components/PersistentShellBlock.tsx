@@ -144,7 +144,9 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                 <span class="agent-shell-title">{props.node.title}</span>
                 <span class="agent-shell-elapsed">[{elapsed()}]</span>
                 <Show when={lastLine()}>
-                    <span class="agent-shell-live-tail">↳ {lastLine()}</span>
+                    {/* U+2192 (→), not U+21B3 (↳) — see ActivityRow.tsx's
+                        identical comment. SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3. */}
+                    <span class="agent-shell-live-tail">→ {lastLine()}</span>
                 </Show>
                 <Show when={props.node.status === "running"}>
                     <button
