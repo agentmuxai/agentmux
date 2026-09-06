@@ -126,6 +126,20 @@ muxspect() {
     return 1
 }
 
+# ─── muxopen ────────────────────────────────────────────────────────────────
+# Launch an agent into a pane from the terminal (no GUI). Constructive
+# sibling of the stop verbs. Delegates to the shared Node core (muxopen.mjs,
+# deployed next to this rcfile). `muxopen help` for usage.
+_AGENTMUX_MUXOPEN_JS="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/muxopen.mjs"
+muxopen() {
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXOPEN_JS" ]; then
+        node "$_AGENTMUX_MUXOPEN_JS" "$@"
+        return
+    fi
+    echo "muxopen: Node unavailable or core missing at $_AGENTMUX_MUXOPEN_JS" >&2
+    return 1
+}
+
 # Append to PROMPT_COMMAND (array-safe)
 if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
     PROMPT_COMMAND+=(_agentmux_si_prompt_command)

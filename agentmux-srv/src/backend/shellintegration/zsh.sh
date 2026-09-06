@@ -120,6 +120,19 @@ muxspect() {
     return 1
 }
 
+# ─── muxopen ────────────────────────────────────────────────────────────────
+# Launch an agent into a pane from the terminal (no GUI). Constructive
+# sibling of the stop verbs. `muxopen help` for usage.
+_AGENTMUX_MUXOPEN_JS="${${(%):-%x}:A:h}/../muxopen.mjs"
+muxopen() {
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXOPEN_JS" ]; then
+        node "$_AGENTMUX_MUXOPEN_JS" "$@"
+        return
+    fi
+    echo "muxopen: Node unavailable or core missing at $_AGENTMUX_MUXOPEN_JS" >&2
+    return 1
+}
+
 autoload -U add-zsh-hook
 add-zsh-hook precmd _agentmux_si_precmd
 add-zsh-hook chpwd  _agentmux_si_osc7

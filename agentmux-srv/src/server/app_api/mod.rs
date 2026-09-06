@@ -26,6 +26,11 @@ use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
 
 mod agent_open;
+/// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
+/// `OpenAgent` MCP tool's backing route) — the HTTP surface must share the
+/// RPC path's exact implementation, including its AGENT_OPEN_LOCKS TOCTOU
+/// serialization. See REPORT_AGENT_OPEN_API_GAP_2026_09_06.md.
+pub(crate) use agent_open::open_agent_impl;
 // pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
 // cross-channel bulk-stop forward target,
 // SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) calls
