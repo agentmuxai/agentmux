@@ -107,10 +107,15 @@ pub enum SubagentEventType {
     ToolUse { name: String, input_summary: String },
     ToolResult { is_error: bool, preview: String },
     Progress { output: String },
-    /// A JSONL `"result"`-typed line — the subagent's final output. Kept
-    /// distinct from `Text` so completion detection can key off the
-    /// discriminant directly instead of matching derived text content
-    /// (see `process_jsonl_change`'s completion check).
+    /// A JSONL `"result"`-typed line — the subagent's final output.
+    ///
+    /// **Never observed in practice.** No transcript AgentMux writes contains
+    /// a `"type":"result"` line (see `process_jsonl_change`'s completion
+    /// check for the evidence), so this variant is parse-only: the parser
+    /// handles it if it ever appears, and nothing depends on it today.
+    /// Completion is established by `completion.rs` from the parent's
+    /// `tool_result` instead. Do not treat the existence of this variant as
+    /// evidence that result-line completion works.
     Result { content: String },
 }
 

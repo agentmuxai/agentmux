@@ -234,12 +234,34 @@ impl SubagentWatcher {
                 state.events.drain(..excess);
             }
 
-            // Check last event for result type (completion). Keyed off the
-            // `Result` discriminant itself (a real `"result"`-typed JSONL
-            // line), not derived text content — real Claude Code result
-            // events populate `result`/`content`, so matching against the
-            // "Subagent completed" placeholder (only ever produced when
-            // both are absent) almost never fired.
+            // Completion by terminal `Result` line.
+            //
+            // ⚠ THIS NEVER FIRES ON ANY TRANSCRIPT AGENTMUX CURRENTLY WRITES.
+            // No `"type":"result"` line exists in the `entrypoint: sdk-cli`
+            // format — 0 of 11 subagent transcripts on the investigated
+            // machine, across CLI 2.1.198 and 2.1.247, and none in the parent
+            // session files either. Every completed subagent transcript ends
+            // on an `assistant` message. Evidence:
+            // docs/reports/REPORT_SUBAGENT_COMPLETION_NEVER_DETECTED_2026_09_05.md.
+            //
+            // Real completion is established by `completion.rs` instead,
+            // correlating the PARENT's `tool_result` for the dispatch's
+            // `tool_use_id` (#3007). If you are here because completions look
+            // wrong, that is the code path to read — not this one.
+            //
+            // Kept rather than deleted: it is not incorrect, only unreachable
+            // in a transcript format we don't control, and it would resume
+            // being the fastest completion signal (immediate, rather than
+            // waiting for the parent turn to end) if such lines ever appear.
+            // Deleting it would also strand `PendingCompletion` and the
+            // workflow-coalescing flush below.
+            //
+            // The history is worth keeping visible, because it is how the bug
+            // survived: #2283 replaced a placeholder-text match its own
+            // comment described as "almost never fired" with this discriminant
+            // check, which fires *never*. Both fail identically from outside —
+            // rows that simply never complete — so the regression read as the
+            // pre-existing flakiness.
             if let Some(last) = new_events.last() {
                 if matches!(&last.event_type, SubagentEventType::Result { .. }) {
                     completed = true;
