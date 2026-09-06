@@ -83,6 +83,36 @@ Windows it would leave two sockets on one port with ambiguous accept
 behaviour, exactly the hijack hazard `SO_EXCLUSIVEADDRUSE` exists to prevent.
 Binding **specific** addresses has no such ambiguity anywhere.
 
+**Follow-up correction — the wildcard had to go entirely, not just off the
+toggle path (added after implementation, reagent P0 on PR #3021).** The first
+implementation left `bootstrap.rs`'s *boot-time* conditional in place: still
+`0.0.0.0:0` when `network:lan_discovery` was already true in `settings.json`.
+That is the persisted, common case for anyone who had ever enabled the feature,
+and it broke the supervisor rather than coexisting with it:
+
+- On Linux/macOS every per-address bind hits `EADDRINUSE` under the wildcard
+  (the reverse pairing of the bullet above, and it conflicts in that direction
+  too). `active` stays empty → `has_lan_listener()` is false →
+  `sync_advertising` calls `discovery.apply(enabled && false)`, **switching off
+  the mDNS the user had enabled.** A silent LAN-disable on every restart,
+  hitting precisely the opted-in users.
+- On Windows the binds succeed and you get the two-sockets-one-port ambiguity
+  described above instead.
+
+Startup now binds `lan_listeners::STARTUP_BIND_ADDR` (`127.0.0.1:0`)
+unconditionally, making the supervisor the sole owner of every LAN socket, and
+`bootstrap.rs` no longer calls `lan_discovery.apply` at all — the supervisor is
+the single driver, so mDNS can never advertise an endpoint before a socket is
+listening on it. Regression guards:
+`wildcard_then_specific_conflict_is_platform_dependent` (the exact boot
+sequence, per-platform) and `startup_bind_is_loopback_only`.
+
+Worth recording as a pattern: both errors in this report were the *same* error
+— reasoning about socket semantics instead of measuring them. The first was
+caught by a spike, the second only by review, because the spike tested
+loopback-then-wildcard and the shipping code did wildcard-then-specific. A
+spike only covers the ordering it actually runs.
+
 The platform difference is pinned by
 `wildcard_vs_loopback_conflict_is_platform_dependent`, which asserts the
 observed behaviour per-platform so it fails loudly if either ever changes.
