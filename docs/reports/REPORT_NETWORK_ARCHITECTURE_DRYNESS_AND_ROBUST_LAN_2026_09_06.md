@@ -188,6 +188,23 @@ twelve positionals become a struct (several are `Option<bool>` in a row —
 `sig_verified`, `reagent_verified`, `lan_verified` — which is a swap waiting to
 happen; the compiler cannot help you there).
 
+**✅ Done.** `forward_inject_to_peer(state, req, forwarded_req, ForwardPeer)`
+is now the single implementation, returning a `ForwardOutcome` of
+`Delivered(body)` / `Stale` / `Inconclusive`. Each tier keeps its own eviction
+policy (registry `should_evict_on_forward_failure` vs. LAN cache evict) but no
+longer owns a copy of the request/response/echo flow. `echo_jekt_to_sender`'s
+three consecutive `Option<bool>`s are now named fields on `EchoTrust`.
+
+Reviewing the three copies side by side surfaced a real divergence, which is
+the argument for the refactor rather than a footnote to it: **the LAN tier
+delivered on "anything but `success: false`", while both host tiers required
+`success: true`.** A 200 response omitting `success` therefore counted as a
+successful LAN delivery and echoed a delivery confirmation to the sender for a
+message that may never have arrived. All three now require `success: true`
+(`a_body_without_success_is_not_delivered`). No real peer is affected —
+`InjectionResponse::success` is a plain `bool` with no `skip_serializing_if`,
+so a genuine AgentMux srv always sends it.
+
 ### 5. Tier 4 exists in the comment and nowhere in the code
 
 `reactive.rs:1044`:
