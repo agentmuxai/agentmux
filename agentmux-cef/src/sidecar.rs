@@ -9,6 +9,44 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 
+/// Seed `settings.json` from the template as soon as the config dir is known.
+///
+/// Until this existed, `ensure_settings_file` was only ever reached from the
+/// Settings pane and the "open settings file" command — i.e. **a fresh
+/// instance had no `settings.json` at all until a human happened to open
+/// Settings**. Every setting silently ran on its code default, and because
+/// settings are per-channel/per-instance isolated
+/// (`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`), a value set in one
+/// instance did not apply to another — so the file's absence was invisible
+/// AND the defaults were not what the operator believed they had configured.
+/// Found via a `network:lan_discovery` toggle that appeared set but wasn't,
+/// on an instance whose data dir had no config file at all.
+///
+/// Called from BOTH backend-init paths (launcher-provided endpoints and
+/// host-spawned) through this one helper deliberately: two independently
+/// maintained provisioning paths is exactly how the auth-dir seeding gap
+/// happened (see `prepare_provider_auth_dir`'s call sites).
+///
+/// Non-fatal by design — a failure here must never block startup. The app is
+/// fully usable on defaults; it just won't have a browsable/editable file
+/// until the next attempt.
+fn seed_settings_file(state: &Arc<AppState>) {
+    match crate::commands::platform::ensure_settings_file(state) {
+        Ok(path) => {
+            tracing::info!(
+                path = %path.as_str().unwrap_or_default(),
+                "settings.json ensured at startup"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "could not ensure settings.json at startup — continuing on defaults"
+            );
+        }
+    }
+}
+
 /// State returned after successfully spawning the backend.
 #[derive(Clone, Debug)]
 pub struct BackendSpawnResult {
@@ -101,6 +139,9 @@ pub fn use_launcher_endpoints(
         *state.version_data_dir.lock() = Some(data_dir);
         *state.version_config_dir.lock() = Some(config_dir);
         *state.user_home_dir.lock() = Some(user_home_dir);
+        // Config dir is now known — materialize settings.json (see the
+        // helper's doc comment for why this can't wait for the Settings pane).
+        seed_settings_file(state);
 
         let version = env!("CARGO_PKG_VERSION").to_string();
         Ok(BackendSpawnResult {
@@ -191,6 +232,9 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // so the value must be the account-wide root, not a per-version
     // subdir.
     *state.user_home_dir.lock() = Some(paths.home_dir.to_string_lossy().to_string());
+    // Config dir is now known — materialize settings.json (see the helper's
+    // doc comment for why this can't wait for the Settings pane).
+    seed_settings_file(state);
 
     // 3. Resolve the backend binary path
     let backend_name = "agentmux-srv";
