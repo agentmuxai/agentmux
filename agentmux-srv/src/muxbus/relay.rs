@@ -161,7 +161,7 @@ pub(crate) async fn relay_inject(
 /// every `muxbus.login`/`status`/`disconnect` handler use. Passing the
 /// per-channel `wstore` finds nothing whenever the shared root resolves (the
 /// normal case), so tier 4 would silently never fire for a logged-in user
-/// [reagent #3023 P0]. Note this deliberately does NOT follow `AppState`'s
+/// (reagent #3023 P0). Note this deliberately does NOT follow `AppState`'s
 /// general steer toward `identity_store` for new muxbus call sites: the
 /// credentials are written to `id_store`, and reading from a store the writer
 /// doesn't use would reintroduce the same bug whenever

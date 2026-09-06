@@ -474,12 +474,21 @@ impl LanDiscovery {
     /// while several AgentMux instances share a machine — but no remote peer
     /// can be listening on OUR port at an address that is OURS.
     fn resolves_to_this_instance(&self, info: &ServiceInfo) -> bool {
+        // Port first, and BEFORE touching the address set. A resolution on a
+        // different port cannot be us, and that is the overwhelmingly common
+        // case (every genuine remote peer), so it must not pay for an address
+        // lookup. Passing the set as an argument would defeat this — arguments
+        // are evaluated eagerly, so the cheap check inside `is_self_resolution`
+        // would come too late [reagent #3025 P2].
+        if info.get_port() != self.port {
+            return false;
+        }
         let addrs: Vec<IpAddr> = info.get_addresses().iter().copied().collect();
         is_self_resolution(
             info.get_port(),
             &addrs,
             self.port,
-            &crate::backend::lan_listeners::all_local_addresses(),
+            &crate::backend::lan_listeners::cached_local_addresses(),
         )
     }
 
