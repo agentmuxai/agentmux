@@ -93,6 +93,21 @@
     // "voice:whisperModel":     "base.en",   // tiny.en | base.en | small.en | …
     // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // explicit override; skips auto-download
 
+    // -- Network --
+    // Discover other AgentMux instances on your local network (mDNS/Bonjour)
+    // so agents on different machines can message each other directly,
+    // without going through the cloud.
+    //
+    // Default FALSE, deliberately: turning this on makes the app advertise
+    // and browse on the local network, which triggers the OS local-network
+    // permission prompt (macOS) / firewall prompt (Windows). Not worth
+    // bothering someone who only ever runs agents on one machine — turn it
+    // on when you actually want cross-machine agent messaging.
+    //
+    // Must be enabled on BOTH machines: discovery is mutual, so a peer with
+    // this off is invisible even if you have it on.
+    // "network:lan_discovery":     false,
+
     // -- Other --
     // "widget:icononly":           false,
     // "blockheader:showblockids": false,
