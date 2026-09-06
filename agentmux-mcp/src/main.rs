@@ -4576,7 +4576,10 @@ mod tests {
         // added here too (REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md
         // slice 2) — same reasoning, not fixing the pre-existing drift between
         // this running total and the prose breakdown below it.
-        assert_eq!(defs.len(), 42, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue");
+        // OPEN_AGENT_TOOL added (REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) —
+        // same reasoning as the entries above, not fixing the pre-existing
+        // drift between this running total and the prose breakdown.
+        assert_eq!(defs.len(), 43, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
