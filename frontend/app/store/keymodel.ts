@@ -12,7 +12,7 @@ import {
     replaceBlock,
     setIsTermMultiInput,
 } from "@/app/store/global";
-import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
+import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";

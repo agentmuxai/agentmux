@@ -628,7 +628,7 @@ async function initAppInner() {
     // properties. Window-level zoom reset is not needed.
 
     // Initialize chrome zoom CSS variables
-    import("@/app/store/zoom.platform").then(({ initChromeZoom }) => {
+    import("@/app/store/zoom").then(({ initChromeZoom }) => {
         initChromeZoom();
     });
 
