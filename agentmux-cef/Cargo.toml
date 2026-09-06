@@ -138,3 +138,6 @@ x11rb = "0.13"
 # subscriber idempotency contract). Mirrors agentmux-launcher's
 # proptest setup.
 proptest = { version = "1", default-features = false, features = ["std"] }
+# Issue #2977 WS4: the background audit log is file-backed (it must survive a
+# host restart), so its tests need a real temp directory rather than a mock.
+tempfile = "3"

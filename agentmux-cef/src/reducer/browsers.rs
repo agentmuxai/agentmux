@@ -40,9 +40,28 @@ pub(super) fn handle_register_browser(
     if super::quit::is_live_user_window(&kind) {
         state.saw_live_user_window = true;
     }
+    // LEVEL-TRIGGERED close-on-arrival for a window that registers after the
+    // instance already decided to quit (ReAgent P1 on PR #2996).
+    //
+    // The pre-checks in `open_window_with_kind` / `open_window_at_position`
+    // narrow this race but cannot close it: a creation that passed them
+    // microseconds before the drain began still runs enqueue →
+    // `post_create_window` → here, and none of those steps re-read
+    // `QuitState`. Registration is the LAST step, so checking here cannot be
+    // raced by construction — the same level-triggered reasoning
+    // `reducer/quit.rs`'s header documents for `reconcile_quit`, and the same
+    // reason `promote_liveness::should_open_fallback` re-checks liveness at
+    // its decision point rather than trusting every close path to cancel.
+    //
+    // Only user windows: pool browsers legitimately register during a drain
+    // (the drain cascade closes them itself), and panes/floaters are not
+    // top-level windows the quit is responsible for.
+    let registered_during_drain = super::quit::should_close_on_arrival(&kind, &state.quit_state);
+
     let v = state.bump_version();
     DispatchOutput {
         events: vec![HostEvent::BrowserRegistered { label, kind, version: v }],
+        registered_during_drain,
         ..Default::default()
     }
 }

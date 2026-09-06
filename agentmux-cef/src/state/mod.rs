@@ -669,6 +669,21 @@ pub struct AppState {
     /// fresh cold-path window. Shares the confirmation signal, and the
     /// stage/confirm shape, with `pending_reproject_closures` directly above.
     pub promote_liveness: Mutex<PromoteLivenessWatches>,
+
+    /// Issue #2977 WS4 — what the background service did while the user had
+    /// no window open, surfaced the next time one opens. Written by
+    /// `host_dispatch` from the reducer's attended/unattended transition;
+    /// drained by the `background_audit_take` IPC command.
+    pub background_audit: Mutex<crate::background_audit::BackgroundAudit>,
+
+    /// Sender into the audit writer thread, held OUTSIDE `background_audit`'s
+    /// mutex on purpose. `host_dispatch` enqueues while holding `host_state`;
+    /// if that required the audit mutex, a concurrent `background_audit_take`
+    /// (which holds it across disk I/O) would stall the UI thread through lock
+    /// contention — the same hazard as doing the I/O inline. A `OnceLock` read
+    /// plus an unbounded `send` is allocation-free and never blocks.
+    pub background_audit_tx:
+        std::sync::OnceLock<std::sync::mpsc::Sender<crate::background_audit::AuditEntry>>,
 }
 
 impl Default for AppState {
@@ -756,6 +771,8 @@ impl Default for AppState {
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
+            background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
+            background_audit_tx: std::sync::OnceLock::new(),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }
@@ -776,7 +793,43 @@ impl AppState {
     pub fn host_dispatch(&self, cmd: crate::reducer::HostCommand) -> crate::reducer::DispatchOutput {
         let out = {
             let mut state = self.host_state.lock();
-            crate::reducer::update(&mut state, cmd)
+            let out = crate::reducer::update(&mut state, cmd);
+            // Issue #2977 WS4 — record attended/unattended transitions for the
+            // audit log the user is shown when a window next opens.
+            //
+            // Written INSIDE the `host_state` scope on purpose (ReAgent P1 /
+            // Codex P2 on PR #3001). The reducer decides the transition under
+            // this lock; applying it after releasing let two concurrent
+            // dispatches land out of order, and because `observed` no-ops when
+            // the log is not in an unattended state, a reordered pair could
+            // silently drop an `Observed` and leave the log stuck claiming an
+            // unattended period that had already ended.
+            //
+            // No I/O and NO LOCK ACQUISITION here, so `host_dispatch`'s
+            // documented "no I/O, sub-microsecond" contract still holds. Both
+            // halves matter: this runs straight from CEF UI-thread callbacks
+            // (`wrr::win_event` dispatches `UnregisterBrowser` there, which is
+            // exactly this transition), and an earlier version that merely
+            // avoided I/O still stalled the UI thread by blocking on the audit
+            // mutex behind a concurrent `background_audit_take`'s disk read.
+            if let Some(went_unattended) = out.background_attention {
+                if let Some(tx) = self.background_audit_tx.get() {
+                    // Lock-free and non-blocking: a `OnceLock` read and an
+                    // unbounded `send`. The transition was already decided AND
+                    // applied to `HostState` by the reducer above, under this
+                    // same lock, so enqueueing here preserves decision order in
+                    // the file without taking any further lock.
+                    let _ = tx.send(crate::background_audit::AuditEntry {
+                        at_ms: crate::background_audit::now_ms(),
+                        kind: if went_unattended {
+                            crate::background_audit::AuditKind::WentUnattended
+                        } else {
+                            crate::background_audit::AuditKind::Observed
+                        },
+                    });
+                }
+            }
+            out
         };
         for ev in &out.events {
             log_host_event(ev);

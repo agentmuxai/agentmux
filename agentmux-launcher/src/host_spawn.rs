@@ -47,6 +47,15 @@ pub(crate) fn spawn_host_supervised(
         .env("AGENTMUX_HOST_REG_SECRET", &srv.host_reg_secret)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         .envs(host_env.iter().cloned())
+        // Auto-start (issue #2977 WS2): translate the launcher's own
+        // `--background` flag into the env the HOST actually reads. The flag
+        // is forwarded to the host in `args` too, but nothing there consumes
+        // it — `AGENTMUX_BACKGROUND_SERVICE` is the real switch, so without
+        // this an auto-started instance would open a normal foreground window
+        // and still quit on last-window-close (Codex P1 on PR #2999).
+        // `background_env_for` also sets `AGENTMUX_TRAY`; see its doc for why
+        // the indicator is not optional in this particular context.
+        .envs(crate::autostart::background_env_for(args))
         .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
         // Explicit stdio instead of inheriting the launcher's own —
         // `CreateProcess(..., CREATE_SUSPENDED, ...)` for this GUI-subsystem
@@ -151,6 +160,13 @@ pub(crate) fn spawn_host_unix(
         // agentmux-cef/src/main.rs::launcher_is_genuine_parent.
         .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
         .envs(host_env.iter().cloned())
+        // Auto-start (issue #2977 WS2) — same translation as the Windows
+        // spawn path. macOS and Linux are the platforms whose generated
+        // artifacts (LaunchAgent, XDG .desktop) actually pass `--background`,
+        // so omitting it here left two of the three shipped platforms with an
+        // inert flag (ReAgent P1 on PR #2999, catching that my first fix for
+        // this was wired into the Windows spawn only).
+        .envs(crate::autostart::background_env_for(args))
         // We reap children ourselves on shutdown (SIGTERM, then SIGKILL
         // backstop) — kill_on_drop would SIGKILL the host the moment the
         // Child is dropped, robbing CEF of the chance to reap its render

@@ -417,6 +417,14 @@ async function initHostWave(): Promise<void> {
         // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
 
+        // Issue #2977 WS4 — show what the background service did while no
+        // window was open. Fire-and-forget: it must never delay or break
+        // startup, and it self-suppresses when there is nothing to report.
+        void (async () => {
+            const { surfaceBackgroundAudit } = await import("@/app/init/background-audit");
+            await surfaceBackgroundAudit();
+        })();
+
         benchDump(); // emit full startup timeline to log
 
     } catch (error) {
@@ -514,6 +522,14 @@ async function initHostNewWindow(): Promise<void> {
 
         // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
+
+        // Issue #2977 WS4 — show what the background service did while no
+        // window was open. Fire-and-forget: it must never delay or break
+        // startup, and it self-suppresses when there is nothing to report.
+        void (async () => {
+            const { surfaceBackgroundAudit } = await import("@/app/init/background-audit");
+            await surfaceBackgroundAudit();
+        })();
 
     } catch (error) {
         console.error("[initHostNewWindow] Initialization failed:", error);

@@ -12,6 +12,7 @@
 // this file must still compile on those platforms.
 
 mod app;
+mod background_audit;
 mod browser_api;
 mod browser_panes;
 mod client;
