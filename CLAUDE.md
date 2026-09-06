@@ -159,7 +159,34 @@ Same idea as `task dev` above, but `mcp__agentmux__Shell` spawns Windows command
 { "cmd": "C:\\<repo>\\scripts\\package-agent.cmd > C:\\<repo>\\pkg-build.log 2>&1" }
 ```
 
-Then poll `ShellStatus` for `running: false` and `Read` the log file for progress/results. `task package` (full CEF host build) routinely exceeds the Bash tool's own timeout — this is the only reliable way to run it from an agent. See `docs/retro/retro-task-package-mcp-timeout-and-shell-output-gap-2026-08-06.md` for the full investigation (Bash-tool timeout, `nohup` not detaching, and this gap all confirmed there).
+Then poll `ShellStatus` for `running: false` and `Read` the log file for progress/results. See `docs/retro/retro-task-package-mcp-timeout-and-shell-output-gap-2026-08-06.md` for the original investigation (Bash-tool timeout, `nohup` not detaching, and the output gap all confirmed there).
+
+**Prefer the Bash tool with `run_in_background: true` unless you specifically need a `shell_id`.** This paragraph used to say MCP Shell was "the only reliable way to run `task package` from an agent," because the build exceeds the Bash tool's timeout. That rationale no longer holds and contradicted the `task dev` section above: a `run_in_background` invocation is exempt from the timeout entirely (`effective_idle_timeout` returns `u64::MAX` for `--declared-background`, `agentmux-bashwrap/src/bash_wrap.rs`). More importantly, `ShellStatus` is **poll-only** — following the old advice forces a `sleep`-loop, which is exactly what "Waiting without polling" below exists to stop. Reach for MCP Shell when you want a durable `shell_id` another turn or agent can `ShellStop`; reach for `run_in_background` when you just want the thing to finish and to be told when it did.
+
+#### Waiting without polling
+
+**A `sleep` in a tool call is almost always a bug.** It burns a call, blocks the
+turn, and — because sleeps get picked to fit a timeout rather than the work —
+either wakes too early (so you sleep again) or too late. Pick by what you are
+actually waiting on:
+
+| Waiting on | Do this | Not this |
+|---|---|---|
+| A long local command (build, packaging, full test suite) | Bash tool, `run_in_background: true`, **no `&`**. You are re-invoked when it exits. | `sleep N; check` |
+| CI on a PR | `scripts/gh-agent.sh pr checks <n> --watch --fail-fast` (or `gh run watch <id>`) in a background Bash call. It blocks until checks settle, so its exit *is* the notification. | polling `pr checks` on a timer |
+| A review verdict, or CI's own result | **Nothing.** muxbus already pushes `[ReAgent] … reviewed` and `[CI] … PASSED` jekts to you. | polling `pr view --json reviews` |
+| Another agent's reply | **Nothing.** Their jekt arrives as a message. | polling their transcript |
+| External state with no watcher, inside `/loop` | `ScheduleWakeup`, delay matched to how fast that state really moves | a chain of 60s sleeps |
+
+Two traps worth naming, both hit in practice:
+
+- **Never append `&`** to a `run_in_background` command. The tracked process
+  becomes the launcher shell that exits in milliseconds, and the real work is
+  orphaned out from under the protection you asked for — see the `task dev`
+  section above for the full failure mode.
+- **A `[CI] PASSED` jekt is not the same as all checks being green.** A repo
+  with several workflows fires the notification per workflow; `pr checks` can
+  still show other legs pending. Confirm before merging on it.
 
 ### Build Prerequisites
 
