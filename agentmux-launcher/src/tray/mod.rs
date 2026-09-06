@@ -44,15 +44,12 @@ mod windows;
 /// platform-neutral, so the handling logic is written and tested once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
-    /// "Open AgentMux" — or a left-click / double-click on the icon itself.
+    /// "New Window" (or "Start AgentMux" when the service is down) — also a
+    /// left-click / double-click on the icon itself.
     /// Reuses the existing `open_new_window` forward rather than introducing a
     /// second way to make a window (see §7.5.1: the reopen path already exists
     /// and is what the macOS reopen delegate uses).
     OpenWindow,
-    /// "Show Panel" — the small companion window (issue #2977 WS3). A real
-    /// CEF window reusing the pool promote path, NOT a native menu: the spec
-    /// rejects a native menu as "too limited for agent chat".
-    ShowPanel,
     /// "Quit AgentMux" — a genuine, user-intended full shutdown, distinct from
     /// closing the last window while background-service mode is on.
     Quit,
@@ -80,16 +77,17 @@ pub struct MenuItem {
 pub fn menu_model(running: bool) -> Vec<MenuItem> {
     vec![
         MenuItem {
+            // "New Window" rather than "Open AgentMux": the icon's presence
+            // already says AgentMux is up, so "Open" read as a no-op for a
+            // state the user can see is true. When the service is NOT
+            // reachable the wording still has to change — "New Window" would
+            // promise something that cannot happen — hence "Start AgentMux".
             label: if running {
-                "Open AgentMux".to_string()
+                "New Window".to_string()
             } else {
                 "Start AgentMux".to_string()
             },
             action: TrayAction::OpenWindow,
-        },
-        MenuItem {
-            label: "Show Panel".to_string(),
-            action: TrayAction::ShowPanel,
         },
         MenuItem {
             label: "Quit AgentMux".to_string(),
@@ -189,19 +187,21 @@ mod tray_model_tests {
     }
 
     #[test]
-    fn menu_offers_open_panel_and_quit_in_that_order() {
+    fn menu_offers_new_window_and_quit_in_that_order() {
+        // Two items, deliberately. The panel entry was removed: `open_panel`
+        // still exists as a host IPC command (issue #2977 WS3, PR #3002), it
+        // is simply not reachable from the tray for now.
         let m = menu_model(true);
-        assert_eq!(m.len(), 3, "menu is deliberately minimal");
+        assert_eq!(m.len(), 2, "menu is deliberately minimal");
         assert_eq!(m[0].action, TrayAction::OpenWindow);
-        assert_eq!(m[1].action, TrayAction::ShowPanel);
-        assert_eq!(m[2].action, TrayAction::Quit);
+        assert_eq!(m[1].action, TrayAction::Quit);
     }
 
     #[test]
     fn menu_and_tooltip_report_running_state_honestly() {
         // WS4: the icon must be a reliable "is it actually running"
         // indicator, so both surfaces have to change with the state.
-        assert_eq!(menu_model(true)[0].label, "Open AgentMux");
+        assert_eq!(menu_model(true)[0].label, "New Window");
         assert_eq!(menu_model(false)[0].label, "Start AgentMux");
         assert!(tooltip(true).contains("running in the background"));
         assert!(tooltip(false).contains("not running"));
