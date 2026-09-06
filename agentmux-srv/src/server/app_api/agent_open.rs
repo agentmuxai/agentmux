@@ -626,7 +626,13 @@ pub(crate) async fn open_agent_impl(
                         nodesize: None,
                         nodesizefraction: None,
                         indexarr: None,
-                        focused: true,
+                        // Honors the request's `focus` (default true — the UI
+                        // flow's behavior). Was hardcoded `true` while the RPC
+                        // surface was the only caller and nothing set the
+                        // field; this PR documents `focus`/`--no-focus` on
+                        // OpenAgent/muxopen, so ignoring it would silently
+                        // contradict their own help text. reagent P1, PR #3032.
+                        focused: cmd.focus.unwrap_or(true),
                         magnified: false,
                         ephemeral: false,
                         targetblockid: String::new(),
