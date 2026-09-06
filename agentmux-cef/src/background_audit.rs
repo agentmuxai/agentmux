@@ -340,7 +340,11 @@ fn entry_line(entry: &AuditEntry) -> String {
 /// Compaction also REWRITES from parsed entries, so it heals any torn line
 /// rather than leaving it to sit in the file until it happens to fall inside
 /// a future dropped range. After a compaction, raw lines and valid entries
-/// are identical again by construction.
+/// are identical again by construction — at rest. A reader racing an
+/// in-flight append can still observe a torn final line; appends are not
+/// atomic, and tolerating that is the point of `parse_line` skipping
+/// junk. The healing guarantee is about what compaction LEAVES behind,
+/// not an invariant that holds at every instant.
 ///
 /// Dropping entries the user has never seen is possible only if they have not
 /// opened a window in `KEEP_LINES` transitions; that is logged loudly rather
@@ -707,69 +711,75 @@ mod background_audit_tests {
     /// A torn line (mid-append crash) coexisting with a compaction cycle.
     ///
     /// The watermark counts PARSED entries; compaction used to count RAW
-    /// lines. With an unparseable line in the file the two diverge, and the
-    /// post-compaction watermark lands off by that many — re-showing an
-    /// already-surfaced entry, or skipping one forever (ReAgent P1 on #3001).
-    /// Every other compaction test writes only well-formed entries, so none
-    /// of them could reach this.
+    /// lines. With an unparseable line in the file the two diverge by exactly
+    /// the number of malformed lines, and the post-compaction watermark lands
+    /// short — re-showing entries the user has already been shown (ReAgent P1
+    /// on #3001). Every other compaction test writes only well-formed
+    /// entries, so none of them could reach this.
+    ///
+    /// Drives `compact_if_oversized` DIRECTLY rather than through the writer
+    /// thread: this is a pure file function, and the arithmetic under test is
+    /// exact. An earlier version of this test pushed 2050 entries through the
+    /// channel and polled for quiescence, which was both flaky (it compared
+    /// two reads the writer could append between — windows-latest caught it)
+    /// and needlessly slow, since compaction re-reads the whole file on every
+    /// append. Writer/reader concurrency is already covered by
+    /// `surfacing_still_works_after_racing_the_compacting_writer`.
     #[test]
     fn a_torn_line_does_not_skew_the_watermark_across_compaction() {
         let dir = tempfile::tempdir().unwrap();
         let log_path = dir.path().join("background-audit.jsonl");
+        let watermark = log_path.with_extension("surfaced");
 
-        // Seed a file that already contains a malformed line among valid ones.
+        // MAX_LINES valid entries plus one torn line => raw lines exceed the
+        // cap, and raw count is exactly one MORE than the valid-entry count.
+        const VALID: usize = MAX_LINES;
         let mut seed = String::new();
-        for i in 0..10u64 {
-            seed.push_str(&format!(
-                "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
-                i,
-                if i % 2 == 0 { "went_unattended" } else { "observed" }
-            ));
-        }
-        seed.push_str("{\"at_ms\":999,\"ki\n"); // torn write
-        std::fs::write(&log_path, seed).unwrap();
-
-        let mut log = BackgroundAudit::default();
-        let (tx, _seeded) = log.init(dir.path()).unwrap();
-
-        // Surface what is there, so the watermark is non-zero and in
-        // valid-entry units.
-        let first = log.take_unsurfaced();
-        assert_eq!(first.len(), 10, "the torn line must not be surfaced");
-        let already: std::collections::HashSet<u64> =
-            first.iter().map(|e| e.at_ms).collect();
-
-        // Drive past the compaction threshold.
-        for i in 0..(MAX_LINES + 50) {
-            let at = 1_000 + i as u64;
-            tx.send(AuditEntry {
-                at_ms: at,
-                kind: if i % 2 == 0 { AuditKind::WentUnattended } else { AuditKind::Observed },
-            })
-            .unwrap();
-        }
-        for _ in 0..400 {
-            if log.entries().len() >= KEEP_LINES {
-                break;
+        for i in 0..VALID {
+            if i == VALID / 2 {
+                seed.push_str("{\"at_ms\":999999,\"ki
+"); // torn write
             }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            seed.push_str(&entry_line(&AuditEntry {
+                at_ms: i as u64,
+                kind: if i % 2 == 0 { AuditKind::WentUnattended } else { AuditKind::Observed },
+            }));
         }
+        std::fs::write(&log_path, &seed).unwrap();
+        assert_eq!(seed.lines().count(), VALID + 1, "one unparseable line present");
 
-        // Nothing already shown may come back.
-        let after = log.take_unsurfaced();
-        for e in &after {
-            assert!(
-                !already.contains(&e.at_ms),
-                "at_ms {} was surfaced twice — watermark skewed by the torn line",
-                e.at_ms
-            );
-        }
-        // And compaction should have healed the file: no unparseable lines left.
-        let raw = std::fs::read_to_string(&log_path).unwrap();
+        // The user has already been shown the first 1500 VALID entries.
+        const SURFACED: usize = 1_500;
+        std::fs::write(&watermark, SURFACED.to_string()).unwrap();
+
+        compact_if_oversized(&log_path, &watermark);
+
+        // Dropped in parsed-entry units: VALID - KEEP_LINES. Counting raw
+        // lines instead would drop one more and pull the watermark one short.
+        let dropped = VALID - KEEP_LINES;
+        let after: usize = std::fs::read_to_string(&watermark).unwrap().trim().parse().unwrap();
         assert_eq!(
-            raw.lines().count(),
-            log.entries().len(),
-            "after compaction every raw line must parse"
+            after,
+            SURFACED - dropped,
+            "watermark must be shifted in the same units it was written in"
+        );
+
+        // The file is healed: every remaining line parses, so raw and parsed
+        // counts cannot drift apart again.
+        let raw = std::fs::read_to_string(&log_path).unwrap();
+        assert_eq!(raw.lines().count(), KEEP_LINES);
+        assert_eq!(raw.lines().filter_map(parse_line).count(), KEEP_LINES);
+
+        // The observable consequence: surfacing returns exactly the entries
+        // never shown before, starting at the first one. Off-by-the-torn-line
+        // would re-show at_ms 1499.
+        let mut log = BackgroundAudit::default();
+        let (_tx, _seeded) = log.init(dir.path()).unwrap();
+        let fresh = log.take_unsurfaced();
+        assert_eq!(fresh.len(), VALID - SURFACED);
+        assert_eq!(
+            fresh[0].at_ms, SURFACED as u64,
+            "an already-surfaced entry was shown again"
         );
     }
 
