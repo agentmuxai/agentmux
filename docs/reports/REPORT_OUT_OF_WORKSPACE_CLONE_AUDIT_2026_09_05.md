@@ -5,11 +5,12 @@
 **Scope:** This machine (`claudius`). Every git clone/worktree of an
 AgentMux-org repo, checked against the rule that an agent must work from a
 clone **inside its own workspace**.
-**Status:** Analysis complete; §2 cleanup **executed** 2026-09-05 after
-operator sign-off. The two §4 blockers were resolved by decision, not by
-rescue — the operator confirmed both documents were stale and not worth
-keeping. §3 (non-AgentMux clones, incl. live `dev-tools` tooling) is
-untouched and still open.
+**Status:** Complete. Both §2 and §3 cleanup **executed** 2026-09-05 after
+operator sign-off. `C:\Systems\` now holds exactly one git repo — a
+third-party project unrelated to AgentMux (§3.2) — and zero
+out-of-workspace clones of any AgentMux-org repo. The two §4 blocker
+documents were resolved by decision rather than rescue (operator confirmed
+both stale); everything else of value was preserved first (§3.1, §4).
 
 ---
 
@@ -85,15 +86,45 @@ completeness; none is in active use by a running agent.
 | `claw` | `agentc/muxbus-drop-secret-fallback` | 2026-06-23 | 0 |
 | `SunoHarvester` | `main` | 2025-11-02 | 10 |
 
-**`C:\Systems\dev-tools` warrants a call-out.** It is the only one of these
-I observed being *used* this session: its `packages/secrets` CLI is how the
-`gh-token-genericagentx` credential is retrieved from AWS Secrets Manager,
-and I built it (`npm run build`) to do so. Two agents already carry
-in-workspace copies (`claude-05309/dev-tools`, `claude-0611j/dev-tools`),
-so the in-workspace pattern exists — but any tooling or habit that reaches
-for `C:\Systems\dev-tools` by path will break when it is removed. Its 6
-dirty files are all `packages/*/bin/*` and predate this session (last
-commit 2026-06-23); they are not mine.
+**All eight AgentMux-org clones above were removed 2026-09-05** after the
+per-repo checks below. `SunoHarvester` was **kept** — see §3.2.
+
+### 3.1 What each check found
+
+- **`reagent` — the one real casualty risk.** 33 commits ahead of its own
+  remote branch (12 of them not on `main` either), i.e. work that existed
+  **only on this disk**. The stale `origin/…` ref initially hid this; it
+  only surfaced after an explicit `git fetch`. Preserved by pushing to
+  `salvage/agenty-docs-provider-update-2026-09-05` on `a5af/reagent`, then
+  verified `HEAD == origin/salvage/…` by SHA before deleting anything.
+  That branch is AgentY's work and should be triaged or deleted by someone
+  who owns it.
+- **`dev-tools` — live tooling, cleared only after proving it.** Its
+  `packages/secrets` CLI is how the `gh-token-genericagentx` credential is
+  read from AWS Secrets Manager, and I used it this session. Removing it
+  turned out to be safe **because the `secrets` command on `PATH` is an
+  independently-installed published package**
+  (`AppData/Roaming/npm/node_modules/@a5af/secrets`), not an `npm link`
+  into `C:\Systems`. Verified by running `secrets list` before and after
+  removal — both succeeded. No agent config referenced the path either.
+  Its 6 dirty files were pure LF→CRLF noise (empty content diff).
+- **`agentmux-agy`** — 11 genuinely-unique uncommitted lines
+  (`harness_engine` / `model_vendor` struct fields; confirmed absent from
+  `main`, which has only the unrelated `model_vendor_base_url`). Saved as
+  a patch alongside AgentC's (§4).
+- **`agentmux-landing`** — release metadata pinned at v0.46.6 against a
+  current v0.55.x; superseded generated output, discarded.
+- **`agentmux-docs`** — a lone submodule-pointer bump. Discarded.
+- **`agentmux-cloud`, `shared-infrastructure`, `claw`** — clean trees, 0
+  unpushed. Nothing to preserve.
+
+### 3.2 `SunoHarvester` — deliberately kept
+
+Its remote is **`hartmark/SunoHarvester`** — a third-party project, not an
+AgentMux-org repo and not an agent clone. It carries 10 untracked Python
+scripts (real, unpushed personal work). It is out of scope for a rule about
+where *agents* work, and deleting it would have destroyed unrelated
+content. Left exactly as found.
 
 ## 4. BLOCKERS — resolved by decision (2026-09-05)
 
@@ -146,8 +177,10 @@ patch before deletion:**
 
 ```
 ~/.agentmux/agents/loap-2-0822g/salvage/
-    agentc-june-identity-wip-2026-09-05.patch      (251 lines, `git diff`)
-    agentc-june-identity-wip-2026-09-05.filelist   (`git status --porcelain`)
+    agentc-june-identity-wip-2026-09-05.patch          (251 lines, `git diff`)
+    agentc-june-identity-wip-2026-09-05.filelist
+    agy-harness-model-decoupling-wip-2026-09-05.patch  (22 lines, from §3.1)
+    reagent-untracked-2026-09-05.filelist
 ```
 
 Reapply with `git apply` from a repo root if anyone ever wants it. Expect
@@ -156,23 +189,32 @@ rewritten. If nobody claims it, deleting the patch is a no-questions
 cleanup; the point was only to not make that call silently on someone
 else's behalf.
 
-## 5. Recommended sequence
+## 5. What was executed (2026-09-05)
 
-1. **Rescue the two blockers in §4** — commit both documents to `main` via
-   a normal PR from an in-workspace clone. *(Actionable now; both are
-   mine and I can do this immediately on request.)*
-2. **Get a decision on the 9 modified files** from whoever owns
-   AgentC-asaf's June identity work — recover as a patch, or discard.
-3. **Only then remove**, as one unit and in this order:
-   `git worktree remove` the three `agentmux-*` worktrees →
-   `git worktree prune` (clears the already-dangling
-   `agentmux-wt-help-restore`) → delete `C:\Systems\agentmux`.
-4. **Handle `C:\Systems\dev-tools` separately** (§3) — confirm nothing
-   invokes it by absolute path before removing, since it is live tooling
-   rather than abandoned state.
-5. **Re-clone into workspaces on demand.** Nothing in §2/§3 needs to be
-   *migrated*: every branch is merged, so a fresh in-workspace clone is
-   strictly better than moving a stale directory.
+1. Preserved everything unique **before** deleting anything: reagent's 33
+   commits pushed to a salvage branch and SHA-verified against the remote;
+   AgentC's and AgentY's uncommitted deltas saved as patches.
+2. `git worktree remove` ×3 → `git worktree prune` (cleared the dangling
+   `agentmux-wt-help-restore`) → deleted `C:\Systems\agentmux`.
+3. Cleared `dev-tools` only after proving the `secrets` CLI on `PATH` is an
+   independent install, verified working before *and* after removal (§3.1).
+4. Deleted the remaining seven AgentMux-org clones.
+5. Left `SunoHarvester` untouched (§3.2).
+
+**Nothing was migrated, by design.** Every branch involved was either
+merged or preserved on a remote, so a fresh in-workspace clone is strictly
+better than relocating a stale directory. My own compliant clone at
+`~/.agentmux/agents/loap-2-0822g/agentmux/` was created that way — a plain
+`git clone`, ~6 seconds.
+
+### Residual items someone else should close out
+
+- `a5af/reagent` → branch `salvage/agenty-docs-provider-update-2026-09-05`
+  (AgentY's 33 commits). Triage or delete.
+- `~/.agentmux/agents/loap-2-0822g/salvage/` → two patches (AgentC's June
+  identity WIP, AgentY's harness/model fields) + two file lists. Both are
+  stale against current `main`; deleting them is a no-questions cleanup
+  once their owners don't want them.
 
 ## 6. Why this recurred, and the cheapest guard
 
