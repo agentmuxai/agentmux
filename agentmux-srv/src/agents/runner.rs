@@ -14,9 +14,11 @@
 //! contract is "send task, wait for done, return result." The
 //! interactive agent pane has its own PTY-based controller in
 //! `blockcontroller/shell/lifecycle.rs`; that path is NOT routed
-//! through this runner's spawn (see
-//! `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §4.2 — what's
-//! shared is the translator + event shape, not the spawn function).
+//! through this runner's spawn — what's shared is the translator +
+//! event shape, not the spawn function. (This used to cite a
+//! `SPEC_UNIFIED_AGENT_TYPES` spec that no longer exists anywhere in
+//! `docs/`; the pointer was dropped rather than replaced — see
+//! `scripts/check-spec-citations.sh`.)
 //! It DOES reuse this module's commit-aware admission gate
 //! (`admit_spawn` / `agent_commit_reserve_gb`, `pub(crate)`) — see
 //! `blockcontroller::shell::lifecycle::ShellController::start`,

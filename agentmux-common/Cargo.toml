@@ -18,7 +18,7 @@ thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Cross-platform home/data/config-dir lookup for the unified data-dir
-# layout (see docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md).
+# layout (see docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md).
 dirs = "5"
 # Host-tier jekt sender signing (jekt_sign.rs) — shared by agentmux-srv
 # (verification) and agentmux-mcp (signing), so the two can never drift on
