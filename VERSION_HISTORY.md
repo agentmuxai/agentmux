@@ -1,5 +1,28 @@
 # AgentMux Version History
 
+## 0.55.37 — 2026-09-06
+
+- fix(agent): swap the remaining tail glyphs from the weak-coverage arrow
+- fix(host): publish the ipc-port file where the launcher reads it in dev mode
+- fix(swarm): subagents that returned are no longer reported as interrupted
+- fix(tray): use the AgentMux brand icon instead of the placeholder mark
+- docs: memory carry-over analysis across new/existing/compacted agent sessions
+- fix(agent): hover peek panel now respects the agent pane zoom level
+- fix(agent): previews now zoom with the pane instead of their own broken font-scale
+- fix(tray): rename Open AgentMux to New Window and drop the panel entry
+- fix(settings): seed settings.json at startup instead of only when the Settings pane opens
+- fix(providers): bump pinned CLI versions per overnight drift report
+- docs(settings): surface network:lan_discovery in the settings template (default off)
+- perf(lan): query LAN peers concurrently instead of sequentially
+- fix(wrr): stop the quit watchdog killing a resting background service
+- fix(window): centre a new window on the main display when none is open
+- fix(swarm): tool rows show the command or file path instead of a raw JSON dump
+- fix(lan): LAN discovery toggle takes effect live, no restart
+- refactor(reactive): unify the three jekt forward tiers behind one helper
+- feat(muxbus): jekt delivery tier 4 — cloud relay is now performed by srv
+- refactor(network): rename ConfigWatcher and wan.subscribed_agents; add credential map
+- fix(lan): stop this instance discovering itself as a LAN peer
+
 ## 0.55.36 — 2026-09-05
 
 - fix(agent): provider_flags were dropped from cmd:args on every send
