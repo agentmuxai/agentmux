@@ -428,8 +428,7 @@ fn run_git_branch(repo_dir: &Path) -> Option<String> {
         // CREATE_NO_WINDOW: console-flash suppression — std::process::Command
         // needs the CommandExt trait to call creation_flags.
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(crate::win32::CREATE_NO_WINDOW);
     }
     let output = cmd.output().ok()?;
     if !output.status.success() {

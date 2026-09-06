@@ -20,7 +20,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -324,8 +323,5 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms()
 }

@@ -184,7 +184,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 // install — observed during workspace
                                 // setup paths (e.g. tear-off triggering
                                 // CLI install on first agent block).
-                                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                                use agentmux_common::win32::CREATE_NO_WINDOW;
                                 let npm_cmd_str = format!(
                                     "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
                                     prefix_dir, package_arg

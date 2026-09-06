@@ -24,10 +24,7 @@ use crate::backend::wps::{Broker, WaveEvent, EVENT_SHELL_CHUNK};
 use agentmux_common::api_types::ShellInputFailure;
 
 fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    agentmux_common::time::now_ms_u64()
 }
 
 /// Live status of a running (or recently exited) shell. Updated by
@@ -293,22 +290,11 @@ impl ShellSessionRegistry {
 /// by name is the cross-instance hazard that let agent "Mazs" nuke peer
 /// dev servers (see SPEC_PERSISTENT_SHELL_PHASE3_STOP §1).
 fn kill_tree(pid: u32) {
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-    }
-    #[cfg(unix)]
-    {
-        // Negative pid targets the process group created via process_group(0).
-        let pgid = pid as i32;
-        unsafe { libc::kill(-pgid, libc::SIGTERM) };
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        unsafe { libc::kill(-pgid, libc::SIGKILL) };
-    }
+    // Group-kill with SIGTERM → 300ms → SIGKILL escalation on Unix (the child
+    // is spawned via process_group(0), so the negative-pid signal reaches its
+    // descendants); `taskkill /F /T /PID` on Windows. The implementation is
+    // shared with the other by-PID kill sites in `agentmux_common::process`.
+    agentmux_common::process::kill_process_group(pid);
 }
 
 pub struct ShellNodeRunner {
@@ -388,7 +374,7 @@ impl ShellNodeRunner {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt as _;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            use agentmux_common::win32::CREATE_NO_WINDOW;
             child_cmd.creation_flags(CREATE_NO_WINDOW);
         }
         // Backstop: reap the wrapper shell if this runner task is ever dropped.

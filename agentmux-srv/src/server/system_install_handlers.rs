@@ -174,7 +174,7 @@ async fn query_winget_version(winget_id: &str) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         c.creation_flags(CREATE_NO_WINDOW);
     }
     let output = c.output().await.ok()?;

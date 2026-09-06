@@ -143,10 +143,7 @@ pub(crate) fn normalize_phone(raw: &str) -> String {
 }
 
 fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    agentmux_common::time::now_ms_u64()
 }
 
 #[cfg(test)]

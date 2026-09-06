@@ -15,7 +15,7 @@
 //! which each controller instance owns privately.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use crate::backend::obj::MetaMapType;
 use crate::backend::storage::store::Store;
@@ -31,10 +31,7 @@ const FLUSH_DEBOUNCE: Duration = Duration::from_secs(1);
 
 /// Returns the current Unix timestamp in milliseconds.
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    agentmux_common::time::now_ms()
 }
 
 /// In-memory accumulator for session stats.  One per controller instance.

@@ -1445,33 +1445,12 @@ pub fn open_login_terminal(args: &serde_json::Value) -> Result<serde_json::Value
     Ok(serde_json::json!({ "opened": true }))
 }
 
-/// Platform-specific best-effort kill of a child process by PID.
-#[cfg(windows)]
-fn kill_pid(pid: u32) -> std::io::Result<()> {
-    // Use taskkill /F /T so the whole tree dies — `openclaw models
-    // auth login` typically spawns a child that opens the browser.
-    let status = std::process::Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!("taskkill exit {:?}", status.code())))
-    }
-}
-
-#[cfg(unix)]
-fn kill_pid(pid: u32) -> std::io::Result<()> {
-    // SIGTERM first; an aborting subprocess gets a chance to clean up.
-    let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    if ret != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
+/// Best-effort kill of a child process by PID — `SIGTERM` on Unix (an
+/// aborting subprocess gets a chance to clean up); `taskkill /F /T /PID`
+/// on Windows so the whole tree dies (`openclaw models auth login`
+/// typically spawns a child that opens the browser). Shared with srv's
+/// identical former copy via `agentmux_common::process`.
+use agentmux_common::process::kill_pid;
 
 // --- CLI command helpers ---
 

@@ -5,7 +5,10 @@ edition = "2021"
 description = "Shared utilities for AgentMux crates"
 
 [dependencies]
-tokio = { version = "1", features = ["process"] }
+# `fs` / `io-util` / `sync` for `event_log::run_disk_writer` (lifted here
+# from launcher + srv — see event_log.rs); `rt` + `macros` for its
+# `#[tokio::test]`.
+tokio = { version = "1", features = ["process", "fs", "io-util", "sync", "rt", "macros"] }
 tracing = "0.1"
 thiserror = "1"
 # Phase B.2: shared IPC protocol types (Command/Event) between
@@ -32,6 +35,11 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 # Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
 # and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.
+# `process::kill_pid` / `kill_process_group` — SIGTERM/SIGKILL by pid and
+# process group. Same pin as agentmux-srv.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 junction = "2.0.0"
 windows-sys = { version = "0.59", features = [
