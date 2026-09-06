@@ -313,7 +313,7 @@ mod recent_sessions_tests {
             reactive_handler,
         ));
         crate::backend::wcore::ensure_initial_data(&wstore).unwrap();
-        let config_watcher = Arc::new(crate::backend::wconfig::ConfigWatcher::new());
+        let config_watcher = Arc::new(crate::backend::wconfig::ConfigState::new());
         let process_tracker = Arc::new(
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
         );
@@ -652,7 +652,7 @@ mod recent_sessions_tests {
             reactive_handler,
         ));
         crate::backend::wcore::ensure_initial_data(&wstore).unwrap();
-        let config_watcher = Arc::new(crate::backend::wconfig::ConfigWatcher::new());
+        let config_watcher = Arc::new(crate::backend::wconfig::ConfigState::new());
         let process_tracker = Arc::new(
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
         );

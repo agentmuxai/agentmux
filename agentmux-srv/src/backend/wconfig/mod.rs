@@ -5,18 +5,24 @@
 //! Port of Go's pkg/wconfig/.
 //!
 //! Provides the full configuration type hierarchy and a thread-safe
-//! config watcher.
+//! in-memory config holder (`ConfigState`).
+//!
+//! Note `ConfigState` does NOT watch the filesystem, despite the name this
+//! module's type carried until 2026-09-06. Filesystem watching lives in
+//! `backend::config_watcher_fs`, on top of the shared `fs_watch::pool`. Two
+//! similarly-named modules where only one watched cost real debugging time;
+//! see REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md §7.
 
 mod loader;
 pub mod redact;
 pub mod types;
-mod watcher;
+mod state;
 
 // Re-export all public APIs so callers can continue using `wconfig::Type`.
 pub use loader::*;
 pub use redact::redact_full_config_for_renderer;
 pub use types::*;
-pub use watcher::*;
+pub use state::*;
 
 // ---- Config file constants ----
 
@@ -389,11 +395,11 @@ mod tests {
         assert!(json.contains("\"cloudEndpoint\":\"wss://cloud.example.com\""));
     }
 
-    // -- ConfigWatcher --
+    // -- ConfigState --
 
     #[test]
     fn test_config_watcher_default() {
-        let watcher = ConfigWatcher::new();
+        let watcher = ConfigState::new();
         let config = watcher.get_full_config();
         assert!(config.settings.term_theme.is_empty());
     }
@@ -402,13 +408,13 @@ mod tests {
     fn test_config_watcher_with_initial() {
         let mut config = FullConfigType::default();
         config.settings.term_theme = "dracula".to_string();
-        let watcher = ConfigWatcher::with_config(config);
+        let watcher = ConfigState::with_config(config);
         assert_eq!(watcher.get_settings().term_theme, "dracula");
     }
 
     #[test]
     fn test_config_watcher_set_config() {
-        let watcher = ConfigWatcher::new();
+        let watcher = ConfigState::new();
         let mut config = FullConfigType::default();
         config.settings.term_font_size = 16.0;
         watcher.set_config(config);
@@ -417,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_config_watcher_update_settings() {
-        let watcher = ConfigWatcher::new();
+        let watcher = ConfigState::new();
         let settings = SettingsType {
             term_theme: "solarized-dark".to_string(),
             ..Default::default()
@@ -431,7 +437,7 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let watcher = Arc::new(ConfigWatcher::new());
+        let watcher = Arc::new(ConfigState::new());
         let handles: Vec<_> = (0..4)
             .map(|i| {
                 let w = watcher.clone();

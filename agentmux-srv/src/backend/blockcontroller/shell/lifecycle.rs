@@ -438,7 +438,7 @@ impl Controller for ShellController {
             let mut has_agent_id = false;
 
             // Settings (global defaults, lowest priority)
-            let config = crate::backend::wconfig::ConfigWatcher::with_config(
+            let config = crate::backend::wconfig::ConfigState::with_config(
                 crate::backend::wconfig::build_default_config(),
             );
             let settings = config.get_settings();

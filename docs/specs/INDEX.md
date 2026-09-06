@@ -686,10 +686,11 @@ partial list.
 | [`web-widget`](web-widget.md) | Web Widget Implementation Spec - Tauri v2 |
 | [`widget-dnd-reorder`](widget-dnd-reorder.md) | Widget Drag-and-Drop Reorder |
 
-### living (2)
+### living (3)
 
 | Spec | Title |
 |---|---|
+| [`ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06`](ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md) | Architecture: network credential → route map |
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 
