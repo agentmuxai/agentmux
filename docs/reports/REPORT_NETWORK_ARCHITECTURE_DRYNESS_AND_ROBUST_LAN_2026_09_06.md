@@ -65,11 +65,27 @@ Properties this buys, none of which the snapshot approach has:
   loopback; a rebind-based design (companion report's Option C) would drop it
   on every toggle.
 
-**Still requires the cross-platform spike** flagged in the companion report:
-that `127.0.0.1:PORT` and `<lan-ip>:PORT` can be bound simultaneously while
-`0.0.0.0:PORT` conflicts with both. Standard socket behaviour, but Windows
-`SO_EXCLUSIVEADDRUSE` semantics deserve an explicit check before this is built
-on. **This is the one assumption the whole design rests on.**
+**Spike done — assumption VERIFIED, and one stated claim was wrong.**
+Measured 2026-09-06 by `backend::lan_listeners::tests`:
+
+- ✅ **`127.0.0.1:PORT` + `<lan-ip>:PORT` bind simultaneously.** Confirmed on
+  Windows; asserted in CI on Linux too. This is the claim the design rests on,
+  and it holds.
+- ❌ **"`0.0.0.0:PORT` conflicts with both" was wrong.** True on Linux/macOS;
+  **false on Windows**, where absent `SO_EXCLUSIVEADDRUSE` the wildcard binds
+  happily alongside an existing loopback listener. The spike was written
+  asserting the conflict and *failed on Windows*, which is how the error was
+  caught before any implementation depended on it.
+
+The correction does not weaken the design — it strengthens the case for it.
+"Just bind the wildcard on toggle" is now ruled out as a portable shortcut: on
+Windows it would leave two sockets on one port with ambiguous accept
+behaviour, exactly the hijack hazard `SO_EXCLUSIVEADDRUSE` exists to prevent.
+Binding **specific** addresses has no such ambiguity anywhere.
+
+The platform difference is pinned by
+`wildcard_vs_loopback_conflict_is_platform_dependent`, which asserts the
+observed behaviour per-platform so it fails loudly if either ever changes.
 
 ### 3. The bigger performance win: peer lookup is sequential
 
@@ -241,9 +257,16 @@ cloud relay to three copy-pasted blocks is how this subsystem got here.
 `agentmux-mcp/src/main.rs:2266-2330` (no cloud fallback). Live `netstat`
 showing `127.0.0.1`-only binding with LAN discovery enabled.
 
-**Asserted, not tested:** simultaneous `127.0.0.1:PORT` + `<lan-ip>:PORT`
-binding (§2) — the load-bearing assumption; and that `if-watch`-style
-interface-change notification is available and adequate on all three targets.
+**Measured, 2026-09-06** (`backend::lan_listeners::tests`): simultaneous
+`127.0.0.1:PORT` + `<lan-ip>:PORT` binding — **holds** (the load-bearing
+assumption, verified on Windows, asserted in CI on Linux). And the wildcard
+conflict is **platform-dependent**, not universal: true on Linux/macOS, false
+on Windows. The first draft of this report asserted the universal version as
+fact; the spike disproved it. Recorded rather than silently corrected, because
+"standard socket behaviour" reasoning is exactly what produced the wrong claim.
+
+**Still asserted, not tested:** that `if-watch`-style interface-change
+notification is available and adequate on all three targets (§2).
 
 **Not investigated:** whether any middleware or handler assumes a loopback peer
 address (per-interface listeners would newly violate that); actual peer counts
