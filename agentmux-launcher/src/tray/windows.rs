@@ -246,21 +246,83 @@ fn run(
     Ok(())
 }
 
-/// The icon bitmap.
+/// Resource ordinal of the brand icon inside this exe.
 ///
-/// Generated rather than loaded from disk: the launcher has no icon asset it
-/// can rely on at runtime (the exe's own icon is injected post-build by
-/// `scripts/inject-exe-icon.sh`, and is not readable as a file next to the
-/// binary in a portable install). A flat, recognizable mark avoids adding a
-/// packaging dependency for the prototype; replacing it with the real brand
-/// icon is a packaging task, not a code one.
+/// `agentmux-launcher/build.rs` hands `agentmux-cef/resources/win/agentmux.ico`
+/// to winres, which emits `1 ICON "..."` — ordinal 1. Kept as a named constant
+/// so the coupling to build.rs is visible from here; `brand_icon_is_embedded`
+/// guards the half of that coupling a test can actually reach.
+const BRAND_ICON_ORDINAL: u16 = 1;
+
+/// The tray icon.
+///
+/// Loaded from this exe own resource table rather than generated or read from
+/// disk. Three reasons this beats the alternatives:
+///
+/// - The brand icon is ALREADY embedded — `build.rs` gives the same
+///   `agentmux.ico` to winres that the exe uses for Explorer/Alt-Tab. Nothing
+///   new to ship, and the tray cannot drift from the app icon.
+/// - A portable install has no icon file next to the binary, so a
+///   disk-loading variant would work in dev and fail once packaged. This is
+///   the failure mode the previous placeholder existed to avoid.
+/// - `.ico` carries several sizes; passing the small-icon metrics lets Windows
+///   pick the frame that matches the current DPI instead of us downscaling a
+///   256x256 PNG and getting a blurry mark on HiDPI.
+///
+/// Falls back to a generated square if the resource is missing (see
+/// `fallback_icon`), because a cosmetic icon must never take down the tray —
+/// but that fallback is logged loudly, since a silent fallback would look
+/// exactly like "the brand icon just doesn't work".
 fn icon() -> tray_icon::Icon {
+    match brand_icon() {
+        Some(icon) => icon,
+        None => {
+            crate::log(
+                "tray: brand icon resource not found in this exe — falling back \
+                 to the generated mark (check build.rs res.set_icon)",
+            );
+            fallback_icon()
+        }
+    }
+}
+
+/// Load ordinal `BRAND_ICON_ORDINAL` at the system small-icon size.
+///
+/// Size is requested explicitly rather than passing `None`: `None` maps to
+/// `LR_DEFAULTSIZE`, which resolves to `SM_CXICON` (the 32x32 *large* icon
+/// metric), leaving Windows to shrink a 32px frame into a 16px tray slot. The
+/// small-icon metrics select the frame the `.ico` already contains at that
+/// size, and follow DPI scaling on their own.
+fn brand_icon() -> Option<tray_icon::Icon> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXSMICON, SM_CYSMICON,
+    };
+
+    let (cx, cy) = unsafe { (GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)) };
+    // Guard the metrics: a zero/negative value would ask LoadImageW for a
+    // degenerate size. Falling back to LR_DEFAULTSIZE is still better than
+    // losing the brand icon entirely.
+    let size = if cx > 0 && cy > 0 { Some((cx as u32, cy as u32)) } else { None };
+
+    match tray_icon::Icon::from_resource(BRAND_ICON_ORDINAL, size) {
+        Ok(icon) => Some(icon),
+        Err(e) => {
+            crate::log(&format!("tray: loading brand icon resource failed: {}", e));
+            None
+        }
+    }
+}
+
+/// Last-resort mark, used only when the exe carries no icon resource.
+///
+/// Deliberately NOT the brand colour: if this ever shows up it means the
+/// resource lookup failed, and it should be obvious at a glance rather than
+/// passing for the real icon.
+fn fallback_icon() -> tray_icon::Icon {
     const S: u32 = 16;
     let mut rgba = Vec::with_capacity((S * S * 4) as usize);
     for y in 0..S {
         for x in 0..S {
-            // A filled rounded square in AgentMux's accent orange, transparent
-            // at the corners so it reads as a mark rather than a block.
             let corner = (x < 2 || x >= S - 2) && (y < 2 || y >= S - 2);
             if corner {
                 rgba.extend_from_slice(&[0, 0, 0, 0]);
@@ -273,4 +335,27 @@ fn icon() -> tray_icon::Icon {
     // somehow did, an unwrap here would kill the tray thread only, which
     // `spawn`'s caller already treats as "no tray".
     tray_icon::Icon::from_rgba(rgba, S, S).expect("16x16 RGBA buffer is well-formed")
+}
+
+#[cfg(test)]
+mod brand_icon_tests {
+    /// `build.rs` embeds the icon only `if icon_path.exists()` — a silent skip.
+    /// If the asset moves, the exe loses its icon resource, `from_resource`
+    /// fails at runtime, and the tray quietly shows the fallback mark instead.
+    /// Nothing else in the build would complain, so assert the path here.
+    ///
+    /// This is the only half of the build.rs coupling a unit test can reach:
+    /// the ordinal itself is decided by winres at build time and is verified
+    /// live (the icon either renders as the brand mark or it does not).
+    #[test]
+    fn the_icon_asset_build_rs_embeds_actually_exists() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../agentmux-cef/resources/win/agentmux.ico");
+        assert!(
+            path.exists(),
+            "build.rs embeds {} only if it exists; it does not, so the tray \
+             would silently fall back",
+            path.display()
+        );
+    }
 }
