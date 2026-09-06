@@ -1324,7 +1324,7 @@ pub unsafe extern "system" fn RunWinMain(
 ///
 /// This MUST agree with where the launcher reads it — `paths.data_dir`, used by
 /// `second_instance::forward_host_cmd` (single-instance window forwarding) and
-/// by `tray::windows::service_reachable` (the tray running-indicator). When the
+/// by `tray::windows::service_reachable` (the tray's running-indicator). When the
 /// two diverge the failure is silent: forwarding reports a transient read error
 /// and the tray icon simply claims the service is down forever.
 ///
@@ -1332,8 +1332,8 @@ pub unsafe extern "system" fn RunWinMain(
 /// is a dev build. `AGENTMUX_IPC_HASH` is set by the launcher and by nothing
 /// else (`supervisor/windows.rs`, `supervisor/unix.rs`), and whenever it is
 /// set, `AGENTMUX_DATA_DIR` came from that same launcher via
-/// `paths.common.to_env_vars()` — so it is that instance own data dir, not
-/// some other instance one.
+/// `paths.common.to_env_vars()` — so it is that instance's own data dir, not
+/// some other instance's.
 ///
 /// Keying on `is_dev_build_exe` instead was wrong, on a premise stated in the
 /// old comment: "in dev mode there is no launcher". `task dev` DOES run the
@@ -1357,7 +1357,7 @@ fn port_file_dir(
         // A launcher spawned us: its data dir is authoritative, dev or not.
         (true, Some(dir)) => dir,
         // No launcher (or it told us nothing): a dev build must not touch the
-        // inherited parent instance port file.
+        // inherited parent instance's port file.
         (_, inherited) => {
             if is_dev_build {
                 host_data_dir.to_path_buf()
@@ -1379,7 +1379,7 @@ mod port_file_dir_tests {
 
     /// The bug this function exists to fix. Under `task dev` a launcher IS
     /// present, so the port file must go where the launcher reads it —
-    /// otherwise the tray running-indicator is stuck false forever.
+    /// otherwise the tray's running-indicator is stuck false forever.
     #[test]
     fn a_dev_build_under_a_launcher_writes_where_the_launcher_reads() {
         assert_eq!(
@@ -1394,8 +1394,8 @@ mod port_file_dir_tests {
     }
 
     /// The hazard the old dev branch was protecting against, kept intact:
-    /// `dev:standalone` inherits the PARENT instance `AGENTMUX_DATA_DIR`, and
-    /// writing there would break that parent single-instance forwarding.
+    /// `dev:standalone` inherits the PARENT instance's `AGENTMUX_DATA_DIR`, and
+    /// writing there would break that parent's single-instance forwarding.
     #[test]
     fn a_standalone_dev_build_does_not_clobber_the_parent_instances_port_file() {
         assert_eq!(
