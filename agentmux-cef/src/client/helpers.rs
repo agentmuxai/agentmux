@@ -384,6 +384,11 @@ pub(crate) fn backend_get_window_pos_and_size(web_endpoint: &str, auth_key: &str
     let width = data.get("winsize")?.get("width")?.as_i64()?;
     let height = data.get("winsize")?.get("height")?.as_i64()?;
     if width <= 0 || height <= 0 {
+        // Never-written Window.pos/winsize default to zero (Point/WinSize's
+        // #[derive(Default)]), which is indistinguishable from "this row
+        // predates the write-through" — treat a zero-or-negative size as
+        // "no real geometry persisted" rather than recreating a
+        // zero-sized window.
         return None;
     }
     Some(agentmux_common::ipc::Rect {
@@ -566,12 +571,12 @@ pub(crate) fn register_ipc_with_backend(
         Ok(r) if r.status_ok() => dlog("register_ipc_with_backend: srv acknowledged host_ipc.Register"),
         Ok(r) => tracing::error!(
             response = %r.first_line(),
-            "[register_ipc_with_backend] Register did not succeed — srv will not be able to proxy UI-automation calls to this host"
+            "[register_ipc_with_backend] host_ipc.Register did not succeed — srv will not be able to proxy UI-automation calls to this host"
         ),
         // A read failure used to fall through to the "(empty)" status line.
         Err(ServiceCallError::Read(_)) => tracing::error!(
             response = "(empty)",
-            "[register_ipc_with_backend] Register did not succeed — srv will not be able to proxy UI-automation calls to this host"
+            "[register_ipc_with_backend] host_ipc.Register did not succeed — srv will not be able to proxy UI-automation calls to this host"
         ),
         Err(ServiceCallError::Write(e)) => tracing::error!(
             error = %e,
