@@ -5,7 +5,7 @@
 **Scope:** This machine (`claudius`). Every git clone/worktree of an
 AgentMux-org repo, checked against the rule that an agent must work from a
 clone **inside its own workspace**.
-**Status:** Complete. Both §2 and §3 cleanup **executed** 2026-09-05 after
+**Status:** implemented — both §2 and §3 cleanup **executed** 2026-09-05 after
 operator sign-off. `C:\Systems\` now holds exactly one git repo — a
 third-party project unrelated to AgentMux (§3.2) — and zero
 out-of-workspace clones of any AgentMux-org repo. The two §4 blocker

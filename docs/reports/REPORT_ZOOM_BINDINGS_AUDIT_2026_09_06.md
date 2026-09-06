@@ -6,9 +6,10 @@
 have separate zoom systems, the pane level and the preview level, but
 sometimes the preview level doesn't even work." Ask: count the zoom bindings
 and report on simplifying to pane level only.
-**Status:** Analysis only. No code changed by this report. (A separate,
-already-merged-or-open fix — PR #3009 — addresses the hover peek panel's own
-zoom escape; it is not part of this proposal.)
+**Status:** proposed — analysis only; this report changes no code. §3 is the
+recommendation; flip this line to `implemented` when it lands. (A separate
+fix, PR #3009, addresses the hover peek panel's own zoom escape — a
+different bug in the same area, not part of this proposal.)
 
 ---
 
