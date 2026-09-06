@@ -3219,3 +3219,51 @@ async fn work_complete_with_a_wrong_fence_is_conflict_not_not_found() {
     let resp = app.oneshot(done).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
 }
+
+// ── POST /api/v1/agent/open (REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) ────────
+//
+// The route exists so automation can START an agent, not just stop one
+// (`/api/v1/fleet/bulk-stop`). These pin the wiring: the route is present,
+// behind the same X-AuthKey gate as every other /api/v1 route, and maps the
+// impl's caller-fault vocabulary (AGENT_NOT_FOUND) to 400 rather than 500.
+// A full successful-open test needs a real agent definition + installed CLI
+// + reducer round-trip and lives with the end-to-end coverage, not here.
+
+#[tokio::test]
+async fn agent_open_rejects_a_bad_auth_key() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/api/v1/agent/open")
+        .method("POST")
+        .header("X-AuthKey", "wrong-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"anything"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn agent_open_unknown_agent_is_a_400_not_a_500() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/api/v1/agent/open")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"no-such-agent-xyz"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "an unknown agent id is the caller's fault, not a server error"
+    );
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["error"].as_str().unwrap_or("").starts_with("AGENT_NOT_FOUND"),
+        "error should carry the impl's AGENT_NOT_FOUND vocabulary, got: {}",
+        json["error"]
+    );
+}

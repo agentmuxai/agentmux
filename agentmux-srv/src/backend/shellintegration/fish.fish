@@ -104,6 +104,19 @@ function muxspect
     return 1
 end
 
+# ─── muxopen ────────────────────────────────────────────────────────────────
+# Launch an agent into a pane from the terminal (no GUI). Constructive
+# sibling of the stop verbs. `muxopen help` for usage.
+set -g _agentmux_muxopen_js (dirname (status -f))/../muxopen.mjs
+function muxopen
+    if command -q node; and test -f "$_agentmux_muxopen_js"
+        node "$_agentmux_muxopen_js" $argv
+        return
+    end
+    echo "muxopen: Node unavailable or core missing at $_agentmux_muxopen_js" >&2
+    return 1
+end
+
 function _agentmux_si_prompt --on-event fish_prompt
     _agentmux_si_osc7
     _agentmux_si_agent_env

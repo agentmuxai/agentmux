@@ -332,6 +332,20 @@ const FLEET_BROADCAST_TOOL: &str = r#"{
   }
 }"#;
 
+const OPEN_AGENT_TOOL: &str = r#"{
+  "name": "OpenAgent",
+  "description": "Launch an agent into a pane by name or definition id (get these from FleetList/DiscoverAgents). Idempotent: if the agent is already open in the target tab, returns its existing pane with created:false instead of opening a second one. This spawns a real provider process (and, for container agents, execs into their container) — it consumes provider tokens like any human-opened pane. Returns JSON {block_id, tab_id, agent_id, provider, controller_type, status, created}. After a successful open the agent becomes addressable for SendMessage.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "agent_id": { "type": "string", "description": "Agent definition id or name (case-insensitive), e.g. from FleetList's host.agents[]" },
+      "tab_id": { "type": "string", "description": "Optional target tab id; defaults to the active tab" },
+      "focus": { "type": "boolean", "description": "Optional: focus the new pane (default true)" }
+    },
+    "required": ["agent_id"]
+  }
+}"#;
+
 const FLEET_BULK_STOP_TOOL: &str = r#"{
   "name": "FleetBulkStop",
   "description": "Stop many agent panes at once by block_id (get these from FleetList). Destructive — double-check your target list first. Returns JSON {succeeded, failed: [{id, error}...], aborted_early}. Optionally pass `staged` to cap blast radius on a bad selection: stops `batch_size` targets at a time, and if a batch's failure rate exceeds `max_fail_percentage`, the remaining targets are recorded as failed (untried) instead of being attempted — `aborted_early` will be true. Without `staged`, every target is attempted as one batch.",
@@ -857,6 +871,8 @@ async fn main() {
                     serde_json::from_str(FLEET_BROADCAST_TOOL).expect("static json");
                 let fleet_bulk_stop: Value =
                     serde_json::from_str(FLEET_BULK_STOP_TOOL).expect("static json");
+                let open_agent: Value =
+                    serde_json::from_str(OPEN_AGENT_TOOL).expect("static json");
                 let loop_tool: Value = serde_json::from_str(LOOP_TOOL).expect("static json");
                 let loop_stop: Value = serde_json::from_str(LOOP_STOP_TOOL).expect("static json");
                 let loop_list: Value = serde_json::from_str(LOOP_LIST_TOOL).expect("static json");
@@ -886,7 +902,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -2553,6 +2569,49 @@ async fn call_tool(
             }
 
             let result = json!({ "succeeded": succeeded, "failed": failed });
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "OpenAgent" => {
+            let agent_id = arguments
+                .get("agent_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: agent_id"))?;
+            let tab_id = arguments.get("tab_id").and_then(|v| v.as_str()).map(str::to_string);
+            let focus = arguments.get("focus").and_then(|v| v.as_bool());
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/agent/open", local_url.trim_end_matches('/'));
+            let body = json!({
+                "agent_id": agent_id,
+                "tab_id": tab_id,
+                "focus": focus,
+            });
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("agent open failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
         }
         "FleetBulkStop" => {
@@ -4492,6 +4551,7 @@ mod tests {
             FLEET_LIST_TOOL,
             FLEET_BROADCAST_TOOL,
             FLEET_BULK_STOP_TOOL,
+            OPEN_AGENT_TOOL,
             CAPTURE_WINDOW_TOOL,
             DISCOVER_WINDOWS_TOOL,
             LIST_CONVERSATIONS_TOOL,
