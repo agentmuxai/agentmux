@@ -14,6 +14,11 @@
  * memories without selecting each in turn. See
  * docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md.
  *
+ * The FILE picker was a `<select>` until 2026-09-04; the detail view is now
+ * two screens — a file tile grid, then the history panel — and the back
+ * button steps back one level rather than always returning to the agent grid.
+ * See docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04.md.
+ *
  * The grid gained find/filter + sort as of 2026-09-02, once it routinely
  * rendered 30+ cards in practice — same trigger and interaction pattern as
  * the Agent pane's own filter bar, adapted where the two views genuinely
@@ -27,18 +32,15 @@
  * This directory and component are about native memory only.
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { NativeMemoryHistoryPanel } from "@/app/view/agent/components/NativeMemoryHistoryPanel";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
-import {
-    DEFAULT_MEMORY_SORT,
-    MemoryAgentFilterBar,
-    type MemoryAgentSortOption,
-} from "./MemoryAgentFilterBar";
+import { DEFAULT_MEMORY_SORT, MemoryAgentFilterBar, type MemoryAgentSortOption } from "./MemoryAgentFilterBar";
+import { MemoryFileCard } from "./MemoryFileCard";
 import "./native-memory-manager.scss";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
@@ -78,11 +80,7 @@ function storeMemorySort(sort: MemoryAgentSortOption): void {
  * this ordering never collapses that distinction, it just decides where an
  * unresolved card sits in the list.
  */
-function compareByCount(
-    a: AgentDefinition,
-    b: AgentDefinition,
-    counts: Record<string, MemoryCountState>,
-): number {
+function compareByCount(a: AgentDefinition, b: AgentDefinition, counts: Record<string, MemoryCountState>): number {
     const rank = (id: string): number => {
         const c = counts[id];
         if (c?.kind === "count") return 0;
@@ -104,7 +102,7 @@ function compareAgents(
     sort: MemoryAgentSortOption,
     a: AgentDefinition,
     b: AgentDefinition,
-    counts: Record<string, MemoryCountState>,
+    counts: Record<string, MemoryCountState>
 ): number {
     switch (sort) {
         case "count":
@@ -156,7 +154,7 @@ export function NativeMemoryManager(): JSX.Element {
         agents()
             .map((a) => a.id)
             .sort()
-            .join(" "),
+            .join(" ")
     );
 
     // Per-agent request generation for fetchCountFor below (Codex P2, PR
@@ -190,7 +188,7 @@ export function NativeMemoryManager(): JSX.Element {
         // touch filesLoading for the identical reason, and with this
         // feature's own stated design intent of a quiet per-card refresh.
         setCounts((prev) =>
-            prev[agent.id] === undefined ? { ...prev, [agent.id]: { kind: "loading" } as MemoryCountState } : prev,
+            prev[agent.id] === undefined ? { ...prev, [agent.id]: { kind: "loading" } as MemoryCountState } : prev
         );
         RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
             .then((res) => {
@@ -202,7 +200,7 @@ export function NativeMemoryManager(): JSX.Element {
                 setCounts((prev) =>
                     prev[agent.id] === undefined
                         ? prev
-                        : { ...prev, [agent.id]: { kind: "count", files: res.files.length } },
+                        : { ...prev, [agent.id]: { kind: "count", files: res.files.length } }
                 );
             })
             .catch((e: Error) => {
@@ -214,7 +212,7 @@ export function NativeMemoryManager(): JSX.Element {
                 setCounts((prev) =>
                     prev[agent.id] === undefined
                         ? prev
-                        : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } },
+                        : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } }
                 );
             });
     };
@@ -410,10 +408,10 @@ export function NativeMemoryManager(): JSX.Element {
                             if (untrack(selectedAgent)?.id === agent.id) {
                                 refetchSelectedAgentFiles(agent);
                             }
-                        }, 250),
+                        }, 250)
                     );
                 },
-            })),
+            }))
         );
 
         // Per-run cleanup: only the subscriptions this run created. Pending
@@ -431,6 +429,19 @@ export function NativeMemoryManager(): JSX.Element {
         debounceTimers.clear();
     });
 
+    // Index file first, then alphabetical. The list RPC's own order is a
+    // plain directory listing, which puts MEMORY.md first only by the accident
+    // of uppercase sorting ahead of lowercase in ASCII — rename the index and
+    // it lands mid-grid. The index is the file loaded into every session, so
+    // it is the one tile whose position is worth pinning explicitly rather
+    // than leaving to collation.
+    const sortedFiles = createMemo(() =>
+        [...files()].sort((a, b) => {
+            if (a.is_index !== b.is_index) return a.is_index ? -1 : 1;
+            return a.filename.localeCompare(b.filename, undefined, { sensitivity: "base" });
+        })
+    );
+
     return (
         <div class="native-memory-manager">
             <Show
@@ -438,8 +449,8 @@ export function NativeMemoryManager(): JSX.Element {
                 fallback={
                     <div class="native-memory-manager-grid-view">
                         <p class="native-memory-manager-hint">
-                            Each agent's own native memory — what it has chosen to remember. Select an
-                            agent to browse its files, versions and diffs.
+                            Each agent's own native memory — what it has chosen to remember. Select an agent to browse
+                            its files, versions and diffs.
                         </p>
                         <Show
                             when={agents().length > 0}
@@ -489,52 +500,73 @@ export function NativeMemoryManager(): JSX.Element {
             >
                 {(agent) => (
                     <div class="native-memory-manager-detail">
+                        {/* One header serves both detail screens (file grid, then
+                            version history). The back button walks the drill-down
+                            back exactly ONE level rather than always jumping to the
+                            agent grid, so the file grid is a real stop on the path
+                            and not a screen you can only leave by starting over. */}
                         <div class="native-memory-manager-header">
                             <button
                                 type="button"
                                 class="native-memory-manager-back"
-                                onClick={() => setSelectedAgent(null)}
+                                onClick={() => (selectedFilename() ? setSelectedFilename("") : setSelectedAgent(null))}
                             >
-                                ← All agents
+                                {selectedFilename() ? "← All files" : "← All agents"}
                             </button>
-                            <span class="native-memory-manager-agent-name">{agentLabel(agent())}</span>
-
-                            <label class="native-memory-manager-field">
-                                <span>File</span>
-                                <select
-                                    value={selectedFilename()}
-                                    disabled={filesLoading() || files().length === 0}
-                                    onChange={(e) => setSelectedFilename(e.currentTarget.value)}
-                                >
-                                    <option value="">
-                                        {filesLoading()
-                                            ? "Loading…"
-                                            : files().length === 0
-                                              ? "No memory files"
-                                              : "Select a file…"}
-                                    </option>
-                                    <For each={files()}>
-                                        {(file) => <option value={file.filename}>{file.filename}</option>}
-                                    </For>
-                                </select>
-                            </label>
+                            <span class="native-memory-manager-crumbs">
+                                <span class="native-memory-manager-agent-name">{agentLabel(agent())}</span>
+                                <Show when={selectedFilename()}>
+                                    {(filename) => (
+                                        <>
+                                            <span class="native-memory-manager-crumb-sep" aria-hidden="true">
+                                                {"·"}
+                                            </span>
+                                            <span class="native-memory-manager-filename">{filename()}</span>
+                                        </>
+                                    )}
+                                </Show>
+                            </span>
                         </div>
 
                         <Show when={filesError()}>
                             <div class="native-memory-manager-error">{filesError()}</div>
                         </Show>
 
-                        <div class="native-memory-manager-body">
-                            <Show
-                                when={selectedFilename()}
-                                fallback={
-                                    <div class="native-memory-manager-empty">
-                                        {filesError()
-                                            ? "This agent's memory directory could not be read."
-                                            : "Pick a memory file to see its version history."}
-                                    </div>
-                                }
-                            >
+                        <Show
+                            when={selectedFilename()}
+                            fallback={
+                                <div class="native-memory-manager-file-grid-view">
+                                    {/* Distinct from the "no files" empty state below:
+                                        an unresolved list must not read as an agent that
+                                        has remembered nothing, the same four-state care
+                                        MemoryAgentCard takes with its own count. */}
+                                    <Show
+                                        when={!filesLoading()}
+                                        fallback={<div class="native-memory-manager-empty">Loading files…</div>}
+                                    >
+                                        <Show
+                                            when={sortedFiles().length > 0}
+                                            fallback={
+                                                <div class="native-memory-manager-empty">
+                                                    {filesError()
+                                                        ? "This agent's memory directory could not be read."
+                                                        : "This agent hasn't remembered anything yet."}
+                                                </div>
+                                            }
+                                        >
+                                            <div class="native-memory-manager-file-grid">
+                                                <For each={sortedFiles()}>
+                                                    {(file) => (
+                                                        <MemoryFileCard file={file} onSelect={setSelectedFilename} />
+                                                    )}
+                                                </For>
+                                            </div>
+                                        </Show>
+                                    </Show>
+                                </div>
+                            }
+                        >
+                            <div class="native-memory-manager-body">
                                 {/* Keyed on agentId:filename:refreshNonce. The first two force
                                     a clean remount when switching agent/file —
                                     NativeMemoryHistoryPanel's own doc comment: it does not
@@ -546,14 +578,11 @@ export function NativeMemoryManager(): JSX.Element {
                                     neither agentId nor filename actually changed. */}
                                 <Show when={`${agent().id}:${selectedFilename()}:${refreshNonce()}`} keyed>
                                     {(_key) => (
-                                        <NativeMemoryHistoryPanel
-                                            agentId={agent().id}
-                                            filename={selectedFilename()}
-                                        />
+                                        <NativeMemoryHistoryPanel agentId={agent().id} filename={selectedFilename()} />
                                     )}
                                 </Show>
-                            </Show>
-                        </div>
+                            </div>
+                        </Show>
                     </div>
                 )}
             </Show>
