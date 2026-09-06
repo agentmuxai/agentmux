@@ -33,7 +33,6 @@ import { ToolOverlayLog } from "./ToolOverlayLog";
 
 export interface ToolBlockOverlayProps {
     node: ToolNode;
-    previewFontScale?: () => number;
     /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
      *  see `activity/dispatch-correlation.ts`. */
     dispatchMatch?: AgentDispatch;
@@ -64,7 +63,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
                 {STATUS_LABEL[props.node.status]}
             </span>
         </div>
-        <ToolOverlayLog node={props.node} fontScale={props.previewFontScale} dispatchMatch={props.dispatchMatch} />
+        <ToolOverlayLog node={props.node} dispatchMatch={props.dispatchMatch} />
     </div>
 );
 
