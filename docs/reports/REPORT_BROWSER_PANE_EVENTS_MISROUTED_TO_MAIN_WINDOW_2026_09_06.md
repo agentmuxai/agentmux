@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-06
 **Author:** AgentX
-**Status:** root-caused; fix in PR #3035 (§5), pending review and merge. Not yet live-verified in the reporting instance — the fix is host-side (Rust) and needs a rebuilt host to take effect.
+**Status:** implemented — fix in PR #3035 (§5), pending review/merge. Not yet live-verified in the reporting instance — the fix is host-side (Rust) and needs a rebuilt host to take effect.
 **Instance:** `channel:local-main-b28b7a-2cd6e3d7`, v0.55.37, Windows 11.
 **Platform:** all — the misrouted call sites are platform-independent Rust.
 

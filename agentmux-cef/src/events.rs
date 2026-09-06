@@ -32,15 +32,23 @@ pub fn emit_event(browser: &Browser, event: &str, payload: &serde_json::Value) {
 
 /// Emit an event to the "main" browser stored in AppState.
 /// This is a convenience wrapper for use from command handlers and background tasks.
-pub fn emit_event_from_state(state: &crate::state::AppState, event: &str, payload: &serde_json::Value) {
+/// Returns whether a browser was found to deliver to.
+pub fn emit_event_from_state(
+    state: &crate::state::AppState,
+    event: &str,
+    payload: &serde_json::Value,
+) -> bool {
     // Phase H.2.b — reducer-aware lookup with fallback.
     if let Some(browser) = state.get_browser("main") {
         emit_event(&browser, event, payload);
+        true
     } else if let Some((_label, browser)) = state.first_browser() {
         // Fallback: emit to any available browser
         emit_event(&browser, event, payload);
+        true
     } else {
         tracing::warn!("Cannot emit event '{}': no browser handle in state", event);
+        false
     }
 }
 
@@ -142,8 +150,7 @@ pub fn emit_browser_pane_event(
                 block_id,
                 event
             );
-            emit_event_from_state(state, event, payload);
-            true
+            emit_event_from_state(state, event, payload)
         }
     }
 }
