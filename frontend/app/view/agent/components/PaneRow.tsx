@@ -94,7 +94,9 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                     <span class="pane-row-meta">{props.meta}</span>
                 </Show>
                 <Show when={props.tail}>
-                    <span class="pane-row-tail">↳ {props.tail}</span>
+                    {/* U+2192 (→), not U+21B3 (↳) — see
+                        SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3.1. */}
+                    <span class="pane-row-tail">→ {props.tail}</span>
                 </Show>
                 <For each={props.actions ?? []}>
                     {(action) => (
