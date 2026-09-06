@@ -46,6 +46,22 @@ const MAX_FORWARD_HOPS: u8 = 3;
 /// `requires_stop` from (not re-derived) — see the call site's own doc
 /// comment inline below for why passing anything else produces a
 /// self-contradictory echoed marker (reagentx P1 on PR #2623).
+/// The delivery-tier + verification signals an echoed marker must carry.
+///
+/// Grouped into a named struct rather than left as positionals because
+/// `sig_verified`, `reagent_verified` and `lan_verified` are three consecutive
+/// `Option<bool>`s: any two of them can be transposed at a call site and the
+/// compiler cannot say a word. The failure mode is a silently mislabelled TRUST
+/// field on a security marker, which is not the kind of bug to leave to
+/// argument order.
+#[derive(Clone, Copy)]
+pub(super) struct EchoTrust<'a> {
+    pub delivery_tier: &'a str,
+    pub sig_verified: Option<bool>,
+    pub reagent_verified: Option<bool>,
+    pub lan_verified: Option<bool>,
+}
+
 pub(super) fn echo_jekt_to_sender(
     state: &AppState,
     source_agent: Option<&str>,
@@ -54,12 +70,15 @@ pub(super) fn echo_jekt_to_sender(
     msgid: &str,
     effective_tier: Option<&str>,
     requires_stop: Option<bool>,
-    delivery_tier: &str,
-    sig_verified: Option<bool>,
-    reagent_verified: Option<bool>,
-    lan_verified: Option<bool>,
+    trust: EchoTrust<'_>,
     priority: &str,
 ) {
+    let EchoTrust {
+        delivery_tier,
+        sig_verified,
+        reagent_verified,
+        lan_verified,
+    } = trust;
     let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
         return;
     };
@@ -116,6 +135,141 @@ pub(super) fn echo_jekt_to_sender(
         Some(&state.filestore),
         global_zone.as_deref(),
     );
+}
+
+/// One forward candidate: where to POST, how to authenticate, and what the
+/// echoed marker should claim about the hop if it lands.
+pub(super) struct ForwardPeer<'a> {
+    /// Base URL of the peer srv (no path), e.g. `http://127.0.0.1:1234`.
+    pub url: &'a str,
+    /// `X-AuthKey` value; skipped entirely when empty.
+    pub auth_key: &'a str,
+    /// Which tier resolved this candidate — log field only.
+    pub kind: &'a str,
+    /// Channel the candidate came from, for the cross-channel registry tier.
+    /// `None` where the notion doesn't apply.
+    pub channel: Option<&'a str>,
+    pub trust: EchoTrust<'a>,
+}
+
+/// What one forward attempt concluded. The distinction that matters is
+/// [`Stale`](ForwardOutcome::Stale) vs
+/// [`Inconclusive`](ForwardOutcome::Inconclusive): only the former is evidence
+/// about the *candidate*, and only the former may drive an eviction.
+pub(super) enum ForwardOutcome {
+    /// The peer delivered it. The sender echo has already been emitted; the
+    /// caller should return this body verbatim.
+    Delivered(serde_json::Value),
+    /// The peer answered without delivering (`success` was not `true`), or was
+    /// unreachable at the transport level. Both are consistent with a registry
+    /// entry or discovery-cache entry pointing at something that is no longer
+    /// there — but neither *proves* it (a startup race looks identical), so
+    /// each tier applies its own eviction policy on top of this.
+    Stale,
+    /// Something failed that says nothing about whether the candidate is
+    /// alive — a non-2xx status, or a body that wasn't JSON. **Never evict on
+    /// this**; fall through to the next candidate/tier and leave the entry be.
+    Inconclusive,
+}
+
+/// The single implementation of "POST this injection to a peer srv and echo it
+/// to the sender if it lands", shared by every forwarding tier.
+///
+/// This existed as three hand-maintained copies (same-host same-channel,
+/// same-host cross-channel, LAN peer) differing only in how the URL and key
+/// were resolved and what they did on failure. That is the shape that has
+/// already produced drift bugs elsewhere in this repo: a tier that forgets the
+/// echo, or passes `delivery_tier` wrong, fails silently and differently from
+/// its siblings. See
+/// `docs/reports/REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` §4.
+///
+/// **One behaviour was unified rather than preserved:** the LAN tier used to
+/// treat "anything but `success: false`" as delivered, while both host tiers
+/// required `success: true`. A 200 response whose body omits `success`
+/// entirely therefore counted as a successful LAN delivery — echoing a
+/// delivery confirmation to the sender for a message that may never have
+/// arrived. All three now require `success: true`. No real peer is affected:
+/// `InjectionResponse::success` is a plain `bool` with no
+/// `skip_serializing_if`, so a genuine AgentMux srv always sends it.
+async fn forward_inject_to_peer(
+    state: &AppState,
+    req: &InjectionRequest,
+    forwarded_req: &InjectionRequest,
+    peer: ForwardPeer<'_>,
+) -> ForwardOutcome {
+    let forward_url = format!("{}/agentmux/reactive/inject", peer.url);
+    let channel = peer.channel.unwrap_or("-");
+    tracing::debug!(
+        target = %req.target_agent,
+        url = %forward_url,
+        kind = peer.kind,
+        channel,
+        "inject forward"
+    );
+
+    let mut fwd = state.http_client.post(&forward_url).json(forwarded_req);
+    if !peer.auth_key.is_empty() {
+        fwd = fwd.header("X-AuthKey", peer.auth_key);
+    }
+
+    match fwd.send().await {
+        Ok(r) if r.status().is_success() => {
+            let Ok(body) = r.json::<serde_json::Value>().await else {
+                tracing::warn!(
+                    target = %req.target_agent,
+                    url = %forward_url,
+                    kind = peer.kind,
+                    channel,
+                    "inject forward: 2xx with an unparseable body — not evicting"
+                );
+                return ForwardOutcome::Inconclusive;
+            };
+            if body.get("success").and_then(|v| v.as_bool()) != Some(true) {
+                tracing::warn!(
+                    target = %req.target_agent,
+                    url = %forward_url,
+                    kind = peer.kind,
+                    channel,
+                    "inject forward: peer did not deliver — candidate may be stale"
+                );
+                return ForwardOutcome::Stale;
+            }
+            echo_jekt_to_sender(
+                state,
+                req.source_agent.as_deref(),
+                &req.target_agent,
+                &req.message,
+                body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
+                body.get("effective_tier").and_then(|v| v.as_str()),
+                body.get("requires_stop").and_then(|v| v.as_bool()),
+                peer.trust,
+                req.priority.as_deref().unwrap_or("normal"),
+            );
+            ForwardOutcome::Delivered(body)
+        }
+        Ok(r) => {
+            tracing::warn!(
+                target = %req.target_agent,
+                status = %r.status(),
+                url = %forward_url,
+                kind = peer.kind,
+                channel,
+                "inject forward: non-success HTTP status — not evicting"
+            );
+            ForwardOutcome::Inconclusive
+        }
+        Err(e) => {
+            tracing::warn!(
+                target = %req.target_agent,
+                error = %e,
+                url = %forward_url,
+                kind = peer.kind,
+                channel,
+                "inject forward: transport failure — candidate may be stale"
+            );
+            ForwardOutcome::Stale
+        }
+    }
 }
 
 /// Max age (seconds) a signed jekt's `ts_secs` may be from "now" and still
@@ -703,14 +857,16 @@ pub(super) async fn handle_reactive_inject(
             &resp.request_id,
             resp.effective_tier.as_deref(),
             resp.requires_stop,
-            req.delivery_tier.as_deref().unwrap_or("host"),
-            req.sig_verified,
-            // Same `req` this call's own `effective_tier`/`requires_stop`
-            // were computed from (via `inject_message` just above) — not
-            // hardcoded, so the echoed marker's TRUST/SIG stays consistent
-            // with its own ESCALATE= (reagentx P1 on PR #2623).
-            req.reagent_verified,
-            req.lan_verified,
+            EchoTrust {
+                delivery_tier: req.delivery_tier.as_deref().unwrap_or("host"),
+                // Same `req` this call's own `effective_tier`/`requires_stop`
+                // were computed from (via `inject_message` just above) — not
+                // hardcoded, so the echoed marker's TRUST/SIG stays consistent
+                // with its own ESCALATE= (reagentx P1 on PR #2623).
+                sig_verified: req.sig_verified,
+                reagent_verified: req.reagent_verified,
+                lan_verified: req.lan_verified,
+            },
             req.priority.as_deref().unwrap_or("normal"),
         );
         return Json(serde_json::to_value(&resp).unwrap_or_default());
@@ -744,110 +900,65 @@ pub(super) async fn handle_reactive_inject(
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url {
-                let forward_url = format!("{}/agentmux/reactive/inject", entry.local_url);
-                tracing::debug!(
-                    target = %req.target_agent,
-                    url = %forward_url,
-                    "cross-instance inject forward"
-                );
-                let mut fwd = state.http_client.post(&forward_url).json(&forwarded_req);
-                if !entry.auth_key.is_empty() {
-                    fwd = fwd.header("X-AuthKey", &entry.auth_key);
-                }
-                match fwd.send().await {
-                    Ok(r) if r.status().is_success() => {
-                        if let Ok(body) = r.json::<serde_json::Value>().await {
-                            if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                                echo_jekt_to_sender(
-                                    &state,
-                                    req.source_agent.as_deref(),
-                                    &req.target_agent,
-                                    &req.message,
-                                    body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
-                                    body.get("effective_tier").and_then(|v| v.as_str()),
-                                    body.get("requires_stop").and_then(|v| v.as_bool()),
-                                    "host",
-                                    req.sig_verified,
-                                    req.reagent_verified,
-                                    req.lan_verified,
-                                    req.priority.as_deref().unwrap_or("normal"),
-                                );
-                                return Json(body);
-                            }
-                            // success:false — could mean this entry is stale
-                            // (e.g. agent unregistered without a clean
-                            // shutdown) OR that the owning process is alive
-                            // but hasn't (yet) registered this specific agent
-                            // — e.g. right after that channel's srv came up.
-                            // should_evict_on_forward_failure combines
-                            // PID-liveness with the entry's age: a dead
-                            // process always evicts; a live process only
-                            // protects a FRESH entry (the actual startup
-                            // race), not an old one — an old entry whose
-                            // process happens to still be alive for OTHER
-                            // agents is presumed to be its own genuinely-dead
-                            // agent (reagent P1 round 2 on #2640: PID alone
-                            // over-protects, since it identifies the whole
-                            // srv process, not this one agent). See
-                            // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
-                            // Falls through to Tier 2b/3 either way (reagent
-                            // P1 on #2350 — this previously returned
-                            // unconditionally whenever the body parsed,
-                            // regardless of success, so a stale same-channel
-                            // entry never fell through to any later tier).
-                            if agent_registry::should_evict_on_forward_failure(&entry) {
-                                tracing::warn!(
-                                    target = %req.target_agent,
-                                    pid = entry.pid,
-                                    "cross-instance forward: success=false, entry presumed dead — evicting and falling through"
-                                );
-                                agent_registry::remove(&data_dir, &req.target_agent);
-                            } else {
-                                tracing::warn!(
-                                    target = %req.target_agent,
-                                    pid = entry.pid,
-                                    "cross-instance forward: success=false but entry is fresh and owning process is alive — NOT evicting, falling through"
-                                );
-                            }
-                        }
-                    }
-                    Ok(r) => {
-                        tracing::warn!(
-                            target = %req.target_agent,
-                            status = %r.status(),
-                            url = %forward_url,
-                            "cross-instance forward: non-success status"
-                        );
-                    }
-                    Err(e) => {
-                        // Connection-level failure (e.g. target port not
-                        // listening yet) is at least as plausible a transient
-                        // trigger as a parsed success:false body — same
-                        // should_evict_on_forward_failure guard as that
-                        // branch above (reagent P1 on this PR, both rounds:
-                        // this Err(e) arm originally evicted unconditionally,
-                        // then a PID-only guard over-protected an old entry
-                        // whose process stayed alive for other agents). See
-                        // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                match forward_inject_to_peer(
+                    &state,
+                    &req,
+                    &forwarded_req,
+                    ForwardPeer {
+                        url: &entry.local_url,
+                        auth_key: &entry.auth_key,
+                        kind: "cross-instance",
+                        channel: None,
+                        trust: EchoTrust {
+                            delivery_tier: "host",
+                            sig_verified: req.sig_verified,
+                            reagent_verified: req.reagent_verified,
+                            lan_verified: req.lan_verified,
+                        },
+                    },
+                )
+                .await
+                {
+                    ForwardOutcome::Delivered(body) => return Json(body),
+                    // A non-delivery here is ambiguous: this entry may be
+                    // stale (agent unregistered without a clean shutdown), OR
+                    // the owning process may be alive and simply not have
+                    // registered this specific agent yet — e.g. right after
+                    // that channel's srv came up. Connection-level failure is
+                    // at least as plausible a transient trigger as a parsed
+                    // success:false body, which is why both land here.
+                    // `should_evict_on_forward_failure` combines PID-liveness
+                    // with the entry's age: a dead process always evicts; a
+                    // live process only protects a FRESH entry (the actual
+                    // startup race), not an old one — an old entry whose
+                    // process happens to still be alive for OTHER agents is
+                    // presumed to be its own genuinely-dead agent (reagent P1
+                    // round 2 on #2640: PID alone over-protects, since it
+                    // identifies the whole srv process, not this one agent).
+                    // See docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                    //
+                    // Falls through to Tier 2b/3 either way (reagent P1 on
+                    // #2350 — this previously returned unconditionally
+                    // whenever the body parsed, regardless of success, so a
+                    // stale same-channel entry never reached a later tier).
+                    ForwardOutcome::Stale => {
                         if agent_registry::should_evict_on_forward_failure(&entry) {
                             tracing::warn!(
                                 target = %req.target_agent,
-                                error = %e,
-                                url = %forward_url,
                                 pid = entry.pid,
-                                "cross-instance forward failed, entry presumed dead — removing registry entry"
+                                "cross-instance forward: entry presumed dead — evicting and falling through"
                             );
                             agent_registry::remove(&data_dir, &req.target_agent);
                         } else {
                             tracing::warn!(
                                 target = %req.target_agent,
-                                error = %e,
-                                url = %forward_url,
                                 pid = entry.pid,
-                                "cross-instance forward failed but entry is fresh and owning process is alive — NOT evicting"
+                                "cross-instance forward: entry is fresh and owning process is alive — NOT evicting, falling through"
                             );
                         }
                     }
+                    // Says nothing about this entry's liveness — leave it be.
+                    ForwardOutcome::Inconclusive => {}
                 }
             }
         }
@@ -873,100 +984,54 @@ pub(super) async fn handle_reactive_inject(
                     continue;
                 }
 
-                let forward_url = format!("{}/agentmux/reactive/inject", entry.local_url);
-                tracing::debug!(
-                    target = %req.target_agent,
-                    channel = %entry.channel,
-                    url = %forward_url,
-                    "cross-channel inject forward"
-                );
-                let mut fwd = state.http_client.post(&forward_url).json(&forwarded_req);
-                if !entry.auth_key.is_empty() {
-                    fwd = fwd.header("X-AuthKey", &entry.auth_key);
-                }
-                match fwd.send().await {
-                    Ok(r) if r.status().is_success() => {
-                        if let Ok(body) = r.json::<serde_json::Value>().await {
-                            if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                                echo_jekt_to_sender(
-                                    &state,
-                                    req.source_agent.as_deref(),
-                                    &req.target_agent,
-                                    &req.message,
-                                    body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
-                                    body.get("effective_tier").and_then(|v| v.as_str()),
-                                    body.get("requires_stop").and_then(|v| v.as_bool()),
-                                    "host",
-                                    req.sig_verified,
-                                    req.reagent_verified,
-                                    req.lan_verified,
-                                    req.priority.as_deref().unwrap_or("normal"),
-                                );
-                                return Json(body);
-                            }
-                            // success:false — same ambiguity as Tier 2a above,
-                            // same should_evict_on_forward_failure policy
-                            // (PID-liveness alone over-protects an old,
-                            // genuinely-dead individual agent whose srv
-                            // process another agent keeps alive — reagent P1
-                            // round 2 on #2640). See
-                            // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
-                            if agent_registry::should_evict_on_forward_failure(&entry) {
-                                tracing::warn!(
-                                    target = %req.target_agent,
-                                    channel = %entry.channel,
-                                    pid = entry.pid,
-                                    "cross-channel forward: success=false, entry presumed dead — evicting and trying next candidate"
-                                );
-                                agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
-                            } else {
-                                tracing::warn!(
-                                    target = %req.target_agent,
-                                    channel = %entry.channel,
-                                    pid = entry.pid,
-                                    "cross-channel forward: success=false but entry is fresh and owning process is alive — NOT evicting, trying next candidate"
-                                );
-                            }
-                        }
-                    }
-                    Ok(r) => {
-                        tracing::warn!(
-                            target = %req.target_agent,
-                            channel = %entry.channel,
-                            status = %r.status(),
-                            url = %forward_url,
-                            "cross-channel forward: non-success status"
-                        );
-                    }
-                    Err(e) => {
-                        // Same should_evict_on_forward_failure policy as the
-                        // success:false branch above — a connection failure
-                        // can be the exact same startup-race transient
-                        // (target channel's srv not listening yet), not
-                        // proof the specific agent is dead. reagent P1 on
-                        // this PR, both rounds. See
-                        // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                match forward_inject_to_peer(
+                    &state,
+                    &req,
+                    &forwarded_req,
+                    ForwardPeer {
+                        url: &entry.local_url,
+                        auth_key: &entry.auth_key,
+                        kind: "cross-channel",
+                        channel: Some(&entry.channel),
+                        trust: EchoTrust {
+                            delivery_tier: "host",
+                            sig_verified: req.sig_verified,
+                            reagent_verified: req.reagent_verified,
+                            lan_verified: req.lan_verified,
+                        },
+                    },
+                )
+                .await
+                {
+                    ForwardOutcome::Delivered(body) => return Json(body),
+                    // Same ambiguity and same should_evict_on_forward_failure
+                    // policy as Tier 2a — PID-liveness alone over-protects an
+                    // old, genuinely-dead individual agent whose srv process
+                    // another agent keeps alive (reagent P1 round 2 on #2640),
+                    // and a connection failure can be the same startup-race
+                    // transient (target channel's srv not listening yet). See
+                    // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                    // Evicting only this channel's entry lets the loop try the
+                    // next candidate.
+                    ForwardOutcome::Stale => {
                         if agent_registry::should_evict_on_forward_failure(&entry) {
                             tracing::warn!(
                                 target = %req.target_agent,
                                 channel = %entry.channel,
-                                error = %e,
-                                url = %forward_url,
                                 pid = entry.pid,
-                                "cross-channel forward failed, entry presumed dead — evicting entry"
+                                "cross-channel forward: entry presumed dead — evicting and trying next candidate"
                             );
                             agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
                         } else {
                             tracing::warn!(
                                 target = %req.target_agent,
                                 channel = %entry.channel,
-                                error = %e,
-                                url = %forward_url,
                                 pid = entry.pid,
-                                "cross-channel forward failed but entry is fresh and owning process is alive — NOT evicting"
+                                "cross-channel forward: entry is fresh and owning process is alive — NOT evicting, trying next candidate"
                             );
                         }
                     }
+                    ForwardOutcome::Inconclusive => {}
                 }
             }
         }
@@ -979,64 +1044,38 @@ pub(super) async fn handle_reactive_inject(
             .find_agent(&req.target_agent, &state.http_client)
             .await
         {
-            let forward_url = format!("{}/agentmux/reactive/inject", peer_url);
-            tracing::debug!(
-                target = %req.target_agent,
-                url = %forward_url,
-                "LAN peer inject forward"
-            );
-            let mut fwd = state.http_client.post(&forward_url).json(&forwarded_req);
-            if !peer_auth_key.is_empty() {
-                fwd = fwd.header("X-AuthKey", &peer_auth_key);
-            }
-            match fwd.send().await {
-                Ok(r) if r.status().is_success() => {
-                    if let Ok(body) = r.json::<serde_json::Value>().await {
-                        // /reactive/inject always returns HTTP 200; check body.success
-                        // to detect "agent not found on that peer" (e.g. after migration).
-                        if body.get("success").and_then(|v| v.as_bool()) == Some(false) {
-                            tracing::warn!(
-                                target = %req.target_agent,
-                                url = %forward_url,
-                                "LAN peer inject: success=false — evicting stale cache entry"
-                            );
-                            state.lan_discovery.evict_agent(&req.target_agent);
-                        } else {
-                            echo_jekt_to_sender(
-                                &state,
-                                req.source_agent.as_deref(),
-                                &req.target_agent,
-                                &req.message,
-                                body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
-                                body.get("effective_tier").and_then(|v| v.as_str()),
-                                body.get("requires_stop").and_then(|v| v.as_bool()),
-                                "lan",
-                                None,
-                                None, // reagent signing is WAN-only, never applies on the LAN forward path
-                                req.lan_verified,
-                                req.priority.as_deref().unwrap_or("normal"),
-                            );
-                            return Json(body);
-                        }
-                    }
-                }
-                Ok(r) => {
-                    tracing::warn!(
-                        target = %req.target_agent,
-                        status = %r.status(),
-                        url = %forward_url,
-                        "LAN peer forward: non-success HTTP status"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        target = %req.target_agent,
-                        error = %e,
-                        url = %forward_url,
-                        "LAN peer forward failed — evicting cache entry"
-                    );
+            match forward_inject_to_peer(
+                &state,
+                &req,
+                &forwarded_req,
+                ForwardPeer {
+                    url: &peer_url,
+                    auth_key: &peer_auth_key,
+                    kind: "lan-peer",
+                    channel: None,
+                    trust: EchoTrust {
+                        delivery_tier: "lan",
+                        sig_verified: None,
+                        // reagent signing is WAN-only; it never applies on the
+                        // LAN forward path.
+                        reagent_verified: None,
+                        lan_verified: req.lan_verified,
+                    },
+                },
+            )
+            .await
+            {
+                ForwardOutcome::Delivered(body) => return Json(body),
+                // The peer answered "not mine" (agent migrated away since we
+                // cached it) or was unreachable — either way the discovery
+                // cache entry is wrong. Unlike the registry tiers there is no
+                // freshness/PID guard to weigh: the cache is cheap to refill
+                // from mDNS, so evicting on any non-delivery is the right
+                // trade rather than an oversight.
+                ForwardOutcome::Stale => {
                     state.lan_discovery.evict_agent(&req.target_agent);
                 }
+                ForwardOutcome::Inconclusive => {}
             }
         }
     }
@@ -2406,5 +2445,152 @@ mod is_self_registration_tests {
             "http://127.0.0.1:12345",
             "http://127.0.0.1:54321"
         ));
+    }
+}
+
+/// `forward_inject_to_peer` unit tests.
+///
+/// These exercise the real HTTP path against a throwaway loopback peer rather
+/// than mocking the client, because the behaviour under test *is* the
+/// response-classification: which peer answers count as delivery, which count
+/// as evidence the candidate is stale, and which must never evict.
+///
+/// `source_agent` is left `None` throughout so `echo_jekt_to_sender` returns at
+/// its first guard. That keeps these tests off the *global* singleton
+/// `reactive_handler` (`test_state()` shares it across the whole test binary —
+/// see the `verify_jekt_signature_tests` module comment), so nothing here can
+/// interfere with another test's agent registrations.
+#[cfg(test)]
+mod forward_inject_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    /// A peer srv that answers `/agentmux/reactive/inject` with a fixed status
+    /// and body. The returned guard shuts it down when dropped.
+    async fn stub_peer(
+        status: StatusCode,
+        body: &'static str,
+    ) -> (String, tokio_util::sync::DropGuard) {
+        let app = axum::Router::new().route(
+            "/agentmux/reactive/inject",
+            axum::routing::post(move || async move {
+                (
+                    status,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    body,
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = tokio_util::sync::CancellationToken::new();
+        let child = token.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async move { child.cancelled().await })
+                .await;
+        });
+        (format!("http://{addr}"), token.drop_guard())
+    }
+
+    fn req() -> InjectionRequest {
+        InjectionRequest {
+            target_agent: "agenty".to_string(),
+            message: "hello".to_string(),
+            source_agent: None,
+            ..Default::default()
+        }
+    }
+
+    fn peer(url: &str) -> ForwardPeer<'_> {
+        ForwardPeer {
+            url,
+            auth_key: "",
+            kind: "test",
+            channel: None,
+            trust: EchoTrust {
+                delivery_tier: "lan",
+                sig_verified: None,
+                reagent_verified: None,
+                lan_verified: None,
+            },
+        }
+    }
+
+    async fn outcome(status: StatusCode, body: &'static str) -> ForwardOutcome {
+        let state = test_state();
+        let (url, _guard) = stub_peer(status, body).await;
+        let r = req();
+        forward_inject_to_peer(&state, &r, &r, peer(&url)).await
+    }
+
+    #[tokio::test]
+    async fn success_true_is_delivered() {
+        let out = outcome(StatusCode::OK, r#"{"success":true,"request_id":"m1"}"#).await;
+        match out {
+            ForwardOutcome::Delivered(body) => {
+                assert_eq!(body.get("request_id").and_then(|v| v.as_str()), Some("m1"));
+            }
+            _ => panic!("expected Delivered"),
+        }
+    }
+
+    #[tokio::test]
+    async fn success_false_is_stale() {
+        let out = outcome(StatusCode::OK, r#"{"success":false,"error":"agent not found"}"#).await;
+        assert!(matches!(out, ForwardOutcome::Stale), "expected Stale");
+    }
+
+    /// **The one behaviour this refactor unified rather than preserved.**
+    ///
+    /// The LAN tier used to deliver on "anything but `success: false`", so a
+    /// 200 whose body omits `success` counted as a successful delivery — and
+    /// echoed a delivery confirmation to the sender for a message that may
+    /// never have arrived. Both host tiers already required `success: true`;
+    /// all three now do.
+    #[tokio::test]
+    async fn a_body_without_success_is_not_delivered() {
+        let out = outcome(StatusCode::OK, r#"{"request_id":"m1"}"#).await;
+        assert!(
+            matches!(out, ForwardOutcome::Stale),
+            "a peer that never said it delivered must not be treated as having delivered"
+        );
+    }
+
+    /// A non-2xx says the peer is up but unhappy — that is not evidence the
+    /// *candidate entry* is stale, so it must not drive an eviction.
+    #[tokio::test]
+    async fn non_2xx_is_inconclusive() {
+        let out = outcome(StatusCode::INTERNAL_SERVER_ERROR, r#"{"success":true}"#).await;
+        assert!(
+            matches!(out, ForwardOutcome::Inconclusive),
+            "expected Inconclusive"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unparseable_body_is_inconclusive() {
+        let out = outcome(StatusCode::OK, "not json at all").await;
+        assert!(
+            matches!(out, ForwardOutcome::Inconclusive),
+            "expected Inconclusive"
+        );
+    }
+
+    /// Transport failure is consistent with a registry/cache entry pointing at
+    /// something that is gone, so it reports `Stale` and lets each tier apply
+    /// its own eviction policy.
+    #[tokio::test]
+    async fn an_unreachable_peer_is_stale() {
+        let state = test_state();
+        // Bind then immediately release, so the port is almost certainly free
+        // and nothing is listening on it.
+        let url = {
+            let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            format!("http://{}", l.local_addr().unwrap())
+        };
+        let r = req();
+        let out = forward_inject_to_peer(&state, &r, &r, peer(&url)).await;
+        assert!(matches!(out, ForwardOutcome::Stale), "expected Stale");
     }
 }
