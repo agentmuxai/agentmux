@@ -901,7 +901,7 @@ pub struct BackgroundSubsystems {
     pub editor_file_watcher: Arc<backend::editor_file_watcher::EditorFileWatcher>,
     pub media_file_watcher: Arc<backend::media_file_watcher::MediaFileWatcher>,
     pub fs_watch_pool: Arc<backend::fs_watch::FsWatchPool>,
-    pub config_watcher: Arc<wconfig::ConfigWatcher>,
+    pub config_watcher: Arc<wconfig::ConfigState>,
     pub reactive_handler: &'static reactive::ReactiveHandler,
     pub poller: Arc<Poller>,
     pub messagebus: Arc<backend::messagebus::MessageBus>,
@@ -961,7 +961,7 @@ pub fn spawn_background_subsystems(
     backend::shellintegration::deploy_scripts(&backend::base::get_home_dir().join(".agentmux"));
 
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
-    let config_watcher = Arc::new(wconfig::ConfigWatcher::with_config(wconfig::build_default_config()));
+    let config_watcher = Arc::new(wconfig::ConfigState::with_config(wconfig::build_default_config()));
 
     // Load user's settings.json from disk (merges with defaults)
     backend::config_watcher_fs::load_settings_from_disk(&config_watcher);

@@ -123,7 +123,7 @@ const SEND_MESSAGE_TOOL: &str = r#"{
 
 const DISCOVER_AGENTS_TOOL: &str = r#"{
   "name": "DiscoverAgents",
-  "description": "List the agents and instances reachable from here across the muxbus delivery tiers (host, LAN, cloud), so you can pick a valid target before SendMessage. Returns JSON: host.addressable (agents reachable right now via local delivery), host.agents (this host's agent directory, each with an `addressable` flag), lan (LAN peers and the agents on them), and wan.subscribed_agents (cloud-subscribed agents). Addressing is by agent name, case-insensitive. Takes no arguments.",
+  "description": "List the agents and instances reachable from here across the muxbus delivery tiers (host, LAN, cloud), so you can pick a valid target before SendMessage. Returns JSON: host.addressable (agents reachable right now via local delivery), host.agents (this host's agent directory, each with an `addressable` flag), lan (LAN peers and the agents on them), and wan.local_agents_subscribed (THIS host's own agents that are subscribed to the cloud relay — not a list of remote agents you can reach over WAN; the relay exposes no such directory, so a cloud-only target simply won't appear anywhere in this output). Addressing is by agent name, case-insensitive. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
@@ -4619,7 +4619,7 @@ mod tests {
         let discovery = serde_json::json!({
             "host": { "addressable": [] },
             "lan": [{ "instance_id": "x", "agents": ["RemoteAgent"] }],
-            "wan": { "subscribed_agents": ["CloudAgent"] },
+            "wan": { "local_agents_subscribed": ["CloudAgent"] },
         });
         let map = build_block_to_agent_map(&discovery);
         assert!(map.is_empty());

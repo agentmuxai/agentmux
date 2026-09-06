@@ -35,7 +35,7 @@ pub(crate) fn test_state() -> AppState {
     // Bootstrap initial data
     wcore::ensure_initial_data(&wstore).unwrap();
 
-    let config_watcher = Arc::new(wconfig::ConfigWatcher::new());
+    let config_watcher = Arc::new(wconfig::ConfigState::new());
 
     let process_tracker = Arc::new(
         crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
