@@ -50,7 +50,7 @@
 /// Windows the binds succeed instead and you get two sockets on one port with
 /// ambiguous accept — see `wildcard_vs_loopback_conflict_is_platform_dependent`
 /// and `wildcard_then_specific_conflict_is_platform_dependent`.)
-/// [reagent #3021 P0]
+/// (reagent #3021 P0)
 pub const STARTUP_BIND_ADDR: &str = "127.0.0.1:0";
 
 /// Every non-loopback address this host is currently reachable on.
@@ -111,6 +111,49 @@ pub fn all_local_addresses() -> std::collections::HashSet<std::net::IpAddr> {
             std::collections::HashSet::new()
         }
     }
+}
+
+/// How long [`cached_local_addresses`] may serve a snapshot before
+/// re-enumerating.
+///
+/// Short on purpose. The cost of being stale is bounded and self-healing: an
+/// interface that appears within the window isn't yet recognised as ours, so
+/// one resolution on that address can still land as a phantom, which clears on
+/// the next resolution after a refresh. Five seconds collapses the burst of
+/// `ServiceResolved` re-fires that motivated caching at all, without letting
+/// that window matter in practice.
+const LOCAL_ADDR_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+
+type LocalAddrCache = std::sync::Mutex<
+    Option<(
+        std::time::Instant,
+        std::sync::Arc<std::collections::HashSet<std::net::IpAddr>>,
+    )>,
+>;
+static LOCAL_ADDR_CACHE: std::sync::OnceLock<LocalAddrCache> = std::sync::OnceLock::new();
+
+/// [`all_local_addresses`] behind a short TTL.
+///
+/// `ServiceResolved` fires far more often than fresh mDNS data arrives —
+/// `enable_addr_auto()` re-fires it on every interface/address change, and the
+/// self-resolution churn this feeds is precisely the high-frequency case. A
+/// fresh `getifaddrs` per event would put a syscall on that hot path
+/// (reagent #3025 P2).
+pub fn cached_local_addresses() -> std::sync::Arc<std::collections::HashSet<std::net::IpAddr>> {
+    let cache = LOCAL_ADDR_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    let Ok(mut slot) = cache.lock() else {
+        // Poisoned: fall back to enumerating directly rather than failing the
+        // self-check, which would resurrect the phantom this guards against.
+        return std::sync::Arc::new(all_local_addresses());
+    };
+    if let Some((at, addrs)) = slot.as_ref() {
+        if at.elapsed() < LOCAL_ADDR_CACHE_TTL {
+            return addrs.clone();
+        }
+    }
+    let fresh = std::sync::Arc::new(all_local_addresses());
+    *slot = Some((std::time::Instant::now(), fresh.clone()));
+    fresh
 }
 
 /// Best-effort discovery of this host's *primary outbound* non-loopback IPv4
@@ -528,6 +571,25 @@ mod tests {
              sockets; got {addr}"
         );
         assert_eq!(addr.port(), 0, "startup port must stay ephemeral");
+    }
+
+    /// The cache must agree with the uncached enumeration, and must actually
+    /// serve a cached value rather than re-enumerating each call.
+    ///
+    /// Deliberately does not assert timing (a TTL test that sleeps is a flaky
+    /// test); it asserts the contract that matters — same contents, and a
+    /// second call returns the very same allocation.
+    #[test]
+    fn the_cached_address_set_matches_a_fresh_enumeration() {
+        let fresh = all_local_addresses();
+        let cached = cached_local_addresses();
+        assert_eq!(*cached, fresh, "cache must not change what counts as ours");
+
+        let again = cached_local_addresses();
+        assert!(
+            std::sync::Arc::ptr_eq(&cached, &again),
+            "a second call within the TTL must reuse the snapshot, not re-enumerate"
+        );
     }
 
     /// `primary_lan_ipv4` must never hand back something unusable as a bind
