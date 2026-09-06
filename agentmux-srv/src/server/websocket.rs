@@ -606,12 +606,14 @@ async fn handle_incoming_text(
                             &resp.request_id,
                             resp.effective_tier.as_deref(),
                             resp.requires_stop,
-                            "host",
-                            None,
                             // Always host-tier here (this is the pane's own outbound
                             // send) — reagent/lan verification never applies.
-                            None,
-                            None,
+                            super::reactive::EchoTrust {
+                                delivery_tier: "host",
+                                sig_verified: None,
+                                reagent_verified: None,
+                                lan_verified: None,
+                            },
                             incoming.priority.as_deref().unwrap_or("normal"),
                         );
                         let ack = json!({ "type": "bus:injected", "via": "pty", "block_id": resp.block_id });
@@ -652,10 +654,12 @@ async fn handle_incoming_text(
                                 &msg_id,
                                 None,
                                 None,
-                                "host",
-                                None,
-                                None,
-                                None,
+                                super::reactive::EchoTrust {
+                                    delivery_tier: "host",
+                                    sig_verified: None,
+                                    reagent_verified: None,
+                                    lan_verified: None,
+                                },
                                 incoming.priority.as_deref().unwrap_or("normal"),
                             );
                             let ack = json!({ "type": "bus:injected", "via": "messagebus", "message_id": msg_id });
