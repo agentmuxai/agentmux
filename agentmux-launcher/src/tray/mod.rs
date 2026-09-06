@@ -20,10 +20,20 @@
 //! takes no input. The launcher's real loop is Tokio. So the Windows backend
 //! here *introduces* a message pump on a dedicated thread; see `windows.rs`.
 //!
-//! macOS is the opposite: the main thread already pumps `NSApplication` for
-//! the process lifetime (when the splash is enabled), so the menu-bar item has
-//! a host loop already. Linux uses `ksni`, which is pure D-Bus and needs no
+//! macOS is the opposite: AppKit insists the status item be created *and*
+//! driven on the main thread, and the launcher's main thread already pumps
+//! `NSApplication` for the process lifetime. So the macOS backend does not
+//! own a thread at all — it queues a request the main-thread pump services,
+//! see `macos.rs`. Linux uses `ksni`, which is pure D-Bus and needs no
 //! toolkit loop at all.
+//!
+//! ## What is shared
+//!
+//! Everything downstream of "the user picked something" is platform-neutral
+//! and lives here: the menu model, the reachability probe that drives the
+//! icon's state, the retrying forwarder to the host, and the action loop the
+//! supervisor spawns. A new backend only has to turn native events into
+//! `TrayAction`s and call `spawn_action_loop` from its supervisor.
 //!
 //! ## Opt-in
 //!
@@ -53,6 +63,122 @@ pub enum TrayAction {
     /// "Quit AgentMux" — a genuine, user-intended full shutdown, distinct from
     /// closing the last window while background-service mode is on.
     Quit,
+}
+
+impl TrayAction {
+    /// The host IPC command this action forwards. Kept next to the enum so
+    /// every backend maps the same way.
+    pub fn host_cmd(self) -> &'static str {
+        match self {
+            // Exactly the path a second launch / the macOS reopen delegate
+            // uses — see design doc §7.5.1.
+            TrayAction::OpenWindow => "open_new_window",
+            // Graceful: `quit_app` drains with LauncherRequested so srv still
+            // gets its per-window cleanup. Killing the process tree from the
+            // launcher instead would leak srv rows and resurrect ghost windows
+            // on next launch.
+            TrayAction::Quit => "quit_app",
+        }
+    }
+}
+
+/// How often backends re-check whether the background service is actually
+/// reachable. Cheap (a loopback connect with a short timeout) and slow enough
+/// to be invisible; the icon is a status indicator, not a monitor.
+pub const STATUS_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Is the background service actually reachable *right now*?
+///
+/// Deliberately the same question `forward_host_cmd` has to answer — port file
+/// readable AND the host's IPC port accepting a connection — because that is
+/// what the indicator should mean: "would Open work if you clicked it?".
+/// Checking only that the port file exists would keep claiming "running" after
+/// a host crash, since the file outlives a hard exit (see `lib.rs`, which
+/// removes it only on a clean `run_message_loop` return).
+pub fn service_reachable(data_dir: &std::path::Path, dir_hash: &str) -> bool {
+    let port_file = data_dir.join(format!("ipc-port-{}", dir_hash));
+    let Ok(contents) = std::fs::read_to_string(&port_file) else {
+        return false;
+    };
+    let Some((port_str, _token)) = contents.trim().split_once(':') else {
+        return false;
+    };
+    let Ok(port) = port_str.parse::<u16>() else {
+        return false;
+    };
+    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok()
+}
+
+/// Forward a tray action to the host, retrying while the failure is
+/// `Transient`.
+///
+/// The tray starts as soon as the single-instance pipe/socket is claimed —
+/// before `srv`/`host` are spawned, and well before the host publishes
+/// `ipc-port-<hash>`. So a user who clicks Quit (or Open) during startup hits
+/// exactly the `Transient` case `ForwardError` already distinguishes: "the
+/// instance is alive but not serving IPC yet". Dropping that request meant a
+/// startup-time Quit silently did nothing and the app carried on booting
+/// (Codex P2 on PR #2996).
+///
+/// Retries only `Transient`. `Fatal` means the port file was readable but the
+/// HTTP path failed — a hung or genuinely broken host, where retrying just
+/// hides the problem, so it is logged once and dropped.
+///
+/// The budget covers a slow cold start (first-run Defender scan, CEF init)
+/// without leaving a click queued forever: a request the user made a minute
+/// ago is no longer one they want acted on.
+pub fn forward_tray_cmd(data_dir: &std::path::Path, dir_hash: &str, cmd: &str) {
+    use crate::second_instance::{forward_host_cmd, ForwardError};
+
+    const MAX_ATTEMPTS: u32 = 30;
+    const DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match forward_host_cmd(data_dir, dir_hash, cmd) {
+            Ok(()) => {
+                crate::log(&format!("tray: {} forwarded (attempt {})", cmd, attempt));
+                return;
+            }
+            Err(ForwardError::Transient(e)) => {
+                if attempt == MAX_ATTEMPTS {
+                    crate::log(&format!(
+                        "tray: {} gave up after {} transient failures ({}) — host never became reachable",
+                        cmd, MAX_ATTEMPTS, e
+                    ));
+                    return;
+                }
+                std::thread::sleep(DELAY);
+            }
+            Err(ForwardError::Fatal(e)) => {
+                crate::log(&format!("tray: {} failed fatally, not retrying: {}", cmd, e));
+                return;
+            }
+        }
+    }
+}
+
+/// Drain user actions from a backend and forward each to the host.
+///
+/// Called by every supervisor right after `start_if_enabled` returns a
+/// receiver. Detached on purpose: it blocks on `recv` and ends when the
+/// backend drops its sender (i.e. at process exit). Its only contact with the
+/// supervisor is the channel — no shared locks — so a wedged forward can stall
+/// nothing but itself.
+pub fn spawn_action_loop(
+    rx: mpsc::Receiver<TrayAction>,
+    data_dir: std::path::PathBuf,
+    dir_hash: String,
+) {
+    std::thread::Builder::new()
+        .name("agentmux-tray-actions".into())
+        .spawn(move || {
+            while let Ok(action) = rx.recv() {
+                forward_tray_cmd(&data_dir, &dir_hash, action.host_cmd());
+            }
+            crate::log("tray: action loop ended");
+        })
+        .ok();
 }
 
 /// A menu entry, resolved from the platform-neutral model below. Kept as data
@@ -148,25 +274,23 @@ pub fn start_if_enabled(
         return None;
     }
     #[cfg(target_os = "windows")]
-    {
-        match windows::spawn(_data_dir, _dir_hash) {
-            Ok(rx) => {
-                crate::log("tray: started (windows)");
-                Some(rx)
-            }
-            Err(e) => {
-                crate::log(&format!("tray: failed to start, continuing without it: {}", e));
-                None
-            }
-        }
-    }
+    let started = windows::spawn(_data_dir, _dir_hash).map(|rx| ("windows", rx));
     #[cfg(not(target_os = "windows"))]
-    {
-        // macOS and Linux backends land in the follow-up PRs for this
-        // workstream; the opt-in simply does nothing there for now rather
-        // than pretending to have started.
-        crate::log("tray: enabled but no backend on this platform yet — continuing without it");
-        None
+    let started: Result<(&str, mpsc::Receiver<TrayAction>), String> =
+        // Linux (`ksni`) is the remaining backend. Wire it here and call
+        // `spawn_action_loop` from `supervisor/unix.rs` — already done for
+        // macOS, so only this arm and the backend module are missing.
+        Err("no backend on this platform yet".to_string());
+
+    match started {
+        Ok((platform, rx)) => {
+            crate::log(&format!("tray: started ({})", platform));
+            Some(rx)
+        }
+        Err(e) => {
+            crate::log(&format!("tray: failed to start, continuing without it: {}", e));
+            None
+        }
     }
 }
 
@@ -205,6 +329,15 @@ mod tray_model_tests {
         assert_eq!(menu_model(false)[0].label, "Start AgentMux");
         assert!(tooltip(true).contains("running in the background"));
         assert!(tooltip(false).contains("not running"));
+    }
+
+    #[test]
+    fn actions_map_to_the_existing_host_commands() {
+        // Both are pre-existing host IPC verbs: `open_new_window` is the
+        // second-launch / reopen path, `quit_app` the graceful drain. The
+        // tray must not grow a third way to do either.
+        assert_eq!(TrayAction::OpenWindow.host_cmd(), "open_new_window");
+        assert_eq!(TrayAction::Quit.host_cmd(), "quit_app");
     }
 
     #[test]
