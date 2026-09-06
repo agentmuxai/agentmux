@@ -15,14 +15,14 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 
-use crate::backend::wconfig::ConfigWatcher;
+use crate::backend::wconfig::ConfigState;
 use super::{get_all_controllers, STATUS_RUNNING};
 
 /// Check interval for the watchdog loop.
 const WATCHDOG_INTERVAL_SECS: u64 = 60;
 
 /// Run the agent watchdog loop. Never returns.
-pub async fn run_watchdog_loop(config: Arc<ConfigWatcher>) {
+pub async fn run_watchdog_loop(config: Arc<ConfigState>) {
     let mut ticker = interval(Duration::from_secs(WATCHDOG_INTERVAL_SECS));
     loop {
         ticker.tick().await;
