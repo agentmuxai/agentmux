@@ -79,7 +79,6 @@ async fn main() {
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = bootstrap::bind_listeners_and_network(
         &config,
-        &bg.config_watcher,
         &bg.event_bus,
         &bg.broker,
         &version,
@@ -168,7 +167,19 @@ async fn main() {
     let shell_sessions_shutdown = state.shell_sessions.clone();
     let wal_wstore = Arc::clone(&state.wstore);
     let wal_filestore = Arc::clone(&state.filestore);
+    let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let router = build_router(state);
+
+    // Hand the LAN listener supervisor its router now that one exists —
+    // `build_router` consumes `AppState`, which owns the supervisor, so this
+    // cannot happen at construction time. Then honor the current setting and
+    // start the self-healing sweep, which also picks up interface changes
+    // (DHCP renewal, Wi-Fi↔Ethernet handoff, VPN up/down) without a restart.
+    // See `backend::lan_listeners`.
+    net.lan_listeners.set_router(router.clone());
+    net.lan_listeners
+        .apply(config_watcher_for_lan.get_settings().network_lan_discovery);
+    Arc::clone(&net.lan_listeners).spawn_reconcile_loop();
 
     let web_server = axum::serve(net.web_listener, router.clone());
     let ws_server = axum::serve(net.ws_listener, router);

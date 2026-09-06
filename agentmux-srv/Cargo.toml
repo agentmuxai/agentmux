@@ -43,6 +43,10 @@ keyring = "2"
 # Zero plaintext secret buffers on drop.
 zeroize = { version = "1", features = ["zeroize_derive"] }
 mdns-sd = "0.12"
+# Interface enumeration for LAN listener bind addresses (backend/lan_listeners.rs).
+# Already in the tree transitively via mdns-sd, so declaring it directly adds no
+# new supply-chain surface — it just makes the dependency honest.
+if-addrs = "0.13"
 which = "7"
 # Text encoding detection + transcoding for the editor (SPEC_EDITOR_FILE_ENCODINGS).
 encoding_rs = "0.8"

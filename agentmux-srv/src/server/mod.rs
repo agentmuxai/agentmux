@@ -168,6 +168,12 @@ pub struct AppState {
     /// be toggled at runtime without restarting the process.
     /// See `docs/specs/lan-discovery-toggle.md`.
     pub lan_discovery: Arc<LanDiscoveryController>,
+    /// Owns the LAN-facing HTTP listeners. Paired with `lan_discovery`: that
+    /// one controls whether we ADVERTISE on the LAN, this one controls whether
+    /// we are actually REACHABLE there. Both must be driven from the same
+    /// place — advertising without listening is the "discovered but
+    /// unreachable" state described in `backend::lan_listeners`.
+    pub lan_listeners: Arc<crate::backend::lan_listeners::LanListenerSupervisor>,
     /// Language Server Protocol supervisor — owns the lifecycle of LSP
     /// server child processes (one per workspace/language) and proxies
     /// LSP messages between the editor pane and the server.
