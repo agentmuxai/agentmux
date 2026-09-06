@@ -33,13 +33,13 @@ base64 = "0.22"
 # docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
-# Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
-# and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.
 # `process::kill_pid` / `kill_process_group` — SIGTERM/SIGKILL by pid and
 # process group. Same pin as agentmux-srv.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
+# and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.
 [target.'cfg(windows)'.dependencies]
 junction = "2.0.0"
 windows-sys = { version = "0.59", features = [

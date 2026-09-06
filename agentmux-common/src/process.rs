@@ -21,35 +21,49 @@
 //! its tree via `/T`) — **never** by image name. Killing by image name is
 //! the cross-instance hazard CLAUDE.md bans outright.
 //!
-//! ## The `pid_t` guard
+//! ## The `kill(2)` argument ranges, and why the guards are what they are
 //!
 //! Callers hand us a `u32`; POSIX `kill(2)` takes a signed `pid_t`, and
-//! two of its argument ranges do not mean "one process" at all:
+//! its argument is **not** simply "a process id". Every range means
+//! something different:
 //!
-//! - **negative** `pid` means *"signal this process group"* — and a raw
-//!   `as` cast of any `u32` above `i32::MAX` wraps negative. ReAgent P1 on
-//!   PR #3033 caught exactly this in the first version of this module's
-//!   own tests: `u32::MAX - 1` wrapped to `-2`, targeting process group 2,
-//!   and the group variant negated it to signal PID 2.
-//! - **zero** means *"every process in the caller's own process group"*.
-//!   The first fix guarded only [`kill_process_group`] against this; a
-//!   second ReAgent P1 pointed out [`kill_pid`]`(0)` still reached
-//!   `kill(0, SIGTERM)` — a group-wide kill from the single-PID path.
+//! | `pid` argument | `kill(2)` signals… |
+//! |---|---|
+//! | `> 0` | exactly that one process |
+//! | `== 0` | every process in the **caller's own** process group |
+//! | `== -1` | **every process the caller may signal — a system-wide broadcast** |
+//! | `< -1` | every process in process group `-pid` |
 //!
-//! So [`checked_pid`] refuses both: anything that does not fit `pid_t`,
-//! and `0`. Both public functions go through it, so the guard cannot
-//! drift between them, and every `pid_t` that reaches a syscall is
-//! **strictly positive** by construction. Real PIDs are never 0 and never
-//! approach `i32::MAX` on any supported platform (Linux `pid_max` caps at
-//! 4194304; Windows PIDs are small multiples of 4), so the guard costs
-//! nothing in practice and closes the hazard entirely.
+//! Three successive ReAgent P1s on PR #3033 each caught this module
+//! hitting one of the non-literal rows through an innocent-looking `u32`:
+//!
+//! 1. `u32::MAX - 1` cast with `as` wraps to `-2` → row four, group 2.
+//! 2. `0` → row two, the caller's own group (the test runner).
+//! 3. `1`, negated for the group call → `-1` → row three, the broadcast.
+//!
+//! So the guards are derived from the table, not added one hole at a time:
+//!
+//! - [`checked_pid`] refuses `0` and anything that does not fit `pid_t`,
+//!   which is exactly the set of inputs that could reach rows two and
+//!   four from the single-PID path. Every `pid_t` that reaches
+//!   [`kill_pid`] is strictly positive → row one only.
+//! - [`kill_process_group`] additionally requires `pgid >= 2`, because it
+//!   negates: `-1` would be row three, and `-0` is `0`, row two. Every
+//!   value it passes to `kill(2)` is `<= -2` → row four only, and never
+//!   the broadcast.
+//!
+//! Real PIDs are never 0 or 1 for anything this module should touch
+//! (1 is `init`/`systemd`), and never approach `i32::MAX` on any supported
+//! platform (Linux `pid_max` caps at 4194304; Windows PIDs are small
+//! multiples of 4) — so the guards cost nothing in practice and close the
+//! whole class, not just the three instances that were reported.
 
 use std::io;
 
 /// Convert a caller-supplied PID to a signed, **strictly positive** `pid_t`.
 /// Refuses `0` (the caller's own process group to `kill(2)`) and anything
-/// that would wrap negative (a process group to `kill(2)`). Shared by both
-/// public functions so the guard can't drift.
+/// that would wrap negative (a process group, or the broadcast). Shared by
+/// both public functions so the guard can't drift.
 fn checked_pid(pid: u32) -> io::Result<i32> {
     if pid == 0 {
         return Err(io::Error::new(
@@ -74,6 +88,10 @@ fn checked_pid(pid: u32) -> io::Result<i32> {
 /// that has already exited surfaces as an error too (Unix `ESRCH`, Windows
 /// non-zero `taskkill` exit) — callers treating "already gone" as success
 /// should ignore the result, which is what every prior copy did.
+///
+/// `1` is accepted here: to `kill(2)` a positive `1` is exactly one process
+/// (row one of the table), not a special value. It only becomes the
+/// broadcast when *negated*, which this function never does.
 pub fn kill_pid(pid: u32) -> io::Result<()> {
     let pid = checked_pid(pid)?;
     #[cfg(windows)]
@@ -89,7 +107,7 @@ pub fn kill_pid(pid: u32) -> io::Result<()> {
     {
         // SAFETY: kill(2) is a well-defined POSIX syscall; `pid` is a
         // checked, strictly-positive pid_t (never 0, never negative), so
-        // this addresses exactly one process — never a group.
+        // this is row one of the module-doc table — exactly one process.
         let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
         if ret != 0 {
             return Err(io::Error::last_os_error());
@@ -107,23 +125,30 @@ pub fn kill_pid(pid: u32) -> io::Result<()> {
 /// (`process_group(0)` / `setsid`) for the negative-pid signal to reach
 /// its descendants; that is the contract every prior copy relied on.
 /// Best-effort: nothing is returned because there is nothing useful a
-/// caller can do about a failed kill of an already-dying group. A PID
-/// that is `0` or out of range for `pid_t` is a **no-op** — never a signal
-/// to the wrong group (see the module doc).
+/// caller can do about a failed kill of an already-dying group.
+///
+/// A PID of `0`, `1`, or anything out of range for `pid_t` is a **no-op**.
+/// `0` and out-of-range are refused by [`checked_pid`]; `1` is refused
+/// here specifically because this function negates its argument and
+/// `kill(-1, …)` is the system-wide broadcast (row three of the module-doc
+/// table), not "process group 1".
 pub fn kill_process_group(pid: u32) {
-    // checked_pid already refuses 0 and anything that would wrap, so
-    // `pgid` is strictly positive here — `-pgid` can never be 0 (the
-    // caller's own group) or -1 (every process).
     let Ok(pgid) = checked_pid(pid) else { return };
+    if pgid < 2 {
+        // pgid == 1 → -pgid == -1 → broadcast to every signalable process.
+        // (pgid == 0 is already impossible here; checked_pid refused it.)
+        return;
+    }
     #[cfg(windows)]
     {
         let _ = taskkill_tree(pgid).status();
     }
     #[cfg(unix)]
     {
-        // SAFETY: kill(2) is a well-defined POSIX syscall; `pgid` is a
-        // checked, strictly-positive pid_t, so `-pgid` addresses exactly
-        // that one group.
+        // SAFETY: kill(2) is a well-defined POSIX syscall; `pgid >= 2` by
+        // the guard above, so `-pgid <= -2` — row four of the module-doc
+        // table, exactly that one process group. It can never be 0 (the
+        // caller's own group) or -1 (the broadcast).
         unsafe { libc::kill(-pgid, libc::SIGTERM) };
         std::thread::sleep(std::time::Duration::from_millis(300));
         unsafe { libc::kill(-pgid, libc::SIGKILL) };
@@ -148,9 +173,8 @@ fn taskkill_tree(pid: i32) -> std::process::Command {
 mod tests {
     use super::*;
 
-    /// pid 0 means "the caller's own process group" to `kill(2)`. Both
-    /// entry points must refuse it before any syscall — this is the
-    /// difference between a no-op and killing the test runner.
+    // ── Row two: pid 0 is the caller's own group ────────────────────────
+
     #[test]
     fn kill_pid_refuses_zero() {
         let err = kill_pid(0).unwrap_err();
@@ -163,9 +187,19 @@ mod tests {
         kill_process_group(0);
     }
 
-    /// The overflow case ReAgent caught: `u32::MAX - 1` cast to `i32` is
-    /// `-2`, which `kill(2)` reads as "process group 2". The guard must
-    /// reject it *before* any syscall, on every platform.
+    // ── Row three: pgid 1 negated is -1, the broadcast ──────────────────
+
+    /// The third P1: `kill_process_group(1)` would have called
+    /// `kill(-1, SIGTERM)` then `kill(-1, SIGKILL)` — every process the
+    /// runner may signal. Must be a silent no-op, reached without any
+    /// syscall.
+    #[test]
+    fn kill_process_group_refuses_one() {
+        kill_process_group(1);
+    }
+
+    // ── Row four via overflow: u32::MAX - 1 wraps to -2 ─────────────────
+
     #[test]
     fn kill_pid_refuses_a_pid_that_would_wrap_negative() {
         let err = kill_pid(u32::MAX - 1).unwrap_err();
@@ -173,18 +207,17 @@ mod tests {
         assert!(err.to_string().contains("does not fit"), "{err}");
     }
 
-    /// Same input through the group variant: wrapping to `-2` and then
-    /// negating would have signalled PID 2. Must be a silent no-op.
     #[test]
     fn kill_process_group_refuses_a_pid_that_would_wrap_negative() {
         kill_process_group(u32::MAX - 1);
     }
 
-    /// The boundary itself: `i32::MAX` fits `pid_t`, so the guard must
-    /// pass it through — and it cannot be a live process on any supported
-    /// platform (Linux pid_max ≤ 4194304; Windows PIDs are small multiples
-    /// of 4), so the OS rejects it cleanly (`ESRCH` / non-zero `taskkill`).
-    /// This is the real "nonexistent PID fails cleanly, not by panic" test.
+    // ── Row one: a real, positive, nonexistent pid fails cleanly ────────
+
+    /// `i32::MAX` fits `pid_t`, so the guard must pass it through — and it
+    /// cannot be a live process on any supported platform, so the OS
+    /// rejects it (`ESRCH` / non-zero `taskkill`). Asserting the error is
+    /// NOT the guard's proves the syscall was actually made.
     #[test]
     fn kill_pid_on_a_nonexistent_in_range_pid_is_an_error_not_a_panic() {
         let err = kill_pid(i32::MAX as u32).unwrap_err();
@@ -192,6 +225,9 @@ mod tests {
     }
 
     /// The guard's exact contract: strictly positive and fits `pid_t`.
+    /// `1` passes `checked_pid` — it is a legitimate single-process target
+    /// for `kill_pid`; only `kill_process_group` layers the `>= 2` rule on
+    /// top, because only it negates.
     #[test]
     fn checked_pid_boundaries() {
         assert!(checked_pid(0).is_err(), "0 is the caller's own group");
