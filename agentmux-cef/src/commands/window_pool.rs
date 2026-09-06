@@ -131,8 +131,8 @@ fn effective_pool_demote_cap(pressure: crate::memory_pressure::PressureLevel) ->
 /// promote they're moved to the cursor and shown.
 pub(crate) const POOL_OFFSCREEN_X: i32 = -32000;
 pub(crate) const POOL_OFFSCREEN_Y: i32 = -32000;
-const POOL_WIDTH: i32 = 1200;
-const POOL_HEIGHT: i32 = 800;
+pub(crate) const POOL_WIDTH: i32 = 1200;
+pub(crate) const POOL_HEIGHT: i32 = 800;
 /// Pixels above the cursor where the title bar sits — matches
 /// open_window_at_position so the cursor lands near the top-center
 /// of the title bar after promotion.
