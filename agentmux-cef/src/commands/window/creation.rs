@@ -270,13 +270,17 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     // promote below discards `win_w`/`win_h` and uses POOL_WIDTH/POOL_HEIGHT
     // (see `promote_pool_window_for_new_window`), so centring `win_w`/`win_h`
     // here would offset the window by half the difference.
+    // PHYSICAL pixels on both sides: POOL_WIDTH/POOL_HEIGHT reach SetWindowPos
+    // unconverted (promote_pool_window only runs to_physical when width is
+    // Some), so they must be centred against the physical work area.
     #[cfg(target_os = "windows")]
     let (pos_x, pos_y) = new_window_origin(
         crate::commands::window_pool::POOL_WIDTH,
         crate::commands::window_pool::POOL_HEIGHT,
+        crate::app::get_monitor_work_area_physical(0, 0),
     );
     #[cfg(not(target_os = "windows"))]
-    let (pos_x, pos_y) = new_window_origin(win_w, win_h);
+    let (pos_x, pos_y) = new_window_origin(win_w, win_h, None);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
         state, pos_x, pos_y, win_w, win_h, initial_view.clone(), initial_meta.clone(),
     ) {
@@ -460,7 +464,14 @@ pub(crate) fn open_window_with_kind(
             // pool path above.
             let (probe_x, probe_y) = cascade_anchor().unwrap_or((0, 0));
             let (win_w, win_h) = get_secondary_window_size(probe_x, probe_y);
-            let (pos_x, pos_y) = new_window_origin(win_w, win_h);
+            // DIP on both sides: get_secondary_window_size divides by the
+            // monitor scale (CEF Views set_bounds expects DIP), so centre
+            // against the DIP work area, NOT the physical one.
+            #[cfg(target_os = "windows")]
+            let work = crate::app::get_monitor_work_area(probe_x, probe_y);
+            #[cfg(not(target_os = "windows"))]
+            let work = None;
+            let (pos_x, pos_y) = new_window_origin(win_w, win_h, work);
             (pos_x, pos_y, win_w, win_h)
         }
     };
@@ -950,10 +961,11 @@ fn center_in_work_area(
     (x, y)
 }
 
-/// Where a new top-level window should go, given the size it will actually be.
+/// Where a new top-level window should go, given the size it will actually be
+/// AND the work area to centre it in.
 ///
 /// Cascades from an existing window when there is one. When there is NOT, the
-/// window is centred on the primary monitor's work area.
+/// window is centred in `work_area`.
 ///
 /// The old behaviour here was to return `CW_USEDEFAULT` in that second case.
 /// That is a valid sentinel for `CreateWindow`, which interprets it as "you
@@ -965,31 +977,49 @@ fn center_in_work_area(
 /// cascade branch ran instead); very visible once background-service mode made
 /// "no window open" the normal state and the tray's "New Window" the first one.
 ///
-/// `win_w`/`win_h` must be the size the window will REALLY be, in the same
-/// (physical-pixel) space as the returned origin — the Windows pool path
-/// promotes at `POOL_WIDTH`/`POOL_HEIGHT` and ignores the size its caller
-/// computed, so passing the caller's size would centre the wrong rectangle.
-fn new_window_origin(win_w: i32, win_h: i32) -> (i32, i32) {
+/// **`work_area` and `win_w`/`win_h` MUST be in the same unit**, and which unit
+/// that is differs per caller — which is why the work area is passed in rather
+/// than looked up here:
+///
+/// - `open_new_window`'s Windows pool path works in **physical** pixels
+///   (`POOL_WIDTH`/`POOL_HEIGHT` reach `SetWindowPos` unconverted, so it pairs
+///   them with `get_monitor_work_area_physical`).
+/// - the `open_window_with_kind` cold path works in **DIP**
+///   (`get_secondary_window_size` divides by the monitor scale because CEF
+///   Views `set_bounds` expects DIP, so it pairs with `get_monitor_work_area`).
+///
+/// An earlier revision looked the work area up internally with the physical
+/// variant and centred whatever size it was handed. That silently mixed a
+/// physical work area with DIP dimensions on the cold path, mis-centring by
+/// half the DPI difference on any monitor above 100% scale — i.e. on the
+/// 125%/150% that Windows 11 ships by default (ReAgent P1 on #3019).
+///
+/// **Windows-only.** On macOS/Linux there is no work area lookup here and the
+/// origin stays the historical `(100, 100)`; the corner-placement bug this
+/// fixes is a Windows path (`promote_pool_window`/`clamp_rect_within`), and
+/// those platforms position pool windows from the frontend instead.
+fn new_window_origin(
+    win_w: i32,
+    win_h: i32,
+    work_area: Option<(i32, i32, i32, i32)>,
+) -> (i32, i32) {
     if let Some(anchor) = cascade_anchor() {
         return anchor;
     }
+    if let Some((wa_x, wa_y, wa_w, wa_h)) = work_area {
+        return center_in_work_area(wa_x, wa_y, wa_w, wa_h, win_w, win_h);
+    }
     #[cfg(target_os = "windows")]
     {
-        // Physical px: matches the space `promote_pool_window` positions in.
-        // `MonitorFromPoint` with `MONITOR_DEFAULTTOPRIMARY` resolves (0, 0) to
-        // the primary monitor, which is "the main display" the user means.
-        if let Some((wa_x, wa_y, wa_w, wa_h)) = crate::app::get_monitor_work_area_physical(0, 0) {
-            return center_in_work_area(wa_x, wa_y, wa_w, wa_h, win_w, win_h);
-        }
         use windows_sys::Win32::UI::WindowsAndMessaging::CW_USEDEFAULT;
-        return (CW_USEDEFAULT, CW_USEDEFAULT);
+        (CW_USEDEFAULT, CW_USEDEFAULT)
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (win_w, win_h);
         (100, 100)
     }
 }
+
 
 /// Compute 70% of the monitor's work area for a secondary window at (px, py).
 /// Falls back to 1200x800 if the monitor can't be determined.
