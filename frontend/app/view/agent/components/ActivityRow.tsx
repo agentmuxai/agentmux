@@ -220,7 +220,14 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             <span class="agent-activity-remaining">{remaining()}</span>
                         </Show>
                         <Show when={tail()}>
-                            <span class="agent-activity-tail">↳ {tail()}</span>
+                            {/* U+2192 (→), not U+21B3 (↳) — the latter has weak
+                                glyph coverage in the fixed-font stack (Hack +
+                                a short fallback list) and renders as a
+                                mismatched/garbled character; → is already used
+                                safely in this same file/font context, see
+                                subagentEventLine's tool_use case above.
+                                SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §3. */}
+                            <span class="agent-activity-tail">→ {tail()}</span>
                         </Show>
                         <Show when={a().canStop}>
                             <button
