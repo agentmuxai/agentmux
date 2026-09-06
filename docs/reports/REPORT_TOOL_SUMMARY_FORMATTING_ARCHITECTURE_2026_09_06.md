@@ -216,3 +216,47 @@ either way; the trap (believing it works) is gone regardless.
 
 **Verified:** full `agentmux-srv` suite 3030 passed / 0 failed. Not verified in a running app
 — the string this produces is unit-tested, but I have not watched a Swarm row render it.
+
+---
+
+## 9. Payload measurements for Phase 2 (2026-09-06)
+
+§5 Phase 2 and §7 both said the payload budget needed measuring and that I hadn't done it.
+Now measured, from real transcripts on this machine.
+
+**Subagent tool calls — the data path the Swarm feed actually shows** (240 calls):
+
+| p50 | p90 | p99 | max |
+|---|---|---|---|
+| 167 B | 330 B | 611 B | **691 B** |
+
+86 of 240 exceed the current 200-char cap; **none reach 1 KB**. Per tool: `Bash` p50 249 /
+max 691, `Read` p50 136 / max 228, `Grep` p50 194 / max 263, `Glob` p50 41 / max 120. Note
+this sample contains no `Agent`/`Workflow` calls at all — subagents rarely dispatch further —
+so it cannot show the large-prompt tail.
+
+**Parent-session tool calls — the tail, if Phase 2 ever generalises** (3,561 calls):
+
+| p50 | p90 | p99 | max |
+|---|---|---|---|
+| 302 B | 2.0 KB | 7.7 KB | **17.8 KB** |
+
+620 exceed 1 KB (17%), 27 exceed 8 KB (0.8%), **none exceed 32 KB**. Largest by tool:
+`Write` 17.8 KB, `Bash` 12.2 KB, `Edit` 11.9 KB, `mcp__agentmux__SendMessage` 6.7 KB,
+`Agent` 6.7 KB.
+
+**This corrects a guess in §5.** I wrote that raw inputs are "unbounded (an `Agent` prompt can
+be tens of KB)" and used that to argue Phase 2 needs a transport budget. The measured reality
+is milder and the shape is different: `Agent` prompts top out at 6.7 KB, and the actual tail
+is `Write`/`Edit` carrying file contents — a category I hadn't considered. Nothing observed
+exceeds 32 KB.
+
+**Implication:** for the Swarm feed specifically, a per-input cap of **1 KB** would transmit
+every observed subagent call whole, versus the 200 chars sent today — so Phase 2 can carry
+structured input at roughly 1.5× the current worst-case payload, not the order-of-magnitude
+increase I assumed. An **8 KB** cap covers p99 of the broader parent-side population if the
+mechanism is generalised later.
+
+Caveat on generalising these numbers: one machine, two agents, a workload skewed toward code
+investigation. A session doing heavy file authoring would push the `Write`/`Edit` tail higher.
+The cap should be a cap, not a bet on the distribution holding.
