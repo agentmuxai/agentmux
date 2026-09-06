@@ -126,7 +126,21 @@ fn try_show_resolved_window(state: &Arc<AppState>, label: &str) -> bool {
     let Some(mut browser) = state.get_browser(label) else { return false };
     let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
     let Some(window) = bv.window() else { return false };
-    if window.is_visible() == 0 {
+    // Same native-vs-Views check as `on_load_end`'s arming site (issue #3028):
+    // trusting Views alone here would resolve the gate as "done" while the
+    // native HWND stays hidden — the reveal's very last step silently
+    // no-opping. Views claiming visible while native says hidden is exactly
+    // the misreport this exists to override.
+    let views_visible = window.is_visible() != 0;
+    let native_visible = native_window_visible(state, Some(label));
+    if should_run_reveal(views_visible, native_visible) {
+        if views_visible {
+            tracing::warn!(
+                target: "startup-paint",
+                label = %label,
+                "[startup-paint] Views reports visible but native HWND is hidden at gate-fire — showing anyway (issue #3028)"
+            );
+        }
         window.show();
         if let Some(host) = browser.host() {
             host.set_focus(1);
@@ -457,7 +471,20 @@ fn try_show_top_level_window(state: &std::sync::Arc<crate::state::AppState>, lab
     let Some(mut browser) = state.get_browser(label) else { return false };
     let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
     let Some(window) = bv.window() else { return false };
-    if window.is_visible() == 0 {
+    // ReAgent P1 on #3030: this retry path exists precisely to ride out CEF
+    // Views timing quirks, so gating it on the Views layer alone reproduces
+    // issue #3028 through the one path meant to rescue it. Same predicate as
+    // the initial on_load_end pass.
+    let views_visible = window.is_visible() != 0;
+    let native_visible = native_window_visible(state, Some(label));
+    if should_run_reveal(views_visible, native_visible) {
+        if views_visible {
+            tracing::warn!(
+                target: "startup-paint",
+                label = %label,
+                "[on_load_end] retry: Views reports visible but native HWND is hidden — revealing anyway (issue #3028)"
+            );
+        }
         reveal_top_level_window(state, Some(label), &window, Some(&mut browser));
     }
     true
