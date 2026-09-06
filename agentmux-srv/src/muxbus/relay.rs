@@ -155,18 +155,38 @@ pub(crate) async fn relay_inject(
 ///
 /// `None` means the account isn't logged in to muxbus at all, i.e. tier 4
 /// doesn't exist here.
+///
+/// **`store` must be the one muxbus credentials actually live in —
+/// `AppState::id_store`,** the same store `CloudSubscriber::init_global` and
+/// every `muxbus.login`/`status`/`disconnect` handler use. Passing the
+/// per-channel `wstore` finds nothing whenever the shared root resolves (the
+/// normal case), so tier 4 would silently never fire for a logged-in user
+/// [reagent #3023 P0]. Note this deliberately does NOT follow `AppState`'s
+/// general steer toward `identity_store` for new muxbus call sites: the
+/// credentials are written to `id_store`, and reading from a store the writer
+/// doesn't use would reintroduce the same bug whenever
+/// `isolated_auth_enabled()` redirects one but not the other.
+///
+/// Ordering matters. The shared account token is a purely local read, so it is
+/// checked FIRST: no credential means the account isn't logged in, and there is
+/// nothing for a per-agent credential to be provisioned against. Doing it the
+/// other way round makes `ensure_agent_credential` attempt a cloud
+/// provisioning round trip (`POST /agents/provision`) on a logged-out instance
+/// — once per failed local inject, i.e. on the hot path of every message to an
+/// unknown agent.
 pub(crate) async fn relay_token(
     source_agent: &str,
-    wstore: &Arc<Store>,
+    store: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Option<String> {
-    if let Some(per_agent) =
-        crate::muxbus::agent_credentials::ensure_agent_credential(source_agent, wstore, http).await
-    {
-        return Some(per_agent);
-    }
     let scheduler = crate::broker::get_global()?;
-    crate::muxbus::cloud_subscriber::load_valid_token(wstore, &scheduler).await
+    let shared = crate::muxbus::cloud_subscriber::load_valid_token(store, &scheduler).await?;
+
+    match crate::muxbus::agent_credentials::ensure_agent_credential(source_agent, store, http).await
+    {
+        Some(per_agent) => Some(per_agent),
+        None => Some(shared),
+    }
 }
 
 #[cfg(test)]

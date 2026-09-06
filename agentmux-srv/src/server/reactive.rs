@@ -1122,7 +1122,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
     // so a caller with no source agent (cron, external bridge) has no tier 4.
     let source = req.source_agent.as_deref().filter(|s| !s.is_empty())?;
 
-    let token = crate::muxbus::relay::relay_token(source, &state.wstore, &state.http_client).await;
+    let token = crate::muxbus::relay::relay_token(source, &state.id_store, &state.http_client).await;
     let Some(token) = token else {
         tracing::debug!(
             target = %req.target_agent,
