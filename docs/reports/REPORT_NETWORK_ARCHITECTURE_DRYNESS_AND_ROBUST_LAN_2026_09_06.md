@@ -229,6 +229,31 @@ owner.** Parts live in `reactive.rs`, one part is delegated to an unnamed
 if cloud relay is tier 4, `handle_reactive_inject` should perform it, and every
 caller inherits it. Failing that, the description must stop promising it.
 
+**✅ Done — the first option.** `crate::muxbus::relay` implements the outbound
+half (`POST /reactive/inject`), and `handle_reactive_inject` calls it as tier 4
+after tiers 1–3 decline, so every caller inherits it rather than
+re-implementing it. `SendMessage`'s description is now true.
+
+Three things worth recording from building it:
+
+1. **The contract was not what the specs implied.** `source_agent` travels in
+   the **`X-Agent-ID` header, not the request body** (the route 400s without
+   it), and `X-Client-Wrapped: true` is required — without it the cloud wraps
+   the message in its own `[JEKT:...]` marker *and* the receiving srv wraps it
+   again in `Handler::inject_message`, so the recipient sees a doubled marker.
+   Both were established by reading
+   `agentmux-cloud/muxbus/server/src/index.ts` directly. An earlier draft of
+   this work inferred the body shape from a spec describing `createInjection`'s
+   stored row and would have shipped broken.
+2. **Tier 4 needs its own loop guard.** `forward_hops` cannot stop a
+   relay↔subscriber ping-pong, because the cloud delivers each message as a
+   *fresh* inbound request with the count reset. A message that arrived with
+   `delivery_tier == "wan"` is therefore never re-relayed.
+3. **Queued is not delivered.** The relay persists and wakes subscribers; the
+   recipient's srv collects on its next sync, or never if it is offline. The
+   outcome type is `Queued`, not `Delivered`, and the tool description now says
+   so — the tier-3 path had exactly this conflation and it was a real bug.
+
 ### 6. Discovery reports local truth as if it were global
 
 `DiscoverAgents` returns `wan.subscribed_agents`, which on inspection lists

@@ -4,6 +4,7 @@
 pub mod agent_credentials;
 pub mod cloud_subscriber;
 pub mod pkce;
+pub mod relay;
 
 /// Identifier MuxBus's single global credential set is registered under
 /// with both the broker scheduler (`crate::broker`) and the OS keychain
