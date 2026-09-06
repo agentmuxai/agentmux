@@ -1886,7 +1886,7 @@ fn cleanup_failed_promote_orphan_cross_platform(state: &Arc<AppState>, label: &s
 /// passed as the tab anchor so it feeds directly to `SetWindowPos` without the
 /// cursor-centering offset math. Width/height pass as `None` so the function
 /// uses the hardcoded `POOL_WIDTH/POOL_HEIGHT` defaults (1200×800) — this
-/// avoids double-applying the DIP→physical DPI conversion: `get_offset_position`
+/// avoids double-applying the DIP→physical DPI conversion: `new_window_origin`
 /// and `get_secondary_window_size` on Windows already return physical pixels
 /// (from `GetWindowRect`/`GetMonitorInfoW`), but `promote_pool_window` only
 /// runs `to_physical()` when `width.is_some()`. Passing `None` skips it.

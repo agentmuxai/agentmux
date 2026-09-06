@@ -356,8 +356,8 @@ pub fn open_subwindow(
 /// bypassing the IPC-handler wrappers (`open_new_window`/`open_subwindow`)
 /// that assume a live, frontend-originated request.
 ///
-/// `explicit_rect`: when `Some`, skips `get_offset_position`/
-/// `get_secondary_window_size`'s offset/70%-of-monitor placement heuristic
+/// `explicit_rect`: when `Some`, skips `new_window_origin`/
+/// `get_secondary_window_size`'s cascade-or-centre/70%-of-monitor placement
 /// and uses the given rect verbatim — the reproject driver's fast path
 /// passes the launcher snapshot's `last_rect` here so a recreated window
 /// lands roughly where it was, instead of at a new-window default position.
