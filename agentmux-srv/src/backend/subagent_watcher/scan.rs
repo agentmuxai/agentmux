@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
+use super::completion;
 use super::parse::file_mtime;
 use super::types::*;
 use super::SubagentWatcher;
@@ -253,8 +254,78 @@ impl SubagentWatcher {
         // (dispatch_id, status) for this block — not just the ones just
         // reconciled — so the Workflow-dispatch aggregation pass below has
         // the full picture per dispatch_id, not just this pass's deltas.
-        let (reconciled_agent_ids, member_statuses_by_dispatch): (
+        // Which of this block's still-`Active` members actually RETURNED.
+        //
+        // Until this existed, every one of them was downgraded to `Abandoned`
+        // on the reasoning that a subagent file without a terminal `Result`
+        // line must have been cut off. That premise is false: AgentMux
+        // transcripts contain no `"type":"result"` line at all, so the
+        // inference fired on healthy dispatches too and the Swarm pane showed
+        // successful Agent-tool calls as "interrupted". `completion.rs` asks a
+        // question the format can actually answer — did the PARENT record a
+        // `tool_result` for this dispatch's `tool_use_id`. See
+        // docs/reports/REPORT_SUBAGENT_COMPLETION_NEVER_DETECTED_2026_09_05.md.
+        //
+        // Resolved BEFORE taking the `sessions` lock, and in two phases: read
+        // the candidate list under a short lock, do the file IO (a parent
+        // transcript is routinely tens of MB) unlocked, then apply. This
+        // function is deliberately careful not to hold that mutex across
+        // anything slow — see the scoping comment below. The apply pass
+        // re-checks `Active`, so a member whose status moved in between is
+        // left alone rather than clobbered by a stale decision.
+        let resolved_statuses: HashMap<String, SubAgentStatus> = {
+            let candidates: Vec<(String, PathBuf)> = {
+                let sessions = self.sessions.lock().unwrap();
+                sessions
+                    .get(session_id)
+                    .map(|session| {
+                        session
+                            .subagents
+                            .values()
+                            .filter(|s| {
+                                s.info.parent_block_id == parent_block_id
+                                    && s.info.status == SubAgentStatus::Active
+                            })
+                            .map(|s| {
+                                (s.info.agent_id.clone(), PathBuf::from(&s.info.jsonl_path))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            // Each candidate resolves its OWN parent transcript, with reads
+            // cached per distinct path. Resolving once from an arbitrary
+            // member and reusing it for the rest was wrong twice over
+            // (reagent P1 on #3007): Workflow-tool members sit one level
+            // deeper (`subagents/workflows/<run-id>/`) so they don't all
+            // share a resolution, and `candidates` comes from a HashMap with
+            // unspecified iteration order — so in a mixed batch an
+            // unresolvable member landing first would zero the map and drag
+            // every Solo member into `Abandoned` too, non-deterministically.
+            let mut results_by_parent: HashMap<PathBuf, HashMap<String, bool>> = HashMap::new();
+            candidates
+                .into_iter()
+                .map(|(agent_id, path)| {
+                    let status = match completion::parent_transcript_for(&path) {
+                        Some(parent) => {
+                            let results = results_by_parent
+                                .entry(parent.clone())
+                                .or_insert_with(|| completion::parent_tool_results_at(&parent));
+                            let tool_use_id = completion::tool_use_id_for(&path);
+                            completion::terminal_status(tool_use_id.as_deref(), results)
+                        }
+                        // No `subagents` ancestor — unrecognised layout.
+                        // Fall back to the historical inference.
+                        None => SubAgentStatus::Abandoned,
+                    };
+                    (agent_id, status)
+                })
+                .collect()
+        };
+
+        let (reconciled_agent_ids, completed_members, member_statuses_by_dispatch): (
             Vec<String>,
+            Vec<(String, String, usize)>,
             HashMap<String, Vec<SubAgentStatus>>,
         ) = {
             let mut sessions = self.sessions.lock().unwrap();
@@ -270,6 +341,7 @@ impl SubagentWatcher {
             // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
             // P1 on PR #2131.
             let mut reconciled_agent_ids = Vec::new();
+            let mut completed_members: Vec<(String, String, usize)> = Vec::new();
             let mut member_statuses_by_dispatch: HashMap<String, Vec<SubAgentStatus>> =
                 std::collections::HashMap::new();
             for state in session.subagents.values_mut() {
@@ -277,7 +349,34 @@ impl SubagentWatcher {
                     continue;
                 }
                 if state.info.status == SubAgentStatus::Active {
-                    state.info.status = SubAgentStatus::Abandoned;
+                    // Absent a resolution (no sidecar, unreadable parent, an
+                    // entry that appeared after the snapshot above) fall back
+                    // to the historical `Abandoned` — never optimistically
+                    // complete something we could not correlate.
+                    let resolved = resolved_statuses
+                        .get(&state.info.agent_id)
+                        .cloned()
+                        .unwrap_or(SubAgentStatus::Abandoned);
+                    state.info.status = resolved.clone();
+                    if resolved == SubAgentStatus::Completed {
+                        tracing::info!(
+                            agent_id = %state.info.agent_id,
+                            parent_block_id = %parent_block_id,
+                            session_id = %session_id,
+                            dispatch_id = %state.info.dispatch_id,
+                            "subagent reconciled: active -> completed (parent recorded a tool_result)"
+                        );
+                        completed_members.push((
+                            state.info.agent_id.clone(),
+                            state.info.dispatch_id.clone(),
+                            state.info.event_count,
+                        ));
+                        member_statuses_by_dispatch
+                            .entry(state.info.dispatch_id.clone())
+                            .or_default()
+                            .push(state.info.status.clone());
+                        continue;
+                    }
                     reconciled_agent_ids.push(state.info.agent_id.clone());
                     // Every field a NAME-based grouping/dedup bug needs to
                     // reconstruct offline: which subagent, which dispatch,
@@ -298,8 +397,23 @@ impl SubagentWatcher {
                     .or_default()
                     .push(state.info.status.clone());
             }
-            (reconciled_agent_ids, member_statuses_by_dispatch)
+            (
+                reconciled_agent_ids,
+                completed_members,
+                member_statuses_by_dispatch,
+            )
         };
+        // Push the corrections the same way the abandoned ones are pushed —
+        // an already-open Swarm pane otherwise keeps showing these as running
+        // until some unrelated reload happens to refresh it.
+        for (agent_id, dispatch_id, total_events) in &completed_members {
+            self.broadcast_subagent_completed(
+                parent_block_id,
+                agent_id,
+                dispatch_id,
+                *total_events,
+            );
+        }
         if !reconciled_agent_ids.is_empty() {
             tracing::info!(
                 parent_block_id = %parent_block_id,
@@ -423,6 +537,48 @@ impl SubagentWatcher {
                     "data": {
                         "parentBlockId": parent_block_id,
                         "agentIds": agent_ids,
+                    }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
+    }
+
+    /// The `Completed` counterpart to `broadcast_subagents_abandoned` above,
+    /// for members reconciliation resolved as having actually returned (see
+    /// `completion.rs`). Emits the same `subagent:completed` event `jsonl.rs`
+    /// already sends when it observes a completion live, so a client needs no
+    /// new handling for the reconcile path — it just stops being told
+    /// "abandoned" for dispatches that returned.
+    ///
+    /// Per-agent rather than batched, unlike its `Abandoned` sibling: the
+    /// payload carries per-member fields (`totalEvents`, `dispatchId`) that a
+    /// batched shape has nowhere to put, and matching `jsonl.rs`'s existing
+    /// event exactly is worth more here than saving a broadcast — a reconcile
+    /// pass typically resolves a handful of completions, not the dozens the
+    /// batching rationale above was written for.
+    ///
+    /// `parentAgent` is omitted (the live emitter includes it): reconcile is
+    /// keyed on the block, and no consumer reads that field.
+    fn broadcast_subagent_completed(
+        &self,
+        parent_block_id: &str,
+        agent_id: &str,
+        dispatch_id: &str,
+        total_events: usize,
+    ) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "subagent:completed",
+                    "data": {
+                        "agentId": agent_id,
+                        "parentBlockId": parent_block_id,
+                        "totalEvents": total_events,
+                        "dispatchId": dispatch_id,
                     }
                 }
             })),
