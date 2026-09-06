@@ -18,7 +18,7 @@
 > AgentMux composes is empty in practice. §3 and §4 are rewritten
 > accordingly. The measurements are recorded in full because several
 > contradict a previously-accepted conclusion in
-> `docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md` (§2.6).
+> `docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md` (§2.7).
 
 ---
 
@@ -121,7 +121,7 @@ globalized (CLAUDE.md's own data-isolation notes), so global-brain content
 does not follow a new build. That explains the 0 — and means it is a
 *structural* consequence of the isolation model, not a one-off.
 
-### 2.7 What is and isn't global — measured, because it is easy to get backwards
+### 2.6 What is and isn't global — measured, because it is easy to get backwards
 
 Storage scope decides which memory survives a new build, so it was measured
 directly rather than reasoned from the isolation notes:
@@ -147,7 +147,7 @@ because they are the same bytes, not because something syncs them.
 one measured empty in §2.5.** "Memory doesn't carry over on a new build" and
 "the composed file has no `# Memory` section" are the same finding, not two.
 
-### 2.6 A previously-accepted conclusion is now stale
+### 2.7 A previously-accepted conclusion is now stale
 
 `docs/analysis/TOKEN_TAX_FOLLOWUP_2026_07_04.md:16` records the
 two-memory-systems question as **"Already resolved — Option A shipped"**:
@@ -197,7 +197,7 @@ running with no curated memory. It looks identical to working.
 
 ### 4.2 Reconcile the two systems' roles, and write the decision down
 
-§2.6's decision record is stale and actively misleading. This needs an
+§2.7's decision record is stale and actively misleading. This needs an
 explicit, current answer to: *which system owns which kind of memory?*
 
 Recommended, matching how they actually behave:
@@ -305,7 +305,7 @@ an unknown:
 3. **Should a fresh build channel inherit global-brain bundles?** Today
    `db_bundles` is not globalized, so every new channel starts with an empty
    brain (§2.5). Everything else an agent carries — transcripts, native
-   memory, definitions — *is* global (§2.7), which makes the global brain
+   memory, definitions — *is* global (§2.6), which makes the global brain
    the lone exception and the direct root cause of "memory doesn't carry
    over" on a portable build. That is how this was noticed, and it is the
    single highest-leverage decision in this spec: globalizing `db_bundles`
