@@ -1301,33 +1301,36 @@ pub struct NetworkBundle {
 /// and the process tracker/broker.
 pub async fn bind_listeners_and_network(
     config: &config::Config,
-    config_watcher: &Arc<wconfig::ConfigWatcher>,
     event_bus: &Arc<EventBus>,
     broker: &Arc<Broker>,
     version: &str,
 ) -> NetworkBundle {
-    // When LAN discovery is enabled the user has explicitly opted in to network
-    // visibility. Bind to 0.0.0.0 so devices on the same network can reach the
-    // port that mDNS advertises. The scoped `lan_key` (X-AuthKey header,
-    // broadcast in the mDNS TXT record) gates only the two LAN-forwarding
-    // routes (`lan_or_full_auth_middleware`) — not the full auth_key
-    // previously broadcast here, which gated the entire API surface (see
-    // Config::lan_key's doc comment).
+    // Startup listeners are ALWAYS loopback-only, regardless of the
+    // `network:lan_discovery` setting. LAN reachability is owned entirely by
+    // `backend::lan_listeners::LanListenerSupervisor`, which binds one extra
+    // socket per non-loopback interface address on these same ports and tears
+    // them down when the setting flips off. `main.rs` calls `apply()` with the
+    // current setting immediately after the router exists, so a user who
+    // already had LAN enabled is reachable from boot — just via the
+    // supervisor's sockets rather than a wildcard one here.
     //
-    // Known limitation: `bind_addr` is resolved once at startup. The toggle is
-    // therefore only fully effective before launch (settings.json) or after a
-    // sidecar restart. Both directions are affected:
-    //   OFF→ON: mDNS re-advertises the LAN IP but listeners stay on 127.0.0.1,
-    //           so remote devices cannot connect until restart.
-    //   ON→OFF: mDNS is stopped but listeners remain on 0.0.0.0 and are still
-    //           reachable on the LAN until restart (lan_key still gates routes).
-    // A future improvement would re-bind listeners on toggle; deferred because
-    // rebinding an active axum server is non-trivial.
-    let bind_addr = if config_watcher.get_settings().network_lan_discovery {
-        "0.0.0.0:0"
-    } else {
-        "127.0.0.1:0"
-    };
+    // Do NOT reintroduce a conditional `0.0.0.0:0` bind. A wildcard socket
+    // holding the port makes the supervisor's per-address binds fail with
+    // EADDRINUSE on Linux/macOS (they succeed on Windows, which lacks
+    // SO_EXCLUSIVEADDRUSE by default — so the bug reproduces on only two of
+    // three platforms). On Linux/macOS that leaves `active` empty, which drives
+    // `sync_advertising` to `discovery.apply(false)` and silently switches off
+    // the mDNS advertising the user had enabled — an ON→OFF regression on every
+    // restart for exactly the users who already opted in. On Windows it instead
+    // leaves two sockets on one port with ambiguous accept. Keeping startup
+    // strictly loopback makes the supervisor the single owner of every LAN
+    // socket on both counts. [reagent #3021 P0]
+    //
+    // The scoped `lan_key` (X-AuthKey header, broadcast in the mDNS TXT record)
+    // gates only the two LAN-forwarding routes (`lan_or_full_auth_middleware`)
+    // — not the full auth_key previously broadcast here, which gated the entire
+    // API surface (see Config::lan_key's doc comment).
+    let bind_addr = backend::lan_listeners::STARTUP_BIND_ADDR;
     let web_listener = TcpListener::bind(bind_addr)
         .await
         .expect("failed to bind web listener");
@@ -1362,22 +1365,24 @@ pub async fn bind_listeners_and_network(
         event_bus.clone(),
         config.lan_key.clone(),
     ));
-    // Honor the current setting at boot — starts the daemon if enabled.
-    lan_discovery.apply(config_watcher.get_settings().network_lan_discovery);
+    // Deliberately NOT applied here. The supervisor below is the single driver
+    // of `lan_discovery.apply`, so mDNS can never advertise an endpoint before
+    // (or without) a socket actually listening on it. `main.rs` reads the
+    // setting and calls `lan_listeners.apply(..)` as soon as the router exists,
+    // which reconciles listeners and then gates advertising on the result.
 
-    // LAN listeners. Startup already bound loopback (or 0.0.0.0 when the
-    // setting was on at launch); this supervisor adds/removes the LAN-facing
-    // listeners on the SAME ports so the setting takes effect live rather than
-    // at the next restart. `apply` is deferred to `main.rs`, which is where the
-    // router it needs to serve finally exists.
+    // LAN listeners. Startup bound loopback only (always — see the bind comment
+    // above); this supervisor adds/removes the LAN-facing listeners on the SAME
+    // ports so the setting takes effect live rather than at the next restart.
+    // `apply` is deferred to `main.rs`, which is where the router it needs to
+    // serve finally exists.
     let lan_listeners = Arc::new(backend::lan_listeners::LanListenerSupervisor::new(
         web_addr.port(),
         ws_addr.port(),
     ));
-    // The supervisor owns the advertise/reachable pairing from here on: it
-    // re-gates mDNS on every reconcile so we never advertise an address
-    // nothing is listening on. The `apply` above still stands as the boot-time
-    // setting read; the supervisor corrects it once listeners are up.
+    // The supervisor owns the advertise/reachable pairing: it re-gates mDNS on
+    // every reconcile so we never advertise an address nothing is listening on,
+    // and it performs the boot-time setting read too (via `main.rs`).
     lan_listeners.set_discovery(lan_discovery.clone());
 
     // LSP supervisor — owns LSP server child processes. Nothing spawned

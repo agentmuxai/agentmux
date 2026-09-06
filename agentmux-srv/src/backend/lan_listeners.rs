@@ -49,6 +49,21 @@
 /// - **IPv6 link-local (`fe80::/10`)** — requires a scope id to be usable as a
 ///   bind/connect target, and peers advertise reachable addresses via mDNS
 ///   anyway. Including them would produce listeners nothing can dial.
+/// The address srv's own startup listeners bind, unconditionally.
+///
+/// **Loopback-only is load-bearing, not a default.** This supervisor is the
+/// sole owner of every LAN-facing socket; startup must not pre-empt it with a
+/// wildcard bind. A `0.0.0.0:PORT` socket holding the port makes
+/// [`LanListenerSupervisor::spawn_pair`]'s per-address binds fail with
+/// `EADDRINUSE` on Linux/macOS, which leaves `active` empty and drives
+/// [`LanListenerSupervisor::sync_advertising`] to switch mDNS *off* — silently
+/// disabling LAN on every restart for users who had already enabled it. (On
+/// Windows the binds succeed instead and you get two sockets on one port with
+/// ambiguous accept — see `wildcard_vs_loopback_conflict_is_platform_dependent`
+/// and `wildcard_then_specific_conflict_is_platform_dependent` below.)
+/// [reagent #3021 P0]
+pub const STARTUP_BIND_ADDR: &str = "127.0.0.1:0";
+
 pub fn lan_bind_addresses() -> Vec<std::net::IpAddr> {
     let Ok(ifaces) = if_addrs::get_if_addrs() else {
         tracing::warn!("could not enumerate network interfaces; no LAN listeners will bind");
@@ -420,6 +435,70 @@ mod tests {
              platform; if it no longer does, the same report's platform note \
              is stale"
         );
+    }
+
+    /// The **reverse order** of the test above, and the one that actually bit:
+    /// a wildcard socket bound FIRST, then the per-address bind this supervisor
+    /// performs. This is the boot sequence that existed when startup bound
+    /// `0.0.0.0:0` for a user who already had `network:lan_discovery` on.
+    ///
+    /// On Linux/macOS the per-address bind fails, so `reconcile` binds nothing,
+    /// `has_lan_listener()` stays false, and `sync_advertising` calls
+    /// `discovery.apply(false)` — turning OFF the mDNS the user had enabled.
+    /// A silent LAN-disable on every restart, for exactly the opted-in users.
+    /// On Windows the bind succeeds and you instead get two sockets on one port.
+    ///
+    /// Neither outcome is acceptable, which is why [`STARTUP_BIND_ADDR`] is
+    /// loopback unconditionally. Like its sibling, this asserts the *measured*
+    /// per-platform behaviour so a change in either direction is visible.
+    #[test]
+    fn wildcard_then_specific_conflict_is_platform_dependent() {
+        let Some(lan_ip) = primary_lan_ipv4() else {
+            eprintln!("skipping: no non-loopback IPv4 on this host");
+            return;
+        };
+
+        let wildcard = TcpListener::bind("0.0.0.0:0").expect("bind wildcard");
+        let port = wildcard.local_addr().unwrap().port();
+        let specific = TcpListener::bind((lan_ip, port));
+
+        let conflicts = specific.is_err();
+        eprintln!(
+            "{lan_ip}:{port} vs existing 0.0.0.0:{port} — conflicts: {conflicts} \
+             (expected: true on Linux/macOS, false on Windows)"
+        );
+
+        #[cfg(windows)]
+        assert!(
+            !conflicts,
+            "Windows was measured as ALLOWING the per-address bind under a \
+             wildcard; if it now conflicts, STARTUP_BIND_ADDR's rationale needs \
+             re-checking (the fix is still correct either way)"
+        );
+        #[cfg(not(windows))]
+        assert!(
+            conflicts,
+            "expected the per-address bind to be refused under a wildcard on \
+             this platform — this conflict is the whole reason startup binds \
+             loopback only; got {:?}",
+            specific.err()
+        );
+    }
+
+    /// Guards the fix itself: startup must never go back to a wildcard bind.
+    ///
+    /// Cheap, but it is the assertion that would have caught the original
+    /// regression — `bind_listeners_and_network` now takes its address from
+    /// this constant rather than branching on the setting.
+    #[test]
+    fn startup_bind_is_loopback_only() {
+        let addr: std::net::SocketAddr = STARTUP_BIND_ADDR.parse().expect("parses as a SocketAddr");
+        assert!(
+            addr.ip().is_loopback(),
+            "startup must bind loopback so the supervisor solely owns LAN \
+             sockets; got {addr}"
+        );
+        assert_eq!(addr.port(), 0, "startup port must stay ephemeral");
     }
 
     /// `primary_lan_ipv4` must never hand back something unusable as a bind

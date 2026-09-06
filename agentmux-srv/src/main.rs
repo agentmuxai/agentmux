@@ -79,7 +79,6 @@ async fn main() {
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = bootstrap::bind_listeners_and_network(
         &config,
-        &bg.config_watcher,
         &bg.event_bus,
         &bg.broker,
         &version,
