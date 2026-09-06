@@ -1,12 +1,34 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Linux-specific zoom module.
-// Chrome zoom sets only --zoomfactor. WebKitGTK does NOT divide flex
-// space by zoom, so no width compensation is needed (CSS uses 100vw).
-
-// Per-pane zoom — modifies the focused block's term:zoom metadata.
-// Chrome zoom — scales title bar + status bar together via --zoomfactor CSS var.
+// Zoom module — per-pane zoom (the focused block's `term:zoom` metadata)
+// and chrome zoom (title bar + status bar, via the `--zoomfactor` CSS var).
+//
+// This used to be three files — `zoom.win32.ts`, `zoom.linux.ts`,
+// `zoom.darwin.ts` — selected by the `.platform` import resolver. Measured
+// on 2026-09-06 they differed by **nine lines, every one a comment**: the
+// JavaScript was identical on all three platforms
+// (docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md §2.3). The
+// per-platform knowledge those comments carried is real, though, so it is
+// kept here rather than lost:
+//
+// The one platform-sensitive concern is *width compensation* when chrome
+// zoom scales the header. JS sets ONLY `--zoomfactor`; how the header's
+// width is compensated is a CSS decision that differs per platform, and it
+// must stay in CSS — do NOT set `--chrome-header-width` (or any width) from
+// JS on any platform:
+//
+//   - Windows: `calc(100vw / var(--zoomfactor, 1))` in window-header.scss.
+//     Setting the width from JS breaks Windows.
+//   - macOS:   `width: 100%` in window-header.darwin.scss. Do NOT switch
+//     it to the `calc(100vw / …)` form — that double-divides on WebKit and
+//     the window buttons drift left on zoom.
+//   - Linux:   WebKitGTK does NOT divide flex space by zoom, so no
+//     compensation is needed at all; the CSS uses a plain `100vw`.
+//
+// If a genuine JS-level platform difference ever appears, the right shape is
+// a single branch on the runtime platform inside `applyChromeZoomCSS` — not
+// three copies of this file.
 
 import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -132,7 +154,8 @@ export function zoomReset(): void {
 // ── Chrome zoom (title bar + status bar) ──────────────────────────
 
 function applyChromeZoomCSS(factor: number): void {
-    // Linux: only set --zoomfactor. No width compensation needed.
+    // Only set --zoomfactor. Width compensation is pure CSS on every
+    // platform — see the header comment for the per-platform rule.
     document.documentElement.style.setProperty("--zoomfactor", String(factor));
 }
 
