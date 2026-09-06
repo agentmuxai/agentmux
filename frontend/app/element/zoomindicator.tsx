@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { zoomIndicatorTextAtom, zoomIndicatorVisibleAtom } from "@/app/store/zoom.platform";
+import { zoomIndicatorTextAtom, zoomIndicatorVisibleAtom } from "@/app/store/zoom";
 import { JSX, Show } from "solid-js";
 import "./zoomindicator.scss";
 

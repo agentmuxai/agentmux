@@ -587,7 +587,7 @@ export function buildCefApi(): AppApi {
             // is in CSS pixels — these match DIP when no zoom applies in the
             // event-target's ancestor chain. AgentMux today only zooms
             // `.window-header` and `.status-bar` (via the per-pane chrome
-            // zoom in `zoom.platform.ts`), so pane content events ARE in
+            // zoom in `zoom.ts`), so pane content events ARE in
             // view DIP. Defensive against future page-zoom changes:
             // divide by any inherited CSS `zoom` on documentElement.
             const rootZoomStr = getComputedStyle(document.documentElement).getPropertyValue("zoom").trim();

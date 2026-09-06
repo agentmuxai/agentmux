@@ -12,7 +12,7 @@ import { showTextInputContextMenu } from "@/store/contextmenu";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getApi, getSettingsPrefixAtom, isDev, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
-import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom.platform";
+import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";

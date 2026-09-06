@@ -4,7 +4,7 @@
 import { QuickTips } from "@/app/element/quicktips";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { showZoomIndicator } from "@/app/store/zoom.platform";
+import { showZoomIndicator } from "@/app/store/zoom";
 import { WOS } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal, onMount, type JSX } from "solid-js";

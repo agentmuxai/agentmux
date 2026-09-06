@@ -2241,7 +2241,7 @@ const AgentPresentationView = ({
     // intercepts Ctrl+/-/0 and dispatches to `zoomIn/Out/Reset`, and
     // `app.tsx` routes Ctrl+Wheel to `zoomBlockIn/Out`. Both call
     // paths probe the focused block's `viewType`, and `viewType ===
-    // "agent"` is explicitly supported (see `zoom.win32.ts::getBlockZoom`).
+    // "agent"` is explicitly supported (see `zoom.ts::getBlockZoom`).
     // The universal flow writes `term:zoom` on block meta, which we
     // read back via `zoomFactor()` and apply on the root div below.
     //

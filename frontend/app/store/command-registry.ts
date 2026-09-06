@@ -20,7 +20,7 @@ import { invokeCommand } from "@/app/platform/ipc";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
-import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
+import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 
 // ---------------------------------------------------------------------------
 // Types
