@@ -261,8 +261,26 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     // On macOS/Linux, emits pool:new-window (no workspaceId → fresh workspace).
     // On Windows, delegates to promote_pool_window with workspace_id="" and physical-pixel
     // anchor (bypassing DIP→physical DPI double-conversion; see promote_pool_window_for_new_window).
-    let (pos_x, pos_y) = get_offset_position();
-    let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+    // Probe the monitor from the cascade anchor when we have one, else the
+    // primary — `get_secondary_window_size` only uses the point to pick a
+    // monitor.
+    let (probe_x, probe_y) = cascade_anchor().unwrap_or((0, 0));
+    let (win_w, win_h) = get_secondary_window_size(probe_x, probe_y);
+    // Centre the dimensions the window will ACTUALLY have. On Windows the pool
+    // promote below discards `win_w`/`win_h` and uses POOL_WIDTH/POOL_HEIGHT
+    // (see `promote_pool_window_for_new_window`), so centring `win_w`/`win_h`
+    // here would offset the window by half the difference.
+    // PHYSICAL pixels on both sides: POOL_WIDTH/POOL_HEIGHT reach SetWindowPos
+    // unconverted (promote_pool_window only runs to_physical when width is
+    // Some), so they must be centred against the physical work area.
+    #[cfg(target_os = "windows")]
+    let (pos_x, pos_y) = new_window_origin(
+        crate::commands::window_pool::POOL_WIDTH,
+        crate::commands::window_pool::POOL_HEIGHT,
+        crate::app::get_monitor_work_area_physical(0, 0),
+    );
+    #[cfg(not(target_os = "windows"))]
+    let (pos_x, pos_y) = new_window_origin(win_w, win_h, None);
     if let Some(label) = crate::commands::window_pool::promote_pool_window_for_new_window(
         state, pos_x, pos_y, win_w, win_h, initial_view.clone(), initial_meta.clone(),
     ) {
@@ -342,8 +360,8 @@ pub fn open_subwindow(
 /// bypassing the IPC-handler wrappers (`open_new_window`/`open_subwindow`)
 /// that assume a live, frontend-originated request.
 ///
-/// `explicit_rect`: when `Some`, skips `get_offset_position`/
-/// `get_secondary_window_size`'s offset/70%-of-monitor placement heuristic
+/// `explicit_rect`: when `Some`, skips `new_window_origin`/
+/// `get_secondary_window_size`'s cascade-or-centre/70%-of-monitor placement
 /// and uses the given rect verbatim — the reproject driver's fast path
 /// passes the launcher snapshot's `last_rect` here so a recreated window
 /// lands roughly where it was, instead of at a new-window default position.
@@ -440,8 +458,20 @@ pub(crate) fn open_window_with_kind(
     let (pos_x, pos_y, win_w, win_h) = match explicit_rect {
         Some(r) => (r.left, r.top, r.right - r.left, r.bottom - r.top),
         None => {
-            let (pos_x, pos_y) = get_offset_position();
-            let (win_w, win_h) = get_secondary_window_size(pos_x, pos_y);
+            // Size first (it only needs a point to pick a monitor), then an
+            // origin that centres THAT size when nothing is open to cascade
+            // from. The cold path really does get `win_w`/`win_h`, unlike the
+            // pool path above.
+            let (probe_x, probe_y) = cascade_anchor().unwrap_or((0, 0));
+            let (win_w, win_h) = get_secondary_window_size(probe_x, probe_y);
+            // DIP on both sides: get_secondary_window_size divides by the
+            // monitor scale (CEF Views set_bounds expects DIP), so centre
+            // against the DIP work area, NOT the physical one.
+            #[cfg(target_os = "windows")]
+            let work = crate::app::get_monitor_work_area(probe_x, probe_y);
+            #[cfg(not(target_os = "windows"))]
+            let work = None;
+            let (pos_x, pos_y) = new_window_origin(win_w, win_h, work);
             (pos_x, pos_y, win_w, win_h)
         }
     };
@@ -890,27 +920,105 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-/// Get an offset position for a new window: 30px right and 30px down from the current window.
-fn get_offset_position() -> (i32, i32) {
+/// Cascade anchor: 30px down-right of an existing top-level window of ours.
+///
+/// `None` when we have no window open — which is the NORMAL case in
+/// background-service mode (issue #2977), where the tray's "New Window" is
+/// often the first window of the session. Callers must supply their own origin
+/// for that case; see `center_in_work_area`.
+fn cascade_anchor() -> Option<(i32, i32)> {
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
         use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect;
         let hwnd = find_own_top_level_window();
         if !hwnd.is_null() {
             let mut rect: RECT = std::mem::zeroed();
             GetWindowRect(hwnd, &mut rect);
-            return (rect.left + 30, rect.top + 30);
+            return Some((rect.left + 30, rect.top + 30));
         }
+    }
+    None
+}
+
+/// Top-left origin that centres a `win_w` x `win_h` window inside a work area.
+///
+/// Pure so the arithmetic is testable without a display. Clamped at the work
+/// origin: a window LARGER than the work area would otherwise get a negative
+/// offset and hang off the top-left, which is the very failure being fixed
+/// here — just with a different cause.
+fn center_in_work_area(
+    wa_x: i32,
+    wa_y: i32,
+    wa_w: i32,
+    wa_h: i32,
+    win_w: i32,
+    win_h: i32,
+) -> (i32, i32) {
+    let x = wa_x + ((wa_w - win_w) / 2).max(0);
+    let y = wa_y + ((wa_h - win_h) / 2).max(0);
+    (x, y)
+}
+
+/// Where a new top-level window should go, given the size it will actually be
+/// AND the work area to centre it in.
+///
+/// Cascades from an existing window when there is one. When there is NOT, the
+/// window is centred in `work_area`.
+///
+/// The old behaviour here was to return `CW_USEDEFAULT` in that second case.
+/// That is a valid sentinel for `CreateWindow`, which interprets it as "you
+/// pick" — but nothing on this path passes it to `CreateWindow`. It travels on
+/// as a literal coordinate: `promote_pool_window` takes it as a physical-pixel
+/// `SetWindowPos` anchor, and `clamp_rect_within` then pulls that
+/// `0x80000000` back inside the work area, landing every window flush in the
+/// TOP-LEFT corner. Harmless while some window was always already open (the
+/// cascade branch ran instead); very visible once background-service mode made
+/// "no window open" the normal state and the tray's "New Window" the first one.
+///
+/// **`work_area` and `win_w`/`win_h` MUST be in the same unit**, and which unit
+/// that is differs per caller — which is why the work area is passed in rather
+/// than looked up here:
+///
+/// - `open_new_window`'s Windows pool path works in **physical** pixels
+///   (`POOL_WIDTH`/`POOL_HEIGHT` reach `SetWindowPos` unconverted, so it pairs
+///   them with `get_monitor_work_area_physical`).
+/// - the `open_window_with_kind` cold path works in **DIP**
+///   (`get_secondary_window_size` divides by the monitor scale because CEF
+///   Views `set_bounds` expects DIP, so it pairs with `get_monitor_work_area`).
+///
+/// An earlier revision looked the work area up internally with the physical
+/// variant and centred whatever size it was handed. That silently mixed a
+/// physical work area with DIP dimensions on the cold path, mis-centring by
+/// half the DPI difference on any monitor above 100% scale — i.e. on the
+/// 125%/150% that Windows 11 ships by default (ReAgent P1 on #3019).
+///
+/// **Windows-only.** On macOS/Linux there is no work area lookup here and the
+/// origin stays the historical `(100, 100)`; the corner-placement bug this
+/// fixes is a Windows path (`promote_pool_window`/`clamp_rect_within`), and
+/// those platforms position pool windows from the frontend instead.
+fn new_window_origin(
+    win_w: i32,
+    win_h: i32,
+    work_area: Option<(i32, i32, i32, i32)>,
+) -> (i32, i32) {
+    if let Some(anchor) = cascade_anchor() {
+        return anchor;
+    }
+    if let Some((wa_x, wa_y, wa_w, wa_h)) = work_area {
+        return center_in_work_area(wa_x, wa_y, wa_w, wa_h, win_w, win_h);
     }
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::CW_USEDEFAULT;
-        return (CW_USEDEFAULT, CW_USEDEFAULT);
+        (CW_USEDEFAULT, CW_USEDEFAULT)
     }
     #[cfg(not(target_os = "windows"))]
-    (100, 100)
+    {
+        (100, 100)
+    }
 }
+
 
 /// Compute 70% of the monitor's work area for a secondary window at (px, py).
 /// Falls back to 1200x800 if the monitor can't be determined.
@@ -1018,5 +1126,44 @@ mod assets_missing_tests {
             html.contains("writeText(\"Expected at: MISSING_ASSETS\")"),
             "Copy path must writeText the detail as a valid JS string literal"
         );
+    }
+}
+
+#[cfg(test)]
+mod new_window_origin_tests {
+    use super::center_in_work_area;
+
+    /// The reported bug: with no window open, the tray's "New Window" landed
+    /// flush in the top-left instead of the middle of the main display.
+    #[test]
+    fn a_window_is_centred_on_a_standard_work_area() {
+        // 1920x1080 minus a 40px taskbar, pool window 1200x800.
+        assert_eq!(center_in_work_area(0, 0, 1920, 1040, 1200, 800), (360, 120));
+    }
+
+    /// Work areas do not start at (0, 0): a taskbar on the left or top shifts
+    /// the origin, and a monitor left of the primary has negative coordinates.
+    /// Centring must be relative to the work area, not the screen.
+    #[test]
+    fn centring_is_relative_to_the_work_area_origin() {
+        assert_eq!(center_in_work_area(-1920, 0, 1920, 1040, 1200, 800), (-1560, 120));
+        assert_eq!(center_in_work_area(0, 40, 1920, 1000, 1200, 800), (360, 140));
+    }
+
+    /// A window at least as large as the work area must sit AT the origin, not
+    /// at a negative offset — that would reproduce the top-left-corner bug
+    /// this function exists to fix, just by a different route.
+    #[test]
+    fn an_oversized_window_clamps_to_the_work_origin_rather_than_going_negative() {
+        assert_eq!(center_in_work_area(0, 0, 1000, 700, 1200, 800), (0, 0));
+        assert_eq!(center_in_work_area(100, 50, 1200, 800, 1200, 800), (100, 50));
+    }
+
+    /// Small monitors are the case where a half-pixel of rounding is most
+    /// visible; assert the exact expected value so the arithmetic cannot drift.
+    #[test]
+    fn odd_leftovers_round_down_consistently() {
+        assert_eq!(center_in_work_area(0, 0, 1001, 801, 1000, 800), (0, 0));
+        assert_eq!(center_in_work_area(0, 0, 1003, 805, 1000, 800), (1, 2));
     }
 }
