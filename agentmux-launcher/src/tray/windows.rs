@@ -250,7 +250,8 @@ fn run(
 ///
 /// `agentmux-launcher/build.rs` hands `agentmux-cef/resources/win/agentmux.ico`
 /// to winres, which emits `1 ICON "..."` — ordinal 1. Kept as a named constant
-/// so the coupling to build.rs is visible from here; `brand_icon_is_embedded`
+/// so the coupling to build.rs is visible from here;
+/// `the_icon_asset_build_rs_embeds_actually_exists`
 /// guards the half of that coupling a test can actually reach.
 const BRAND_ICON_ORDINAL: u16 = 1;
 
