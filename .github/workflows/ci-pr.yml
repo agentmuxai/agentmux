@@ -97,6 +97,14 @@ jobs:
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
 
+      # Same rationale as the three above — encodes a regression that already
+      # happened (PR #3023 P0: tier-4 cloud relay read credentials from the
+      # wrong store and silently never fired). Not unit-testable: test_state()
+      # backs wstore/id_store/identity_store with one Store, so a runtime test
+      # cannot tell them apart.
+      - name: muxbus credential store gate
+        run: bash scripts/check-muxbus-credential-store.sh
+
   frontend:
     name: vitest
     runs-on: ubuntu-latest
