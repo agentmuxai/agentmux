@@ -212,8 +212,9 @@ pub(crate) fn set_pane_main_frame_loading(
         loading,
         url,
     );
-    crate::events::emit_event_from_state(
+    crate::events::emit_browser_pane_event(
         state,
+        block_id,
         "browser-pane-nav-state",
         &serde_json::json!({
             "block_id": block_id,
@@ -532,8 +533,9 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
             "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=true",
             block_id_short, url,
         );
-        crate::events::emit_event_from_state(
+        crate::events::emit_browser_pane_event(
             state,
+            &block_id,
             "browser-pane-nav-state",
             &serde_json::json!({
                 "block_id": block_id,
@@ -613,8 +615,9 @@ pub fn on_loading_state_change_browser_pane(
             "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=false is_loading={} (raw_cef_is_loading={}) can_back={} can_forward={}",
             block_id_short, url, corrected_is_loading, is_loading, can_go_back, can_go_forward,
         );
-        crate::events::emit_event_from_state(
+        crate::events::emit_browser_pane_event(
             state,
+            &block_id,
             "browser-pane-nav-state",
             &serde_json::json!({
                 "block_id": block_id,

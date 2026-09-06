@@ -1476,3 +1476,52 @@ fn reconcile_quit_poke_is_quit_relevant() {
     use super::is_quit_relevant;
     assert!(is_quit_relevant(&HostCommand::ReconcileQuit));
 }
+
+// ── Browser-pane host→JS event routing ──────────────────────────────────────
+// A pane's push events (nav-state / title-change / favicon-urls) must be
+// delivered to the top-level window that OWNS the pane, never blindly to
+// `main`: after a tab tear-off recreates the pane in a promoted pool window,
+// `main` has no listener for that block_id, the events are silently dropped,
+// and the pane's loading overlay never clears. See
+// docs/reports/REPORT_BROWSER_PANE_EVENTS_MISROUTED_TO_MAIN_WINDOW_2026_09_06.md.
+
+#[test]
+fn browser_pane_event_target_is_the_owning_window_not_main() {
+    let mut state = HostState::default();
+    // The reported repro: pane recreated in a promoted pool window while
+    // `main` is still alive.
+    let out = update(
+        &mut state,
+        HostCommand::TryRegisterBrowserPaneLive {
+            block_id: "b1".into(),
+            pending: Some(pending_in("window-pool-930b71ac")),
+        },
+    );
+    assert!(matches!(
+        out.browser_pane_register_result,
+        Some(RegisterResult::Fresh(_))
+    ));
+    assert_eq!(
+        crate::events::browser_pane_event_target(&state, "b1").as_deref(),
+        Some("window-pool-930b71ac"),
+    );
+}
+
+#[test]
+fn browser_pane_event_target_is_none_for_unknown_or_windowless_pane() {
+    let mut state = HostState::default();
+    assert_eq!(
+        crate::events::browser_pane_event_target(&state, "nope"),
+        None
+    );
+    // The legacy enqueue path records no window: the emitter must fall back
+    // to its previous behaviour rather than try to deliver to an empty label.
+    update(
+        &mut state,
+        browser_pane_request("legacy", "browser-pane-legacy-1"),
+    );
+    assert_eq!(
+        crate::events::browser_pane_event_target(&state, "legacy"),
+        None
+    );
+}

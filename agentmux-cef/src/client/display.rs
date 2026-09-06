@@ -83,8 +83,9 @@ impl AgentMuxHandler {
                         block_id_short,
                         title_str,
                     );
-                    crate::events::emit_event_from_state(
+                    crate::events::emit_browser_pane_event(
                         &self.state,
+                        &block_id,
                         "browser-pane-title-change",
                         &serde_json::json!({ "block_id": block_id, "title": title_str }),
                     );
@@ -151,8 +152,9 @@ impl AgentMuxHandler {
             urls.len(),
             urls.first(),
         );
-        crate::events::emit_event_from_state(
+        crate::events::emit_browser_pane_event(
             &self.state,
+            &block_id,
             "browser-pane-favicon-urls",
             &serde_json::json!({ "block_id": block_id, "urls": urls }),
         );
