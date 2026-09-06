@@ -25,10 +25,21 @@
  * above the whole transcript regardless of virtualization internals — the
  * same reason the original floating-ui `Tooltip` component never had this
  * bug. Position is `fixed` (not `absolute`) using raw
- * `getBoundingClientRect()` viewport coordinates — already zoom-safe (CSS
- * `zoom`, not `transform: scale()`, per AgentDocumentVirtualList.tsx's own
- * CDP-verified comments) — and floating-ui's `autoUpdate` keeps it synced
- * on scroll/resize without hand-rolling scroll listeners.
+ * `getBoundingClientRect()` viewport coordinates, and floating-ui's
+ * `autoUpdate` keeps it synced on scroll/resize without hand-rolling
+ * scroll listeners.
+ *
+ * **Pane zoom (2026-09-06).** Escaping the row's subtree also escapes the
+ * pane's `zoom`, which `agent-view.tsx` sets on the pane root — so this
+ * panel used to render at 100% no matter how far the agent pane was zoomed
+ * in or out, while everything around it scaled. An earlier revision of this
+ * header called the component "already zoom-safe", which was true only of
+ * its POSITION: `getBoundingClientRect()` reports post-zoom viewport pixels,
+ * so the panel always landed in the right place — at the wrong size. That
+ * half-truth is precisely why the gap survived. It now reads the pane's
+ * factor off the anchor row's inherited `--agent-pane-zoom` and applies it
+ * to itself; see `readPaneZoom` and `withPaneZoom` for the mechanism and
+ * for why every length has to be divided by the factor.
  *
  * Positioning is deliberately single-direction (top-anchored, growing
  * downward over the entry) rather than the above/below picker
@@ -91,8 +102,10 @@ interface PeekOverlayProps {
      * `translateX(-100%)` rather than a `right:` offset, deliberately —
      * `right` would need `window.innerWidth`, which is a different
      * coordinate space from the `getBoundingClientRect()` values
-     * everything else here uses, and would break the CSS-`zoom` safety
-     * this component's header documents.
+     * everything else here uses. It also keeps the pane-zoom compensation
+     * in `withPaneZoom` uniform: every length it touches is a
+     * `getBoundingClientRect()`-derived viewport pixel, divided by the same
+     * factor. A `right:` offset would need the opposite correction.
      */
     align?: "end" | "stretch";
     children?: JSX.Element;
@@ -107,6 +120,63 @@ const BOTTOM_MARGIN_PX = 4;
 // own top edge (align="end" mode only) — see the `top` computation in
 // `update()` below for why this must be strictly positive.
 const CURSOR_GAP_PX = 12;
+
+/**
+ * This overlay's owning pane's zoom factor, read off the anchor row.
+ *
+ * `agent-view.tsx` sets BOTH `zoom: <factor>` and `--agent-pane-zoom:
+ * <factor>` on the pane root. The row is inside that subtree, so the custom
+ * property inherits down to it — reading from the row means this works for
+ * whichever pane the hovered entry belongs to (and for the history view,
+ * which sets the same pair) without threading a prop through all six
+ * call sites.
+ *
+ * Returns 1 for anything unparseable, absent, or non-positive: a peek
+ * rendered outside an agent pane (or in a test harness with no computed
+ * custom properties) must keep behaving exactly as it did before.
+ */
+function readPaneZoom(row: HTMLElement | undefined): number {
+    if (!row) return 1;
+    const raw = getComputedStyle(row).getPropertyValue("--agent-pane-zoom").trim();
+    const parsed = Number.parseFloat(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+/** Style lengths that are in real viewport px and must be de-scaled. */
+const ZOOM_SCALED_LENGTHS = ["left", "top", "width", "max-width", "max-height"] as const;
+
+/**
+ * Re-express a style computed in REAL viewport pixels so it renders
+ * identically on an element that carries `zoom: paneZoom`.
+ *
+ * This is the whole fix, and the division is the non-obvious half of it.
+ * CSS `zoom` on an element multiplies the used value of that element's OWN
+ * lengths — including the inset properties of a positioned element. With
+ * `zoom: 2`, `left: 100px` paints at 200px from the viewport's left edge.
+ * Every input here comes from `getBoundingClientRect()`, which already
+ * reports post-zoom rendered pixels, so each length must be pre-divided by
+ * the factor to land where it did before.
+ *
+ * `transform: translateX(-100%)` is deliberately NOT touched: it resolves
+ * against the element's own border-box width, which scales with it, so it
+ * stays correct at any zoom.
+ *
+ * A `paneZoom` of exactly 1 returns the style untouched (no `zoom`
+ * property emitted at all) — the overwhelmingly common case stays
+ * byte-identical to the pre-fix behavior.
+ */
+function withPaneZoom(style: JSX.CSSProperties, paneZoom: number): JSX.CSSProperties {
+    if (paneZoom === 1) return style;
+    const scaled: JSX.CSSProperties = { ...style, zoom: paneZoom };
+    for (const key of ZOOM_SCALED_LENGTHS) {
+        const value = style[key];
+        if (typeof value !== "string") continue;
+        const px = Number.parseFloat(value);
+        if (!Number.isFinite(px)) continue;
+        scaled[key] = `${px / paneZoom}px`;
+    }
+    return scaled;
+}
 
 export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
@@ -130,15 +200,21 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         if (!row) return;
         const rect = row.getBoundingClientRect();
         const container = findScrollContainerRect(row);
+        const paneZoom = readPaneZoom(row);
         if ((props.align ?? "end") === "stretch") {
             const cap = Math.max(0, container.bottom - rect.top - BOTTOM_MARGIN_PX);
-            setFloatingStyle({
-                position: "fixed",
-                left: `${rect.left}px`,
-                top: `${rect.top}px`,
-                width: `${rect.width}px`,
-                "max-height": `${cap}px`,
-            });
+            setFloatingStyle(
+                withPaneZoom(
+                    {
+                        position: "fixed",
+                        left: `${rect.left}px`,
+                        top: `${rect.top}px`,
+                        width: `${rect.width}px`,
+                        "max-height": `${cap}px`,
+                    },
+                    paneZoom,
+                ),
+            );
             return;
         }
         // Shrink-wrapped and right-anchored. No `width` is set at all, so the
@@ -201,14 +277,19 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             top = rect.top;
         }
         const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
-        setFloatingStyle({
-            position: "fixed",
-            left: `${rect.right}px`,
-            top: `${top}px`,
-            transform: "translateX(-100%)",
-            "max-width": `${rect.width}px`,
-            "max-height": `${cap}px`,
-        });
+        setFloatingStyle(
+            withPaneZoom(
+                {
+                    position: "fixed",
+                    left: `${rect.right}px`,
+                    top: `${top}px`,
+                    transform: "translateX(-100%)",
+                    "max-width": `${rect.width}px`,
+                    "max-height": `${cap}px`,
+                },
+                paneZoom,
+            ),
+        );
     };
 
     // Track the mouse continuously while the row exists, independent of

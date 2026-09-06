@@ -233,4 +233,121 @@ describe("PeekOverlay", () => {
             vi.useRealTimers();
         }
     });
+
+    // The panel is Portal-rendered to document.body, which escapes the agent
+    // pane's `zoom` — so it used to paint at 100% while the pane around it
+    // scaled. It now reads `--agent-pane-zoom` off the anchor row (the var
+    // inherits down from the pane root) and applies it to itself.
+    describe("agent pane zoom", () => {
+        function setRect(el: Element, rect: Partial<DOMRect>) {
+            vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+                top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => {},
+                ...rect,
+            } as DOMRect);
+        }
+
+        /** A row inside a scroll container inside a zoomed pane root. */
+        function makeZoomedRow(paneZoom: string | null) {
+            const paneRoot = document.createElement("div");
+            if (paneZoom != null) paneRoot.style.setProperty("--agent-pane-zoom", paneZoom);
+            document.body.appendChild(paneRoot);
+            const container = document.createElement("div");
+            container.style.overflowY = "auto";
+            paneRoot.appendChild(container);
+            const row = document.createElement("div");
+            container.appendChild(row);
+            setRect(container, { top: 0, bottom: 1000, right: 400 });
+            setRect(row, { top: 100, bottom: 300, left: 100, right: 400, width: 300 });
+            return row;
+        }
+
+        function renderPeek(row: HTMLElement, align?: "end" | "stretch") {
+            render(() => (
+                <PeekOverlay show={true} rowEl={() => row} align={align}>
+                    <span>peek content</span>
+                </PeekOverlay>
+            ));
+            vi.advanceTimersByTime(50);
+            return document.querySelector(".agent-node-peek-overlay") as HTMLElement;
+        }
+
+        it("applies the pane's zoom factor to the portaled panel", () => {
+            vi.useFakeTimers();
+            try {
+                const overlay = renderPeek(makeZoomedRow("1.5"));
+                expect(overlay.style.zoom).toBe("1.5");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        // The non-obvious half: CSS `zoom` also multiplies the element's own
+        // inset lengths, and every input here is an already-post-zoom
+        // getBoundingClientRect() value — so each must be pre-divided to land
+        // where it did before. Without this the panel would fly off-screen at
+        // high zoom instead of merely being the wrong size.
+        it("pre-divides its viewport-px geometry so the panel still lands on the row's edge", () => {
+            vi.useFakeTimers();
+            try {
+                const overlay = renderPeek(makeZoomedRow("2"));
+                // row.right is 400 real px; at zoom 2 that must be written as 200.
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(200, 5);
+                // max-width tracks the row's 300px width → 150 at zoom 2.
+                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(150, 5);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("de-scales the stretch variant's width and left too", () => {
+            vi.useFakeTimers();
+            try {
+                const overlay = renderPeek(makeZoomedRow("2"), "stretch");
+                expect(overlay.style.zoom).toBe("2");
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(50, 5);   // 100 / 2
+                expect(parseFloat(overlay.style.top)).toBeCloseTo(50, 5);    // 100 / 2
+                expect(parseFloat(overlay.style.width)).toBeCloseTo(150, 5); // 300 / 2
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        // The overwhelmingly common case must stay byte-identical to the
+        // pre-fix behavior — no `zoom` property emitted, no division.
+        it("emits no zoom and leaves geometry untouched at 100%", () => {
+            vi.useFakeTimers();
+            try {
+                const overlay = renderPeek(makeZoomedRow("1"));
+                expect(overlay.style.zoom).toBe("");
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(400, 5);
+                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(300, 5);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        // A peek rendered outside any agent pane (or in a harness with no
+        // computed custom properties) must not break.
+        it("falls back to 1 when the pane zoom variable is absent", () => {
+            vi.useFakeTimers();
+            try {
+                const overlay = renderPeek(makeZoomedRow(null));
+                expect(overlay.style.zoom).toBe("");
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(400, 5);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("ignores a malformed or non-positive zoom variable", () => {
+            vi.useFakeTimers();
+            try {
+                expect(renderPeek(makeZoomedRow("not-a-number")).style.zoom).toBe("");
+                cleanup();
+                expect(renderPeek(makeZoomedRow("0")).style.zoom).toBe("");
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
 });
