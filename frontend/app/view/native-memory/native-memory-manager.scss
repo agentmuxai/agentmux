@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Styles for NativeMemoryManager — Armory's "Native Memory" tab
-// (agent picker + file picker + NativeMemoryHistoryPanel).
+// Styles for NativeMemoryManager — Armory's "Native Memory" tab. Three
+// screens in one drill-down, each its own grid/list: agent cards →
+// file cards → NativeMemoryHistoryPanel.
 
 .native-memory-manager {
     display: flex;
@@ -18,30 +19,6 @@
     padding: var(--space-2);
     border-bottom: 1px solid var(--border-color);
     background: var(--panel-bg-color);
-}
-
-.native-memory-manager-field {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    flex: 1;
-    max-width: 320px;
-    font-size: var(--text-xs);
-    color: var(--secondary-text-color);
-
-    select {
-        padding: var(--space-1) var(--space-1-5);
-        border: 1px solid var(--border-color);
-        border-radius: 0;
-        background: var(--main-bg-color);
-        color: var(--main-text-color);
-        font-size: var(--text-sm);
-
-        &:disabled {
-            opacity: 0.6;
-        }
-    }
 }
 
 .native-memory-manager-error {
@@ -157,6 +134,125 @@
     }
 }
 
+// ── File grid (2026-09-04) ───────────────────────────────────────────────
+// Second screen of the drill-down. Replaces the file <select> that used to
+// live in the detail header; same card metrics as the agent grid above, since
+// the two are consecutive screens of one flow. See MemoryFileCard.tsx.
+
+.native-memory-manager-file-grid-view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-3);
+}
+
+.native-memory-manager-file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-2);
+}
+
+.memory-file-card {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    min-height: 56px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    border-radius: 0;
+    color: var(--main-text-color);
+    text-align: left;
+    cursor: default;
+    transition: all 0.15s;
+    min-width: 0;
+
+    &:hover,
+    &:focus-visible {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+    }
+
+    // The index file is the entry point the agent loads every session — a
+    // left rule marks it without spending a whole badge row on emphasis.
+    &--index {
+        border-left: 2px solid color-mix(in srgb, var(--accent-color) 60%, var(--border-color));
+    }
+}
+
+.memory-file-card-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: 14px;
+    color: var(--secondary-text-color);
+    opacity: 0.8;
+}
+
+.memory-file-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.memory-file-card-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    font-family: var(--termfontfamily, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.memory-file-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+
+    // Collapse the row entirely when a file has neither an index marker nor a
+    // metadata_type, so the meta line doesn't sit on a phantom gap.
+    &:empty {
+        display: none;
+    }
+}
+
+.memory-file-card-badge {
+    padding: 0 5px;
+    border: 1px solid var(--border-color);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+
+    &--index {
+        border-color: color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+        color: var(--accent-color);
+    }
+}
+
+.memory-file-card-meta {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+// ── Grids — narrow panes ─────────────────────────────────────────────────
+// Panes go down to 128px in either dimension (MinNodeSizePx,
+// frontend/layout/lib/layoutResize.ts), where a 200px minimum track overflows
+// its own container. Both grids collapse to a single column rather than
+// scrolling sideways — same narrow-pane budget the filter bar below already
+// works to.
+@container armory (max-width: 359px) {
+    .native-memory-manager-grid,
+    .native-memory-manager-file-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 // ── Detail view ──────────────────────────────────────────────────────────
 
 .native-memory-manager-detail {
@@ -191,6 +287,33 @@
     font-size: var(--text-sm);
     font-weight: 600;
     color: var(--main-text-color);
+}
+
+// Agent name, then (on the history screen only) the open filename. `min-width:
+// 0` + the ellipsis on the filename below keep a long memory filename from
+// pushing the back button off the header at a narrow pane width.
+.native-memory-manager-crumbs {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.native-memory-manager-crumb-sep {
+    flex-shrink: 0;
+    color: var(--secondary-text-color);
+    opacity: 0.6;
+}
+
+.native-memory-manager-filename {
+    min-width: 0;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    font-family: var(--termfontfamily, monospace);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 // ── Filter bar (2026-09-02) ──────────────────────────────────────────────
@@ -262,7 +385,10 @@
     color: var(--secondary-text-color);
     font-size: 14px;
     line-height: 1;
-    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    transition:
+        background 0.1s,
+        color 0.1s,
+        border-color 0.1s;
 
     &:hover {
         background: color-mix(in srgb, var(--error-color) 15%, transparent);
