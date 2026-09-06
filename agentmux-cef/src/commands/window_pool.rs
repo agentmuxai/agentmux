@@ -1034,6 +1034,14 @@ struct PromoteFallback {
     pos_y: i32,
     width: i32,
     height: i32,
+    /// Issue #2977 WS3 — this promote was a tray PANEL, not an ordinary
+    /// window. Without it the fallback would recover a failed panel promote
+    /// as a normal, full-size, normally-placed window with no always-on-top:
+    /// the user asks for a panel, the renderer fails to confirm, and they get
+    /// something entirely different (Codex P2 + ReAgent P2 on PR #3002).
+    /// Uses the same `pos_x/pos_y/width/height` above, which for a panel are
+    /// already the exact rect it was promoted at.
+    panel: bool,
 }
 
 /// Workstream 0 Phase 1 prerequisite #2 (issue #2977) — arm a bounded
@@ -1121,7 +1129,32 @@ fn arm_promote_liveness(state: &Arc<AppState>, label: &str, fallback: PromoteFal
              opening a fresh cold-path window instead of leaving the user with a possibly-dead one"
         );
 
-        let result = if fallback.workspace_id.is_empty() {
+        let result = if fallback.panel {
+            // Recreate a PANEL: explicit rect (so it is panel-sized and
+            // panel-placed rather than taking the new-window offset
+            // heuristic) plus always-on-top, matching what `open_panel`'s own
+            // cold path does.
+            let out = crate::commands::window::open_window_with_kind(
+                &state,
+                WindowKind::FullInstance,
+                None,
+                fallback.initial_view.as_deref(),
+                fallback.initial_meta.as_deref(),
+                Some(agentmux_common::ipc::Rect {
+                    left: fallback.pos_x,
+                    top: fallback.pos_y,
+                    right: fallback.pos_x + fallback.width,
+                    bottom: fallback.pos_y + fallback.height,
+                }),
+                false,
+            );
+            if let Ok(v) = &out {
+                if let Some(label) = v.as_str() {
+                    crate::ui_tasks::post_set_always_on_top(&state, label);
+                }
+            }
+            out
+        } else if fallback.workspace_id.is_empty() {
             // New-window promote (Cmd+N / File → New Window): no workspace to
             // reattach, the frontend creates a fresh one. Position is
             // arbitrary here, so take the cold path's normal offset placement
@@ -1204,6 +1237,11 @@ pub fn promote_pool_window(
     tab_anchor_y: Option<i32>,
     initial_view: Option<String>,
     initial_meta: Option<String>,
+    // Issue #2977 WS3 — this promote is a tray panel. Only affects the
+    // liveness FALLBACK (`PromoteFallback::panel`), so a panel whose renderer
+    // never confirms is recovered as a panel rather than as an ordinary
+    // full-size window.
+    is_panel: bool,
 ) -> Option<String> {
     // PR #5 H.4 — atomic pop+remove via reducer. The dispatch pops
     // the front of the pool queue, removes the label from
@@ -1619,6 +1657,7 @@ pub fn promote_pool_window(
             pos_y,
             width: win_w,
             height: win_h,
+            panel: is_panel,
         },
     );
 
@@ -1735,6 +1774,11 @@ pub fn promote_pool_window(
     tab_anchor_y: Option<i32>,
     initial_view: Option<String>,
     initial_meta: Option<String>,
+    // Issue #2977 WS3 — this promote is a tray panel. Only affects the
+    // liveness FALLBACK (`PromoteFallback::panel`), so a panel whose renderer
+    // never confirms is recovered as a panel rather than as an ordinary
+    // full-size window.
+    is_panel: bool,
 ) -> Option<String> {
     // Atomic pop from the pool queue via reducer. Returns None if empty
     // — caller falls back to cold path.
@@ -1789,6 +1833,7 @@ pub fn promote_pool_window(
             pos_y: y,
             width: w,
             height: h,
+            panel: is_panel,
         },
     );
 
@@ -1872,6 +1917,7 @@ pub fn promote_pool_window_for_new_window(
             Some(pos_y),  // tab_anchor_y
             initial_view,
             initial_meta,
+            false, // ordinary new window, not a panel
         );
     }
 
@@ -1919,6 +1965,7 @@ pub fn promote_pool_window_for_new_window(
                 pos_y,
                 width,
                 height,
+                panel: false,
             },
         );
 

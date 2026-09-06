@@ -1004,6 +1004,18 @@ pub struct DispatchOutput {
     /// background audit log for surfacing when a window next opens.
     pub background_attention: Option<bool>,
 
+    /// Set `true` by `RegisterBrowser` when a live USER window registered
+    /// while `QuitState` had already left `Running` — i.e. a window creation
+    /// that was already in flight when a quit began (ReAgent P1 on PR #2996).
+    ///
+    /// The caller (`client::on_after_created`) MUST close that browser
+    /// immediately. The pre-checks on the creation paths narrow this race but
+    /// cannot close it — registration is the last step, so this is the only
+    /// point that cannot be raced. Leaving it open means a live window
+    /// stranded in a draining host, which the WRR watchdog then force-kills
+    /// seconds later in front of the user.
+    pub registered_during_drain: bool,
+
     /// Set `true` by `RelabelBrowser` when the rename succeeded (or was a
     /// no-op because `old_label == new_label`). Stays `false` on failure
     /// (old label absent, or new label already registered — e.g. a
@@ -1069,7 +1081,7 @@ pub(crate) fn background_attention_transition_for_test(
     quit::background_attention_transition(enabled, currently_unattended, live_after)
 }
 
-pub(crate) use quit::count_live_user_windows;
+pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
 
 /// Whether a command can change the quit decision's inputs — the live
 /// user-window count (`browsers`), pending user-initiated creations, or
