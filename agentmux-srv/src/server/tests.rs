@@ -79,6 +79,7 @@ pub(crate) fn test_state() -> AppState {
             event_bus.clone(),
             String::new(),
         )),
+        lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
         lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,
         process_broker,

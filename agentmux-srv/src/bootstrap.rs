@@ -1286,6 +1286,11 @@ pub struct NetworkBundle {
     pub ws_addr: std::net::SocketAddr,
     pub local_web_url: String,
     pub lan_discovery: Arc<backend::lan_discovery::LanDiscoveryController>,
+    /// Owns the LAN-facing listeners so `network:lan_discovery` takes effect
+    /// live, instead of only at the next startup — see
+    /// `backend::lan_listeners`. Needs its router handed to it by `main.rs`
+    /// after `build_router`.
+    pub lan_listeners: Arc<backend::lan_listeners::LanListenerSupervisor>,
     pub lsp_supervisor: Arc<backend::lsp::LspSupervisor>,
     pub process_tracker: Arc<backend::process_tracker::registry::AgentProcessRegistry>,
     pub process_broker: Arc<crate::broker::ProcessBroker>,
@@ -1359,6 +1364,21 @@ pub async fn bind_listeners_and_network(
     ));
     // Honor the current setting at boot — starts the daemon if enabled.
     lan_discovery.apply(config_watcher.get_settings().network_lan_discovery);
+
+    // LAN listeners. Startup already bound loopback (or 0.0.0.0 when the
+    // setting was on at launch); this supervisor adds/removes the LAN-facing
+    // listeners on the SAME ports so the setting takes effect live rather than
+    // at the next restart. `apply` is deferred to `main.rs`, which is where the
+    // router it needs to serve finally exists.
+    let lan_listeners = Arc::new(backend::lan_listeners::LanListenerSupervisor::new(
+        web_addr.port(),
+        ws_addr.port(),
+    ));
+    // The supervisor owns the advertise/reachable pairing from here on: it
+    // re-gates mDNS on every reconcile so we never advertise an address
+    // nothing is listening on. The `apply` above still stands as the boot-time
+    // setting read; the supervisor corrects it once listeners are up.
+    lan_listeners.set_discovery(lan_discovery.clone());
 
     // LSP supervisor — owns LSP server child processes. Nothing spawned
     // until the editor pane calls `lspstart`. Spec:
@@ -1457,6 +1477,7 @@ pub async fn bind_listeners_and_network(
         ws_addr,
         local_web_url,
         lan_discovery,
+        lan_listeners,
         lsp_supervisor,
         process_tracker,
         process_broker,
@@ -1601,6 +1622,7 @@ pub fn build_app_state(
         subagent_watcher: bg.subagent_watcher,
         history_service: bg.history_service,
         lan_discovery: net.lan_discovery.clone(),
+        lan_listeners: net.lan_listeners.clone(),
         lsp_supervisor: net.lsp_supervisor.clone(),
         local_web_url: net.local_web_url.clone(),
         // Bounded request timeout: cross-instance reactive-inject forwards

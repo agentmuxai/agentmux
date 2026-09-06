@@ -1568,13 +1568,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // The fs watcher's subsequent reload is a no-op (settings already up to date).
     let config_watcher_setconfig = state.config_watcher.clone();
     let event_bus_setconfig = state.event_bus.clone();
-    let lan_discovery_setconfig = state.lan_discovery.clone();
+
+    let lan_listeners_setconfig = state.lan_listeners.clone();
     engine.register_handler(
         COMMAND_SET_CONFIG,
         Box::new(move |data, _ctx| {
             let cw = config_watcher_setconfig.clone();
             let eb = event_bus_setconfig.clone();
-            let lan = lan_discovery_setconfig.clone();
+
+            let lan_listeners = lan_listeners_setconfig.clone();
             Box::pin(async move {
                 let new_keys: serde_json::Map<String, serde_json::Value> =
                     serde_json::from_value(data).map_err(|e| format!("setconfig: {e}"))?;
@@ -1592,7 +1594,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 //    idempotent so it's safe to call unconditionally — when the
                 //    daemon is already in the requested state, this is a no-op.
                 //    See docs/specs/lan-discovery-toggle.md.
-                lan.apply(lan_enabled);
+                //
+                //    Only the LISTENER supervisor is driven here. It owns the
+                //    advertise/reachable pairing and re-gates `lan` itself on
+                //    every reconcile, so mDNS never advertises an address
+                //    nothing is listening on ("discovered but unreachable").
+                //    Calling `lan.apply` here as well would fight that gate —
+                //    it would advertise immediately, before any listener is
+                //    bound, which is the exact state being designed out.
+                lan_listeners.apply(lan_enabled);
 
                 // 4. Broadcast updated config now — no waiting for fs watcher
                 let config = cw.get_full_config();
