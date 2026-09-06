@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.55.36 — 2026-09-05
+
+- fix(agent): provider_flags were dropped from cmd:args on every send
+- fix(host): gate last-window quit behind background-service mode (tray Workstream 0 prereq #1)
+- fix(agent-pane): hide the tab strip entirely on a fresh pane, so the picker isn't overlaid by a lone +
+- feat(window): Chrome-style drag-to-top maximize and border-drag vertical snap
+- fix(pool): fall back to a fresh window when a promoted pool window never proves its renderer is alive
+- feat(layout): drop Armory from the default startup panes; CPU now sits above Swarm
+- fix(tabs): tab bar highlights the clicked tab immediately instead of waiting on the destination pane's reveal
+- feat(armory): memory file picker is a tile grid, not a dropdown
+- docs(tray): answer the launcher event-loop assumption from code — no Win32 pump exists
+- fix(agent): bump the stale fable model pin and stop the picker advertising a model it doesn't select
+- docs(tray): document the tray-less reopen path for background-service mode
+- fix(agent): activity dock title no longer over-truncates; fix garbled tail glyph
+- feat(tray): optional Windows tray icon with graceful quit (issue #2977 WS1)
+- feat(autostart): opt-in auto-start registration for Windows, macOS and Linux (issue #2977 WS2)
+- feat(audit): record and surface what the background service did while unattended (issue #2977 WS4)
+- feat(tray): small companion panel window opened from the tray (issue #2977 WS3)
+
 ## 0.55.35 — 2026-09-04
 
 - fix(toolchain): persist system-tool install success across stale-PATH refresh, show live version and collapsible install details
