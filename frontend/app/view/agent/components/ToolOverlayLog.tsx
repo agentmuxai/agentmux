@@ -44,7 +44,6 @@ import "./tool-renderers/DispatchCard";
 
 interface ToolOverlayLogProps {
     node: ToolNode;
-    fontScale?: () => number;
     /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
      *  see `activity/dispatch-correlation.ts`. Undefined when no confident
      *  match was found, or for any other tool kind. */
@@ -160,8 +159,13 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         const el = scrollRef;
         if (!el) return;
         const onWheel = (e: WheelEvent) => {
-            // Ctrl+wheel is the preview font-zoom gesture (ToolBlock.tsx) —
-            // leave it alone.
+            // Ctrl+wheel is a ZOOM gesture, not a scroll — never scroll-chain
+            // it. It used to belong to the preview's own font-zoom
+            // (ToolBlock.tsx); that was removed 2026-09-06 and it now falls
+            // through to the pane zoom in app.tsx. The guard is still
+            // required either way: without it, a Ctrl+wheel at this box's
+            // scroll boundary would zoom the pane AND scroll it at the same
+            // time.
             if (e.ctrlKey) return;
             const atTop = el.scrollTop <= 0;
             const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
@@ -341,7 +345,6 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
             class="agent-tool-overlay-log"
             ref={scrollRef}
             onScroll={onScroll}
-            style={props.fontScale ? { "font-size": `${props.fontScale() * 100}%` } : undefined}
         >
             <Switch>
                 <Match when={isStreaming() && hasChunks()}>
