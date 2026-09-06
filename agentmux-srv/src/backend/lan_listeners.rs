@@ -89,6 +89,30 @@ pub fn lan_bind_addresses() -> Vec<std::net::IpAddr> {
     out
 }
 
+/// **Every** address this host answers on — loopback and IPv6 link-local
+/// included.
+///
+/// Deliberately broader than [`lan_bind_addresses`], and for a different
+/// purpose: that one answers "where should we listen", this one answers "is
+/// this address us?". The exclusions that make sense for binding are exactly
+/// wrong here — a link-local `fe80::` address is useless as a bind target but
+/// is very much still us when it comes back in an mDNS resolution, which is
+/// the case that made this necessary (see
+/// `LanDiscovery::resolves_to_this_instance`).
+pub fn all_local_addresses() -> std::collections::HashSet<std::net::IpAddr> {
+    match if_addrs::get_if_addrs() {
+        Ok(ifaces) => ifaces.into_iter().map(|i| i.ip()).collect(),
+        Err(e) => {
+            // Empty means "can't prove any address is ours", so the self-check
+            // that consumes this simply won't fire. That degrades to today's
+            // behaviour (a phantom self-peer) rather than to something worse
+            // like discarding a real peer.
+            tracing::warn!(error = %e, "could not enumerate interfaces for the LAN self-check");
+            std::collections::HashSet::new()
+        }
+    }
+}
+
 /// Best-effort discovery of this host's *primary outbound* non-loopback IPv4
 /// address.
 ///
