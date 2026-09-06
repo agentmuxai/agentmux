@@ -1350,6 +1350,31 @@ fn reconcile_quit_never_drains_when_background_service_enabled() {
     );
 }
 
+/// Issue #2977 WS4 — the transition is level-triggered against the CURRENT
+/// state, so it fires only on a real crossing and is idempotent under the
+/// repeated zero-window dispatches pool churn produces.
+#[test]
+fn attention_transition_fires_only_on_a_real_crossing() {
+    use super::quit::background_attention_transition as t;
+    // attended -> no windows left
+    assert_eq!(t(true, false, 0), Some(true));
+    // unattended -> a window opened
+    assert_eq!(t(true, true, 1), Some(false));
+    // Already in that state: not a new event.
+    assert_eq!(t(true, true, 0), None);
+    assert_eq!(t(true, false, 3), None);
+}
+
+/// With background-service mode off, reaching zero windows means the app is
+/// EXITING, not resting — there is no unattended period to tell the user
+/// about, and reporting one would be actively misleading.
+#[test]
+fn no_attention_transitions_when_background_service_is_off() {
+    use super::quit::background_attention_transition as t;
+    assert_eq!(t(false, false, 0), None);
+    assert_eq!(t(false, true, 1), None);
+}
+
 /// Idempotent: once draining, reconcile is a no-op (no double-drain).
 #[test]
 fn reconcile_quit_noop_once_draining() {
