@@ -38,10 +38,24 @@ GEN_DIR="frontend/types/rpc"
 
 cd "$(dirname "$0")/.." || exit 1
 
+# Every dirtiness check here goes through `git status --porcelain`, never
+# `git diff`. `git diff --quiet -- <path>` only inspects TRACKED files, so a
+# generated binding that has never been committed shows up as untracked and
+# the check passes — which is precisely the case this gate exists to catch:
+# a new type derives TS, its .ts is left out of the commit, and a fresh
+# checkout is missing a binding the frontend imports. `-uall` lists files
+# inside untracked directories too, so a whole new subdirectory is not
+# collapsed to a single entry. (ReAgent + Codex both flagged this on #3078;
+# confirmed here: `git diff --quiet` exits 0 with a new untracked file in
+# the path, while `git status --porcelain` reports it as `??`.)
+generated_dirt() {
+    git status --porcelain -uall -- "$GEN_DIR" 2>/dev/null
+}
+
 # Refuse to run against a tree that is already dirty in the generated
 # directory: a pre-existing edit there would be indistinguishable from drift
-# this run produced, and the diff below would blame the generator for it.
-if ! git diff --quiet -- "$GEN_DIR" 2>/dev/null; then
+# this run produced, and the report below would blame the generator for it.
+if [ -n "$(generated_dirt)" ]; then
     echo "check-rpc-bindings: $GEN_DIR has uncommitted changes before regenerating." >&2
     echo "  Commit or stash them first — otherwise this check cannot tell your" >&2
     echo "  edits apart from generator drift." >&2
@@ -55,7 +69,7 @@ if ! cargo test -p agentmux-srv export_bindings >/dev/null 2>&1; then
     exit 1
 fi
 
-if git diff --quiet -- "$GEN_DIR"; then
+if [ -z "$(generated_dirt)" ]; then
     n=$(find "$GEN_DIR" -name '*.ts' 2>/dev/null | wc -l | tr -d ' ')
     echo "check-rpc-bindings: ok ($n generated type(s) current)"
     exit 0
@@ -68,6 +82,9 @@ echo "" >&2
 echo "  Fix: cargo test -p agentmux-srv export_bindings && git add $GEN_DIR" >&2
 echo "" >&2
 echo "  Difference (committed vs regenerated):" >&2
+# Status first: it is the only one of the two that shows a binding which is
+# missing from the commit entirely (`??`), as opposed to merely changed.
+generated_dirt >&2
 git --no-pager diff --stat -- "$GEN_DIR" >&2
 git --no-pager diff -- "$GEN_DIR" | head -60 >&2
 exit 1
