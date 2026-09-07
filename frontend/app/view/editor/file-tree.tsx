@@ -68,23 +68,12 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                 <For each={props.model.rootsAtom()}>
                     {(root: Root) => (
                         <TreeNode
-                            model={props.model}
+                            {...props}
                             path={root.path}
                             name={root.name}
                             depth={0}
                             isDir={true}
                             isSymlink={false}
-                            activeFilePath={props.activeFilePath}
-                            showHidden={props.showHidden}
-                            onFileClick={props.onFileClick}
-                            onFileDblClick={props.onFileDblClick}
-                            onContextMenu={props.onContextMenu}
-                            renamingPath={props.renamingPath}
-                            onRenameConfirm={props.onRenameConfirm}
-                            onRenameCancel={props.onRenameCancel}
-                            newEntry={props.newEntry}
-                            onNewEntryConfirm={props.onNewEntryConfirm}
-                            onNewEntryCancel={props.onNewEntryCancel}
                         />
                     )}
                 </For>
@@ -134,6 +123,11 @@ function FileTreeToolbar(props: FileTreeToolbarProps): JSX.Element {
     );
 }
 
+/**
+ * Everything except `path` / `name` / `depth` / `isDir` / `isSymlink` is
+ * per-tree state that every node forwards unchanged to its children; the
+ * two `<TreeNode {...props} …/>` sites spread it rather than re-listing it.
+ */
 interface TreeNodeProps {
     model: FileTreeModel;
     path: string;
@@ -272,23 +266,12 @@ function TreeNode(props: TreeNodeProps): JSX.Element {
                 <For each={filteredEntries()}>
                     {(entry) => (
                         <TreeNode
-                            model={props.model}
+                            {...props}
                             path={joinPath(props.path, entry.name)}
                             name={entry.name}
                             depth={props.depth + 1}
                             isDir={entry.is_dir}
                             isSymlink={entry.is_symlink}
-                            activeFilePath={props.activeFilePath}
-                            showHidden={props.showHidden}
-                            onFileClick={props.onFileClick}
-                            onFileDblClick={props.onFileDblClick}
-                            onContextMenu={props.onContextMenu}
-                            renamingPath={props.renamingPath}
-                            onRenameConfirm={props.onRenameConfirm}
-                            onRenameCancel={props.onRenameCancel}
-                            newEntry={props.newEntry}
-                            onNewEntryConfirm={props.onNewEntryConfirm}
-                            onNewEntryCancel={props.onNewEntryCancel}
                         />
                     )}
                 </For>

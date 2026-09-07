@@ -216,29 +216,32 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     // briefly flips false (the root cause of the "memory change forgot
     // login" bug fixed in this PR).
 
+    // The Connect CTA has two triggers and one arm:
+    //   - the controller has no usable credentials (`unauthenticated`) or
+    //     the probe said the session is gone (`expired`), or
+    //   - the controller is `ready` — outcomeFor() only asks "does the
+    //     account supply this provider?" — but the backend's expiry probe
+    //     flagged the account itself `needs_reauth` / `expired`. Without
+    //     this the panel would render <ReadyBanner /> and ConnectCta's
+    //     reconnect wording would never be seen; the user would have no
+    //     signal their credentials need refreshing. Clicking Connect
+    //     re-runs OAuth into the SAME account's isolation dir
+    //     (existingAccountId in auth-flow-controller.ts's connect()),
+    //     refreshing the token in place. codex P1 on #982.
+    // The arm is listed first so the stale-ready case wins over the
+    // generic ready arm; `unauthenticated` / `expired` match no other arm,
+    // so folding them in here changes which arm renders for no state.
+    const showConnectCta = () => {
+        const kind = controller.state().kind;
+        if (kind === "unauthenticated" || kind === "expired") return true;
+        const status = props.accountStatus?.();
+        return kind === "ready" && (status === "needs_reauth" || status === "expired");
+    };
+
     return (
         <div class="pre-launch-auth-panel">
             <Switch>
-                {/* An account the backend's expiry probe flagged stale
-                    (`needs_reauth` / `expired`) lands the controller in
-                    `ready` because outcomeFor() only looks at "does the
-                    account supply this provider?". Without this arm the
-                    panel would render <ReadyBanner /> and the
-                    reconnect wording in ConnectCta would never be
-                    seen — the user would have no signal their
-                    credentials need refreshing. Match BEFORE the
-                    generic ready arm so the reconnect CTA wins.
-                    Clicking Connect re-runs OAuth into the SAME
-                    account's isolation dir (existingAccountId in
-                    auth-flow-controller.ts's connect()), refreshing the
-                    token in place. codex P1 on #982. */}
-                <Match
-                    when={
-                        controller.state().kind === "ready" &&
-                        (props.accountStatus?.() === "needs_reauth" ||
-                            props.accountStatus?.() === "expired")
-                    }
-                >
+                <Match when={showConnectCta()}>
                     <ConnectCta
                         provider={props.provider}
                         state={controller.state()}
@@ -305,21 +308,6 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         state={controller.state()}
                         onRetry={() => handleConnect()}
                         canRetry={!props.disabled}
-                    />
-                </Match>
-                <Match
-                    when={
-                        controller.state().kind === "unauthenticated" ||
-                        controller.state().kind === "expired"
-                    }
-                >
-                    <ConnectCta
-                        provider={props.provider}
-                        state={controller.state()}
-                        accountStatus={props.accountStatus?.() ?? null}
-                        hasAccount={props.accountSuppliesProvider()}
-                        onConnect={() => handleConnect()}
-                        disabled={props.disabled ?? false}
                     />
                 </Match>
             </Switch>
