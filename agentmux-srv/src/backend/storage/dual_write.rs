@@ -488,24 +488,31 @@ impl Store {
         // instance was folded at create. The previous version keyed by
         // `inst.id` always and silently no-op'd on every folded
         // instance's lifecycle event.
-        let key = match Self::agents_projection_key_for_inst(&conn, &inst.id) {
-            Some((k, _)) => k,
+        let (key, is_folded) = match Self::agents_projection_key_for_inst(&conn, &inst.id) {
+            Some(k) => k,
             None => return Ok(()),
         };
         // `instance_update` touches block_id/session_id/status/
         // github_context/ended_at. As of schema v29 every one of them is
         // modelled on the consolidated row (the launch-state columns —
-        // see OBJECT_SCHEMA_VERSION's v29 entry), so mirror the whole
-        // post-update row: `inst` is the reloaded legacy row, i.e. the
-        // authoritative current values, and a continuation's update lands
-        // on the chain head via the projection key above, which is exactly
-        // "the agent's latest launch state". `last_block_id` only moves
-        // when the row actually has a block — an empty block_id must not
-        // erase the pointer My Agents uses to find the snapshot. We also
-        // refresh updated_at so a Phase-3b reader can sort by recency,
-        // with the same monotonic-floor trick as the fold branch in
-        // `agents_dual_write_instance_create` — wall clock alone collides
-        // under millisecond resolution on fast successive mutations.
+        // see OBJECT_SCHEMA_VERSION's v29 entry). The row holds the agent's
+        // LATEST launch state, so the launch-state fields are taken from
+        // the newest instance in the chain, not from `inst`: an older
+        // chain member can still receive a late write (a delayed
+        // session/status capture from its old pane) after a continuation
+        // has superseded it, and mirroring that write would swap the
+        // continuation's session for the old one — resuming the wrong
+        // conversation (codex P1 on #3075). `github_context` is not launch
+        // state and mirrors from `inst` as before. `last_block_id` only
+        // moves when the newest launch actually has a block — an empty
+        // block_id must not erase the pointer My Agents uses to find the
+        // snapshot. We also refresh updated_at so a Phase-3b reader can
+        // sort by recency, with the same monotonic-floor trick as the fold
+        // branch in `agents_dual_write_instance_create` — wall clock alone
+        // collides under millisecond resolution on fast successive
+        // mutations.
+        let latest = Self::latest_launch_state_for_key(&conn, &key, is_folded)?
+            .unwrap_or_else(|| (inst.block_id.clone(), inst.session_id.clone(), inst.status.clone(), inst.ended_at));
         let global_prior: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
@@ -523,17 +530,47 @@ impl Store {
                 ended_at = ?6,
                 last_block_id = CASE WHEN ?7 = '' THEN last_block_id ELSE ?7 END
              WHERE id = ?3 AND is_template = 0",
-            params![
-                inst.github_context,
-                now_monotonic,
-                key,
-                inst.session_id,
-                inst.status,
-                inst.ended_at,
-                inst.block_id,
-            ],
+            params![inst.github_context, now_monotonic, key, latest.1, latest.2, latest.3, latest.0],
         )?;
         Ok(())
+    }
+
+    /// The `(block_id, session_id, status, ended_at)` of the NEWEST legacy
+    /// instance in the chain a projection key stands for — the state the
+    /// consolidated row must show. A folded key (`is_folded`) is a
+    /// user-clone definition id, whose launches and continuations all carry
+    /// that `definition_id`; a template-launch key is the chain head's own
+    /// id, whose descendants are found by walking `parent_instance_id`
+    /// downward. Newest by `created_at`, then id, so the choice is
+    /// deterministic on equal timestamps. `None` when no instance is found
+    /// (the caller falls back to the row it was handed).
+    fn latest_launch_state_for_key(
+        conn: &Connection,
+        key: &str,
+        is_folded: bool,
+    ) -> Result<Option<(String, String, String, i64)>, StoreError> {
+        let sql = if is_folded {
+            "SELECT block_id, session_id, status, ended_at
+             FROM db_agent_instances
+             WHERE definition_id = ?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1"
+        } else {
+            "WITH RECURSIVE chain(id) AS (
+                SELECT id FROM db_agent_instances WHERE id = ?1
+                UNION ALL
+                SELECT c.id FROM db_agent_instances c JOIN chain ON c.parent_instance_id = chain.id
+             )
+             SELECT i.block_id, i.session_id, i.status, i.ended_at
+             FROM db_agent_instances i JOIN chain ON i.id = chain.id
+             ORDER BY i.created_at DESC, i.id DESC
+             LIMIT 1"
+        };
+        match conn.query_row(sql, params![key], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))) {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Mirror `instance_set_hidden` into `db_agents.user_hidden`.

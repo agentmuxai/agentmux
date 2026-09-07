@@ -3222,6 +3222,23 @@
             )
             .unwrap();
         assert_eq!(launch_state("inst-ls").0, "sess-2");
+
+        // A late write from the SUPERSEDED launch (its old pane finally
+        // reporting) must not swap the continuation's state back — the row
+        // shows the newest launch's state, not the writer's (codex P1 on
+        // #3075).
+        store
+            .instance_update_partial(
+                "inst-ls",
+                &crate::backend::storage::InstanceUpdate {
+                    session_id: Some("sess-stale".into()),
+                    status: Some("stopped".into()),
+                    ended_at: Some(3500),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(launch_state("inst-ls"), ("sess-2".into(), "running".into(), 3000, 0, "blk-2".into()));
     }
 
     /// Reagent P1 + P2 on #1013 round 2 — pins the user-cloned-def

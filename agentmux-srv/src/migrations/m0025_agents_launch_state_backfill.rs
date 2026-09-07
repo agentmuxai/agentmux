@@ -82,8 +82,77 @@ fn projection_key(
     }
 }
 
-/// The backfill proper, on an open connection. `Ok(n)` = rows updated.
-pub(super) fn backfill_launch_state(conn: &Connection) -> Result<usize, String> {
+/// What the backfill did. `projected` counts template-launch chains whose
+/// consolidated row was missing and had to be created first; `updated`
+/// counts rows that received launch state.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct BackfillStats {
+    pub definitions_repaired: usize,
+    pub projected: usize,
+    pub updated: usize,
+    pub missing_definition: usize,
+}
+
+/// Create the consolidated row for a template-launch chain whose head has
+/// no `db_agents` row yet — the "Phase 3a stamped, db_agents partially
+/// populated" upgrade shape (codex P1 on #3075). Without this the UPDATE
+/// below affects zero rows, the migration is still recorded applied, and
+/// the chain's session/status is unreachable once readers flip. Frozen
+/// copy of the consolidate pass-3 / dual-write head-INSERT column mapping
+/// as of v29, `INSERT OR IGNORE` so it can never clobber a row that
+/// appeared in between. `Ok(false)` when the definition itself is gone —
+/// nothing to project against (the legacy FK cascade would have removed
+/// such an instance; if it survived it is an orphan).
+fn project_template_launch_row(conn: &Connection, root: &LegacyInstance) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "INSERT OR IGNORE INTO db_agents (
+                id, name, icon, description,
+                is_template, parent_template_id,
+                provider, provider_flags, shell, environment,
+                agent_type, agent_bus_id, accounts,
+                auto_start, restart_on_crash, idle_timeout_minutes,
+                slug, branch_label,
+                identity_id, memory_id, working_directory, github_context,
+                instance_name,
+                created_at, updated_at, is_seeded, user_hidden,
+                container_image, container_volumes, container_name,
+                use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                conversation_visibility
+             )
+             SELECT i.id,
+                    CASE WHEN i.instance_name = '' THEN d.name ELSE i.instance_name END,
+                    d.icon, d.description,
+                    0, d.id,
+                    d.provider, d.provider_flags, d.shell, d.environment,
+                    d.agent_type, d.agent_bus_id, d.accounts,
+                    d.auto_start, d.restart_on_crash, d.idle_timeout_minutes,
+                    d.slug, d.branch_label,
+                    i.identity_id, i.memory_id, d.working_directory, i.github_context,
+                    i.instance_name,
+                    i.created_at, i.created_at, 0, i.display_hidden,
+                    d.container_image, d.container_volumes, d.container_name,
+                    d.use_ambient_login, d.model_vendor_base_url, d.auto_continue_enabled,
+                    d.conversation_visibility
+             FROM db_agent_instances i
+             JOIN db_agent_definitions d ON d.id = i.definition_id
+             WHERE i.id = ?1",
+            params![root.id],
+        )
+        .map_err(|e| format!("project template launch {}: {e}", root.id))?;
+    Ok(n > 0)
+}
+
+/// The backfill proper, on an open connection.
+///
+/// Order matters: first every definition missing from `db_agents` is
+/// repaired (the same `repair_def_gaps` bootstrap runs, but bootstrap runs
+/// it AFTER migrations — too late for this one), then every
+/// template-launch chain head missing its projection row is projected,
+/// and only then is launch state copied. Otherwise a missing row would be
+/// skipped here, created later with default launch state, and never
+/// revisited (codex P1 on #3075).
+pub(super) fn backfill_launch_state(conn: &mut Connection) -> Result<BackfillStats, String> {
     let has_legacy: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_instances')",
@@ -92,8 +161,13 @@ pub(super) fn backfill_launch_state(conn: &Connection) -> Result<usize, String> 
         )
         .map_err(|e| format!("probe db_agent_instances: {e}"))?;
     if !has_legacy {
-        return Ok(0);
+        return Ok(BackfillStats::default());
     }
+    let mut stats = BackfillStats {
+        definitions_repaired: crate::backend::storage::agents_consolidate::repair_def_gaps(conn)
+            .map_err(|e| format!("repair definition gaps: {e}"))?,
+        ..Default::default()
+    };
 
     let mut stmt = conn
         .prepare(
@@ -118,8 +192,9 @@ pub(super) fn backfill_launch_state(conn: &Connection) -> Result<usize, String> 
         })
         .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
         .map_err(|e| format!("read db_agent_instances: {e}"))?;
+    drop(stmt);
     if instances.is_empty() {
-        return Ok(0);
+        return Ok(stats);
     }
 
     let mut seeded_stmt = conn
@@ -129,6 +204,7 @@ pub(super) fn backfill_launch_state(conn: &Connection) -> Result<usize, String> 
         .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
         .and_then(|rows| rows.collect::<Result<HashMap<_, _>, _>>())
         .map_err(|e| format!("read db_agent_definitions: {e}"))?;
+    drop(seeded_stmt);
 
     let by_id: HashMap<String, &LegacyInstance> = instances.iter().map(|i| (i.id.clone(), i)).collect();
     // Latest instance per projection key — `created_at`, then id, so the
@@ -145,7 +221,28 @@ pub(super) fn backfill_launch_state(conn: &Connection) -> Result<usize, String> 
         }
     }
 
-    let mut updated = 0usize;
+    // A template-launch key IS the chain head's instance id; if the head has
+    // no consolidated row, project one before the state copy below.
+    for key in latest.keys() {
+        let Some(root) = by_id.get(key) else { continue };
+        let exists: bool = conn
+            .query_row("SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)", params![key], |r| r.get(0))
+            .map_err(|e| format!("probe db_agents {key}: {e}"))?;
+        if exists {
+            continue;
+        }
+        if project_template_launch_row(conn, root)? {
+            stats.projected += 1;
+        } else {
+            stats.missing_definition += 1;
+            tracing::warn!(
+                instance_id = %root.id,
+                definition_id = %root.definition_id,
+                "m0025_agents_launch_state_backfill: template launch has no definition; cannot project"
+            );
+        }
+    }
+
     for (key, inst) in latest {
         let n = conn
             .execute(
@@ -161,9 +258,9 @@ pub(super) fn backfill_launch_state(conn: &Connection) -> Result<usize, String> 
                 params![key, inst.session_id, inst.status, inst.started_at, inst.ended_at, inst.block_id],
             )
             .map_err(|e| format!("update db_agents {key}: {e}"))?;
-        updated += n;
+        stats.updated += n;
     }
-    Ok(updated)
+    Ok(stats)
 }
 
 impl Migration for M0025AgentsLaunchStateBackfill {
@@ -183,11 +280,17 @@ impl Migration for M0025AgentsLaunchStateBackfill {
             Store::open(&ctx.channel_store_path)
                 .map_err(|e| MigrationError(format!("agents_launch_state_backfill: open wstore: {e}")))?,
         );
-        let conn = Connection::open(&ctx.channel_store_path)
+        let mut conn = Connection::open(&ctx.channel_store_path)
             .map_err(|e| MigrationError(format!("agents_launch_state_backfill: open: {e}")))?;
-        let updated = backfill_launch_state(&conn)
+        let stats = backfill_launch_state(&mut conn)
             .map_err(|e| MigrationError(format!("agents_launch_state_backfill: {e}")))?;
-        tracing::info!(updated, "m0025_agents_launch_state_backfill: complete");
+        tracing::info!(
+            definitions_repaired = stats.definitions_repaired,
+            projected = stats.projected,
+            updated = stats.updated,
+            missing_definition = stats.missing_definition,
+            "m0025_agents_launch_state_backfill: complete"
+        );
         Ok(())
     }
 
@@ -296,8 +399,10 @@ mod tests {
     #[test]
     fn backfills_the_latest_launch_of_each_chain_into_its_projection_row() {
         let (_dir, path) = pre_v29_store();
-        let conn = Connection::open(&path).unwrap();
-        assert_eq!(backfill_launch_state(&conn).unwrap(), 2, "one template chain + one clone");
+        let mut conn = Connection::open(&path).unwrap();
+        let stats = backfill_launch_state(&mut conn).unwrap();
+        assert_eq!(stats.updated, 2, "one template chain + one clone: {stats:?}");
+        assert_eq!((stats.projected, stats.definitions_repaired, stats.missing_definition), (0, 0, 0));
         // The template chain's head row carries the CHILD's (latest) state.
         assert_eq!(launch_state(&conn, "head"), ("s2".into(), "running".into(), 3000, "b2".into()));
         // The clone's own row carries its launch.
@@ -309,12 +414,43 @@ mod tests {
     #[test]
     fn is_idempotent_and_never_overwrites_state_written_since() {
         let (_dir, path) = pre_v29_store();
-        let conn = Connection::open(&path).unwrap();
+        let mut conn = Connection::open(&path).unwrap();
         // Live state already on the head row (the dual-write got there first).
         conn.execute("UPDATE db_agents SET session_id = 'live', status = 'running' WHERE id = 'head'", []).unwrap();
-        assert_eq!(backfill_launch_state(&conn).unwrap(), 1, "only the still-default clone row");
+        assert_eq!(backfill_launch_state(&mut conn).unwrap().updated, 1, "only the still-default clone row");
         assert_eq!(launch_state(&conn, "head").0, "live");
-        assert_eq!(backfill_launch_state(&conn).unwrap(), 0, "second run writes nothing");
+        assert_eq!(backfill_launch_state(&mut conn).unwrap().updated, 0, "second run writes nothing");
+    }
+
+    #[test]
+    fn projects_a_template_launch_whose_consolidated_row_is_missing_before_copying_state() {
+        // The "Phase 3a stamped, db_agents partially populated" upgrade
+        // shape (codex P1 on #3075): the chain head has no db_agents row at
+        // all. Skipping it would record the migration applied while the
+        // chain's session stays unreachable forever.
+        let (_dir, path) = pre_v29_store();
+        let mut conn = Connection::open(&path).unwrap();
+        conn.execute("DELETE FROM db_agents WHERE id = 'head'", []).unwrap();
+        let stats = backfill_launch_state(&mut conn).unwrap();
+        assert_eq!(stats.projected, 1, "{stats:?}");
+        assert_eq!(stats.updated, 2, "{stats:?}");
+        assert_eq!(launch_state(&conn, "head"), ("s2".into(), "running".into(), 3000, "b2".into()));
+        let (is_template, parent, name): (i64, String, String) = conn
+            .query_row("SELECT is_template, parent_template_id, name FROM db_agents WHERE id = 'head'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((is_template, parent.as_str(), name.as_str()), (0, "tpl", "head"), "projected as a user agent of its template");
+    }
+
+    #[test]
+    fn repairs_a_definition_missing_from_db_agents_before_copying_state() {
+        let (_dir, path) = pre_v29_store();
+        let mut conn = Connection::open(&path).unwrap();
+        conn.execute("DELETE FROM db_agents WHERE id = 'clone'", []).unwrap();
+        let stats = backfill_launch_state(&mut conn).unwrap();
+        assert_eq!(stats.definitions_repaired, 1, "{stats:?}");
+        assert_eq!(launch_state(&conn, "clone").0, "s3");
     }
 
     #[test]
@@ -322,9 +458,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("objects.db");
         drop(Store::open(&path).unwrap());
-        let conn = Connection::open(&path).unwrap();
+        let mut conn = Connection::open(&path).unwrap();
         conn.execute_batch("DROP TABLE db_agent_instances;").unwrap();
-        assert_eq!(backfill_launch_state(&conn).unwrap(), 0);
+        assert_eq!(backfill_launch_state(&mut conn).unwrap(), BackfillStats::default());
     }
 
     #[test]

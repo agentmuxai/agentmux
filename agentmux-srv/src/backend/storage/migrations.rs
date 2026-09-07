@@ -581,12 +581,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             github_context       TEXT NOT NULL DEFAULT '',
             instance_name        TEXT NOT NULL DEFAULT '',
 
-            -- Latest launch's block (Phase 3c): pointer to the most-recent
-            -- session's block so the consolidated read can locate the
-            -- conversation snapshot without joining db_agent_instances. The
-            -- only transient per-launch field db_agents retains; the rest
-            -- (status/session_id/started_at/ended_at) live on the block and
-            -- retire with db_agent_instances.
+            -- Latest launch's block: pointer to the most-recent session's
+            -- block so the consolidated read can locate the conversation
+            -- snapshot without joining db_agent_instances. Was the only
+            -- per-launch field db_agents retained until v29 added the
+            -- four launch-state columns right below it.
             last_block_id        TEXT NOT NULL DEFAULT '',
 
             -- Latest launch's state (v29, consolidation Phase 3b/3c). The
