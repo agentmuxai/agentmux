@@ -361,6 +361,26 @@ describe("instructions_by_provider authoring model", () => {
         expect(providerKeyProblem("a\bb")).toBeNull();
     });
 
+    // codex P2 on #3063. `out[key] = content` for key "__proto__" hits the
+    // inherited legacy setter instead of creating an own property, so
+    // JSON.stringify omits it — editing ANY row would then silently delete an
+    // imported __proto__ override. Same wipe-class bug the raw-string
+    // round-trip exists to prevent, arriving through a different door.
+    it("serializes a __proto__ key as an own property", () => {
+        expect(
+            serializeInstructionsByProvider([{ provider: "__proto__", content: "P" }]),
+        ).toBe('{"__proto__":"P"}');
+    });
+
+    it("round-trips a __proto__ key without losing it", () => {
+        const raw = '{"__proto__":"P","claude":"A"}';
+        const { entries, malformed } = parseInstructionsByProvider(raw);
+        expect(malformed).toBe(false);
+        expect(entries.map((e) => e.provider).sort()).toEqual(["__proto__", "claude"]);
+        const out = JSON.parse(serializeInstructionsByProvider(entries));
+        expect(Object.keys(out).sort()).toEqual(["__proto__", "claude"]);
+    });
+
     it("sanitizes to the path export will actually write", () => {
         expect(sanitizeProviderKey("claude")).toBe("claude");
         expect(sanitizeProviderKey(String.raw`a\b`)).toBe("a/b");
@@ -385,6 +405,28 @@ describe("instructions_by_provider authoring model", () => {
             ]),
         ).toEqual(["claude"]);
         expect(duplicateProviderKeys([{ provider: "claude", content: "A" }])).toEqual([]);
+    });
+
+    // reagent P1 on #3063. bundle_export.rs sorts RAW keys ascending and keeps
+    // the FIRST of a colliding set. Flagging by array order instead marks
+    // whichever row the UI happens to hold first — which can be the row export
+    // actually KEEPS, warning on the survivor while the row that is really
+    // dropped shows nothing. "a/b" (0x2F) sorts before "a\b" (0x5C), so the
+    // loser here is the backslash row even though it was added first.
+    it("flags the row export drops, not the one it keeps, regardless of UI order", () => {
+        // Built from a char code on purpose: a literal backslash in this
+        // file has been mangled by tooling more than once (it is what
+        // produced codex P2 on this very PR — "a-backslash-b" read as a backspace
+        // escape, so the separator case was never exercised).
+        const backslashKey = "a" + String.fromCharCode(92) + "b";
+        const uiOrder = [
+            { provider: backslashKey, content: "added first" },
+            { provider: "a/b", content: "added second" },
+        ];
+        expect(duplicateProviderKeys(uiOrder)).toEqual([backslashKey]);
+        // Reversing the UI order must not change the verdict — export does not
+        // care what order the form holds them in.
+        expect(duplicateProviderKeys([...uiOrder].reverse())).toEqual([backslashKey]);
     });
 
     it("does not report backend-rejected keys as duplicates", () => {

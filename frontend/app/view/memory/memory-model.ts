@@ -476,7 +476,15 @@ export function parseInstructionsByProvider(raw: string): ParsedInstructionsByPr
  *  with a blank key are dropped — they cannot be exported and would serialize
  *  as a `""` key. */
 export function serializeInstructionsByProvider(entries: ProviderInstruction[]): string {
-    const out: Record<string, string> = {};
+    // Null prototype, deliberately: on a plain `{}`, assigning the key
+    // "__proto__" hits Object.prototype's inherited legacy setter instead of
+    // creating an own property, so JSON.stringify silently omits it. A bundle
+    // that imported a `__proto__` override would lose it the moment the user
+    // edited ANY row — the same wipe class the raw-string round-trip exists to
+    // prevent, arriving through a different door (codex P2, #3063). Provider
+    // keys are free text and can arrive from an untrusted .abf, so this is
+    // reachable, not theoretical.
+    const out: Record<string, string> = Object.create(null);
     for (const { provider, content } of entries) {
         const key = provider.trim();
         if (key.length === 0) continue;
@@ -546,13 +554,29 @@ export function providerKeyProblem(provider: string): string | null {
  *  comparing raw strings would miss exactly that case. Keys the backend
  *  rejects outright are excluded; `providerKeyProblem` already covers those. */
 export function duplicateProviderKeys(entries: ProviderInstruction[]): string[] {
+    // Order is part of the contract, not an implementation detail:
+    // `bundle_export.rs` sorts the RAW keys ascending and keeps the FIRST of
+    // each colliding set, skipping the rest with a warning. Walking the
+    // caller's array order instead marks whichever row the form happens to
+    // hold first — which can be the row export actually KEEPS, so the warning
+    // lands on the survivor while the row that really gets dropped shows
+    // nothing at all (reagent P1, #3063).
+    //
+    // Plain `<`/`>` rather than localeCompare, to match Rust's `String::cmp`
+    // (byte order). localeCompare is locale-aware and would disagree — e.g. it
+    // ignores punctuation differences that decide this exact comparison.
+    const sortedKeys = entries
+        .map((e) => e.provider.trim())
+        .filter((key) => key.length > 0)
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
     const seen = new Set<string>();
     const dupes = new Set<string>();
-    for (const { provider } of entries) {
-        const safe = sanitizeProviderKey(provider);
+    for (const key of sortedKeys) {
+        const safe = sanitizeProviderKey(key);
         if (safe === null) continue;
-        if (seen.has(safe)) dupes.add(provider.trim());
-        seen.add(safe);
+        if (seen.has(safe)) dupes.add(key);
+        else seen.add(safe);
     }
     return [...dupes].sort();
 }
