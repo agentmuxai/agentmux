@@ -121,8 +121,12 @@ should_check() {
     # spec out of docs/specs/ (say, reclassifying it under docs/reports/)
     # showed up as a non-spec path, skipped the check, and left the index
     # carrying a row for a file no longer there. Verified against git 2.55:
-    # `--name-only --find-renames` prints just `docs/reports/X.md`, while
-    # `--name-status` prints `R100  docs/specs/X.md  docs/reports/X.md`.
+    # for a spec moved out of the tree, `--name-only --find-renames` prints
+    # the destination path alone, while `--name-status` prints an `R100` row
+    # carrying the old path and the new one. (Spelled out rather than shown
+    # as a literal example path — check-spec-citations.sh reads any
+    # spec-shaped path in a comment as a citation, and a made-up one is a
+    # dangling citation by its definition. It caught exactly that here.)
     #
     # Deliberately UNLIKE check-doc-status.sh, which skips pure renames (R100)
     # because relocating a file makes no claim about its Status. The opposite
