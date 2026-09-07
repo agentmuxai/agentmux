@@ -1,17 +1,16 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Components shared byte-for-byte across all three platform TileLayout
-// implementations (TileLayout.{win32,linux,darwin}.tsx). None of these have
-// platform-conditional logic — the genuinely platform-specific pieces
-// (TileLayoutComponent, DisplayNode's drag REGISTRATION, ResizeHandle's
-// pointer-capture handling) stay local to each platform file and must NOT be
-// merged here.
+// Components shared by the three platform TileLayout builds. The rest of the
+// shared body — TileLayoutComponent, DisplayNode (including its drag
+// REGISTRATION) and ResizeHandleWrapper — lives in TileLayout.core.tsx; each
+// TileLayout.{win32,linux,darwin}.tsx supplies only a `TileLayoutPlatform`
+// object (animate delay, drag-lifecycle side effects, its ResizeHandle).
+// Nothing here has platform-conditional logic.
 //
-// `DisplayNode` itself is platform-specific and stays in each TileLayout.*.tsx
-// (different WebView2/WebKitGTK/WKWebView drag-registration quirks), so
-// `DisplayNodesWrapper` takes it as a prop and renders it via `<Dynamic>`
-// rather than importing a single implementation.
+// `DisplayNodesWrapper` still takes `DisplayNode` as a prop and renders it via
+// `<Dynamic>`: the core builds DisplayNode per platform object inside
+// createTileLayout(), so there is no single importable implementation.
 
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
@@ -158,10 +157,9 @@ export const MagnifiedPaneOverlay = (props: { layoutModel: LayoutModel }) => {
 export interface DisplayNodesWrapperProps {
     layoutModel: LayoutModel;
     /**
-     * The platform-specific `DisplayNode` component (drag REGISTRATION
-     * differs per WebView2/WebKitGTK/WKWebView — see the local `DisplayNode`
-     * in each TileLayout.{win32,linux,darwin}.tsx). Rendered via `<Dynamic>`
-     * since this wrapper itself has no platform-specific logic.
+     * The `DisplayNode` built by `createTileLayout()` for the current
+     * platform object (TileLayout.core.tsx). Rendered via `<Dynamic>` since
+     * this wrapper itself has no platform-specific logic.
      */
     DisplayNode: (props: { layoutModel: LayoutModel; node: LayoutNode }) => JSX.Element;
 }
