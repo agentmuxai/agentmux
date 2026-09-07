@@ -143,6 +143,20 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
         return cmd_list(&shared_store, channel_store.as_ref());
     }
 
+    // Same critical section as the in-process runner (Phase 3): the CLI apply
+    // path must not race a daemon that is migrating the same stores.
+    let lock_path = shared_store_path
+        .parent()
+        .map(|p| p.join(MIGRATION_LOCK_FILE))
+        .unwrap_or_else(|| PathBuf::from(MIGRATION_LOCK_FILE));
+    let _lock = match MigrationLock::acquire(&lock_path, MIGRATION_LOCK_WAIT) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("migration: {}", e);
+            return 1;
+        }
+    };
+
     // A migration is pending if its tracking store does not record it applied.
     let pending: Vec<_> = REGISTRY
         .iter()
@@ -313,18 +327,85 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
         }
     };
 
+    let home = match resolve_home() {
+        Some(p) => p,
+        None => return Err("run_pending_migrations: cannot resolve global shared root".to_string()),
+    };
+
+    apply_pending(REGISTRY, &home, &shared_store_path, data_dir)
+}
+
+// ── Cross-process migration lock (Phase 3, F6) ────────────────────────────────
+//
+// Two `agentmux-srv` processes against the same data dir (a crash-restart
+// race, or a misconfigured channel) could both see a migration as pending
+// and both run `up()`: SQLite's own locking serializes individual statements,
+// not the runner's check → run → mark-applied sequence (classic TOCTOU).
+//
+// The lock is a dedicated one-table SQLite file next to the shared store
+// with `BEGIN IMMEDIATE` held for the whole batch. That IS a cross-process
+// advisory lock — SQLite takes an OS-level file lock — with three properties
+// a hand-rolled lockfile does not get for free: it blocks (busy_timeout)
+// instead of failing, it is released by the OS when the holder dies (no
+// stale-lockfile cleanup), and it is portable to Windows. It is NOT taken on
+// the real stores because migrations open their own connections to those
+// (m0007 opens the channel store itself); a transaction held there would
+// deadlock them.
+
+/// File name of the lock database, created beside the shared store.
+pub(super) const MIGRATION_LOCK_FILE: &str = "migrations.lock.db";
+
+/// How long a second runner waits for the first to finish before giving up.
+/// Matches the launcher's extended ESTART deadline for a long migration
+/// batch (`srv_spawner.rs` / `sidecar.rs`: 30 minutes).
+const MIGRATION_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Held for the duration of a migration batch. Dropping it releases the lock.
+pub(super) struct MigrationLock {
+    _conn: rusqlite::Connection,
+}
+
+impl MigrationLock {
+    /// Acquire the batch lock at `path`, waiting up to `wait` for another
+    /// holder. `Err` only if the lock database cannot be opened or the wait
+    /// expires — both fatal for a migration run, by design.
+    pub(super) fn acquire(path: &Path, wait: std::time::Duration) -> Result<Self, String> {
+        let conn = rusqlite::Connection::open(path)
+            .map_err(|e| format!("open migration lock {}: {}", path.display(), e))?;
+        conn.busy_timeout(wait)
+            .map_err(|e| format!("migration lock busy_timeout: {}", e))?;
+        // The table exists only so the file is a well-formed database on
+        // first use; the lock is the RESERVED lock BEGIN IMMEDIATE takes.
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS lock (id INTEGER PRIMARY KEY); BEGIN IMMEDIATE;")
+            .map_err(|e| format!("acquire migration lock {} (another runner may still hold it): {}", path.display(), e))?;
+        Ok(Self { _conn: conn })
+    }
+}
+
+/// The batch body of `run_pending_migrations`, generic over the registry so
+/// the concurrency contract can be tested with a fake migration. Takes the
+/// cross-process lock BEFORE the pending check so that check → run → mark is
+/// one critical section.
+pub(super) fn apply_pending(
+    regs: &[&(dyn super::Migration + Sync)],
+    home: &Path,
+    shared_store_path: &Path,
+    data_dir: &Path,
+) -> Result<usize, String> {
     if let Some(parent) = shared_store_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             return Err(format!("run_pending_migrations: create shared dir: {}", e));
         }
     }
 
-    let home = match resolve_home() {
-        Some(p) => p,
-        None => return Err("run_pending_migrations: cannot resolve global shared root".to_string()),
-    };
+    let lock_path = shared_store_path
+        .parent()
+        .map(|p| p.join(MIGRATION_LOCK_FILE))
+        .unwrap_or_else(|| PathBuf::from(MIGRATION_LOCK_FILE));
+    let _lock = MigrationLock::acquire(&lock_path, MIGRATION_LOCK_WAIT)
+        .map_err(|e| format!("run_pending_migrations: {}", e))?;
 
-    let shared_store = match Store::open_shared(&shared_store_path) {
+    let shared_store = match Store::open_shared(shared_store_path) {
         Ok(s) => s,
         Err(e) => return Err(format!("run_pending_migrations: open shared store: {}", e)),
     };
@@ -345,7 +426,7 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
         Err(e) => return Err(format!("run_pending_migrations: open channel store: {}", e)),
     };
 
-    let pending: Vec<_> = REGISTRY.iter().filter(|m| {
+    let pending: Vec<_> = regs.iter().filter(|m| {
         let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
         tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
     }).collect();
@@ -355,13 +436,13 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     }
 
     let ctx = super::MigrationContext {
-        home: home.clone(),
+        home: home.to_path_buf(),
         data_dir: data_dir.to_path_buf(),
-        shared_store_path: shared_store_path.clone(),
+        shared_store_path: shared_store_path.to_path_buf(),
         channel_store_path: channel_store_path.clone(),
     };
 
-    if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
+    if let Err(e) = backup_stores(home, shared_store_path, data_dir) {
         return Err(format!("run_pending_migrations: backup failed: {}", e));
     }
 
@@ -620,6 +701,84 @@ pub(super) fn table_count(conn: &rusqlite::Connection, table: &str) -> Result<i6
         Ok(n) => Ok(n),
         Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => Ok(0),
         Err(e) => Err(format!("count {}: {}", table, e)),
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+    use crate::migrations::{Migration, MigrationError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn lock_is_exclusive_across_connections_and_released_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MIGRATION_LOCK_FILE);
+        let first = MigrationLock::acquire(&path, std::time::Duration::from_millis(100)).expect("first holder");
+        // A second acquirer waits out its budget and fails while the first holds.
+        let err = MigrationLock::acquire(&path, std::time::Duration::from_millis(200))
+            .err()
+            .expect("second acquire must fail while the first is held");
+        assert!(err.contains("another runner may still hold it"), "{}", err);
+        drop(first);
+        MigrationLock::acquire(&path, std::time::Duration::from_millis(100)).expect("free after drop");
+    }
+
+    /// A Global migration that records how many times `up()` ran and is slow
+    /// enough that two runners started together both pass the "is it
+    /// pending?" check before either can mark it applied — unless the
+    /// critical section holds.
+    static UP_RUNS: AtomicUsize = AtomicUsize::new(0);
+    struct SlowOnce;
+    impl Migration for SlowOnce {
+        fn id(&self) -> &'static str { "9900_slow_once" }
+        fn scope(&self) -> MigrationScope { MigrationScope::Global }
+        fn description(&self) -> &'static str { "counts its own runs" }
+        fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> {
+            UP_RUNS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Ok(())
+        }
+    }
+    static SLOW_ONCE: SlowOnce = SlowOnce;
+
+    #[test]
+    fn two_concurrent_runners_on_one_data_dir_apply_a_migration_exactly_once() {
+        // Phase 3 acceptance (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03):
+        // "two concurrent run_pending_migrations calls against the same
+        // fresh data dir; assert the migration's up() body executes exactly
+        // once." Both runners must also succeed: the loser sees the winner's
+        // db_migrations row once it gets the lock and applies nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_path_buf();
+        let shared = home.join("shared").join("store.db");
+        let data_dir = home.join("data");
+        UP_RUNS.store(0, Ordering::SeqCst);
+
+        let results: Vec<Result<usize, String>> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..2)
+                .map(|_| {
+                    let (home, shared, data_dir) = (home.clone(), shared.clone(), data_dir.clone());
+                    s.spawn(move || {
+                        let regs: Vec<&(dyn Migration + Sync)> = vec![&SLOW_ONCE];
+                        apply_pending(&regs, &home, &shared, &data_dir)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("runner thread")).collect()
+        });
+
+        for r in &results {
+            assert!(r.is_ok(), "both runners must succeed: {:?}", results);
+        }
+        let applied: usize = results.iter().map(|r| *r.as_ref().unwrap()).sum();
+        assert_eq!(applied, 1, "exactly one runner applied it: {:?}", results);
+        assert_eq!(UP_RUNS.load(Ordering::SeqCst), 1, "up() body must execute exactly once");
+
+        // And the record is durable: a third run has nothing to do.
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&SLOW_ONCE];
+        assert_eq!(apply_pending(&regs, &home, &shared, &data_dir).unwrap(), 0);
+        assert_eq!(UP_RUNS.load(Ordering::SeqCst), 1);
     }
 }
 
