@@ -301,6 +301,7 @@ partial list.
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
 | [`SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30`](SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md) | SPEC: Remove the terminal Stage-1 RAF write-coalescer (double-rAF) |
+| [`SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07`](SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md) | SPEC: Frosted-glass backdrop for the terminal pane tab strip |
 | [`SPEC_THEME_PICKER_AND_MIDNIGHT_AGENT_BG`](SPEC_THEME_PICKER_AND_MIDNIGHT_AGENT_BG.md) | Theme picker in hamburger menu + midnight agent-pane black background |
 | [`SPEC_TOKEN_STATS_NUMBER_FORMATTING_2026_08_02`](SPEC_TOKEN_STATS_NUMBER_FORMATTING_2026_08_02.md) | Plan: consolidate duplicated display-formatting utilities into `frontend/util/` |
 | [`SPEC_TOOL_BLOCK_INTERACTION_HOLD_AND_GLOB_EXPAND_2026_06_09`](SPEC_TOOL_BLOCK_INTERACTION_HOLD_AND_GLOB_EXPAND_2026_06_09.md) | SPEC: Tool Block Interaction Hold + Glob Auto-Expand |
