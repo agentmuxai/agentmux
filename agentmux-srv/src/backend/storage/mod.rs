@@ -24,6 +24,7 @@ pub mod error;
 pub mod filestore;
 pub mod history;
 pub mod identities;
+pub mod managed;
 pub mod mcp_servers;
 pub mod memory_bundles;
 pub mod migrations;
