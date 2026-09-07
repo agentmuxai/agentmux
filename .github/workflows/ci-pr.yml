@@ -77,21 +77,13 @@ jobs:
       - name: Doc Status vocabulary (changed docs only)
         run: bash scripts/check-doc-status.sh
 
-      # Reports, does not block. INDEX.md is generated output that is also
-      # committed, so two spec-adding PRs merging in parallel leave it
-      # internally inconsistent (both ROWS merge; the section header COUNT
-      # resolves to one side) — a state neither parent was in and neither
-      # author can prevent. Blocking on that failed PRs that touched no docs
-      # at all: of the 24 PR CI failures in the 90 runs before this changed,
-      # 16 were this gate, five of them on `main` itself.
-      #
-      # Correctness is now enforced where it can actually be established —
-      # after the merge lands, by docs-index-autoregen.yml, which regenerates
-      # and opens a PR. Keeping the step visible (rather than deleting it)
-      # still tells an author their branch is stale, which is useful; it just
-      # no longer blocks unrelated work on a conflict they did not create.
-      - name: Specs index is current (advisory)
-        continue-on-error: true
+      # Blocking, and safe to be: INDEX.md's committed form no longer carries
+      # any derived count, so two spec-adding branches three-way-merge to the
+      # correct union instead of to a silently-wrong file. A failure here now
+      # means real drift — a spec added without regenerating — which is the
+      # author's to fix and takes one command. See the history note at the top
+      # of scripts/gen-docs-index.sh for why it used to fail for everyone.
+      - name: Specs index is current
         run: bash scripts/gen-docs-index.sh --check
 
       - name: Spec citations resolve (changed files only)

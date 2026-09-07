@@ -50,6 +50,10 @@ fn fixtures_dir() -> PathBuf {
 /// Motivated by the 2026-09-07 `create_no_window_flag_set` failure, where
 /// the first spawn burned two 15s timeouts and the six node spawns after it
 /// finished in ~0.8s combined. See that test's comment.
+///
+/// `#[cfg(windows)]` because its only caller is, so on the ubuntu/macos legs
+/// an unconditional definition would be dead code (reagent P2 on #3056).
+#[cfg(windows)]
 async fn warm_node() {
     let mut cmd = tokio::process::Command::new("node");
     cmd.args(["-e", ""]);
