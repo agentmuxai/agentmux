@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::super::rpc_types::{RpcContext, RpcMessage, RpcOpts, COMMAND_EVENT_RECV};
+use super::schema::RpcSchema;
 
 // ---- Constants (match Go) ----
 
@@ -180,6 +181,10 @@ struct EngineInner {
     #[allow(dead_code)]
     auth_token: String,
     rpc_context: Option<RpcContext>,
+    /// Request/response types of every command registered through
+    /// [`WshRpcEngine::register_typed`]. Lives beside `handlers` so the
+    /// mapping is a side effect of registration and cannot drift from it.
+    schema: RpcSchema,
 }
 
 /// Core RPC engine: handles incoming RPC requests, dispatches to registered
@@ -211,6 +216,7 @@ impl WshRpcEngine {
                 active_handlers: HashMap::new(),
                 auth_token: String::new(),
                 rpc_context: None,
+                schema: RpcSchema::new(),
             }),
             output_tx,
         });
@@ -223,6 +229,76 @@ impl WshRpcEngine {
         inner
             .handlers
             .insert(command.to_string(), Handler::Call(handler));
+    }
+
+    /// Register a call handler from typed request/response values, and
+    /// record the pair in this engine's [`RpcSchema`].
+    ///
+    /// Behaviourally identical to [`Self::register_handler`]: the closure is
+    /// wrapped in exactly the deserialize → run → serialize steps every
+    /// hand-written handler already performs, so migrating one is not
+    /// supposed to change what goes over the wire. What it adds is that the
+    /// `Req`/`Resp` pairing becomes *data* the process can dump, which is
+    /// the prerequisite for generating the frontend's bindings instead of
+    /// hand-maintaining them — see `schema.rs` and
+    /// `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`.
+    ///
+    /// Two deliberate differences from the untyped path, both matching what
+    /// the existing handlers do anyway:
+    ///
+    /// - **Deserialization failure is reported as `Err`**, with the command
+    ///   name and serde's message — the same `format!("{cmd}: {e}")` shape
+    ///   the hand-written handlers use.
+    /// - **A response is always sent** (`Ok(Some(..))`). Handlers that must
+    ///   answer with nothing at all keep using `register_handler`; `Resp =
+    ///   ()` serializes to `null`, which is a response, not silence.
+    ///
+    /// Serialization failure is also an `Err` rather than a panic: a
+    /// response type whose `Serialize` fails is a bug, but it is not worth
+    /// taking the connection down for.
+    pub fn register_typed<Req, Resp, F, Fut>(&self, command: &'static str, handler: F)
+    where
+        Req: serde::de::DeserializeOwned + Send + 'static,
+        Resp: serde::Serialize + Send + 'static,
+        F: Fn(Req, RpcContext) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<Resp, String>> + Send + 'static,
+    {
+        {
+            let mut inner = self.lock_inner();
+            inner.schema.record(
+                command,
+                std::any::type_name::<Req>(),
+                std::any::type_name::<Resp>(),
+            );
+        }
+
+        let handler = std::sync::Arc::new(handler);
+        self.register_handler(
+            command,
+            Box::new(move |data, ctx| {
+                let handler = handler.clone();
+                Box::pin(async move {
+                    let req: Req = serde_json::from_value(data)
+                        .map_err(|e| format!("{command}: {e}"))?;
+                    let resp = handler(req, ctx).await?;
+                    let value = serde_json::to_value(&resp)
+                        .map_err(|e| format!("{command}: response is not serializable: {e}"))?;
+                    Ok(Some(value))
+                })
+            }),
+        );
+    }
+
+    /// Snapshot of every typed command's request/response pair, in command
+    /// order. Handlers registered through the untyped [`Self::register_handler`]
+    /// are absent — that is what lets the migration proceed one at a time.
+    pub fn schema_json(&self) -> serde_json::Value {
+        self.lock_inner().schema.to_json()
+    }
+
+    /// Number of commands registered through the typed path.
+    pub fn typed_command_count(&self) -> usize {
+        self.lock_inner().schema.len()
     }
 
     /// Register a streaming handler (single request → stream of responses).
