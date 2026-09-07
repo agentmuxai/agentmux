@@ -339,7 +339,7 @@ partial list.
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 
-### proposed (96)
+### proposed (95)
 
 | Spec | Title |
 |---|---|
