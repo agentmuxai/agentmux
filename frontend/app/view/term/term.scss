@@ -62,6 +62,53 @@
         }
     }
 
+    // Frosted-glass band across the top of the pane, matching the agent
+    // pane's tab strip. See
+    // docs/specs/SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md.
+    //
+    // What this DOES and does not do, stated plainly so the next reader
+    // doesn't expect more from it: the terminal strip is a reserved flex
+    // row with `.view-term`'s own opaque background behind it, NOT an
+    // overlay over live content the way the agent pane's is
+    // (SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md §0 explains why the
+    // two panes differ structurally). So `backdrop-filter` here has almost
+    // nothing to soften — the visible change is the `--tab-strip-bg` tint
+    // and the full-width band, which is what makes the two pane types look
+    // like the same product. The filter is kept anyway because it is NOT
+    // always inert: with a terminal background image configured
+    // (`computeBgStyleFromMeta`, term.tsx) there IS texture behind this
+    // row, and then it blurs for real.
+    //
+    // Making the terminal strip a true overlay so live terminal output
+    // blurs underneath was considered and NOT done: it would put the top
+    // terminal row under glass, which breaks full-screen TUIs (vim, htop)
+    // and changes the PTY's row count. See §2.2 of the spec above.
+    //
+    // `2px` matches the agent pane deliberately — `8px` was tried there and
+    // rejected live because letterforms dissolved. If it changes, change
+    // both.
+    > .pane-tab-strip {
+        // Was shrink-to-fit (`align-self: flex-start` in the shared
+        // PaneTabStrip.scss). The band has to span the pane for the glass
+        // to read as a panel rather than a lozenge around [tabs][+].
+        // `animateWidth` was removed from term.tsx's <PaneTabStrip> in the
+        // same change: it animates a box width that no longer varies.
+        width: 100%;
+
+        // Sits above the `z-0` full-pane background-image layer that
+        // term.tsx renders for `termBg()`. That layer spans `inset-0` —
+        // including this row — and is positioned, so without an explicit
+        // stacking position here it paints OVER this non-positioned flex
+        // child and hides the tabs whenever a terminal background image is
+        // set. Below the `z-index: 10` overlays (search, links) by design.
+        position: relative;
+        z-index: 1;
+
+        background: var(--tab-strip-bg);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+    }
+
     .term-connectelem {
         flex-grow: 1;
         min-height: 0;
