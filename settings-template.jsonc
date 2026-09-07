@@ -42,6 +42,11 @@
     // "window:maxtabcachesize":   10,
     // "window:disablehardwareacceleration": false,
 
+    // -- Startup --
+    // Suppress the splash screen. Applies at the NEXT launch: the launcher
+    // reads this before the app itself is running.
+    // "splash:disabled":          false,
+
     // -- App --
     // "app:globalhotkey":         "",
     // "app:defaultnewblock":      "",
