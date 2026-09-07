@@ -485,38 +485,74 @@ export function serializeInstructionsByProvider(entries: ProviderInstruction[]):
     return JSON.stringify(out);
 }
 
+/** Faithful port of `sanitize_context_relative_path` (bundle_export.rs).
+ *
+ *  Returns the sanitized path a key would be exported under, or `null` if the
+ *  backend would reject it (in which case export SKIPS the variant with a
+ *  warning). Kept deliberately mechanical rather than "improved", because its
+ *  only job is to agree with the Rust — a stricter frontend rule warns about
+ *  keys that in fact work, and a looser one stays silent about keys that get
+ *  dropped. Mirrors, in order: empty, `\` normalized to `/`, leading `/`
+ *  rejected, any `:` rejected, `..` segments rejected, `.`/empty segments
+ *  skipped, and "nothing left" rejected.
+ *
+ *  NOTE what this does NOT reject, because the backend does not either:
+ *  nested segments (`a/b` is legal and exports to instructions/a/b/AGENTS.md)
+ *  and control characters. */
+export function sanitizeProviderKey(provider: string): string | null {
+    // The stored key is the trimmed one (see serializeInstructionsByProvider),
+    // so validate what will actually be stored, not what was typed.
+    const key = provider.trim();
+    if (key.length === 0) return null;
+    const normalized = key.split("\\").join("/");
+    if (normalized.startsWith("/") || normalized.includes(":")) return null;
+    const parts: string[] = [];
+    for (const component of normalized.split("/")) {
+        if (component === "" || component === ".") continue;
+        if (component === "..") return null;
+        parts.push(component);
+    }
+    if (parts.length === 0) return null;
+    return parts.join("/");
+}
+
 /** Why a provider key would not survive export, or `null` if it is fine.
  *
- *  Mirrors the export-side rule in `bundle_export.rs`, which runs each key
- *  through `sanitize_context_relative_path` before writing
- *  `instructions/<provider>/AGENTS.md` and SKIPS the variant with a warning if
- *  it is unsafe. Surfacing that while the user is typing beats losing the
- *  variant silently at export time. Advisory — the caller should warn, not
- *  block, matching the Validate button's posture. */
+ *  Advisory. The key IS still saved to the bundle (serialization drops only
+ *  blank keys) — what it loses is the export: `bundle_export.rs` skips any key
+ *  this rejects, with a warning, so the variant silently vanishes from the
+ *  `.abf`. Better to say so while the user is typing than at export time. */
 export function providerKeyProblem(provider: string): string | null {
     const key = provider.trim();
     if (key.length === 0) return "Provider key cannot be empty.";
-    if (key === "." || key === "..") return `"${key}" is not a usable directory name.`;
-    if (key.includes("/") || key.includes("\\")) {
-        return "Provider key cannot contain path separators.";
+    if (sanitizeProviderKey(key) !== null) return null;
+    const normalized = key.split("\\").join("/");
+    if (normalized.startsWith("/")) {
+        return "Provider key cannot start with a path separator.";
     }
-    // eslint-disable-next-line no-control-regex
-    if (/[\x00-\x1f]/.test(key)) return "Provider key cannot contain control characters.";
-    return null;
+    if (normalized.includes(":")) return "Provider key cannot contain a colon.";
+    if (normalized.split("/").some((c) => c === "..")) {
+        return 'Provider key cannot contain a ".." segment.';
+    }
+    return "Provider key has no usable path segment.";
 }
 
-/** Keys that appear more than once after trimming.
+/** Keys that collide once sanitized.
  *
- *  Export keeps exactly one of a colliding pair (sorted-first wins) and warns
- *  about the rest, so duplicates mean silent data loss on export. */
+ *  Compares SANITIZED paths, not raw strings, because that is what collides in
+ *  `bundle_export.rs`: it keys `seen_safe_providers` on the sanitized value and
+ *  keeps only the sorted-first of a colliding set, warning about the rest. So
+ *  `a/b` and `a\b` are the same export path and one of them is silently lost —
+ *  comparing raw strings would miss exactly that case. Keys the backend
+ *  rejects outright are excluded; `providerKeyProblem` already covers those. */
 export function duplicateProviderKeys(entries: ProviderInstruction[]): string[] {
     const seen = new Set<string>();
     const dupes = new Set<string>();
     for (const { provider } of entries) {
-        const key = provider.trim();
-        if (key.length === 0) continue;
-        if (seen.has(key)) dupes.add(key);
-        seen.add(key);
+        const safe = sanitizeProviderKey(provider);
+        if (safe === null) continue;
+        if (seen.has(safe)) dupes.add(provider.trim());
+        seen.add(safe);
     }
     return [...dupes].sort();
 }

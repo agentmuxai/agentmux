@@ -9,6 +9,7 @@ import {
     emptyDraft,
     parseInstructionsByProvider,
     providerKeyProblem,
+    sanitizeProviderKey,
     serializeInstructionsByProvider,
 } from "./memory-model";
 
@@ -322,28 +323,78 @@ describe("instructions_by_provider authoring model", () => {
         expect(serializeInstructionsByProvider(entries)).toBe(raw);
     });
 
-    // Authoring-time mirror of the export-side rule
-    // (bundle_export.rs sanitize_context_relative_path): a key that is not a
-    // safe path segment is SKIPPED on export with a warning, so the variant is
-    // silently lost. Better to say so while the user is typing it.
-    it("rejects provider keys that would not survive export", () => {
-        for (const bad of ["", "   ", "a/b", "a\b", ".", "..", "with space/../esc"]) {
-            expect(providerKeyProblem(bad)).not.toBeNull();
-        }
+    // Authoring-time mirror of the export-side rule. These assertions are
+    // pinned to sanitize_context_relative_path (bundle_export.rs) EXACTLY —
+    // reagent P1 on #3063 caught the first version inventing stricter rules
+    // than the backend has, so it warned "It will not be saved" about keys
+    // that in fact export fine. A mirror that disagrees with what it mirrors
+    // is worse than no mirror.
+    it("rejects only the keys the backend actually rejects", () => {
+        // empty / no usable segment
+        expect(providerKeyProblem("")).not.toBeNull();
+        expect(providerKeyProblem("   ")).not.toBeNull();
+        expect(providerKeyProblem(".")).not.toBeNull();
+        expect(providerKeyProblem("./.")).not.toBeNull();
+        expect(providerKeyProblem("/")).not.toBeNull();
+        // leading separator, colon, traversal
+        expect(providerKeyProblem("/abs")).not.toBeNull();
+        expect(providerKeyProblem("C:/x")).not.toBeNull();
+        expect(providerKeyProblem("a:b")).not.toBeNull();
+        expect(providerKeyProblem("..")).not.toBeNull();
+        expect(providerKeyProblem("a/../b")).not.toBeNull();
     });
 
-    it("accepts ordinary provider keys", () => {
-        for (const ok of ["claude", "codex", "gemini", "my-harness", "my_harness2"]) {
+    // The backend normalizes "\" to "/" and splits — nested segments are legal
+    // and export to instructions/a/b/AGENTS.md. Warning about them was the
+    // actual defect in #3063's first cut.
+    it("accepts keys the backend accepts, including nested and odd ones", () => {
+        for (const ok of ["claude", "codex", "my-harness", "my_harness2", "a/b"]) {
             expect(providerKeyProblem(ok)).toBeNull();
         }
+        // Real backslash, via String.raw. The previous version of this test
+        // wrote "a\b", which JS reads as a BACKSPACE control character, so the
+        // separator case was never exercised and passed only by accident
+        // (reagent P2, #3063).
+        expect(providerKeyProblem(String.raw`a\b`)).toBeNull();
+        // Control characters are not rejected by the backend, so we must not
+        // claim they are.
+        expect(providerKeyProblem("a\bb")).toBeNull();
     });
 
-    it("flags duplicate keys, which export resolves by dropping all but one", () => {
-        const entries = [
-            { provider: "claude", content: "A" },
-            { provider: "claude", content: "B" },
-        ];
-        expect(duplicateProviderKeys(entries)).toEqual(["claude"]);
+    it("sanitizes to the path export will actually write", () => {
+        expect(sanitizeProviderKey("claude")).toBe("claude");
+        expect(sanitizeProviderKey(String.raw`a\b`)).toBe("a/b");
+        expect(sanitizeProviderKey("./a//b")).toBe("a/b");
+        expect(sanitizeProviderKey("..")).toBeNull();
+    });
+
+    // Export keys its collision set on the SANITIZED path, so two keys that
+    // differ as strings but normalize identically are a real collision — one
+    // of them is silently dropped from the .abf.
+    it("flags duplicates that collide only after sanitizing", () => {
+        expect(
+            duplicateProviderKeys([
+                { provider: "a/b", content: "A" },
+                { provider: String.raw`a\b`, content: "B" },
+            ]),
+        ).toEqual([String.raw`a\b`]);
+        expect(
+            duplicateProviderKeys([
+                { provider: "claude", content: "A" },
+                { provider: "claude", content: "B" },
+            ]),
+        ).toEqual(["claude"]);
         expect(duplicateProviderKeys([{ provider: "claude", content: "A" }])).toEqual([]);
+    });
+
+    it("does not report backend-rejected keys as duplicates", () => {
+        // They are already flagged by providerKeyProblem; double-warning about
+        // a key that never reaches export is noise.
+        expect(
+            duplicateProviderKeys([
+                { provider: "..", content: "A" },
+                { provider: "..", content: "B" },
+            ]),
+        ).toEqual([]);
     });
 });

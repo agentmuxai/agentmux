@@ -106,7 +106,7 @@ export const BundleProviderInstructionsSection = (
                 <For each={rows()}>
                     {(row, index) => {
                         const problem = () => providerKeyProblem(row.provider);
-                        const duped = () => dupes().has(row.provider.trim());
+                        const duped = () => dupes().has(row.provider.trim());  // keyed on the raw trimmed key, which is what duplicateProviderKeys reports
                         return (
                             <div class="memory-view-provider-instruction-row">
                                 <div class="memory-view-provider-instruction-head">
@@ -130,14 +130,29 @@ export const BundleProviderInstructionsSection = (
                                     </button>
                                 </div>
                                 <Show when={problem()}>
+                                    {/* The consequence differs by case and the
+                                        warning has to match, or it is just a
+                                        different wrong message (reagent P1,
+                                        #3063 said "It will not be saved" for
+                                        every problem, which was false for most
+                                        of them):
+                                        - blank key: genuinely not saved,
+                                          serializeInstructionsByProvider drops
+                                          it;
+                                        - any other rejected key: saved fine,
+                                          but bundle_export.rs skips it with a
+                                          warning, so it vanishes from the .abf. */}
                                     <div class="memory-view-provider-instruction-warn">
-                                        {problem()} It will not be saved.
+                                        {problem()}{" "}
+                                        {row.provider.trim().length === 0
+                                            ? "This row will not be saved until you name it."
+                                            : "It will still be saved, but skipped when this bundle is exported."}
                                     </div>
                                 </Show>
                                 <Show when={!problem() && duped()}>
                                     <div class="memory-view-provider-instruction-warn">
-                                        Duplicate provider key — only one of these will survive
-                                        export.
+                                        Two keys resolve to the same export path — only one of
+                                        them survives export.
                                     </div>
                                 </Show>
                                 <textarea
