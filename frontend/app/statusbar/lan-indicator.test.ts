@@ -43,4 +43,36 @@ describe("resolveLanIndicator", () => {
         const r = resolveLanIndicator({ enabled: true, peerCount: -1 });
         expect(r.state).toBe("idle");
     });
+
+    // codex P2: the daemon failing to start leaves the SETTING enabled and
+    // populates the error atom. Reporting that as the muted "idle" state hid a
+    // real failure behind a tooltip documented as healthy.
+    it("surfaces a start-up failure instead of the healthy idle state", () => {
+        const r = resolveLanIndicator({
+            enabled: true,
+            peerCount: 0,
+            error: "mDNS daemon failed to bind",
+        });
+        expect(r.state).toBe("error");
+        expect(r.state).not.toBe("idle");
+        expect(r.label).toContain("mDNS daemon failed to bind");
+    });
+
+    it("still reports off when disabled, even with a stale error", () => {
+        const r = resolveLanIndicator({ enabled: false, peerCount: 0, error: "boom" });
+        expect(r.state).toBe("off");
+    });
+
+    // Mirrors the popover, whose peer rows are not gated on the error while
+    // its "no peers" row is: an actual peer proves discovery works.
+    it("prefers peers over a lingering error", () => {
+        const r = resolveLanIndicator({ enabled: true, peerCount: 2, error: "stale" });
+        expect(r.state).toBe("peers");
+        expect(r.label).toBe("2 on LAN");
+    });
+
+    it("treats null/undefined error as no error", () => {
+        expect(resolveLanIndicator({ enabled: true, peerCount: 0, error: null }).state).toBe("idle");
+        expect(resolveLanIndicator({ enabled: true, peerCount: 0 }).state).toBe("idle");
+    });
 });

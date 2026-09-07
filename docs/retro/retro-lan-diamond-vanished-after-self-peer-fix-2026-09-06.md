@@ -1,10 +1,10 @@
 # Retro: the status-bar LAN diamond vanished — because #3025 fixed the bug that was lighting it
 
 **Date:** 2026-09-06
-**Status:** Root-caused, no code change made yet. The current behavior matches
-the written spec; what changed is the behavior users had actually learned. A
-follow-up UI decision is proposed below but deliberately not implemented in
-this retro.
+**Status:** implemented — root-caused here, and the three-state indicator
+described below shipped in PR #3052 alongside this file. The pre-existing
+behavior matched the written spec; what had changed underneath it was the
+behavior users actually learned.
 **Severity:** Low functionally (LAN discovery is working correctly), Medium for
 trust — the only status-bar signal that discovery is alive silently disappeared
 for every single-instance user, with nothing to distinguish it from "off".
@@ -107,25 +107,40 @@ report that prompted this retro.
 
 ---
 
-## Proposed fix (not implemented here)
+## The fix (shipped in PR #3052)
 
-Make the status bar distinguish the three real states, keeping the spec's
-peers-exist meaning intact rather than overloading the diamond:
+The status bar now distinguishes all three real states, keeping the spec's
+peers-exist meaning intact rather than overloading one glyph. The repo owner
+asked for the off state to be visible too (rather than rendering nothing), so
+the indicator is now always present:
 
-| State | Status bar |
-|---|---|
-| Discovery off | nothing (unchanged) |
-| Discovery on, 0 peers | dimmed/outline `◇`, tooltip "LAN discovery on — no peers found" |
-| Discovery on, N peers | current accent-colored `◆`, tooltip "N on LAN" |
+| State | Glyph | Color | Tooltip |
+|---|---|---|---|
+| Discovery off (the default) | `◇` hollow | `--warning-color` | "LAN discovery off — click to enable" |
+| Discovery on, 0 peers | `◇` hollow | muted `--secondary-text-color` | "LAN discovery on — no peers found" |
+| Discovery on, daemon failed | `◇` hollow | `--error-color` | "LAN discovery failed: ‹reason›" |
+| Discovery on, N peers | `◆` filled | `--accent-color` | "N on LAN" |
 
-`lanDiscoveryEnabled()` already exists in `HostPopover.tsx` immediately below
-`lanCount()`, so this is a small, self-contained change. Deliberately left for a
-separate PR with the repo owner's call on the glyph, since it is a visual-design
-decision, not a defect fix.
+The failure row was added after review (codex P2 on #3052) and is the same
+bug class as the one this retro is about: when `LanDiscovery::start` fails —
+the Windows-firewall-"Block" path — the *setting* stays enabled, so a resolver
+reading only enabled+peer-count renders the muted state whose tooltip says
+nothing is wrong. Ranking is off → peers → error → idle, mirroring the popover,
+whose peer rows are not gated on the error while its "no peers" row is
+(`!lanDiscoveryError()`): reaching a peer is proof discovery works, which makes
+a lingering error stale rather than current.
 
-An alternative — have the diamond track `lanDiscoveryEnabled()` — is **not**
-recommended: it contradicts the spec, and it would discard the genuinely useful
-"someone else is out there" signal that the diamond is supposed to carry.
+Filled-vs-hollow carries the peers/no-peers distinction without relying on
+color, so the two hollow states remain distinguishable from the useful one even
+if their hues are not. Glyph, state class and tooltip all come from a single
+pure `resolveLanIndicator()` (`frontend/app/statusbar/lan-indicator.ts`, tested
+in `lan-indicator.test.ts`), so the label a user reads cannot drift from the
+glyph they see — the failure mode that made this bug invisible in the first
+place was exactly a UI signal quietly meaning something other than it appeared to.
+
+An alternative — have the diamond simply track `lanDiscoveryEnabled()` — was
+**rejected**: it contradicts the spec, and it would discard the genuinely useful
+"someone else is out there" signal the diamond is supposed to carry.
 
 ---
 
