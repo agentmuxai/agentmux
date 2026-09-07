@@ -10,7 +10,7 @@
 //! - Confirmation dialogs
 //! - Checkbox-bearing dialogs
 //!
-//! The actual display is handled by the frontend (Tauri webview);
+//! The actual display is handled by the frontend (the CEF renderer);
 //! this module defines the wire format and a registry for pending requests.
 
 

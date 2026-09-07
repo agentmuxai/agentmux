@@ -3,7 +3,7 @@
 //
 // Startup performance benchmark utility.
 // Records named milestones with high-resolution timestamps relative to
-// performance.timeOrigin so all phases (tauri-api, bootstrap, wave) share
+// performance.timeOrigin so all phases (host api, bootstrap, wave) share
 // the same epoch.
 //
 // Usage:
