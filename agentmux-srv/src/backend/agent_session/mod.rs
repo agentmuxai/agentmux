@@ -7,7 +7,9 @@
 //! Zone names: active = `agent:<defId>:current`,
 //! archived = `agent:<defId>:archive:<unix_ms>`. Each zone holds
 //! `output.state.json` (full UI snapshot) and `output` (raw NDJSON stream).
-//! See `docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md`.
+//! (This used to cite a SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23
+//! design doc that was never committed; the zone layout above is the
+//! contract.)
 //!
 //! ## Public API surface
 //!
