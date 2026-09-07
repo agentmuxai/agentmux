@@ -560,10 +560,19 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 tabs={visibleTermTabs()}
                 activeId={activeBlockId()}
                 zoomFactor={model.termZoomAtom}
-                // Unlike the agent pane, this strip stays genuinely
-                // shrink-to-fit (no full-width override) — safe to animate.
-                // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
-                animateWidth
+                // NO `animateWidth` here any more. That width animation
+                // (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4)
+                // exists to smooth the strip's box growing/shrinking as tabs
+                // are added and removed — which only happens while the box is
+                // shrink-to-fit. This strip is now `width: 100%` (term.scss,
+                // for the glass band —
+                // docs/specs/SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md
+                // §3.1), so its box width no longer varies with tab count and
+                // the animation would be measuring, holding and transitioning
+                // a value that never changes. The tab pills themselves still
+                // resize inside the fixed-width box; only the box stopped
+                // moving. The agent pane's strip is full-width for the same
+                // reason and likewise does not animate.
                 getId={(t) => t.blockId}
                 getLabel={(t) => t.label}
                 onActivate={handleTermTabSwitch}
