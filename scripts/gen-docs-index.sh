@@ -161,10 +161,54 @@ fi
 # per status word — 730 files x 8 statuses, ~5,800 process spawns — which took
 # over two minutes on Windows. Now each file is read once into a status->rows
 # map, which is ~730 spawns and seconds.
+# ── Which files ARE the spec tree ───────────────────────────────────────────
+#
+# Tracked files, not a filesystem glob. The index describes the COMMITTED
+# spec tree, and a bare `docs/specs/*.md` glob does not: it also picks up
+# work-in-progress specs that are not in the repo yet.
+#
+# That is not a cosmetic difference. Regenerating with an untracked spec
+# present writes a row for it into INDEX.md, and committing that INDEX.md
+# without the spec leaves a link to a file nobody else has — the index
+# asserting the existence of something that does not exist. It also made
+# `--check` report STALE for a perfectly clean checkout, so the honest
+# response to the gate ("run the generator") was the thing that introduced
+# the bad row.
+#
+# `git ls-files` reads the INDEX, not HEAD, so a `git add`ed spec counts
+# immediately — the normal "write the spec, add it, regenerate, commit both"
+# flow works without a commit-then-regenerate dance.
+#
+# Deleted-but-still-tracked paths are filtered by the -f test: `git rm`'d in
+# the working tree but not yet staged, the file is gone and must not get a
+# row built from a failed read.
+#
+# CI is unaffected: a checkout has no untracked files, so tracked and
+# on-disk are the same set there and the generated output is byte-identical.
+# Outside a git repo (a tarball, say) it falls back to the glob rather than
+# emitting an empty index.
+spec_files() {
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        # Depth-1 only. A git pathspec's `*` matches `/` as well (fnmatch
+        # without FNM_PATHNAME), so `docs/specs/*.md` also pulls in
+        # `docs/specs/archive/*.md` — the one subtree this index excludes on
+        # purpose. Caught by asserting the regenerated file was byte-identical
+        # on a clean checkout: it grew 76 archive rows. The grep, not the
+        # pathspec, is what bounds the depth.
+        git ls-files -- docs/specs | grep -E '^docs/specs/[^/]+\.md$' | while IFS= read -r f; do
+            [ -f "$f" ] && printf '%s\n' "$f"
+        done
+    else
+        for f in docs/specs/*.md; do
+            [ -f "$f" ] && printf '%s\n' "$f"
+        done
+    fi
+}
+
 build() {
     declare -A ROWS
     local total=0 shown=0
-    for f in docs/specs/*.md; do
+    while IFS= read -r f; do
         b=$(basename "$f")
         case "$b" in INDEX.md|README.md) continue ;; esac
         total=$((total + 1))
@@ -182,7 +226,7 @@ build() {
 
         ROWS["$w"]="${ROWS[$w]:-}| [\`${b%.md}\`](${b}) | ${title} |
 "
-    done
+    done < <(spec_files)
 
     printf '%s
 ' "$BEGIN"
