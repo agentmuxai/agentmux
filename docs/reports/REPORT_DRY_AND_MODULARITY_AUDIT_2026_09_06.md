@@ -184,7 +184,7 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 
 ### Phase 2 — codegen the Rust↔TS boundary (medium effort, highest leverage)
 
-7. Generate `gotypes.d.ts` and the 322 RPC stubs from srv `rpc_types` (`Command*` structs already carry the shape; `serde` attributes carry the wire names). A `scripts/gen-rpc-bindings.sh` + a CI gate ("bindings are current," same pattern as the existing "specs index is current" gate) turns 200+ sync comments into a build error. **Designed in `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`** — the registry-first shape, because the command → type mapping is not data anywhere today.
+7. Generate `gotypes.d.ts` and the 322 RPC stubs (the 284 command stubs plus the 38 service methods of §2.1) from srv `rpc_types` (`Command*` structs already carry the shape; `serde` attributes carry the wire names). A `scripts/gen-rpc-bindings.sh` + a CI gate ("bindings are current," same pattern as the existing "specs index is current" gate) turns 200+ sync comments into a build error. **Designed in `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`** — the registry-first shape, because the command → type mapping is not data anywhere today.
 8. Emit shared *constants* through the same generator — `persistent.rs:785`'s "no shared constant crosses the boundary" becomes false.
 9. Move the default layout tree, the provider catalog's `pinned_version`, and the two formatter mirrors (`format_global_brain_block`, `dim_agent_color`) to single-source: backend owns them, frontend receives them over RPC or from generated constants. The layout preset's inability to express 20/80 sizing goes away with it.
 
