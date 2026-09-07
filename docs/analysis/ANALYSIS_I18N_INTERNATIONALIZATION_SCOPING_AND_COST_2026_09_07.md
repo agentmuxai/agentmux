@@ -128,7 +128,7 @@ Ranges reflect the extrapolation/measurement uncertainty already flagged in §3 
 |---|---|---|
 | Human-only | $0.15–$0.30/word | 4 × 12,000 × $0.15 = **$7,200** to 4 × 25,000 × $0.30 = **$30,000** |
 | Hybrid AI + human review (2026 enterprise default) | $0.05–$0.10/word | 4 × 12,000 × $0.05 = **$2,400** to 4 × 25,000 × $0.10 = **$10,000** |
-| Pure AI (not recommended alone for UI copy needing product context) | $0.001–$0.002/word | 4 × 12,000 × $0.001 ≈ **$48** to 4 × 25,000 × $0.002 = **$100** — cited for completeness, not as a realistic ship-quality option |
+| Pure AI (not recommended alone for UI copy needing product context) | $0.001–$0.002/word | 4 × 12,000 × $0.001 ≈ **$48** to 4 × 25,000 × $0.002 = **$200** — cited for completeness, not as a realistic ship-quality option |
 
 **Recommended: hybrid AI + human review, ~$2,400–$10,000 one-time for this 4-locale set.** This is the pattern research describes as the current enterprise default, balancing the near-zero cost of pure AI against the quality risk of shipping unreviewed machine translation in product UI.
 
