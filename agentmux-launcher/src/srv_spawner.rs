@@ -141,6 +141,72 @@ pub fn migration_failed_dialog_body(reason: &str) -> String {
     )
 }
 
+/// Outcome of waiting for srv's readiness signal. Module-level (not local to
+/// `spawn_srv`) so `prefer_buffered_failure` can be unit-tested.
+enum EstartWait {
+    Ready(Option<SrvSpawnResult>),
+    Timeout,
+    MigrationFailed(String),
+}
+
+/// Second guard for the ESTART-vs-failure race (reagent P1, post-merge on
+/// #3043). The stderr reader task sends the migration-failure reason and then
+/// drops every sender as srv exits, so by the time the waiter's `select!`
+/// runs, BOTH "failure buffered" and "ESTART channel closed" are ready.
+/// `biased;` in the select makes the failure arm win when both are seen in
+/// one poll; this covers the remaining shape, where the closed channel was
+/// observed first and the reason is sitting in `failure_rx` unread. Every
+/// other outcome passes through unchanged.
+fn prefer_buffered_failure(recv: EstartWait, failure_rx: &mut mpsc::Receiver<String>) -> EstartWait {
+    match recv {
+        EstartWait::Ready(None) => match failure_rx.try_recv() {
+            Ok(reason) => EstartWait::MigrationFailed(reason),
+            Err(_) => EstartWait::Ready(None),
+        },
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod estart_race_tests {
+    use super::*;
+
+    #[test]
+    fn closed_estart_channel_with_buffered_failure_becomes_migration_failed() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        // Reader task's exact sequence: send the reason, then drop the sender.
+        tx.try_send("migration 0007 failed: disk I/O error".into()).unwrap();
+        drop(tx);
+        match prefer_buffered_failure(EstartWait::Ready(None), &mut rx) {
+            EstartWait::MigrationFailed(r) => assert_eq!(r, "migration 0007 failed: disk I/O error"),
+            _ => panic!("buffered failure reason must win over a closed ESTART channel"),
+        }
+    }
+
+    #[test]
+    fn closed_estart_channel_without_failure_stays_channel_closed() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        drop(tx); // srv died before ESTART for some other reason — no failure line
+        assert!(matches!(
+            prefer_buffered_failure(EstartWait::Ready(None), &mut rx),
+            EstartWait::Ready(None)
+        ));
+    }
+
+    #[test]
+    fn other_outcomes_pass_through_untouched() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        tx.try_send("should not be consumed".into()).unwrap();
+        assert!(matches!(prefer_buffered_failure(EstartWait::Timeout, &mut rx), EstartWait::Timeout));
+        assert!(matches!(
+            prefer_buffered_failure(EstartWait::MigrationFailed("x".into()), &mut rx),
+            EstartWait::MigrationFailed(_)
+        ));
+        // Neither pass-through drained the channel.
+        assert_eq!(rx.try_recv().ok().as_deref(), Some("should not be consumed"));
+    }
+}
+
 /// Run `agentmux-srv migrate` synchronously before spawning the daemon.
 ///
 /// The migration runner exits 0 (success / nothing to do) or 1 (failure).
@@ -556,16 +622,21 @@ pub async fn spawn_srv(
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
-    enum EstartWait {
-        Ready(Option<SrvSpawnResult>),
-        Timeout,
-        MigrationFailed(String),
-    }
     let recv = loop {
         tokio::select! {
+            // `biased;` — poll arms in declaration order, failure first.
+            // The stderr reader sends the failure reason and then hits EOF
+            // (srv exits 1 right after the line), dropping every sender
+            // before this select! is next polled. Unbiased, `rx.recv()`
+            // resolving to None (closed) could win the coin flip over the
+            // already-buffered reason and degrade this to the generic
+            // EstartChannelClosed — invisible on Windows, exactly what the
+            // MigrationFailed path exists to fix (reagent P1, post-merge on
+            // #3043). `prefer_buffered_failure` below is the second guard.
+            biased;
+            Some(reason) = failure_rx.recv() => break EstartWait::MigrationFailed(reason),
             result = rx.recv() => break EstartWait::Ready(result),
             _ = &mut sleep => break EstartWait::Timeout,
-            Some(reason) = failure_rx.recv() => break EstartWait::MigrationFailed(reason),
             Some(()) = migration_rx.recv() => {
                 // Migrations are running — extend the deadline generously.
                 let new_deadline = tokio::time::Instant::now() + migration_timeout;
@@ -577,6 +648,7 @@ pub async fn spawn_srv(
             }
         }
     };
+    let recv = prefer_buffered_failure(recv, &mut failure_rx);
     match recv {
         EstartWait::Timeout => {
             let _ = child.start_kill();
