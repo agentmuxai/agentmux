@@ -1,5 +1,40 @@
 # AgentMux Version History
 
+## 0.55.39 — 2026-09-07
+
+- feat(tray): macOS menu-bar backend + headless AppKit pump for background-service mode (issue #2977 WS1)
+- DRY contained cleanups: one MenuRows renderer in flyoutmenu, TreeNode prop pass-through in file-tree, single Connect-CTA arm in PreLaunchAuthPanel, migrations freeze-copy policy, audit report corrections
+- docs: large-migrations completion audit — 14 initiatives scored, 4 stale status claims corrected (CLAUDE.md transcript_request, migration framework, SolidJS analysis, master reducer status)
+- TileLayout: one shared core (createTileLayout) with per-platform hook objects for win32/linux/darwin instead of three near-identical copies; no behavior change
+- fix(srv): a failed data migration is now fatal — srv emits AGENTMUXSRV-MIGRATION-FAILED and exits 1 before ESTART instead of booting against a half-migrated store; launcher and CEF host surface the reason immediately (migration hardening Phase 1a)
+- storage: one generic ManagedResource implementation behind the skill_* and mcp_server_* store methods (agent- and bundle-level list/get/bind/unbind/upsert/access checks); public API, messages and tests unchanged
+- refactor(agent-pane): route agent-view's 11 raw store dispatches through its AgentPaneModel handle (A9 of #1549) — post-unmount dispatches now drop safely instead of throwing, and all pane commands hit the crash-trail
+- docs: Phase 2 RPC-bindings codegen design spec and Phase 5 saga/reducer decision record for the DRY audit; report progress note updated
+- fix(launcher,cef): migration-failure reason can no longer lose a select! race to the closed ESTART channel — biased poll order plus a post-loop buffered-reason check, so a failed migration always surfaces as MigrationFailed instead of degrading to the generic channel-closed error
+- fix(lan): make the mDNS instance label unique and dot-free so two hosts on the same version discover each other
+- feat(settings): toggle to disable the startup splash screen
+- refactor(agent-pane): drop the AgentAtoms mirror — the pane model exposes the reducer state and document nodes reactively (A6 of #1549); adding a reducer field is now a one-place change, and the two detailsOpen writes that bypassed the reducer go through it
+- fix(agent-pane): drop the dead tab-strip gap above My Agents on a fresh pane
+- fix(statusbar): LAN diamond now shows all three states (peers / on-but-idle / off)
+- docs: regenerate the specs index — the committed header count (95) disagreed with its own 96 rows, a merge artifact that failed the 'Specs index is current' gate on every PR including main
+- fix(memory): backfill native-memory versions from disk and repair rows mislabeled 'detected outside AgentMux'
+- feat(srv): agentmux-srv migrate --verify — a doctor pass that asks every APPLIED migration for its post-condition (row counts, marker files) and exits 3 on any mismatch; 0007 and 0002 implement real checks (migration hardening Phase 1b)
+- ci: make the specs index merge-safe by dropping the derived row count from its committed section headers (the one value that resolved wrongly when two spec-adding PRs merged, and 67% of recent CI failures); fix the create_no_window_flag_set flake by pre-warming node.exe outside the measured window
+- fix(srv): migrations run under a cross-process lock — two srv processes booting against the same data dir can no longer both apply the same migration (migration hardening Phase 3)
+- feat(abf): authoring UI for per-provider instruction overrides (instructions_by_provider)
+- feat(jekt): cross-channel sender verification — DELIVERY=channel, TRUST=channel-verified (spec Phase B)
+- feat(muxspect): migrations command — the migrate --verify doctor report from inside a live instance (hardening Phase 1c)
+- test(migrations): Phase 5 regression suite — stale-marker incident, crash-before-mark resume, multi-version upgrade, bootstrap stamping
+- chore(deps): drop the unused react dependency left over from the React→SolidJS migration
+- feat(docs): weekly docs stale-sweep — flags current-claiming docs whose cited files changed or vanished, posted to a standing issue (docs-lifecycle Phase 5)
+- fix(migrations): 0002 block-zones migration no longer trusts its marker file — content-idempotent re-run, content-checked bootstrap stamping and verify (hardening Phase 2)
+- refactor(mcp): split agentmux-mcp/src/main.rs — 50 tool schemas into tool_schemas.rs and the window capture/discovery cluster into window_capture.rs (audit step 17); no behavior change
+- ci(docs): scope the specs-index gate to PRs that touch docs/specs
+- chore: retire the misleading Tauri-era comments and log labels outside the CEF crate (Tauri->CEF migration residue)
+- fix(ci): generate the specs index from tracked files, not a filesystem glob
+- refactor(srv): record each RPC command's request/response types at registration (RpcSchema + register_typed) — the mapping a bindings generator needs, which did not previously exist as data
+- feat(storage): db_agents carries the latest launch state (session/status/started/ended) — schema v29 + backfill from db_agent_instances (agent consolidation Phase 3b, PR 1)
+
 ## 0.55.38 — 2026-09-06
 
 - docs: stop agents sleep-polling — decision table for waiting without polling
