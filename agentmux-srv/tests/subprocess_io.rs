@@ -61,12 +61,16 @@ async fn warm_node() {
     cmd.stdout(std::process::Stdio::null());
     cmd.stderr(std::process::Stdio::null());
     cmd.kill_on_drop(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    // No inner `#[cfg(windows)]` — the whole function is already gated, so
+    // one would be an always-true condition. (`spawn_node` below does need
+    // its inner cfg: that function is compiled on every platform.)
+    //
+    // No `use std::os::windows::process::CommandExt` either: on
+    // `tokio::process::Command` (unlike `std`'s) `creation_flags` is an
+    // inherent method, so importing the extension trait only earns an
+    // unused-import warning.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
     if let Ok(mut child) = cmd.spawn() {
         // Bounded so a pathological runner can't stall the suite here; the
         // caller's own timeout is the one that decides pass/fail.
