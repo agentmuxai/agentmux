@@ -508,6 +508,41 @@
     }
 }
 
+// ── LAN discovery diamond (next to the hostname) ────────────────────────
+// Three distinct states, because "discovery off" and "discovery on but no
+// peers yet" are different facts the user acts on differently — and until
+// #3025 they were indistinguishable here (every instance discovered itself,
+// so the peer count was never 0 while enabled). See
+// docs/retro/retro-lan-diamond-vanished-after-self-peer-fix-2026-09-06.md.
+//
+//   filled + accent  ◆  peers found        (unchanged from before)
+//   hollow + muted   ◇  on, none found     (working, just nobody out there)
+//   hollow + warning ◇  discovery off      (the default — opt-in feature)
+//
+// Filled-vs-hollow carries the peers/no-peers distinction on its own, so the
+// state is not conveyed by color alone (the two hollow states differ in hue
+// but a user who cannot separate them still sees "not filled = no peers").
+.status-lan-diamond {
+    margin-left: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+
+    &--peers {
+        color: var(--accent-color);
+    }
+
+    // Deliberately dimmer than --off: this is the quiet, healthy steady state
+    // for anyone with a single machine, and should not read as a warning.
+    &--idle {
+        color: var(--secondary-text-color);
+        opacity: 0.65;
+    }
+
+    &--off {
+        color: var(--warning-color);
+    }
+}
+
 // ── MuxBus session dot (on the network pill, next to the LAN diamond) ──────
 // Red = no valid MuxBus session (WAN jekt delivery dead — click the pill and
 // sign in from the panel); green = connected. Deliberately quiet: a dot, not
