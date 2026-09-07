@@ -5,3 +5,4 @@
 //! Port of Go's pkg/wshutil/wshrouter.go and pkg/wshutil/wshrpc.go.
 
 pub mod engine;
+pub mod schema;

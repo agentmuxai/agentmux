@@ -962,6 +962,32 @@ impl AppState {
             .collect()
     }
 
+    /// This browser's own registered `BrowserKind`, by label. The
+    /// authoritative answer to "what is this browser", as opposed to whatever
+    /// its (possibly cloned, possibly shared) `AgentMuxClient` claims — see
+    /// `client::navigation::takes_pane_path` and issue #3028. `None` when the
+    /// label isn't registered (yet).
+    pub fn browser_kind_for_label(&self, label: &str) -> Option<BrowserKind> {
+        self.host_state.lock().browsers.get(label).map(|h| h.kind.clone())
+    }
+
+    /// Browsers that are genuinely `BrowserKind::TopLevel` — no floaters.
+    /// `list_top_level_browsers` deliberately includes floaters because its
+    /// callers emit host JS events, but a caller that needs a *window-shaped*
+    /// browser (notably `CreateWindowTask`, which CLONES the browser's CEF
+    /// client into a brand-new top-level window) must not pick a floater: a
+    /// floater's client carries `is_browser_pane = true`, which the new window
+    /// then inherits. Issue #3028.
+    pub fn list_full_top_level_browsers(&self) -> Vec<(String, Browser)> {
+        self.host_state
+            .lock()
+            .browsers
+            .iter()
+            .filter(|(_, h)| matches!(h.kind, BrowserKind::TopLevel { .. }))
+            .map(|(k, h)| (k.clone(), h.browser.clone()))
+            .collect()
+    }
+
     /// Count of live, user-visible top-level windows — the authoritative
     /// last-window quit gate (`client::on_before_close` +
     /// `wrr::win_event::maybe_quit_on_last_user_window`). Delegates to

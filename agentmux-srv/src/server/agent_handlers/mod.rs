@@ -1140,6 +1140,81 @@ mod recent_sessions_tests {
         assert_eq!(tpl.user_hidden, 1);
     }
 
+    /// The typed registration path records what it registers.
+    ///
+    /// This is the property the whole codegen plan rests on
+    /// (`docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`): the command →
+    /// request/response mapping has to be data the process can hand out, and
+    /// it has to come from registration itself rather than a second list
+    /// someone maintains by hand. Asserting the exact type names means a
+    /// rename that silently changes the generated bindings fails here.
+    #[tokio::test]
+    async fn register_typed_records_each_command_request_and_response_type() {
+        let (_state, engine, _rx) = build_state_with_template_seed();
+        let schema = engine.schema_json();
+        let rows = schema.as_array().expect("schema is an array");
+
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema — was it registered with register_handler instead of register_typed?"))
+        };
+
+        for cmd in [
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_UNHIDE,
+        ] {
+            let row = find(cmd);
+            assert_eq!(row["requestName"], "CommandAgentDefHideData", "{cmd} request type");
+            assert_eq!(row["responseName"], "AgentDefHideResult", "{cmd} response type");
+            // The full path is what disambiguates two same-named types in
+            // different modules, so it must be a path, not a bare name.
+            assert!(
+                row["request"].as_str().unwrap().contains("::"),
+                "{cmd} request should be fully qualified, got {:?}",
+                row["request"]
+            );
+        }
+
+        // Commands still on register_handler are absent rather than recorded
+        // wrong — that absence is what makes migrating one at a time safe.
+        assert!(
+            rows.iter().all(|r| r["command"] != crate::backend::rpc_types::COMMAND_LIST_AGENTS),
+            "listagents is not migrated yet and must not appear in the schema",
+        );
+    }
+
+    /// A migrated handler answers exactly as it did before, including the
+    /// error shape for a malformed request.
+    #[tokio::test]
+    async fn register_typed_preserves_the_wire_behaviour_of_a_migrated_handler() {
+        let (_state, engine, mut rx) = build_state_with_template_seed();
+
+        // Happy path: unchanged response body.
+        let resp: crate::backend::rpc_types::AgentDefHideResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": "tpl-claude" }),
+        )
+        .await;
+        assert!(resp.ok);
+
+        // Malformed request: still an RPC error, still prefixed with the
+        // command name the hand-written body used.
+        let err = call_rpc_expect_error(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_HIDE,
+            serde_json::json!({ "definition_id": 42 }),
+        )
+        .await;
+        assert!(
+            err.starts_with("agentdefhide:"),
+            "error should keep the command prefix, got {err:?}",
+        );
+    }
+
     #[tokio::test]
     async fn hide_then_unhide_round_trip() {
         let (_state, engine, mut rx) = build_state_with_template_seed();

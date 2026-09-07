@@ -126,7 +126,21 @@ fn try_show_resolved_window(state: &Arc<AppState>, label: &str) -> bool {
     let Some(mut browser) = state.get_browser(label) else { return false };
     let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
     let Some(window) = bv.window() else { return false };
-    if window.is_visible() == 0 {
+    // Same native-vs-Views check as `on_load_end`'s arming site (issue #3028):
+    // trusting Views alone here would resolve the gate as "done" while the
+    // native HWND stays hidden — the reveal's very last step silently
+    // no-opping. Views claiming visible while native says hidden is exactly
+    // the misreport this exists to override.
+    let views_visible = window.is_visible() != 0;
+    let native_visible = native_window_visible(state, Some(label));
+    if should_run_reveal(views_visible, native_visible) {
+        if views_visible {
+            tracing::warn!(
+                target: "startup-paint",
+                label = %label,
+                "[startup-paint] Views reports visible but native HWND is hidden at gate-fire — showing anyway (issue #3028)"
+            );
+        }
         window.show();
         if let Some(host) = browser.host() {
             host.set_focus(1);
@@ -330,6 +344,93 @@ const SHOW_WINDOW_MAX_RETRIES: u32 = 10;
 /// two later, long enough not to busy-loop the UI thread.
 const SHOW_WINDOW_RETRY_DELAY_MS: i64 = 50;
 
+/// Should `on_load_end` run the reveal path for a resolved top-level window?
+///
+/// The Views-layer answer alone is NOT trustworthy on Windows. Observed live
+/// (issue #3028, 2026-09-06, cold-path `open_new_window` with the pool
+/// bypassed): `Window::is_visible()` returned nonzero for a freshly created
+/// cold-path window whose native HWND was `IsWindowVisible == FALSE` — so this
+/// branch silently skipped, the paint gate was never armed, and the window
+/// stayed hidden forever. The frontend's `report_first_paint` arrived with the
+/// correct label and no-opped (`reveal_gated_window` returns when nothing is
+/// pending), and the 4s safety timeout was never scheduled: every backstop
+/// hangs off arming, so "skip arming" defeated all of them at once. Same
+/// Views-vs-HWND mismatch class as `POOL_HWND_CACHE`
+/// (`SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md`) and cef#3638.
+///
+/// `views_visible` is the Views-layer claim; `native_visible` is
+/// `IsWindowVisible` on the HWND when we have one (None on non-Windows, or
+/// when no HWND is bound for the label). Reveal when EITHER layer says the
+/// window is not visible: revealing an actually-visible window is harmless
+/// (`try_show_resolved_window` treats already-visible as resolved), while
+/// skipping a hidden one strands it permanently.
+fn should_run_reveal(views_visible: bool, native_visible: Option<bool>) -> bool {
+    !views_visible || native_visible == Some(false)
+}
+
+/// Does this browser take `on_load_end`'s browser-pane path (pane-specific
+/// work, then return) instead of the top-level reveal path?
+///
+/// The `AgentMuxClient`'s own `is_browser_pane` flag is NOT trustworthy for
+/// this decision, because a client is shared by every browser created from
+/// it. `CreateWindowTask::execute` clones its client from an arbitrary
+/// browser returned by `list_top_level_browsers()`, and that helper
+/// deliberately includes `Floater`s ("they ARE trusted top-level renderers,
+/// so `list_top_level_browsers` includes them for host JS-event emission" —
+/// `BrowserKind`'s own doc comment). Every floater client is built with
+/// `is_browser_pane = true` (`floating_pane.rs`), so a cold-path top-level
+/// window that happens to clone a floater's client inherits `true` and
+/// returned out of `on_load_end` above the whole reveal block — issue #3028.
+/// `browsers` is a `HashMap`, so which client gets cloned varies per run:
+/// exactly the intermittency that made #3028 reproduce every time under the
+/// issue's repro (all windows closed, only pool + `floating-pool-*` browsers
+/// alive) and not at all under a three-rapid-clicks repro with `main` open.
+///
+/// This is the same "the inherited flag lies, the registered kind doesn't"
+/// hazard already documented at `client/lifecycle.rs`'s `BrowserKind`
+/// classification ("LABEL is the source of truth ... if the iteration happens
+/// to pick a pane, the new window inherits `is_browser_pane=true`"). That fix
+/// corrected the *classification*; the flag itself was left wrong and
+/// `on_load_end` still branched on it.
+///
+/// `kind` is this browser's own registered `BrowserKind`. `None` (not
+/// registered yet, or identity lookup missed) falls back to the client flag —
+/// the pre-fix behaviour — rather than guessing on missing evidence.
+fn takes_pane_path(kind: Option<&crate::state::BrowserKind>, client_is_browser_pane: bool) -> bool {
+    use crate::state::BrowserKind;
+    match kind {
+        // Genuine pane-like renderers: panes and floating panes/tear-offs.
+        // Floaters host panes and need the focus-subclass re-install, which
+        // is why their clients set the flag in the first place.
+        Some(BrowserKind::Pane { .. }) | Some(BrowserKind::Floater { .. }) => true,
+        // A real top-level window (or a CEF-owned popup) — never the pane
+        // path, no matter what client it was cloned from.
+        Some(BrowserKind::TopLevel { .. }) | Some(BrowserKind::Popup) => false,
+        None => client_is_browser_pane,
+    }
+}
+
+/// Native-layer visibility for a label's bound HWND. `None` when no HWND is
+/// bound (or off Windows) — callers must treat that as "no extra information",
+/// not as hidden.
+#[cfg(target_os = "windows")]
+fn native_window_visible(state: &Arc<AppState>, label: Option<&str>) -> Option<bool> {
+    let label = label?;
+    let hwnd = *state.window_hwnds.lock().get(label)?;
+    // SAFETY: IsWindowVisible tolerates stale/invalid handles (returns FALSE).
+    let vis = unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::IsWindowVisible(
+            hwnd as windows_sys::Win32::Foundation::HWND,
+        )
+    };
+    Some(vis != 0)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn native_window_visible(_state: &Arc<AppState>, _label: Option<&str>) -> Option<bool> {
+    None
+}
+
 /// Show (or, on Linux, arm the startup-paint gate for) a top-level window's
 /// Views `Window`, once confirmed not yet visible. Shared by `on_load_end`'s
 /// primary resolution path and `ShowWindowRetryTask`'s retry path so BOTH
@@ -412,7 +513,20 @@ fn try_show_top_level_window(state: &std::sync::Arc<crate::state::AppState>, lab
     let Some(mut browser) = state.get_browser(label) else { return false };
     let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
     let Some(window) = bv.window() else { return false };
-    if window.is_visible() == 0 {
+    // ReAgent P1 on #3030: this retry path exists precisely to ride out CEF
+    // Views timing quirks, so gating it on the Views layer alone reproduces
+    // issue #3028 through the one path meant to rescue it. Same predicate as
+    // the initial on_load_end pass.
+    let views_visible = window.is_visible() != 0;
+    let native_visible = native_window_visible(state, Some(label));
+    if should_run_reveal(views_visible, native_visible) {
+        if views_visible {
+            tracing::warn!(
+                target: "startup-paint",
+                label = %label,
+                "[on_load_end] retry: Views reports visible but native HWND is hidden — revealing anyway (issue #3028)"
+            );
+        }
         reveal_top_level_window(state, Some(label), &window, Some(&mut browser));
     }
     true
@@ -590,7 +704,29 @@ impl AgentMuxHandler {
         // Runs AFTER cred injection so a floating-pane window gets BOTH the
         // bridge and its focus fix; a real remote browser pane falls through
         // here having received no creds (origin didn't match above).
-        if self.is_browser_pane {
+        // Decide the pane branch from what this browser actually IS (its
+        // registered `BrowserKind`), not from the shared client's
+        // `is_browser_pane` flag, which a cloned client can carry in from an
+        // unrelated floater — issue #3028's root cause, see `takes_pane_path`.
+        let resolved_kind = {
+            let mut owned = browser.as_deref().cloned();
+            owned
+                .as_mut()
+                .and_then(|b| self.window_label_for(b))
+                .and_then(|label| self.state.browser_kind_for_label(&label))
+        };
+        let is_pane_path = takes_pane_path(resolved_kind.as_ref(), self.is_browser_pane);
+        if self.is_browser_pane && !is_pane_path {
+            // The exact #3028 condition. Loud: this window would have been
+            // stranded hidden forever before this fix, with no log at all.
+            tracing::warn!(
+                target: "startup-paint",
+                kind = ?resolved_kind,
+                "[on_load_end] client claims browser-pane but this browser is a top-level \
+                 window (cloned client) — taking the reveal path (issue #3028)"
+            );
+        }
+        if is_pane_path {
             if let Some(b) = browser.as_deref() {
                 crate::browser_pane::callbacks::on_load_end_browser_pane(&self.state, b);
             }
@@ -653,7 +789,30 @@ impl AgentMuxHandler {
             if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
                 if let Some(window) = bv.window() {
                     resolved = true;
-                    if window.is_visible() == 0 {
+                    let views_visible = window.is_visible() != 0;
+                    let native_visible =
+                        native_window_visible(&self.state, browser_label.as_deref());
+                    if views_visible && native_visible != Some(false) {
+                        // Genuinely visible (or no native evidence otherwise).
+                        // Log it: the silent version of this skip is what made
+                        // issue #3028 undiagnosable from the field.
+                        tracing::debug!(
+                            target: "startup-paint",
+                            label = ?browser_label,
+                            "[on_load_end] window already visible — reveal skipped"
+                        );
+                    } else if views_visible {
+                        // The mismatch case from issue #3028: Views claims
+                        // visible, the native HWND is hidden. Loud, because it
+                        // means the Views layer cannot be trusted for this
+                        // window and only this check saved it.
+                        tracing::warn!(
+                            target: "startup-paint",
+                            label = ?browser_label,
+                            "[on_load_end] Views reports visible but native HWND is hidden — revealing anyway (issue #3028)"
+                        );
+                    }
+                    if should_run_reveal(views_visible, native_visible) {
                         // Linux: defer the actual show()/focus (and the splash
                         // dismiss above) until the frontend confirms a real
                         // compositor paint, instead of doing it here on mere
@@ -954,4 +1113,92 @@ pub(crate) fn show_load_error_page(
     let data_uri = format!("data:text/html;base64,{}", b64_str);
     let uri = CefString::from(data_uri.as_str());
     frame.load_url(Some(&uri));
+}
+
+#[cfg(test)]
+mod pane_path_tests {
+    use super::takes_pane_path;
+    use crate::state::BrowserKind;
+
+    /// Issue #3028's actual root cause. `CreateWindowTask` clones its CEF
+    /// `Client` from an arbitrary browser in `list_top_level_browsers()`,
+    /// which deliberately includes `Floater`s — and every floater client is
+    /// built with `is_browser_pane = true`. A cold-path top-level window that
+    /// happens to clone a floater's client inherits that flag, and the old
+    /// `if self.is_browser_pane { .. return }` gate then returned out of
+    /// `on_load_end` ABOVE the entire reveal block: paint gate never armed,
+    /// `report_first_paint` no-opped, the 4s safety timeout never scheduled.
+    /// What this browser IS must win over what its cloned client claims.
+    #[test]
+    fn a_top_level_window_with_an_inherited_pane_flag_is_not_a_pane() {
+        assert!(!takes_pane_path(
+            Some(&BrowserKind::TopLevel { is_pool: false }),
+            true,
+        ));
+        assert!(!takes_pane_path(
+            Some(&BrowserKind::TopLevel { is_pool: true }),
+            true,
+        ));
+    }
+
+    /// The converse must keep working: genuine panes and floaters take the
+    /// pane path even if they were somehow handed a non-pane client. Floaters
+    /// are pane-like here by design — they host panes and need the focus
+    /// subclass re-install, which is why their clients set the flag at all.
+    #[test]
+    fn genuine_panes_and_floaters_still_take_the_pane_path() {
+        assert!(takes_pane_path(
+            Some(&BrowserKind::Pane { block_id: "b".into() }),
+            false,
+        ));
+        assert!(takes_pane_path(Some(&BrowserKind::Floater { is_pool: false }), false));
+        assert!(takes_pane_path(Some(&BrowserKind::Floater { is_pool: true }), false));
+    }
+
+    /// Unresolvable kind (browser not registered yet / identity lookup miss)
+    /// must fall back to the client flag — the pre-fix behaviour — rather
+    /// than guessing. Never silently reclassify on missing evidence.
+    #[test]
+    fn an_unresolvable_kind_falls_back_to_the_client_flag() {
+        assert!(takes_pane_path(None, true));
+        assert!(!takes_pane_path(None, false));
+    }
+
+    /// A popup is CEF-owned and Chrome-style (shown at creation); it was not
+    /// on the pane path before this change and must not move onto it.
+    #[test]
+    fn a_popup_is_unchanged_by_this_gate() {
+        assert!(!takes_pane_path(Some(&BrowserKind::Popup), false));
+    }
+}
+
+#[cfg(test)]
+mod reveal_decision_tests {
+    use super::should_run_reveal;
+
+    /// The normal deferred-show case: nothing claims the window is visible.
+    #[test]
+    fn a_hidden_window_is_revealed() {
+        assert!(should_run_reveal(false, None));
+        assert!(should_run_reveal(false, Some(false)));
+    }
+
+    /// Issue #3028: Views said visible, the native HWND said hidden, and the
+    /// old `window.is_visible() == 0` gate silently skipped — never arming the
+    /// paint gate, so the paint signal AND the 4s timeout both no-opped and
+    /// the window stayed hidden forever. Native evidence must win.
+    #[test]
+    fn views_visible_but_native_hidden_still_reveals() {
+        assert!(should_run_reveal(true, Some(false)));
+    }
+
+    /// A genuinely visible window must not be re-revealed: the reveal path
+    /// also focuses, and stealing focus on every load-end would be a
+    /// regression for real visible windows.
+    #[test]
+    fn a_genuinely_visible_window_is_left_alone() {
+        assert!(!should_run_reveal(true, Some(true)));
+        // No native evidence => trust the Views layer, as before this fix.
+        assert!(!should_run_reveal(true, None));
+    }
 }
