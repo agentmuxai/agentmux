@@ -1,7 +1,8 @@
 # SolidJS Migration Analysis — Performance & Bundle Size
 
 **Date:** 2026-03-11  
-**Current stack:** React 19 + Jotai + Vite + Tauri (WebView2/Chromium)
+**Status:** historical — the migration this doc proposed is complete: as of 2026-09-06, 390 frontend files import `solid-js` and none import `react`; the desktop shell is CEF, not Tauri (`docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §2.2). The stack line below is the pre-migration baseline, kept as written.
+**Stack at time of writing:** React 19 + Jotai + Vite + Tauri (WebView2/Chromium)
 
 ---
 

@@ -1,6 +1,6 @@
 # Migration Framework Spec
 **Date:** 2026-06-24  
-**Status:** Proposed (implemented — see note below)
+**Status:** implemented — `agentmux-srv/src/migrations/` is the live framework (m0000–m0006+), used at every startup by `bootstrap.rs`; see the 2026-08-07 audit note below. Restamped 2026-09-06 (was "Proposed") per `docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §5.3.
 **Scope:** agentmux-srv, agentmux-launcher
 
 > **2026-08-07 audit note:** Implemented, foundational — `agentmux-srv/src/migrations/`
