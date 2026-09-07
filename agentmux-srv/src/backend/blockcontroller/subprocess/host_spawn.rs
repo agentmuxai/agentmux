@@ -149,7 +149,7 @@ impl SubprocessController {
         // console, causing stdout to go to that console rather than the pipe.
         #[cfg(windows)]
         {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            use agentmux_common::win32::CREATE_NO_WINDOW;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
         core::apply_working_dir(&mut cmd, &self.block_id, &config.working_dir, &config.env_vars);

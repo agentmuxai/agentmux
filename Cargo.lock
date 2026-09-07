@@ -85,6 +85,7 @@ dependencies = [
  "ed25519-dalek",
  "hmac",
  "junction",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

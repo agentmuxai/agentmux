@@ -383,31 +383,11 @@ impl AuthSessionManager {
     }
 }
 
-/// Platform-specific best-effort kill of a child process by PID.
-/// Mirror of the cef-side helper in `agentmux-cef::commands::platform`.
-#[cfg(windows)]
-fn kill_pid(pid: u32) -> std::io::Result<()> {
-    let status = std::process::Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(std::io::Error::other(format!("taskkill exit {:?}", status.code())))
-    }
-}
-
-#[cfg(unix)]
-fn kill_pid(pid: u32) -> std::io::Result<()> {
-    let ret = unsafe { libc::kill(pid as i32, libc::SIGTERM) };
-    if ret != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
+/// Best-effort kill of a child process by PID — `SIGTERM` on Unix,
+/// `taskkill /F /T /PID` on Windows. This used to be a private copy that
+/// described itself as a "mirror of the cef-side helper"; both now share
+/// `agentmux_common::process::kill_pid`.
+use agentmux_common::process::kill_pid;
 
 #[cfg(test)]
 mod tests {

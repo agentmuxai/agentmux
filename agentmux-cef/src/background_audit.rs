@@ -409,10 +409,7 @@ fn parse_line(line: &str) -> Option<AuditEntry> {
 /// Wall-clock milliseconds since the Unix epoch, or 0 if the clock predates
 /// it (a badly misconfigured machine — a visibly odd timestamp beats a panic).
 pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms_u64()
 }
 
 /// Initialise the audit log for this instance and publish its plumbing.

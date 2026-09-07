@@ -23,7 +23,7 @@ pub fn open_browser(url: &str) {
         let mut cmd = std::process::Command::new("cmd");
         cmd.arg("/C").raw_arg(format!("start \"\" \"{url}\""));
         // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         cmd.creation_flags(CREATE_NO_WINDOW);
         let _ = cmd.spawn();
     }

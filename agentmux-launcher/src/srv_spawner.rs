@@ -346,8 +346,8 @@ pub async fn spawn_srv(
     // the job — those resources would survive launcher death.
     #[cfg(target_os = "windows")]
     {
-        const CREATE_SUSPENDED: u32 = 0x00000004;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        use agentmux_common::win32::CREATE_SUSPENDED;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         cmd.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
     }
 

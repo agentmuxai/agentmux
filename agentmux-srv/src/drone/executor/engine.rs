@@ -235,10 +235,7 @@ async fn mark_state(
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms()
 }
 
 /// Returns the layered topological order of the graph. Each layer is

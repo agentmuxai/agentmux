@@ -265,7 +265,7 @@ async fn run_migrations_inner(
     {
         // CREATE_NO_WINDOW: console-flash suppression — host (GUI) spawning the
         // srv migrate child; tokio::process::Command has creation_flags inherent.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         command.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = command

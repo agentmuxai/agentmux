@@ -21,7 +21,7 @@ pub(super) const PTY_READ_BUF_SIZE: usize = 4096;
 pub(super) fn detect_local_shell_path_windows() -> String {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    use agentmux_common::win32::CREATE_NO_WINDOW;
     // Try pwsh (PowerShell 7)
     if Command::new("where")
         .arg("pwsh")

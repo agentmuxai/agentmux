@@ -11,12 +11,14 @@
 ///   reachable through the backend `open_subwindow` API — reserved for agent /
 ///   internal use cases (transient auxiliary views, tool-spawned panels). Closes
 ///   when its parent full instance closes.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WindowKind {
-    FullInstance,
-    Subwindow,
-}
+///
+/// The type itself lives in `agentmux_common::ipc` — it is the wire type the
+/// launcher deserializes, and the host used to carry a byte-identical private
+/// copy of it (same variants, same derives, same `serde(rename_all)`) that
+/// `client/lifecycle.rs` then mapped back onto the common one variant by
+/// variant. One definition; the mapping is gone
+/// (`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md` §2.2).
+pub use agentmux_common::ipc::WindowKind;
 
 /// Per-window metadata held alongside the CEF `Browser`. See `WindowKind` for
 /// the semantics of `kind` and `parent_instance_id`.

@@ -70,7 +70,7 @@ The consequence is spread, not concentrated: the 334 sync comments cluster at **
 | ObjC FFI externs (`objc_msgSend`, `sel_registerName`, `objc_getClass`, `method_setImplementation`) | Re-declared per file in **9 `agentmux-cef` files** (~55 `extern "C"` declarations) | Nothing |
 | Process-kill | **Five implementations, three mechanisms**: `TerminateJobObject` (`process_tracker/windows.rs`), `taskkill /F /T /PID` in four separate crates (`bashwrap/bash_wrap.rs:419`, `cef/commands/cli_login.rs:1454`, `srv/backend/shell_node.rs:299`, `srv/identity/auth_session.rs:391`), `libc::kill` in three more | Nothing |
 | Broadcast chunking constants | `agentmux-mcp/src/main.rs:2486` — *"Mirrors `fleet_broadcast_impl`'s own chunking constants — kept in sync by hand since this is a separate process/crate"* | Nothing — and `agentmux-mcp` **already depends on common** |
-| Cross-crate types | `WindowKind`, `Rect` in cef *and* common; `ProviderConfig` in cef *and* srv; `DataPaths` in common *and* launcher; `Event`/`Command` in common *and* srv | Partially — the common versions exist and are shadowed |
+| Cross-crate types | `WindowKind` in cef *and* common — **byte-identical** (same variants, derives, `serde(rename_all)`), and cef then mapped one onto the other variant by variant (`client/lifecycle.rs:412`). Checked on implementation: `Rect` and `DataPaths` are **name collisions, not shadows** — cef's `Rect` is `{x,y,width,height: f64}` (browser coords) vs common's `{left,top,right,bottom: i32}` (Win32 `RECT`); launcher's `DataPaths` is a richer struct that *contains* common's. Those two want a rename for clarity, not a merge. | `WindowKind`: yes, shadowed. The others: no. |
 
 (All four `taskkill` sites correctly use `/PID`, per CLAUDE.md's ban on image-name kills. The finding is fragmentation, not a safety bug.)
 
@@ -175,8 +175,8 @@ Ordered by payoff ÷ risk. Each step is independently shippable.
 2. `common::time` — `now_ms()` / `now_secs()`; delete 26 copies. Pick one signature (`i64`), fix the handful of `u64` callers.
 3. `common::event_log` — parameterize the log filename; delete one of two 415-line files. The srv copy's own doc comment is the migration guide.
 4. `common::process::kill_tree(pid)` — one Windows (`taskkill /F /T /PID`) + one Unix (`libc::kill(-pgid)`) implementation; route the four `taskkill` sites and three `libc::kill` sites through it. `process_tracker` keeps its Job Object path; this is for the non-tracked cases.
-5. `agentmux-cef::objc_ffi` — one `extern "C"` block; delete ~55 per-file re-declarations.
-6. Move `WindowKind`, `Rect`, `DataPaths` callers onto the `common` definitions that already exist; delete the shadows.
+5. `agentmux-cef::objc_ffi` — one `extern "C"` block; delete ~55 per-file re-declarations. **Deferred from the first Phase 1 PR:** on inspection the externs are *not* uniform — `objc_getClass` returns `Class` at 7 sites, `Id` at 5, `*mut c_void` at 1, with per-file type aliases — so unifying them means unifying the aliases too, and that code is macOS-only and cannot be compiled or tested on the Windows machine this audit ran on. Needs a macOS build to land safely.
+6. Move `WindowKind` callers onto the `common` definition that already exists; delete the shadow. (`Rect` and `DataPaths` turned out to be name collisions, not shadows — see the corrected §2.2 row — and want a rename, not a merge.)
 
 Expected: ~1,200 lines removed, seven sync comments retired, and — more importantly — `common` becomes the obvious home for the next shared thing.
 

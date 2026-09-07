@@ -177,7 +177,7 @@ pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
     // a console window on every pre-launch prereq check. See cli.rs's note.
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         c.creation_flags(CREATE_NO_WINDOW);
     }
     let output = c.output().await.ok()?;

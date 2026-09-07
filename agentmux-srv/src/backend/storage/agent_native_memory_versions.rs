@@ -61,10 +61,7 @@ pub struct NativeMemoryVersionSummary {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    agentmux_common::time::now_ms()
 }
 
 /// SHA-256 hex digest of a memory file's content — used both to populate

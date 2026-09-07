@@ -44,10 +44,7 @@ const DEFAULT_LEASE_MS: i64 = 120_000;
 const EVENT_WORK_QUEUE_CHANGED: &str = "workqueue:changed";
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms()
 }
 
 fn publish_changed(state: &AppState) {

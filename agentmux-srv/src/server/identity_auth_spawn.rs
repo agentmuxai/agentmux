@@ -130,7 +130,7 @@ pub(crate) fn spawn_auth_cli(
         // CREATE_NO_WINDOW: console-flash suppression, see agentmux-common/src/cli.rs
         #[cfg(windows)]
         {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            use agentmux_common::win32::CREATE_NO_WINDOW;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
         let mut child = match cmd.spawn()
@@ -727,7 +727,7 @@ async fn confirm_authenticated(
     // auth flow — without the flag each poll flashes a console. See cli.rs.
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         c.creation_flags(CREATE_NO_WINDOW);
     }
     match c.status().await {

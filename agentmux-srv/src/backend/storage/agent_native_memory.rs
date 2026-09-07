@@ -38,10 +38,7 @@ pub struct NativeMemoryMirrorRow {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    agentmux_common::time::now_ms()
 }
 
 /// One `db_agent_native_memory` row, with its `agent_id` — the shape

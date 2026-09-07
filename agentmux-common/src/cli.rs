@@ -34,8 +34,7 @@ pub fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     // import needed (see agentmux-bashwrap/src/bash_wrap.rs's note).
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(crate::win32::CREATE_NO_WINDOW);
     }
     cmd
 }

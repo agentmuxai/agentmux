@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 
@@ -103,10 +102,7 @@ impl FileStore {
     }
 
     pub(super) fn now_ms() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64
+        agentmux_common::time::now_ms()
     }
 
     /// Evict the least-recently-used cache entries until `cache_total_bytes <= cache_max_bytes`.

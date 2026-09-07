@@ -568,15 +568,10 @@ pub(crate) fn reproject_from_snapshot(
         return Vec::new();
     }
     // FullInstance before Subwindow — stable sort preserves the snapshot's
-    // own relative ordering within each kind. `WindowSnapshot.kind` is the
-    // WIRE type (`agentmux_common::ipc::WindowKind`), distinct from the
-    // host's own `crate::state::WindowKind` — mapped one-to-one, same
-    // conversion `apply_shadow_projection`'s `Event::WindowOpened` arm
-    // already does.
-    let to_host_kind = |k: agentmux_common::ipc::WindowKind| match k {
-        agentmux_common::ipc::WindowKind::FullInstance => crate::state::WindowKind::FullInstance,
-        agentmux_common::ipc::WindowKind::Subwindow => crate::state::WindowKind::Subwindow,
-    };
+    // own relative ordering within each kind. `WindowSnapshot.kind` IS the
+    // host's `crate::state::WindowKind` (a re-export of the wire type,
+    // `state/window_meta.rs`), so it is passed straight through below — the
+    // variant-by-variant mapping this used to do is gone.
     to_create.sort_by_key(|w| match w.kind {
         agentmux_common::ipc::WindowKind::FullInstance => 0,
         agentmux_common::ipc::WindowKind::Subwindow => 1,
@@ -610,7 +605,7 @@ pub(crate) fn reproject_from_snapshot(
             },
             None => None,
         };
-        match open_window_with_kind(state, to_host_kind(w.kind), new_parent, None, None, w.last_rect, true) {
+        match open_window_with_kind(state, w.kind, new_parent, None, None, w.last_rect, true) {
             Ok(new_label_val) => {
                 let new_label = new_label_val.as_str().unwrap_or_default().to_string();
                 tracing::info!(

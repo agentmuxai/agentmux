@@ -871,10 +871,11 @@ pub struct Rect {
     pub bottom: i32,
 }
 
-/// Wire-side enum for `WindowKind`. Mirrors `agentmux-cef::state::WindowKind`
-/// — kept here so the launcher can deserialize without depending on the
-/// host crate. The host serializes its own type via `serde(rename_all =
-/// "snake_case")` so the JSON shape matches exactly.
+/// Window role in the multi-window model — the single definition, used by
+/// the host (`agentmux-cef::state` re-exports it) and deserialized by the
+/// launcher. The host used to carry a byte-identical private copy and map
+/// between the two variant by variant; that copy is gone
+/// (`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md` §2.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowKind {
