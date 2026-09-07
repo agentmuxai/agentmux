@@ -103,107 +103,56 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: b
         }
     }
 
-    let shared_store = match Store::open_shared(&shared_store_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("migration: failed to open shared store: {}", e);
-            return 1;
+    // `--list` and `--dry-run` are read-only previews and deliberately do NOT
+    // take the migration lock: an operator uses them precisely while another
+    // process may be mid-migration, and a 30-minute wait would defeat that
+    // (reagent P1 on #3062). They open the stores the ordinary way (schema
+    // setup and all — the same thing the daemon does on every boot).
+    if list || dry_run {
+        let (shared_store, channel_store) = match open_stores_for_preview(&shared_store_path, data_dir) {
+            Ok(pair) => pair,
+            Err(msg) => {
+                eprintln!("migration: {}", msg);
+                return 1;
+            }
+        };
+        if list {
+            return cmd_list(&shared_store, channel_store.as_ref());
         }
-    };
-
-    // Channel store (objects.db) tracks channel-scoped migrations independently
-    // per channel — MigrationScope::Channel migrations record here, not in shared.
-    // Always create the directory and open/create the store so that seed migrations
-    // (e.g. m0008_default_bundle) run on fresh install. Data-transformation
-    // migrations guard themselves with `if !ctx.channel_store_path.exists()` and
-    // are no-ops when called on a newly-created empty database.
-    let channel_store_path = data_dir.join("db").join("objects.db");
-    if let Some(parent) = channel_store_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            eprintln!("migration: failed to create channel db dir {}: {}", parent.display(), e);
-            return 1;
+        let pending = pending_of(REGISTRY, &shared_store, channel_store.as_ref());
+        if pending.is_empty() {
+            emit_summary(0, REGISTRY.len());
         }
-    }
-    let channel_store = match Store::open(&channel_store_path) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            eprintln!("migration: failed to open channel store: {}", e);
-            return 1;
-        }
-    };
-
-    let ctx = MigrationContext {
-        home: home.clone(),
-        data_dir: data_dir.to_path_buf(),
-        shared_store_path: shared_store_path.clone(),
-        channel_store_path: channel_store_path.clone(),
-    };
-
-    if list {
-        return cmd_list(&shared_store, channel_store.as_ref());
-    }
-
-    // A migration is pending if its tracking store does not record it applied.
-    let pending: Vec<_> = REGISTRY
-        .iter()
-        .filter(|m| {
-            let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-            tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
-        })
-        .collect();
-
-    if pending.is_empty() {
-        emit_summary(0, REGISTRY.len());
-        return 0;
-    }
-
-    if dry_run {
         for m in &pending {
             println!("pending: {} — {}", m.id(), m.description());
         }
         return 0;
     }
 
-    // Back up before any writes.
-    if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
-        eprintln!("migration: backup failed: {}", e);
-        return 1;
-    }
-
-    let skipped = REGISTRY.len() - pending.len();
-    let mut applied = 0;
-
-    for m in &pending {
-        emit("migration_start", m.id(), &format!("\"description\":\"{}\"", m.description()));
-        let t = Instant::now();
-        match m.up(&ctx) {
-            Ok(()) => {
-                let ms = t.elapsed().as_millis() as u64;
-                let scope = m.scope().as_str();
-                let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-                let mark_result = tracking
-                    .ok_or_else(|| format!("no tracking store for {} (channel store missing)", m.id()))
-                    .and_then(|s| s.migration_mark_applied(m.id(), scope, ms).map_err(|e| e.to_string()));
-                if let Err(e) = mark_result {
-                    let msg = format!("migration: failed to record {} as applied: {}", m.id(), e);
-                    write_error_log(&home, &msg);
-                    eprintln!("{}", msg);
-                    return 1;
-                }
-                emit("migration_done", m.id(), &format!("\"duration_ms\":{}", ms));
-                applied += 1;
-            }
-            Err(e) => {
-                let msg = format!("migration {} failed: {}", m.id(), e);
-                write_error_log(&home, &msg);
-                eprintln!("{}", msg);
-                return 1;
-            }
+    // Apply: the SAME locked batch the daemon runs (`apply_pending`), so the
+    // CLI can never race a booting srv — and the lock is taken before the
+    // stores are opened, so a daemon holding a write transaction longer than
+    // `Store::open*`'s own 5 s busy timeout waits on the lock instead of
+    // failing with a spurious "database is locked" (reagent P1 on #3062).
+    // The only CLI-specific parts are the NDJSON progress lines the
+    // launcher's `run_migrate` reader expects and the error log file.
+    let progress = ApplyProgress {
+        on_start: &|id, description| {
+            emit("migration_start", id, &format!("\"description\":\"{}\"", description));
+        },
+        on_done: &|id, ms| emit("migration_done", id, &format!("\"duration_ms\":{}", ms)),
+    };
+    match apply_pending(REGISTRY, &home, &shared_store_path, data_dir, Some(&progress)) {
+        Ok(outcome) => {
+            emit_summary(outcome.applied, outcome.skipped);
+            0
+        }
+        Err(msg) => {
+            write_error_log(&home, &msg);
+            eprintln!("{}", msg);
+            1
         }
     }
-
-    emit_summary(applied, skipped);
-    0
 }
 
 /// Return the store that tracks applied state for a migration of the given scope.
@@ -313,73 +262,199 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
         }
     };
 
+    let home = match resolve_home() {
+        Some(p) => p,
+        None => return Err("run_pending_migrations: cannot resolve global shared root".to_string()),
+    };
+
+    apply_pending(REGISTRY, &home, &shared_store_path, data_dir, None).map(|o| o.applied)
+}
+
+// ── Cross-process migration lock (Phase 3, F6) ────────────────────────────────
+//
+// Two `agentmux-srv` processes against the same data dir (a crash-restart
+// race, or a misconfigured channel) could both see a migration as pending
+// and both run `up()`: SQLite's own locking serializes individual statements,
+// not the runner's check → run → mark-applied sequence (classic TOCTOU).
+//
+// The lock is a dedicated one-table SQLite file next to the shared store
+// with `BEGIN IMMEDIATE` held for the whole batch. That IS a cross-process
+// advisory lock — SQLite takes an OS-level file lock — with three properties
+// a hand-rolled lockfile does not get for free: it blocks (busy_timeout)
+// instead of failing, it is released by the OS when the holder dies (no
+// stale-lockfile cleanup), and it is portable to Windows. It is NOT taken on
+// the real stores because migrations open their own connections to those
+// (m0007 opens the channel store itself); a transaction held there would
+// deadlock them.
+
+/// File name of the lock database, created beside the shared store.
+pub(super) const MIGRATION_LOCK_FILE: &str = "migrations.lock.db";
+
+/// How long a second runner waits for the first to finish before giving up.
+/// Matches the launcher's extended ESTART deadline for a long migration
+/// batch (`srv_spawner.rs` / `sidecar.rs`: 30 minutes).
+const MIGRATION_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Held for the duration of a migration batch. Dropping it releases the lock.
+pub(super) struct MigrationLock {
+    _conn: rusqlite::Connection,
+}
+
+impl MigrationLock {
+    /// Acquire the batch lock at `path`, waiting up to `wait` for another
+    /// holder. `Err` only if the lock database cannot be opened or the wait
+    /// expires — both fatal for a migration run, by design.
+    pub(super) fn acquire(path: &Path, wait: std::time::Duration) -> Result<Self, String> {
+        let conn = rusqlite::Connection::open(path)
+            .map_err(|e| format!("open migration lock {}: {}", path.display(), e))?;
+        conn.busy_timeout(wait)
+            .map_err(|e| format!("migration lock busy_timeout: {}", e))?;
+        // The table exists only so the file is a well-formed database on
+        // first use; the lock is the RESERVED lock BEGIN IMMEDIATE takes.
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS lock (id INTEGER PRIMARY KEY); BEGIN IMMEDIATE;")
+            .map_err(|e| format!("acquire migration lock {} (another runner may still hold it): {}", path.display(), e))?;
+        Ok(Self { _conn: conn })
+    }
+}
+
+/// Open the shared + channel stores the way every writer does (creating the
+/// channel dir/db on a fresh install — see the comment inside). Shared by the
+/// locked batch and the lock-free `--list`/`--dry-run` previews.
+fn open_stores_for_preview(shared_store_path: &Path, data_dir: &Path) -> Result<(Store, Option<Store>), String> {
+    let shared_store = Store::open_shared(shared_store_path)
+        .map_err(|e| format!("open shared store: {}", e))?;
+    let channel_store_path = data_dir.join("db").join("objects.db");
+    if let Some(parent) = channel_store_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create channel db dir: {}", e))?;
+    }
+    // Channel store (objects.db) tracks channel-scoped migrations independently
+    // per channel — MigrationScope::Channel migrations record here, not in shared.
+    // Always open/create it so that seed migrations (e.g. m0008_default_bundle)
+    // run on fresh install. Skipping it on a fresh install once left the
+    // Channel-scoped migrations (0002/0003/0007) out of the pending list, so
+    // they were never marked applied; when wstore then created objects.db,
+    // count_pending_migrations at ESTART reported them pending and fired the
+    // "Migration failed" UI warning on every fresh first launch.
+    // Data-transformation migrations guard themselves with
+    // `if !ctx.channel_store_path.exists()` and are no-ops on an empty db.
+    let channel_store = Store::open(&channel_store_path)
+        .map(Some)
+        .map_err(|e| format!("open channel store: {}", e))?;
+    Ok((shared_store, channel_store))
+}
+
+/// The migrations in `regs` whose tracking store does not record them applied.
+fn pending_of<'r>(
+    regs: &'r [&'r (dyn super::Migration + Sync)],
+    shared: &Store,
+    channel: Option<&Store>,
+) -> Vec<&'r (dyn super::Migration + Sync)> {
+    regs.iter()
+        .copied()
+        .filter(|m| {
+            tracking_store(m.scope(), shared, channel).map_or(false, |s| !s.migration_is_applied(m.id()))
+        })
+        .collect()
+}
+
+/// Per-migration progress hooks for the CLI's NDJSON lines. The daemon passes
+/// `None` and relies on the `tracing` lines `apply_pending` always emits.
+pub(super) struct ApplyProgress<'a> {
+    pub on_start: &'a dyn Fn(&str, &str),
+    pub on_done: &'a dyn Fn(&str, u64),
+}
+
+/// What a batch did. `skipped` = already applied at the time of the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ApplyOutcome {
+    pub applied: usize,
+    pub skipped: usize,
+}
+
+/// The locked migration batch — the ONE apply path, used by the daemon
+/// (`run_pending_migrations`) and by `agentmux-srv migrate`. Generic over the
+/// registry so the concurrency contract can be tested with a fake migration.
+///
+/// Order matters and is the point of Phase 3: the cross-process lock is
+/// taken FIRST, before the stores are even opened, so that check → run →
+/// mark is one critical section and a second runner blocks on the lock
+/// (30 min) rather than tripping `Store::open*`'s 5 s busy timeout against
+/// a migrating peer.
+pub(super) fn apply_pending(
+    regs: &[&(dyn super::Migration + Sync)],
+    home: &Path,
+    shared_store_path: &Path,
+    data_dir: &Path,
+    progress: Option<&ApplyProgress<'_>>,
+) -> Result<ApplyOutcome, String> {
     if let Some(parent) = shared_store_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
             return Err(format!("run_pending_migrations: create shared dir: {}", e));
         }
     }
 
-    let home = match resolve_home() {
-        Some(p) => p,
-        None => return Err("run_pending_migrations: cannot resolve global shared root".to_string()),
-    };
-
-    let shared_store = match Store::open_shared(&shared_store_path) {
-        Ok(s) => s,
-        Err(e) => return Err(format!("run_pending_migrations: open shared store: {}", e)),
-    };
-
-    let channel_store_path = data_dir.join("db").join("objects.db");
-    if let Some(parent) = channel_store_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return Err(format!("run_pending_migrations: create channel db dir: {}", e));
-        }
+    // Two locks, one beside each store this batch can write, always in the
+    // same order (shared, then channel) so two runners can never deadlock
+    // on each other. One lock beside the shared store is not enough: two
+    // processes can share a `data_dir` (hence the same `objects.db`) while
+    // resolving DIFFERENT shared stores — isolated-auth instances with
+    // different `AGENTMUX_INSTANCE_DIR`s do exactly that — and would then
+    // hold different shared-side locks while racing on the same
+    // channel-scoped migrations (codex P1 on #3062).
+    let shared_lock_path = shared_store_path
+        .parent()
+        .map(|p| p.join(MIGRATION_LOCK_FILE))
+        .unwrap_or_else(|| PathBuf::from(MIGRATION_LOCK_FILE));
+    let _shared_lock = MigrationLock::acquire(&shared_lock_path, MIGRATION_LOCK_WAIT)
+        .map_err(|e| format!("run_pending_migrations: {}", e))?;
+    let channel_db_dir = data_dir.join("db");
+    if let Err(e) = std::fs::create_dir_all(&channel_db_dir) {
+        return Err(format!("run_pending_migrations: create channel db dir: {}", e));
     }
-    // Always open/create the channel store, mirroring run_migrate_command (runner.rs:85-98).
-    // Skipping it on fresh install left Channel-scoped migrations (0002/0003/0007)
-    // out of the pending list, so they were never marked applied. When wstore then
-    // created objects.db, count_pending_migrations at ESTART time reported them as
-    // pending and fired the "Migration failed" UI warning on every fresh first launch.
-    let channel_store = match Store::open(&channel_store_path) {
-        Ok(s) => Some(s),
-        Err(e) => return Err(format!("run_pending_migrations: open channel store: {}", e)),
-    };
+    let _channel_lock = MigrationLock::acquire(&channel_db_dir.join(MIGRATION_LOCK_FILE), MIGRATION_LOCK_WAIT)
+        .map_err(|e| format!("run_pending_migrations: {}", e))?;
 
-    let pending: Vec<_> = REGISTRY.iter().filter(|m| {
-        let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-        tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
-    }).collect();
+    let (shared_store, channel_store) = open_stores_for_preview(shared_store_path, data_dir)
+        .map_err(|e| format!("run_pending_migrations: {}", e))?;
+    let channel_store_path = channel_db_dir.join("objects.db");
 
+    let pending = pending_of(regs, &shared_store, channel_store.as_ref());
     if pending.is_empty() {
-        return Ok(0);
+        return Ok(ApplyOutcome { applied: 0, skipped: regs.len() });
     }
+    let skipped = regs.len() - pending.len();
 
     let ctx = super::MigrationContext {
-        home: home.clone(),
+        home: home.to_path_buf(),
         data_dir: data_dir.to_path_buf(),
-        shared_store_path: shared_store_path.clone(),
+        shared_store_path: shared_store_path.to_path_buf(),
         channel_store_path: channel_store_path.clone(),
     };
 
-    if let Err(e) = backup_stores(&home, &shared_store_path, data_dir) {
+    if let Err(e) = backup_stores(home, shared_store_path, data_dir) {
         return Err(format!("run_pending_migrations: backup failed: {}", e));
     }
 
     let mut applied = 0;
     for m in &pending {
-        let t = std::time::Instant::now();
+        let t = Instant::now();
         tracing::info!(id = m.id(), description = m.description(), "run_pending_migrations: applying");
+        if let Some(p) = progress {
+            (p.on_start)(m.id(), m.description());
+        }
         match m.up(&ctx) {
             Ok(()) => {
                 let ms = t.elapsed().as_millis() as u64;
                 let scope = m.scope().as_str();
-                let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-                if let Some(s) = tracking {
-                    if let Err(e) = s.migration_mark_applied(m.id(), scope, ms) {
-                        return Err(format!("run_pending_migrations: mark applied {}: {}", m.id(), e));
-                    }
+                let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref())
+                    .ok_or_else(|| format!("run_pending_migrations: no tracking store for {} (channel store missing)", m.id()))?;
+                if let Err(e) = tracking.migration_mark_applied(m.id(), scope, ms) {
+                    return Err(format!("run_pending_migrations: failed to record {} as applied: {}", m.id(), e));
                 }
                 tracing::info!(id = m.id(), duration_ms = ms, "run_pending_migrations: applied");
+                if let Some(p) = progress {
+                    (p.on_done)(m.id(), ms);
+                }
                 applied += 1;
             }
             Err(e) => {
@@ -388,7 +463,7 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
         }
     }
 
-    Ok(applied)
+    Ok(ApplyOutcome { applied, skipped })
 }
 
 // ── Pending count (used by srv startup before migration and for ESTART) ──────
@@ -620,6 +695,156 @@ pub(super) fn table_count(conn: &rusqlite::Connection, table: &str) -> Result<i6
         Ok(n) => Ok(n),
         Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => Ok(0),
         Err(e) => Err(format!("count {}: {}", table, e)),
+    }
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+    use crate::migrations::{Migration, MigrationError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn lock_is_exclusive_across_connections_and_released_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(MIGRATION_LOCK_FILE);
+        let first = MigrationLock::acquire(&path, std::time::Duration::from_millis(100)).expect("first holder");
+        // A second acquirer waits out its budget and fails while the first holds.
+        let err = MigrationLock::acquire(&path, std::time::Duration::from_millis(200))
+            .err()
+            .expect("second acquire must fail while the first is held");
+        assert!(err.contains("another runner may still hold it"), "{}", err);
+        drop(first);
+        MigrationLock::acquire(&path, std::time::Duration::from_millis(100)).expect("free after drop");
+    }
+
+    /// A Global migration that records how many times `up()` ran and is slow
+    /// enough that two runners started together both pass the "is it
+    /// pending?" check before either can mark it applied — unless the
+    /// critical section holds.
+    static UP_RUNS: AtomicUsize = AtomicUsize::new(0);
+    struct SlowOnce;
+    impl Migration for SlowOnce {
+        fn id(&self) -> &'static str { "9900_slow_once" }
+        fn scope(&self) -> MigrationScope { MigrationScope::Global }
+        fn description(&self) -> &'static str { "counts its own runs" }
+        fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> {
+            UP_RUNS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Ok(())
+        }
+    }
+    static SLOW_ONCE: SlowOnce = SlowOnce;
+
+    /// Channel-scoped twin of `SlowOnce`, for the different-shared-store case.
+    static CHANNEL_UP_RUNS: AtomicUsize = AtomicUsize::new(0);
+    struct SlowOnceChannel;
+    impl Migration for SlowOnceChannel {
+        fn id(&self) -> &'static str { "9901_slow_once_channel" }
+        fn scope(&self) -> MigrationScope { MigrationScope::Channel }
+        fn description(&self) -> &'static str { "counts its own runs (channel scope)" }
+        fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> {
+            CHANNEL_UP_RUNS.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            Ok(())
+        }
+    }
+    static SLOW_ONCE_CHANNEL: SlowOnceChannel = SlowOnceChannel;
+
+    #[test]
+    fn runners_with_different_shared_stores_but_one_data_dir_still_serialize() {
+        // codex P1 on #3062: isolated-auth instances resolve different shared
+        // stores yet can share a data dir, i.e. the same objects.db and the
+        // same channel-scoped migrations. The shared-side lock alone would let
+        // both through; the channel-side lock must catch it.
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_path_buf();
+        let data_dir = home.join("data");
+        let shared_a = home.join("iso-a").join("shared").join("store.db");
+        let shared_b = home.join("iso-b").join("shared").join("store.db");
+        CHANNEL_UP_RUNS.store(0, Ordering::SeqCst);
+
+        let results: Vec<Result<ApplyOutcome, String>> = std::thread::scope(|s| {
+            let handles: Vec<_> = [shared_a.clone(), shared_b.clone()]
+                .into_iter()
+                .map(|shared| {
+                    let (home, data_dir) = (home.clone(), data_dir.clone());
+                    s.spawn(move || {
+                        let regs: Vec<&(dyn Migration + Sync)> = vec![&SLOW_ONCE_CHANNEL];
+                        apply_pending(&regs, &home, &shared, &data_dir, None)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("runner thread")).collect()
+        });
+
+        for r in &results {
+            assert!(r.is_ok(), "both runners must succeed: {:?}", results);
+        }
+        let applied: usize = results.iter().map(|r| r.as_ref().unwrap().applied).sum();
+        assert_eq!(applied, 1, "exactly one runner applied it: {:?}", results);
+        assert_eq!(CHANNEL_UP_RUNS.load(Ordering::SeqCst), 1, "channel-scoped up() ran once despite two shared stores");
+    }
+
+    #[test]
+    fn previews_do_not_wait_on_the_migration_lock() {
+        // reagent P1 on #3062: `--list` / `--dry-run` must stay usable while
+        // another process is mid-migration. Hold the lock, then take the same
+        // read path the previews use and require it to come back at once.
+        let dir = tempfile::tempdir().unwrap();
+        let shared = dir.path().join("shared").join("store.db");
+        std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+        let data_dir = dir.path().join("data");
+        let _held = MigrationLock::acquire(&shared.parent().unwrap().join(MIGRATION_LOCK_FILE), std::time::Duration::from_millis(100))
+            .expect("hold the lock");
+
+        let before = UP_RUNS.load(Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        let (shared_store, channel_store) = open_stores_for_preview(&shared, &data_dir).expect("preview opens stores");
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&SLOW_ONCE];
+        let pending = pending_of(&regs, &shared_store, channel_store.as_ref());
+        assert_eq!(pending.len(), 1, "nothing applied yet, so the fake is pending");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "preview must not block on the lock");
+        assert_eq!(UP_RUNS.load(Ordering::SeqCst), before, "preview never runs up()");
+    }
+
+    #[test]
+    fn two_concurrent_runners_on_one_data_dir_apply_a_migration_exactly_once() {
+        // Phase 3 acceptance (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03):
+        // "two concurrent run_pending_migrations calls against the same
+        // fresh data dir; assert the migration's up() body executes exactly
+        // once." Both runners must also succeed: the loser sees the winner's
+        // db_migrations row once it gets the lock and applies nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().to_path_buf();
+        let shared = home.join("shared").join("store.db");
+        let data_dir = home.join("data");
+        UP_RUNS.store(0, Ordering::SeqCst);
+
+        let results: Vec<Result<usize, String>> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..2)
+                .map(|_| {
+                    let (home, shared, data_dir) = (home.clone(), shared.clone(), data_dir.clone());
+                    s.spawn(move || {
+                        let regs: Vec<&(dyn Migration + Sync)> = vec![&SLOW_ONCE];
+                        apply_pending(&regs, &home, &shared, &data_dir, None).map(|o| o.applied)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("runner thread")).collect()
+        });
+
+        for r in &results {
+            assert!(r.is_ok(), "both runners must succeed: {:?}", results);
+        }
+        let applied: usize = results.iter().map(|r| *r.as_ref().unwrap()).sum();
+        assert_eq!(applied, 1, "exactly one runner applied it: {:?}", results);
+        assert_eq!(UP_RUNS.load(Ordering::SeqCst), 1, "up() body must execute exactly once");
+
+        // And the record is durable: a third run has nothing to do.
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&SLOW_ONCE];
+        assert_eq!(apply_pending(&regs, &home, &shared, &data_dir, None).map(|o| o.applied).unwrap(), 0);
+        assert_eq!(UP_RUNS.load(Ordering::SeqCst), 1);
     }
 }
 
