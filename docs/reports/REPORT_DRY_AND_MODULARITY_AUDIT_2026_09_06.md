@@ -137,9 +137,9 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 ### 3.2 Same-file repetition
 
-- **`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`** — *corrected 2026-09-07.* The first draft of this report called this a **378-line** render tree appearing twice (`:239` / `:313`). That was a tooling artifact: `jscpd`'s `javascript` tokenizer mis-parses TSX and matched a 377-line span against a 12-line one, while the `tsx` tokenizer finds **no** clone in the file. The real duplication was two identical 7-line `<ConnectCta …/>` invocations in the first and last `<Match>` arms — folded into one arm in PR-TBD. There is no legacy render path to delete.
+- **`frontend/app/view/agent/components/PreLaunchAuthPanel.tsx`** — *corrected 2026-09-07.* The first draft of this report called this a **378-line** render tree appearing twice (`:239` / `:313`). That was a tooling artifact: `jscpd`'s `javascript` tokenizer mis-parses TSX and matched a 377-line span against a 12-line one, while the `tsx` tokenizer finds **no** clone in the file. The real duplication was two identical 7-line `<ConnectCta …/>` invocations in the first and last `<Match>` arms — folded into one arm in #3039. There is no legacy render path to delete.
 - **`agentmux-cef/src/client/helpers.rs`** — one ~25-line block repeated **seven times** (`:196, :281, :361, :428, :492, :684, :756`); 287 duplicated lines in a 1-file cluster. Reads as a copy-pasted "open socket to srv with timeout, send, read" sequence that wants to be one function with a payload parameter.
-- `frontend/app/element/flyoutmenu.tsx` (`:295`/`:497`, `:323`/`:515` — 62 + 68 lines), `frontend/app/view/editor/file-tree.tsx` (`:76`/`:280`, 57 lines), `agentmux-srv/src/server/service/session_restore.rs` (`:504`/`:671`, 45 lines), `tab_move.rs`, `window_mutate.rs`, `backend/history/mod.rs` (three internal clones). *(`flyoutmenu` and `file-tree` folded in PR-TBD: one `MenuRows` level renderer, and a `{...props}` pass-through for `TreeNode`.)*
+- `frontend/app/element/flyoutmenu.tsx` (`:295`/`:497`, `:323`/`:515` — 62 + 68 lines), `frontend/app/view/editor/file-tree.tsx` (`:76`/`:280`, 57 lines), `agentmux-srv/src/server/service/session_restore.rs` (`:504`/`:671`, 45 lines), `tab_move.rs`, `window_mutate.rs`, `backend/history/mod.rs` (three internal clones). *(`flyoutmenu` and `file-tree` folded in #3039: one `MenuRows` level renderer, and a `{...props}` pass-through for `TreeNode`.)*
 
 ### 3.3 Smaller cross-file pairs worth a look
 
@@ -151,7 +151,7 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 ### 3.4 Migrations that copy live logic — probably right, but undocumented
 
-`m0020_agent_color_backfill.rs`, `m0021_backfill_agent_bundles.rs`, `m0017_ambient_login_grandfather.rs` carry 30–45-line clones of live code in `def_registry_mirror.rs`, `mcp_servers.rs`, `blockcontroller/core.rs`. Freezing a snapshot of live logic inside a migration is a *legitimate* pattern — a migration must not change meaning when the live code later does. But **no migration or `migrations.rs` states that policy**; a grep for `frozen | snapshot of | must not import | deliberately duplicated` finds nothing about it. Un-annotated, it's indistinguishable from accidental copying, and the next contributor will "helpfully" dedupe it. **Recommendation: write the rule down, not remove the copies.** *(Done in PR-TBD — the policy lives in `agentmux-srv/src/migrations/mod.rs`, the framework module that owns the `m00NN_*` files. The pairs were re-verified with `jscpd --format rust` first: m0021 ↔ `mcp_servers.rs` 24 + 28 lines, m0021 ↔ `def_registry_mirror.rs` 30, m0020 ↔ `mcp_servers.rs` 25, m0017 ↔ `blockcontroller/core.rs` 16 + 19.)*
+`m0020_agent_color_backfill.rs`, `m0021_backfill_agent_bundles.rs`, `m0017_ambient_login_grandfather.rs` carry 30–45-line clones of live code in `def_registry_mirror.rs`, `mcp_servers.rs`, `blockcontroller/core.rs`. Freezing a snapshot of live logic inside a migration is a *legitimate* pattern — a migration must not change meaning when the live code later does. But **no migration or `migrations.rs` states that policy**; a grep for `frozen | snapshot of | must not import | deliberately duplicated` finds nothing about it. Un-annotated, it's indistinguishable from accidental copying, and the next contributor will "helpfully" dedupe it. **Recommendation: write the rule down, not remove the copies.** *(Done in #3039 — the policy lives in `agentmux-srv/src/migrations/mod.rs`, the framework module that owns the `m00NN_*` files. The pairs were re-verified with `jscpd --format rust` first: m0021 ↔ `mcp_servers.rs` 24 + 28 lines, m0021 ↔ `def_registry_mirror.rs` 30, m0020 ↔ `mcp_servers.rs` 25, m0017 ↔ `blockcontroller/core.rs` 16 + 19.)*
 
 ### 3.5 Test-fixture builders
 
@@ -169,7 +169,7 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 Ordered by payoff ÷ risk. Each step is independently shippable.
 
-**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in PR-TBD. Step 11 is next: `TileLayout` measures **437 of 598 lines identical across all three platform files** (73%), so the shared core is real; the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models.
+**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 is next: `TileLayout` measures **437 of 598 lines identical across all three platform files** (73%), so the shared core is real; the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models.
 
 ### Phase 1 — mechanical lifts into `agentmux-common` (low risk, immediate)
 
@@ -207,7 +207,7 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 15. `PreLaunchAuthPanel.tsx`: ~~finish the migration to controller state and delete the 378-line legacy render path~~ — **withdrawn**; see the corrected §3.2 row. The two-arm `ConnectCta` fold is done.
 16. `client/helpers.rs`: fold the seven repeats into one function. **Done in #3036** — it was ten repeats, not seven; `backend_close_window` was left alone on purpose.
 17. Split `persistent.rs` (7,151) along the seams it already has (`persistent_resume.rs` and `session_recovery.rs` were split out; continue). Split `agentmux-mcp/src/main.rs` into `tools/` by tool family.
-18. Add a one-paragraph policy to `migrations.rs` stating that migrations deliberately freeze copies of live logic and must not be "deduplicated." **Done in PR-TBD** — in `agentmux-srv/src/migrations/mod.rs` (the module that owns the migrations), not `backend/storage/migrations.rs` (schema DDL).
+18. Add a one-paragraph policy to `migrations.rs` stating that migrations deliberately freeze copies of live logic and must not be "deduplicated." **Done in #3039** — in `agentmux-srv/src/migrations/mod.rs` (the module that owns the migrations), not `backend/storage/migrations.rs` (schema DDL).
 
 ## 6. Limits of this audit
 
