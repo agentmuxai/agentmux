@@ -384,15 +384,44 @@ mod tests {
         store.agent_def_insert(&mut tpl).unwrap();
         let mut clone = def("clone", 0, "tpl");
         store.agent_def_insert(&mut clone).unwrap();
-        // A template launch with one continuation: head → child.
-        store.instance_create(&inst("head", "tpl", "", "b1", "s1", "stopped", 2000)).unwrap();
-        store.instance_create(&inst("child", "tpl", "head", "b2", "s2", "running", 3000)).unwrap();
-        // A launch of the user clone (folds into the clone's own row).
-        store.instance_create(&inst("clone-run", "clone", "", "b3", "s3", "paused", 2500)).unwrap();
         drop(store);
+
+        // The pre-upgrade shape, written the only way it can still be
+        // written: the live instance API stopped touching
+        // `db_agent_instances` in Phase 3b, so an upgraded install's legacy
+        // rows come from an older build, not from this code. Raw SQL is what
+        // that looks like — one launch row per launch, plus the `db_agents`
+        // projections the Phase 3a dual-write left with default launch state.
         let conn = Connection::open(&path).unwrap();
-        conn.execute_batch("UPDATE db_agents SET session_id = '', status = '', started_at = 0, ended_at = 0, last_block_id = '';")
+        let mut add_legacy = |id: &str, def_id: &str, parent: &str, block: &str, session: &str, status: &str, created: i64| {
+            conn.execute(
+                "INSERT INTO db_agent_instances
+                    (id, definition_id, parent_instance_id, block_id, session_id, status,
+                     github_context, started_at, ended_at, created_at,
+                     identity_id, memory_id, instance_name, working_directory, display_hidden)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, 0, ?7, '', '', ?1, '', 0)",
+                params![id, def_id, parent, block, session, status, created],
+            )
             .unwrap();
+        };
+        // A template launch with one continuation: head → child.
+        add_legacy("head", "tpl", "", "b1", "s1", "stopped", 2000);
+        add_legacy("child", "tpl", "head", "b2", "s2", "running", 3000);
+        // A launch of the user clone (its projection is the clone's own row).
+        add_legacy("clone-run", "clone", "", "b3", "s3", "paused", 2500);
+        // The template-launch chain's projection row, as the dual-write wrote
+        // it: keyed by the chain head, launch state still at its defaults.
+        conn.execute(
+            "INSERT INTO db_agents (id, name, provider, is_template, parent_template_id, is_seeded, created_at, updated_at)
+             VALUES ('head', 'head', 'claude', 0, 'tpl', 0, 2000, 2000)",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            "UPDATE db_agents SET session_id = '', status = '', started_at = 0, ended_at = 0, last_block_id = '';",
+        )
+        .unwrap();
+        drop(conn);
         (dir, path)
     }
 

@@ -685,11 +685,18 @@ fn template_promote_clones_template_and_moves_zones() {
         "new archive zone should be populated"
     );
 
-    // Instance is repointed.
-    let inst = wstore.instance_get("inst-maks").unwrap().unwrap();
+    // The agent launched off the template is repointed at the new
+    // user-owned def. In the consolidated model the agent's own id is its
+    // `definition_id`, so the repoint shows up as its template lineage.
+    let repointed = wstore
+        .agent_def_list()
+        .unwrap()
+        .into_iter()
+        .find(|d| d.id == "inst-maks")
+        .expect("the launched agent still exists");
     assert_eq!(
-        inst.definition_id, new_def.id,
-        "instance should now reference new user-agent def"
+        repointed.parent_id, new_def.id,
+        "the agent should now descend from the new user-agent def"
     );
 
     // Template definition is still around (still seeded), but the
@@ -1340,12 +1347,21 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
     let stale_archive = agent_archive_zone(&template.id, 1_699_000_000_000);
     write_zone_file(&filestore, &stale_archive, SNAPSHOT_FILE, b"old archive").unwrap();
 
-    // Pre-condition: exactly one user-clone DEF (the
-    // deterministic-id one). Use the dedicated
-    // `db_agent_definitions` scan (not `agent_def_list`, which
-    // reads `db_agents` and surfaces template-instance
-    // projection rows).
-    let clones_pre = wstore.user_clone_defs_for_template(&template.id).unwrap();
+    // Pre-condition: exactly one promote-target clone. Consolidation
+    // Phase 3b: a launch of a template is ALSO a `db_agents` row with
+    // `parent_template_id = template`, so lineage alone no longer separates
+    // "clone the migration made" from "agent the user launched" — match the
+    // migration's deterministic id instead, which is what idempotency is
+    // actually about here.
+    let clones_of_template = |wstore: &Store| -> Vec<crate::backend::storage::store::AgentDefinition> {
+        wstore
+            .agent_def_list()
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.is_seeded == 0 && d.id.starts_with("template-promote-v1-"))
+            .collect()
+    };
+    let clones_pre = clones_of_template(&wstore);
     assert_eq!(clones_pre.len(), 1, "test setup: one prior clone at deterministic id");
     assert_eq!(clones_pre[0].id, promote_target_id);
 
@@ -1355,7 +1371,7 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
 
     // Still exactly one user-clone def — the retry reused the
     // deterministic-id clone instead of inserting another.
-    let clones_post = wstore.user_clone_defs_for_template(&template.id).unwrap();
+    let clones_post = clones_of_template(&wstore);
     assert_eq!(
         clones_post.len(),
         1,
