@@ -82,15 +82,14 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
 ] }
 
-# Optional tray icon (issue #2977 Workstream 1). Scoped to Windows because
-# that is the only backend that exists today (`src/tray/windows.rs`) —
-# declaring these for platforms with no consumer would pull the objc2/AppKit
-# stack into macOS builds for nothing (ReAgent P2 on PR #2996).
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+# Optional tray / menu-bar icon (issue #2977 Workstream 1). Scoped to the two
+# platforms with a backend (`src/tray/windows.rs`, `src/tray/macos.rs`) —
+# declaring these for a platform with no consumer would pull the objc2/AppKit
+# or GTK stack into a build for nothing (ReAgent P2 on PR #2996).
 #
-# When the macOS backend lands, these move to a
-# `cfg(any(target_os = "windows", target_os = "macos"))` block. Linux will
-# add `ksni` instead — NOT the same crate — because tray-icon's Linux path
-# needs a GTK3 main loop running alongside CEF's own GLib loop
+# Linux will add `ksni` instead — NOT the same crate — because tray-icon's
+# Linux path needs a GTK3 main loop running alongside CEF's own GLib loop
 # (SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md §2), while `ksni` is
 # pure D-Bus StatusNotifierItem with no toolkit loop.
 #
@@ -98,6 +97,12 @@ windows-sys = { version = "0.59", features = [
 # off; those are Linux-only concerns and would drag GTK in.
 tray-icon = { version = "0.24", default-features = false }
 muda = { version = "0.19", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Decodes the embedded menu-bar template glyph (`resources/menubar-template.png`)
+# into the RGBA buffer `tray_icon::Icon::from_rgba` wants. Same crate/version
+# tray-icon itself already pulls in on macOS, so this adds nothing to the graph.
+png = "0.18"
 
 [target.'cfg(unix)'.dependencies]
 # Phase 1 macOS/Linux dev integration (SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_

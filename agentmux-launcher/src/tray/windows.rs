@@ -64,34 +64,6 @@ pub fn spawn(
 /// `WM_APP` is the documented base for application-private messages.
 const WM_AGENTMUX_STATUS: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 
-/// How often to re-check whether the background service is actually
-/// reachable. Cheap (a loopback connect with a short timeout) and slow enough
-/// to be invisible; the icon is a status indicator, not a monitor.
-const STATUS_POLL: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// Is the background service actually reachable *right now*?
-///
-/// Deliberately the same question `forward_host_cmd` has to answer — port file
-/// readable AND the host's IPC port accepting a connection — because that is
-/// what the indicator should mean: "would Open work if you clicked it?".
-/// Checking only that the port file exists would keep claiming "running" after
-/// a host crash, since the file outlives a hard exit (see `lib.rs`, which
-/// removes it only on a clean `run_message_loop` return).
-fn service_reachable(data_dir: &std::path::Path, dir_hash: &str) -> bool {
-    let port_file = data_dir.join(format!("ipc-port-{}", dir_hash));
-    let Ok(contents) = std::fs::read_to_string(&port_file) else {
-        return false;
-    };
-    let Some((port_str, _token)) = contents.trim().split_once(':') else {
-        return false;
-    };
-    let Ok(port) = port_str.parse::<u16>() else {
-        return false;
-    };
-    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
-    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok()
-}
-
 /// Create the icon and pump messages until the process ends.
 ///
 /// Everything here runs on the tray thread. `tray-icon` and `muda` both
@@ -112,7 +84,7 @@ fn run(
     // — and again during every restart. WS4 requires this icon be a
     // *reliable* indicator, so it is driven from `service_reachable`
     // throughout (Codex P2 on PR #2996).
-    let mut running = service_reachable(&data_dir, &dir_hash);
+    let mut running = super::service_reachable(&data_dir, &dir_hash);
     let model = super::menu_model(running);
     let menu = Menu::new();
     // Keep the muda items alive alongside their action, so a menu event's id
@@ -154,8 +126,8 @@ fn run(
             .spawn(move || {
                 let mut last = running;
                 loop {
-                    std::thread::sleep(STATUS_POLL);
-                    let now = service_reachable(&poll_dir, &poll_hash);
+                    std::thread::sleep(super::STATUS_POLL);
+                    let now = super::service_reachable(&poll_dir, &poll_hash);
                     if now != last {
                         last = now;
                         // wparam carries the new state; the pump reads it

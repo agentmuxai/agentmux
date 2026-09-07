@@ -8,7 +8,7 @@ use crate::show_fatal_dialog;
 use crate::supervisor::{HOST_RESTART_BUDGET, HOST_RESTART_WINDOW};
 use crate::{
     data_dir, event_log, hash, host_pipe, ipc, mem_supervisor, other_instances, saga,
-    srv_spawner, startup_events, state,
+    srv_spawner, startup_events, state, tray,
 };
 
 /// Await the next delivery of a Unix signal, or never resolve if the
@@ -196,6 +196,19 @@ pub(crate) async fn run_unix(
     // never a recomputed hash. SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md.
     #[cfg(target_os = "macos")]
     crate::splash_mac::set_reopen_target(paths.data_dir.clone(), dir_hash.clone());
+
+    // Optional tray / menu-bar icon (issue #2977 Workstream 1). Same placement
+    // rationale as the Windows supervisor: this is the first point where we
+    // know we are THE instance (a second launch exits inside
+    // `bind_socket_with_recovery`), so a second icon cannot appear, and
+    // `data_dir`/`dir_hash` — all the actions need to reach the host — are
+    // resolved. Fire-and-forget: `None` when the tray is off (the default),
+    // unsupported here, or failed to start; the action loop is a detached
+    // thread that only ever forwards over the same authenticated channel a
+    // second launch uses.
+    if let Some(tray_rx) = tray::start_if_enabled(paths.data_dir.clone(), dir_hash.clone()) {
+        tray::spawn_action_loop(tray_rx, paths.data_dir.clone(), dir_hash.clone());
+    }
 
     // Task #35 (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md P1) — read-only
     // detection of other, OLDER AgentMux instances still running. Mirrors
