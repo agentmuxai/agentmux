@@ -79,7 +79,10 @@ impl Migration for M0000Bootstrap {
                 (Some(cs), true) => {
                     let filestore = crate::backend::storage::filestore::FileStore::open(&filestore_path)
                         .map_err(|e| MigrationError(format!("bootstrap: open filestore: {}", e)))?;
+                    // An unreadable blocks table is a failed bootstrap, not
+                    // a stamp (codex P1 on #3070).
                     crate::backend::agent_session::block_zones_look_incomplete(cs, &filestore)
+                        .map_err(|e| MigrationError(format!("bootstrap: verify block_zones: {}", e)))?
                 }
                 _ => false,
             };

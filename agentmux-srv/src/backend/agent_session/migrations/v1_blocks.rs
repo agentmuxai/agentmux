@@ -86,14 +86,12 @@ fn existing_archive_snapshots(filestore: &FileStore, def_id: &str) -> Vec<Vec<u8
 /// not (fully) run on this data — regardless of what any marker says.
 ///
 /// Used by `m0000_bootstrap` (never stamp `0002` off the flag alone) and by
-/// `m0002`'s `verify()`. Never writes.
-pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> bool {
-    let Ok(blocks) = wstore.get_all::<Block>() else {
-        // Can't read the blocks table at all — nothing to judge. The
-        // migration's own run reports that as a failure; a doctor must not
-        // claim incompleteness it could not observe.
-        return false;
-    };
+/// `m0002`'s `verify()`. Never writes. `Err` when the blocks table cannot be
+/// read at all — that is not "complete", and the callers must not treat it
+/// as such (codex P1 on #3070): bootstrap fails rather than stamps, the
+/// doctor reports an error.
+pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> Result<bool, String> {
+    let blocks = wstore.get_all::<Block>().map_err(|e| format!("read blocks: {e}"))?;
     let mut current_populated: HashMap<String, bool> = HashMap::new();
     for block in &blocks {
         let Some(def_id) = agent_definition_id(block) else { continue };
@@ -105,10 +103,10 @@ pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> boo
             matches!(filestore.stat(&agent_current_zone(def_id), SNAPSHOT_FILE), Ok(Some(f)) if f.size > 0)
         });
         if !populated {
-            return true;
+            return Ok(true);
         }
     }
-    false
+    Ok(false)
 }
 
 /// One-shot migration of per-block agent session zones to per-agent
@@ -119,28 +117,23 @@ pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> boo
 /// framework's `db_migrations` row is the gate; the marker is written at the
 /// end as evidence only.
 ///
-/// Failure mode: per-block errors are logged + counted; we do NOT abort
-/// startup. A `get_all::<Block>` failure returns early without the marker so
-/// `m0000`'s stamping cannot mistake it for a completed run.
+/// Failure mode: per-block errors are logged + counted and do not abort the
+/// run. A `get_all::<Block>` failure is different — nothing was scanned — and
+/// is returned as `Err` so `m0002::up` fails the migration instead of
+/// letting the runner record it applied around a scan that never happened
+/// (codex P1 on #3070; before Phase 2 this returned default stats and `up`
+/// reported `Ok`).
 pub fn migrate_block_zones_v1(
     wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     data_dir: &Path,
-) -> MigrationStats {
+) -> Result<MigrationStats, String> {
     let marker_path = data_dir.join(MIGRATION_MARKER_V1);
     let mut stats = MigrationStats::default();
 
-    let blocks: Vec<Block> = match wstore.get_all::<Block>() {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                "agent_session migration: wstore.get_all<Block> failed; skipping migration"
-            );
-            // Don't write the marker — let the next start retry.
-            return stats;
-        }
-    };
+    let blocks: Vec<Block> = wstore
+        .get_all::<Block>()
+        .map_err(|e| format!("agent_session migration: read blocks: {e}"))?;
 
     // Track the most-recently-modified block snapshot per definition_id.
     // Value: (modts_ms, snapshot_bytes).
@@ -291,5 +284,5 @@ pub fn migrate_block_zones_v1(
         "agent_session migration: complete"
     );
 
-    stats
+    Ok(stats)
 }
