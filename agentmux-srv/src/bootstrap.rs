@@ -565,7 +565,22 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     match migrations::run_pending_migrations(&wave_data_dir) {
         Ok(0) => {}
         Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
-        Err(e) => tracing::warn!("startup: migration error (continuing): {}", e),
+        Err(e) => {
+            // SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1 (F4): a failed
+            // migration is fatal. This used to be a `warn!` and the server
+            // booted anyway against a store in an unknown state, which turned
+            // any migration bug into a silent one. Note the asymmetry it left:
+            // failing to OPEN the store (just below) always exited 1; failing
+            // to MIGRATE it did not.
+            //
+            // The tagged stderr line lets the launcher / CEF host fail fast
+            // with the real reason instead of timing out on ESTART 30s later
+            // (agentmux-common/src/srv_stderr.rs). Exit code 1 is what
+            // docs/exe-return-codes.md already documented for this case.
+            tracing::error!("startup: migration failed — refusing to start: {}", e);
+            eprintln!("{}", agentmux_common::srv_stderr::migration_failed_line(&e));
+            std::process::exit(1);
+        }
     }
 
     let wstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {

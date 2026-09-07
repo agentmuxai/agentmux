@@ -366,6 +366,10 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     // running (same pattern as agentmux-launcher/src/srv_spawner.rs).
     let (tx, mut rx) = tokio::sync::mpsc::channel::<BackendSpawnResult>(1);
     let (migration_tx, mut migration_rx) = tokio::sync::mpsc::channel::<()>(4);
+    // Third channel: a fatal migration failure. srv reports it on stderr and
+    // exits 1 without ESTART (SPEC_MIGRATION_SYSTEM_HARDENING Phase 1); the
+    // waiter fails immediately with the reason instead of after the timeout.
+    let (failure_tx, mut failure_rx) = tokio::sync::mpsc::channel::<String>(1);
     let state_for_monitor = state.clone();
 
     std::thread::spawn(move || {
@@ -385,6 +389,11 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                         );
                         estart_received = true;
                         let _ = tx.blocking_send(result);
+                    } else if let Some(reason) =
+                        agentmux_common::srv_stderr::parse_migration_failed_line(&l)
+                    {
+                        tracing::error!("[agentmux-srv] MIGRATION FAILED: {}", reason);
+                        let _ = failure_tx.blocking_send(reason);
                     } else if l.starts_with("AGENTMUXSRV-MIGRATING") {
                         tracing::info!("[agentmux-srv] {}", l);
                         let _ = migration_tx.blocking_send(());
@@ -448,10 +457,13 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
-    let recv: Result<Option<BackendSpawnResult>, ()> = loop {
+    let recv: Result<Option<BackendSpawnResult>, String> = loop {
         tokio::select! {
             result = rx.recv() => break Ok(result),
-            _ = &mut sleep => break Err(()),
+            _ = &mut sleep => break Err("Timeout waiting for agentmux-srv to start (30s)".to_string()),
+            Some(reason) = failure_rx.recv() => {
+                break Err(format!("agentmux-srv database migration failed: {}", reason));
+            }
             Some(()) = migration_rx.recv() => {
                 let new_deadline = tokio::time::Instant::now() + migration_timeout;
                 if new_deadline > deadline {
@@ -462,8 +474,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
             }
         }
     };
-    let result = recv
-        .map_err(|()| "Timeout waiting for agentmux-srv to start (30s)".to_string())?
+    let result = recv?
         .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
 
     tracing::info!(
