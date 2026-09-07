@@ -49,6 +49,22 @@ impl FileStore {
         Self::configure_and_migrate(conn)
     }
 
+    /// Open an existing filestore **read-only** — the `Store::open_read_only`
+    /// twin: `SQLITE_OPEN_READ_ONLY`, no pragma that writes, no migrations, no
+    /// version stamp. For doctor checks that need `stat`/`read_file` against
+    /// a filestore they must not touch (codex P2 on #3070). Fails if the file
+    /// does not exist.
+    pub fn open_read_only(path: &Path) -> Result<Self, StoreError> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            cache: Mutex::new(HashMap::new()),
+            cache_total_bytes: Mutex::new(0),
+            cache_max_bytes: MAX_CACHE_BYTES,
+        })
+    }
+
     /// Open an in-memory FileStore for testing.
     #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {

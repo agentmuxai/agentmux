@@ -66,8 +66,29 @@ impl Migration for M0000Bootstrap {
 
         // ── Channel: agent zone migration ────────────────────────────────────
         // marker = data_dir/migration_agent_zones_v1.flag
-        if ctx.data_dir.join("migration_agent_zones_v1.flag").exists() {
-            stamp_channel("0002_block_zones_v1");
+        //
+        // Phase 2 hardening (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03): the
+        // flag alone is not proof the zones were migrated — a restored
+        // objects.db/filestore beside a stale flag is the same F1 shape as
+        // 0007's. Stamp only when the data agrees: no agent block still has
+        // a snapshot whose agent `:current` zone is empty. A data dir with no
+        // filestore has nothing to migrate and stamps on the flag as before.
+        if ctx.data_dir.join(crate::backend::agent_session::MIGRATION_MARKER_V1).exists() {
+            let filestore_path = ctx.data_dir.join("db").join("filestore.db");
+            let looks_incomplete = match (&channel_store, filestore_path.exists()) {
+                (Some(cs), true) => {
+                    let filestore = crate::backend::storage::filestore::FileStore::open(&filestore_path)
+                        .map_err(|e| MigrationError(format!("bootstrap: open filestore: {}", e)))?;
+                    // An unreadable blocks table is a failed bootstrap, not
+                    // a stamp (codex P1 on #3070).
+                    crate::backend::agent_session::block_zones_look_incomplete(cs, &filestore)
+                        .map_err(|e| MigrationError(format!("bootstrap: verify block_zones: {}", e)))?
+                }
+                _ => false,
+            };
+            if !looks_incomplete {
+                stamp_channel("0002_block_zones_v1");
+            }
         }
 
         // ── Channel: template promotion ──────────────────────────────────────

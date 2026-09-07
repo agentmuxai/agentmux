@@ -308,6 +308,52 @@ fn a_stale_consolidate_marker_beside_an_empty_target_is_not_stamped_and_the_next
     }
 }
 
+#[test]
+fn a_stale_zones_flag_beside_unmigrated_block_snapshots_is_not_stamped_and_the_next_boot_migrates() {
+    // Hardening Phase 2: the same incident shape as 0007's, for 0002. A
+    // data dir whose `migration_agent_zones_v1.flag` says done while an
+    // agent block still holds a snapshot its agent's `:current` zone never
+    // received. Bootstrap must leave 0002 pending; the boot must migrate.
+    use crate::backend::agent_session::{agent_current_zone, MIGRATION_MARKER_V1};
+    use crate::backend::obj::{Block, MetaMapType};
+    use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
+
+    let home = TempHome::new();
+    home.mark_as_existing_install();
+    let wstore = Store::open(&home.channel_store()).unwrap();
+    let filestore_path = home.data_dir().join("db").join("filestore.db");
+    let filestore = FileStore::open(&filestore_path).unwrap();
+    let mut meta = MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("agent"));
+    meta.insert("agentId".to_string(), serde_json::json!("def-stale"));
+    let mut block = Block {
+        oid: "block-stale".to_string(),
+        parentoref: String::new(),
+        version: 1,
+        runtimeopts: None,
+        stickers: None,
+        meta,
+        subblockids: None,
+    };
+    wstore.insert(&mut block).unwrap();
+    filestore.make_file("block-stale", "output.state.json", FileMeta::default(), FileOpts::default()).unwrap();
+    filestore.write_file("block-stale", "output.state.json", br#"{"nodes":[{"type":"user_message","message":"orphaned"}]}"#).unwrap();
+    drop((wstore, filestore));
+    std::fs::write(home.data_dir().join(MIGRATION_MARKER_V1), b"v1\n").unwrap();
+
+    M0000Bootstrap.up(&home.ctx()).unwrap();
+    assert!(
+        !home.applied(MigrationScope::Channel).contains(&"0002_block_zones_v1".to_string()),
+        "a stale zones flag must not be stamped as applied"
+    );
+
+    home.apply_all(None);
+    assert!(home.applied(MigrationScope::Channel).contains(&"0002_block_zones_v1".to_string()));
+    let filestore = FileStore::open(&filestore_path).unwrap();
+    let current = filestore.read_file(&agent_current_zone("def-stale"), "output.state.json").unwrap();
+    assert!(current.is_some_and(|b| String::from_utf8_lossy(&b).contains("orphaned")), "the boot migrated the orphaned snapshot");
+}
+
 // ── 2. Crash between effect and mark ──────────────────────────────────────────
 
 #[test]

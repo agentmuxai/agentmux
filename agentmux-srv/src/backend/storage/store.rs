@@ -88,6 +88,25 @@ impl Store {
         Self::configure_and_migrate(conn)
     }
 
+    /// Open an existing store **read-only**: `SQLITE_OPEN_READ_ONLY`, no
+    /// WAL/journal pragma, no schema setup, no version stamp — nothing that
+    /// could write. For doctor checks (`migrate --verify`, `muxspect
+    /// migrations`) that need the typed read API against a store they must
+    /// not touch, including one on a read-only backup (codex P2 on #3070).
+    /// Any read of a table the store predates simply errors. Fails if the
+    /// file does not exist — a doctor must never conjure a store.
+    pub fn open_read_only(path: &Path) -> Result<Self, StoreError> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
+            muxbus_save_lock: Mutex::new(()),
+        })
+    }
+
     /// Open an in-memory Store for testing.
     #[allow(dead_code)]
     pub fn open_in_memory() -> Result<Self, StoreError> {

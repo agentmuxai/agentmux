@@ -11,5 +11,5 @@
 pub mod v1_blocks;
 pub mod v1_templates;
 
-pub use v1_blocks::{migrate_block_zones_v1, MIGRATION_MARKER_V1};
+pub use v1_blocks::{block_zones_look_incomplete, migrate_block_zones_v1, MIGRATION_MARKER_V1};
 pub use v1_templates::migrate_promote_template_sessions_v1;
