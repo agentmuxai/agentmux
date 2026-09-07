@@ -256,16 +256,6 @@ fn require_agent_env(local_url: &str, auth_key: &str, block_id: &str) -> Result<
     Ok(())
 }
 
-/// Where `CaptureWindow` writes its PNGs. Mirrors `agentmux-srv`'s own
-/// `get_wave_data_dir()` (`AGENTMUX_DATA_HOME` env var, else `~/.agentmux`)
-/// rather than the shared OS temp dir — reagent P2 on this tool's own PR
-/// (#2709 round 1): `std::env::temp_dir()` is world-readable on a
-/// multi-user host, and CaptureWindow can capture arbitrary OS windows
-/// (not just AgentMux's own pane), so a captured image could leak to other
-/// local users. `agentmux-mcp` can't import `agentmux-srv`'s function
-/// directly (separate crate/process), so this replicates its exact logic
-/// instead of inventing a new convention.
-
 /// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
 /// this MCP server's trusted environment. The App API identity/preset/memory
 /// REST endpoints stamp their `agent_id` from this — the agent's own model
