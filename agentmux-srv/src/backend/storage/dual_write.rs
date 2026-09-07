@@ -302,7 +302,11 @@ impl Store {
                     instance_name = ?7,
                     updated_at = ?8,
                     user_hidden = ?9,
-                    last_block_id = ?10
+                    last_block_id = ?10,
+                    session_id = ?11,
+                    status = ?12,
+                    started_at = ?13,
+                    ended_at = ?14
                  WHERE id = ?1",
                 params![
                     def.id,
@@ -315,6 +319,10 @@ impl Store {
                     now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
                     inst.block_id,
+                    inst.session_id,
+                    inst.status,
+                    inst.started_at,
+                    inst.ended_at,
                 ],
             )
         } else if is_continuation {
@@ -345,7 +353,11 @@ impl Store {
                     instance_name = ?7,
                     updated_at = ?8,
                     user_hidden = ?9,
-                    last_block_id = ?10
+                    last_block_id = ?10,
+                    session_id = ?11,
+                    status = ?12,
+                    started_at = ?13,
+                    ended_at = ?14
                  WHERE id = ?1 AND is_template = 0",
                 params![
                     root_id,
@@ -358,6 +370,10 @@ impl Store {
                     now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
                     inst.block_id,
+                    inst.session_id,
+                    inst.status,
+                    inst.started_at,
+                    inst.ended_at,
                 ],
             )
         } else {
@@ -375,7 +391,8 @@ impl Store {
                     created_at, updated_at, is_seeded, user_hidden,
                     last_block_id,
                     container_image, container_volumes, container_name,
-                    use_ambient_login
+                    use_ambient_login,
+                    session_id, status, started_at, ended_at
                  ) VALUES (
                     ?1, ?2, ?3, ?4,
                     0, ?5,
@@ -388,7 +405,8 @@ impl Store {
                     ?23, ?24, 0, ?25,
                     ?26,
                     ?27, ?28, ?29,
-                    ?30
+                    ?30,
+                    ?31, ?32, ?33, ?34
                  )
                  ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -399,7 +417,11 @@ impl Store {
                     instance_name = excluded.instance_name,
                     updated_at = excluded.updated_at,
                     user_hidden = excluded.user_hidden,
-                    last_block_id = excluded.last_block_id",
+                    last_block_id = excluded.last_block_id,
+                    session_id = excluded.session_id,
+                    status = excluded.status,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at",
                 params![
                     inst.id,
                     name,
@@ -431,6 +453,10 @@ impl Store {
                     def.container_volumes,
                     def.container_name,
                     def.use_ambient_login,
+                    inst.session_id,
+                    inst.status,
+                    inst.started_at,
+                    inst.ended_at,
                 ],
             )
         };
@@ -466,16 +492,20 @@ impl Store {
             Some((k, _)) => k,
             None => return Ok(()),
         };
-        // `instance_update` only touches block_id/session_id/status/
-        // github_context/ended_at. Of those, only `github_context` lands
-        // on db_agents (block/session/status/ended_at are not modelled
-        // on the consolidated row — they're block/session-machine
-        // concerns the consolidation deliberately drops). We DO refresh
-        // updated_at so a Phase-3b reader can sort by recency. Apply
-        // the same monotonic-floor trick as the fold branch in
-        // `agents_dual_write_instance_create` — wall clock alone
-        // collides under millisecond resolution on fast successive
-        // mutations.
+        // `instance_update` touches block_id/session_id/status/
+        // github_context/ended_at. As of schema v29 every one of them is
+        // modelled on the consolidated row (the launch-state columns —
+        // see OBJECT_SCHEMA_VERSION's v29 entry), so mirror the whole
+        // post-update row: `inst` is the reloaded legacy row, i.e. the
+        // authoritative current values, and a continuation's update lands
+        // on the chain head via the projection key above, which is exactly
+        // "the agent's latest launch state". `last_block_id` only moves
+        // when the row actually has a block — an empty block_id must not
+        // erase the pointer My Agents uses to find the snapshot. We also
+        // refresh updated_at so a Phase-3b reader can sort by recency,
+        // with the same monotonic-floor trick as the fold branch in
+        // `agents_dual_write_instance_create` — wall clock alone collides
+        // under millisecond resolution on fast successive mutations.
         let global_prior: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
@@ -487,9 +517,21 @@ impl Store {
         conn.execute(
             "UPDATE db_agents SET
                 github_context = ?1,
-                updated_at = ?2
+                updated_at = ?2,
+                session_id = ?4,
+                status = ?5,
+                ended_at = ?6,
+                last_block_id = CASE WHEN ?7 = '' THEN last_block_id ELSE ?7 END
              WHERE id = ?3 AND is_template = 0",
-            params![inst.github_context, now_monotonic, key],
+            params![
+                inst.github_context,
+                now_monotonic,
+                key,
+                inst.session_id,
+                inst.status,
+                inst.ended_at,
+                inst.block_id,
+            ],
         )?;
         Ok(())
     }

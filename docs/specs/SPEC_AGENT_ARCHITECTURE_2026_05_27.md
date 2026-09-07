@@ -7,6 +7,13 @@
 
 > **Staleness note (2026-08-03):** this doc has not been edited since 2026-05-28 (`6584c024`). Phase 3b is only partially shipped and Phase 3c has not happened — `db_agent_definitions`/`db_agent_instances` still exist in the current schema, contradicting this doc's own acceptance criteria. Confirmed stalled, not just unread — see `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` §1.4 and `SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` for the audit that found this. Treat the phase table below as historical intent, not current status, until someone either finishes the migration or formally re-scopes it here.
 
+> **Resumed 2026-09-07** (repo-owner decision: finish, not park — `SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 4 option (a)). Inventory of every remaining legacy read/write, FK and caller is in the PR description of the first PR below; the plan is four PRs, each keeping `db_agents` and the legacy tables in sync until the drop:
+>
+> 1. **Launch state on `db_agents`** (schema v29: `session_id`, `status`, `started_at`, `ended_at`; `m0025` backfill; dual-write keeps them current) — the four columns whose absence kept `db_agent_instances` alive (recent-sessions picker, the pane close/reopen continuity write-back, the status-filtered instance list). Shipped 2026-09-07.
+> 2. **Instance read flip**: `instance_get`, `instance_get_by_block_id`, `instance_list(status)`, `instance_list_named`, the `instance_get_active_for_block` fallback → `db_agents`; instance writes → `db_agents` only; delete the dead `instance_get_by_name`/`user_clone_defs_for_template`.
+> 3. **Definition flip + FK re-point**: the remaining `db_agent_definitions` reads/writes and the six tables whose FK targets it (`db_agent_content`, `_skills`, `_history`, `_identity_links`, `_skills_ref`, `_mcp_ref`) rebuilt against `db_agents(id)`.
+> 4. **Drop** both legacy tables, `dual_write.rs`, `agents_consolidate.rs`, `repair_agent_def_gaps`; retire `0007` and its marker; keep `m0004`/`m0006`/`transcript_backfill` tolerant of `db_agents`-only stores. This doc's phase table is updated in each PR.
+
 ---
 
 ## Why this spec exists
