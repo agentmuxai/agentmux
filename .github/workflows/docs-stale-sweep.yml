@@ -42,9 +42,14 @@ jobs:
           node-version: '24'
 
       - name: Run the sweep
+        env:
+          # Passed through env, never interpolated into the script: a
+          # workflow_dispatch input is caller-controlled text (reagent P2 on
+          # #3068). The script validates it as a positive number itself.
+          WEEKS: ${{ github.event.inputs.weeks || '8' }}
         run: |
-          node scripts/docs-stale-sweep.mjs --weeks "${{ github.event.inputs.weeks || '8' }}" > sweep.md
-          node scripts/docs-stale-sweep.mjs --weeks "${{ github.event.inputs.weeks || '8' }}" --json > sweep.json
+          node scripts/docs-stale-sweep.mjs --weeks "$WEEKS" > sweep.md
+          node scripts/docs-stale-sweep.mjs --weeks "$WEEKS" --json > sweep.json
           echo '## Docs stale-sweep' >> "$GITHUB_STEP_SUMMARY"
           cat sweep.md >> "$GITHUB_STEP_SUMMARY"
 
