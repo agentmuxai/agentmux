@@ -420,9 +420,17 @@ pub fn load_config() -> config::Config {
 
     // Dispatch migrate subcommand before loading config (no AUTH_KEY needed).
     if let Some(config::SrvCommand::Migrate { dry_run, list, verify }) = &args.command {
+        // Same precedence as `Config::from_env_and_args`: the CLI flag, then
+        // the canonical `AGENTMUX_DATA_DIR` the launcher exports. Without
+        // that fallback a launcher-spawned `migrate --verify` opened a
+        // different objects.db than the daemon's and could "verify" the
+        // wrong channel and exit 0 (codex P1 on #3058). The retired
+        // `AGENTMUX_DATA_HOME` and the bare default stay last for the
+        // standalone / pre-unification shapes.
         let data_dir: std::path::PathBuf = args.wavedata
             .as_deref()
             .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var("AGENTMUX_DATA_DIR").ok().filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
             .or_else(|| std::env::var("AGENTMUX_DATA_HOME").ok().map(std::path::PathBuf::from))
             .unwrap_or_else(|| std::path::PathBuf::from(base::get_wave_data_dir()));
         let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify);
