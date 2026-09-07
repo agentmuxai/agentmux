@@ -347,9 +347,11 @@ pub(crate) async fn run_unix(
             log(&format!("FATAL: srv spawn failed: {}", e));
             eprintln!("Failed to start backend: {}", e);
             if let srv_spawner::SrvSpawnError::MigrationFailed(reason) = &e {
-                // The launcher has the `windows` subsystem in release, so the
-                // eprintln above goes nowhere there; this is the only thing the
-                // user sees. Same helper the OOM give-up path uses.
+                // On Unix `show_fatal_dialog` is itself an eprintln (no native
+                // dialog yet — see main.rs), so today this repeats the line
+                // above. Kept so both supervisors call the same helper with the
+                // same words: when a native macOS/Linux dialog lands in
+                // show_fatal_dialog, this path gets it for free.
                 crate::show_fatal_dialog(
                     srv_spawner::MIGRATION_FAILED_DIALOG_TITLE,
                     &srv_spawner::migration_failed_dialog_body(reason),
