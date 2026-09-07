@@ -54,6 +54,7 @@ mod m0020_agent_color_backfill;
 mod m0021_backfill_agent_bundles;
 mod m0022_identity_store_links_backfill;
 mod m0023_native_memory_versions_backfill;
+mod m0024_native_memory_backfill_from_fs;
 mod runner;
 
 pub use runner::count_pending_migrations;
@@ -153,4 +154,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0021_backfill_agent_bundles::M0021BackfillAgentBundles,
     &m0022_identity_store_links_backfill::M0022IdentityStoreLinksBackfill,
     &m0023_native_memory_versions_backfill::M0023NativeMemoryVersionsBackfill,
+    &m0024_native_memory_backfill_from_fs::M0024NativeMemoryBackfillFromFs,
 ];
