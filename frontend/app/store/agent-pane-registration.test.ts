@@ -25,7 +25,6 @@ import {
 } from "./agent-document-store";
 import {
     __resetAllSlots as resetPaneStateSlots,
-    type AgentPaneProjections,
     snapshot as paneStateSnapshot,
 } from "./agent-pane-state-store";
 import {
@@ -36,28 +35,8 @@ import {
     unregisterPane,
 } from "./agent-pane-registration";
 
-function noopProjections(): AgentPaneProjections {
-    // Reagent P1 on #999: PR G dropped `turnActive` and `stopping` from
-    // AgentPaneProjections; including them here would trip excess-property
-    // checking on the explicit return type.
-    return {
-        streaming: () => {},
-        sessionStats: () => {},
-        sessionTotals: () => {},
-        currentTool: () => {},
-        turnTokens: () => {},
-        pending: () => {},
-        initPhase: () => {},
-        turnPhase: () => {},
-    };
-}
-
 function fullRegistration(): PaneRegistration {
-    return {
-        agentId: "agent-1",
-        documentSetter: () => {},
-        projections: noopProjections(),
-    };
+    return { agentId: "agent-1" };
 }
 
 describe("agent-pane-registration (unified helper)", () => {
@@ -163,12 +142,7 @@ describe("agent-pane-registration (unified helper)", () => {
             // catch the resulting TypeError. With `as never` we get
             // past TS to verify the runtime behavior of the helper.
             expect(() =>
-                registerPane("blk-5", {
-                    agentId: "a",
-                    documentSetter: () => {},
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    projections: undefined as any,
-                }),
+                registerPane("blk-5", { agentId: "a" }),
             ).not.toThrow(); // pane-state register is `slots.set`, doesn't read projections
 
             // The above demonstrates that the current per-store
@@ -263,17 +237,12 @@ describe("agent-pane-registration (unified helper)", () => {
         });
     });
 
-    describe("documentSetter wired correctly", () => {
-        it("dispatching into the document store after registerPane fires the documentSetter", async () => {
-            // Smoke: confirm the unified helper actually wired the
-            // setter through to the store (not just registered an
-            // empty slot).
-            const setterCalls: number[] = [];
-            registerPane("blk-8", {
-                agentId: "a",
-                documentSetter: (nodes) => setterCalls.push(nodes.length),
-                projections: noopProjections(),
-            });
+    describe("reactive read side wired correctly (A6 of #1549)", () => {
+        it("dispatching into the document store after registerPane is visible on model.document()", async () => {
+            // Smoke: confirm the unified helper handed the model the
+            // store-owned nodes accessor (not just registered an empty
+            // slot).
+            const model = registerPane("blk-8", { agentId: "a" });
 
             // Dispatch a StreamFlush so the reducer mutates nodes.
             const { dispatch: dispatchDoc } = await import("./agent-document-store");
@@ -289,20 +258,11 @@ describe("agent-pane-registration (unified helper)", () => {
                 updatedNodes: [],
             });
 
-            expect(setterCalls).toEqual([1]);
+            expect(model.document().length).toBe(1);
         });
 
-        it("dispatching into the pane-state store after registerPane fires the projection setters", async () => {
-            const turnPhaseKinds: string[] = [];
-            const proj: AgentPaneProjections = {
-                ...noopProjections(),
-                turnPhase: (next) => turnPhaseKinds.push(next.kind),
-            };
-            registerPane("blk-9", {
-                agentId: "a",
-                documentSetter: () => {},
-                projections: proj,
-            });
+        it("dispatching into the pane-state store after registerPane is visible on model.state", async () => {
+            const model = registerPane("blk-9", { agentId: "a" });
 
             const { dispatch: dispatchPane } = await import("./agent-pane-state-store");
             // Lifecycle: InitReady → StreamSubscribe → TurnStart promotes
@@ -311,7 +271,7 @@ describe("agent-pane-registration (unified helper)", () => {
             dispatchPane("blk-9", { type: "InitReady", at: 0 });
             dispatchPane("blk-9", { type: "StreamSubscribe", at: 1 });
             dispatchPane("blk-9", { type: "TurnStart", at: 2 });
-            expect(turnPhaseKinds).toContain("Submitting");
+            expect(model.state.turnPhase.kind).toBe("Submitting");
         });
     });
 

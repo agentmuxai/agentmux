@@ -45,7 +45,7 @@ function makeCtx(): SlashCommandContext {
         blockId: "block-1",
         provider: () => claude,
         block: () => ({ meta: { cmd: "claude-cli", agentId: "agent-1" } }),
-        documentAtom: [() => [], vi.fn()] as any,
+        documentNodes: () => [],
         log: vi.fn(),
         setAuthUrl: vi.fn(),
         notifyControllerHealthy: vi.fn(),

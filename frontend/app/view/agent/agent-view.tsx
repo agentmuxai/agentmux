@@ -55,7 +55,7 @@ import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reve
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { sleep } from "@/util/util";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
@@ -112,7 +112,6 @@ import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-
 import { getProvider } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
-import type { SignalPair } from "./state";
 import { createAgentAtoms } from "./state";
 import { shouldShowTabStrip } from "./tab-strip-visibility";
 import type { DocumentNode } from "./types";
@@ -335,6 +334,17 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // lone conversation shows just the "+" (no pill for itself). The
     // moment a 2nd tab exists, both (including the first) appear.
     const visibleTabs = createMemo(() => (combinedTabs().length > 1 ? combinedTabs() : []));
+    // Single source of truth for whether the strip renders — read both by
+    // the <Show> that mounts it and by the picker host's strip-clearance
+    // custom property below, so the space reserved for the strip can never
+    // disagree with whether the strip is actually there.
+    const showTabStrip = createMemo(() =>
+        shouldShowTabStrip({
+            visibleTabCount: visibleTabs().length,
+            hasAgent: !!agentId(),
+            isHistoryTab: isHistoryTab(),
+        }),
+    );
     const activeBlockId = createMemo(() => {
         layoutModel.localTreeStateAtom();
         return layoutModel.getNodeByBlockId(model.blockId)?.data?.activeBlockId ?? model.blockId;
@@ -549,13 +559,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                         back the moment the pane is a real conversation; see
                         shouldShowTabStrip for why a 2nd blank tab still keeps
                         the strip up. */}
-                    <Show
-                        when={shouldShowTabStrip({
-                            visibleTabCount: visibleTabs().length,
-                            hasAgent: !!agentId(),
-                            isHistoryTab: isHistoryTab(),
-                        })}
-                    >
+                    <Show when={showTabStrip()}>
                         <PaneTabStrip
                             tabs={visibleTabs()}
                             activeId={activeBlockId()}
@@ -600,6 +604,20 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                                 <Show when={pickerVisible()}>
                                     <div
                                         class="agent-picker-host"
+                                        // Strip clearance, inherited by
+                                        // `.agent-picker`'s padding-top (see
+                                        // _picker.scss). The strip floats over
+                                        // the content, so the picker pads
+                                        // itself out of the way — but on a
+                                        // fresh pane the strip isn't rendered
+                                        // at all (shouldShowTabStrip), and
+                                        // reserving its height there is pure
+                                        // dead space above "My Agents".
+                                        style={{
+                                            "--pane-tab-strip-reserve": showTabStrip()
+                                                ? "var(--pane-tab-strip-height, 28px)"
+                                                : "0px",
+                                        }}
                                         classList={{
                                             // Applied the instant agentId()
                                             // is set (same render as
@@ -707,7 +725,7 @@ const AgentPresentationView = ({
         model._openAgentStashModal = null;
     });
 
-    const agentAtoms = createMemo(() => createAgentAtoms(model.blockId));
+    const agentAtoms = createMemo(() => createAgentAtoms());
 
     // Register this pane with BOTH the document store and the pane-state
     // store SYNCHRONOUSLY in one atomic call, during component-body
@@ -753,31 +771,12 @@ const AgentPresentationView = ({
 
     let paneModel: AgentPaneModel;
     {
-        const a = agentAtoms();
-        paneModel = registerAgentPane(model.blockId, {
-            agentId,
-            documentSetter: a.documentAtom[1],
-            projections: {
-                streaming: a.streamingStateAtom[1],
-                sessionStats: a.sessionStatsAtom[1],
-                sessionTotals: a.sessionTotalsAtom[1],
-                currentTool: a.currentToolAtom[1],
-                turnTokens: a.turnTokensAtom[1],
-                contextTokens: a.contextTokensAtom[1],
-                contextWindow: a.contextWindowAtom[1],
-                pending: a.pendingMessagesAtom[1],
-                initPhase: a.initPhaseAtom[1],
-                turnPhase: a.turnPhaseAtom[1],
-                detailsOpen: a.detailsOpenAtom[1],
-                currentToolArg: a.currentToolArgAtom[1],
-                failure: a.failureAtom[1],
-                compacting: a.compactingAtom[1],
-                attachedTask: a.attachedTaskAtom[1],
-                registryAttachedTaskSince: a.registryAttachedTaskSinceAtom[1],
-                reconnecting: a.reconnectingAtom[1],
-            },
-        });
-        registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
+        // A6 of issue #1549: the stores own their reactive read side now
+        // (`paneModel.state` / `paneModel.document`). Nothing is wired from
+        // the view into them, so a new reducer field is reactive here
+        // without touching this file.
+        paneModel = registerAgentPane(model.blockId, { agentId });
+        registerAgentActivity(model.blockId, () => paneModel.state.turnPhase);
 
         // Register with the reactive handler so the Swarm view sees this pane.
         // Uses the same handleAgentIdChange path as the PTY/OSC flow — handles
@@ -795,7 +794,7 @@ const AgentPresentationView = ({
             // unexpected — also dump the render-trail + recent reducer-dispatch
             // ring so the next reproduction yields a root cause.
             // See PLAN_PANE_CRASH_DIAGNOSTICS_2026-06-05.md.
-            const phase = a.turnPhaseAtom[0]();
+            const phase = paneModel.state.turnPhase;
             const midTurn = workingFromPhase(phase);
             if (midTurn) {
                 console.warn(
@@ -831,7 +830,7 @@ const AgentPresentationView = ({
         // it without needing access to per-pane in-memory signals. Fires at
         // most once per turn (TokensIn at message_start).
         createEffect(() => {
-            const tokens = a.contextTokensAtom[0]();
+            const tokens = (paneModel.state.lastContextTokens ?? null);
             void RpcApi.SetMetaCommand(TabRpcClient, {
                 oref: WOS.makeORef("block", model.blockId),
                 meta: { "term:ctx-tokens": tokens ?? null } as any,
@@ -1016,8 +1015,9 @@ const AgentPresentationView = ({
             const [, setDocState] = agentAtoms().documentStateAtom;
             setDocState((prev) => ({ ...prev, ...documentState }));
             if (typeof detailsOpen === "boolean") {
-                const [, setDetailsOpen] = agentAtoms().detailsOpenAtom;
-                setDetailsOpen(detailsOpen);
+                // Reducer-owned field: restore through the reducer, not by
+                // writing a signal behind its back (A6 of issue #1549).
+                paneModel.dispatchPane({ type: detailsOpen ? "DetailsExpand" : "DetailsCollapse" }, "system");
             }
         },
         log,
@@ -1035,7 +1035,7 @@ const AgentPresentationView = ({
     // session_outcome divider is always the first document node.
     const earlierHistoryAvailable = createMemo(() => {
         if (history.scopeClamped()) return true;
-        const first = agentAtoms().documentAtom[0]()[0];
+        const first = paneModel.document()[0];
         return first?.type === "session_outcome" && first.outcome === "fresh";
     });
 
@@ -1043,28 +1043,23 @@ const AgentPresentationView = ({
     // injected as a normal, scrolling document node (§3.2 of
     // SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) —
     // replaces the old pinned-above-the-scroll-region PaneRow. The real
-    // setter is passed through unchanged: AgentDocumentView/
-    // createAgentViewState only ever read `documentAtom[0]`, never call the
-    // setter, so pairing a derived read with the real write side is safe
-    // (nothing writes through this pair, so there's nothing to desync).
-    const displayDocumentAtom: SignalPair<DocumentNode[]> = [
-        () =>
-            injectResumePreflight(
-                injectHistoryLink(agentAtoms().documentAtom[0](), earlierHistoryAvailable()),
-                buildResumePreflightNode(
-                    agentAtoms().documentAtom[0](),
-                    resumePreflight.result(),
-                    resumePreflight.showSteps(),
-                ),
+    // read-only view: AgentDocumentView / createAgentViewState only ever
+    // read it. Writes go through `paneModel.dispatchDoc`.
+    const displayDocument: Accessor<DocumentNode[]> = () =>
+        injectResumePreflight(
+            injectHistoryLink(paneModel.document(), earlierHistoryAvailable()),
+            buildResumePreflightNode(
+                paneModel.document(),
+                resumePreflight.result(),
+                resumePreflight.showSteps(),
             ),
-        agentAtoms().documentAtom[1],
-    ];
+        );
 
     // Auth + launch flow state and the onCleanup that kills the CLI
     // if the pane closes mid-login.
     // `getDocument` is read-only; for writes we MUST dispatch through
     // agent-document-store so slot.state stays in sync.
-    const [getDocument] = agentAtoms().documentAtom;
+    const getDocument = paneModel.document;
 
     // Agent-pane state-persistence (RFC #857 + spec
     // SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md). See
@@ -1074,6 +1069,7 @@ const AgentPresentationView = ({
         definitionId: agentId,
         getAtoms: agentAtoms,
         getDocument,
+        getDetailsOpen: () => paneModel.state.detailsOpen,
         snapshotIsForeignBlock: () => history.snapshotIsForeignBlock(),
         log,
     });
@@ -1178,7 +1174,7 @@ const AgentPresentationView = ({
         on(turnJustEndedAtom, (n) => {
             if (n === 0) return;
             const timer = setTimeout(() => {
-                if (workingFromPhase(agentAtoms().turnPhaseAtom[0]())) return;
+                if (workingFromPhase(paneModel.state.turnPhase)) return;
                 paneModel.dispatchDoc({
                     type: "ScrubOrphanedInProgress",
                     at: Date.now(),
@@ -1277,7 +1273,7 @@ const AgentPresentationView = ({
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
         // Mount-time TurnPhase reconciliation — see
         // docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
-        // Finding 1. dispatchPaneIfRegistered (not dispatchPane) because
+        // Finding 1. Dispatched via paneModel (soft; never throws) because
         // this can resolve before registerPane() has run for a pane still
         // mid-mount.
         onControllerStatus: (rts) => {
@@ -1338,7 +1334,7 @@ const AgentPresentationView = ({
     // overrides the tag to "unauthenticated" the instant it appears, instead
     // of waiting for the user to click "Login Again" first.
     const loginStatus = createMemo((): "authenticated" | "unauthenticated" | "unknown" => {
-        if (agentAtoms().failureAtom[0]()?.data.code === "auth") return "unauthenticated";
+        if (paneModel.state.failure?.data.code === "auth") return "unauthenticated";
         return status.authStatus();
     });
 
@@ -1507,7 +1503,7 @@ const AgentPresentationView = ({
     // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
     useAgentActivitySummary({
         blockId: model.blockId,
-        turnPhase: agentAtoms().turnPhaseAtom[0],
+        turnPhase: (() => paneModel.state.turnPhase),
         getRootWidth: () => rootRef?.offsetWidth,
     });
 
@@ -1518,7 +1514,7 @@ const AgentPresentationView = ({
     let composerIsEmptyFn: (() => boolean) | null = null;
     useNextPromptSuggestion({
         blockId: model.blockId,
-        turnPhase: agentAtoms().turnPhaseAtom[0],
+        turnPhase: (() => paneModel.state.turnPhase),
         turnJustEndedAtom,
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
     });
@@ -1541,7 +1537,7 @@ const AgentPresentationView = ({
     // Mutations dispatch through agent-document-store; the reducer there
     // owns dedup against in-flight history loads and the truncate-suppress
     // invariant that prevents the mid-session wipe bug.
-    const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
+    const pendingMessages = () => paneModel.state.pending;
     // Forwarded to ActivityDock so it can render registry-known background
     // tasks the transcript itself has no record of (Tier 1 of
     // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
@@ -1552,18 +1548,18 @@ const AgentPresentationView = ({
         // check is centralized in the model rather than per call site.
         model: paneModel,
         outputFormat: outputFormat(),
-        documentAtom: agentAtoms().documentAtom,
+        documentNodes: paneModel.document,
         // turnPhase is the SoT for "is a stop in flight". useAgentStream
         // needs it to detect user-initiated stops and append the
         // "⏹ Interrupted by user" row when session_end lands.
-        turnPhaseAtom: agentAtoms().turnPhaseAtom,
+        turnPhase: () => paneModel.state.turnPhase,
         // See useAgentStream.ts's UseAgentStreamOpts doc comment: watched by
         // useCompactionStream to push the "Compacting conversation…"
         // transcript node whenever `compacting` transitions to set,
         // regardless of which dispatch caused it (SPEC_COMPACTION_STARTED_
         // RECONCILIATION_RACE_2026_09_02.md).
-        compactingAtom: agentAtoms().compactingAtom,
-        pendingMessagesAtom,
+        compacting: () => paneModel.state.compacting,
+        pendingMessages,
         enabled: true,
         // Provider id (lowercase catalog key) attributes completed-turn
         // tokens to the correct row in the status-bar token-usage store.
@@ -1607,7 +1603,7 @@ const AgentPresentationView = ({
     const [toolPromotionCheckNonce, setToolPromotionCheckNonce] = createSignal(0);
     createEffect(() => {
         toolPromotionCheckNonce();
-        const nodes = agentAtoms().documentAtom[0]();
+        const nodes = paneModel.document();
         const now = Date.now();
         setHasPromotedTool(hasRunningPromotedTool(nodes, now));
         const at = nextToolPromotionAt(nodes, now);
@@ -1625,23 +1621,23 @@ const AgentPresentationView = ({
         workingRowSupersededByDock({
             hasPromotedTool: hasPromotedTool(),
             showingLaunchActivity: showingLaunchActivity(),
-            turnPhase: agentAtoms().turnPhaseAtom[0](),
-            compacting: agentAtoms().compactingAtom[0](),
-            reconnecting: agentAtoms().reconnectingAtom[0](),
+            turnPhase: paneModel.state.turnPhase,
+            compacting: paneModel.state.compacting,
+            reconnecting: paneModel.state.reconnecting,
         })
     );
 
     const workingRowLoading = createMemo(
         () =>
             !supersededByDock() &&
-            (showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()))
+            (showingLaunchActivity() || workingFromPhase(paneModel.state.turnPhase))
     );
     const workingRowVisible = createMemo(
         () =>
             workingRowLoading() ||
-            agentAtoms().sessionStatsAtom[0]() != null ||
-            agentAtoms().compactingAtom[0]() != null ||
-            agentAtoms().reconnectingAtom[0]() != null,
+            paneModel.state.sessionStats != null ||
+            paneModel.state.compacting != null ||
+            paneModel.state.reconnecting != null,
     );
 
     // Attached-task axis dispatch — the deferred §6.1 call site of
@@ -1656,7 +1652,7 @@ const AgentPresentationView = ({
     const [attachedCheckNonce, setAttachedCheckNonce] = createSignal(0);
     createEffect(() => {
         attachedCheckNonce();
-        const nodes = agentAtoms().documentAtom[0]();
+        const nodes = paneModel.document();
         const subs = allSubagentsAtom();
         const now = Date.now();
         // `at` carries the earliest running activity's REAL start time, not
@@ -1679,12 +1675,12 @@ const AgentPresentationView = ({
         // undone the next time this effect ran and saw no transcript
         // evidence. Routing the registry signal through its own axis
         // instead of the shared one this effect owns fixes that.
-        const registryStartMs = agentAtoms().registryAttachedTaskSinceAtom[0]();
+        const registryStartMs = paneModel.state.registryAttachedTaskSince;
         const startMs =
             transcriptStartMs != null && registryStartMs != null
                 ? Math.min(transcriptStartMs, registryStartMs)
                 : (transcriptStartMs ?? registryStartMs);
-        const current = agentAtoms().attachedTaskAtom[0]() != null;
+        const current = paneModel.state.attachedTask != null;
         if ((startMs != null) !== current) {
             paneModel.dispatchPane(
                 startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
@@ -1705,7 +1701,7 @@ const AgentPresentationView = ({
         model: paneModel,
         block,
         provider,
-        documentAtom: agentAtoms().documentAtom,
+        documentNodes: paneModel.document,
         log,
         setAuthUrl: status.setAuthUrl,
         canRetry: status.canRetry,
@@ -1744,7 +1740,7 @@ const AgentPresentationView = ({
         // defers this to the next animation frame so the mounted node is
         // included in scrollHeight. See SPEC_AGENT_PANE_FOLLOWUPS item #1.
         onSent: () => scrollToBottomFn?.(),
-        pendingMessagesAtom,
+        pendingMessages,
     });
 
     // Mark turn as active when the user sends a message — TurnStart
@@ -1755,7 +1751,7 @@ const AgentPresentationView = ({
         // the shell — and thus the output — is immediately visible; without
         // this the user sees no feedback if the drawer is closed.
         if (message.trim().startsWith("!")) {
-            agentAtoms().detailsOpenAtom[1](true);
+            paneModel.dispatchPane({ type: "DetailsExpand" }, "user");
         }
         // Capture working state BEFORE TurnStart so PendingMessageQueued can
         // mark whether this message is queued behind a running turn (true) or
@@ -1778,7 +1774,7 @@ const AgentPresentationView = ({
         // a boolean) so a rejected send can re-dispatch it and restore the
         // banner instead of leaving it cleared with no recovery affordance
         // (Codex P1, third re-review).
-        const liveFailure = agentAtoms().failureAtom[0]();
+        const liveFailure = paneModel.state.failure;
         // Carry the WHOLE PaneFailure, not just `.data`: `turnAttempted` lives
         // on the wrapper, and capturing only the inner AgentFailure discarded
         // it structurally — so the guard's re-dispatch below rebuilt the
@@ -1853,11 +1849,11 @@ const AgentPresentationView = ({
     createEffect(() => {
         const decision = decideSyntheticRow({
             canRetry: status.canRetry(),
-            current: agentAtoms().failureAtom[0](),
+            current: paneModel.state.failure,
             previous: prevFailure,
             syntheticDismissed,
         });
-        prevFailure = untrack(() => agentAtoms().failureAtom[0]());
+        prevFailure = untrack(() => paneModel.state.failure);
         syntheticDismissed = decision.syntheticDismissed;
         if (decision.action === "raise") {
             paneModel.dispatchPane(
@@ -1879,7 +1875,7 @@ const AgentPresentationView = ({
             // Keep prevFailure in step with what we just dispatched, so the
             // re-run this write triggers sees "our row is showing" rather than
             // "a row just appeared from nowhere".
-            prevFailure = untrack(() => agentAtoms().failureAtom[0]());
+            prevFailure = untrack(() => paneModel.state.failure);
         } else if (decision.action === "retract") {
             paneModel.dispatchPane({ type: "FailureCleared" }, "system");
             prevFailure = null;
@@ -2015,7 +2011,7 @@ const AgentPresentationView = ({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,
-        failure: agentAtoms().failureAtom[0],
+        failure: (() => paneModel.state.failure),
         onRetry: retryLastTurn,
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
         // context_exceeded recovery — drop the over-full session and return to
@@ -2067,8 +2063,8 @@ const AgentPresentationView = ({
     // recall an un-sent message first.
     let prevTool: string | null = null;
     createEffect(() => {
-        const tool = agentAtoms().currentToolAtom[0]();
-        const phaseKind = agentAtoms().turnPhaseAtom[0]().kind;
+        const tool = paneModel.state.currentTool;
+        const phaseKind = paneModel.state.turnPhase.kind;
         const newToolCall = tool !== null && tool !== prevTool;
         prevTool = tool;
         const turnIdle = phaseKind === "Idle" || phaseKind === "Done";
@@ -2177,7 +2173,7 @@ const AgentPresentationView = ({
     // In-session search: matches, navigation, highlight. Searches over
     // the currently-loaded document slice only.
     const search = useInSessionSearch({
-        document: agentAtoms().documentAtom[0],
+        document: paneModel.document,
         jumpTo: scroll.jumpTo,
     });
 
@@ -2298,9 +2294,9 @@ const AgentPresentationView = ({
                         class="agent-pane-progress-bar"
                         classList={{
                             "agent-pane-progress-bar--active":
-                                showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+                                showingLaunchActivity() || workingFromPhase(paneModel.state.turnPhase),
                             "agent-pane-progress-bar--stopping":
-                                agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
+                                paneModel.state.turnPhase.kind === "Interrupting",
                         }}
                         role="progressbar"
                         aria-label="Agent working"
@@ -2333,7 +2329,7 @@ const AgentPresentationView = ({
             {/* The "Earlier conversations / Open Agent History" link used to
                 render here as a PaneRow pinned above the scroll region —
                 now it's a `history_link` synthetic DOCUMENT NODE, injected
-                by injectHistoryLink into displayDocumentAtom below, so it
+                by injectHistoryLink into displayDocument below, so it
                 scrolls with the transcript instead of staying fixed in
                 place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */}
             {/* Scroll region wrapper — .agent-document (inside AgentDocumentView)
@@ -2356,7 +2352,7 @@ const AgentPresentationView = ({
                 (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md). */}
             <div class="agent-document-scroll-region">
                 <AgentDocumentView
-                    documentAtom={displayDocumentAtom}
+                    documentNodes={displayDocument}
                     documentStateAtom={agentAtoms().documentStateAtom}
                     onOpenHistory={() => void openOrFocusHistoryTab({ currentBlockId: model.blockId, agentId })}
                     onAgentErrorLogin={() => {
@@ -2461,7 +2457,7 @@ const AgentPresentationView = ({
                 No "Send now" affordance — Esc on an empty composer delivers
                 a queued message immediately instead (mirrors Claude Code
                 CLI). See SPEC_AGENT_ESCAPE_STEER_QUEUED_MESSAGE_2026_07_06.md. */}
-            <PendingMessagesPanel pendingMessages={pendingMessagesAtom[0]} />
+            <PendingMessagesPanel pendingMessages={pendingMessages} />
 
             {/* PR F — Disconnected banner. Visible when the stream
                 tore down while a turn was in flight (kind=Disconnected).
@@ -2502,7 +2498,7 @@ const AgentPresentationView = ({
                 )}
             </Show>
             <AgentDisconnectedBanner
-                phase={agentAtoms().turnPhaseAtom[0]}
+                phase={(() => paneModel.state.turnPhase)}
                 onReconnect={() => {
                     // Standard stream-reconnect path: dispatch
                     // `StreamSubscribe` against the live pane. If the
@@ -2524,7 +2520,7 @@ const AgentPresentationView = ({
                 to where the user's attention already is. Moved from the top per
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
             <ActivityDock
-                documentAtom={agentAtoms().documentAtom}
+                documentNodes={paneModel.document}
                 blockId={model.blockId}
                 backgroundTasksAtom={backgroundTasksAtom}
             />
@@ -2554,25 +2550,25 @@ const AgentPresentationView = ({
                 <Show when={workingRowVisible()}>
                     <AgentWorkingRow
                         loading={workingRowLoading()}
-                        stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
-                        currentTool={agentAtoms().currentToolAtom[0]()}
-                        currentToolArg={agentAtoms().currentToolArgAtom[0]()}
+                        stopping={paneModel.state.turnPhase.kind === "Interrupting"}
+                        currentTool={paneModel.state.currentTool}
+                        currentToolArg={paneModel.state.currentToolArg}
                         toolPromoted={hasPromotedTool()}
-                        sessionStats={agentAtoms().sessionStatsAtom[0]()}
-                        turnTokens={agentAtoms().turnTokensAtom[0]()}
+                        sessionStats={paneModel.state.sessionStats}
+                        turnTokens={paneModel.state.turnTokens}
                         launchPhase={status.launchPhase()}
                         onCancelLogin={status.cancelLogin}
                         hasAuthUrl={!!status.authUrl()}
                         waitingReason={(() => {
-                            const phase = agentAtoms().turnPhaseAtom[0]();
+                            const phase = paneModel.state.turnPhase;
                             return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
                         })()}
                         retryAfterMs={(() => {
-                            const phase = agentAtoms().turnPhaseAtom[0]();
+                            const phase = paneModel.state.turnPhase;
                             return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
                         })()}
-                        compacting={agentAtoms().compactingAtom[0]()}
-                        reconnecting={agentAtoms().reconnectingAtom[0]()}
+                        compacting={paneModel.state.compacting}
+                        reconnecting={paneModel.state.reconnecting}
                     />
                 </Show>
             </div>
@@ -2581,21 +2577,21 @@ const AgentPresentationView = ({
                 activity ticker and Log button that toggles the log panel.
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
-                loading={showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
+                loading={showingLaunchActivity() || workingFromPhase(paneModel.state.turnPhase)}
                 processCount={processCount()}
                 onProcessBadgeClick={() => {
                     createBlock({ meta: { view: "swarm" } });
                 }}
-                logOpen={agentAtoms().detailsOpenAtom[0]()}
+                logOpen={paneModel.state.detailsOpen}
                 onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
-                contextTokens={agentAtoms().contextTokensAtom[0]()}
-                contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
+                contextTokens={(paneModel.state.lastContextTokens ?? null)}
+                contextWindow={(paneModel.state.lastContextWindow ?? null) ?? provider()?.contextWindow}
                 authStatus={loginStatus()}
                 blockId={model.blockId}
                 blockAtom={block}
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
-                compacting={agentAtoms().compactingAtom[0]()}
+                compacting={paneModel.state.compacting}
                 // Route through handleSendMessage — same pattern as the
                 // SlashHelpPanel's onInvoke above, and for the same reason:
                 // this needs the same pre-TurnStart wasAlreadyWorking
@@ -2661,7 +2657,7 @@ const AgentPresentationView = ({
                     (SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md): the shell
                     stacks under the text input (which shifts up to make room,
                     since this region hugs the pane bottom). */}
-                <Show when={agentAtoms().detailsOpenAtom[0]()}>
+                <Show when={paneModel.state.detailsOpen}>
                     <div class="agent-composer-details" id={`agent-composer-details-${model.blockId}`}>
                         <AgentControlBar
                             blockId={model.blockId}

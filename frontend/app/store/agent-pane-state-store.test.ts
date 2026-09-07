@@ -18,30 +18,42 @@
  *      catching their own throws.
  */
 
+import { createComputed, createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     __resetAllSlots,
     __resetListeners,
     addEventListener,
     type AgentPaneEvent,
-    type AgentPaneProjections,
     dispatch,
     dispatchIfRegistered,
+    paneView,
     registerPane,
     setEventSink,
     unregisterPane,
 } from "./agent-pane-state-store";
 
-function noopProj(): AgentPaneProjections {
-    return {
-        streaming: () => {},
-        sessionStats: () => {},
-        sessionTotals: () => {},
-        currentTool: () => {},
-        turnTokens: () => {},
-        pending: () => {},
-        initPhase: () => {},
-    };
+/**
+ * A reactive reader of one `AgentPaneView` field that unmounts the pane the
+ * first time that field changes — the "subscriber disposes pane mid-dispatch"
+ * cascade from LIFECYCLE_DISPATCH_LEAK_2026_05_15.md, expressed against the
+ * store-owned view (A6 of issue #1549) instead of a hand-passed setter.
+ * Returns the root disposer.
+ */
+function cascadeOnFirstChange(blockId: string, field: "streaming" | "turnPhase"): () => void {
+    const view = paneView(blockId)!;
+    let primed = false;
+    return createRoot((dispose) => {
+        createComputed(() => {
+            view[field];
+            if (!primed) {
+                primed = true;
+                return;
+            }
+            unregisterPane(blockId); // cascade: subscriber disposed pane
+        });
+        return dispose;
+    });
 }
 
 describe("agent-pane-state-store (cascade contracts)", () => {
@@ -64,28 +76,21 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             // notification. The cascade-detection inside the store will
             // emit a CASCADE_DETECTED warning. The dispatch call itself
             // returns events normally — but the next dispatch throws.
-            // `streaming` is the first setter the dispatch loop touches
-            // when state.streaming changes — StreamSubscribe always
-            // toggles it. Use that as the cascading site so the test
-            // doesn't depend on internal projection-order details.
-            const proj: AgentPaneProjections = {
-                ...noopProj(),
-                streaming: () => {
-                    unregisterPane("blockA"); // cascade: subscriber disposed pane
-                },
-            };
-            registerPane("blockA", "agentA", proj);
+            // `streaming` always changes on StreamSubscribe, so a reader of
+            // that field is the cascading site.
+            registerPane("blockA", "agentA");
+            const disposeReader = cascadeOnFirstChange("blockA", "streaming");
 
             const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
             try {
-                // First dispatch: setter cascade-disposes the slot.
+                // First dispatch: the reader cascade-disposes the slot.
                 dispatch("blockA", { type: "StreamSubscribe", at: 0 });
                 // Cascade-detection log should fire.
                 const cascadeWarns = warnSpy.mock.calls.filter(([msg]) =>
                     typeof msg === "string" && msg.includes("CASCADE_DETECTED"),
                 );
                 expect(cascadeWarns.length).toBeGreaterThan(0);
-                expect(cascadeWarns[0][0]).toContain("'streaming'"); // names the cascading setter
+                expect(cascadeWarns[0][0]).toContain("'streaming'"); // names the cascading field
 
                 // Second dispatch: throws because slot is gone.
                 expect(() =>
@@ -93,6 +98,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
                 ).toThrowError(/dispatch for unregistered pane/);
             } finally {
                 warnSpy.mockRestore();
+                disposeReader();
             }
         });
     });
@@ -108,7 +114,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         });
 
         it("dispatches normally when the slot exists", () => {
-            registerPane("blockB", "agentA", noopProj());
+            registerPane("blockB", "agentA");
             const events = dispatchIfRegistered("blockB", { type: "TurnStart", at: 0 });
             // TurnStart produces events; we don't care about content here,
             // just that the call went through the real reducer.
@@ -122,18 +128,13 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             // next call (in useAgentStream.flushPendingNodes) is
             // StreamFlushObserved against agent-pane-state. With the
             // soft variant, that next call returns [] silently.
-            const proj: AgentPaneProjections = {
-                ...noopProj(),
-                streaming: () => {
-                    unregisterPane("blockC"); // cascade
-                },
-            };
-            registerPane("blockC", "agentA", proj);
+            registerPane("blockC", "agentA");
+            const disposeReader = cascadeOnFirstChange("blockC", "streaming");
 
             const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
             try {
                 // Trigger the cascade via the throwing dispatch (the
-                // path that does the actual projection work).
+                // path that publishes to the view).
                 dispatch("blockC", { type: "StreamSubscribe", at: 0 });
                 // The simulated "next dispatch in the same caller frame":
                 // with the soft variant, no throw, just an empty array.
@@ -145,26 +146,35 @@ describe("agent-pane-state-store (cascade contracts)", () => {
                 expect(events).toEqual([]);
             } finally {
                 warnSpy.mockRestore();
+                disposeReader();
             }
         });
     });
 
     // ── PR B (turn-phase view migration) ────────────────────────────────
-    // PR A added `turnPhase` to the reducer state with dual-write; PR B —
-    // this PR — exposes a projection setter for it so the agent VIEW can
-    // bind its "working" animation to `workingFromPhase(turnPhase)` via
-    // a Solid signal. Verify the setter is invoked with the dual-written
-    // phase value at each lifecycle transition.
-    describe("turnPhase projection (PR B)", () => {
-        it("calls the turnPhase setter with the dual-written phase value", () => {
+    // PR A added `turnPhase` to the reducer state with dual-write; PR B
+    // exposed it to the agent VIEW so it can bind its "working" animation
+    // to `workingFromPhase(turnPhase)` via a Solid signal. Since A6 of
+    // issue #1549 that signal is the store-owned `paneView().turnPhase`;
+    // verify a reactive reader sees each lifecycle transition, and only
+    // real transitions (identity-equal fields do not notify).
+    describe("turnPhase reactive view (PR B, via A6)", () => {
+        it("notifies a reader with each phase transition, and only transitions", () => {
             const phaseCalls: { kind: string }[] = [];
-            const proj: AgentPaneProjections = {
-                ...noopProj(),
-                turnPhase: (next) => {
-                    phaseCalls.push({ kind: next.kind });
-                },
-            };
-            registerPane("blockD", "agentA", proj);
+            registerPane("blockD", "agentA");
+            const view = paneView("blockD")!;
+            let primed = false;
+            const disposeReader = createRoot((dispose) => {
+                createComputed(() => {
+                    const kind = view.turnPhase.kind;
+                    if (!primed) {
+                        primed = true;
+                        return;
+                    }
+                    phaseCalls.push({ kind });
+                });
+                return dispose;
+            });
 
             // Sequence: InitReady → StreamSubscribe (Idle stays Idle)
             //         → TurnStart (Idle → Submitting)
@@ -178,10 +188,10 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             dispatch("blockD", { type: "RequestStop", at: 130 });
             dispatch("blockD", { type: "TurnEnd", stats: null });
 
-            // Only ACTUAL transitions hit the setter (reducer skips
-            // setter calls when prev === next reference). Subscribing
-            // from Idle keeps phase Idle (no spontaneous promotion), so
-            // there's no setter call there.
+            // Only ACTUAL transitions notify (the store skips a field whose
+            // value is reference-equal to before). Subscribing from Idle
+            // keeps phase Idle (no spontaneous promotion), so no
+            // notification there.
             const kinds = phaseCalls.map((c) => c.kind);
             expect(kinds).toEqual([
                 "Submitting", // TurnStart
@@ -189,6 +199,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
                 "Interrupting", // RequestStop while working
                 "Done", // TurnEnd
             ]);
+            disposeReader();
         });
     });
 
@@ -203,7 +214,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             setEventSink(singleSink);
             addEventListener(listener);
 
-            registerPane("blockX", "agentX", noopProj());
+            registerPane("blockX", "agentX");
             dispatch("blockX", { type: "InitReady", at: 100 });
 
             // The single sink and the listener both saw the same event.
@@ -220,7 +231,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             setEventSink(sink);
             const unsub = addEventListener(listener);
 
-            registerPane("blockY", "agentY", noopProj());
+            registerPane("blockY", "agentY");
             dispatch("blockY", { type: "InitReady", at: 100 });
             unsub();
             dispatch("blockY", { type: "StreamSubscribe", at: 110 });
@@ -240,7 +251,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             addEventListener(good);
 
             const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-            registerPane("blockZ", "agentZ", noopProj());
+            registerPane("blockZ", "agentZ");
             dispatch("blockZ", { type: "InitReady", at: 100 });
 
             expect(sink).toHaveBeenCalledTimes(1);
@@ -257,7 +268,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
                 seen.push(ev);
             });
 
-            registerPane("blockTE", "agentTE", noopProj());
+            registerPane("blockTE", "agentTE");
             dispatch("blockTE", { type: "InitReady", at: 100 });
             dispatch("blockTE", { type: "StreamSubscribe", at: 100 });
             dispatch("blockTE", { type: "TurnStart", at: 110 });
@@ -312,7 +323,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
                 const blockId = `block-${fromKind}`;
-                registerPane(blockId, "agentA", noopProj());
+                registerPane(blockId, "agentA");
                 setup(blockId);
                 info.mockClear();
 
@@ -334,7 +345,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         it("logs a heartbeat only every 12th StreamWatchdogTick dispatch", () => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
-                registerPane("blockTick", "agentA", noopProj());
+                registerPane("blockTick", "agentA");
                 info.mockClear();
 
                 const heartbeatCalls = () =>
@@ -376,7 +387,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         it("logs attached-task-observed with the current phase and axis state", () => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
-                registerPane("blockAttached", "agentA", noopProj());
+                registerPane("blockAttached", "agentA");
                 info.mockClear();
 
                 dispatch("blockAttached", { type: "AttachedTaskObserved", at: 500 });
@@ -393,7 +404,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         it("logs attached-task-cleared", () => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
-                registerPane("blockAttached2", "agentA", noopProj());
+                registerPane("blockAttached2", "agentA");
                 dispatch("blockAttached2", { type: "AttachedTaskObserved", at: 500 });
                 info.mockClear();
 
@@ -410,7 +421,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         it("logs the registry-derived axis independently of the live axis", () => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
-                registerPane("blockAttached3", "agentA", noopProj());
+                registerPane("blockAttached3", "agentA");
                 info.mockClear();
 
                 dispatch("blockAttached3", { type: "RegistryAttachedTaskObserved", at: 700 });
@@ -427,7 +438,7 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         it("does not log for a no-op (already-observed) dispatch", () => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
-                registerPane("blockAttached4", "agentA", noopProj());
+                registerPane("blockAttached4", "agentA");
                 dispatch("blockAttached4", { type: "AttachedTaskObserved", at: 500 });
                 info.mockClear();
 

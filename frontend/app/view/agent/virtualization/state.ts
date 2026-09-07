@@ -15,11 +15,10 @@
 
 import { batch, createMemo, createSignal, type Accessor, type Setter } from "solid-js";
 import type { DocumentNode } from "../types";
-import type { SignalPair } from "../state";
 import type { ScrollAnchor } from "./anchor";
 
 export interface AgentViewState {
-    /** Current document — pass-through from the existing documentAtom. */
+    /** Current document — pass-through from the store-owned nodes accessor (`model.document`). */
     nodes: Accessor<readonly DocumentNode[]>;
 
     /**
@@ -125,14 +124,13 @@ export interface AgentViewState {
 }
 
 /**
- * Construct a fresh AgentViewState bound to a document signal pair.
- * Call once per agent ViewModel instance — same lifetime as the
- * existing AgentAtoms (see ../state.ts).
+ * Construct a fresh AgentViewState bound to a document-nodes accessor
+ * (`model.document`, or any derived read of it). Call once per agent
+ * ViewModel instance.
  */
-export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): AgentViewState {
-    // Renamed from `document` to avoid shadowing the browser global
-    // (reagent P2 on PR #783).
-    const [docSignal] = documentAtom;
+export function createAgentViewState(docSignal: Accessor<DocumentNode[]>): AgentViewState {
+    // Named docSignal, not document, to avoid shadowing the browser
+    // global (reagent P2 on PR #783).
 
     const nodeIndex = createMemo<ReadonlyMap<string, number>>(() => {
         const docs = docSignal();
