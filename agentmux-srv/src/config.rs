@@ -32,7 +32,7 @@ pub enum SrvCommand {
         list: bool,
         /// Check every APPLIED migration post-condition (row counts, marker
         /// files) instead of running anything. Exit 0 if every check holds or
-        /// is not verifiable, 2 if any is a mismatch or errored. This is the
+        /// is not verifiable, 3 if any is a mismatch or errored (2 is clap usage-error, so a typoed flag never reads as a data finding). This is the
         /// doctor pass from SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1:
         /// db_migrations only records that up() returned Ok, never that it
         /// wrote what it was meant to.
