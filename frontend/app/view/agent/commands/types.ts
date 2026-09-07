@@ -15,7 +15,7 @@
  */
 
 import type { ProviderDefinition } from "../providers";
-import type { SignalPair } from "../state";
+import type { Accessor } from "solid-js";
 import type { DocumentNode } from "../types";
 import type { LogFn } from "../hooks/useAgentControllerStatus";
 
@@ -116,8 +116,8 @@ export interface SlashCommandContext {
     provider: () => ProviderDefinition | undefined;
     /** Reactive accessor for the current block meta. */
     block: () => { meta?: Record<string, any> } | undefined;
-    /** Document atom pair for commands that mutate the conversation (/clear). */
-    documentAtom: SignalPair<DocumentNode[]>;
+    /** Reactive read accessor for the conversation document. Writes go through `model.dispatchDoc`. */
+    documentNodes: Accessor<DocumentNode[]>;
     /** Launch-log sink for system messages. */
     log: LogFn;
     /** Set the OAuth URL for /login. */

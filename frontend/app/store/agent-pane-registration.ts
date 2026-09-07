@@ -11,12 +11,13 @@
  */
 
 import {
+    documentNodes as agentDocNodes,
     registerPane as registerAgentDocPaneRaw,
     snapshot as agentDocSnapshot,
     unregisterPane as unregisterAgentDocPaneRaw,
 } from "./agent-document-store";
 import {
-    type AgentPaneProjections,
+    paneView as agentPaneStateView,
     registerPane as registerAgentPaneStatePaneRaw,
     snapshot as agentPaneStateSnapshot,
     unregisterPane as unregisterAgentPaneStatePaneRaw,
@@ -25,25 +26,21 @@ import {
     type AgentPaneModel,
     _createAgentPaneModel,
 } from "./agent-pane-model";
-import type { DocumentNode } from "../view/agent/types";
 
 /**
- * Options bundle for the unified register call. Mirrors the union of
- * what the two underlying stores need:
+ * Options bundle for the unified register call.
  *
  *   - `agentId` — identity of the agent occupying this pane. Drives
  *     reducer initialState for the pane-state slot.
- *   - `documentSetter` — write-only projection for the documentAtom.
- *   - `projections` — the seven per-field setters the pane-state slot
- *     writes through (streaming / sessionStats / currentTool /
- *     turnTokens / pending / initPhase / turnPhase). PR G dropped the
- *     legacy `turnActive` and `stopping` projections — see
- *     `AgentPaneProjections` in `agent-pane-state-store.ts`.
+ *
+ * The `documentSetter` / `projections` fields this used to carry are gone
+ * (A6 of issue #1549): both stores now own their reactive read side and the
+ * returned `AgentPaneModel` exposes it as `model.state` / `model.document`.
+ * Nothing is wired from the view into the stores any more, so nothing can
+ * be forgotten.
  */
 export interface PaneRegistration {
     agentId: string;
-    documentSetter: (nodes: DocumentNode[]) => void;
-    projections: AgentPaneProjections;
 }
 
 /**
@@ -109,9 +106,9 @@ export function registerPane(
     // of them triggers a reactive cascade. Both register functions are
     // a simple `Map.set` with no setter calls, so they cannot themselves
     // cascade-dispatch.
-    registerAgentDocPaneRaw(blockId, reg.documentSetter);
+    registerAgentDocPaneRaw(blockId);
     try {
-        registerAgentPaneStatePaneRaw(blockId, reg.agentId, reg.projections);
+        registerAgentPaneStatePaneRaw(blockId, reg.agentId);
     } catch (e) {
         // Pane-state register failed — roll back the document slot so
         // the contract holds. The document slot was set above; we own
@@ -134,7 +131,10 @@ export function registerPane(
     const prior = paneModels.get(blockId);
     if (prior) prior._markDisposed();
 
-    const model = _createAgentPaneModel(blockId);
+    // Both raw registers just succeeded synchronously, so both accessors
+    // exist; the `!` would only fail if a store's registerPane stopped
+    // populating its slot, which the registration-invariant tests pin.
+    const model = _createAgentPaneModel(blockId, agentPaneStateView(blockId)!, agentDocNodes(blockId)!);
     paneModels.set(blockId, model);
     notifyLifecycleListeners();
     return model;

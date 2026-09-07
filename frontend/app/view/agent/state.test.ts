@@ -6,27 +6,20 @@ import {
     createAgentAtoms,
     type AgentAtoms,
 } from "./state";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 
 let atoms: AgentAtoms;
 
 beforeEach(() => {
-    atoms = createAgentAtoms("test-block-1");
+    atoms = createAgentAtoms();
 });
 
-describe("createAgentAtoms", () => {
-    test("creates signals with correct default values", () => {
-        const [getDoc] = atoms.documentAtom;
-        const [getStats] = atoms.sessionStatsAtom;
-        const [getPhase] = atoms.turnPhaseAtom;
-
-        expect(getDoc()).toEqual([]);
-        expect(getStats()).toBeNull();
-        // PR G: the working signal is `turnPhase` only — Idle by default
-        // (the legacy `turnActiveAtom` was dropped).
-        expect(getPhase().kind).toBe("Idle");
-    });
-
+// A6 of issue #1549: `createAgentAtoms` used to build a 19-signal mirror of
+// the two agent-pane stores (turnPhase, document, failure, …). Those are
+// read from `model.state` / `model.document` now, and the reactive-view
+// contract is tested where it lives (agent-pane-state-store.test.ts,
+// agent-pane-registration.test.ts, agent-pane-model.test.ts). What is left
+// here is the genuinely view-local document UI state.
+describe("createAgentAtoms (view-local state only)", () => {
     test("documentStateAtom has correct default filter", () => {
         const [getState] = atoms.documentStateAtom;
         const state = getState();
@@ -37,68 +30,29 @@ describe("createAgentAtoms", () => {
         expect(state.filter.showOutgoing).toBe(true);
     });
 
+    test("documentStateAtom starts with empty collapse/pin/expanded sets and no selection", () => {
+        const [getState] = atoms.documentStateAtom;
+        const state = getState();
+        expect(state.collapsedNodes.size).toBe(0);
+        expect(state.pinnedNodes.size).toBe(0);
+        expect(state.expandedTools.size).toBe(0);
+        expect(state.scrollPosition).toBe(0);
+        expect(state.selectedNode).toBeNull();
+    });
+
     test("separate instances have independent state", () => {
-        const atoms2 = createAgentAtoms("test-block-2");
-        const [getPhase1, setPhase1] = atoms.turnPhaseAtom;
-        const [getPhase2] = atoms2.turnPhaseAtom;
+        const atoms2 = createAgentAtoms();
+        const [getState1, setState1] = atoms.documentStateAtom;
+        const [getState2] = atoms2.documentStateAtom;
 
-        setPhase1({ kind: "Submitting", submittedAt: 1, pendingContent: "" });
-        expect(getPhase1().kind).toBe("Submitting");
-        expect(getPhase2().kind).toBe("Idle");
+        setState1((prev) => ({ ...prev, scrollPosition: 42 }));
+        expect(getState1().scrollPosition).toBe(42);
+        expect(getState2().scrollPosition).toBe(0);
     });
 
-    // ── Turn-phase view binding ─────────────────────────────────────────
-    // The view's working animation and "Stopping…" label both bind to
-    // `turnPhaseAtom`. Verifies the SoT is wired correctly — these are
-    // the only working/stopping signals after PR G dropped the legacy
-    // `turnActiveAtom` / `stoppingAtom`.
-    // Spec: docs/specs/SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md §7.
-    test("turnPhaseAtom defaults to Idle and drives workingFromPhase = false", () => {
-        const [getPhase] = atoms.turnPhaseAtom;
-        expect(getPhase().kind).toBe("Idle");
-        expect(workingFromPhase(getPhase())).toBe(false);
-    });
-
-    test("workingFromPhase(turnPhaseAtom) = true for Submitting/Streaming/Interrupting", () => {
-        const [getPhase, setPhase] = atoms.turnPhaseAtom;
-
-        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "" });
-        expect(workingFromPhase(getPhase())).toBe(true);
-
-        setPhase({
-            kind: "Streaming",
-            bufferSize: 0,
-            toolsActive: 0,
-            lastEventMs: 1,
-        });
-        expect(workingFromPhase(getPhase())).toBe(true);
-
-        setPhase({ kind: "Interrupting", reason: "user", sigintSentAt: 1 });
-        expect(workingFromPhase(getPhase())).toBe(true);
-
-        setPhase({ kind: "Done", outcome: "completed", finishedAt: 1 });
-        expect(workingFromPhase(getPhase())).toBe(false);
-
-        setPhase({
-            kind: "Disconnected",
-            lastKind: "Streaming",
-            lastConnectedAt: 1,
-            reason: "stream-unsubscribed",
-        });
-        expect(workingFromPhase(getPhase())).toBe(false);
-    });
-
-    test("Interrupting phase drives the 'Stopping…' label", () => {
-        const [getPhase, setPhase] = atoms.turnPhaseAtom;
-        // The view's `stopping` prop on AgentStatusLine reads
-        // `turnPhaseAtom[0]().kind === "Interrupting"`. Verify the
-        // predicate flips correctly.
-        expect(getPhase().kind === "Interrupting").toBe(false);
-
-        setPhase({ kind: "Interrupting", reason: "user", sigintSentAt: 1 });
-        expect(getPhase().kind === "Interrupting").toBe(true);
-
-        setPhase({ kind: "Done", outcome: "stopped", finishedAt: 2 });
-        expect(getPhase().kind === "Interrupting").toBe(false);
+    test("exposes no reducer-owned fields — those live on the pane model", () => {
+        // Guard against the mirror creeping back: the only key is the
+        // view-local document UI state.
+        expect(Object.keys(atoms)).toEqual(["documentStateAtom"]);
     });
 });

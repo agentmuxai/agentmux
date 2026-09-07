@@ -24,7 +24,7 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A3 | Break `global.ts` god-module + `global.ts ⇄ wos.ts` cycle | ★★★★ | Med-High | Med | ✅ **done** | #1566 | global.ts 1047→821 LOC; cycle broken; leaf violations fixed. |
 | A4 | Split `service.rs::dispatch_service` (2272-line match) | ★★★★ | Med | Low | ✅ **done** | #1552 | Backend `server/`. |
 | A5 | Extract `BlockControllerCore` (3 near-clone controllers) | ★★★★ | Med-High | Med | ✅ **done** | #1564 | Backend `blockcontroller/`. Also fixed ACP session-id persist bug. |
-| A6 | Collapse agent-pane's 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🔴 **blocked** | — | Collides with **#1555** (agent-pane). Wait for it to merge. |
+| A6 | Collapse agent-pane 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🟡 **mirror killed** | SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06 | AgentAtoms mirror removed, acceptance criterion met (2026-09-06). Remaining half — scroll/expansion unification — is SPEC_AGENT_PANE_LAYOUT_REDUCER render-path wiring; track it there. |
 | A7 | Shared `ToolCorrelator` for translator tool-call/result | ★★★ | Low | Low | ✅ **done** | #1545 | `providers/tool-correlation.ts`. |
 | A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | ✅ **done** | #1554 | Backend `server/`. |
 | A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | ✅ **done** | #3044 | Busy predicate was already unified by the state-machine work (`isWorking`/`workingFromPhase`, 1 use left); #3044 routed the 11 raw dispatches + added a grep-shaped guard test. |
@@ -123,7 +123,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   `shell.rs:1209-1563`) into a neutral `blockcontroller/blockfile_io.rs` — other controllers import them
   via `super::shell::…` today.
 
-### A6 — Collapse agent-pane's 4 state systems 🔴
+### A6 — Collapse agent-pane 4 state systems 🟡 (mirror removed; scroll/expansion tracked separately)
 - **Entry points:** `frontend/app/view/agent/agent-view.tsx` (1282 LOC); `…/store/agent-pane-state/`
   (the `turnPhase` reducer — the *good* core); the `AgentAtoms` 1:1 mirror; per-pane `documentState`;
   `agent-pane-layout-store.ts`. Dual scroll/expansion bridged by `expansion-source.ts`.
@@ -132,6 +132,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 - **Acceptance:** adding a pane state field touches one place; no `AgentAtoms ⇄ AgentPaneState` copy.
 - **Gotcha / blocker:** AgentU **#1543** is editing the agent-pane reducer/types/store right now.
   **Blocked until #1543 merges.** Pairs with A9.
+- **Status (2026-09-06):** the `AgentAtoms` mirror is gone — SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06.md. `AgentPaneModel.state` (one generated signal per reducer field) and `.document` are the single reactive source; `PaneRegistration` is `{ agentId }`; the 19-signal bundle shrank to the one view-local `documentStateAtom`. The acceptance criterion (one-place field addition, no copy) is met and pinned by `agent-pane-view.test.ts`. The scroll/expansion half is SPEC_AGENT_PANE_LAYOUT_REDUCER render-path wiring and is tracked there, not here.
 
 ### A7 — Shared `ToolCorrelator` ✅ (#1545)
 - **Landed:** `frontend/app/view/agent/providers/tool-correlation.ts` (`ToolCorrelator` map+`call()`+

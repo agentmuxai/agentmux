@@ -52,7 +52,7 @@ describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
     const mkOpts = (getTurnPhase: () => TurnPhase, setTurnPhase: (p: TurnPhase) => void) => ({
         blockId: "block-1",
         model: { dispatchPane } as any,
-        turnPhaseAtom: [getTurnPhase, setTurnPhase] as any,
+        turnPhase: getTurnPhase,
         queue: { pushNewNode: vi.fn(), scheduleFlush: vi.fn() } as any,
         flushParserPending: vi.fn(),
         hasNodeId: () => false,

@@ -52,7 +52,7 @@ function setup(pending: PendingMessage[]) {
         usePendingMessageAcceptance({
             blockId: BLOCK_ID,
             model: { dispatchPane: (cmd: unknown) => dispatched.push(cmd) } as any,
-            pendingMessagesAtom: [() => pending, () => {}] as any,
+            pendingMessages: () => pending,
             queue: {
                 pushNewNode: (n: unknown) => pushedNodes.push(n),
                 scheduleFlush: vi.fn(),

@@ -37,7 +37,6 @@ import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
 import type { ProviderDefinition } from "../providers";
-import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
 import type { LogFn } from "./useAgentControllerStatus";
 
@@ -60,7 +59,8 @@ export interface UseAgentCommandsOptions {
     model: AgentPaneModel;
     block: Accessor<{ meta?: Record<string, any> } | undefined>;
     provider: Accessor<ProviderDefinition | undefined>;
-    documentAtom: SignalPair<DocumentNode[]>;
+    /** Reactive accessor for the pane document nodes (`model.document`). */
+    documentNodes: Accessor<DocumentNode[]>;
     log: LogFn;
     setAuthUrl: (url: string | null) => void;
     /**
@@ -208,7 +208,7 @@ export interface UseAgentCommandsOptions {
      * and `useAgentStream` removes entries on `agent-message-accepted`,
      * promoting them into the document at that moment.
      */
-    pendingMessagesAtom?: SignalPair<import("../state").PendingMessage[]>;
+    pendingMessages?: Accessor<import("../state").PendingMessage[]>;
 }
 
 export interface UseAgentCommands {
@@ -462,7 +462,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // existing turn-just-ended edge detector (trackTurnJustEnded), AND by
     // flushHeldMessages (see its own call site) — both fire off the SAME
     // turn-just-ended moment via independent signals (a live controllerstatus
-    // event vs. a reactive turnPhaseAtom effect), so either can run first.
+    // event vs. a reactive turnPhase effect), so either can run first.
     let controllerRefreshPendingUntilIdle = false;
     // Tracks the actual in-flight refresh (not just "one is due") so a
     // caller that arrives AFTER the flag was already claimed by the other
@@ -693,7 +693,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         blockId: opts.blockId,
         provider: opts.provider,
         block: opts.block,
-        documentAtom: opts.documentAtom,
+        documentNodes: opts.documentNodes,
         log: opts.log,
         setAuthUrl: opts.setAuthUrl,
         notifyControllerHealthy: opts.notifyControllerHealthy,
@@ -1420,7 +1420,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // /login succeeding mid-turn and this flush are both triggered
             // by the SAME turn-just-ended moment, via independent signals
             // (a live controllerstatus event vs. this pane's reactive
-            // turnPhaseAtom effect) — either can fire first. Awaiting here
+            // turnPhase effect) — either can fire first. Awaiting here
             // ensures a deferred controller restart (if any is pending OR
             // already in flight, started by the other trigger) fully
             // completes before this loop issues a single AgentInputCommand

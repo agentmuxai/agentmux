@@ -170,7 +170,7 @@ const emptyDocumentState = (): DocumentState => ({
 
 function setup() {
     const documentAtom = createSignal<DocumentNode[]>([]);
-    const viewState = createAgentViewState(documentAtom);
+    const viewState = createAgentViewState(documentAtom[0]);
     const [docState] = createSignal(emptyDocumentState());
 
     const utils = render(() => (

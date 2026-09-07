@@ -36,7 +36,7 @@ function bash(over: Partial<DocumentNode> = {}): DocumentNode {
 
 /** Register a pane and seed its document with `nodes`. */
 function paneWith(blockId: string, nodes: DocumentNode[]) {
-    registerPane(blockId, () => {});
+    registerPane(blockId);
     dispatch(blockId, { type: "StreamFlush", newNodes: nodes, updatedNodes: [] }, "system");
 }
 

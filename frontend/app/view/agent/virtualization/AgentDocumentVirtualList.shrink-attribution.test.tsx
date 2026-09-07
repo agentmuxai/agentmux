@@ -112,7 +112,7 @@ const toolNode = (id: string): DocumentNode => ({
 
 function setup(nodes: DocumentNode[]) {
     const documentAtom = createSignal<DocumentNode[]>(nodes);
-    const viewState = createAgentViewState(documentAtom);
+    const viewState = createAgentViewState(documentAtom[0]);
     const [docState] = createSignal(emptyDocumentState());
     const utils = render(() => (
         <AgentDocumentVirtualList

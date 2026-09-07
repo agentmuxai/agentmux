@@ -28,7 +28,7 @@ import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
-import type { SignalPair } from "../state";
+import type { Accessor } from "solid-js";
 import type { DocumentNode, SessionStats } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
@@ -43,7 +43,8 @@ const WATCHDOG_INTERVAL_MS = 5_000;
 export interface UseTurnLifecycleOptions {
     blockId: string;
     model: AgentPaneModel;
-    turnPhaseAtom: SignalPair<TurnPhase>;
+    /** Reactive accessor for the reducer turn phase (`model.state.turnPhase`). */
+    turnPhase: Accessor<TurnPhase>;
     provider?: string;
     queue: StreamFlushQueue;
     /** Flushes the stream-parser's text/thinking accumulators. Called at the start of `finalizeTurn`. */
@@ -57,7 +58,7 @@ export interface UseTurnLifecycleResult {
 }
 
 export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycleResult {
-    const [getTurnPhase] = opts.turnPhaseAtom;
+    const getTurnPhase = opts.turnPhase;
 
     /**
      * Shared finalization for "the turn is over." Called by both the
