@@ -5,7 +5,6 @@ import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
-import { dispatchIfRegistered as dispatchDocIfRegistered } from "@/app/store/agent-document-store";
 import {
     snapshot as layoutSnapshot,
     registerPane as registerLayoutPane,
@@ -17,11 +16,7 @@ import {
     unregisterPane as unregisterAgentPane,
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
-import {
-    dispatch as dispatchPane,
-    dispatchIfRegistered as dispatchPaneIfRegistered,
-    snapshot as paneSnapshot,
-} from "@/app/store/agent-pane-state-store";
+import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
@@ -1126,7 +1121,7 @@ const AgentPresentationView = ({
     // controllerstatus event. Does NOT touch turnJustEndedAtom — see
     // trackTurnJustEnded for why that's kept separate.
     function reconcileTurnActive(active: boolean): void {
-        dispatchPaneIfRegistered(model.blockId, { type: "ReconcileTurnActive", at: Date.now(), active }, "system");
+        paneModel.dispatchPane({ type: "ReconcileTurnActive", at: Date.now(), active }, "system");
     }
 
     // Feeds the turnJustEndedAtom edge-detector. Deliberately called ONLY
@@ -1184,7 +1179,7 @@ const AgentPresentationView = ({
             if (n === 0) return;
             const timer = setTimeout(() => {
                 if (workingFromPhase(agentAtoms().turnPhaseAtom[0]())) return;
-                dispatchDocIfRegistered(model.blockId, {
+                paneModel.dispatchDoc({
                     type: "ScrubOrphanedInProgress",
                     at: Date.now(),
                     scope: "tools-only",
@@ -1206,7 +1201,7 @@ const AgentPresentationView = ({
             id: `system_notification_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
             content: `${prefix}${text}`,
         } as import("./types").MarkdownNode;
-        dispatchDocIfRegistered(model.blockId, {
+        paneModel.dispatchDoc({
             type: "StreamFlush",
             newNodes: [node],
             updatedNodes: [],
@@ -1276,7 +1271,7 @@ const AgentPresentationView = ({
             // relogin always did, decided at click time from the row's own
             // turnAttempted, and calls onReady() instead of this on its
             // no-retry path. So every caller that reaches here wants a retry.
-            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
             retryLastTurn();
         },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
@@ -1691,8 +1686,7 @@ const AgentPresentationView = ({
                 : (transcriptStartMs ?? registryStartMs);
         const current = agentAtoms().attachedTaskAtom[0]() != null;
         if ((startMs != null) !== current) {
-            dispatchPaneIfRegistered(
-                model.blockId,
+            paneModel.dispatchPane(
                 startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
                 "system"
             );
@@ -1800,7 +1794,7 @@ const AgentPresentationView = ({
         // turn; the queue-drain (agent-message-accepted) re-enters Submitting
         // if needed.
         if (!wasAlreadyWorking) {
-            dispatchPane(model.blockId, { type: "TurnStart", at: Date.now(), content: message }, "user");
+            paneModel.dispatchPane({ type: "TurnStart", at: Date.now(), content: message }, "user");
         }
         return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve);
     };
@@ -1866,8 +1860,7 @@ const AgentPresentationView = ({
         prevFailure = untrack(() => agentAtoms().failureAtom[0]());
         syntheticDismissed = decision.syntheticDismissed;
         if (decision.action === "raise") {
-            dispatchPane(
-                model.blockId,
+            paneModel.dispatchPane(
                 {
                     type: "FailureObserved",
                     at: Date.now(),
@@ -1888,7 +1881,7 @@ const AgentPresentationView = ({
             // "a row just appeared from nowhere".
             prevFailure = untrack(() => agentAtoms().failureAtom[0]());
         } else if (decision.action === "retract") {
-            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
             prevFailure = null;
         }
     });
@@ -1965,7 +1958,7 @@ const AgentPresentationView = ({
     const declareAuthHealthy = () => {
         status.notifyControllerHealthy();
         if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
-            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            paneModel.dispatchPane({ type: "FailureCleared" }, "system");
         }
     };
 
@@ -2517,7 +2510,7 @@ const AgentPresentationView = ({
                     // click, the second subscribe is harmless — the
                     // reducer's Disconnected→Idle transition is the
                     // same regardless of who calls it.
-                    dispatchPane(model.blockId, { type: "StreamSubscribe", at: Date.now() }, "user");
+                    paneModel.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "user");
                 }}
             />
             {/* Non-Claude quick-fork fallback note — SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md
@@ -2594,7 +2587,7 @@ const AgentPresentationView = ({
                     createBlock({ meta: { view: "swarm" } });
                 }}
                 logOpen={agentAtoms().detailsOpenAtom[0]()}
-                onToggleLog={() => dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")}
+                onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
                 contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
                 authStatus={loginStatus()}
