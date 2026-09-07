@@ -28,6 +28,8 @@ This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can
 |-----------|-------------|
 | **0** | Clean shutdown — server exited normally. This includes: version/help flag requested, signal-based shutdown (SIGTERM/SIGINT), lock file indicates another instance is running, or graceful stop via internal command |
 | **1** | Fatal startup error — server failed to start. Causes include: lock file creation failure, database migration failure, HTTP/WebSocket server bind failure, or other unrecoverable initialization error |
+| **2** | CLI usage error (unknown flag, bad value) — clap default. Not an AgentMux code; listed so `migrate --verify` scripts do not mistake it for a data finding. |
+| **3** | `migrate --verify` only: at least one APPLIED migration failed its post-condition check (a mismatch, or the check itself errored — including a tracking table that could not be read). Distinct from 1 (a migration run failed) and from clap 2. `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 1b. |
 
 A failed data migration exits 1 **without** emitting `AGENTMUXSRV-ESTART`; srv first writes a single `AGENTMUXSRV-MIGRATION-FAILED error:<reason>` line to stderr so the launcher / CEF host can surface the reason immediately (`agentmux-common/src/srv_stderr.rs`). Before 2026-09-06 a migration failure was logged as a warning and the server started anyway — `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 1.
 

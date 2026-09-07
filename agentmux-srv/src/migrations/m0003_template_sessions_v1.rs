@@ -29,4 +29,14 @@ impl Migration for M0003TemplateSessionsV1 {
         crate::backend::agent_session::migrate_promote_template_sessions_v1(&wstore, &filestore, &ctx.data_dir);
         Ok(())
     }
+
+    // No `verify()` on purpose. SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03
+    // Phase 1 lists 0003 alongside 0002 as "the same legacy-marker pattern",
+    // but it is not: `migrate_promote_template_sessions_v1` explicitly
+    // IGNORES its marker file and re-asserts the data invariant ("no seeded
+    // definition has a session zone") on every startup — see
+    // `agent_session/migrations/v1_templates.rs`'s doc comment. A mismatch
+    // here is self-healing on the next start, so a doctor check would report
+    // a condition that cannot persist. Reporting `NotVerifiable` is more
+    // honest than a check whose "mismatch" means nothing.
 }
