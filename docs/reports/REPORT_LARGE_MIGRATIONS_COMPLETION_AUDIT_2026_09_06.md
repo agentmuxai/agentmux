@@ -318,7 +318,7 @@ proposes is done. Restamp `historical`.
 | # | Initiative | State | What remains |
 |---|---|---|---|
 | 1 | Tauri → CEF | ✅ done | comment-only residue |
-| 2 | React → SolidJS | ✅ done | drop the unused `react` dep |
+| 2 | React → SolidJS | ✅ done | — (unused `react` dep dropped 2026-09-07) |
 | 3 | Reducer/saga (E–H) | ✅ done | reconcile two status docs (§5.2) |
 | 4 | Arch refactor A1–A15 | 🟡 12/15 | **A6, A9**, A10 (optional) |
 | 5 | muxspect A/B/C | ✅ done | fix CLAUDE.md (§5.1) |
