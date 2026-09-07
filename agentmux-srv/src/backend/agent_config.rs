@@ -1291,6 +1291,19 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
     }
     if let Ok(keypair) = wstore.agent_lan_key_ensure(agent_slug) {
         env.insert("AGENTMUX_LAN_KEY".to_string(), json!(keypair.private_key));
+        // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5 (Phase B): the
+        // cross-channel signature binds the sending channel into the signed
+        // material, so the MCP process must know its channel by the SAME
+        // string a receiver reads off this instance's shared registry entry.
+        // Written explicitly rather than relying on the ambient
+        // `AGENTMUX_CHANNEL` leaking into the agent's shell: a nested
+        // portable, or an agent launched with a scrubbed env, would
+        // otherwise sign as "stable" while registered under its real
+        // channel, and every cross-channel jekt it sent would fail to verify.
+        env.insert(
+            "AGENTMUX_CHANNEL".to_string(),
+            json!(crate::backend::reactive::registry::local_channel_id()),
+        );
         patched = true;
     }
     if !patched {
@@ -1890,6 +1903,13 @@ mod tests {
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria", "existing fields must survive the patch");
         assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
         assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
+        // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B: the channel the
+        // sender signs under must be the one the shared registry publishes.
+        assert_eq!(
+            env["AGENTMUX_CHANNEL"],
+            json!(crate::backend::reactive::registry::local_channel_id()),
+            "the MCP env must carry the same channel id the shared registry entry is written under"
+        );
     }
 
     #[test]

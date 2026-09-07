@@ -3,10 +3,12 @@
 **Date:** 2026-09-02
 **Author:** Agent4
 **Status:** active — Phase A (D1 key publication + D5 signing primitives)
-shipped in #2959. Phases B (verification), C (enforcement) and D (escalation
-chaining) remain — see §10. Phase A is strictly additive: it publishes a public
-key and adds two as-yet-unused functions, so no message's `TRUST=` can change
-until Phase B.
+shipped in #2959; Phase B (D2 verification, D4 `DELIVERY=channel`, the
+`channel-verified` relaxation) shipped 2026-09-07 — see §10.2. Phases C
+(enforcement) and D (escalation chaining) remain — see §10. Phases A and B are
+strictly additive: A publishes a public key and adds two then-unused functions,
+B can only move a message from `self-declared` to `channel-verified`, so no
+message's `TRUST=` can get *worse* until Phase C.
 **Related (all real, all shipped):**
 `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (marker format, tier rules),
 `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` (host-tier HMAC),
@@ -247,6 +249,23 @@ belonging to a *different* channel's registry entry) resolves to `channel`, not
 `host`. Reserving `host` for genuinely same-instance traffic means the label
 finally matches the guarantee.
 
+**As built (Phase B, 2026-09-07) — the label is set by the forwarding side,
+not detected by the receiving side.** The parenthetical above is not
+implementable as written: the forward authenticates with the *receiver's own*
+full `auth_key` (that is what the shared registry entry publishes, §2.4), so
+from the receiver's point of view it is indistinguishable from any local
+full-key caller. Instead `handle_reactive_inject`'s Tier 2a/2b forward sets
+`delivery_tier = "channel"` on the hop it sends
+(`same_host_forward_tier`), and the receiver's `resolve_delivery_tier` honours
+a full-key caller's claim exactly as it already does for `lan`/`wan`. This is
+safe on the same grounds that rule already rests on: a full-key holder can
+claim `channel`, but claiming it only *adds* `verify_cross_channel_signature`
+on top of the unconditional HMAC check — it never removes a check. A hop that
+already carries `lan`/`wan` keeps that label (so the peer re-derives that
+tier's own verification); a `channel` hop forwarded again stays `channel`;
+Tier 3 (LAN) forwards are untouched because the peer forces `lan` off its
+`lan_key` auth regardless of the body.
+
 ### D5 — Domain separation and channel binding
 
 Cross-channel signatures use a distinct payload from LAN ones, via a new
@@ -443,13 +462,56 @@ this spec was exactly that setup, by accident.
 | Phase | Content | Ships with |
 |---|---|---|
 | **A** ✅ | D1 (publish pubkey), D5 (`sign_channel_jekt`/`verify_channel_jekt` + tests 9–10) | **implemented 2026-09-02** |
-| **B** | D2 (verification), D4 (`DELIVERY=channel`), `channel-verified` added to the 08-17 verified-sender list; `Some(false)` **not yet** escalating | next release |
+| **B** ✅ | D2 (verification), D4 (`DELIVERY=channel`), `channel-verified` added to the 08-17 verified-sender list; `Some(false)` **not yet** escalating | **implemented 2026-09-07** — §10.2 |
 | **C** | D3 enforcement (`Some(false)` → forced sensitive) | after A has propagated (§6) |
 | **D** | §7.3 escalation-chaining rule | separate spec |
 
 Phase C is the one that must not be rushed forward. Phases A and B are
 strictly additive — they can only move messages from `self-declared` to
 `channel-verified`, never the reverse.
+
+### 10.2 Phase B as built (2026-09-07)
+
+| Piece | Location |
+|---|---|
+| `source_channel` + `channel_sig` on the wire request | `agentmux-common/src/api_types.rs::InjectRequest`, `agentmux-srv/src/backend/reactive/types.rs::InjectionRequest` |
+| `channel_verified` (server-only, `skip_deserializing`) | `types.rs::InjectionRequest` |
+| Sender signs every outgoing jekt with `sign_channel_jekt` (alongside `jekt_sig`/`lan_sig`) | `agentmux-mcp/src/main.rs::sign_outgoing_jekt` → `OutgoingJektSignatures::into_request` (all three send paths) |
+| `AGENTMUX_CHANNEL` injected into the MCP env at spawn, from the same `local_channel_id()` the registry writer uses | `agentmux-srv/src/backend/agent_config.rs::inject_jekt_signing_keys_into_mcp_json`, `backend/reactive/registry.rs::local_channel_id` |
+| D2: `verify_cross_channel_signature` (+ `_in` testable core) | `agentmux-srv/src/server/reactive.rs`, called from `handle_reactive_inject` after `verify_lan_signature` |
+| D4: forward labels the hop `channel` | `reactive.rs::same_host_forward_tier`, Tier 2a/2b in `handle_reactive_inject` |
+| `TRUST=channel-verified` rendering | `backend/reactive/sanitize.rs::wrap_jekt_message` |
+| `channel-verified` in the 08-17 verified-sender list | `backend/reactive/handler.rs` (`is_cryptographically_verified`) |
+| Tests: §9 items 1–11 | `server/reactive.rs::verify_cross_channel_signature_tests`, `backend/reactive/tests.rs` (`*_channel_*`), `resolve_delivery_tier_tests` |
+
+Decisions made during implementation:
+
+- **Signing is unconditional on the sender, like `lan_sig`.** The MCP process
+  can't know the routing outcome, so `channel_sig` rides on every send and
+  srv ignores it off the `channel` tier. Cost: one Ed25519 signature per
+  send.
+- **The sender declares `source_channel`; the receiver verifies with it, not
+  with the entry's `channel`.** A signature only verifies under the channel
+  string it was minted with, so a wrong or forged declaration simply fails
+  (§D5 test 10). Iterating the agent's entries (§D2 step 5) is over their
+  *keys*, not their channel names.
+- **`AGENTMUX_CHANNEL` is written into the MCP env explicitly** rather than
+  relying on the ambient variable leaking into the agent's shell. `stable`
+  is the default on both sides when unset, matching the registry writer.
+- **Trust label on the `channel` tier without a verified channel signature
+  falls back to the host-tier labels** (`host-verified`/`unverified`/
+  `self-declared` off `sig_verified`), not `network-claimed`: no network
+  boundary was crossed, and a same-channel sibling instance may genuinely
+  have proven identity through the HMAC path (§D2 step 2 makes the two
+  verifiers mutually exclusive, so there is never a conflict).
+- **`Some(false)` is logged (`tracing::warn!`) but not escalated.** Phase C
+  is a one-line addition to `handler.rs`'s forcing rules plus flipping
+  `test_handler_inject_channel_unverified_is_not_forced_sensitive_in_phase_b`.
+- **Not yet verified end-to-end in two live instances** (the §9 integration
+  item). Same caveat §10.1 carries for Phase A, for the same reason
+  (`REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md`). The check: restart
+  two channels, message across them, confirm `DELIVERY=channel
+  TRUST=channel-verified` on the receiving marker.
 
 ### 10.1 Phase A as built (2026-09-02)
 
