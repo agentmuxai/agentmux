@@ -63,16 +63,16 @@ describe("docs-stale-sweep resolveCitation", () => {
 describe("docs-stale-sweep classifyDoc", () => {
     const DAY = 86400;
     const now = 1_800_000_000;
-    const tracked = new Set(["docs/specs/SPEC_X.md", "a/b/live.rs", "a/b/old.rs"]);
+    const tracked = new Set(["docs/fixtures/SPEC_X.md", "a/b/live.rs", "a/b/old.rs"]);
     const byBasename = new Map([
         ["live.rs", ["a/b/live.rs"]],
         ["old.rs", ["a/b/old.rs"]],
     ]);
-    const base = { doc: "docs/specs/SPEC_X.md", tracked, byBasename, now, weeks: 8 };
+    const base = { doc: "docs/fixtures/SPEC_X.md", tracked, byBasename, now, weeks: 8 };
 
     it("flags a stale live doc whose citation changed after it", () => {
         const touched = new Map([
-            ["docs/specs/SPEC_X.md", now - 100 * DAY],
+            ["docs/fixtures/SPEC_X.md", now - 100 * DAY],
             ["a/b/live.rs", now - 10 * DAY],
             ["a/b/old.rs", now - 200 * DAY],
         ]);
@@ -86,7 +86,7 @@ describe("docs-stale-sweep classifyDoc", () => {
     });
 
     it("flags a stale live doc that cites a path which no longer exists, but not a bare unknown name", () => {
-        const touched = new Map([["docs/specs/SPEC_X.md", now - 100 * DAY]]);
+        const touched = new Map([["docs/fixtures/SPEC_X.md", now - 100 * DAY]]);
         const r = classifyDoc({ ...base, touched, text: "**Status:** proposed\n`a/b/gone.rs` and `whatever.rs`" });
         expect(r.missing).toEqual(["a/b/gone.rs"]);
         expect(r.flagged).toBe(true);
@@ -94,12 +94,12 @@ describe("docs-stale-sweep classifyDoc", () => {
 
     it("does not flag a recently touched doc, or a stale one whose citations are all older than it", () => {
         const drifted = new Map([
-            ["docs/specs/SPEC_X.md", now - 10 * DAY],
+            ["docs/fixtures/SPEC_X.md", now - 10 * DAY],
             ["a/b/live.rs", now - 1 * DAY],
         ]);
         expect(classifyDoc({ ...base, touched: drifted, text: "**Status:** active\n`a/b/live.rs`" }).flagged).toBe(false);
         const quiet = new Map([
-            ["docs/specs/SPEC_X.md", now - 100 * DAY],
+            ["docs/fixtures/SPEC_X.md", now - 100 * DAY],
             ["a/b/live.rs", now - 300 * DAY],
         ]);
         const r = classifyDoc({ ...base, touched: quiet, text: "**Status:** active\n`a/b/live.rs`" });
@@ -108,14 +108,14 @@ describe("docs-stale-sweep classifyDoc", () => {
     });
 
     it("does not judge terminal docs or docs without a Status line", () => {
-        const touched = new Map([["docs/specs/SPEC_X.md", now - 400 * DAY]]);
+        const touched = new Map([["docs/fixtures/SPEC_X.md", now - 400 * DAY]]);
         expect(classifyDoc({ ...base, touched, text: "**Status:** historical\n`a/b/gone.rs`" })).toBeNull();
         expect(classifyDoc({ ...base, touched, text: "**Status:** superseded\n`a/b/gone.rs`" })).toBeNull();
         expect(classifyDoc({ ...base, touched, text: "no status here `a/b/gone.rs`" })).toBeNull();
     });
 
     it("keeps a non-canonical Status word but marks it", () => {
-        const touched = new Map([["docs/specs/SPEC_X.md", now - 100 * DAY]]);
+        const touched = new Map([["docs/fixtures/SPEC_X.md", now - 100 * DAY]]);
         const r = classifyDoc({ ...base, touched, text: "**Status:** ready\n`a/b/gone.rs`" });
         expect(r.canonical).toBe(false);
         expect(r.flagged).toBe(true);
@@ -129,16 +129,16 @@ describe("docs-stale-sweep renderMarkdown", () => {
         shallow: false,
         counts: { docs: 10, noStatus: 2, terminal: 1, live: 7, stale: 3, flagged: 2, nonCanonicalStatus: 1 },
         flagged: [
-            { doc: "docs/specs/A.md", status: "active", ageDays: 120, drifted: [{ path: "x/y.rs", daysAfterDoc: 30 }], missing: ["x/gone.rs"] },
-            { doc: "docs/specs/B.md", status: "ready", ageDays: 90, drifted: [], missing: ["z/gone.rs"] },
+            { doc: "docs/fixtures/A.md", status: "active", ageDays: 120, drifted: [{ path: "x/y.rs", daysAfterDoc: 30 }], missing: ["x/gone.rs"] },
+            { doc: "docs/fixtures/B.md", status: "ready", ageDays: 90, drifted: [], missing: ["z/gone.rs"] },
         ],
     };
 
     it("renders the counts, one row per flagged doc, and honours the limit", () => {
         const md = renderMarkdown(report, 1);
         expect(md).toContain("| … **of which cite a file that changed since, or is gone** | **2** |");
-        expect(md).toContain("| `docs/specs/A.md` | active | 120d | `x/y.rs` (+30d) | `x/gone.rs` |");
-        expect(md).not.toContain("docs/specs/B.md");
+        expect(md).toContain("| `docs/fixtures/A.md` | active | 120d | `x/y.rs` (+30d) | `x/gone.rs` |");
+        expect(md).not.toContain("docs/fixtures/B.md");
         expect(md).toContain("… and 1 more");
     });
 
