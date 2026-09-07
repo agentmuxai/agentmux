@@ -41,7 +41,15 @@ This message means the **count** of pending migrations at startup was non-zero �
 
 ## 4. Suspected incomplete migration (data missing after upgrade)
 
-The known failure shape (the incident behind the hardening spec) is a migration **recorded as applied that wrote nothing** — a marker file or a `db_migrations` row said "done" while the target table stayed empty. The doctor pass checks exactly this, read-only:
+The known failure shape (the incident behind the hardening spec) is a migration **recorded as applied that wrote nothing** — a marker file or a `db_migrations` row said "done" while the target table stayed empty. The doctor pass checks exactly this, read-only.
+
+**If the app is running, start here** — same report, no binary hunting, from any agent or shell pane inside the instance:
+
+```
+muxspect migrations            # or: node ~/.agentmux/shell/muxspect.mjs migrations
+```
+
+It exits 3 on a `MISMATCH` or error, exactly like `--verify` below. It only doctors the instance you are inside; for another channel, or when the app will not start, use the CLI:
 
 ```
 # Find the srv binary: <install>/runtime/agentmux-srv-<version>-<os>.<arch>[.exe]

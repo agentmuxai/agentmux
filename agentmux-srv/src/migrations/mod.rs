@@ -60,8 +60,10 @@ mod runner;
 mod phase5_tests;
 
 pub use runner::count_pending_migrations;
+pub use runner::doctor_report_for_instance;
 pub use runner::run_migrate_command;
 pub use runner::run_pending_migrations;
+pub use runner::DoctorReport;
 
 use std::path::PathBuf;
 
