@@ -3703,9 +3703,23 @@
     #[test]
     fn deleting_an_agent_does_not_leave_a_definition_for_gap_repair_to_resurrect() {
         let store = make_store();
+        // A definition registry has to be attached for this to be a real
+        // test: `agent_def_list` overlays every ACTIVE global record onto the
+        // local list, so a store with no registry cannot observe the
+        // resurrection that overlay causes (reagent P1 round 2 on #3080).
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = std::sync::Arc::new(
+            crate::registry::DefinitionStore::open(tmp.path().join("definitions")).unwrap(),
+        );
+        store.set_def_registry(def_store.clone());
+
         let mut def = sample_agent("agent-gone", "agent-gone");
         store.agent_def_insert(&mut def).unwrap();
         assert_eq!(count_agents(&store, "id = 'agent-gone'"), 1);
+        assert!(
+            def_store.exists("agent-gone"),
+            "sanity: creating an agent mirrors it into the global registry",
+        );
 
         assert!(store.instance_delete("agent-gone").unwrap());
         assert_eq!(count_agents(&store, "id = 'agent-gone'"), 0);
@@ -3726,5 +3740,13 @@
             count_agents(&store, "id = 'agent-gone'"),
             0,
             "a deleted agent must stay deleted across the next boot's gap repair",
+        );
+
+        // ...and the global record is tombstoned, so the cross-channel
+        // overlay can't put it back on the next read either.
+        assert!(!def_store.exists("agent-gone"), "the global record must be retired");
+        assert!(
+            !store.agent_def_list().unwrap().iter().any(|d| d.id == "agent-gone"),
+            "a deleted agent must not come back through the registry overlay",
         );
     }
