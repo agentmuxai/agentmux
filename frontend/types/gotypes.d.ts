@@ -1739,6 +1739,7 @@ declare global {
         "preview:showhiddenfiles"?: boolean;
         "tab:preset"?: string;
         "tab:skipcloseconfirm"?: boolean;
+        "splash:disabled"?: boolean;
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;

@@ -57,7 +57,12 @@ pub struct SrvSpawnResult {
     /// see `SrvSpawnResult`'s own doc comment above).
     pub host_reg_secret: String,
     /// Number of data migrations still pending after the in-process startup run.
-    /// Non-zero means run_pending_migrations failed; status-bar shows a retry message.
+    /// Counted by srv at ESTART time (`count_pending_migrations`). Since
+    /// SPEC_MIGRATION_SYSTEM_HARDENING Phase 1 a migration *failure* never
+    /// reaches ESTART at all (srv exits 1 with `MigrationFailed`), so a
+    /// non-zero value here means the count and the run disagree — e.g. the
+    /// fresh-install ordering case runner.rs documents — and the status-bar
+    /// shows its retry message for that.
     pub pending_migrations: usize,
     /// RFC3339 timestamp captured when ESTART arrived. Carried on the
     /// result for `--diag` / debug observability; not currently
@@ -78,6 +83,12 @@ pub enum SrvSpawnError {
     ResumeFailed(String),
     EstartTimeout,
     EstartChannelClosed,
+    /// srv reported `AGENTMUXSRV-MIGRATION-FAILED` and exited 1 before ESTART
+    /// (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1). Carries the
+    /// reason srv gave. Distinct from `EstartTimeout` so the supervisor can
+    /// show the user a real message instead of "timeout (30s)" — and so it
+    /// can do it immediately rather than 30s later.
+    MigrationFailed(String),
 }
 
 impl std::fmt::Display for SrvSpawnError {
@@ -91,7 +102,108 @@ impl std::fmt::Display for SrvSpawnError {
             Self::EstartChannelClosed => {
                 write!(f, "ESTART channel closed before srv signalled ready")
             }
+            Self::MigrationFailed(s) => write!(f, "database migration failed: {}", s),
         }
+    }
+}
+
+/// Title for the fatal dialog both supervisors show on `MigrationFailed`.
+pub const MIGRATION_FAILED_DIALOG_TITLE: &str = "AgentMux — database migration failed";
+
+/// Body for that dialog. Kept here (not in each supervisor) so Windows and
+/// Unix show the same words.
+///
+/// Every sentence is something the launcher actually knows:
+/// - Restart-to-retry: srv re-runs every unapplied migration on the next
+///   launch (`run_pending_migrations` filters on `migration_is_applied`).
+/// - The backup ordering: `runner.rs::run_pending_migrations` calls
+///   `backup_stores` (→ `~/.agentmux/shared/backups/pre-migration-<ver>-<ts>/`)
+///   BEFORE applying anything, and returns `Err("... backup failed: ...")`
+///   without running a migration if that copy fails. So the reason text
+///   itself tells the user which case they are in; we state the ordering
+///   and let it do so, rather than asserting a backup exists.
+///
+/// We deliberately do NOT claim "your data has not been changed" or "a
+/// snapshot was taken": the backup step is one of the things that can be
+/// the failure, and bootstrap.rs's separate `maybe_snapshot_pre_migration`
+/// is best-effort (non-fatal on error, `Ok(None)` when it decides none is
+/// needed). An earlier revision of this text made that claim
+/// unconditionally — reagent P1 on PR #3043.
+pub fn migration_failed_dialog_body(reason: &str) -> String {
+    format!(
+        "AgentMux could not update its data store and will not start.\n\n\
+         {}\n\n\
+         Restart AgentMux to retry. Migrations only run after a copy of the \
+         store is written to ~/.agentmux/shared/backups/pre-migration-*/ — \
+         if the error above is about writing that copy, nothing was changed. \
+         Run `muxlog srv` for the full log.",
+        reason
+    )
+}
+
+/// Outcome of waiting for srv's readiness signal. Module-level (not local to
+/// `spawn_srv`) so `prefer_buffered_failure` can be unit-tested.
+enum EstartWait {
+    Ready(Option<SrvSpawnResult>),
+    Timeout,
+    MigrationFailed(String),
+}
+
+/// Second guard for the ESTART-vs-failure race (reagent P1, post-merge on
+/// #3043). The stderr reader task sends the migration-failure reason and then
+/// drops every sender as srv exits, so by the time the waiter's `select!`
+/// runs, BOTH "failure buffered" and "ESTART channel closed" are ready.
+/// `biased;` in the select makes the failure arm win when both are seen in
+/// one poll; this covers the remaining shape, where the closed channel was
+/// observed first and the reason is sitting in `failure_rx` unread. Every
+/// other outcome passes through unchanged.
+fn prefer_buffered_failure(recv: EstartWait, failure_rx: &mut mpsc::Receiver<String>) -> EstartWait {
+    match recv {
+        EstartWait::Ready(None) => match failure_rx.try_recv() {
+            Ok(reason) => EstartWait::MigrationFailed(reason),
+            Err(_) => EstartWait::Ready(None),
+        },
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod estart_race_tests {
+    use super::*;
+
+    #[test]
+    fn closed_estart_channel_with_buffered_failure_becomes_migration_failed() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        // Reader task's exact sequence: send the reason, then drop the sender.
+        tx.try_send("migration 0007 failed: disk I/O error".into()).unwrap();
+        drop(tx);
+        match prefer_buffered_failure(EstartWait::Ready(None), &mut rx) {
+            EstartWait::MigrationFailed(r) => assert_eq!(r, "migration 0007 failed: disk I/O error"),
+            _ => panic!("buffered failure reason must win over a closed ESTART channel"),
+        }
+    }
+
+    #[test]
+    fn closed_estart_channel_without_failure_stays_channel_closed() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        drop(tx); // srv died before ESTART for some other reason — no failure line
+        assert!(matches!(
+            prefer_buffered_failure(EstartWait::Ready(None), &mut rx),
+            EstartWait::Ready(None)
+        ));
+    }
+
+    #[test]
+    fn other_outcomes_pass_through_untouched() {
+        let (tx, mut rx) = mpsc::channel::<String>(1);
+        tx.try_send("should not be consumed".into()).unwrap();
+        assert!(matches!(prefer_buffered_failure(EstartWait::Timeout, &mut rx), EstartWait::Timeout));
+        assert!(matches!(
+            prefer_buffered_failure(EstartWait::MigrationFailed("x".into()), &mut rx),
+            EstartWait::MigrationFailed(_)
+        ));
+        // Neither pass-through drained the channel.
+        assert_eq!(rx.try_recv().ok().as_deref(), Some("should not be consumed"));
     }
 }
 
@@ -442,6 +554,10 @@ pub async fn spawn_srv(
     // large-dataset migration that takes longer than the normal 30s boot window
     // doesn't cause the launcher to kill srv prematurely.
     let (migration_tx, mut migration_rx) = mpsc::channel::<()>(4);
+    // Third channel: srv reports a fatal migration failure on stderr and exits
+    // 1 without ESTART. Without this the waiter would only notice via the 30s
+    // timeout, and the user would see "timeout" instead of the actual error.
+    let (failure_tx, mut failure_rx) = mpsc::channel::<String>(1);
     let auth_key_for_estart = auth_key.clone();
     let host_reg_secret_for_estart = host_reg_secret.clone();
     let started_at_for_estart = started_at.clone();
@@ -469,6 +585,11 @@ pub async fn spawn_srv(
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
+            } else if let Some(reason) =
+                agentmux_common::srv_stderr::parse_migration_failed_line(&line)
+            {
+                crate::log(&format!("[srv {} MIGRATION FAILED] {}", pid_for_log, reason));
+                let _ = failure_tx.send(reason).await;
             } else if line.starts_with("AGENTMUXSRV-MIGRATING") {
                 crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
                 let _ = migration_tx.send(()).await;
@@ -501,10 +622,21 @@ pub async fn spawn_srv(
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
-    let recv: Result<Option<SrvSpawnResult>, ()> = loop {
+    let recv = loop {
         tokio::select! {
-            result = rx.recv() => break Ok(result),
-            _ = &mut sleep => break Err(()),
+            // `biased;` — poll arms in declaration order, failure first.
+            // The stderr reader sends the failure reason and then hits EOF
+            // (srv exits 1 right after the line), dropping every sender
+            // before this select! is next polled. Unbiased, `rx.recv()`
+            // resolving to None (closed) could win the coin flip over the
+            // already-buffered reason and degrade this to the generic
+            // EstartChannelClosed — invisible on Windows, exactly what the
+            // MigrationFailed path exists to fix (reagent P1, post-merge on
+            // #3043). `prefer_buffered_failure` below is the second guard.
+            biased;
+            Some(reason) = failure_rx.recv() => break EstartWait::MigrationFailed(reason),
+            result = rx.recv() => break EstartWait::Ready(result),
+            _ = &mut sleep => break EstartWait::Timeout,
             Some(()) = migration_rx.recv() => {
                 // Migrations are running — extend the deadline generously.
                 let new_deadline = tokio::time::Instant::now() + migration_timeout;
@@ -516,8 +648,9 @@ pub async fn spawn_srv(
             }
         }
     };
+    let recv = prefer_buffered_failure(recv, &mut failure_rx);
     match recv {
-        Err(()) => {
+        EstartWait::Timeout => {
             let _ = child.start_kill();
             sink.stage_end(
                 "backend",
@@ -527,7 +660,20 @@ pub async fn spawn_srv(
             );
             Err(SrvSpawnError::EstartTimeout)
         }
-        Ok(None) => {
+        EstartWait::MigrationFailed(reason) => {
+            // srv exits itself right after the line; start_kill on an
+            // already-exited child is a harmless no-op and keeps this arm in
+            // the same shape as the other two failure paths.
+            let _ = child.start_kill();
+            sink.stage_end(
+                "backend",
+                srv_t.elapsed().as_millis() as u64,
+                crate::startup_events::StartupStatus::Error,
+                Some("migration failed".into()),
+            );
+            Err(SrvSpawnError::MigrationFailed(reason))
+        }
+        EstartWait::Ready(None) => {
             let _ = child.start_kill();
             sink.stage_end(
                 "backend",
@@ -537,7 +683,7 @@ pub async fn spawn_srv(
             );
             Err(SrvSpawnError::EstartChannelClosed)
         }
-        Ok(Some(result)) => {
+        EstartWait::Ready(Some(result)) => {
             sink.stage_end(
                 "backend",
                 srv_t.elapsed().as_millis() as u64,
@@ -665,5 +811,47 @@ pub fn assign_pid_to_job(
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod migration_failed_tests {
+    use super::*;
+
+    #[test]
+    fn display_names_the_migration_and_carries_srv_reason() {
+        let e = SrvSpawnError::MigrationFailed("migration 0007 failed: disk I/O error".into());
+        assert_eq!(e.to_string(), "database migration failed: migration 0007 failed: disk I/O error");
+    }
+
+    #[test]
+    fn dialog_body_includes_reason_and_restart_guidance() {
+        let body = migration_failed_dialog_body("open shared store: database is locked");
+        assert!(body.contains("open shared store: database is locked"));
+        assert!(body.contains("Restart AgentMux to retry"));
+        assert!(body.contains("shared/backups/pre-migration-"), "must say where the pre-run copy lives");
+    }
+
+    #[test]
+    fn dialog_body_never_asserts_a_backup_exists() {
+        // reagent P1 on #3043: `backup_stores` failing is itself one of the
+        // error paths, so the body must not promise a snapshot/backup was
+        // taken. The wording states the ordering (copy first, then migrate)
+        // and lets the reason text — which names the backup step when that
+        // is what failed — carry the rest.
+        let body = migration_failed_dialog_body("run_pending_migrations: backup failed: disk full");
+        assert!(!body.contains("has not been changed:"), "unconditional data-safety claim");
+        assert!(!body.contains("a snapshot was taken"), "unconditional snapshot claim");
+        assert!(body.contains("if the error above is about writing that copy, nothing was changed"));
+    }
+
+    #[test]
+    fn stderr_line_from_srv_parses_into_the_reason_the_dialog_shows() {
+        // End-to-end over the shared protocol: what srv writes is what the
+        // launcher reads, without either side owning the literal.
+        let line = agentmux_common::srv_stderr::migration_failed_line("mark applied 0011: readonly db");
+        let reason = agentmux_common::srv_stderr::parse_migration_failed_line(&line).expect("tagged line");
+        assert_eq!(reason, "mark applied 0011: readonly db");
+        assert!(!line.starts_with("AGENTMUXSRV-MIGRATING"), "must not be swallowed by the MIGRATING branch");
     }
 }

@@ -29,6 +29,8 @@ This table is not a small fixed enum — on Windows, `supervisor/windows.rs` can
 | **0** | Clean shutdown — server exited normally. This includes: version/help flag requested, signal-based shutdown (SIGTERM/SIGINT), lock file indicates another instance is running, or graceful stop via internal command |
 | **1** | Fatal startup error — server failed to start. Causes include: lock file creation failure, database migration failure, HTTP/WebSocket server bind failure, or other unrecoverable initialization error |
 
+A failed data migration exits 1 **without** emitting `AGENTMUXSRV-ESTART`; srv first writes a single `AGENTMUXSRV-MIGRATION-FAILED error:<reason>` line to stderr so the launcher / CEF host can surface the reason immediately (`agentmux-common/src/srv_stderr.rs`). Before 2026-09-06 a migration failure was logged as a warning and the server started anyway — `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 1.
+
 ## Windows Installer (Inno Setup)
 
 The Windows installer moved from NSIS to **Inno Setup** (`packaging/windows/agentmux.iss`, driven by `scripts/package-installer.ps1`). It uses Inno Setup's own standard `Setup.exe` exit codes (not the NSIS table this doc previously listed) — see the [Inno Setup documentation](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes) for the authoritative list, since no custom exit-code handling is defined in `agentmux.iss`. Standard silent-install flags apply: `/SILENT`, `/VERYSILENT`.
