@@ -1309,6 +1309,11 @@ async fn test_handler_inject_channel_verified_renders_trust_channel_verified() {
 
     assert!(resp.success);
     assert_eq!(resp.effective_tier.as_deref(), Some("coord"), "clean content from a proven sender is routine");
+    assert_eq!(
+        resp.channel_verified,
+        Some(true),
+        "the verdict rides back on the response so a forwarding instance can echo the same TRUST (codex P2 on #3064)"
+    );
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(payload.contains("DELIVERY=channel"), "{payload}");
@@ -2086,6 +2091,7 @@ fn test_injection_response_serde() {
         timestamp: 1700000000000,
         effective_tier: Some("coord".to_string()),
         requires_stop: Some(false),
+        channel_verified: None,
     };
 
     let json = serde_json::to_string(&resp).unwrap();

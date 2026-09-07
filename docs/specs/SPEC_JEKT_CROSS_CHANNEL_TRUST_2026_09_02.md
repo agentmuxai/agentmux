@@ -504,6 +504,14 @@ Decisions made during implementation:
   boundary was crossed, and a same-channel sibling instance may genuinely
   have proven identity through the HMAC path (§D2 step 2 makes the two
   verifiers mutually exclusive, so there is never a conflict).
+- **The receiver's verdict rides back to the forwarder.** Only the receiving
+  instance computes `channel_verified` (the forwarder holds the sender's
+  HMAC key, so D2 step 2 skips it there). `InjectionResponse` therefore
+  carries `channel_verified` alongside `effective_tier`/`requires_stop`, and
+  the forwarder's sender-echo takes it from the response body
+  (`echo_trust_from_peer_body`), so the sender's echoed marker shows the
+  same `TRUST=` the receiver rendered next to the `ESCALATE=` it already
+  mirrors (codex P2 on the Phase B PR).
 - **`Some(false)` is logged (`tracing::warn!`) but not escalated.** Phase C
   is a one-line addition to `handler.rs`'s forcing rules plus flipping
   `test_handler_inject_channel_unverified_is_not_forced_sensitive_in_phase_b`.

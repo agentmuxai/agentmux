@@ -359,6 +359,7 @@ impl Handler {
                 timestamp: now,
                 effective_tier: None,
                 requires_stop: None,
+                channel_verified: None,
             };
         }
 
@@ -372,6 +373,7 @@ impl Handler {
                 timestamp: now,
                 effective_tier: None,
                 requires_stop: None,
+                channel_verified: None,
             };
         }
 
@@ -402,6 +404,7 @@ impl Handler {
                     timestamp: now,
                     effective_tier: None,
                     requires_stop: None,
+                    channel_verified: None,
                 };
             }
         };
@@ -455,6 +458,7 @@ impl Handler {
                         timestamp: now,
                         effective_tier: None,
                         requires_stop: None,
+                        channel_verified: None,
                     };
                 }
             }
@@ -668,6 +672,7 @@ impl Handler {
                         timestamp: now,
                         effective_tier: Some(effective_tier.to_string()),
                         requires_stop: Some(requires_stop),
+                        channel_verified: req.channel_verified,
                     };
                 }
                 Ok(false) => {
@@ -702,6 +707,7 @@ impl Handler {
                         timestamp: now,
                         effective_tier: Some(effective_tier.to_string()),
                         requires_stop: Some(requires_stop),
+                        channel_verified: req.channel_verified,
                     };
                 }
             }
@@ -731,6 +737,7 @@ impl Handler {
                     timestamp: now,
                     effective_tier: Some(effective_tier.to_string()),
                     requires_stop: Some(requires_stop),
+                    channel_verified: req.channel_verified,
                 };
             }
         };
@@ -773,6 +780,7 @@ impl Handler {
                 timestamp: now,
                 effective_tier: Some(effective_tier.to_string()),
                 requires_stop: Some(requires_stop),
+                channel_verified: req.channel_verified,
             };
         }
 
@@ -809,6 +817,7 @@ impl Handler {
             timestamp: now,
             effective_tier: Some(effective_tier.to_string()),
             requires_stop: Some(requires_stop),
+            channel_verified: req.channel_verified,
         }
     }
 
@@ -875,6 +884,7 @@ impl Handler {
                     timestamp: now,
                     effective_tier: None,
                     requires_stop: None,
+                    channel_verified: None,
                 })
             }
             SupervisorAction::Nudge => {

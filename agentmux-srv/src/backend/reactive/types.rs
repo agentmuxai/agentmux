@@ -320,6 +320,18 @@ pub struct InjectionResponse {
     /// fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_stop: Option<bool>,
+    /// The `InjectionRequest::channel_verified` verdict this delivery was
+    /// judged on, echoed back so a FORWARDING instance can render the same
+    /// `TRUST=` on the sender's echoed marker that the receiver rendered
+    /// (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B, codex P2 on
+    /// #3064). Only the receiving instance ever computes it — the forwarder
+    /// holds the sender's HMAC key and so skips cross-channel verification
+    /// by design (§D2 step 2) — so without this the echo would show the
+    /// sender-side view next to a receiver-side `ESCALATE=`. Same
+    /// thread-it-through reasoning as `requires_stop` above. `None` off the
+    /// channel tier or when nothing could be checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_verified: Option<bool>,
 }
 
 /// Agent registration record.

@@ -54,13 +54,35 @@ const MAX_FORWARD_HOPS: u8 = 3;
 /// compiler cannot say a word. The failure mode is a silently mislabelled TRUST
 /// field on a security marker, which is not the kind of bug to leave to
 /// argument order.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct EchoTrust<'a> {
     pub delivery_tier: &'a str,
     pub sig_verified: Option<bool>,
     pub reagent_verified: Option<bool>,
     pub lan_verified: Option<bool>,
     pub channel_verified: Option<bool>,
+}
+
+/// The trust an echoed marker should carry after a forward, given the
+/// peer's response body. The RECEIVING instance is the one that computes
+/// `channel_verified` (the forwarder holds the sender's HMAC key, so §D2
+/// step 2 of SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md makes it skip
+/// cross-channel verification) and threads it back via
+/// `InjectionResponse::channel_verified`, exactly as it already does for
+/// `effective_tier`/`requires_stop`. Taking it from the body keeps the
+/// sender's echoed `TRUST=` consistent with the `ESCALATE=` the same body
+/// supplies — otherwise a sensitive cross-channel message could echo as
+/// `TRUST=self-declared … ESCALATE=none`, which contradicts itself (codex
+/// P2 on #3064). A body without the field (an older peer) leaves the
+/// caller's value alone.
+fn echo_trust_from_peer_body<'a>(body: &serde_json::Value, base: EchoTrust<'a>) -> EchoTrust<'a> {
+    EchoTrust {
+        channel_verified: body
+            .get("channel_verified")
+            .and_then(|v| v.as_bool())
+            .or(base.channel_verified),
+        ..base
+    }
 }
 
 pub(super) fn echo_jekt_to_sender(
@@ -245,7 +267,7 @@ async fn forward_inject_to_peer(
                 body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                 body.get("effective_tier").and_then(|v| v.as_str()),
                 body.get("requires_stop").and_then(|v| v.as_bool()),
-                peer.trust,
+                echo_trust_from_peer_body(&body, peer.trust),
                 req.priority.as_deref().unwrap_or("normal"),
             );
             ForwardOutcome::Delivered(body)
@@ -1340,6 +1362,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 // rather than guessed at.
                 effective_tier: None,
                 requires_stop: None,
+                channel_verified: None,
             };
             Some(serde_json::to_value(&body).unwrap_or_default())
         }
@@ -3038,6 +3061,41 @@ mod forward_inject_tests {
         let (url, _guard) = stub_peer(status, body).await;
         let r = req();
         forward_inject_to_peer(&state, &r, &r, peer(&url)).await
+    }
+
+    // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B, codex P2 on
+    // #3064: the receiver's channel verdict rides back on the response and
+    // wins over the forwarder's (always-None) view for the echoed marker.
+    #[test]
+    fn echo_trust_takes_the_receivers_channel_verdict_from_the_body() {
+        let base = EchoTrust {
+            delivery_tier: "channel",
+            sig_verified: Some(true),
+            reagent_verified: None,
+            lan_verified: None,
+            channel_verified: None,
+        };
+        let body = serde_json::json!({ "success": true, "channel_verified": true });
+        let t = echo_trust_from_peer_body(&body, base);
+        assert_eq!(t.channel_verified, Some(true));
+        assert_eq!(t.sig_verified, Some(true), "every other field is untouched");
+        assert_eq!(t.delivery_tier, "channel");
+
+        let body = serde_json::json!({ "success": true, "channel_verified": false });
+        assert_eq!(echo_trust_from_peer_body(&body, base).channel_verified, Some(false));
+    }
+
+    #[test]
+    fn echo_trust_keeps_the_callers_value_when_an_older_peer_omits_the_field() {
+        let base = EchoTrust {
+            delivery_tier: "host",
+            sig_verified: None,
+            reagent_verified: None,
+            lan_verified: None,
+            channel_verified: Some(true),
+        };
+        let body = serde_json::json!({ "success": true });
+        assert_eq!(echo_trust_from_peer_body(&body, base), base);
     }
 
     #[tokio::test]
