@@ -317,7 +317,7 @@ proposes is done. Restamp `historical`.
 | 3 | Reducer/saga (E–H) | ✅ done | reconcile two status docs (§5.2) |
 | 4 | Arch refactor A1–A15 | 🟡 12/15 | **A6, A9**, A10 (optional) |
 | 5 | muxspect A/B/C | ✅ done | fix CLAUDE.md (§5.1) |
-| 6 | Migration system hardening | 🟡 Phase 0 of 6 | Phases 1–6; failure still non-fatal |
+| 6 | Migration system hardening | 🟡 Phases 0, 1, 3, 6 of 6 (1a/1b/3/6 shipped 2026-09-07, 1c 2026-09-07) | Phases 2, 4, rest of 5 |
 | 7 | Docs lifecycle hardening | 🟡 ~3 of 6 | Phases 2, 5; ~360-file status backlog |
 | 8 | Jekt cross-channel trust | 🟡 Phase A of D | Phases B, C, D |
 | 9 | Container agents | 🟡 multi-generation | #2939 workstreams; #1400 Phase 3 gaps |

@@ -636,7 +636,71 @@ fn verify_event_line(r: &VerifyRecord) -> String {
     )
 }
 
-fn cmd_verify(data_dir: &Path, home: &Path, shared_store_path: &Path) -> i32 {
+// ── Doctor report ─────────────────────────────────────────────────────────────
+//
+// SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md Phase 1c: the `--verify` pass
+// and the applied/pending listing, as ONE machine-readable structure that both
+// `agentmux-srv migrate --verify` (printed below) and the live instance's
+// `GET /api/v1/muxspect/migrations` (JSON) are built from. One producer, so
+// the CLI you run against a stopped install and the `muxspect migrations`
+// you run from inside a running one can never disagree about what
+// "verified" means. Read-only end to end — same `open_readonly` path as
+// `--verify`, never opens a `Store`, never creates a file.
+
+/// The complete migration doctor report for one data dir.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DoctorReport {
+    pub data_dir: String,
+    pub shared_store: String,
+    pub channel_store: String,
+    /// One entry per tracking store whose `db_migrations` could not be read
+    /// (not a database, malformed, locked). Every migration of that scope
+    /// reads `unknown` / `error` below; this names the cause once.
+    pub tracking_errors: Vec<String>,
+    pub migrations: Vec<DoctorRow>,
+    pub summary: DoctorSummary,
+    /// What `migrate --verify` exits with for this state: `0`, or
+    /// [`VERIFY_FAILED_EXIT_CODE`] when any check is a mismatch or error.
+    pub exit_code: i32,
+}
+
+/// One registry migration, in registry order.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DoctorRow {
+    pub id: &'static str,
+    pub scope: &'static str,
+    pub description: &'static str,
+    /// `applied` | `pending` | `unknown` — the last when the scope's
+    /// tracking store could not be read (see `tracking_errors`).
+    pub state: &'static str,
+    /// [`super::VerifyOutcome::label`] for an applied migration: `ok` |
+    /// `MISMATCH` | `error` | `n/a`. Absent for a pending one — there is no
+    /// post-condition to check until it has run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verify: Option<&'static str>,
+    /// The verdict's evidence or reason (counts, the SQLite error, …).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct DoctorSummary {
+    pub total: usize,
+    pub applied: usize,
+    pub pending: usize,
+    pub unknown: usize,
+    /// Applied migrations whose `verify()` ran — equals `applied` unless a
+    /// tracking store was unreadable.
+    pub checked: usize,
+    pub ok: usize,
+    pub mismatch: usize,
+    pub error: usize,
+    pub not_verifiable: usize,
+}
+
+/// Paths and tracking state the doctor works from. Reads both tracking
+/// stores through the fallible read-only path; never opens a `Store`.
+fn doctor_inputs(data_dir: &Path, home: &Path, shared_store_path: &Path) -> (MigrationContext, AppliedIds) {
     let channel_store_path = data_dir.join("db").join("objects.db");
     let ctx = MigrationContext {
         home: home.to_path_buf(),
@@ -648,8 +712,97 @@ fn cmd_verify(data_dir: &Path, home: &Path, shared_store_path: &Path) -> i32 {
         global: read_applied_ids(shared_store_path),
         channel: read_applied_ids(&channel_store_path),
     };
+    (ctx, applied)
+}
+
+/// Assemble the report from an already-run verify pass, so `cmd_verify` can
+/// print the per-record NDJSON lines from the same `records` the report
+/// summarises rather than verifying twice.
+fn build_doctor_report(
+    regs: &[&(dyn super::Migration + Sync)],
+    ctx: &MigrationContext,
+    applied: &AppliedIds,
+    records: &[VerifyRecord],
+) -> DoctorReport {
+    let mut summary = DoctorSummary { total: regs.len(), ..Default::default() };
+    let mut migrations = Vec::with_capacity(regs.len());
+    for m in regs {
+        let record = records.iter().find(|r| r.id == m.id());
+        let state = match applied.for_scope(m.scope()) {
+            Err(_) => "unknown",
+            Ok(ids) if ids.contains(m.id()) => "applied",
+            Ok(_) => "pending",
+        };
+        match state {
+            "applied" => summary.applied += 1,
+            "pending" => summary.pending += 1,
+            _ => summary.unknown += 1,
+        }
+        let (verify, detail) = match record {
+            Some(r) => {
+                summary.checked += 1;
+                match r.outcome {
+                    super::VerifyOutcome::Ok(_) => summary.ok += 1,
+                    super::VerifyOutcome::Mismatch(_) => summary.mismatch += 1,
+                    super::VerifyOutcome::Error(_) => summary.error += 1,
+                    super::VerifyOutcome::NotVerifiable => summary.not_verifiable += 1,
+                }
+                (Some(r.outcome.label()), r.outcome.detail().to_string())
+            }
+            None => (None, String::new()),
+        };
+        migrations.push(DoctorRow {
+            id: m.id(),
+            scope: m.scope().as_str(),
+            description: m.description(),
+            state,
+            verify,
+            detail,
+        });
+    }
+    let tracking_errors = [&applied.global, &applied.channel]
+        .into_iter()
+        .filter_map(|r| r.as_ref().err().cloned())
+        .collect();
+    DoctorReport {
+        data_dir: ctx.data_dir.display().to_string(),
+        shared_store: ctx.shared_store_path.display().to_string(),
+        channel_store: ctx.channel_store_path.display().to_string(),
+        tracking_errors,
+        migrations,
+        summary,
+        exit_code: verify_exit_code(records),
+    }
+}
+
+/// The doctor report for `data_dir`, against an explicit registry (tests
+/// pass fakes; production passes `REGISTRY`). Read-only.
+pub fn doctor_report(
+    regs: &[&(dyn super::Migration + Sync)],
+    data_dir: &Path,
+    home: &Path,
+    shared_store_path: &Path,
+) -> DoctorReport {
+    let (ctx, applied) = doctor_inputs(data_dir, home, shared_store_path);
+    let records = verify_applied(regs, &ctx, &applied);
+    build_doctor_report(regs, &ctx, &applied, &records)
+}
+
+/// [`doctor_report`] for the running instance's own registry and resolved
+/// shared store / home — what `GET /api/v1/muxspect/migrations` serves.
+/// `Err` when the shared root can't be resolved at all (no
+/// `AGENTMUX_SHARED_DIR`, CI), the same condition under which
+/// `run_migrate_command` treats migrations as a no-op.
+pub fn doctor_report_for_instance(data_dir: &Path) -> Result<DoctorReport, String> {
+    let shared_store_path = resolve_shared_store_path()
+        .ok_or_else(|| "shared store path is unresolvable (AGENTMUX_SHARED_DIR / home not set)".to_string())?;
+    let home = resolve_home().ok_or_else(|| "AgentMux home is unresolvable".to_string())?;
+    Ok(doctor_report(REGISTRY, data_dir, &home, &shared_store_path))
+}
+
+fn cmd_verify(data_dir: &Path, home: &Path, shared_store_path: &Path) -> i32 {
+    let (ctx, applied) = doctor_inputs(data_dir, home, shared_store_path);
     let records = verify_applied(REGISTRY, &ctx, &applied);
-    let mut counts = [0usize; 4]; // ok, mismatch, error, n/a
     for r in &records {
         let detail = r.outcome.detail();
         if detail.is_empty() {
@@ -658,31 +811,23 @@ fn cmd_verify(data_dir: &Path, home: &Path, shared_store_path: &Path) -> i32 {
             println!("verify: {} [{}] [{}] — {}", r.id, r.scope, r.outcome.label(), detail);
         }
         println!("{}", verify_event_line(r));
-        match r.outcome {
-            super::VerifyOutcome::Ok(_) => counts[0] += 1,
-            super::VerifyOutcome::Mismatch(_) => counts[1] += 1,
-            super::VerifyOutcome::Error(_) => counts[2] += 1,
-            super::VerifyOutcome::NotVerifiable => counts[3] += 1,
-        }
     }
+    let report = build_doctor_report(REGISTRY, &ctx, &applied, &records);
+    let s = &report.summary;
     println!(
         "verify: {} applied checked — {} ok, {} mismatch, {} error, {} not verifiable (data dir {})",
-        records.len(),
-        counts[0],
-        counts[1],
-        counts[2],
-        counts[3],
+        s.checked,
+        s.ok,
+        s.mismatch,
+        s.error,
+        s.not_verifiable,
         data_dir.display()
     );
     println!(
         "{{\"event\":\"verify_complete\",\"checked\":{},\"ok\":{},\"mismatch\":{},\"error\":{},\"not_verifiable\":{}}}",
-        records.len(),
-        counts[0],
-        counts[1],
-        counts[2],
-        counts[3]
+        s.checked, s.ok, s.mismatch, s.error, s.not_verifiable
     );
-    verify_exit_code(&records)
+    report.exit_code
 }
 
 /// `SELECT COUNT(*) FROM <table>` on a (read-only) connection, treating a
@@ -989,6 +1134,76 @@ mod verify_tests {
         let conn = open_readonly(&path).unwrap().expect("exists");
         assert_eq!(table_count(&conn, "db_table_that_never_existed").unwrap(), 0);
         assert!(table_count(&conn, "db_migrations").is_ok());
+    }
+
+    // ---- Doctor report (Phase 1c — the producer `muxspect migrations` serves) ----
+
+    #[test]
+    fn doctor_report_on_a_fresh_data_dir_lists_everything_pending_and_creates_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        let shared = dir.path().join("shared").join("store.db");
+        let report = doctor_report(REGISTRY, &data_dir, dir.path(), &shared);
+
+        assert_eq!(report.migrations.len(), REGISTRY.len());
+        assert!(report.migrations.iter().all(|r| r.state == "pending" && r.verify.is_none()));
+        assert_eq!(report.summary.total, REGISTRY.len());
+        assert_eq!(report.summary.pending, REGISTRY.len());
+        assert_eq!(report.summary.checked, 0);
+        assert!(report.tracking_errors.is_empty());
+        assert_eq!(report.exit_code, 0);
+        // Read-only, like --verify: a doctor must never conjure a store.
+        assert!(!shared.exists() && !data_dir.exists(), "doctor created files");
+        // Serialises — the handler returns this as JSON.
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["summary"]["pending"], REGISTRY.len());
+        assert!(json["migrations"][0].get("verify").is_none(), "pending rows omit `verify`");
+    }
+
+    #[test]
+    fn doctor_report_reports_applied_rows_with_their_verdict_and_counts_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        let channel = data_dir.join("db").join("objects.db");
+        std::fs::create_dir_all(channel.parent().unwrap()).unwrap();
+        let shared = dir.path().join("shared").join("store.db");
+        {
+            // A fresh channel store with 0007 recorded applied: no legacy
+            // rows, empty target — consistent, so the verdict is `ok`.
+            let store = Store::open(&channel).expect("create channel store");
+            store.migration_mark_applied("0007_agents_consolidate", "channel", 1).unwrap();
+        }
+        let report = doctor_report(REGISTRY, &data_dir, dir.path(), &shared);
+        let row = report.migrations.iter().find(|r| r.id == "0007_agents_consolidate").unwrap();
+        assert_eq!(row.state, "applied");
+        assert_eq!(row.verify, Some("ok"));
+        assert!(row.detail.contains("no legacy rows"), "{}", row.detail);
+        assert_eq!(report.summary.applied, 1);
+        assert_eq!(report.summary.checked, 1);
+        assert_eq!(report.summary.ok, 1);
+        assert_eq!(report.summary.pending, REGISTRY.len() - 1);
+        assert_eq!(report.exit_code, 0);
+    }
+
+    #[test]
+    fn doctor_report_marks_a_scope_unknown_when_its_tracking_store_is_unreadable_and_exits_3() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        let shared = dir.path().join("shared").join("store.db");
+        std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+        std::fs::write(&shared, b"definitely not sqlite\n").unwrap();
+        let report = doctor_report(REGISTRY, &data_dir, dir.path(), &shared);
+
+        let global_rows: Vec<_> = report.migrations.iter().filter(|r| r.scope == "global").collect();
+        assert!(!global_rows.is_empty());
+        assert!(global_rows.iter().all(|r| r.state == "unknown" && r.verify == Some("error")));
+        assert!(report.migrations.iter().filter(|r| r.scope == "channel").all(|r| r.state == "pending"));
+        assert_eq!(report.summary.unknown, global_rows.len());
+        assert_eq!(report.summary.error, global_rows.len());
+        // The cause is named once, not once per migration.
+        assert_eq!(report.tracking_errors.len(), 1, "{:?}", report.tracking_errors);
+        assert!(report.tracking_errors[0].contains("store.db"));
+        assert_eq!(report.exit_code, VERIFY_FAILED_EXIT_CODE);
     }
 
     #[test]
