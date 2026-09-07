@@ -14,6 +14,21 @@
 //! (use the `NNNN_slug` convention). Retiring old migrations: remove from
 //! [`REGISTRY`] once the minimum supported upgrade path passes the migration's
 //! origin version — the `db_migrations` row stays as a permanent record.
+//!
+//! # Migrations freeze copies of live logic on purpose
+//!
+//! Some migrations carry verbatim copies of helpers that also exist in live
+//! code: `m0017_ambient_login_grandfather` mirrors ~35 lines of
+//! `backend/blockcontroller/core.rs`; `m0020_agent_color_backfill` and
+//! `m0021_backfill_agent_bundles` mirror 25–30 lines each of
+//! `backend/storage/mcp_servers.rs` and `def_registry_mirror.rs`. That is
+//! deliberate, not accidental duplication. A migration must produce the same
+//! rows on every machine it ever runs on, so it cannot call a live helper
+//! whose behaviour a later release may change; the copy pins the logic as it
+//! was at the migration's origin version. Do not "deduplicate" a migration
+//! against live code. When you copy logic into a new migration, say so next
+//! to the copy — `// frozen copy of <path>::<fn> as of <version>` — so the
+//! next reader can tell a freeze from a drift.
 
 mod m0000_bootstrap;
 mod m0001_legacy_data_dir;
