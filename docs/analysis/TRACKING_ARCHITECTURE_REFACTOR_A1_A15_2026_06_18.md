@@ -27,7 +27,7 @@ Value/Effort/Risk are from the audit. "Gate" = which trees the PR touches (colli
 | A6 | Collapse agent-pane's 4 parallel state systems / kill the mirror | ★★★★ | High | Med-High | 🔴 **blocked** | — | Collides with **#1555** (agent-pane). Wait for it to merge. |
 | A7 | Shared `ToolCorrelator` for translator tool-call/result | ★★★ | Low | Low | ✅ **done** | #1545 | `providers/tool-correlation.ts`. |
 | A8 | Split `websocket.rs` by command family | ★★★ | Med | Low | ✅ **done** | #1554 | Backend `server/`. |
-| A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | 🔴 **blocked** | — | Same gate as A6 (#1555). |
+| A9 | De-dup agent-pane "is busy?" selector (17×); route via `paneModel` | ★★★ | Low | Low | ✅ **done** | #3044 | Busy predicate was already unified by the state-machine work (`isWorking`/`workingFromPhase`, 1 use left); #3044 routed the 11 raw dispatches + added a grep-shaped guard test. |
 | A10 | Consolidate data-dir resolution onto `DataPaths` | ★★★ | Med | Med | 🟢 ready | — | Backend; touches where live data lives — migration care. |
 | A11 | Real `BlockRegistry` + registry-driven `ModalLayer` | ★★★ | Low-Med | Low | ✅ **done** | #1562 | Frontend `block/`, `element/`. |
 | A12 | Dead-code sweep (watchdog family; dead RPC constants) | ★★ | Low-Med | Low | ✅ **done** | #1542, #1565 | StreamStalled removed; watchdogs NOT dead (skip); 65 dead COMMAND_* consts removed. |
@@ -153,12 +153,13 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
   `cargo check` green; the A1 contract test still green (registered command set unchanged).
 - **Gotcha:** registrations use string-literal command names here (see A1 lesson #1) — keep names byte-identical or the A1 test catches you (that's the point).
 
-### A9 — De-dup "is busy?" + route via `paneModel` 🔴
+### A9 — De-dup "is busy?" + route via `paneModel` ✅
 - **Entry points:** `status.isLoading() || workingFromPhase(turnPhaseAtom())` duplicated **17×** across
   the agent view; 11 raw `dispatch*` calls in `agent-view.tsx` bypass `paneModel`.
 - **Approach:** one `isPaneBusy()` selector; route the 11 raw dispatches through `paneModel`.
 - **Acceptance:** one definition of "busy"; no raw `dispatch*` in `agent-view.tsx`.
 - **Gotcha / blocker:** same gate as A6 (#1543).
+- **Status (2026-09-06):** ✅ done in #3044. By then the busy-selector half had already been resolved elsewhere — `isWorking`/`workingFromPhase` in `agent-pane-state/types.ts` is the single predicate since the state-machine PR G, and agent-view had one use left, not 17. The 11 raw `dispatch*` calls were still all there (7 hard `dispatchPane`, 2 `dispatchPaneIfRegistered`, 2 `dispatchDocIfRegistered`) and are now routed through `paneModel`; `agent-view-dispatch-via-pane-model.test.ts` pins the acceptance criterion. Blocker #1543 had merged long before.
 
 ### A10 — Consolidate data-dir resolution onto `DataPaths` 🟢
 - **Entry points:** canonical `agentmux-common/src/data_paths.rs:4-7` ("single source of truth") is
@@ -277,7 +278,7 @@ Each item: **entry points** (where to start), **approach**, **acceptance criteri
 | `agentmux-srv/src/backend/blockcontroller/shell.rs` | 2358 | A5 |
 | `frontend/types/gotypes.d.ts` | 2297 | A1 (hand-maintained) |
 | `frontend/app/store/rpc-api.ts` | 1568 | A1 (hand-maintained) |
-| `frontend/app/view/agent/agent-view.tsx` | 1282 | A6/A9 |
+| `frontend/app/view/agent/agent-view.tsx` | 1282 → **2730** (2026-09-06) | A6 |
 | `frontend/app/store/global.ts` | (87 exports / 95 importers) | A3 |
 
 **Healthy patterns to copy** (audit §7): the agent-pane `update()` reducer + `EventSink` fan-out; the
