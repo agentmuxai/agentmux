@@ -105,6 +105,19 @@ Usage:
                                   explicitly when there may be more, rather
                                   than presenting a truncated view as the
                                   whole backlog.
+  muxspect migrations [--json]    the migration doctor for THIS instance's
+                                  data dir: every migration's applied/pending
+                                  state and, for applied ones, the same
+                                  post-condition verdict
+                                  'agentmux-srv migrate --verify' gives
+                                  (ok / MISMATCH / error / n/a) — without
+                                  stopping the app or hunting for the srv
+                                  binary. A MISMATCH is "recorded as applied
+                                  but the data isn't there", the failure the
+                                  hardening spec was written about. Read-only.
+                                  Exits 3 on any MISMATCH or error, matching
+                                  the CLI (docs/recovery/RUNBOOK_MIGRATION_
+                                  RECOVERY_2026_09_07.md §4).
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -616,6 +629,48 @@ export function renderWork(data, stateFilter, limit) {
 }
 
 /**
+ * Render `muxspect migrations` — the migration doctor report
+ * (`GET /api/v1/muxspect/migrations`, the same producer as
+ * `agentmux-srv migrate --verify`). One line per migration in registry
+ * order; a MISMATCH or error is shouted, not left for the reader to spot in
+ * a column, because that row IS the answer to "why is my data missing".
+ *
+ * Exported for muxspect.test.mjs. Pure apart from console output.
+ */
+export function renderMigrations(data) {
+    const rows = data.migrations ?? [];
+    const s = data.summary ?? {};
+    console.log(`data dir: ${data.data_dir ?? "?"}`);
+    console.log(`${rows.length} migration(s) — ${s.applied ?? 0} applied, ${s.pending ?? 0} pending` +
+        (s.unknown ? `, ${s.unknown} UNKNOWN (tracking store unreadable)` : "") + "\n");
+    for (const m of rows) {
+        // A verdict only exists for applied migrations; pending rows have
+        // nothing to verify yet and say so by omission.
+        let verdict = "";
+        if (m.verify === "MISMATCH") verdict = "  MISMATCH — recorded applied, effect is NOT there";
+        else if (m.verify === "error") verdict = "  ERROR — check could not run";
+        else if (m.verify) verdict = `  verify=${m.verify}`;
+        console.log(`${m.id}  [${m.scope}]  ${m.state}${verdict}`);
+        if (m.detail) console.log(`    ${m.detail}`);
+    }
+    for (const err of data.tracking_errors ?? []) {
+        console.log(`\ntracking state unreadable: ${err}`);
+    }
+    console.log(
+        `\nverify: ${s.checked ?? 0} applied checked — ${s.ok ?? 0} ok, ${s.mismatch ?? 0} mismatch, ` +
+            `${s.error ?? 0} error, ${s.not_verifiable ?? 0} not verifiable`,
+    );
+    if ((s.mismatch ?? 0) > 0 || (s.error ?? 0) > 0) {
+        console.log(
+            "At least one applied migration failed its post-condition. This is the " +
+                "\"marker says done, data isn't there\" shape — see " +
+                "docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md §4-§5 before touching anything. " +
+                "Nothing here has been changed; this command is read-only.",
+        );
+    }
+}
+
+/**
  * Render `muxspect layout` — the persisted pane tree per tab as an indented
  * outline, plus the layout doctor's verdict.
  *
@@ -754,6 +809,16 @@ async function main() {
         );
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderWork(data, stateFilter, WORK_LIST_LIMIT);
+        return;
+    }
+
+    if (cmd === "migrations") {
+        const data = await apiGet(url, authKey, "/api/v1/muxspect/migrations");
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderMigrations(data);
+        // Mirror `migrate --verify`'s exit code so scripts can gate on it the
+        // same way whether they ran the CLI or this.
+        if (data.exit_code) process.exitCode = data.exit_code;
         return;
     }
 

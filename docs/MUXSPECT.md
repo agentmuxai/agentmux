@@ -195,6 +195,40 @@ always-global identity store, so `muxspect work` shows items enqueued from
 deliberate — a per-channel queue would defeat the point — but it does mean this
 one command is not subject to the single-instance limitation described below.
 
+## Checking migration state (`migrations`)
+
+```bash
+muxspect migrations          # every migration: applied/pending, and the verify verdict for applied ones
+muxspect migrations --json   # the full report, same shape the CLI's --verify is built from
+```
+
+The migration doctor, from inside a running instance. It lists every migration
+in the registry with its state (`applied` / `pending` / `unknown`), and for each
+applied one runs the same post-condition check `agentmux-srv migrate --verify`
+runs: `ok`, `MISMATCH`, `error`, or `n/a` for a migration that declares no
+checkable effect. Both are produced by one function
+(`migrations::doctor_report`), so this and the CLI cannot disagree.
+
+**The thing to look for: `MISMATCH`.** That row is a migration the tracking
+table says has run, but whose effect is not in the data — the "marker says
+done, table is empty" shape behind
+`docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`. It is the one
+migration-state answer to "why is this agent / definition / bundle missing
+after an upgrade" that `describe`'s `last_error` cannot give you. The command
+names the migration and the counts; `docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`
+§4–§5 is what to do next.
+
+Read-only, like the CLI: it opens both tracking stores `SQLITE_OPEN_READ_ONLY`
+and never creates a file. Exits **3** on any `MISMATCH` or `error`, the same
+code as `--verify`, so a script can gate on either interchangeably. `unknown`
+means a tracking store itself could not be read; the cause is printed once
+under `tracking state unreadable:`.
+
+Scope: this instance's own data dir (`AGENTMUX_DATA_DIR`) and the shared store
+it resolves — the same single-instance limitation as everything except `work`.
+To doctor a different channel, run the CLI against its data dir per the
+runbook.
+
 ## What it can and can't see
 
 `muxspect` is a thin, read-only client over the same `ProcessBroker`

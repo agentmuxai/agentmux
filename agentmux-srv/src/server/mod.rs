@@ -503,6 +503,13 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/muxspect/background-tasks",
             get(muxspect_handlers::handle_muxspect_background_tasks),
         )
+        // Migration doctor — `migrate --verify`'s report from inside a live
+        // instance (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md Phase 1c).
+        // Read-only; see the handler's own doc comment.
+        .route(
+            "/api/v1/muxspect/migrations",
+            get(muxspect_handlers::handle_muxspect_migrations),
+        )
         // Sender-liveness verdict for a JEKT's claimed FROM — see the
         // handler's own doc comment (SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md).
         .route(

@@ -619,6 +619,35 @@ impl From<crate::backend::storage::background_tasks::BackgroundTask> for Backgro
     }
 }
 
+/// `GET /api/v1/muxspect/migrations` — the migration doctor for THIS
+/// instance's data dir: every registry migration with its applied/pending
+/// state and, for applied ones, the same post-condition verdict
+/// `agentmux-srv migrate --verify` prints
+/// (`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 1c). Built by the
+/// one producer both share (`migrations::doctor_report_for_instance`), so an
+/// operator inside a running instance gets exactly the answer the CLI would
+/// give against a stopped one — without hunting for the srv binary or the
+/// data dir. The incident the hardening spec was written about (§1.6: a
+/// migration "recorded as applied that wrote nothing") is exactly a "why did
+/// this agent fail to start" question, which is `muxspect`'s job.
+///
+/// Read-only, like `--verify`: opens both tracking stores with
+/// `SQLITE_OPEN_READ_ONLY`, never opens a `Store`, never creates a file.
+/// Runs on the blocking pool — it is a handful of SQLite reads, but they
+/// are synchronous. `exit_code` in the body is what `--verify` would exit
+/// with (0 or 3), so the CLI can mirror it.
+pub async fn handle_muxspect_migrations() -> impl IntoResponse {
+    let data_dir = crate::backend::base::get_wave_data_dir();
+    let report = tokio::task::spawn_blocking(move || crate::migrations::doctor_report_for_instance(&data_dir))
+        .await
+        .map_err(|e| format!("doctor task panicked: {e}"))
+        .and_then(|r| r);
+    match report {
+        Ok(report) => Json(report).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
 /// `GET /api/v1/muxspect/background-tasks[?block_id=X]` — the durable
 /// declared-background task registry (`db_background_tasks`), the source
 /// of truth `handle_muxspect_dock`'s ephemeral, 1-hour-evicted
