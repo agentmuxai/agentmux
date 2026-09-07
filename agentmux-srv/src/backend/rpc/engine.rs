@@ -223,12 +223,27 @@ impl WshRpcEngine {
         (engine, output_rx)
     }
 
-    /// Register a call handler (single request → single response).
-    pub fn register_handler(&self, command: &str, handler: CommandHandler) {
+    /// Install a call handler without touching the schema.
+    ///
+    /// The one path that must not evict: [`Self::register_typed`] records a
+    /// binding and then installs its wrapper, so going through the public
+    /// [`Self::register_handler`] would delete the entry it had just written.
+    fn install_call_handler(&self, command: &str, handler: CommandHandler) {
         let mut inner = self.lock_inner();
         inner
             .handlers
             .insert(command.to_string(), Handler::Call(handler));
+    }
+
+    /// Register a call handler (single request → single response).
+    ///
+    /// Drops any typed binding previously recorded for `command`: the last
+    /// registration wins for the handler map, so it must win for the schema
+    /// too, or `schema_json()` would advertise a request/response pair the
+    /// live handler no longer implements.
+    pub fn register_handler(&self, command: &str, handler: CommandHandler) {
+        self.lock_inner().schema.remove(command);
+        self.install_call_handler(command, handler);
     }
 
     /// Register a call handler from typed request/response values, and
@@ -273,7 +288,9 @@ impl WshRpcEngine {
         }
 
         let handler = std::sync::Arc::new(handler);
-        self.register_handler(
+        // install_call_handler, not register_handler: the latter evicts the
+        // schema entry recorded just above.
+        self.install_call_handler(
             command,
             Box::new(move |data, ctx| {
                 let handler = handler.clone();
@@ -305,6 +322,9 @@ impl WshRpcEngine {
     #[allow(dead_code)]
     pub fn register_stream_handler(&self, command: &str, handler: StreamHandler) {
         let mut inner = self.lock_inner();
+        // Same eviction as register_handler — a streaming command has no
+        // single typed response to describe.
+        inner.schema.remove(command);
         inner
             .handlers
             .insert(command.to_string(), Handler::Stream(handler));
@@ -632,6 +652,99 @@ impl WshRpcEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Replacing a typed command through an untyped path clears its schema
+    /// entry (codex P2 on #3074).
+    ///
+    /// The handler map's last-registration-wins rule has to hold for the
+    /// schema too. If it did not, `schema_json()` would keep advertising the
+    /// old request/response pair for a command whose live handler no longer
+    /// accepts it — and a generator reading that would emit a client stub
+    /// that fails at runtime. A stale binding is worse than a missing one.
+    #[tokio::test]
+    async fn replacing_a_typed_command_through_an_untyped_path_clears_its_schema_entry() {
+        #[derive(serde::Deserialize)]
+        struct Req {
+            #[allow(dead_code)]
+            v: i32,
+        }
+        #[derive(serde::Serialize)]
+        struct Resp {
+            ok: bool,
+        }
+
+        let (engine, _rx) = WshRpcEngine::new();
+        engine.register_typed("typed-then-untyped", |_r: Req, _ctx| async move {
+            Ok(Resp { ok: true })
+        });
+        assert_eq!(engine.typed_command_count(), 1, "typed registration should be recorded");
+
+        // Same command, now an untyped handler.
+        engine.register_handler(
+            "typed-then-untyped",
+            Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!("plain"))) })),
+        );
+        assert_eq!(
+            engine.typed_command_count(),
+            0,
+            "an untyped re-registration must drop the stale typed pair",
+        );
+
+        // And the same via the streaming path, which has no single response
+        // type to describe at all.
+        engine.register_typed("typed-then-stream", |_r: Req, _ctx| async move {
+            Ok(Resp { ok: true })
+        });
+        assert_eq!(engine.typed_command_count(), 1);
+        engine.register_stream_handler(
+            "typed-then-stream",
+            Box::new(|_data, _ctx| {
+                Box::pin(async move {
+                    let (_tx, rx) = mpsc::channel(1);
+                    Ok(rx)
+                })
+            }),
+        );
+        assert_eq!(
+            engine.typed_command_count(),
+            0,
+            "a streaming re-registration must drop the stale typed pair too",
+        );
+    }
+
+    #[tokio::test]
+    async fn register_typed_still_records_after_the_wrapper_is_installed() {
+        // Guards the ordering inside register_typed: it records the binding
+        // and then installs the wrapper. Routing that install through the
+        // public evicting path would delete the entry it had just written,
+        // and this assertion is what catches that.
+        //
+        // NB: keep either registration function's name away from an
+        // immediately-following parenthesised word in prose here.
+        // test/contract/rpc-contract.test.ts scans this file with a regex
+        // that does not skip comments, so such a phrase reads to it as a
+        // real registration whose command it cannot resolve, and fails the
+        // contract extractor. (This comment is deliberately phrased to
+        // describe the trap without containing it.)
+        #[derive(serde::Deserialize)]
+        struct Req {
+            #[allow(dead_code)]
+            v: i32,
+        }
+        #[derive(serde::Serialize)]
+        struct Resp {
+            ok: bool,
+        }
+
+        let (engine, _rx) = WshRpcEngine::new();
+        engine.register_typed("stays-recorded", |_r: Req, _ctx| async move {
+            Ok(Resp { ok: true })
+        });
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        assert_eq!(rows.len(), 1, "register_typed must not evict its own entry");
+        assert_eq!(rows[0]["command"], "stays-recorded");
+    }
 
     #[tokio::test]
     async fn test_register_and_call_handler() {

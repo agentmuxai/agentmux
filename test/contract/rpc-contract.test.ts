@@ -82,7 +82,13 @@ interface Contract {
 }
 
 function deriveContract(root: string): Contract {
-    // ── Backend: resolve `register_handler(NAME, …)` to command names.
+    // ── Backend: resolve `register_handler(NAME, …)` and
+    // `register_typed(NAME, …)` to command names. Both are real
+    // registrations — `register_typed` additionally records the command's
+    // request/response types in the engine's `RpcSchema`
+    // (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md). Missing it here would let
+    // a command silently drop out of this contract the moment it is
+    // migrated, which is the opposite of what this test is for.
     // NAME is a string literal or a `pub const … &str = "…"`. Both forms
     // appear; consts are resolved against every const defined in the
     // crate (not just COMMAND_*-prefixed ones).
@@ -97,7 +103,20 @@ function deriveContract(root: string): Contract {
 
     const registered = new Set<string>();
     const unresolved: string[] = [];
-    const regRe = /register_handler\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_:]*))/g;
+    const regRe = /register_(?:handler|typed)\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_:]*))/g;
+    // `register_typed` forwards to `register_handler(command, …)`, where
+    // `command` is its own parameter — unresolvable by construction and not a
+    // registration. Skip exactly that one call: the engine file AND the
+    // identifier `command`.
+    //
+    // Not a whole-file exclusion — engine.rs also carries `#[cfg(test)]`
+    // registrations ("echo", "failme", "checkctx") that are string literals
+    // and legitimately belong in `registered`; dropping the file removed them
+    // and silently shrank the backend surface this test compares against.
+    // Not a bare identifier allow-list either — a real handler elsewhere that
+    // used `command` as a local would then be skipped in silence. Both
+    // conditions together are what keep the loud-failure guarantee intact.
+    const enginePath = path.join("backend", "rpc", "engine.rs");
     for (const f of rsFiles) {
         const src = fs.readFileSync(f, "utf8");
         let m: RegExpExecArray | null;
@@ -108,14 +127,19 @@ function deriveContract(root: string): Contract {
             }
             const ident = m[2].split("::").pop() as string;
             const val = constMap.get(ident);
-            if (val !== undefined) registered.add(val);
-            else unresolved.push(ident);
+            if (val !== undefined) {
+                registered.add(val);
+            } else if (f.endsWith(enginePath) && ident === "command") {
+                // register_typed's forwarding call — see above.
+            } else {
+                unresolved.push(ident);
+            }
         }
     }
     // A register_handler arg we can't resolve means the extractor is
     // blind to part of the contract — fail loudly rather than pass with
     // an incomplete `registered` set.
-    expect(unresolved, `unresolved register_handler args: ${unresolved.join(", ")}`).toEqual([]);
+    expect(unresolved, `unresolved register_handler/register_typed args: ${unresolved.join(", ")}`).toEqual([]);
 
     // ── Frontend: declared bindings (method → command) in rpc-api.ts.
     // Each binding is `Method(client: RpcClient, …): Ret { return
@@ -315,6 +339,12 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "memory.write",
     "pane.open",
     "slow",
+    // engine.rs #[cfg(test)] registrations for the typed-registry eviction
+    // tests, same category as echo/failme/checkctx above: real
+    // register_* calls in test code, never a frontend-facing command.
+    "stays-recorded",
+    "typed-then-stream",
+    "typed-then-untyped",
 ];
 
 describe("RPC frontend↔backend contract (A1)", () => {

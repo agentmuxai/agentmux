@@ -107,6 +107,16 @@ impl RpcSchema {
         self.bindings.values().collect()
     }
 
+    /// Forget `command`'s binding, if it had one.
+    ///
+    /// Called when a command is (re-)registered through an untyped path, so
+    /// the schema always describes the handler that is actually installed. A
+    /// stale typed pair would be worse than no pair at all: it would generate
+    /// a client stub with types the live handler does not accept.
+    pub fn remove(&mut self, command: &str) {
+        self.bindings.remove(command);
+    }
+
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
@@ -173,6 +183,19 @@ mod tests {
         s.record("dup", "a::Second", "a::SecondR");
         assert_eq!(s.len(), 1);
         assert_eq!(s.get("dup").unwrap().request, "a::Second");
+    }
+
+    #[test]
+    fn remove_forgets_a_binding_so_a_replaced_command_stops_advertising_stale_types() {
+        let mut s = RpcSchema::new();
+        s.record("foo", "a::Req", "a::Resp");
+        s.remove("foo");
+        assert!(s.get("foo").is_none());
+        assert!(s.is_empty());
+        // Removing something that was never recorded is a no-op, not a panic:
+        // every untyped registration calls this, and most commands were never
+        // typed in the first place.
+        s.remove("never-registered");
     }
 
     #[test]
