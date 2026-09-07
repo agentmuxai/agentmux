@@ -2554,7 +2554,7 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
 /// independently (reagentx P2 on PR #2602) — kept as one definition here so
 /// a future field addition only needs updating once.
 #[cfg(test)]
-fn test_agent_def(
+pub(crate) fn test_agent_def(
     id: &str,
     name: &str,
     provider: &str,

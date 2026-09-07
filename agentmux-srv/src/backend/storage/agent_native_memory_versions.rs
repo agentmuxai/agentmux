@@ -354,6 +354,91 @@ impl Store {
     /// happens to be old, and a hyperactive file never grows unbounded
     /// purely because every version happens to be recent. Returns the
     /// number of rows deleted.
+    /// Repair the mislabeled rollout backfill — see
+    /// `migrations::m0024_native_memory_backfill_from_fs` for the full
+    /// story. In short: `m0023` was supposed to tag every pre-existing
+    /// memory file `agent_inferred`, but it iterated the
+    /// `db_agent_native_memory` MIRROR, which is populated lazily and is
+    /// empty on a typical install — so it backfilled nothing, and the
+    /// drift sweep (which reads the real filesystem) claimed those same
+    /// files milliseconds later as `external_fs_write`, i.e. "detected
+    /// outside AgentMux — provenance unknown". Innocent files, alarming
+    /// label.
+    ///
+    /// The predicate is deliberately narrow, because relabeling a
+    /// provenance claim is not something to do speculatively. All four
+    /// must hold:
+    ///
+    /// - `source = 'external_fs_write'` and `detected_via =
+    ///   'reconciliation_sweep'` — the slow path, which is the only one
+    ///   that can observe a file it has never seen before at startup;
+    /// - `parent_version_id IS NULL` — a FIRST-EVER version for that
+    ///   `(agent_id, filename)`, i.e. genuine first sight rather than an
+    ///   observed change to something already tracked;
+    /// - `created_at` inside a short window starting at `m0023`'s own
+    ///   `applied_at` — the load-bearing clause, since a memory file
+    ///   created out-of-band next week is also first-sight-via-sweep and
+    ///   that one is a real external write whose label must stand.
+    ///
+    /// ## The limit of the window, stated plainly
+    ///
+    /// Inside the window this cannot tell the rollout burst from a
+    /// genuinely new out-of-band file, and will relabel both (ReAgent P2
+    /// on PR #3055 — an earlier revision of this comment claimed an
+    /// absolute guarantee it does not deliver). Nothing in the row or the
+    /// file distinguishes them: mtime is no help either, since a burst
+    /// row's file may have been legitimately edited since.
+    ///
+    /// What makes the trade acceptable is the shape of the two errors, not
+    /// their likelihood alone. Getting it wrong costs one just-created file
+    /// a benign "Agent" label instead of "detected outside AgentMux", on an
+    /// install where the user is watching a fresh upgrade. Not acting costs
+    /// every pre-existing memory file on every affected install a permanent
+    /// security-flavored warning it did not earn — which is the bug this
+    /// repairs. The window is kept as small as the evidence allows so the
+    /// ambiguous region stays tiny.
+    ///
+    /// `source_detail` keeps the original `detected_via` and records that
+    /// the row was relabeled, so the audit trail says what happened rather
+    /// than quietly presenting the new claim as if it were the original
+    /// observation.
+    ///
+    /// Returns the number of rows relabeled. A no-op (returns 0) when
+    /// `m0023` never ran — nothing to repair on a fresh install.
+    pub fn agent_native_memory_version_relabel_rollout_first_sight(
+        &self,
+    ) -> Result<usize, StoreError> {
+        // The sweep's `tokio::time::interval` fires immediately on its
+        // first tick, so the burst lands milliseconds after migrations
+        // finish — 61ms on the install this was diagnosed from. A minute is
+        // three orders of magnitude of slack for a loaded machine's first
+        // sweep, while keeping the ambiguous region (see above) short.
+        const ROLLOUT_WINDOW_MS: i64 = 60 * 1000;
+        let conn = self.conn.lock().unwrap();
+        // strftime() parses m0023's ISO-8601 `applied_at` (offset included)
+        // to epoch seconds; the version table stores epoch millis.
+        let updated = conn.execute(
+            "UPDATE db_agent_native_memory_versions
+                SET source = 'agent_inferred',
+                    source_detail = json_object(
+                        'relabeled_from', 'external_fs_write',
+                        'detected_via', json_extract(source_detail, '$.detected_via'),
+                        'reason', 'rollout_first_sight'
+                    )
+              WHERE source = 'external_fs_write'
+                AND json_extract(source_detail, '$.detected_via') = 'reconciliation_sweep'
+                AND parent_version_id IS NULL
+                AND created_at >= (
+                    SELECT strftime('%s', applied_at) * 1000 FROM db_migrations
+                     WHERE id = '0023_native_memory_versions_backfill')
+                AND created_at <= (
+                    SELECT strftime('%s', applied_at) * 1000 + ?1 FROM db_migrations
+                     WHERE id = '0023_native_memory_versions_backfill')",
+            params![ROLLOUT_WINDOW_MS],
+        )?;
+        Ok(updated)
+    }
+
     pub fn agent_native_memory_version_prune(
         &self,
         agent_id: &str,
@@ -419,6 +504,151 @@ mod tests {
     fn shared_store() -> Store {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         Store::open_shared(tmp.path()).unwrap()
+    }
+
+    /// Record that `m0023` ran at `applied_at` (ISO-8601). The relabel
+    /// window is anchored to this row, so it is what makes a version
+    /// "part of the rollout burst" or not.
+    fn record_m0023(store: &Store, applied_at: &str) {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO db_migrations (id, applied_at, duration_ms, scope)
+                 VALUES ('0023_native_memory_versions_backfill', ?1, 0, 'global')",
+                params![applied_at],
+            )
+            .unwrap();
+    }
+
+    /// An ISO-8601 stamp for "now", so versions inserted by a test land
+    /// inside the rollout window.
+    fn now_iso() -> String {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%S+00:00', ?1, 'unixepoch')",
+            params![secs as i64],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap()
+    }
+
+    /// The sweep's own row shape for a file it has never seen before.
+    fn sweep_first_sight(store: &Store, agent: &str, file: &str) {
+        store
+            .agent_native_memory_version_insert(
+                agent, file, "pre-existing content", "external_fs_write",
+                r#"{"detected_via":"reconciliation_sweep"}"#, "",
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn relabels_the_rollout_first_sight_burst() {
+        // The real-world case: m0023 backfilled nothing (empty mirror), and
+        // the sweep claimed the pre-existing files milliseconds later.
+        let store = shared_store();
+        record_m0023(&store, &now_iso());
+        sweep_first_sight(&store, "agent-1", "MEMORY.md");
+
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 1);
+
+        let v = &store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap()[0];
+        assert_eq!(v.source, "agent_inferred");
+        // The audit trail must still say what actually happened.
+        assert!(v.source_detail.contains("relabeled_from"), "{}", v.source_detail);
+        assert!(v.source_detail.contains("reconciliation_sweep"), "{}", v.source_detail);
+    }
+
+    #[test]
+    fn leaves_a_genuine_external_write_outside_the_window_alone() {
+        // A memory file created out-of-band after the upgrade is also
+        // first-sight-via-sweep. Once it is outside the window that one is a
+        // real external write and its label must stand — the single most
+        // important thing this repair must not get wrong.
+        let store = shared_store();
+        record_m0023(&store, "2020-01-01T00:00:00+00:00");
+        sweep_first_sight(&store, "agent-1", "MEMORY.md");
+
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 0);
+        assert_eq!(
+            store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap()[0].source,
+            "external_fs_write"
+        );
+    }
+
+    #[test]
+    fn relabels_a_genuinely_new_file_inside_the_window_too() {
+        // Pins a KNOWN, accepted limitation rather than a desired property
+        // (ReAgent P2 on PR #3055): inside the window the burst and a
+        // genuinely new out-of-band file are indistinguishable, so this one
+        // is relabeled too. Documented in the method's own doc comment; the
+        // mitigation is that the window is small, not that the case cannot
+        // happen. Here so nobody reads the guarantee as absolute, and so
+        // narrowing it later is a deliberate change with a failing test
+        // rather than a silent one.
+        let store = shared_store();
+        record_m0023(&store, &now_iso());
+        sweep_first_sight(&store, "agent-1", "BRAND-NEW.md");
+
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 1);
+    }
+
+    #[test]
+    fn leaves_an_observed_change_to_a_tracked_file_alone() {
+        // Not first sight: the file was already versioned, so the sweep
+        // observed a real out-of-band CHANGE. parent_version_id is set, and
+        // the row must keep its label.
+        let store = shared_store();
+        record_m0023(&store, &now_iso());
+        store
+            .agent_native_memory_version_insert("agent-1", "MEMORY.md", "v1", "human", "{}", "")
+            .unwrap();
+        sweep_first_sight(&store, "agent-1", "MEMORY.md");
+
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 0);
+    }
+
+    #[test]
+    fn leaves_fs_watch_detections_alone() {
+        // Only the slow sweep can observe a never-before-seen file at
+        // startup; a live fs-watch event means something wrote while we
+        // were watching.
+        let store = shared_store();
+        record_m0023(&store, &now_iso());
+        store
+            .agent_native_memory_version_insert(
+                "agent-1", "MEMORY.md", "c", "external_fs_write",
+                r#"{"detected_via":"fs_watch"}"#, "",
+            )
+            .unwrap();
+
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 0);
+    }
+
+    #[test]
+    fn is_a_no_op_when_m0023_never_ran() {
+        // Fresh install: db_migrations exists but has no m0023 row, so the
+        // window subquery is NULL and nothing matches. Must not error.
+        let store = shared_store();
+        sweep_first_sight(&store, "agent-1", "MEMORY.md");
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 0);
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let store = shared_store();
+        record_m0023(&store, &now_iso());
+        sweep_first_sight(&store, "agent-1", "MEMORY.md");
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 1);
+        // Second run finds nothing: the rows it would match are no longer
+        // external_fs_write.
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 0);
     }
 
     #[test]

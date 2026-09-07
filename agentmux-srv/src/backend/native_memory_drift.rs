@@ -95,7 +95,7 @@ pub(crate) fn check_and_record_drift(
 /// InvalidData`, distinguishable from a transient I/O error) rather than
 /// read partially; callers log and skip it, same treatment as any other
 /// per-file read failure.
-fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
+pub(crate) fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut buf = Vec::new();
     let read = std::fs::File::open(path)?
