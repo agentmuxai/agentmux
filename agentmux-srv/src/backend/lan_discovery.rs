@@ -588,52 +588,53 @@ impl LanDiscovery {
                 // blank-TXT self-resolution was never recognized as self and
                 // was inserted as a phantom peer that could never self-heal
                 // (see the instance_id-preservation fix below for why).
-                // A fullname match is now a HINT, never proof. It may only
-                // skip when the port+address test agrees that this really is
-                // us. Treating equality alone as proof is what broke
-                // cross-host discovery before 2026-09-06: with a
-                // version-derived (non-unique) name, a genuine peer's fullname
-                // could equal ours exactly — and on a conflict-renamed host,
-                // `service_fullname` is stale and matches the peer that WON
-                // the name. Either way the instance dropped every
-                // announcement from its peer, permanently, and reported
-                // `lan: []` forever. `mdns_instance_label` makes the collision
-                // itself impossible; this makes the consequence impossible
-                // even if some future name scheme regresses.
-                //
-                // The blank-TXT self-resolution storm this check was
-                // originally added for (~96% of own-address events resolving
-                // with `peer_id=""`) is still caught: those are on OUR port at
-                // OUR address, so `resolves_to_this_instance` returns true for
-                // them on its own.
-                if fullname == self.service_fullname && self.resolves_to_this_instance(&info) {
-                    return;
-                }
-
-                // Belt-and-braces on the fullname check above, which was
-                // measured NOT to be sufficient on 2026-09-06: this instance
-                // was still inserting itself as a peer. The srv log showed
-                // four `LAN peer discovered` events, all `peer_id=""`, all on
-                // port 55019 — this instance's own port — at 192.168.1.230,
-                // 172.23.176.1 and fe80::5c1e:c2bb:b5bc:9655, every one of
-                // them an address of this very host. They collapse into a
-                // single phantom map entry (the map is keyed by fullname), so
-                // `DiscoverAgents` reported one LAN "peer" that was really us,
-                // with empty agents/hostname/instance_id.
-                //
-                // Why the fullname check misses them is not established —
-                // plausibly mdns-sd conflict-renaming when several AgentMux
-                // instances share this host, or a re-registration under
-                // `enable_addr_auto()`. Rather than guess at that, this checks
-                // the thing we can state with certainty: a service on OUR port
-                // at an address that belongs to THIS machine is us. A genuine
-                // remote peer cannot satisfy both — it would have to be
+                // THE self-check. One test, and it is the only one: a service
+                // on OUR port at an address belonging to THIS machine is us. A
+                // genuine remote peer cannot satisfy both — it would have to be
                 // reachable at one of our own interface addresses.
                 //
-                // Cost of the phantom, and why it is worth a second guard:
-                // `find_agent` now fans out concurrently to every known peer,
-                // so each LAN lookup spent a request asking ourselves a
-                // question we had already answered locally.
+                // There used to be a second, independent check above this one
+                // comparing the resolved `fullname` against our own. It is gone
+                // as of 2026-09-06, because it was actively harmful and,
+                // once this check existed, entirely redundant (any event a
+                // fullname match could legitimately skip is one this check
+                // already skips — reagent P2 on PR #3048 caught that keeping it
+                // as a conjunct left dead code that also bypassed the debug log
+                // below).
+                //
+                // Why it was harmful, and the answer to a question the previous
+                // revision of this comment recorded as unexplained ("Why the
+                // fullname check misses them is not established — plausibly
+                // mdns-sd conflict-renaming"): it WAS conflict-renaming. The
+                // mDNS instance label used to be `agentmux-{instance_id}` where
+                // `instance_id` is the VERSION, so every host on a release
+                // registered the same name AND that name contained dots, which
+                // is malformed for a single DNS-SD label. mdns-sd split it at
+                // the first dot and conflict-renamed the loser
+                // ("agentmux-v0 (2).55.37._agentmux._tcp.local."). Two
+                // consequences: a genuine peer's fullname could equal ours
+                // exactly, and on a renamed host `service_fullname` — captured
+                // before `register()` — went stale and matched the peer that
+                // WON the name. Either way that host silently dropped every
+                // announcement from its peer, forever, reporting `lan: []`
+                // while the peer saw it fine. `mdns_instance_label` now makes
+                // the collision impossible; deleting the check makes the
+                // consequence impossible even if a future naming scheme
+                // regresses.
+                //
+                // The blank-TXT self-resolution storm the fullname check was
+                // originally added for is still caught here: live logs showed
+                // ~96% of resolution events for this instance's own
+                // virtual/link-local addresses carrying an empty TXT record
+                // (`peer_id=""`), all on this instance's own port at its own
+                // addresses — so this check catches them on its own, which is
+                // what made the fullname comparison redundant rather than
+                // load-bearing.
+                //
+                // Cost of getting it wrong, and why it is worth being careful:
+                // `find_agent` fans out concurrently to every known peer, so a
+                // phantom self-entry spent a request per lookup asking
+                // ourselves a question we had already answered locally.
                 if self.resolves_to_this_instance(&info) {
                     tracing::debug!(
                         address = %info.get_addresses().iter().next().map(|a| a.to_string()).unwrap_or_default(),
