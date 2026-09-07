@@ -35,13 +35,10 @@ const runningTool = (id: string): ToolNode => ({
 });
 
 describe("agent-document-store dispatch — dock node status push", () => {
-    let setterCalls: DocumentNode[][] = [];
-
     beforeEach(() => {
         vi.clearAllMocks();
         __resetAllSlots();
-        setterCalls = [];
-        registerPane(blockId, (nodes) => setterCalls.push(nodes));
+        registerPane(blockId);
     });
 
     test("ScrubOrphanedInProgress pushes a docknodestatus delta for each resolved tool node", () => {

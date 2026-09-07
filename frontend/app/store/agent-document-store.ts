@@ -9,11 +9,15 @@
  * (`Map<blockId, AgentDocumentState>`) and dispatches commands through
  * the pure reducer. Every mutation to an agent pane's message list
  * flows through this module — no direct setDocument calls anywhere
- * else. The pane's `documentAtom` becomes a write-only projection.
+ * else. The reactive read side of `nodes` is owned here too (A6 of
+ * issue #1549 — it used to be a view-owned `documentAtom` signal whose
+ * setter was handed in at registration).
  *
  * Pattern modeled on `launcher-event-reducer.ts`: single module,
- * in-memory mirror, atom projection, audit-friendly.
+ * in-memory mirror, audit-friendly.
  */
+
+import { type Accessor, createSignal, type Setter } from "solid-js";
 
 import type { DocumentNode } from "../view/agent/types";
 import { markDispatch } from "../view/agent/virtualization/perf-probe";
@@ -61,12 +65,15 @@ function pushResolvedDockNodes(blockId: string, events: AgentDocumentEvent[]) {
     }
 }
 
-/** A pane's projection setter — typically the SignalPair[1] from createAgentAtoms. */
-type DocumentSetter = (nodes: DocumentNode[]) => void;
-
 interface Slot {
     state: AgentDocumentState;
-    setter: DocumentSetter;
+    /**
+     * Reactive read side of `state.nodes`. Referential equality, same as
+     * the view-owned signal it replaced: the reducer produces a fresh array
+     * whenever the node list changes, so identity is the change signal.
+     */
+    nodes: Accessor<DocumentNode[]>;
+    setNodes: Setter<DocumentNode[]>;
 }
 
 const slots = new Map<string, Slot>();
@@ -98,21 +105,31 @@ let eventSink: EventSink = (blockId, event) => {
 
 /**
  * Register a pane with the store. The slot owns the pane's reducer
- * state and writes through the setter on each mutation.
+ * state and its reactive `nodes` accessor.
  *
  * Idempotent: re-registering a blockId resets its state to initialState
- * and rebinds the setter. (Useful for hot-reload scenarios.)
+ * and creates a fresh accessor. (Useful for hot-reload scenarios.)
  *
  * @internal — production callers MUST use `registerPane` from
  * `agent-pane-registration.ts` so the pane is registered atomically
  * across BOTH stores (document + pane-state). Direct callers of this
- * function are limited to single-store unit tests (cascade-detection
- * scenarios that need a custom single-store projection). PR-3 of the
- * cascade follow-up sequence — see agent-pane-registration.ts for
- * rationale + Option A/B discussion.
+ * function are limited to single-store unit tests. PR-3 of the cascade
+ * follow-up sequence — see agent-pane-registration.ts for rationale +
+ * Option A/B discussion.
  */
-export function registerPane(blockId: string, setter: DocumentSetter): void {
-    slots.set(blockId, { state: initialState(), setter });
+export function registerPane(blockId: string): void {
+    const state = initialState();
+    const [nodes, setNodes] = createSignal<DocumentNode[]>(state.nodes);
+    slots.set(blockId, { state, nodes, setNodes });
+}
+
+/**
+ * Reactive accessor for a pane's document nodes, or `null` if the pane is
+ * not registered. Production code reaches this through
+ * `AgentPaneModel.document`; this export is for tests and diagnostics.
+ */
+export function documentNodes(blockId: string): Accessor<DocumentNode[]> | null {
+    return slots.get(blockId)?.nodes ?? null;
 }
 
 /**
@@ -155,27 +172,29 @@ export function dispatch(
         );
     }
     // Perf probe (task #40): times the FULL dispatch — reducer + the
-    // setter push below — the exact layer the original virtualization
+    // signal publish below — the exact layer the original virtualization
     // probe never measured (it only timed row DOM mount). No-op outside
     // dev (see markDispatch / isProbingEnabled).
     const stopDispatchTiming = markDispatch("document");
     const result = update(slot.state, command, Date.now(), opts);
     const prevNodes = slot.state.nodes;
     slot.state = result.state;
-    // Push to atom only if nodes changed (referential equality).
-    // Avoids no-op signal writes that would still schedule a Solid effect.
+    // Publish only if nodes changed (referential equality). Avoids no-op
+    // signal writes that would still schedule a Solid effect. Thunk form
+    // so Solid never mistakes the array for an updater function.
     if (slot.state.nodes !== prevNodes) {
-        slot.setter(slot.state.nodes);
+        const nodes = slot.state.nodes;
+        slot.setNodes(() => nodes);
         // Cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
-        // documentAtom subscribers can unmount the pane synchronously
-        // during this setter; the slot then vanishes mid-dispatch and
-        // the caller's next dispatch (often dispatchPane on a sibling
-        // store) throws. Log so the trigger is identifiable.
+        // A `nodes` subscriber can unmount the pane synchronously during
+        // this publish; the slot then vanishes mid-dispatch and the
+        // caller's next dispatch (often dispatchPane on a sibling store)
+        // throws. Log so the trigger is identifiable.
         if (!slots.has(blockId)) {
             console.warn(
                 `[agent-document-store] CASCADE_DETECTED: slot disposed mid-dispatch ` +
                 `(cmd=${command.type}, blockId=${blockId.slice(0, 7)}, source=${source}). ` +
-                `A documentAtom subscriber unmounted the pane during this dispatch. ` +
+                `A document-nodes subscriber unmounted the pane during this dispatch. ` +
                 `Subsequent dispatches in the same callback will throw.`,
             );
         }

@@ -23,7 +23,7 @@ describe("AgentViewState", () => {
         it("builds an id → index map from the document", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([md("a"), md("b"), md("c")]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 const idx = state.nodeIndex();
                 expect(idx.get("a")).toBe(0);
                 expect(idx.get("b")).toBe(1);
@@ -36,7 +36,7 @@ describe("AgentViewState", () => {
         it("re-indexes when the document changes", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([md("a"), md("b")]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 expect(state.indexOf("a")).toBe(0);
 
                 doc[1]([md("z"), md("a"), md("b")]); // prepend "z"
@@ -50,7 +50,7 @@ describe("AgentViewState", () => {
         it("returns -1 for unknown ids via indexOf", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([md("a")]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 expect(state.indexOf("missing")).toBe(-1);
                 dispose();
             });
@@ -61,7 +61,7 @@ describe("AgentViewState", () => {
         it("starts true (initial mount expects auto-scroll)", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 expect(state.stickToBottom()).toBe(true);
                 dispose();
             });
@@ -70,7 +70,7 @@ describe("AgentViewState", () => {
         it("disengageStickToBottom flips it off", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 state.disengageStickToBottom();
                 expect(state.stickToBottom()).toBe(false);
                 dispose();
@@ -80,7 +80,7 @@ describe("AgentViewState", () => {
         it("engageStickToBottom flips it on AND clears any head anchor (atomic)", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 state.captureHeadAnchor({ nodeId: "n5", offsetPx: 50 });
                 expect(state.stickToBottom()).toBe(false);
                 expect(state.headAnchor()).not.toBeNull();
@@ -99,7 +99,7 @@ describe("AgentViewState", () => {
         it("stores the anchor and flips stickToBottom off (atomic)", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 expect(state.stickToBottom()).toBe(true); // pre-condition
 
                 state.captureHeadAnchor({ nodeId: "n5", offsetPx: 50 });
@@ -113,7 +113,7 @@ describe("AgentViewState", () => {
         it("clearHeadAnchor drops the anchor without touching stickToBottom", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 state.captureHeadAnchor({ nodeId: "n5", offsetPx: 50 });
                 state.clearHeadAnchor();
                 expect(state.headAnchor()).toBeNull();
@@ -128,7 +128,7 @@ describe("AgentViewState", () => {
         it("starts null and can be set/cleared", () => {
             withRoot((dispose) => {
                 const doc = createSignal<DocumentNode[]>([]);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 expect(state.streamingNodeId()).toBeNull();
 
                 state.setStreamingNodeId("msg_1");
@@ -146,7 +146,7 @@ describe("AgentViewState", () => {
             withRoot((dispose) => {
                 const initial = [md("a"), md("b")];
                 const doc = createSignal<DocumentNode[]>(initial);
-                const state = createAgentViewState(doc);
+                const state = createAgentViewState(doc[0]);
                 expect(state.nodes()).toBe(initial);
                 dispose();
             });

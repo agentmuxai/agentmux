@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentPaneModel — per-pane lifecycle handle that carries a `disposed` flag
- * and dispatch helpers for both agent-pane stores.
+ * AgentPaneModel — per-pane lifecycle handle that carries a `disposed` flag,
+ * dispatch helpers for both agent-pane stores, and the reactive read side
+ * of each store's state.
  *
  * Created during `registerPane`, marked `disposed` at the start of
  * `unregisterPane` (before either store deletes its slot). Hooks pass
@@ -11,9 +12,19 @@
  * default-safe against post-unmount races without having to remember the
  * soft-dispatch variant per call site. The module-level `dispatchIfRegistered`
  * exports remain live for call sites that lack a model handle.
+ *
+ * `model.state` / `model.document` are the single reactive source the view
+ * renders from (A6 of issue #1549). Before this, the view owned a parallel
+ * `AgentAtoms` bundle of 19 signals that the stores wrote into through a
+ * hand-maintained setter interface — adding a reducer field meant editing
+ * four files, and a view could (and did) write an atom directly, bypassing
+ * the reducer that owned the field.
  */
 
+import type { Accessor } from "solid-js";
+
 import { trail } from "@/log/render-trail";
+import type { DocumentNode } from "../view/agent/types";
 import {
     type AgentDocumentCommand,
     type AgentDocumentEvent,
@@ -22,6 +33,7 @@ import {
 import {
     type AgentPaneCommand,
     type AgentPaneEvent,
+    type AgentPaneView,
     dispatchIfRegistered as dispatchPaneIfRegisteredRaw,
 } from "./agent-pane-state-store";
 import type { CommandSource } from "./command-source";
@@ -31,7 +43,7 @@ import type { CommandSource } from "./command-source";
  * agent-pane-registration.ts) and lives until `unregisterPane`. Threaded
  * into hooks/views as `opts.model` so they can dispatch against the
  * agent pane's two stores without having to remember the soft-variant
- * rule case-by-case.
+ * rule case-by-case, and read the stores' state without a mirror.
  *
  * Construction is internal to agent-pane-registration.ts —
  * `_createAgentPaneModel` below is `@internal`. Callers receive the
@@ -55,6 +67,23 @@ export interface AgentPaneModel {
      * it; dispatchers just gate-check.
      */
     readonly disposed: boolean;
+
+    /**
+     * Reactive, read-only view of the pane's reducer state — one signal per
+     * `AgentPaneState` field (see `AgentPaneView` in agent-pane-state-store).
+     * Reads track like any signal read: `model.state.turnPhase.kind`.
+     *
+     * Stays readable after `disposed` (it holds the last published state);
+     * nothing writes to it except the store's own dispatch, so there is no
+     * second copy to drift.
+     */
+    readonly state: AgentPaneView;
+
+    /**
+     * Reactive accessor for the pane's document nodes, owned by
+     * agent-document-store. Same lifetime rule as `state`.
+     */
+    readonly document: Accessor<DocumentNode[]>;
 
     /**
      * Dispatch a command against the pane-state store. Default-safe:
@@ -96,10 +125,14 @@ export interface AgentPaneModel {
  */
 class AgentPaneModelImpl implements AgentPaneModel {
     readonly blockId: string;
+    readonly state: AgentPaneView;
+    readonly document: Accessor<DocumentNode[]>;
     private _disposed = false;
 
-    constructor(blockId: string) {
+    constructor(blockId: string, state: AgentPaneView, document: Accessor<DocumentNode[]>) {
         this.blockId = blockId;
+        this.state = state;
+        this.document = document;
     }
 
     get disposed(): boolean {
@@ -161,10 +194,14 @@ class AgentPaneModelImpl implements AgentPaneModel {
 /**
  * Construct a new model. `@internal` — only `agent-pane-registration.ts`
  * should call this. Callers receive their `AgentPaneModel` from
- * `registerPane`.
+ * `registerPane`, which passes in the two stores' reactive read sides.
  */
-export function _createAgentPaneModel(blockId: string): AgentPaneModel & {
+export function _createAgentPaneModel(
+    blockId: string,
+    state: AgentPaneView,
+    document: Accessor<DocumentNode[]>,
+): AgentPaneModel & {
     _markDisposed(): void;
 } {
-    return new AgentPaneModelImpl(blockId);
+    return new AgentPaneModelImpl(blockId, state, document);
 }

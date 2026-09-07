@@ -11,7 +11,7 @@
  * module doc for the full rationale.
  *
  * Called directly from inside the caller's `onMount`, matching the
- * original inline placement. No-ops when `pendingMessagesAtom` is not
+ * original inline placement. No-ops when `pendingMessages` is not
  * supplied.
  */
 
@@ -22,7 +22,8 @@ import * as WOS from "@/app/store/wos";
 import { trail } from "@/log/render-trail";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import type { PendingMessage, SignalPair } from "../state";
+import type { Accessor } from "solid-js";
+import type { PendingMessage } from "../state";
 import type { UserMessageNode } from "../types";
 import { STARTUP_HEADING_RE } from "../stream-parser";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -30,7 +31,7 @@ import type { StreamFlushQueue } from "../stream-flush-queue";
 export interface UsePendingMessageAcceptanceOptions {
     blockId: string;
     model: AgentPaneModel;
-    pendingMessagesAtom?: SignalPair<PendingMessage[]>;
+    pendingMessages?: Accessor<PendingMessage[]>;
     queue: StreamFlushQueue;
     hasNodeId: (id: string) => boolean;
     addNodeId: (id: string) => void;
@@ -52,8 +53,8 @@ export interface UsePendingMessageAcceptanceOptions {
 }
 
 export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOptions): void {
-    if (!opts.pendingMessagesAtom) return;
-    const [getPending] = opts.pendingMessagesAtom;
+    if (!opts.pendingMessages) return;
+    const getPending = opts.pendingMessages;
 
     // Subscribe to `agent-message-accepted`: when the backend picks
     // up a queued message, promote the matching entry out of the

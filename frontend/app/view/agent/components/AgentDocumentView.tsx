@@ -14,7 +14,7 @@
  *
  * All scroll behavior — stick-to-bottom, anchor capture, jump-to-node,
  * pagination restore — lives in the VirtualList. This component is
- * just glue between the existing AgentAtoms contract and that new
+ * just glue between the pane model reactive reads and that new
  * component.
  *
  * Diagnostic / launch-flow logs used to render inline at the top of this
@@ -40,7 +40,9 @@ import type { LaunchPhase } from "../flows/launch-phase";
 import { toInAppLoginPhase } from "./to-in-app-login-phase";
 
 interface AgentDocumentViewProps {
-    documentAtom: SignalPair<DocumentNode[]>;
+    /** Reactive accessor for the nodes to render (`model.document`, or a derived read of it). */
+    documentNodes: Accessor<DocumentNode[]>;
+    /** View-local UI state (collapse/pin sets, scroll, filter). Still a signal pair: it is not reducer-owned. */
     documentStateAtom: SignalPair<DocumentState>;
     /** Re-run the provider login flow — forwarded to the list so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
@@ -97,7 +99,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // Phase 2: build the view state once per mount. Lifetime matches
     // this component (not the agent ViewModel) — that's fine because
     // scroll state is per-pane-mount, not per-agent-session.
-    const viewState = createAgentViewState(props.documentAtom);
+    const viewState = createAgentViewState(props.documentNodes);
     // Register the markHistoryReady callback with the parent so
     // useHistoryPagination (called in agent-view.tsx) can signal when
     // the initial history load is done. Called synchronously — before
@@ -177,7 +179,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
     // no dispatches of its own to match against anyway.
     const dispatchMatches = createMemo<Map<string, AgentDispatch>>(() =>
         props.blockId
-            ? correlateDispatchesForBlock(props.blockId, props.documentAtom[0](), allSubagentsAtom(), allDispatchesAtom())
+            ? correlateDispatchesForBlock(props.blockId, props.documentNodes(), allSubagentsAtom(), allDispatchesAtom())
             : new Map()
     );
 

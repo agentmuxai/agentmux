@@ -178,13 +178,14 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
-### implemented (135)
+### implemented (136)
 
 | Spec | Title |
 |---|---|
 | [`PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01`](PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md) | Docs cleanup — execution plan |
 | [`PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02`](PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) | Plan — consolidate the agent pane's two (really three) separate login CTAs |
 | [`PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03`](PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md) | Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap) |
+| [`SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06`](SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06.md) | SPEC: A6 — remove the agent-pane `AgentAtoms` mirror; render from the reducer stores |
 | [`SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02`](SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md) | Spec: ABF Import UI (Phase 3) — Selective Import + Collision Handling |
 | [`SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01`](SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md) | Spec: ABF v0.1 — Single-File Format + Importer (Phase 2) |
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
@@ -339,7 +340,7 @@ partial list.
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 
-### proposed (96)
+### proposed (95)
 
 | Spec | Title |
 |---|---|
