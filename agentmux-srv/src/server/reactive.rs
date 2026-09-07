@@ -54,12 +54,35 @@ const MAX_FORWARD_HOPS: u8 = 3;
 /// compiler cannot say a word. The failure mode is a silently mislabelled TRUST
 /// field on a security marker, which is not the kind of bug to leave to
 /// argument order.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct EchoTrust<'a> {
     pub delivery_tier: &'a str,
     pub sig_verified: Option<bool>,
     pub reagent_verified: Option<bool>,
     pub lan_verified: Option<bool>,
+    pub channel_verified: Option<bool>,
+}
+
+/// The trust an echoed marker should carry after a forward, given the
+/// peer's response body. The RECEIVING instance is the one that computes
+/// `channel_verified` (the forwarder holds the sender's HMAC key, so §D2
+/// step 2 of SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md makes it skip
+/// cross-channel verification) and threads it back via
+/// `InjectionResponse::channel_verified`, exactly as it already does for
+/// `effective_tier`/`requires_stop`. Taking it from the body keeps the
+/// sender's echoed `TRUST=` consistent with the `ESCALATE=` the same body
+/// supplies — otherwise a sensitive cross-channel message could echo as
+/// `TRUST=self-declared … ESCALATE=none`, which contradicts itself (codex
+/// P2 on #3064). A body without the field (an older peer) leaves the
+/// caller's value alone.
+fn echo_trust_from_peer_body<'a>(body: &serde_json::Value, base: EchoTrust<'a>) -> EchoTrust<'a> {
+    EchoTrust {
+        channel_verified: body
+            .get("channel_verified")
+            .and_then(|v| v.as_bool())
+            .or(base.channel_verified),
+        ..base
+    }
 }
 
 pub(super) fn echo_jekt_to_sender(
@@ -78,6 +101,7 @@ pub(super) fn echo_jekt_to_sender(
         sig_verified,
         reagent_verified,
         lan_verified,
+        channel_verified,
     } = trust;
     let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
         return;
@@ -110,6 +134,7 @@ pub(super) fn echo_jekt_to_sender(
         // the echoed marker internally consistent with its own `ESCALATE=`.
         reagent_verified,
         lan_verified,
+        channel_verified,
         // Defaults to `true` (STOP) when the caller couldn't tell us —
         // matches `effective_tier` defaulting to the more-cautious "coord"
         // rather than assuming "info" above; never silently downgrades a
@@ -242,7 +267,7 @@ async fn forward_inject_to_peer(
                 body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                 body.get("effective_tier").and_then(|v| v.as_str()),
                 body.get("requires_stop").and_then(|v| v.as_bool()),
-                peer.trust,
+                echo_trust_from_peer_body(&body, peer.trust),
                 req.priority.as_deref().unwrap_or("normal"),
             );
             ForwardOutcome::Delivered(body)
@@ -502,6 +527,115 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     req.lan_verified = Some(verified);
 }
 
+/// Anti-replay window for cross-channel `channel_sig` —
+/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
+/// `JEKT_SIG_MAX_AGE_SECS`, NOT LAN/WAN's wider one. A cross-channel forward
+/// is a same-machine HTTP call to `127.0.0.1`; it has no real-network
+/// latency budget to accommodate, for the same reason host-tier doesn't.
+const CHANNEL_SIG_MAX_AGE_SECS: i64 = JEKT_SIG_MAX_AGE_SECS;
+
+/// Cross-channel (same machine, different AgentMux instance) per-agent
+/// Ed25519 signature verification —
+/// docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D2, Phase B.
+///
+/// Mirrors `verify_lan_signature`'s structure but resolves the claimed
+/// sender's public key from the host-global shared registry
+/// (`AgentEntry::jekt_public_key`, published at registration by whichever
+/// instance actually spawned that agent — §D1) instead of a LAN round trip.
+/// A local file read, so this is synchronous and has none of the LAN
+/// lookup's rate-limiter `Skipped` hazard.
+///
+/// Only meaningful for `delivery_tier == "channel"` — the label a same-host
+/// forward now carries (§D4, set by the forwarding instance in
+/// `handle_reactive_inject`'s Tier 2a/2b). Off that tier the field stays
+/// `None`, same scoping as `lan_verified`.
+///
+/// Ordering guarantee (§D2 step 2): a claimed sender THIS instance holds an
+/// HMAC key for is a same-instance agent, and `verify_jekt_signature` owns
+/// it entirely — this function returns without touching `channel_verified`,
+/// so the two verifiers can never disagree about one message.
+///
+/// Outcomes, all three-state like its siblings:
+/// - `None` — no shared-registry entry for the claimed sender anywhere (a
+///   genuine bridge, or an agent that never registered), OR every entry
+///   found has an empty `jekt_public_key` (written before Phase A shipped —
+///   "cannot check," never "failed the check," §6). Nothing to verify
+///   against; not a red flag on its own.
+/// - `Some(true)` — `channel_sig` present, fresh, and verified against the
+///   published key of ANY of that agent's entries (one agent name can
+///   legitimately be live in several channels at once — §D2 step 5).
+/// - `Some(false)` — a published key WAS found but the signature was
+///   missing, stale, or wrong. The §D3 red flag; **not escalated in Phase
+///   B** (see `InjectionRequest::channel_verified`'s doc comment).
+pub(super) fn verify_cross_channel_signature(state: &AppState, req: &mut InjectionRequest) {
+    let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
+        return;
+    };
+    verify_cross_channel_signature_in(state, req, &shared_dir, now_unix_secs());
+}
+
+/// [`verify_cross_channel_signature`] with the shared registry dir and clock
+/// injected — the testable core; the wrapper above only resolves the real
+/// dir. Keeps tests off the process-global `AGENTMUX_SHARED_DIR` env var.
+pub(super) fn verify_cross_channel_signature_in(
+    state: &AppState,
+    req: &mut InjectionRequest,
+    shared_dir: &std::path::Path,
+    now_secs: i64,
+) {
+    if req.delivery_tier.as_deref() != Some("channel") {
+        return;
+    }
+    let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
+        return;
+    };
+    // §D2 step 2: a same-instance sender is the HMAC path's to judge.
+    if matches!(state.wstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
+        return;
+    }
+    // Only entries that actually published a key count — a pre-Phase-A
+    // entry (empty key) is "cannot check," and must not turn a missing
+    // signature into `Some(false)` on a mixed-version machine (§6).
+    let published_keys: Vec<Vec<u8>> = agent_registry::lookup_all_shared(shared_dir, &claimed)
+        .into_iter()
+        .filter(|e| !e.jekt_public_key.is_empty())
+        .filter_map(|e| agentmux_common::jekt_sign::decode_key(&e.jekt_public_key))
+        .collect();
+    if published_keys.is_empty() {
+        return;
+    }
+
+    let msgid = req.request_id.clone().unwrap_or_default();
+    let ts = req.ts_secs.unwrap_or(0);
+    let within_freshness_window = ts > 0 && (now_secs - ts).abs() <= CHANNEL_SIG_MAX_AGE_SECS;
+    let source_channel = req.source_channel.as_deref().unwrap_or("");
+    let verified = within_freshness_window
+        && req.channel_sig.as_deref().is_some_and(|sig| {
+            published_keys.iter().any(|key| {
+                agentmux_common::jekt_sign::verify_channel_jekt(
+                    key,
+                    &msgid,
+                    &claimed,
+                    source_channel,
+                    &req.target_agent,
+                    ts,
+                    &req.message,
+                    sig,
+                )
+            })
+        });
+    if !verified {
+        tracing::warn!(
+            agent_id = %claimed,
+            source_channel = %source_channel,
+            has_signature = req.channel_sig.is_some(),
+            fresh = within_freshness_window,
+            "cross-channel jekt: claimed sender has a published key but the signature did not verify"
+        );
+    }
+    req.channel_verified = Some(verified);
+}
+
 /// Server-derived `delivery_tier` for the LAN-key case only —
 /// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3, revised after
 /// reagentx P0 on the implementing PR: an earlier version of this override
@@ -529,11 +663,31 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
 /// this instance, so which tier it self-labels a request as grants nothing
 /// extra — at worst it triggers MORE verification
 /// (`verify_lan_signature` running), never less.
+///
+/// `"channel"` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4) rides the
+/// same rule: it's set by the FORWARDING instance on a same-host Tier 2a/2b
+/// hop and authenticates here with this instance's full `auth_key`, so a
+/// full-key caller's own `"channel"` claim is honoured as-is. Claiming it
+/// gains nothing — it only adds `verify_cross_channel_signature` on top of
+/// the unconditional `verify_jekt_signature`, never removes a check.
 fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
     if auth_via == super::ReactiveAuthVia::LanKey {
         "lan".to_string()
     } else {
         claimed.unwrap_or("host").to_string()
+    }
+}
+
+/// The `delivery_tier` a same-host Tier 2a/2b forward carries to the peer
+/// instance — SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4. See the call
+/// site in `handle_reactive_inject` for the full reasoning; in short: a
+/// `host`-tier (or unlabelled) request becomes `channel` on the hop, and
+/// anything already carrying a network tier keeps it so the peer re-derives
+/// that tier's own verification.
+fn same_host_forward_tier(current: Option<&str>) -> &str {
+    match current {
+        None | Some("host") => "channel",
+        Some(other) => other,
     }
 }
 
@@ -844,6 +998,7 @@ pub(super) async fn handle_reactive_inject(
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
+    verify_cross_channel_signature(&state, &mut req);
     resolve_transcript_request_tier_fields(&state.wstore, &mut req);
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
@@ -866,6 +1021,7 @@ pub(super) async fn handle_reactive_inject(
                 sig_verified: req.sig_verified,
                 reagent_verified: req.reagent_verified,
                 lan_verified: req.lan_verified,
+                channel_verified: req.channel_verified,
             },
             req.priority.as_deref().unwrap_or("normal"),
         );
@@ -894,6 +1050,26 @@ pub(super) async fn handle_reactive_inject(
     let mut forwarded_req = req.clone();
     forwarded_req.forward_hops = req.forward_hops.saturating_add(1);
 
+    // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D4: a same-host hop to a
+    // DIFFERENT instance (Tier 2a/2b below) is labelled `channel`, not
+    // `host` — `host` is reserved for genuinely same-instance traffic, so
+    // the label finally matches the guarantee (the receiving instance holds
+    // no HMAC key for a sender it didn't spawn; §2.3 of the spec). The
+    // receiver can't tell a forward from a local call by auth alone (the
+    // forward authenticates with the receiver's own full `auth_key`), so
+    // the forwarding side says so here, and `resolve_delivery_tier` on the
+    // far side honours a full-key caller's claim as it always has.
+    //
+    // An already-`lan`/`wan` hop keeps its label: that's what lets the peer
+    // re-derive its own tier-specific verification on the second hop
+    // (`resolve_delivery_tier`'s doc comment, reagentx P0 on the LAN signing
+    // PR). A `channel` hop forwarded again stays `channel`. Tier 3 (LAN)
+    // sends `forwarded_req` untouched — the peer authenticates it via
+    // `lan_key` and forces `lan` regardless of the body.
+    let same_host_tier = same_host_forward_tier(req.delivery_tier.as_deref());
+    let mut same_host_req = forwarded_req.clone();
+    same_host_req.delivery_tier = Some(same_host_tier.to_string());
+
     if is_not_found {
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
         let data_dir = base::get_wave_data_dir();
@@ -903,17 +1079,18 @@ pub(super) async fn handle_reactive_inject(
                 match forward_inject_to_peer(
                     &state,
                     &req,
-                    &forwarded_req,
+                    &same_host_req,
                     ForwardPeer {
                         url: &entry.local_url,
                         auth_key: &entry.auth_key,
                         kind: "cross-instance",
                         channel: None,
                         trust: EchoTrust {
-                            delivery_tier: "host",
+                            delivery_tier: same_host_tier,
                             sig_verified: req.sig_verified,
                             reagent_verified: req.reagent_verified,
                             lan_verified: req.lan_verified,
+                            channel_verified: req.channel_verified,
                         },
                     },
                 )
@@ -987,17 +1164,18 @@ pub(super) async fn handle_reactive_inject(
                 match forward_inject_to_peer(
                     &state,
                     &req,
-                    &forwarded_req,
+                    &same_host_req,
                     ForwardPeer {
                         url: &entry.local_url,
                         auth_key: &entry.auth_key,
                         kind: "cross-channel",
                         channel: Some(&entry.channel),
                         trust: EchoTrust {
-                            delivery_tier: "host",
+                            delivery_tier: same_host_tier,
                             sig_verified: req.sig_verified,
                             reagent_verified: req.reagent_verified,
                             lan_verified: req.lan_verified,
+                            channel_verified: req.channel_verified,
                         },
                     },
                 )
@@ -1060,6 +1238,7 @@ pub(super) async fn handle_reactive_inject(
                         // LAN forward path.
                         reagent_verified: None,
                         lan_verified: req.lan_verified,
+                        channel_verified: req.channel_verified,
                     },
                 },
             )
@@ -1168,6 +1347,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                     sig_verified: None,
                     reagent_verified: None,
                     lan_verified: None,
+                    channel_verified: None,
                 },
                 priority,
             );
@@ -1182,6 +1362,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 // rather than guessed at.
                 effective_tier: None,
                 requires_stop: None,
+                channel_verified: None,
             };
             Some(serde_json::to_value(&body).unwrap_or_default())
         }
@@ -2499,9 +2680,258 @@ mod verify_lan_signature_tests {
     }
 }
 
+/// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §9 — the unit half of the
+/// test plan (items 1–8 and the D5 replay cases 9–10, driven through the
+/// verifier rather than the raw primitives). Entries are written straight to
+/// a temp shared-registry dir with an explicit public key, bypassing the
+/// process-global pubkey resolver (a `OnceLock` another test binary-wide
+/// test owns), so each test is hermetic and order-independent.
+#[cfg(test)]
+mod verify_cross_channel_signature_tests {
+    use super::*;
+    use crate::backend::reactive::registry::{write_shared_entry_for_test, AgentEntry};
+    use crate::server::tests::test_state;
+    use agentmux_common::jekt_sign::{generate_lan_keypair, sign_channel_jekt, sign_lan_jekt};
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+
+    const NOW: i64 = 1_800_000_000;
+
+    /// `(private, public)` — `generate_lan_keypair` itself returns
+    /// `(public, private)`; flipped here so call sites read naturally.
+    fn keypair(seed_byte: u8) -> ([u8; 32], [u8; 32]) {
+        let (public, private) = generate_lan_keypair([seed_byte; 32]);
+        (private, public)
+    }
+
+    fn publish(shared_dir: &std::path::Path, agent: &str, channel: &str, pubkey: Option<&[u8; 32]>) {
+        write_shared_entry_for_test(
+            shared_dir,
+            &AgentEntry {
+                agent_id: agent.to_string(),
+                local_url: "http://127.0.0.1:9001".to_string(),
+                block_id: "block-1".to_string(),
+                pid: 1,
+                updated_at: 1,
+                auth_key: String::new(),
+                channel: channel.to_string(),
+                registration_nonce: 0,
+                jekt_public_key: pubkey.map(|k| BASE64.encode(k)).unwrap_or_default(),
+            },
+        );
+    }
+
+    fn channel_req(source: &str, source_channel: &str, ts: i64) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: "lark".to_string(),
+            message: "here is the brief".to_string(),
+            source_agent: Some(source.to_string()),
+            delivery_tier: Some("channel".to_string()),
+            request_id: Some("msg-xc-1".to_string()),
+            ts_secs: Some(ts),
+            source_channel: Some(source_channel.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn sign(req: &InjectionRequest, private: &[u8; 32]) -> String {
+        sign_channel_jekt(
+            private,
+            req.request_id.as_deref().unwrap(),
+            req.source_agent.as_deref().unwrap(),
+            req.source_channel.as_deref().unwrap(),
+            &req.target_agent,
+            req.ts_secs.unwrap(),
+            &req.message,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_valid_signature_against_the_published_key_verifies() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (private, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        let mut req = channel_req("agent4", "chan-a", NOW);
+        req.channel_sig = Some(sign(&req, &private));
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_resolvable_sender_with_no_signature_is_an_active_failure() {
+        // §D3's load-bearing row: entry + key found, nothing signed.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (_, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        let mut req = channel_req("agent4", "chan-a", NOW);
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_signature_from_the_wrong_key_fails() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (_, public) = keypair(1);
+        let (imposter_private, _) = keypair(2);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        let mut req = channel_req("agent4", "chan-a", NOW);
+        req.channel_sig = Some(sign(&req, &imposter_private));
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_pre_upgrade_entry_with_an_empty_key_cannot_be_checked() {
+        // §6: "cannot check," never "failed the check" — otherwise every
+        // sender on a mixed-version machine escalates.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        publish(dir.path(), "agent4", "chan-a", None);
+        let mut req = channel_req("agent4", "chan-a", NOW);
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, None, "an empty published key must yield None, not Some(false)");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_sender_with_no_entry_anywhere_is_left_unset() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = channel_req("slack-bridge", "chan-a", NOW);
+        req.channel_sig = Some("irrelevant".to_string());
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, None);
+    }
+
+    #[tokio::test]
+    async fn a_same_instance_sender_is_left_to_the_hmac_path() {
+        // §D2 step 2: this instance holds an HMAC key for the claimed sender,
+        // so verify_jekt_signature owns the verdict — even though a shared
+        // entry with a key exists and nothing was signed.
+        let state = test_state();
+        state.wstore.agent_jekt_key_ensure("agent4").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let (_, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        let mut req = channel_req("agent4", "chan-a", NOW);
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, None, "must not shadow the HMAC verifier for a local agent");
+    }
+
+    #[tokio::test]
+    async fn a_valid_signature_outside_the_freshness_window_fails() {
+        // §D6: host-tier's 300s window, not LAN/WAN's 600s.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (private, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        let stale = NOW - CHANNEL_SIG_MAX_AGE_SECS - 1;
+        let mut req = channel_req("agent4", "chan-a", stale);
+        req.channel_sig = Some(sign(&req, &private));
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(false));
+
+        // ...and just inside it still verifies, so the boundary is the
+        // window and not something else.
+        let fresh = NOW - CHANNEL_SIG_MAX_AGE_SECS + 5;
+        let mut req = channel_req("agent4", "chan-a", fresh);
+        req.channel_sig = Some(sign(&req, &private));
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(true));
+        assert_eq!(CHANNEL_SIG_MAX_AGE_SECS, 300, "spec §D6 pins the host-tier window");
+    }
+
+    #[tokio::test]
+    async fn an_agent_live_in_two_channels_verifies_against_either_published_key() {
+        // §D2 step 5: same name, two channels, two keypairs; a signature
+        // from the second channel must verify even though the first
+        // channel's entry sorts ahead of it.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (_, public_a) = keypair(1);
+        let (private_b, public_b) = keypair(2);
+        publish(dir.path(), "agent4", "chan-a", Some(&public_a));
+        publish(dir.path(), "agent4", "chan-b", Some(&public_b));
+        let mut req = channel_req("agent4", "chan-b", NOW);
+        req.channel_sig = Some(sign(&req, &private_b));
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_lan_signature_replayed_as_a_cross_channel_one_fails() {
+        // §D5 domain separator — same key, same (msgid, sender, target, ts,
+        // message), but the LAN payload must not verify on this tier.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (private, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        let mut req = channel_req("agent4", "chan-a", NOW);
+        req.channel_sig = sign_lan_jekt(&private, "msg-xc-1", "agent4", "lark", NOW, "here is the brief");
+        assert!(req.channel_sig.is_some());
+        verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+        assert_eq!(req.channel_verified, Some(false));
+    }
+
+    #[tokio::test]
+    async fn a_signature_minted_for_one_channel_replayed_as_another_fails() {
+        // §D5 channel binding — the same agent's genuine signature from
+        // chan-a, presented as if it came from chan-b.
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (private, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        publish(dir.path(), "agent4", "chan-b", Some(&public));
+        let genuine = channel_req("agent4", "chan-a", NOW);
+        let sig = sign(&genuine, &private);
+        let mut replayed = channel_req("agent4", "chan-b", NOW);
+        replayed.channel_sig = Some(sig);
+        verify_cross_channel_signature_in(&state, &mut replayed, dir.path(), NOW);
+        assert_eq!(replayed.channel_verified, Some(false));
+    }
+
+    #[tokio::test]
+    async fn verification_is_scoped_to_the_channel_tier() {
+        let state = test_state();
+        let dir = tempfile::tempdir().unwrap();
+        let (private, public) = keypair(1);
+        publish(dir.path(), "agent4", "chan-a", Some(&public));
+        for tier in ["host", "lan", "wan"] {
+            let mut req = channel_req("agent4", "chan-a", NOW);
+            req.delivery_tier = Some(tier.to_string());
+            req.channel_sig = Some(sign(&req, &private));
+            verify_cross_channel_signature_in(&state, &mut req, dir.path(), NOW);
+            assert_eq!(req.channel_verified, None, "tier {tier} must leave channel_verified unset");
+        }
+    }
+
+    #[test]
+    fn same_host_forward_relabels_host_as_channel_and_keeps_network_tiers() {
+        // §D4: only a host-tier (or unlabelled) request becomes `channel`
+        // on the hop; a lan/wan/channel label is preserved so the peer
+        // re-derives that tier's own verification.
+        assert_eq!(same_host_forward_tier(None), "channel");
+        assert_eq!(same_host_forward_tier(Some("host")), "channel");
+        assert_eq!(same_host_forward_tier(Some("channel")), "channel");
+        assert_eq!(same_host_forward_tier(Some("lan")), "lan");
+        assert_eq!(same_host_forward_tier(Some("wan")), "wan");
+    }
+}
+
 #[cfg(test)]
 mod resolve_delivery_tier_tests {
     use super::*;
+
+    #[test]
+    fn full_auth_key_honours_a_channel_claim() {
+        // §D4: the forwarding instance labels the hop; the receiving
+        // instance (authenticated with its own full key) keeps the label.
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("channel")), "channel");
+        // A lan_key holder still can't claim it — LAN wins, as for every tier.
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, Some("channel")), "lan");
+    }
 
     #[test]
     fn lan_key_forces_lan_regardless_of_claim() {
@@ -2621,6 +3051,7 @@ mod forward_inject_tests {
                 sig_verified: None,
                 reagent_verified: None,
                 lan_verified: None,
+                channel_verified: None,
             },
         }
     }
@@ -2630,6 +3061,41 @@ mod forward_inject_tests {
         let (url, _guard) = stub_peer(status, body).await;
         let r = req();
         forward_inject_to_peer(&state, &r, &r, peer(&url)).await
+    }
+
+    // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B, codex P2 on
+    // #3064: the receiver's channel verdict rides back on the response and
+    // wins over the forwarder's (always-None) view for the echoed marker.
+    #[test]
+    fn echo_trust_takes_the_receivers_channel_verdict_from_the_body() {
+        let base = EchoTrust {
+            delivery_tier: "channel",
+            sig_verified: Some(true),
+            reagent_verified: None,
+            lan_verified: None,
+            channel_verified: None,
+        };
+        let body = serde_json::json!({ "success": true, "channel_verified": true });
+        let t = echo_trust_from_peer_body(&body, base);
+        assert_eq!(t.channel_verified, Some(true));
+        assert_eq!(t.sig_verified, Some(true), "every other field is untouched");
+        assert_eq!(t.delivery_tier, "channel");
+
+        let body = serde_json::json!({ "success": true, "channel_verified": false });
+        assert_eq!(echo_trust_from_peer_body(&body, base).channel_verified, Some(false));
+    }
+
+    #[test]
+    fn echo_trust_keeps_the_callers_value_when_an_older_peer_omits_the_field() {
+        let base = EchoTrust {
+            delivery_tier: "host",
+            sig_verified: None,
+            reagent_verified: None,
+            lan_verified: None,
+            channel_verified: Some(true),
+        };
+        let body = serde_json::json!({ "success": true });
+        assert_eq!(echo_trust_from_peer_body(&body, base), base);
     }
 
     #[tokio::test]

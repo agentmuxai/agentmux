@@ -359,6 +359,7 @@ impl Handler {
                 timestamp: now,
                 effective_tier: None,
                 requires_stop: None,
+                channel_verified: None,
             };
         }
 
@@ -372,6 +373,7 @@ impl Handler {
                 timestamp: now,
                 effective_tier: None,
                 requires_stop: None,
+                channel_verified: None,
             };
         }
 
@@ -402,6 +404,7 @@ impl Handler {
                     timestamp: now,
                     effective_tier: None,
                     requires_stop: None,
+                    channel_verified: None,
                 };
             }
         };
@@ -455,6 +458,7 @@ impl Handler {
                         timestamp: now,
                         effective_tier: None,
                         requires_stop: None,
+                        channel_verified: None,
                     };
                 }
             }
@@ -572,9 +576,18 @@ impl Handler {
         // never both be true for the same field at once, so a message that
         // reaches STOP-required via one of those three rules is, by
         // construction, never simultaneously "verified" on that same tier.
+        //
+        // `channel_verified` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md
+        // §D3, Phase B) joins the list on the same terms: a cross-channel
+        // signature that verified against the sender's published public
+        // key is proof of exactly who sent it. Its `Some(false)` is NOT yet
+        // among the forcing rules above — Phase C, deliberately held back
+        // until published keys have propagated (spec §6/§10) — so today
+        // this field can only ever relax, never escalate.
         let is_cryptographically_verified = req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
-            || req.lan_verified == Some(true);
+            || req.lan_verified == Some(true)
+            || req.channel_verified == Some(true);
         // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 2: the
         // ONE named exception to the verified-sender relaxation above. A
         // transcript_request's ESCALATE=required is not relaxed by a
@@ -611,6 +624,7 @@ impl Handler {
             req.sig_verified,
             req.reagent_verified,
             req.lan_verified,
+            req.channel_verified,
             requires_stop,
             &request_id,
             priority,
@@ -658,6 +672,7 @@ impl Handler {
                         timestamp: now,
                         effective_tier: Some(effective_tier.to_string()),
                         requires_stop: Some(requires_stop),
+                        channel_verified: req.channel_verified,
                     };
                 }
                 Ok(false) => {
@@ -692,6 +707,7 @@ impl Handler {
                         timestamp: now,
                         effective_tier: Some(effective_tier.to_string()),
                         requires_stop: Some(requires_stop),
+                        channel_verified: req.channel_verified,
                     };
                 }
             }
@@ -721,6 +737,7 @@ impl Handler {
                     timestamp: now,
                     effective_tier: Some(effective_tier.to_string()),
                     requires_stop: Some(requires_stop),
+                    channel_verified: req.channel_verified,
                 };
             }
         };
@@ -763,6 +780,7 @@ impl Handler {
                 timestamp: now,
                 effective_tier: Some(effective_tier.to_string()),
                 requires_stop: Some(requires_stop),
+                channel_verified: req.channel_verified,
             };
         }
 
@@ -799,6 +817,7 @@ impl Handler {
             timestamp: now,
             effective_tier: Some(effective_tier.to_string()),
             requires_stop: Some(requires_stop),
+            channel_verified: req.channel_verified,
         }
     }
 
@@ -865,6 +884,7 @@ impl Handler {
                     timestamp: now,
                     effective_tier: None,
                     requires_stop: None,
+                    channel_verified: None,
                 })
             }
             SupervisorAction::Nudge => {

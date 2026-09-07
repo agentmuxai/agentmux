@@ -300,6 +300,20 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 /// `is_lan_sig_invalid`), same as how `SIG=invalid` doesn't get its own
 /// `TRUST` value either.
 ///
+/// `channel_verified` (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D3/§D4)
+/// is the same idea one tier over: `DELIVERY=channel` is a same-machine
+/// forward to a *different* AgentMux instance — until Phase B it rendered as
+/// `host`, the strongest-sounding label, with no verification behind it.
+/// On that tier `Some(true)` renders `TRUST=channel-verified` (its own
+/// label, like `lan-verified`, so a reader can tell *how* identity was
+/// proven). Otherwise the tier falls back to the host-tier labels off
+/// `sig_verified`: the receiving instance may still hold the sender's HMAC
+/// key (a same-channel sibling instance) and have proven identity that way,
+/// and the two verifiers are mutually exclusive by construction (`§D2`
+/// step 2), so there's never a conflict to resolve. `Some(false)` renders
+/// nothing special here — same as `lan_verified`, the red flag (once Phase
+/// C enables it) lives in `TIER`.
+///
 /// `requires_stop` (SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md)
 /// is the caller's already-computed answer to "does `TIER=sensitive` mean
 /// STOP, or just tag-for-visibility" — see `Handler::inject_message_inner`'s
@@ -319,6 +333,7 @@ pub fn wrap_jekt_message(
     sig_verified: Option<bool>,
     reagent_verified: Option<bool>,
     lan_verified: Option<bool>,
+    channel_verified: Option<bool>,
     requires_stop: bool,
     msg_id: &str,
     priority: &str,
@@ -332,7 +347,9 @@ pub fn wrap_jekt_message(
     let from = source_agent.unwrap_or("unknown");
     let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
         "lan-verified"
-    } else if delivery_tier != "host" {
+    } else if delivery_tier == "channel" && channel_verified == Some(true) {
+        "channel-verified"
+    } else if delivery_tier != "host" && delivery_tier != "channel" {
         "network-claimed"
     } else {
         match sig_verified {

@@ -220,6 +220,42 @@ pub struct InjectionRequest {
     /// (`docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.4/§2.5).
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub lan_verified: Option<bool>,
+    /// The sending instance's channel id, as declared by the sender and bound
+    /// into `channel_sig`'s signed material
+    /// (`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` §D5). Client-supplied,
+    /// like `source_agent` — a wrong value simply fails verification, it
+    /// grants nothing. Carried through same-host forwards unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_channel: Option<String>,
+    /// Base64 Ed25519 signature for the cross-channel tier (same machine,
+    /// different AgentMux instance), produced by the claimed `source_agent`'s
+    /// own LAN keypair over a domain-separated payload that also binds
+    /// `source_channel` (`agentmux_common::jekt_sign::sign_channel_jekt`).
+    /// Meaningless off the `channel` tier, same scoping as `lan_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_sig: Option<String>,
+    /// Server-computed verification outcome for `channel_sig` —
+    /// `#[serde(skip_deserializing)]`, the same guarantee as `sig_verified`/
+    /// `lan_verified`: no attacker-supplied JSON body can set this. Set by
+    /// `verify_cross_channel_signature` (`server/reactive.rs`) after resolving
+    /// the claimed `source_agent`'s published public key from the host-global
+    /// shared registry (`AgentEntry::jekt_public_key`, §D1) — a local file
+    /// read, so unlike `lan_verified` it's synchronous.
+    ///
+    /// `None` — no entry for the claimed sender in the shared registry (a
+    /// bridge, or an agent that has never registered), an entry with an
+    /// empty `jekt_public_key` (written before Phase A shipped — "cannot
+    /// check," never "failed the check," spec §6), or the sender is a
+    /// same-instance agent (the HMAC path owns those, §D2 step 2).
+    /// `Some(true)` renders `TRUST=channel-verified` and joins the
+    /// verified-sender list for the `ESCALATE=none` relaxation. `Some(false)`
+    /// — an entry with a key WAS found and the signature was missing, stale,
+    /// or wrong — is the §D3 red flag, **not yet escalated**: Phase B
+    /// (this) only ever moves a message from `self-declared` to
+    /// `channel-verified`; Phase C turns `Some(false)` into forced
+    /// `TIER=sensitive` once published keys have propagated (spec §10).
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub channel_verified: Option<bool>,
     /// Server-computed: this jekt's `message` is a `transcript_request`
     /// payload (`agentmux_common::transcript_request::parse_transcript_request`)
     /// — `muxspect` Phase B/C's LAN/WAN conversation-visibility protocol.
@@ -284,6 +320,18 @@ pub struct InjectionResponse {
     /// fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requires_stop: Option<bool>,
+    /// The `InjectionRequest::channel_verified` verdict this delivery was
+    /// judged on, echoed back so a FORWARDING instance can render the same
+    /// `TRUST=` on the sender's echoed marker that the receiver rendered
+    /// (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B, codex P2 on
+    /// #3064). Only the receiving instance ever computes it — the forwarder
+    /// holds the sender's HMAC key and so skips cross-channel verification
+    /// by design (§D2 step 2) — so without this the echo would show the
+    /// sender-side view next to a receiver-side `ESCALATE=`. Same
+    /// thread-it-through reasoning as `requires_stop` above. `None` off the
+    /// channel tier or when nothing could be checked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_verified: Option<bool>,
 }
 
 /// Agent registration record.

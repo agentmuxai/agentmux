@@ -613,6 +613,7 @@ async fn handle_incoming_text(
                                 sig_verified: None,
                                 reagent_verified: None,
                                 lan_verified: None,
+                                channel_verified: None,
                             },
                             incoming.priority.as_deref().unwrap_or("normal"),
                         );
@@ -659,6 +660,7 @@ async fn handle_incoming_text(
                                     sig_verified: None,
                                     reagent_verified: None,
                                     lan_verified: None,
+                                    channel_verified: None,
                                 },
                                 incoming.priority.as_deref().unwrap_or("normal"),
                             );

@@ -1850,11 +1850,52 @@ fn build_block_to_agent_map(discovery: &Value) -> std::collections::HashMap<Stri
 /// srv treats an absent signature as "unverified," never as a reason to
 /// fail delivery, so a missing key here must never block
 /// `SendMessage`/`Loop` from sending.
+///
+/// The cross-channel signature (`channel_sig`,
+/// `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` §D5) rides along on the
+/// same terms as `lan_sig`: same `AGENTMUX_LAN_KEY`, but over a
+/// domain-separated payload that also binds this process's channel
+/// (`AGENTMUX_CHANNEL`, injected into this env at spawn by
+/// `inject_jekt_signing_keys_into_mcp_json`; defaults to `stable` exactly as
+/// srv's own registry writer does). srv only consults it once it has itself
+/// labelled the delivery `channel` — a same-machine forward to a different
+/// instance — so on every other tier it's simply ignored.
+///
+/// Returned as a named struct rather than a tuple: the three signatures are
+/// consecutive `Option<String>`s and a transposition at any of the call
+/// sites would compile clean and silently mislabel trust on the receiver.
+struct OutgoingJektSignatures {
+    request_id: String,
+    ts_secs: i64,
+    jekt_sig: Option<String>,
+    lan_sig: Option<String>,
+    source_channel: Option<String>,
+    channel_sig: Option<String>,
+}
+
+impl OutgoingJektSignatures {
+    /// The wire request these signatures were minted for — every send path
+    /// builds it through here so none can forget a field.
+    fn into_request(self, target_agent: String, message: String, source_agent: Option<String>) -> InjectRequest {
+        InjectRequest {
+            target_agent,
+            message,
+            source_agent,
+            request_id: Some(self.request_id),
+            ts_secs: Some(self.ts_secs),
+            jekt_sig: self.jekt_sig,
+            lan_sig: self.lan_sig,
+            source_channel: self.source_channel,
+            channel_sig: self.channel_sig,
+        }
+    }
+}
+
 fn sign_outgoing_jekt(
     source_agent: Option<&str>,
     target_agent: &str,
     message: &str,
-) -> (String, i64, Option<String>, Option<String>) {
+) -> OutgoingJektSignatures {
     let msgid = generate_jekt_msgid();
     let ts_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1866,13 +1907,30 @@ fn sign_outgoing_jekt(
         let src = source_agent?;
         Some(agentmux_common::jekt_sign::sign_jekt(&key, &msgid, src, target_agent, ts_secs, message))
     })();
+    let lan_key = std::env::var("AGENTMUX_LAN_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .and_then(|b64| agentmux_common::jekt_sign::decode_key(&b64));
     let lan_sig = (|| {
-        let key_b64 = std::env::var("AGENTMUX_LAN_KEY").ok().filter(|s| !s.is_empty())?;
-        let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
+        let key = lan_key.as_deref()?;
         let src = source_agent?;
-        agentmux_common::jekt_sign::sign_lan_jekt(&key, &msgid, src, target_agent, ts_secs, message)
+        agentmux_common::jekt_sign::sign_lan_jekt(key, &msgid, src, target_agent, ts_secs, message)
     })();
-    (msgid, ts_secs, jekt_sig, lan_sig)
+    let source_channel = std::env::var("AGENTMUX_CHANNEL").ok().filter(|s| !s.is_empty());
+    let channel_sig = (|| {
+        let key = lan_key.as_deref()?;
+        let src = source_agent?;
+        // Same default srv's registry writer uses (`local_channel_id`): an
+        // unset var means the stable channel, not "unknown".
+        let channel = source_channel.as_deref().unwrap_or("stable");
+        agentmux_common::jekt_sign::sign_channel_jekt(key, &msgid, src, channel, target_agent, ts_secs, message)
+    })();
+    // Only declare a channel when there's a signature bound to it — a bare
+    // `source_channel` with nothing to verify is noise on the wire.
+    let source_channel = channel_sig
+        .as_ref()
+        .map(|_| source_channel.unwrap_or_else(|| "stable".to_string()));
+    OutgoingJektSignatures { request_id: msgid, ts_secs, jekt_sig, lan_sig, source_channel, channel_sig }
 }
 
 /// Build the identity proof every `/api/v1/ui/*` request carries — an
@@ -2302,22 +2360,12 @@ async fn call_tool(
                 .ok()
                 .filter(|s| !s.is_empty());
 
-            let (request_id, ts_secs, jekt_sig, lan_sig) =
-                sign_outgoing_jekt(source_agent.as_deref(), to, message);
-
             let url = format!(
                 "{}/agentmux/reactive/inject",
                 local_url.trim_end_matches('/')
             );
-            let req = InjectRequest {
-                target_agent: to.to_string(),
-                message: message.to_string(),
-                source_agent,
-                request_id: Some(request_id),
-                ts_secs: Some(ts_secs),
-                jekt_sig,
-                lan_sig,
-            };
+            let req = sign_outgoing_jekt(source_agent.as_deref(), to, message)
+                .into_request(to.to_string(), message.to_string(), source_agent);
 
             let resp = client
                 .post(&url)
@@ -2522,17 +2570,8 @@ async fn call_tool(
                     // fails, just via the inject endpoint's own "agent not
                     // found" rather than this pre-check.
                     let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
-                    let (request_id, ts_secs, jekt_sig, lan_sig) =
-                        sign_outgoing_jekt(source_agent.as_deref(), &target_agent, message);
-                    let req = InjectRequest {
-                        target_agent,
-                        message: message.to_string(),
-                        source_agent: source_agent.clone(),
-                        request_id: Some(request_id),
-                        ts_secs: Some(ts_secs),
-                        jekt_sig,
-                        lan_sig,
-                    };
+                    let req = sign_outgoing_jekt(source_agent.as_deref(), &target_agent, message)
+                        .into_request(target_agent, message.to_string(), source_agent.clone());
                     let outcome = async {
                         let resp = client
                             .post(&url)
@@ -3282,17 +3321,8 @@ async fn call_tool(
                     tokio::time::sleep(interval).await;
                 }
                 loop {
-                    let (request_id, ts_secs, jekt_sig, lan_sig) =
-                        sign_outgoing_jekt(task_source.as_deref(), &task_target, &task_prompt);
-                    let req = InjectRequest {
-                        target_agent: task_target.clone(),
-                        message: task_prompt.clone(),
-                        source_agent: task_source.clone(),
-                        request_id: Some(request_id),
-                        ts_secs: Some(ts_secs),
-                        jekt_sig,
-                        lan_sig,
-                    };
+                    let req = sign_outgoing_jekt(task_source.as_deref(), &task_target, &task_prompt)
+                        .into_request(task_target.clone(), task_prompt.clone(), task_source.clone());
                     let _ = task_client
                         .post(&url)
                         .header("X-AuthKey", &task_auth)
