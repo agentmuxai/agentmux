@@ -3,6 +3,12 @@
 //
 // Phase E.5.5 — srv-side saga coordinator.
 //
+// NOT the same framework as `agentmux_launcher::saga`, despite the shared
+// name — see the "Why srv, not launcher" note directly below for the
+// original reasoning, and
+// docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md
+// for the decision to keep both rather than merge or rename them.
+//
 // **Why srv, not launcher:** the existing E.1a coordinator
 // framework lives in `agentmux-launcher::saga` (which still does
 // nothing — no consumers). The original Phase E spec assumed

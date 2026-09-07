@@ -3,6 +3,12 @@
 //
 // Phase B.3 — pure reducer.
 //
+// Shares its DISCIPLINE with `agentmux_srv::reducer` — pure, total,
+// deterministic, no I/O — but not its types: different `State`,
+// `Command` and `Event`, over the window/process state machine rather
+// than workspaces/tabs/blocks. Two reducers by design; see
+// docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md.
+//
 // Per `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §5.1:
 //
 //   pub fn update(state: &State, cmd: Command) -> (State, Vec<Event>);

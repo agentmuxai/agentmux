@@ -200,7 +200,7 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 
 ### Phase 5 — a decision on saga/reducer (no code until decided)
 
-14. Choose: one shared saga/reducer crate, or rename the launcher's and srv's types so the shared vocabulary stops implying a shared implementation. Write the choice into an ADR. Either outcome is fine; the current state is the only bad one. **Recommendation written** — `docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md`, status proposed.
+14. ~~Choose: one shared saga/reducer crate, or rename the launcher's and srv's types~~ — **DONE.** Decided 2026-09-07: keep both, document the split. `docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md` (now `active`), and the four module headers carry cross-references so a reader meeting either framework learns the other exists and why. No code moved: the two saga modules share one method name (`new`) and no types, so there was no duplication to remove — only a naming collision to stop implying one.
 
 ### Anytime — contained cleanups
 

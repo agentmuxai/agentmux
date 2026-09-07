@@ -1,6 +1,6 @@
 # Decision: the launcher and srv saga/reducer frameworks stay separate, and say so
 
-**Status:** proposed — the recommendation from the DRY audit (`docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md` §2.5, Phase 5 step 14), awaiting the repo owner's call. No code moves until it is accepted.
+**Status:** active — accepted by the repo owner 2026-09-07. Option 3: the two frameworks stay separate and each module header says so. The cross-references shipped in the PR that flipped this line; no code moved. Verified 2026-09-07.
 
 ## Context
 
@@ -33,6 +33,6 @@ Reasons: the divergence is designed, not accidental. The srv header and the 04-3
 
 ## Consequences
 
-- No code changes in this decision. On acceptance: add the four header cross-references (one comments-only PR) and mark this page **active**.
+- No code changes in this decision. **Done on acceptance:** the four header cross-references landed as a comments-only PR (`agentmux-launcher/src/saga/mod.rs`, `agentmux-srv/src/sagas/mod.rs`, `agentmux-launcher/src/reducer/mod.rs`, `agentmux-srv/src/reducer.rs`), and this page moved to `active`.
 - The audit's Phase 5 line item closes as "decided: separate, documented".
 - Re-open if a saga needs to coordinate launcher and srv state in one run, or if a third saga or reducer framework appears anywhere in the workspace.
