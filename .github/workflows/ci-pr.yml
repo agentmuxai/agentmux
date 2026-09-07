@@ -64,6 +64,21 @@ jobs:
       - name: cargo test --workspace
         run: cargo test --workspace -- --test-threads=1
 
+      # frontend/types/rpc/*.ts is generated from the Rust request/response
+      # types by ts-rs. This turns the audit's "keep in sync with the
+      # agentmux-srv RPC" comments into a build failure, for the commands
+      # migrated to register_typed so far (the set grows as the migration
+      # proceeds; the gate does not change with it).
+      #
+      # Lives in THIS job, not the docs job: it needs a Rust toolchain and a
+      # built agentmux-srv, both of which the steps above already provide, so
+      # regenerating costs almost nothing here. Safe on the Windows leg
+      # because .gitattributes normalizes every text file to LF, so the
+      # generated files cannot differ by line ending between platforms.
+      # See scripts/check-rpc-bindings.sh.
+      - name: RPC bindings are current
+        run: bash scripts/check-rpc-bindings.sh
+
   docs:
     name: doc status + grep gates
     runs-on: ubuntu-latest

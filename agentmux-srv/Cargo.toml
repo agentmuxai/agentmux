@@ -25,6 +25,15 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 tokio-util = { version = "0.7", features = ["io"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
+# TypeScript type generation for the RPC bindings (backend/rpc/schema.rs +
+# tests/rpc_bindings.rs). Derive-only: ts-rs emits a .ts declaration per
+# #[derive(TS)] type when the export test runs, and contributes nothing at
+# runtime. The serde-compat feature makes it honour the rename_all /
+# default / skip_serializing_if attributes these structs already carry, so
+# the emitted type matches the wire shape serde actually produces rather
+# than the Rust field names.
+# See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md.
+ts-rs = { version = "10", features = ["serde-compat"] }
 base64 = "0.22"
 thiserror = "1"
 dirs = "5"

@@ -343,7 +343,8 @@ pub struct AgentDefCreateFromTemplateResult {
 /// Request for `agentdefhide` / `agentdefunhide`. Phase 2 of the
 /// two-tier picker (Q2 Decision Y). The two RPCs share the same shape
 /// — the action is encoded in the command name, not the payload.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAgentDefHideData {
     /// id of a seeded definition (must have `is_seeded = 1`).
     pub definition_id: String,
@@ -354,7 +355,8 @@ pub struct CommandAgentDefHideData {
 /// that exists but isn't a template returns an RPC-level error, not
 /// `ok: false` — the caller should never have been able to send that
 /// id from the picker UI.)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentDefHideResult {
     pub ok: bool,
 }
