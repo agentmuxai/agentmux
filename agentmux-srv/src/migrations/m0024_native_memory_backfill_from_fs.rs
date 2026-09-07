@@ -49,6 +49,32 @@
 //!    `agent_native_memory_version_relabel_rollout_first_sight`, which
 //!    documents each clause. It cannot touch a genuine external write.
 //!
+//! ## Why this is Channel-scoped, and which store enumerates
+//!
+//! The two stores are not interchangeable, and picking the wrong one here
+//! would have reproduced the exact bug this migration exists to fix
+//! (caught in review before merge, not by me):
+//!
+//! - **Versions** (`db_agent_native_memory_versions`) live in the SHARED
+//!   store, so every read/insert/relabel below uses `shared_store_path`.
+//! - **Enumeration** does not. `list_all_memory_targets` calls
+//!   `agent_def_list()`, which prepares against `db_agents`, and
+//!   `memory_dir_for_agent_by_id`, which reads `db_agent_content` — both
+//!   per-channel tables created by `run_object_schema`, absent from
+//!   `Store::open_shared` by design (see its doc comment). Handing it the
+//!   shared store makes `agent_def_list()` fail with a SQL error that
+//!   `list_all_memory_targets` swallows (`if let Ok(agents)`), so that
+//!   whole enumeration path silently yields nothing and only currently
+//!   *active* registry agents get backfilled — every persisted-but-idle
+//!   agent missed, which is the same "read the wrong source, get an empty
+//!   list, look successful" failure as `m0023`.
+//!
+//! So the migration is `Channel`-scoped: it runs once per channel, with
+//! that channel's own store doing the enumeration — matching what the
+//! drift sweep itself gets in production (`state.wstore` is the channel
+//! store) — while still reading and writing versions in the shared store.
+//! The repair half is idempotent, so running once per channel is safe.
+//!
 //! Order matters: repair runs FIRST. Relabeling turns a row into the
 //! `agent_inferred` version the pair should have had, which then makes
 //! step 2's "has no version yet" test correctly skip that pair. Backfilling
@@ -65,7 +91,7 @@ pub struct M0024NativeMemoryBackfillFromFs;
 
 impl Migration for M0024NativeMemoryBackfillFromFs {
     fn id(&self) -> &'static str { "0024_native_memory_backfill_from_fs" }
-    fn scope(&self) -> MigrationScope { MigrationScope::Global }
+    fn scope(&self) -> MigrationScope { MigrationScope::Channel }
     fn description(&self) -> &'static str {
         "Backfill native memory versions from disk; repair mislabeled rollout rows"
     }
@@ -88,7 +114,22 @@ impl Migration for M0024NativeMemoryBackfillFromFs {
             })?;
 
         // ── 2. Backfill anything still unversioned, reading the filesystem.
-        let targets = crate::server::native_memory_handlers::list_all_memory_targets(&store);
+        // Enumerate with the CHANNEL store — see the module doc. Absent on
+        // a channel whose objects.db hasn't been created yet, in which case
+        // there are no agents here to backfill and the repair above was the
+        // whole job.
+        if !ctx.channel_store_path.exists() {
+            tracing::info!(
+                relabeled,
+                "native_memory_backfill_from_fs: no channel store yet; repair-only pass"
+            );
+            return Ok(());
+        }
+        let channel_store = Store::open(&ctx.channel_store_path).map_err(|e| {
+            MigrationError(format!("native_memory_backfill_from_fs: open channel store: {e}"))
+        })?;
+        let targets =
+            crate::server::native_memory_handlers::list_all_memory_targets(&channel_store);
         let mut backfilled = 0usize;
         let mut skipped_already_versioned = 0usize;
         let mut unreadable = 0usize;
@@ -239,6 +280,57 @@ mod tests {
         let versions = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].source, "agent_inferred");
+    }
+
+    /// The regression the review caught before merge: enumeration must use
+    /// the CHANNEL store. With the shared store, `agent_def_list()` fails on
+    /// the missing `db_agents` table, `list_all_memory_targets` swallows the
+    /// error, and this agent's on-disk memory is silently never backfilled —
+    /// the same "wrong source, empty list, looks fine" failure as m0023.
+    #[test]
+    fn backfills_an_on_disk_file_for_an_agent_only_the_channel_store_knows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared_path = tmp.path().join("shared.db");
+        let channel_path = tmp.path().join("objects.db");
+        let shared = Store::open_shared(&shared_path).unwrap();
+        let channel = Store::open(&channel_path).unwrap();
+
+        // An agent whose memory dir resolves via working_directory +
+        // CLAUDE_CONFIG_DIR — both per-channel reads.
+        let mut def = crate::backend::storage::agents::test_agent_def(
+            "agent-1", "Agent One", "claude", "agent", 1000, "",
+        );
+        def.working_directory = "/wd".to_string();
+        channel.agent_def_insert(&mut def).unwrap();
+        channel
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", tmp.path().display()),
+                updated_at: 1000,
+            })
+            .unwrap();
+
+        // memory_dir_for_cwd maps "/wd" -> "-wd" (non-alphanumerics to '-').
+        let mem_dir = tmp.path().join("projects").join("-wd").join("memory");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        std::fs::write(mem_dir.join("MEMORY.md"), "content that predates version tracking").unwrap();
+
+        M0024NativeMemoryBackfillFromFs
+            .up(&MigrationContext {
+                home: tmp.path().to_path_buf(),
+                data_dir: tmp.path().to_path_buf(),
+                shared_store_path: shared_path.clone(),
+                channel_store_path: channel_path.clone(),
+            })
+            .unwrap();
+
+        let latest = shared
+            .agent_native_memory_version_latest(&def.id, "MEMORY.md")
+            .unwrap()
+            .expect("the on-disk file must be backfilled, not silently skipped");
+        assert_eq!(latest.source, "agent_inferred");
+        assert_eq!(latest.content, "content that predates version tracking");
     }
 
     /// A store with no shared file at all must not error — the migration
