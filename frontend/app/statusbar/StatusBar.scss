@@ -541,6 +541,14 @@
     &--off {
         color: var(--warning-color);
     }
+
+    // Enabled, but the mDNS daemon could not start (Windows firewall "Block"
+    // is the usual cause). Distinct from --idle, which looks identical to the
+    // user otherwise: same hollow glyph, no peers, but nothing wrong. Ranked
+    // below --peers, since reaching a peer proves discovery works [codex P2].
+    &--error {
+        color: var(--error-color);
+    }
 }
 
 // ── MuxBus session dot (on the network pill, next to the LAN diamond) ──────

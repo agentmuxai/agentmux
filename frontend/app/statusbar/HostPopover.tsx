@@ -378,7 +378,12 @@ const HostPopover = (): JSX.Element => {
 
     // Glyph + label + state in one place (`lan-indicator.ts`), so the tooltip
     // a user reads can never disagree with the glyph they see.
-    const lanIndicator = () => resolveLanIndicator({ enabled: lanDiscoveryEnabled(), peerCount: lanCount() });
+    const lanIndicator = () =>
+        resolveLanIndicator({
+            enabled: lanDiscoveryEnabled(),
+            peerCount: lanCount(),
+            error: lanDiscoveryError(),
+        });
 
     // Toggle the network:lan_discovery setting. The backend's setconfig handler
     // calls LanDiscoveryController.apply, which starts/stops the mDNS daemon
