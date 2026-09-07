@@ -402,7 +402,7 @@ async function initHostWave(): Promise<void> {
         t = performance.now();
         await initWaveWrap(initOpts);
         tlog("initWaveWrap", t);
-        tlog("TOTAL initTauriWave", t0);
+        tlog("TOTAL initCefWave", t0);
 
         // Apply dev window title — task dev TITLE="agentx: PR #1780"
         // Only runs in Vite dev mode; VITE_DEV_TITLE is empty string in prod builds.
@@ -449,7 +449,7 @@ async function initHostNewWindow(): Promise<void> {
     };
 
     try {
-        getApi().sendLog("[initTauriNewWindow] Creating new backend objects");
+        getApi().sendLog("[initCefNewWindow] Creating new backend objects");
 
         // Get client data (reuse existing client)
         let t = performance.now();
@@ -461,7 +461,7 @@ async function initHostNewWindow(): Promise<void> {
         // instead of creating a blank one.
         const tearOffWsId = new URLSearchParams(window.location.search).get("workspaceId") ?? "";
         if (tearOffWsId) {
-            getApi().sendLog(`[initTauriNewWindow] tear-off workspaceId=${tearOffWsId}`);
+            getApi().sendLog(`[initCefNewWindow] tear-off workspaceId=${tearOffWsId}`);
         }
 
         t = performance.now();
@@ -518,7 +518,7 @@ async function initHostNewWindow(): Promise<void> {
         t = performance.now();
         await initWaveWrap(initOpts);
         tlog("initWaveWrap", t);
-        tlog("TOTAL initTauriNewWindow", t0);
+        tlog("TOTAL initCefNewWindow", t0);
 
         // Initialize instance tracking (must come after initWaveWrap so global state is ready)
         await initInstanceTracking();
@@ -612,7 +612,7 @@ async function initAppInner() {
     document.body.style.opacity = "0";
     document.body.classList.add("is-transparent");
 
-    // Check if we're in a host app (Tauri or CEF) that owns the backend sidecar.
+    // Check if we're in the host app (CEF) that owns the backend sidecar.
     // Host apps query the backend for client/window/tab state.
     // Non-host mode waits for an agentmux-init event from the host.
     const hostApp = isHostApp();
@@ -737,7 +737,7 @@ async function initAppInner() {
 
 // bootstrap.ts calls initApp() directly (static import).
 // This self-start path is kept only for dev environments where the
-// bootstrap entry point is not used. Skip if running in Tauri or CEF
+// bootstrap entry point is not used. Skip if running in the CEF host
 // since the bootstrap handles setup (window.api) before calling initApp().
 if (!isHostApp()) {
     if (document.readyState === "loading") {

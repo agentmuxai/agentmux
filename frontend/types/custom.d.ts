@@ -781,7 +781,7 @@ declare global {
 
     // Window extensions — eliminates (window as any) casts throughout the codebase
     interface Window {
-        // Platform API (set by CEF/Tauri bootstrap)
+        // Platform API (set by the CEF bootstrap)
         api: AppApi;
         globalAtoms: any; // GlobalAtomsType has a pre-existing type mismatch — fix separately
 
