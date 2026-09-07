@@ -9,6 +9,7 @@
 /// `format!`. Used by the recovery page to inject the app URL for the
 /// Reload button's navigation target.
 use super::dlog;
+use super::service_call::{service_body, service_call, ServiceCallError};
 
 pub(crate) fn js_string_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -184,67 +185,34 @@ fn parse_web_endpoint(web_endpoint: &str, caller: &str) -> Option<std::net::Sock
 /// `WindowOpacityApplied`/`WindowOpacityCleared` distinction (the caller in
 /// `transparency.rs` maps `Cleared` to `None`, not `Some(1.0)`).
 pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, window_id: &str, opacity: Option<f32>) {
-    use std::io::Write;
-
     let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_opacity") else {
         return;
     };
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "SetWindowOpacity",
-        "args": [window_id, opacity],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    match std::net::TcpStream::connect_timeout(&addr, timeout) {
-        Ok(mut stream) => {
-            stream.set_write_timeout(Some(timeout)).ok();
-            stream.set_read_timeout(Some(timeout)).ok();
-            if let Err(e) = stream.write_all(request.as_bytes()) {
-                tracing::warn!(
-                    window_id = %window_id,
-                    error = %e,
-                    "[backend_set_window_opacity] write failed — opacity mirror not persisted"
-                );
-                return;
-            }
-            // Drain the response so the connection closes cleanly; only the
-            // status line matters here (best-effort, unlike
-            // backend_close_window this isn't gating a user-visible retry).
-            use std::io::Read;
-            let mut resp = String::new();
-            let _ = stream.read_to_string(&mut resp);
-            let first_line = resp.lines().next().unwrap_or("(empty)");
-            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
-                tracing::warn!(
-                    window_id = %window_id,
-                    response = %first_line,
-                    "[backend_set_window_opacity] SetWindowOpacity did not succeed — opacity mirror not persisted"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                window_id = %window_id,
-                addr = %addr,
-                error = %e,
-                "[backend_set_window_opacity] connect failed — opacity mirror not persisted"
-            );
-        }
+    let body = service_body("window", "SetWindowOpacity", serde_json::json!([window_id, opacity]));
+    match service_call(addr, auth_key, &body) {
+        Ok(r) if r.status_ok() => {}
+        Ok(r) => tracing::warn!(
+            window_id = %window_id,
+            response = %r.first_line(),
+            "[backend_set_window_opacity] SetWindowOpacity did not succeed — opacity mirror not persisted"
+        ),
+        // A read failure used to fall through to the "(empty)" status line.
+        Err(ServiceCallError::Read(_)) => tracing::warn!(
+            window_id = %window_id,
+            response = "(empty)",
+            "[backend_set_window_opacity] SetWindowOpacity did not succeed — opacity mirror not persisted"
+        ),
+        Err(ServiceCallError::Write(e)) => tracing::warn!(
+            window_id = %window_id,
+            error = %e,
+            "[backend_set_window_opacity] write failed — opacity mirror not persisted"
+        ),
+        Err(ServiceCallError::Connect(e)) => tracing::warn!(
+            window_id = %window_id,
+            addr = %addr,
+            error = %e,
+            "[backend_set_window_opacity] connect failed — opacity mirror not persisted"
+        ),
     }
 }
 
@@ -265,68 +233,38 @@ pub(crate) fn backend_set_window_opacity(web_endpoint: &str, auth_key: &str, win
 /// `Point`/`WinSize`) since the two crates don't share these types directly
 /// — the wire format is plain JSON either way.
 pub(crate) fn backend_set_window_pos_and_size(web_endpoint: &str, auth_key: &str, window_id: &str, rect: agentmux_common::ipc::Rect) {
-    use std::io::Write;
-
     let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_pos_and_size") else {
         return;
     };
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "SetWindowPosAndSize",
-        "args": [
-            window_id,
-            { "x": rect.left, "y": rect.top },
-            { "width": rect.right - rect.left, "height": rect.bottom - rect.top },
-        ],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    match std::net::TcpStream::connect_timeout(&addr, timeout) {
-        Ok(mut stream) => {
-            stream.set_write_timeout(Some(timeout)).ok();
-            stream.set_read_timeout(Some(timeout)).ok();
-            if let Err(e) = stream.write_all(request.as_bytes()) {
-                tracing::warn!(
-                    window_id = %window_id,
-                    error = %e,
-                    "[backend_set_window_pos_and_size] write failed — position mirror not persisted"
-                );
-                return;
-            }
-            use std::io::Read;
-            let mut resp = String::new();
-            let _ = stream.read_to_string(&mut resp);
-            let first_line = resp.lines().next().unwrap_or("(empty)");
-            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
-                tracing::warn!(
-                    window_id = %window_id,
-                    response = %first_line,
-                    "[backend_set_window_pos_and_size] SetWindowPosAndSize did not succeed — position mirror not persisted"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                window_id = %window_id,
-                addr = %addr,
-                error = %e,
-                "[backend_set_window_pos_and_size] connect failed — position mirror not persisted"
-            );
-        }
+    let body = service_body("window", "SetWindowPosAndSize", serde_json::json!([
+        window_id,
+        { "x": rect.left, "y": rect.top },
+        { "width": rect.right - rect.left, "height": rect.bottom - rect.top },
+    ]));
+    match service_call(addr, auth_key, &body) {
+        Ok(r) if r.status_ok() => {}
+        Ok(r) => tracing::warn!(
+            window_id = %window_id,
+            response = %r.first_line(),
+            "[backend_set_window_pos_and_size] SetWindowPosAndSize did not succeed — position mirror not persisted"
+        ),
+        // A read failure used to fall through to the "(empty)" status line.
+        Err(ServiceCallError::Read(_)) => tracing::warn!(
+            window_id = %window_id,
+            response = "(empty)",
+            "[backend_set_window_pos_and_size] SetWindowPosAndSize did not succeed — position mirror not persisted"
+        ),
+        Err(ServiceCallError::Write(e)) => tracing::warn!(
+            window_id = %window_id,
+            error = %e,
+            "[backend_set_window_pos_and_size] write failed — position mirror not persisted"
+        ),
+        Err(ServiceCallError::Connect(e)) => tracing::warn!(
+            window_id = %window_id,
+            addr = %addr,
+            error = %e,
+            "[backend_set_window_pos_and_size] connect failed — position mirror not persisted"
+        ),
     }
 }
 
@@ -349,64 +287,34 @@ pub(crate) fn backend_set_window_topology(
     kind: &str,
     parent_window_id: Option<&str>,
 ) {
-    use std::io::Write;
-
     let Some(addr) = parse_web_endpoint(web_endpoint, "backend_set_window_topology") else {
         return;
     };
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "SetWindowTopology",
-        "args": [window_id, kind, parent_window_id],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    match std::net::TcpStream::connect_timeout(&addr, timeout) {
-        Ok(mut stream) => {
-            stream.set_write_timeout(Some(timeout)).ok();
-            stream.set_read_timeout(Some(timeout)).ok();
-            if let Err(e) = stream.write_all(request.as_bytes()) {
-                tracing::warn!(
-                    window_id = %window_id,
-                    error = %e,
-                    "[backend_set_window_topology] write failed — topology mirror not persisted"
-                );
-                return;
-            }
-            use std::io::Read;
-            let mut resp = String::new();
-            let _ = stream.read_to_string(&mut resp);
-            let first_line = resp.lines().next().unwrap_or("(empty)");
-            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
-                tracing::warn!(
-                    window_id = %window_id,
-                    response = %first_line,
-                    "[backend_set_window_topology] SetWindowTopology did not succeed — topology mirror not persisted"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                window_id = %window_id,
-                addr = %addr,
-                error = %e,
-                "[backend_set_window_topology] connect failed — topology mirror not persisted"
-            );
-        }
+    let body = service_body("window", "SetWindowTopology", serde_json::json!([window_id, kind, parent_window_id]));
+    match service_call(addr, auth_key, &body) {
+        Ok(r) if r.status_ok() => {}
+        Ok(r) => tracing::warn!(
+            window_id = %window_id,
+            response = %r.first_line(),
+            "[backend_set_window_topology] SetWindowTopology did not succeed — topology mirror not persisted"
+        ),
+        // A read failure used to fall through to the "(empty)" status line.
+        Err(ServiceCallError::Read(_)) => tracing::warn!(
+            window_id = %window_id,
+            response = "(empty)",
+            "[backend_set_window_topology] SetWindowTopology did not succeed — topology mirror not persisted"
+        ),
+        Err(ServiceCallError::Write(e)) => tracing::warn!(
+            window_id = %window_id,
+            error = %e,
+            "[backend_set_window_topology] write failed — topology mirror not persisted"
+        ),
+        Err(ServiceCallError::Connect(e)) => tracing::warn!(
+            window_id = %window_id,
+            addr = %addr,
+            error = %e,
+            "[backend_set_window_topology] connect failed — topology mirror not persisted"
+        ),
     }
 }
 
@@ -423,53 +331,22 @@ pub(crate) fn backend_set_window_topology(
 /// identically, so there's no need to distinguish "srv has no value" from
 /// "couldn't reach srv" here.
 pub(crate) fn backend_get_window_opacity(web_endpoint: &str, auth_key: &str, window_id: &str) -> Option<f32> {
-    use std::io::Write;
-
     let addr = parse_web_endpoint(web_endpoint, "backend_get_window_opacity")?;
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "GetWindow",
-        "args": [window_id],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_opacity] connect failed"))
-        .ok()?;
-    stream.set_write_timeout(Some(timeout)).ok();
-    stream.set_read_timeout(Some(timeout)).ok();
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_opacity] write failed"))
-        .ok()?;
-
-    use std::io::Read;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).ok()?;
-
-    // Split the raw HTTP/1.1 response into headers and body on the blank
-    // line (matches the request format written above — no chunked
-    // encoding involved, srv's axum response is a single JSON payload).
-    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
-    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
-    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
-    }
-    parsed.get("data")?.get("opacity")?.as_f64().map(|o| o as f32)
+    let body = service_body("window", "GetWindow", serde_json::json!([window_id]));
+    let data = match service_call(addr, auth_key, &body) {
+        Ok(r) => r.data_if_success()?,
+        Err(ServiceCallError::Connect(e)) => {
+            tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_opacity] connect failed");
+            return None;
+        }
+        Err(ServiceCallError::Write(e)) => {
+            tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_opacity] write failed");
+            return None;
+        }
+        // A read failure returned None silently before, too.
+        Err(ServiceCallError::Read(_)) => return None,
+    };
+    data.get("opacity")?.as_f64().map(|o| o as f32)
 }
 
 /// Read back the last-persisted position/size for `window_id` from srv —
@@ -487,50 +364,21 @@ pub(crate) fn backend_get_window_opacity(web_endpoint: &str, auth_key: &str, win
 /// `open_window_with_kind`), same as it does today when this function
 /// doesn't exist at all.
 pub(crate) fn backend_get_window_pos_and_size(web_endpoint: &str, auth_key: &str, window_id: &str) -> Option<agentmux_common::ipc::Rect> {
-    use std::io::Write;
-
     let addr = parse_web_endpoint(web_endpoint, "backend_get_window_pos_and_size")?;
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "GetWindow",
-        "args": [window_id],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_pos_and_size] connect failed"))
-        .ok()?;
-    stream.set_write_timeout(Some(timeout)).ok();
-    stream.set_read_timeout(Some(timeout)).ok();
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_pos_and_size] write failed"))
-        .ok()?;
-
-    use std::io::Read;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).ok()?;
-
-    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
-    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
-    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
-    }
-    let data = parsed.get("data")?;
+    let body = service_body("window", "GetWindow", serde_json::json!([window_id]));
+    let data = match service_call(addr, auth_key, &body) {
+        Ok(r) => r.data_if_success()?,
+        Err(ServiceCallError::Connect(e)) => {
+            tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_pos_and_size] connect failed");
+            return None;
+        }
+        Err(ServiceCallError::Write(e)) => {
+            tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_pos_and_size] write failed");
+            return None;
+        }
+        // A read failure returned None silently before, too.
+        Err(ServiceCallError::Read(_)) => return None,
+    };
     let x = data.get("pos")?.get("x")?.as_i64()?;
     let y = data.get("pos")?.get("y")?.as_i64()?;
     let width = data.get("winsize")?.get("width")?.as_i64()?;
@@ -558,50 +406,22 @@ pub(crate) fn backend_get_window_pos_and_size(web_endpoint: &str, auth_key: &str
 /// MUST invoke this off the UI thread (`reproject_from_srv` spawns a
 /// `std::thread`, mirroring `register_backend_window`'s write-through).
 pub(crate) fn backend_get_client_window_ids(web_endpoint: &str, auth_key: &str) -> Option<Vec<String>> {
-    use std::io::Write;
-
     let addr = parse_web_endpoint(web_endpoint, "backend_get_client_window_ids")?;
-
-    let body = serde_json::json!({
-        "service": "client",
-        "method": "GetClientData",
-        "args": [],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|e| tracing::warn!(error = %e, "[backend_get_client_window_ids] connect failed"))
-        .ok()?;
-    stream.set_write_timeout(Some(timeout)).ok();
-    stream.set_read_timeout(Some(timeout)).ok();
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| tracing::warn!(error = %e, "[backend_get_client_window_ids] write failed"))
-        .ok()?;
-
-    use std::io::Read;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).ok()?;
-
-    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
-    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
-    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
-    }
-    let ids = parsed.get("data")?.get("windowids")?.as_array()?;
+    let body = service_body("client", "GetClientData", serde_json::json!([]));
+    let data = match service_call(addr, auth_key, &body) {
+        Ok(r) => r.data_if_success()?,
+        Err(ServiceCallError::Connect(e)) => {
+            tracing::warn!(error = %e, "[backend_get_client_window_ids] connect failed");
+            return None;
+        }
+        Err(ServiceCallError::Write(e)) => {
+            tracing::warn!(error = %e, "[backend_get_client_window_ids] write failed");
+            return None;
+        }
+        // A read failure returned None silently before, too.
+        Err(ServiceCallError::Read(_)) => return None,
+    };
+    let ids = data.get("windowids")?.as_array()?;
     Some(
         ids.iter()
             .filter_map(|v| v.as_str().map(str::to_string))
@@ -620,50 +440,22 @@ pub(crate) fn backend_find_window_by_label(
     auth_key: &str,
     label: &str,
 ) -> Option<Vec<String>> {
-    use std::io::Write;
-
     let addr = parse_web_endpoint(web_endpoint, "backend_find_window_by_label")?;
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "FindWindowByLabel",
-        "args": [label],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|e| tracing::warn!(error = %e, "[backend_find_window_by_label] connect failed"))
-        .ok()?;
-    stream.set_write_timeout(Some(timeout)).ok();
-    stream.set_read_timeout(Some(timeout)).ok();
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| tracing::warn!(error = %e, "[backend_find_window_by_label] write failed"))
-        .ok()?;
-
-    use std::io::Read;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).ok()?;
-
-    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
-    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
-    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
-    }
-    let ids = parsed.get("data")?.as_array()?;
+    let body = service_body("window", "FindWindowByLabel", serde_json::json!([label]));
+    let data = match service_call(addr, auth_key, &body) {
+        Ok(r) => r.data_if_success()?,
+        Err(ServiceCallError::Connect(e)) => {
+            tracing::warn!(error = %e, "[backend_find_window_by_label] connect failed");
+            return None;
+        }
+        Err(ServiceCallError::Write(e)) => {
+            tracing::warn!(error = %e, "[backend_find_window_by_label] write failed");
+            return None;
+        }
+        // A read failure returned None silently before, too.
+        Err(ServiceCallError::Read(_)) => return None,
+    };
+    let ids = data.as_array()?;
     Some(
         ids.iter()
             .filter_map(|v| v.as_str().map(str::to_string))
@@ -679,50 +471,21 @@ pub(crate) fn backend_get_window_topology(
     auth_key: &str,
     window_id: &str,
 ) -> Option<(Option<String>, Option<String>)> {
-    use std::io::Write;
-
     let addr = parse_web_endpoint(web_endpoint, "backend_get_window_topology")?;
-
-    let body = serde_json::json!({
-        "service": "window",
-        "method": "GetWindow",
-        "args": [window_id],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout)
-        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_topology] connect failed"))
-        .ok()?;
-    stream.set_write_timeout(Some(timeout)).ok();
-    stream.set_read_timeout(Some(timeout)).ok();
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|e| tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_topology] write failed"))
-        .ok()?;
-
-    use std::io::Read;
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).ok()?;
-
-    let body_str = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
-    let parsed: serde_json::Value = serde_json::from_str(body_str).ok()?;
-    if parsed.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return None;
-    }
-    let data = parsed.get("data")?;
+    let body = service_body("window", "GetWindow", serde_json::json!([window_id]));
+    let data = match service_call(addr, auth_key, &body) {
+        Ok(r) => r.data_if_success()?,
+        Err(ServiceCallError::Connect(e)) => {
+            tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_topology] connect failed");
+            return None;
+        }
+        Err(ServiceCallError::Write(e)) => {
+            tracing::warn!(window_id = %window_id, error = %e, "[backend_get_window_topology] write failed");
+            return None;
+        }
+        // A read failure returned None silently before, too.
+        Err(ServiceCallError::Read(_)) => return None,
+    };
     let kind = data.get("kind").and_then(|v| v.as_str()).map(str::to_string);
     let parent_window_id = data.get("parent_window_id").and_then(|v| v.as_str()).map(str::to_string);
     Some((kind, parent_window_id))
@@ -743,65 +506,35 @@ pub(crate) fn backend_get_window_topology(
 /// triggering. No debounce (unlike opacity): this fires once per button
 /// click, not once per drag tick, so there's no burst to collapse.
 pub(crate) fn backend_update_block_meta(web_endpoint: &str, auth_key: &str, block_id: &str, meta_patch: serde_json::Value) {
-    use std::io::Write;
-
     let Some(addr) = parse_web_endpoint(web_endpoint, "backend_update_block_meta") else {
         return;
     };
-
     let oref = format!("block:{block_id}");
-    let body = serde_json::json!({
-        "service": "object",
-        "method": "UpdateObjectMeta",
-        "args": [oref, meta_patch],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    match std::net::TcpStream::connect_timeout(&addr, timeout) {
-        Ok(mut stream) => {
-            stream.set_write_timeout(Some(timeout)).ok();
-            stream.set_read_timeout(Some(timeout)).ok();
-            if let Err(e) = stream.write_all(request.as_bytes()) {
-                tracing::warn!(
-                    block_id = %block_id,
-                    error = %e,
-                    "[backend_update_block_meta] write failed — floating-pane placement not persisted"
-                );
-                return;
-            }
-            use std::io::Read;
-            let mut resp = String::new();
-            let _ = stream.read_to_string(&mut resp);
-            let first_line = resp.lines().next().unwrap_or("(empty)");
-            if !first_line.contains(" 200 ") && !first_line.starts_with("HTTP/1.1 200") {
-                tracing::warn!(
-                    block_id = %block_id,
-                    response = %first_line,
-                    "[backend_update_block_meta] UpdateObjectMeta did not succeed — floating-pane placement not persisted"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::warn!(
-                block_id = %block_id,
-                addr = %addr,
-                error = %e,
-                "[backend_update_block_meta] connect failed — floating-pane placement not persisted"
-            );
-        }
+    let body = service_body("object", "UpdateObjectMeta", serde_json::json!([oref, meta_patch]));
+    match service_call(addr, auth_key, &body) {
+        Ok(r) if r.status_ok() => {}
+        Ok(r) => tracing::warn!(
+            block_id = %block_id,
+            response = %r.first_line(),
+            "[backend_update_block_meta] UpdateObjectMeta did not succeed — floating-pane placement not persisted"
+        ),
+        // A read failure used to fall through to the "(empty)" status line.
+        Err(ServiceCallError::Read(_)) => tracing::warn!(
+            block_id = %block_id,
+            response = "(empty)",
+            "[backend_update_block_meta] UpdateObjectMeta did not succeed — floating-pane placement not persisted"
+        ),
+        Err(ServiceCallError::Write(e)) => tracing::warn!(
+            block_id = %block_id,
+            error = %e,
+            "[backend_update_block_meta] write failed — floating-pane placement not persisted"
+        ),
+        Err(ServiceCallError::Connect(e)) => tracing::warn!(
+            block_id = %block_id,
+            addr = %addr,
+            error = %e,
+            "[backend_update_block_meta] connect failed — floating-pane placement not persisted"
+        ),
     }
 }
 
@@ -830,65 +563,29 @@ pub(crate) fn register_ipc_with_backend(
     ipc_token: &str,
     host_reg_secret: &str,
 ) {
-    use std::io::Write;
-
     let Some(addr) = parse_web_endpoint(web_endpoint, "register_ipc_with_backend") else {
         return;
     };
-
-    let body = serde_json::json!({
-        "service": "host_ipc",
-        "method": "Register",
-        "args": [ipc_port, ipc_token, host_reg_secret],
-        "uicontext": null,
-    })
-    .to_string();
-    let request = format!(
-        "POST /agentmux/service HTTP/1.1\r\n\
-         Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         \r\n\
-         {}",
-        auth_key, body.len(), body
-    );
-
-    let timeout = std::time::Duration::from_millis(2000);
-    match std::net::TcpStream::connect_timeout(&addr, timeout) {
-        Ok(mut stream) => {
-            stream.set_write_timeout(Some(timeout)).ok();
-            stream.set_read_timeout(Some(timeout)).ok();
-            if let Err(e) = stream.write_all(request.as_bytes()) {
-                tracing::error!(
-                    error = %e,
-                    "[register_ipc_with_backend] write failed — srv will not be able to \
-                     proxy UI-automation calls to this host until a future retry succeeds"
-                );
-                return;
-            }
-            use std::io::Read;
-            let mut resp = String::new();
-            let _ = stream.read_to_string(&mut resp);
-            let first_line = resp.lines().next().unwrap_or("(empty)");
-            if first_line.contains(" 200 ") || first_line.starts_with("HTTP/1.1 200") {
-                dlog("register_ipc_with_backend: srv acknowledged host_ipc.Register");
-            } else {
-                tracing::error!(
-                    response = %first_line,
-                    "[register_ipc_with_backend] host_ipc.Register did not succeed — \
-                     srv will not be able to proxy UI-automation calls to this host"
-                );
-            }
-        }
-        Err(e) => {
-            tracing::error!(
-                addr = %addr,
-                error = %e,
-                "[register_ipc_with_backend] connect failed — srv will not be able to \
-                 proxy UI-automation calls to this host until a future retry succeeds"
-            );
-        }
+    let body = service_body("host_ipc", "Register", serde_json::json!([ipc_port, ipc_token, host_reg_secret]));
+    match service_call(addr, auth_key, &body) {
+        Ok(r) if r.status_ok() => dlog("register_ipc_with_backend: srv acknowledged host_ipc.Register"),
+        Ok(r) => tracing::error!(
+            response = %r.first_line(),
+            "[register_ipc_with_backend] host_ipc.Register did not succeed — srv will not be able to proxy UI-automation calls to this host"
+        ),
+        // A read failure used to fall through to the "(empty)" status line.
+        Err(ServiceCallError::Read(_)) => tracing::error!(
+            response = "(empty)",
+            "[register_ipc_with_backend] host_ipc.Register did not succeed — srv will not be able to proxy UI-automation calls to this host"
+        ),
+        Err(ServiceCallError::Write(e)) => tracing::error!(
+            error = %e,
+            "[register_ipc_with_backend] write failed — srv will not be able to proxy UI-automation calls to this host until a future retry succeeds"
+        ),
+        Err(ServiceCallError::Connect(e)) => tracing::error!(
+            addr = %addr,
+            error = %e,
+            "[register_ipc_with_backend] connect failed — srv will not be able to proxy UI-automation calls to this host until a future retry succeeds"
+        ),
     }
 }

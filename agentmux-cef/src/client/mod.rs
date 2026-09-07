@@ -52,6 +52,9 @@ const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;
+// The one raw-TCP `/agentmux/service` transport `helpers.rs`'s backend_*
+// wrappers share — see service_call.rs's module doc.
+mod service_call;
 mod display;
 pub(crate) mod navigation;
 mod crash_recovery;
