@@ -57,7 +57,12 @@ pub struct SrvSpawnResult {
     /// see `SrvSpawnResult`'s own doc comment above).
     pub host_reg_secret: String,
     /// Number of data migrations still pending after the in-process startup run.
-    /// Non-zero means run_pending_migrations failed; status-bar shows a retry message.
+    /// Counted by srv at ESTART time (`count_pending_migrations`). Since
+    /// SPEC_MIGRATION_SYSTEM_HARDENING Phase 1 a migration *failure* never
+    /// reaches ESTART at all (srv exits 1 with `MigrationFailed`), so a
+    /// non-zero value here means the count and the run disagree — e.g. the
+    /// fresh-install ordering case runner.rs documents — and the status-bar
+    /// shows its retry message for that.
     pub pending_migrations: usize,
     /// RFC3339 timestamp captured when ESTART arrived. Carried on the
     /// result for `--diag` / debug observability; not currently
@@ -78,6 +83,12 @@ pub enum SrvSpawnError {
     ResumeFailed(String),
     EstartTimeout,
     EstartChannelClosed,
+    /// srv reported `AGENTMUXSRV-MIGRATION-FAILED` and exited 1 before ESTART
+    /// (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1). Carries the
+    /// reason srv gave. Distinct from `EstartTimeout` so the supervisor can
+    /// show the user a real message instead of "timeout (30s)" — and so it
+    /// can do it immediately rather than 30s later.
+    MigrationFailed(String),
 }
 
 impl std::fmt::Display for SrvSpawnError {
@@ -91,8 +102,27 @@ impl std::fmt::Display for SrvSpawnError {
             Self::EstartChannelClosed => {
                 write!(f, "ESTART channel closed before srv signalled ready")
             }
+            Self::MigrationFailed(s) => write!(f, "database migration failed: {}", s),
         }
     }
+}
+
+/// Title for the fatal dialog both supervisors show on `MigrationFailed`.
+pub const MIGRATION_FAILED_DIALOG_TITLE: &str = "AgentMux — database migration failed";
+
+/// Body for that dialog. Kept here (not in each supervisor) so Windows and
+/// Unix show the same words. Restart-to-retry is accurate: srv re-runs every
+/// unapplied migration on the next launch, and a pre-migration snapshot of the
+/// store was written before the attempt (bootstrap.rs `maybe_snapshot_pre_migration`).
+pub fn migration_failed_dialog_body(reason: &str) -> String {
+    format!(
+        "AgentMux could not update its data store and will not start.\n\n\
+         {}\n\n\
+         Your data has not been changed: a snapshot was taken before the \
+         attempt. Restart AgentMux to retry. If this keeps happening, run \
+         `muxlog srv` and report the error above.",
+        reason
+    )
 }
 
 /// Run `agentmux-srv migrate` synchronously before spawning the daemon.
@@ -442,6 +472,10 @@ pub async fn spawn_srv(
     // large-dataset migration that takes longer than the normal 30s boot window
     // doesn't cause the launcher to kill srv prematurely.
     let (migration_tx, mut migration_rx) = mpsc::channel::<()>(4);
+    // Third channel: srv reports a fatal migration failure on stderr and exits
+    // 1 without ESTART. Without this the waiter would only notice via the 30s
+    // timeout, and the user would see "timeout" instead of the actual error.
+    let (failure_tx, mut failure_rx) = mpsc::channel::<String>(1);
     let auth_key_for_estart = auth_key.clone();
     let host_reg_secret_for_estart = host_reg_secret.clone();
     let started_at_for_estart = started_at.clone();
@@ -469,6 +503,11 @@ pub async fn spawn_srv(
                 ));
                 let _ = tx.send(result).await;
                 estart_sent = true;
+            } else if let Some(reason) =
+                agentmux_common::srv_stderr::parse_migration_failed_line(&line)
+            {
+                crate::log(&format!("[srv {} MIGRATION FAILED] {}", pid_for_log, reason));
+                let _ = failure_tx.send(reason).await;
             } else if line.starts_with("AGENTMUXSRV-MIGRATING") {
                 crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
                 let _ = migration_tx.send(()).await;
@@ -501,10 +540,16 @@ pub async fn spawn_srv(
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
-    let recv: Result<Option<SrvSpawnResult>, ()> = loop {
+    enum EstartWait {
+        Ready(Option<SrvSpawnResult>),
+        Timeout,
+        MigrationFailed(String),
+    }
+    let recv = loop {
         tokio::select! {
-            result = rx.recv() => break Ok(result),
-            _ = &mut sleep => break Err(()),
+            result = rx.recv() => break EstartWait::Ready(result),
+            _ = &mut sleep => break EstartWait::Timeout,
+            Some(reason) = failure_rx.recv() => break EstartWait::MigrationFailed(reason),
             Some(()) = migration_rx.recv() => {
                 // Migrations are running — extend the deadline generously.
                 let new_deadline = tokio::time::Instant::now() + migration_timeout;
@@ -517,7 +562,7 @@ pub async fn spawn_srv(
         }
     };
     match recv {
-        Err(()) => {
+        EstartWait::Timeout => {
             let _ = child.start_kill();
             sink.stage_end(
                 "backend",
@@ -527,7 +572,20 @@ pub async fn spawn_srv(
             );
             Err(SrvSpawnError::EstartTimeout)
         }
-        Ok(None) => {
+        EstartWait::MigrationFailed(reason) => {
+            // srv exits itself right after the line; start_kill on an
+            // already-exited child is a harmless no-op and keeps this arm in
+            // the same shape as the other two failure paths.
+            let _ = child.start_kill();
+            sink.stage_end(
+                "backend",
+                srv_t.elapsed().as_millis() as u64,
+                crate::startup_events::StartupStatus::Error,
+                Some("migration failed".into()),
+            );
+            Err(SrvSpawnError::MigrationFailed(reason))
+        }
+        EstartWait::Ready(None) => {
             let _ = child.start_kill();
             sink.stage_end(
                 "backend",
@@ -537,7 +595,7 @@ pub async fn spawn_srv(
             );
             Err(SrvSpawnError::EstartChannelClosed)
         }
-        Ok(Some(result)) => {
+        EstartWait::Ready(Some(result)) => {
             sink.stage_end(
                 "backend",
                 srv_t.elapsed().as_millis() as u64,
@@ -665,5 +723,34 @@ pub fn assign_pid_to_job(
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod migration_failed_tests {
+    use super::*;
+
+    #[test]
+    fn display_names_the_migration_and_carries_srv_reason() {
+        let e = SrvSpawnError::MigrationFailed("migration 0007 failed: disk I/O error".into());
+        assert_eq!(e.to_string(), "database migration failed: migration 0007 failed: disk I/O error");
+    }
+
+    #[test]
+    fn dialog_body_includes_reason_and_restart_guidance() {
+        let body = migration_failed_dialog_body("open shared store: database is locked");
+        assert!(body.contains("open shared store: database is locked"));
+        assert!(body.contains("Restart AgentMux to retry"));
+        assert!(body.contains("snapshot"), "must tell the user their data is intact");
+    }
+
+    #[test]
+    fn stderr_line_from_srv_parses_into_the_reason_the_dialog_shows() {
+        // End-to-end over the shared protocol: what srv writes is what the
+        // launcher reads, without either side owning the literal.
+        let line = agentmux_common::srv_stderr::migration_failed_line("mark applied 0011: readonly db");
+        let reason = agentmux_common::srv_stderr::parse_migration_failed_line(&line).expect("tagged line");
+        assert_eq!(reason, "mark applied 0011: readonly db");
+        assert!(!line.starts_with("AGENTMUXSRV-MIGRATING"), "must not be swallowed by the MIGRATING branch");
     }
 }

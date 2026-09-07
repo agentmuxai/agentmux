@@ -346,6 +346,15 @@ pub(crate) async fn run_unix(
         Err(e) => {
             log(&format!("FATAL: srv spawn failed: {}", e));
             eprintln!("Failed to start backend: {}", e);
+            if let srv_spawner::SrvSpawnError::MigrationFailed(reason) = &e {
+                // The launcher has the `windows` subsystem in release, so the
+                // eprintln above goes nowhere there; this is the only thing the
+                // user sees. Same helper the OOM give-up path uses.
+                crate::show_fatal_dialog(
+                    srv_spawner::MIGRATION_FAILED_DIALOG_TITLE,
+                    &srv_spawner::migration_failed_dialog_body(reason),
+                );
+            }
             std::process::exit(1);
         }
     };
