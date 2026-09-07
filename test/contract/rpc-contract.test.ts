@@ -82,7 +82,13 @@ interface Contract {
 }
 
 function deriveContract(root: string): Contract {
-    // ── Backend: resolve `register_handler(NAME, …)` to command names.
+    // ── Backend: resolve `register_handler(NAME, …)` and
+    // `register_typed(NAME, …)` to command names. Both are real
+    // registrations — `register_typed` additionally records the command's
+    // request/response types in the engine's `RpcSchema`
+    // (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md). Missing it here would let
+    // a command silently drop out of this contract the moment it is
+    // migrated, which is the opposite of what this test is for.
     // NAME is a string literal or a `pub const … &str = "…"`. Both forms
     // appear; consts are resolved against every const defined in the
     // crate (not just COMMAND_*-prefixed ones).
@@ -97,7 +103,13 @@ function deriveContract(root: string): Contract {
 
     const registered = new Set<string>();
     const unresolved: string[] = [];
-    const regRe = /register_handler\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_:]*))/g;
+    const regRe = /register_(?:handler|typed)\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_:]*))/g;
+    // Every match must resolve to a command name. `register_typed` installs
+    // its wrapper through a private `install_call_handler`, which this regex
+    // deliberately does not match, so the engine's own plumbing contributes
+    // nothing here and needs no special case — only real registrations in the
+    // handler modules (and engine.rs's own `#[cfg(test)]` stubs, which use
+    // string literals) are seen.
     for (const f of rsFiles) {
         const src = fs.readFileSync(f, "utf8");
         let m: RegExpExecArray | null;
@@ -108,14 +120,17 @@ function deriveContract(root: string): Contract {
             }
             const ident = m[2].split("::").pop() as string;
             const val = constMap.get(ident);
-            if (val !== undefined) registered.add(val);
-            else unresolved.push(ident);
+            if (val !== undefined) {
+                registered.add(val);
+            } else {
+                unresolved.push(ident);
+            }
         }
     }
     // A register_handler arg we can't resolve means the extractor is
     // blind to part of the contract — fail loudly rather than pass with
     // an incomplete `registered` set.
-    expect(unresolved, `unresolved register_handler args: ${unresolved.join(", ")}`).toEqual([]);
+    expect(unresolved, `unresolved register_handler/register_typed args: ${unresolved.join(", ")}`).toEqual([]);
 
     // ── Frontend: declared bindings (method → command) in rpc-api.ts.
     // Each binding is `Method(client: RpcClient, …): Ret { return
@@ -315,6 +330,12 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "memory.write",
     "pane.open",
     "slow",
+    // engine.rs #[cfg(test)] registrations for the typed-registry eviction
+    // tests, same category as echo/failme/checkctx above: real
+    // register_* calls in test code, never a frontend-facing command.
+    "stays-recorded",
+    "typed-then-stream",
+    "typed-then-untyped",
 ];
 
 describe("RPC frontend↔backend contract (A1)", () => {

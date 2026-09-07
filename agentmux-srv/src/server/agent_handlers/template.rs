@@ -282,14 +282,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // disappears (existing list query already excludes hidden by default).
     let wstore_hide = state.wstore.clone();
     let broker_hide = state.broker.clone();
-    engine.register_handler(
+    // Registered through `register_typed` (rather than `register_handler`)
+    // so this command's request/response pair lands in the engine's
+    // `RpcSchema` — the mapping the frontend's bindings will be generated
+    // from. See `backend/rpc/schema.rs`. Behaviour is unchanged: the
+    // deserialize-in / serialize-out steps this body used to perform are
+    // exactly what the wrapper now does.
+    engine.register_typed(
         COMMAND_AGENT_DEF_HIDE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentDefHideData, _ctx| {
             let wstore = wstore_hide.clone();
             let broker = broker_hide.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentDefHideData = serde_json::from_value(data)
-                    .map_err(|e| format!("agentdefhide: {e}"))?;
+            async move {
                 let ok = wstore
                     .agent_def_set_hidden(&cmd.definition_id, true)
                     .map_err(|e| format!("agentdefhide: {e}"))?;
@@ -306,10 +310,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         "agentdefhide: hid template"
                     );
                 }
-                let resp = AgentDefHideResult { ok };
-                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
-            })
-        }),
+                Ok(AgentDefHideResult { ok })
+            }
+        },
     );
 
     // agentdefunhide → set user_hidden = 0 on a seeded template,
@@ -317,14 +320,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // agentdefhide. Phase 2 of the two-tier picker spec.
     let wstore_unhide = state.wstore.clone();
     let broker_unhide = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_DEF_UNHIDE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentDefHideData, _ctx| {
             let wstore = wstore_unhide.clone();
             let broker = broker_unhide.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentDefHideData = serde_json::from_value(data)
-                    .map_err(|e| format!("agentdefunhide: {e}"))?;
+            async move {
                 let ok = wstore
                     .agent_def_set_hidden(&cmd.definition_id, false)
                     .map_err(|e| format!("agentdefunhide: {e}"))?;
@@ -341,10 +342,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         "agentdefunhide: unhid template"
                     );
                 }
-                let resp = AgentDefHideResult { ok };
-                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
-            })
-        }),
+                Ok(AgentDefHideResult { ok })
+            }
+        },
     );
 
     // agentdeflisthiddentemplates → templates the user has hidden
