@@ -288,9 +288,13 @@ export function dispatch(
     //
     // Cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
     // A reactive subscriber of one of these fields can synchronously unmount
-    // the pane (call `unregisterPane`) when the batch flushes. Record which
-    // fields changed so the warning can name the trigger — the next dispatch
-    // in the caller's frame will throw.
+    // the pane (call `unregisterPane`) when the batch flushes. Because every
+    // write lands inside one `batch()`, subscriber effects run only after all
+    // of them — so, unlike the old per-setter loop, this cannot single out
+    // WHICH field's reader disposed the pane. It records the set of fields
+    // this dispatch changed (the reader belongs to one of them), which is what
+    // the warning below names. The next dispatch in the caller's frame will
+    // throw.
     const next = slot.state;
     const changed: string[] = [];
     batch(() => {
