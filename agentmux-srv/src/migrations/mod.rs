@@ -15,6 +15,20 @@
 //! [`REGISTRY`] once the minimum supported upgrade path passes the migration's
 //! origin version — the `db_migrations` row stays as a permanent record.
 //!
+//! # No private marker files
+//!
+//! `db_migrations` (plus a [`Migration::verify`] post-condition) is the sole
+//! source of truth for "has this run" — SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03
+//! Phase 2. A new migration must not introduce its own flag file, and no
+//! migration may treat the mere *existence* of a marker as proof of
+//! completion: that is the shape that left `0007`'s target table empty
+//! while its flag said "done" (§1.2, F1). The three legacy markers that
+//! remain are evidence only — `0007`'s and `0002`'s helpers decide from the
+//! data (`consolidate_looks_incomplete`, `block_zones_look_incomplete`) and
+//! are content-idempotent, `0003`'s helper ignores its marker and re-asserts
+//! its invariant every run — and `m0000_bootstrap` consults them only
+//! together with those content checks when stamping a pre-framework install.
+//!
 //! # Migrations freeze copies of live logic on purpose
 //!
 //! Some migrations carry verbatim copies of helpers that also exist in live
