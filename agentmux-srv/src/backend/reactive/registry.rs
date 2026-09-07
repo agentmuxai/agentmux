@@ -514,6 +514,20 @@ pub fn remove_shared_if_nonce(
     let _ = std::fs::remove_dir(shared_agent_dir(shared_dir, agent_id));
 }
 
+/// This process's own channel id — `AGENTMUX_CHANNEL`, default `"stable"`.
+///
+/// The single source of the `channel` string written into every shared
+/// registry entry ([`write_shared_from_env`] and siblings), and — as of
+/// `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` Phase B — the string
+/// injected into each agent's MCP env as `AGENTMUX_CHANNEL` so the
+/// `source_channel` a sender binds into its cross-channel signature (§D5)
+/// is byte-identical to the `channel` a receiver finds on the entry it
+/// verifies against. Two independent reads of the env var would agree
+/// today; one function guarantees they keep agreeing.
+pub fn local_channel_id() -> String {
+    std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string())
+}
+
 /// Convenience wrapper over [`write_shared`]: resolves the shared dir and
 /// this process's channel itself, no-op if the shared root can't be
 /// resolved. Exists so call sites outside `server/reactive.rs`'s explicit
@@ -523,7 +537,7 @@ pub fn remove_shared_if_nonce(
 /// repeat the same resolve-dir-then-read-env dance.
 pub fn write_shared_from_env(agent_id: &str, local_url: &str, block_id: &str) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        let channel = local_channel_id();
         write_shared(&shared_dir, agent_id, local_url, block_id, &channel);
     }
 }
@@ -531,7 +545,7 @@ pub fn write_shared_from_env(agent_id: &str, local_url: &str, block_id: &str) {
 /// Convenience wrapper over [`remove_shared`] — see [`write_shared_from_env`].
 pub fn remove_shared_from_env(agent_id: &str) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        let channel = local_channel_id();
         remove_shared(&shared_dir, agent_id, &channel);
     }
 }
@@ -545,7 +559,7 @@ pub fn write_shared_from_env_with_nonce(
     registration_nonce: u64,
 ) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        let channel = local_channel_id();
         write_shared_with_nonce(&shared_dir, agent_id, local_url, block_id, &channel, registration_nonce);
     }
 }
@@ -554,7 +568,7 @@ pub fn write_shared_from_env_with_nonce(
 /// [`write_shared_from_env`].
 pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
-        let channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+        let channel = local_channel_id();
         remove_shared_if_nonce(&shared_dir, agent_id, &channel, expected_nonce);
     }
 }
@@ -674,6 +688,18 @@ fn write_entry_file(path: &Path, entry: &AgentEntry) {
     }
     drop(f);
     let _ = std::fs::rename(&tmp_path, path);
+}
+
+/// Write a fully-specified shared-registry entry, bypassing the
+/// process-global pubkey resolver and `local_auth_key()`. For tests that
+/// need a deterministic `jekt_public_key` regardless of which other test in
+/// the binary happened to install the `OnceLock` resolver first
+/// (`server/reactive.rs`'s cross-channel verification tests).
+#[cfg(test)]
+pub fn write_shared_entry_for_test(shared_dir: &Path, entry: &AgentEntry) {
+    let _guard = REGISTRY_OP_LOCK.lock().unwrap();
+    let _ = std::fs::create_dir_all(shared_agent_dir(shared_dir, &entry.agent_id));
+    write_entry_file(&shared_channel_path(shared_dir, &entry.agent_id, &entry.channel), entry);
 }
 
 #[cfg(test)]

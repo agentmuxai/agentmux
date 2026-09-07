@@ -156,6 +156,22 @@ pub struct InjectRequest {
     /// under the same "no key yet" conditions as `jekt_sig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan_sig: Option<String>,
+    /// The sending instance's channel id (`AGENTMUX_CHANNEL`, injected into
+    /// the MCP env at spawn alongside the keys). Bound into `channel_sig`'s
+    /// signed material (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5) so
+    /// a signature minted in one channel can't be replayed as the same agent
+    /// speaking from another. Absent whenever `channel_sig` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_channel: Option<String>,
+    /// Base64 Ed25519 signature for the same-machine, different-instance
+    /// (cross-channel) tier, produced with the sender's own `AGENTMUX_LAN_KEY`
+    /// over a domain-separated payload that also binds `source_channel`
+    /// (`agentmux_common::jekt_sign::sign_channel_jekt`). Sent unconditionally
+    /// for the same reason `lan_sig` is: srv only consults it once it has
+    /// itself labelled the delivery `channel`. Absent under the same "no key
+    /// yet" conditions as `lan_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_sig: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────

@@ -181,6 +181,11 @@ Phase A is explicitly additive — it publishes keys, but nothing verifies again
 the security benefit arrives in Phase B/C. This is the newest stalled item (4 days old) and is
 plausibly just in-flight rather than abandoned, but it is incomplete at this baseline.
 
+**Update 2026-09-07:** Phase B shipped (D2 verification, `DELIVERY=channel`, `TRUST=channel-verified`
+in the `ESCALATE=none` list) — spec §10.2. Phase C (forcing `sensitive` on a failed cross-channel
+signature) is a deliberate one-line follow-up once published keys have propagated; Phase D is its
+own spec.
+
 ### 3.5 Container / sandbox agents  🟡 **[doc-claim]**
 
 Umbrella issue #2939 (open, "multi-generation"), with Phase 3 integration gaps in issue #1400
@@ -319,7 +324,7 @@ proposes is done. Restamp `historical`.
 | 5 | muxspect A/B/C | ✅ done | fix CLAUDE.md (§5.1) |
 | 6 | Migration system hardening | 🟡 Phase 0 of 6 | Phases 1–6; failure still non-fatal |
 | 7 | Docs lifecycle hardening | 🟡 ~3 of 6 | Phases 2, 5; ~360-file status backlog |
-| 8 | Jekt cross-channel trust | 🟡 Phase A of D | Phases B, C, D |
+| 8 | Jekt cross-channel trust | 🟡 Phases A–B of D (B shipped 2026-09-07) | Phases C, D |
 | 9 | Container agents | 🟡 multi-generation | #2939 workstreams; #1400 Phase 3 gaps |
 | 10 | Armory foundation consolidation | 🟡 by design | follow-up SPECs per its §4 |
 | 11 | Mandatory ABF rethink | 🔴 not started | everything |
