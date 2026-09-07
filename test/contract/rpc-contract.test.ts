@@ -104,19 +104,12 @@ function deriveContract(root: string): Contract {
     const registered = new Set<string>();
     const unresolved: string[] = [];
     const regRe = /register_(?:handler|typed)\s*\(\s*(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_:]*))/g;
-    // `register_typed` forwards to `register_handler(command, …)`, where
-    // `command` is its own parameter — unresolvable by construction and not a
-    // registration. Skip exactly that one call: the engine file AND the
-    // identifier `command`.
-    //
-    // Not a whole-file exclusion — engine.rs also carries `#[cfg(test)]`
-    // registrations ("echo", "failme", "checkctx") that are string literals
-    // and legitimately belong in `registered`; dropping the file removed them
-    // and silently shrank the backend surface this test compares against.
-    // Not a bare identifier allow-list either — a real handler elsewhere that
-    // used `command` as a local would then be skipped in silence. Both
-    // conditions together are what keep the loud-failure guarantee intact.
-    const enginePath = path.join("backend", "rpc", "engine.rs");
+    // Every match must resolve to a command name. `register_typed` installs
+    // its wrapper through a private `install_call_handler`, which this regex
+    // deliberately does not match, so the engine's own plumbing contributes
+    // nothing here and needs no special case — only real registrations in the
+    // handler modules (and engine.rs's own `#[cfg(test)]` stubs, which use
+    // string literals) are seen.
     for (const f of rsFiles) {
         const src = fs.readFileSync(f, "utf8");
         let m: RegExpExecArray | null;
@@ -129,8 +122,6 @@ function deriveContract(root: string): Contract {
             const val = constMap.get(ident);
             if (val !== undefined) {
                 registered.add(val);
-            } else if (f.endsWith(enginePath) && ident === "command") {
-                // register_typed's forwarding call — see above.
             } else {
                 unresolved.push(ident);
             }
