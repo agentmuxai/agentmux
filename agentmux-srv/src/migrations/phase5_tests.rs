@@ -119,28 +119,69 @@ impl Drop for TempHome {
     }
 }
 
-/// A legacy `db_agent_definitions` row — the pre-consolidation shape `0007`
-/// exists to fold into `db_agents`. Same columns the consolidate module's
-/// own tests insert.
-fn insert_legacy_definition(channel_store: &Path, id: &str, name: &str) {
-    // `Store::open` lays down the schema (including the legacy tables it still
-    // adopts); the row itself goes in through SQL because no live API writes
-    // that table any more.
-    drop(Store::open(channel_store).expect("create channel store"));
-    let conn = Connection::open(channel_store).unwrap();
-    conn.execute(
-        "INSERT INTO db_agent_definitions
-            (id, slug, name, icon, provider, description, working_directory, shell,
-             provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
-             created_at, agent_type, environment, agent_bus_id, is_seeded, accounts,
-             parent_id, branch_label, updated_at)
-         VALUES (?1, ?1, ?2, '✦', 'claude', 'desc', '', 'bash',
-                 '', 0, 0, 0,
-                 1000, 'standalone', '', '', 1, '',
-                 '', '', 1000)",
-        params![id, name],
-    )
-    .unwrap();
+impl TempHome {
+    /// The `CLAUDE_CONFIG_DIR` every fixture agent runs under — inside the
+    /// temp home, so `m0024_native_memory_backfill_from_fs` (which reads
+    /// each agent's memory directory off disk during the full-registry
+    /// tests) resolves to `<temp>/shared/providers/claude/...` and never to
+    /// the developer's real `~/.agentmux/shared/providers/claude`. That
+    /// resolver (`memory_dir_for_cwd`) falls back to the REAL home when an
+    /// agent has no `CLAUDE_CONFIG_DIR` and to `~/.agentmux/agents/<name>`
+    /// when its working directory is blank, so both are set explicitly
+    /// (codex P2 on #3066).
+    fn claude_config_dir(&self) -> PathBuf {
+        self.home().join("shared").join("providers").join("claude")
+    }
+
+    /// A fixture agent's working directory — also inside the temp home.
+    fn agent_working_dir(&self, id: &str) -> PathBuf {
+        self.home().join("agents").join(id)
+    }
+
+    /// Where Claude Code keeps the memory files for `agent_working_dir(id)`
+    /// under `claude_config_dir()` — the same sanitisation
+    /// `memory_dir_for_cwd` applies (every non-alphanumeric byte → `-`).
+    fn agent_memory_dir(&self, id: &str) -> PathBuf {
+        let folder: String = self
+            .agent_working_dir(id)
+            .to_string_lossy()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        self.claude_config_dir().join("projects").join(folder).join("memory")
+    }
+
+    /// A legacy `db_agent_definitions` row — the pre-consolidation shape
+    /// `0007` exists to fold into `db_agents` — plus the `env` content row
+    /// that pins its `CLAUDE_CONFIG_DIR` inside this temp home. Same
+    /// definition columns the consolidate module's own tests insert.
+    fn insert_legacy_definition(&self, id: &str, name: &str) {
+        // `Store::open` lays down the schema (including the legacy tables it
+        // still adopts); the rows go in through SQL because no live API
+        // writes that table any more.
+        let channel_store = self.channel_store();
+        drop(Store::open(&channel_store).expect("create channel store"));
+        let conn = Connection::open(&channel_store).unwrap();
+        let working_directory = self.agent_working_dir(id).to_string_lossy().into_owned();
+        conn.execute(
+            "INSERT INTO db_agent_definitions
+                (id, slug, name, icon, provider, description, working_directory, shell,
+                 provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+                 created_at, agent_type, environment, agent_bus_id, is_seeded, accounts,
+                 parent_id, branch_label, updated_at)
+             VALUES (?1, ?1, ?2, '✦', 'claude', 'desc', ?3, 'bash',
+                     '', 0, 0, 0,
+                     1000, 'standalone', '', '', 1, '',
+                     '', '', 1000)",
+            params![id, name, working_directory],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at) VALUES (?1, 'env', ?2, 1000)",
+            params![id, format!("CLAUDE_CONFIG_DIR={}\n", self.claude_config_dir().display())],
+        )
+        .unwrap();
+    }
 }
 
 fn count(channel_store: &Path, table: &str) -> i64 {
@@ -173,7 +214,7 @@ fn bootstrap_stamps_every_pre_framework_marker_it_recognises() {
     // Channel-scoped markers: the zones flag, and a consolidate flag backed
     // by a genuinely populated db_agents (Phase 0a's content check passes).
     std::fs::write(home.data_dir().join("migration_agent_zones_v1.flag"), b"1").unwrap();
-    insert_legacy_definition(&home.channel_store(), "tpl-1", "Coder");
+    home.insert_legacy_definition("tpl-1", "Coder");
     Store::open(&home.channel_store()).unwrap().run_agents_consolidate(None).unwrap();
     assert_eq!(count(&home.channel_store(), "db_agents"), 1);
     std::fs::write(home.data_dir().join(CONSOLIDATE_FLAG), b"phase3a").unwrap();
@@ -233,8 +274,8 @@ fn a_stale_consolidate_marker_beside_an_empty_target_is_not_stamped_and_the_next
     // backfill would never run again — db_agents empty forever.
     let home = TempHome::new();
     home.mark_as_existing_install();
-    insert_legacy_definition(&home.channel_store(), "tpl-1", "Coder");
-    insert_legacy_definition(&home.channel_store(), "tpl-2", "Reviewer");
+    home.insert_legacy_definition("tpl-1", "Coder");
+    home.insert_legacy_definition("tpl-2", "Reviewer");
     std::fs::write(home.data_dir().join(CONSOLIDATE_FLAG), b"phase3a").unwrap();
     assert_eq!(count(&home.channel_store(), "db_agents"), 0, "the target must start empty");
 
@@ -277,16 +318,38 @@ fn a_crash_between_a_migrations_effect_and_its_mark_resumes_without_duplicating_
     // nothing is written twice. This is that claim as a test.
     let home = TempHome::new();
     home.mark_as_existing_install();
-    insert_legacy_definition(&home.channel_store(), "tpl-1", "Coder");
-    insert_legacy_definition(&home.channel_store(), "tpl-2", "Reviewer");
+    home.insert_legacy_definition("tpl-1", "Coder");
+    home.insert_legacy_definition("tpl-2", "Reviewer");
+
+    // A memory file where the fixture's CLAUDE_CONFIG_DIR says it should be,
+    // so the full-registry boot below also proves m0024 reads from INSIDE
+    // the temp home (it imports the file) rather than from the real one.
+    let memory_dir = home.agent_memory_dir("tpl-1");
+    std::fs::create_dir_all(&memory_dir).unwrap();
+    std::fs::write(memory_dir.join("note.md"), "# remembered\n").unwrap();
 
     let first = home.apply_all(None);
     assert_eq!(first.skipped, 0);
     assert_eq!(count(&home.channel_store(), "db_agents"), 2);
     assert!(home.data_dir().join(CONSOLIDATE_FLAG).exists(), "0007 wrote its own marker");
+    let imported = Store::open_shared(&home.shared_store())
+        .unwrap()
+        .agent_native_memory_version_latest("tpl-1", "note.md")
+        .unwrap();
+    assert!(
+        imported.is_some_and(|v| v.content == "# remembered\n"),
+        "m0024 must import the memory file from the temp home's providers dir"
+    );
 
-    // Simulate the crash: the effect and the marker file are on disk, the
-    // tracking row never made it.
+    // Simulate the crash in the window the spec names — AFTER the backfill
+    // transaction committed, BEFORE the marker was written (and so before
+    // the runner could record the row either). The data is there; nothing
+    // says so. `agents_consolidate.rs` documents this as "next start retries
+    // from scratch" — which is only safe if a from-scratch retry over
+    // already-consolidated rows writes nothing twice (codex P2 on #3066:
+    // deleting only the tracking row would have left the marker to
+    // short-circuit the re-run and proved nothing about that).
+    std::fs::remove_file(home.data_dir().join(CONSOLIDATE_FLAG)).unwrap();
     Connection::open(home.channel_store())
         .unwrap()
         .execute("DELETE FROM db_migrations WHERE id = ?1", [CONSOLIDATE_ID])
@@ -296,11 +359,35 @@ fn a_crash_between_a_migrations_effect_and_its_mark_resumes_without_duplicating_
     let second = home.apply_all(None);
     assert_eq!(second.applied, 1, "exactly the unmarked migration re-runs");
     assert_eq!(second.skipped, REGISTRY.len() - 1);
-    assert_eq!(count(&home.channel_store(), "db_agents"), 2, "the re-run must not duplicate rows");
+    assert_eq!(count(&home.channel_store(), "db_agents"), 2, "a from-scratch retry must not duplicate rows");
+    assert!(home.data_dir().join(CONSOLIDATE_FLAG).exists(), "the retry re-writes the marker");
     assert!(home.applied(MigrationScope::Channel).contains(&CONSOLIDATE_ID.to_string()), "and it is marked again");
 
     // Third boot: nothing to do.
     assert_eq!(home.apply_all(None).applied, 0);
+}
+
+#[test]
+fn losing_only_the_tracking_row_after_the_marker_is_written_short_circuits_on_the_next_boot() {
+    // The narrower window: marker on disk, tracking row lost (a crash between
+    // the marker write and `migration_mark_applied`). The content-checked
+    // marker short-circuits the re-run (`already_done`), so this is the cheap
+    // path — kept as its own test so a regression in either window is named.
+    let home = TempHome::new();
+    home.mark_as_existing_install();
+    home.insert_legacy_definition("tpl-1", "Coder");
+    home.apply_all(None);
+    assert_eq!(count(&home.channel_store(), "db_agents"), 1);
+
+    Connection::open(home.channel_store())
+        .unwrap()
+        .execute("DELETE FROM db_migrations WHERE id = ?1", [CONSOLIDATE_ID])
+        .unwrap();
+
+    let second = home.apply_all(None);
+    assert_eq!(second.applied, 1);
+    assert_eq!(count(&home.channel_store(), "db_agents"), 1);
+    assert!(home.applied(MigrationScope::Channel).contains(&CONSOLIDATE_ID.to_string()));
 }
 
 // ── 3. Upgrade skipping many versions ─────────────────────────────────────────
