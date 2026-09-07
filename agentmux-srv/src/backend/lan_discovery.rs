@@ -251,6 +251,52 @@ fn mdns_hostname(os_hostname: &str) -> String {
     }
 }
 
+/// Build this instance's DNS-SD *instance name* — the first label of the
+/// service fullname. Must be BOTH unique per running instance AND free of
+/// dots.
+///
+/// Both properties were violated before 2026-09-06, and together they broke
+/// LAN discovery outright between two hosts on the same build:
+///
+/// - **Not unique.** The name was `format!("agentmux-{instance_id}")`, and
+///   `instance_id` is the *version* (`config.rs`'s `args.instance`, which the
+///   launcher sets to e.g. `v0.55.37`). Every host on the same release
+///   therefore registered the identical name, and `handle_event`'s self-skip —
+///   which compares incoming fullnames against our own — discarded genuine
+///   peers as if they were us.
+/// - **Not a single label.** `v0.55.37` contains dots. In DNS-SD the instance
+///   name is ONE label and dots must be escaped; nothing escaped them, so
+///   mdns-sd split at the first dot, treated `agentmux-v0` as the label and
+///   `.55.37` as part of the service type. Observed verbatim in a peer's log
+///   as `agentmux-v0 (2).55.37._agentmux._tcp.local.` — note the conflict
+///   suffix landing mid-version-string.
+///
+/// The two compounded: the collision triggered mdns-sd's conflict-renaming,
+/// and because `service_fullname` was captured *before* `register()` (fixed
+/// alongside this), the renamed host kept a stale self-name that exactly
+/// matched the OTHER host's real name — so the renamed host silently dropped
+/// every announcement from its peer, permanently, with no self-heal. That is
+/// why discovery was observed to work in one direction only.
+///
+/// `hostname` + `port` is unique per instance (hostname per machine, port per
+/// srv on that machine) and carries no version, which is deliberate: a version
+/// does not belong in an identity key, and it was the version being in there
+/// that created the cross-host collision. Any character that isn't
+/// alphanumeric, `-` or `_` is replaced, so a FQDN hostname
+/// (`box.corp.example`) or an exotic one can't reintroduce the dot bug.
+fn mdns_instance_label(hostname: &str, port: u16) -> String {
+    let sanitized: String = hostname
+        .trim_end_matches('.')
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    // An empty/all-punctuation hostname would otherwise yield `agentmux--<port>`;
+    // the port alone still disambiguates instances on this host, and remote
+    // peers are disambiguated by address.
+    let host_part = if sanitized.is_empty() { "unknown".to_string() } else { sanitized };
+    format!("agentmux-{host_part}-{port}")
+}
+
 impl LanDiscovery {
     /// Start LAN discovery: register this instance and browse for peers.
     pub fn start(
@@ -266,7 +312,11 @@ impl LanDiscovery {
         // Register this instance. mdns-sd requires the host name passed to
         // `ServiceInfo::new` to end with `.local.` — we always normalize so
         // a raw OS hostname like "claudius" becomes "claudius.local.".
-        let service_name = format!("agentmux-{}", &instance_id);
+        // Unique per INSTANCE and dot-free — see `mdns_instance_label`. The
+        // version still travels in the TXT record (`instance_id` below), which
+        // is where peers actually read it from; it just must not be the
+        // identity key.
+        let service_name = mdns_instance_label(&hostname, port);
         let host_name_mdns = mdns_hostname(&hostname);
         let properties = [
             ("version", version.as_str()),
@@ -303,6 +353,21 @@ impl LanDiscovery {
         daemon
             .register(service_info)
             .map_err(|e| format!("mDNS register failed: {e}"))?;
+
+        // Log the name we registered under. Before this, an affected host was
+        // mute: the ONLY site that logged a fullname was the `ServiceRemoved`
+        // branch, so a host that discovered nothing (the exact failure this
+        // commit fixes) could not self-report its own service name at all, and
+        // the bug had to be diagnosed from the *peer's* log. `service_fullname`
+        // is the pre-register name — if mdns-sd ever conflict-renames us it
+        // will differ from what is actually on the wire, which is itself worth
+        // seeing, and is why the self-check below no longer trusts it alone.
+        tracing::info!(
+            service_fullname = %service_fullname,
+            instance_id = %instance_id,
+            port,
+            "LAN discovery registered mDNS service"
+        );
 
         // Browse for peers — keep the receiver for the event loop
         let browse_receiver = daemon
@@ -510,7 +575,25 @@ impl LanDiscovery {
                 // blank-TXT self-resolution was never recognized as self and
                 // was inserted as a phantom peer that could never self-heal
                 // (see the instance_id-preservation fix below for why).
-                if fullname == self.service_fullname {
+                // A fullname match is now a HINT, never proof. It may only
+                // skip when the port+address test agrees that this really is
+                // us. Treating equality alone as proof is what broke
+                // cross-host discovery before 2026-09-06: with a
+                // version-derived (non-unique) name, a genuine peer's fullname
+                // could equal ours exactly — and on a conflict-renamed host,
+                // `service_fullname` is stale and matches the peer that WON
+                // the name. Either way the instance dropped every
+                // announcement from its peer, permanently, and reported
+                // `lan: []` forever. `mdns_instance_label` makes the collision
+                // itself impossible; this makes the consequence impossible
+                // even if some future name scheme regresses.
+                //
+                // The blank-TXT self-resolution storm this check was
+                // originally added for (~96% of own-address events resolving
+                // with `peer_id=""`) is still caught: those are on OUR port at
+                // OUR address, so `resolves_to_this_instance` returns true for
+                // them on its own.
+                if fullname == self.service_fullname && self.resolves_to_this_instance(&info) {
                     return;
                 }
 
@@ -1421,17 +1504,50 @@ mod handle_event_tests {
     /// `service_name`/host-name shape `LanDiscovery::start()` registers
     /// with, so `get_fullname()` matches what production code would
     /// compute for the same `instance_id`.
-    fn test_service_info(instance_id: &str, port: u16, properties: &[(&str, &str)]) -> ServiceInfo {
-        let service_name = format!("agentmux-{instance_id}");
-        ServiceInfo::new(
-            SERVICE_TYPE,
-            &service_name,
-            "test-host.local.",
-            "127.0.0.1",
-            port,
-            properties,
-        )
-        .expect("ServiceInfo::new should succeed for a well-formed test fixture")
+    fn test_service_info(host_seed: &str, port: u16, properties: &[(&str, &str)]) -> ServiceInfo {
+        test_service_info_at(host_seed, port, "127.0.0.1", properties)
+    }
+
+    /// As [`test_service_info`], but with an explicit address. Self-fixtures
+    /// need a genuinely local one, because the self-check now requires the
+    /// port AND address to say "this is us" — a fullname match alone no
+    /// longer skips. See `handle_event`.
+    fn test_service_info_at(
+        host_seed: &str,
+        port: u16,
+        addr: &str,
+        properties: &[(&str, &str)],
+    ) -> ServiceInfo {
+        // Mirror production's naming exactly (`mdns_instance_label`), so
+        // `get_fullname()` is what `start()` would really register.
+        let service_name = super::mdns_instance_label(host_seed, port);
+        test_service_info_with_label(&service_name, port, addr, properties)
+    }
+
+    /// Build a `ServiceInfo` with an explicit instance label, decoupled from
+    /// the SRV port. Needed because the peer map is keyed by fullname and the
+    /// label now embeds the port: a test that models "the SAME service moved
+    /// to a new port" must hold the label fixed while the SRV port changes,
+    /// which the label-derives-from-port helpers cannot express.
+    fn test_service_info_with_label(
+        label: &str,
+        port: u16,
+        addr: &str,
+        properties: &[(&str, &str)],
+    ) -> ServiceInfo {
+        ServiceInfo::new(SERVICE_TYPE, label, "test-host.local.", addr, port, properties)
+            .expect("ServiceInfo::new should succeed for a well-formed test fixture")
+    }
+
+    /// One address that genuinely belongs to this host, so a self-fixture
+    /// satisfies `resolves_to_this_instance`. Falls back to loopback on the
+    /// (practically impossible) empty-set machine.
+    fn own_addr() -> String {
+        crate::backend::lan_listeners::cached_local_addresses()
+            .iter()
+            .next()
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "127.0.0.1".to_string())
     }
 
     /// A `LanDiscovery` whose `service_fullname` is derived the same way
@@ -1439,24 +1555,106 @@ mod handle_event_tests {
     /// `self_instance_id`), so the self-skip comparison in `handle_event`
     /// is exercised exactly as it runs in production — not asserted
     /// against a hand-typed guess at mdns-sd's fullname format.
-    fn test_discovery(self_instance_id: &str) -> LanDiscovery {
-        let self_info = test_service_info(self_instance_id, 0, &[]);
+    /// `self_port` is now load-bearing: it is BOTH the port baked into our
+    /// own `service_fullname` and the `port` the self-check compares against,
+    /// exactly as in production where both come from the same bind. The old
+    /// fixture set `port: 0` while minting self-events on a different port —
+    /// harmless when a bare fullname match was enough to skip, but it did not
+    /// represent a real self-resolution.
+    fn test_discovery(self_host_seed: &str, self_port: u16) -> LanDiscovery {
+        let self_info = test_service_info(self_host_seed, self_port, &[]);
         LanDiscovery {
             daemon: mdns_sd::ServiceDaemon::new().expect("daemon construction (no register/browse)"),
             instances: Arc::new(RwLock::new(HashMap::new())),
-            instance_id: self_instance_id.to_string(),
+            instance_id: self_host_seed.to_string(),
             event_bus: Arc::new(crate::backend::eventbus::EventBus::new()),
             service_fullname: self_info.get_fullname().to_string(),
             auth_key: String::new(),
             hostname: String::new(),
             version: String::new(),
-            port: 0,
+            port: self_port,
             udp_cancel: Mutex::new(None),
         }
     }
 
     fn get(instances: &[LanInstance], instance_id: &str) -> Option<LanInstance> {
         instances.iter().find(|i| i.instance_id == instance_id).cloned()
+    }
+
+    // -- cross-host discovery regression (2026-09-06) --
+    //
+    // Two hosts on the same build stopped discovering each other in one
+    // direction. `service_name` was `agentmux-{instance_id}` and `instance_id`
+    // is the VERSION, so both hosts registered the identical fullname; the
+    // self-skip then dropped the genuine peer as "us". The dots in the version
+    // also made the label malformed, triggering mdns-sd conflict-renaming,
+    // which left the renamed host with a stale `service_fullname` that matched
+    // its peer's real name — so the renamed host went blind permanently.
+    // Found jointly with Manpo@gamerlove against two live hosts.
+
+    #[test]
+    fn a_peer_whose_fullname_equals_ours_is_still_discovered() {
+        // THE regression. A remote peer announcing under a fullname identical
+        // to our own (same-version collision, or a stale self-name after a
+        // conflict-rename) must NOT be mistaken for us: it is on a different
+        // port, which is proof it is somebody else.
+        let discovery = test_discovery("collide", 59859);
+        let peer_with_our_exact_name = test_service_info(
+            "collide",
+            59859,
+            &[("instance_id", "v0.55.37"), ("hostname", "gamerlove")],
+        );
+        // Same fullname as ours, by construction.
+        assert_eq!(
+            peer_with_our_exact_name.get_fullname(),
+            discovery.service_fullname,
+            "fixture must actually reproduce the fullname collision"
+        );
+
+        // ...but arriving from a remote address, on a port that is not ours.
+        let remote_peer = test_service_info_at(
+            "collide",
+            60237,
+            "192.168.1.68",
+            &[("instance_id", "v0.55.37"), ("hostname", "gamerlove")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(remote_peer));
+
+        assert_eq!(
+            discovery.get_instances().len(),
+            1,
+            "a remote peer must be discovered even when its fullname collides with ours"
+        );
+    }
+
+    #[test]
+    fn instance_label_is_free_of_dots_and_unique_per_instance() {
+        // Dots made the label malformed (mdns-sd split it and appended its
+        // conflict suffix mid-string, observed as
+        // "agentmux-v0 (2).55.37._agentmux._tcp.local.").
+        let fqdn = super::mdns_instance_label("box.corp.example", 59859);
+        assert!(!fqdn.contains('.'), "label must contain no dots, got {fqdn}");
+
+        // Same host, two instances -> different labels (differing ports).
+        assert_ne!(
+            super::mdns_instance_label("claudius", 59859),
+            super::mdns_instance_label("claudius", 60237),
+        );
+        // Two hosts on the SAME version -> different labels. This is the
+        // property the old version-derived name did not have.
+        assert_ne!(
+            super::mdns_instance_label("claudius", 59859),
+            super::mdns_instance_label("gamerlove", 59859),
+        );
+        // No version anywhere in it, deliberately.
+        assert!(!super::mdns_instance_label("claudius", 59859).contains("0.55"));
+    }
+
+    #[test]
+    fn instance_label_survives_a_hostname_with_no_usable_characters() {
+        let label = super::mdns_instance_label("...", 59859);
+        assert!(!label.contains('.'));
+        assert_eq!(label, "agentmux-unknown-59859");
     }
 
     #[test]
@@ -1468,8 +1666,8 @@ mod handle_event_tests {
         // derived, always present) rather than the TXT `instance_id`
         // property must catch this even though the property itself is
         // blank on this event.
-        let discovery = test_discovery("self-id");
-        let blank_self_event = test_service_info("self-id", 56023, &[]);
+        let discovery = test_discovery("self-id", 56023);
+        let blank_self_event = test_service_info_at("self-id", 56023, &own_addr(), &[]);
 
         discovery.handle_event(ServiceEvent::ServiceResolved(blank_self_event));
 
@@ -1483,9 +1681,13 @@ mod handle_event_tests {
     fn self_resolution_with_full_txt_is_also_never_inserted_as_a_peer() {
         // Sanity check that the fullname-based skip doesn't regress the
         // straightforward case (this was already correct before the fix).
-        let discovery = test_discovery("self-id");
-        let full_self_event =
-            test_service_info("self-id", 56023, &[("instance_id", "self-id"), ("hostname", "myhost")]);
+        let discovery = test_discovery("self-id", 56023);
+        let full_self_event = test_service_info_at(
+            "self-id",
+            56023,
+            &own_addr(),
+            &[("instance_id", "self-id"), ("hostname", "myhost")],
+        );
 
         discovery.handle_event(ServiceEvent::ServiceResolved(full_self_event));
 
@@ -1494,7 +1696,7 @@ mod handle_event_tests {
 
     #[test]
     fn blank_txt_refire_does_not_clobber_previously_known_good_peer_fields() {
-        let discovery = test_discovery("self-id");
+        let discovery = test_discovery("self-id", 56023);
 
         let full_event = test_service_info(
             "peer-1",
@@ -1534,13 +1736,23 @@ mod handle_event_tests {
         // populated by mdns-sd — a genuine interface/address change must
         // still be reflected even when the TXT-derived fields are absent
         // on that same event.
-        let discovery = test_discovery("self-id");
+        let discovery = test_discovery("self-id", 56023);
 
-        let first = test_service_info("peer-1", 9999, &[("instance_id", "peer-1"), ("hostname", "realhost")]);
+        // One stable label across both events: this models the same mDNS
+        // service re-resolving on a new port, not a different service. (The
+        // label embeds a port in production, so it is pinned here explicitly
+        // rather than derived from the changing SRV port.)
+        let label = super::mdns_instance_label("peer-1", 9999);
+        let first = test_service_info_with_label(
+            &label,
+            9999,
+            "127.0.0.1",
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
         discovery.handle_event(ServiceEvent::ServiceResolved(first));
         assert_eq!(get(&discovery.get_instances(), "peer-1").unwrap().port, 9999);
 
-        let moved = test_service_info("peer-1", 8888, &[]);
+        let moved = test_service_info_with_label(&label, 8888, "127.0.0.1", &[]);
         discovery.handle_event(ServiceEvent::ServiceResolved(moved));
 
         let instances = discovery.get_instances();
@@ -1556,7 +1768,7 @@ mod handle_event_tests {
         // first-seen blank-TXT event: nothing was ever known, so nothing
         // can be preserved. hostname stays empty until a TXT-bearing event
         // eventually arrives.
-        let discovery = test_discovery("self-id");
+        let discovery = test_discovery("self-id", 56023);
         let blank_first = test_service_info("peer-2", 7777, &[]);
 
         discovery.handle_event(ServiceEvent::ServiceResolved(blank_first));
