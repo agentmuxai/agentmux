@@ -15,6 +15,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
+use super::managed::{ManagedResource, Owner};
 use super::store::Store;
 
 /// A reusable skill/capability attached to a agent definition.
@@ -218,6 +219,55 @@ pub struct Skill {
     pub updated_at: i64,
 }
 
+impl ManagedResource for Skill {
+    const TABLE: &'static str = "db_skills";
+    const REF_COL: &'static str = "skill_id";
+    const AGENT_REF_TABLE: &'static str = "db_agent_skills_ref";
+    const BUNDLE_REF_TABLE: &'static str = "db_bundle_skills_ref";
+    const COLUMNS: &'static [&'static str] = &[
+        "id", "name", "trigger", "skill_type", "description", "content", "is_global", "created_at", "updated_at",
+    ];
+    const UPDATE_COLUMNS: &'static [&'static str] =
+        &["name", "trigger", "skill_type", "description", "content", "updated_at"];
+    const NAME_NOUN: &'static str = "skill";
+    const ARTICLE_NOUN: &'static str = "a skill";
+    const KIND: &'static str = "skill";
+
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Skill {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            trigger: row.get(2)?,
+            skill_type: row.get(3)?,
+            description: row.get(4)?,
+            content: row.get(5)?,
+            is_global: row.get::<_, i64>(6)? != 0,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    }
+    fn values(&self) -> Vec<rusqlite::types::Value> {
+        use rusqlite::types::Value;
+        vec![
+            Value::Text(self.id.clone()),
+            Value::Text(self.name.clone()),
+            Value::Text(self.trigger.clone()),
+            Value::Text(self.skill_type.clone()),
+            Value::Text(self.description.clone()),
+            Value::Text(self.content.clone()),
+            Value::Integer(if self.is_global { 1 } else { 0 }),
+            Value::Integer(self.created_at),
+            Value::Integer(self.updated_at),
+        ]
+    }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 /// `skill_list`'s response shape: the skill plus whether the requesting agent
 /// specifically holds a `db_agent_skills_ref` row for it. Mirrors
 /// `McpServerListItem` — see its doc comment for why `is_global` alone isn't
@@ -254,36 +304,11 @@ impl Store {
     /// List all skills visible to an agent: own (referenced) + global, each
     /// annotated with whether this specific agent holds the bind ref.
     pub fn skill_list(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
-                    EXISTS(SELECT 1 FROM db_agent_skills_ref r WHERE r.skill_id = s.id AND r.agent_id = ?1) AS bound_to_agent
-             FROM db_skills s
-             WHERE s.is_global = 1
-                OR s.id IN (SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?1)
-             ORDER BY s.is_global DESC, s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(SkillListItem {
-                skill: Skill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    trigger: row.get(2)?,
-                    skill_type: row.get(3)?,
-                    description: row.get(4)?,
-                    content: row.get(5)?,
-                    is_global: row.get::<_, i64>(6)? != 0,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                },
-                bound_to_agent: row.get::<_, i64>(9)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list::<Skill>(Owner::Agent, agent_id)?
+            .into_iter()
+            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent })
+            .collect())
     }
 
     /// Effective skills for an agent at launch/config-materialization time:
@@ -334,15 +359,7 @@ impl Store {
         // `bundle_skill_list` below. Happens AFTER the has_own decision —
         // bundle-referenced skills still appear in the final list, they
         // just never trigger the "discard legacy" path on their own.
-        if let Ok(Some(def)) = self.agent_def_get(agent_id) {
-            if !def.memory_id.is_empty() {
-                for item in self.bundle_skill_list(&def.memory_id).unwrap_or_default() {
-                    if !visible_skills.iter().any(|s| s.id == item.skill.id) {
-                        visible_skills.push(item.skill);
-                    }
-                }
-            }
-        }
+        self.managed_union_bundle_refs(agent_id, &mut visible_skills);
         if has_own_skill_refs {
             crate::backend::agent_config::skills_to_agent_skills(&visible_skills, agent_id)
         } else {
@@ -361,35 +378,11 @@ impl Store {
     /// SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md §8 ("used by N agents"),
     /// tracked as gap #2 of #1960.
     pub fn skill_list_global(&self) -> Result<Vec<SkillCatalogItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
-                    (SELECT COUNT(*) FROM db_agent_skills_ref r WHERE r.skill_id = s.id) AS bound_count
-             FROM db_skills s
-             WHERE s.is_global = 1
-             ORDER BY s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(SkillCatalogItem {
-                skill: Skill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    trigger: row.get(2)?,
-                    skill_type: row.get(3)?,
-                    description: row.get(4)?,
-                    content: row.get(5)?,
-                    is_global: row.get::<_, i64>(6)? != 0,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                },
-                bound_count: row.get(9)?,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list_global::<Skill>()?
+            .into_iter()
+            .map(|(skill, bound_count)| SkillCatalogItem { skill, bound_count })
+            .collect())
     }
 
     /// Catalog-tier sibling of `skill_list` (above) — same `bound_to_agent`
@@ -405,74 +398,22 @@ impl Store {
     /// catalog) — so exposing them alongside a caller-chosen agent's bind
     /// status is safe. reagentx P0 on PR #2329.
     pub fn skill_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
-                    EXISTS(SELECT 1 FROM db_agent_skills_ref r WHERE r.skill_id = s.id AND r.agent_id = ?1) AS bound_to_agent
-             FROM db_skills s
-             WHERE s.is_global = 1
-             ORDER BY s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(SkillListItem {
-                skill: Skill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    trigger: row.get(2)?,
-                    skill_type: row.get(3)?,
-                    description: row.get(4)?,
-                    content: row.get(5)?,
-                    is_global: row.get::<_, i64>(6)? != 0,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                },
-                bound_to_agent: row.get::<_, i64>(9)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list_global_for_agent::<Skill>(agent_id)?
+            .into_iter()
+            .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent })
+            .collect())
     }
 
     /// Get a standalone skill by id.
     pub fn skill_get(&self, id: &str) -> Result<Option<Skill>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let result = conn.query_row(
-            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
-             FROM db_skills WHERE id = ?1",
-            params![id],
-            |row| {
-                Ok(Skill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    trigger: row.get(2)?,
-                    skill_type: row.get(3)?,
-                    description: row.get(4)?,
-                    content: row.get(5)?,
-                    is_global: row.get::<_, i64>(6)? != 0,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                })
-            },
-        );
-        match result {
-            Ok(s) => Ok(Some(s)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(StoreError::Sqlite(e)),
-        }
+        self.managed_get::<Skill>(id)
     }
 
     /// Delete a standalone skill and purge its ref rows (both agent- and
     /// bundle-level). Returns true if deleted.
     pub fn skill_delete(&self, id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        // Purge ref rows explicitly (FK cascades may be off on some builds).
-        conn.execute("DELETE FROM db_agent_skills_ref WHERE skill_id = ?1", params![id])?;
-        conn.execute("DELETE FROM db_bundle_skills_ref WHERE skill_id = ?1", params![id])?;
-        let rows = conn.execute("DELETE FROM db_skills WHERE id = ?1", params![id])?;
-        Ok(rows > 0)
+        self.managed_delete::<Skill>(id)
     }
 
     /// Bind a skill to an agent (insert ref row). Idempotent — binding an
@@ -489,32 +430,12 @@ impl Store {
     /// case — reporting success while creating nothing. reagentx P1, PR
     /// #2315.
     pub fn skill_bind(&self, agent_id: &str, skill_id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let agent_exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
-            params![agent_id],
-            |row| row.get(0),
-        )?;
-        if !agent_exists {
-            return Err(StoreError::Other(format!(
-                "agent {agent_id} not found in this channel's local registry — cross-channel skill binding is not supported"
-            )));
-        }
-        conn.execute(
-            "INSERT OR IGNORE INTO db_agent_skills_ref (agent_id, skill_id) VALUES (?1, ?2)",
-            params![agent_id, skill_id],
-        )?;
-        Ok(())
+        self.managed_bind_agent::<Skill>(agent_id, skill_id)
     }
 
     /// Unbind a skill from an agent. Returns true if a row was removed.
     pub fn skill_unbind(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_agent_skills_ref WHERE agent_id = ?1 AND skill_id = ?2",
-            params![agent_id, skill_id],
-        )?;
-        Ok(rows > 0)
+        self.managed_unbind::<Skill>(Owner::Agent, agent_id, skill_id)
     }
 
     /// Atomically upsert a skill enforcing per-agent name uniqueness, and (when
@@ -529,44 +450,7 @@ impl Store {
         skill: &Skill,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        let dup: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM db_skills
-             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
-               SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?3
-             ))",
-            params![skill.name, skill.id, agent_id],
-            |r| r.get(0),
-        )?;
-        if dup > 0 {
-            return Err(StoreError::Other(format!(
-                "skill name '{}' already bound to this agent",
-                skill.name
-            )));
-        }
-        tx.execute(
-            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
-               description=excluded.description, content=excluded.content,
-               updated_at=excluded.updated_at",
-            params![
-                skill.id, skill.name, skill.trigger, skill.skill_type,
-                skill.description, skill.content,
-                if skill.is_global { 1i64 } else { 0i64 },
-                skill.created_at, skill.updated_at,
-            ],
-        )?;
-        if bind_new {
-            tx.execute(
-                "INSERT OR IGNORE INTO db_agent_skills_ref (agent_id, skill_id) VALUES (?1, ?2)",
-                params![agent_id, skill.id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.managed_upsert_unique(Owner::Agent, agent_id, skill, bind_new, None)
     }
 
     /// Atomically upsert a GLOBAL skill enforcing catalog-wide name
@@ -578,61 +462,19 @@ impl Store {
     /// duplicate bullet in the assembled CLAUDE.md skills index.
     /// `skill.is_global` must already be `true`; caller's job.
     pub fn skill_upsert_unique_global(&self, skill: &Skill) -> Result<(), StoreError> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        let dup: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM db_skills WHERE name = ?1 AND id <> ?2 AND is_global = 1",
-            params![skill.name, skill.id],
-            |r| r.get(0),
-        )?;
-        if dup > 0 {
-            return Err(StoreError::Other(format!(
-                "a global skill named '{}' already exists",
-                skill.name
-            )));
-        }
-        tx.execute(
-            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
-               description=excluded.description, content=excluded.content,
-               updated_at=excluded.updated_at",
-            params![
-                skill.id, skill.name, skill.trigger, skill.skill_type,
-                skill.description, skill.content,
-                skill.created_at, skill.updated_at,
-            ],
-        )?;
-        tx.commit()?;
-        Ok(())
+        self.managed_upsert_unique_global(skill)
     }
 
     /// Return true if the given skill is accessible to the agent (global or bound).
     /// Used for read and delete access checks.
     pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_skills
-             WHERE id = ?1 AND (is_global = 1 OR id IN (
-               SELECT skill_id FROM db_agent_skills_ref WHERE agent_id = ?2
-             ))",
-            rusqlite::params![skill_id, agent_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_accessible_to::<Skill>(Owner::Agent, agent_id, skill_id)
     }
 
     /// Return true if the agent has a direct ref binding to this skill (for delete/mutation).
     /// Global skills are excluded — use the is_global guard separately.
     pub fn skill_is_bound_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_agent_skills_ref WHERE agent_id = ?1 AND skill_id = ?2",
-            rusqlite::params![agent_id, skill_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_bound_to::<Skill>(Owner::Agent, agent_id, skill_id)
     }
 
     // ── Bundle-level references (composable model v2) ──────────────────
@@ -644,36 +486,11 @@ impl Store {
     /// and global skills, each annotated with whether this specific bundle
     /// holds the `db_bundle_skills_ref` row.
     pub fn bundle_skill_list(&self, bundle_id: &str) -> Result<Vec<SkillBundleListItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
-                    EXISTS(SELECT 1 FROM db_bundle_skills_ref r WHERE r.skill_id = s.id AND r.bundle_id = ?1) AS bound_to_bundle
-             FROM db_skills s
-             WHERE s.is_global = 1
-                OR s.id IN (SELECT skill_id FROM db_bundle_skills_ref WHERE bundle_id = ?1)
-             ORDER BY s.is_global DESC, s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map(params![bundle_id], |row| {
-            Ok(SkillBundleListItem {
-                skill: Skill {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    trigger: row.get(2)?,
-                    skill_type: row.get(3)?,
-                    description: row.get(4)?,
-                    content: row.get(5)?,
-                    is_global: row.get::<_, i64>(6)? != 0,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
-                },
-                bound_to_bundle: row.get::<_, i64>(9)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list::<Skill>(Owner::Bundle, bundle_id)?
+            .into_iter()
+            .map(|(skill, bound_to_bundle)| SkillBundleListItem { skill, bound_to_bundle })
+            .collect())
     }
 
     /// Bind a skill to a bundle (insert ref row). Idempotent.
@@ -682,25 +499,7 @@ impl Store {
     /// `Store::bundle_mcp_bind`'s doc comment (mcp_servers.rs) for the full
     /// reasoning (reagentx P0 review on PR #2639).
     pub fn bundle_skill_bind(&self, id_store: &Store, bundle_id: &str, skill_id: &str) -> Result<(), StoreError> {
-        let bundle_exists: bool = {
-            let conn = id_store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
-                params![bundle_id],
-                |row| row.get(0),
-            )?
-        };
-        if !bundle_exists {
-            return Err(StoreError::Other(format!(
-                "bundle {bundle_id} not found — cannot bind a skill to a nonexistent bundle"
-            )));
-        }
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES (?1, ?2)",
-            params![bundle_id, skill_id],
-        )?;
-        Ok(())
+        self.managed_bind_bundle::<Skill>(id_store, bundle_id, skill_id)
     }
 
     /// Atomically create a NEW, PRIVATE (never global) skill scoped and
@@ -715,83 +514,18 @@ impl Store {
         skill: &Skill,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        let bundle_exists: bool = {
-            let conn = id_store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
-                params![bundle_id],
-                |row| row.get(0),
-            )?
-        };
-        if !bundle_exists {
-            return Err(StoreError::Other(format!(
-                "bundle {bundle_id} not found — cannot create a skill for a nonexistent bundle"
-            )));
-        }
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        let dup: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM db_skills
-             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
-               SELECT skill_id FROM db_bundle_skills_ref WHERE bundle_id = ?3
-             ))",
-            params![skill.name, skill.id, bundle_id],
-            |r| r.get(0),
-        )?;
-        if dup > 0 {
-            return Err(StoreError::Other(format!(
-                "skill name '{}' already bound to this bundle",
-                skill.name
-            )));
-        }
-        // is_global hardcoded to 0 — see bundle_mcp_upsert_unique's
-        // identical comment.
-        tx.execute(
-            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
-               description=excluded.description, content=excluded.content,
-               updated_at=excluded.updated_at",
-            params![
-                skill.id, skill.name, skill.trigger, skill.skill_type,
-                skill.description, skill.content,
-                skill.created_at, skill.updated_at,
-            ],
-        )?;
-        if bind_new {
-            tx.execute(
-                "INSERT OR IGNORE INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES (?1, ?2)",
-                params![bundle_id, skill.id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.managed_upsert_unique_for_bundle(id_store, bundle_id, skill, bind_new)
     }
 
     /// Unbind a skill from a bundle. Returns true if a row was removed.
     pub fn bundle_skill_unbind(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_bundle_skills_ref WHERE bundle_id = ?1 AND skill_id = ?2",
-            params![bundle_id, skill_id],
-        )?;
-        Ok(rows > 0)
+        self.managed_unbind::<Skill>(Owner::Bundle, bundle_id, skill_id)
     }
 
     /// Return true if the given skill is accessible to the bundle (global or
     /// bundle-bound). Mirrors `skill_is_accessible_to`.
     pub fn bundle_skill_is_accessible_to(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_skills
-             WHERE id = ?1 AND (is_global = 1 OR id IN (
-               SELECT skill_id FROM db_bundle_skills_ref WHERE bundle_id = ?2
-             ))",
-            rusqlite::params![skill_id, bundle_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_accessible_to::<Skill>(Owner::Bundle, bundle_id, skill_id)
     }
 
     /// Return true if the bundle has a direct ref binding to this skill
@@ -799,13 +533,7 @@ impl Store {
     /// edit/delete-ownership checks, as opposed to
     /// `bundle_skill_is_accessible_to`'s broader read-access check.
     pub fn bundle_skill_is_bound_to(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_bundle_skills_ref WHERE bundle_id = ?1 AND skill_id = ?2",
-            rusqlite::params![bundle_id, skill_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_bound_to::<Skill>(Owner::Bundle, bundle_id, skill_id)
     }
 }
 
