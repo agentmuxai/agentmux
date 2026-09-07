@@ -120,7 +120,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // `agent:<defId>:current`. Continuation is now
                 // structural (same zone, different block) rather than
                 // parametric (per-block snapshot copy + --continue).
-                // See docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
                 if !inst.block_id.is_empty()
                     && crate::backend::agent_session::is_valid_definition_id(&inst.definition_id)
                 {
