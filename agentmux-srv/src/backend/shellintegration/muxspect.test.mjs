@@ -13,7 +13,86 @@
 // parser silently misbehaved depending on which side they landed on.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkSpawnerTier, logSrvVersion, parseArgs, renderLayout, renderWork } from "./muxspect.mjs";
+import { checkSpawnerTier, logSrvVersion, parseArgs, renderLayout, renderMigrations, renderWork } from "./muxspect.mjs";
+
+describe("muxspect renderMigrations", () => {
+    let logSpy;
+    beforeEach(() => {
+        logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        logSpy.mockRestore();
+    });
+
+    const printed = () => logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+
+    const report = (overrides = {}) => ({
+        data_dir: "/data",
+        shared_store: "/shared/store.db",
+        channel_store: "/data/db/objects.db",
+        tracking_errors: [],
+        migrations: [
+            { id: "0007_agents_consolidate", scope: "channel", description: "Consolidate", state: "applied", verify: "ok", detail: "db_agents=5 (legacy: definitions=4, instances=1)" },
+            { id: "0003_x", scope: "channel", description: "x", state: "applied", verify: "n/a" },
+            { id: "0024_y", scope: "global", description: "y", state: "pending" },
+        ],
+        summary: { total: 3, applied: 2, pending: 1, unknown: 0, checked: 2, ok: 1, mismatch: 0, error: 0, not_verifiable: 1 },
+        exit_code: 0,
+        ...overrides,
+    });
+
+    it("shows every migration's state, the verdict for applied ones, and the --verify summary line", () => {
+        renderMigrations(report());
+        const out = printed();
+        expect(out).toContain("0007_agents_consolidate  [channel]  applied  verify=ok");
+        expect(out).toContain("db_agents=5");
+        expect(out).toContain("0003_x  [channel]  applied  verify=n/a");
+        // A pending row has no verdict — nothing to verify yet.
+        expect(out).toContain("0024_y  [global]  pending");
+        expect(out).not.toContain("0024_y  [global]  pending  verify");
+        expect(out).toContain("verify: 2 applied checked — 1 ok, 0 mismatch, 0 error, 1 not verifiable");
+        expect(out).not.toContain("RUNBOOK");
+    });
+
+    it("shouts a MISMATCH and points at the runbook, without claiming to have changed anything", () => {
+        renderMigrations(
+            report({
+                migrations: [
+                    { id: "0007_agents_consolidate", scope: "channel", description: "Consolidate", state: "applied", verify: "MISMATCH", detail: "db_agent_definitions=3 db_agent_instances=2 but db_agents=0" },
+                ],
+                summary: { total: 1, applied: 1, pending: 0, unknown: 0, checked: 1, ok: 0, mismatch: 1, error: 0, not_verifiable: 0 },
+                exit_code: 3,
+            }),
+        );
+        const out = printed();
+        expect(out).toContain("MISMATCH — recorded applied, effect is NOT there");
+        expect(out).toContain("but db_agents=0");
+        expect(out).toContain("RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md");
+        expect(out).toContain("read-only");
+    });
+
+    it("surfaces an unreadable tracking store once, by cause, and counts its rows as unknown", () => {
+        renderMigrations(
+            report({
+                tracking_errors: ["read db_migrations in /shared/store.db: file is not a database"],
+                migrations: [
+                    { id: "0024_y", scope: "global", description: "y", state: "unknown", verify: "error", detail: "cannot read applied state: file is not a database" },
+                ],
+                summary: { total: 1, applied: 0, pending: 0, unknown: 1, checked: 1, ok: 0, mismatch: 0, error: 1, not_verifiable: 0 },
+                exit_code: 3,
+            }),
+        );
+        const out = printed();
+        expect(out).toContain("1 UNKNOWN (tracking store unreadable)");
+        expect(out).toContain("tracking state unreadable: read db_migrations in /shared/store.db: file is not a database");
+        expect(out).toContain("0024_y  [global]  unknown  ERROR — check could not run");
+    });
+
+    it("parses as a bare command", () => {
+        expect(parseArgs(["migrations"])).toEqual({ cmd: "migrations", blockId: undefined, json: false, help: false });
+        expect(parseArgs(["migrations", "--json"]).json).toBe(true);
+    });
+});
 
 describe("muxspect parseArgs", () => {
     it("'layout' with no tab id parses as a bare command", () => {
