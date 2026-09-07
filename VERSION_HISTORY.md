@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.55.38 — 2026-09-06
+
+- docs: stop agents sleep-polling — decision table for waiting without polling
+- docs: DRY and modularity audit — findings and a phased slimming plan
+- feat(app-api): agent.open over HTTP + OpenAgent MCP tool + muxopen — automation can now launch agents, not just stop them
+- refactor(common): lift CREATE_NO_WINDOW, now_ms, event_log, process-kill, and WindowKind into agentmux-common
+- refactor(frontend): collapse the three byte-identical zoom.{win32,linux,darwin}.ts platform forks into one zoom.ts
+- fix(browser-pane): route pane nav-state/title/favicon events to the pane's owning window, not main
+- refactor(cef): one raw-TCP service_call transport for the ten backend_* helpers in client/helpers.rs
+
 ## 0.55.37 — 2026-09-06
 
 - fix(agent): swap the remaining tail glyphs from the weak-coverage arrow
