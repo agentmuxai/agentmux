@@ -1580,10 +1580,32 @@ wrap_task! {
             // CrBrowserMain. A graceful return here lets the launcher's crash-
             // budget supervisor retry (with --disable-gpu) only on real CEF
             // faults, not on this transient race.
+            //
+            // Issue #3028: prefer a GENUINE `BrowserKind::TopLevel` browser.
+            // `list_top_level_browsers()` also includes `Floater`s (by design
+            // — its other callers emit host JS events and floaters are
+            // trusted renderers), and every floater's client is built with
+            // `is_browser_pane = true`. Cloning a floater's client here hands
+            // that flag to a brand-new top-level window, whose `on_load_end`
+            // then took the browser-pane early-return ABOVE the reveal block:
+            // paint gate never armed, `report_first_paint` no-opped, 4s
+            // safety timeout never scheduled, window hidden forever. Because
+            // `browsers` is a `HashMap`, which client got cloned varied per
+            // run — the intermittency that made #3028 reproduce every time
+            // with all windows closed (only pool + `floating-pool-*` alive)
+            // and not at all with `main` open. `on_load_end` no longer trusts
+            // the inherited flag either (`takes_pane_path`), but picking the
+            // right client here keeps the flag honest in the first place.
+            //
+            // Falls back to the floater-inclusive list rather than aborting:
+            // a floater-only population is still a live renderer to clone
+            // from, and a window that opens with a stale flag is now handled
+            // correctly downstream — strictly better than no window at all.
             let client = self
                 .state
-                .list_top_level_browsers()
+                .list_full_top_level_browsers()
                 .into_iter()
+                .chain(self.state.list_top_level_browsers())
                 .find_map(|(_, b)| {
                     b.host().and_then(|h| h.client())
                 });

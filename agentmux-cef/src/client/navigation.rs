@@ -368,6 +368,48 @@ fn should_run_reveal(views_visible: bool, native_visible: Option<bool>) -> bool 
     !views_visible || native_visible == Some(false)
 }
 
+/// Does this browser take `on_load_end`'s browser-pane path (pane-specific
+/// work, then return) instead of the top-level reveal path?
+///
+/// The `AgentMuxClient`'s own `is_browser_pane` flag is NOT trustworthy for
+/// this decision, because a client is shared by every browser created from
+/// it. `CreateWindowTask::execute` clones its client from an arbitrary
+/// browser returned by `list_top_level_browsers()`, and that helper
+/// deliberately includes `Floater`s ("they ARE trusted top-level renderers,
+/// so `list_top_level_browsers` includes them for host JS-event emission" —
+/// `BrowserKind`'s own doc comment). Every floater client is built with
+/// `is_browser_pane = true` (`floating_pane.rs`), so a cold-path top-level
+/// window that happens to clone a floater's client inherits `true` and
+/// returned out of `on_load_end` above the whole reveal block — issue #3028.
+/// `browsers` is a `HashMap`, so which client gets cloned varies per run:
+/// exactly the intermittency that made #3028 reproduce every time under the
+/// issue's repro (all windows closed, only pool + `floating-pool-*` browsers
+/// alive) and not at all under a three-rapid-clicks repro with `main` open.
+///
+/// This is the same "the inherited flag lies, the registered kind doesn't"
+/// hazard already documented at `client/lifecycle.rs`'s `BrowserKind`
+/// classification ("LABEL is the source of truth ... if the iteration happens
+/// to pick a pane, the new window inherits `is_browser_pane=true`"). That fix
+/// corrected the *classification*; the flag itself was left wrong and
+/// `on_load_end` still branched on it.
+///
+/// `kind` is this browser's own registered `BrowserKind`. `None` (not
+/// registered yet, or identity lookup missed) falls back to the client flag —
+/// the pre-fix behaviour — rather than guessing on missing evidence.
+fn takes_pane_path(kind: Option<&crate::state::BrowserKind>, client_is_browser_pane: bool) -> bool {
+    use crate::state::BrowserKind;
+    match kind {
+        // Genuine pane-like renderers: panes and floating panes/tear-offs.
+        // Floaters host panes and need the focus-subclass re-install, which
+        // is why their clients set the flag in the first place.
+        Some(BrowserKind::Pane { .. }) | Some(BrowserKind::Floater { .. }) => true,
+        // A real top-level window (or a CEF-owned popup) — never the pane
+        // path, no matter what client it was cloned from.
+        Some(BrowserKind::TopLevel { .. }) | Some(BrowserKind::Popup) => false,
+        None => client_is_browser_pane,
+    }
+}
+
 /// Native-layer visibility for a label's bound HWND. `None` when no HWND is
 /// bound (or off Windows) — callers must treat that as "no extra information",
 /// not as hidden.
@@ -662,7 +704,29 @@ impl AgentMuxHandler {
         // Runs AFTER cred injection so a floating-pane window gets BOTH the
         // bridge and its focus fix; a real remote browser pane falls through
         // here having received no creds (origin didn't match above).
-        if self.is_browser_pane {
+        // Decide the pane branch from what this browser actually IS (its
+        // registered `BrowserKind`), not from the shared client's
+        // `is_browser_pane` flag, which a cloned client can carry in from an
+        // unrelated floater — issue #3028's root cause, see `takes_pane_path`.
+        let resolved_kind = {
+            let mut owned = browser.as_deref().cloned();
+            owned
+                .as_mut()
+                .and_then(|b| self.window_label_for(b))
+                .and_then(|label| self.state.browser_kind_for_label(&label))
+        };
+        let is_pane_path = takes_pane_path(resolved_kind.as_ref(), self.is_browser_pane);
+        if self.is_browser_pane && !is_pane_path {
+            // The exact #3028 condition. Loud: this window would have been
+            // stranded hidden forever before this fix, with no log at all.
+            tracing::warn!(
+                target: "startup-paint",
+                kind = ?resolved_kind,
+                "[on_load_end] client claims browser-pane but this browser is a top-level \
+                 window (cloned client) — taking the reveal path (issue #3028)"
+            );
+        }
+        if is_pane_path {
             if let Some(b) = browser.as_deref() {
                 crate::browser_pane::callbacks::on_load_end_browser_pane(&self.state, b);
             }
@@ -1049,6 +1113,63 @@ pub(crate) fn show_load_error_page(
     let data_uri = format!("data:text/html;base64,{}", b64_str);
     let uri = CefString::from(data_uri.as_str());
     frame.load_url(Some(&uri));
+}
+
+#[cfg(test)]
+mod pane_path_tests {
+    use super::takes_pane_path;
+    use crate::state::BrowserKind;
+
+    /// Issue #3028's actual root cause. `CreateWindowTask` clones its CEF
+    /// `Client` from an arbitrary browser in `list_top_level_browsers()`,
+    /// which deliberately includes `Floater`s — and every floater client is
+    /// built with `is_browser_pane = true`. A cold-path top-level window that
+    /// happens to clone a floater's client inherits that flag, and the old
+    /// `if self.is_browser_pane { .. return }` gate then returned out of
+    /// `on_load_end` ABOVE the entire reveal block: paint gate never armed,
+    /// `report_first_paint` no-opped, the 4s safety timeout never scheduled.
+    /// What this browser IS must win over what its cloned client claims.
+    #[test]
+    fn a_top_level_window_with_an_inherited_pane_flag_is_not_a_pane() {
+        assert!(!takes_pane_path(
+            Some(&BrowserKind::TopLevel { is_pool: false }),
+            true,
+        ));
+        assert!(!takes_pane_path(
+            Some(&BrowserKind::TopLevel { is_pool: true }),
+            true,
+        ));
+    }
+
+    /// The converse must keep working: genuine panes and floaters take the
+    /// pane path even if they were somehow handed a non-pane client. Floaters
+    /// are pane-like here by design — they host panes and need the focus
+    /// subclass re-install, which is why their clients set the flag at all.
+    #[test]
+    fn genuine_panes_and_floaters_still_take_the_pane_path() {
+        assert!(takes_pane_path(
+            Some(&BrowserKind::Pane { block_id: "b".into() }),
+            false,
+        ));
+        assert!(takes_pane_path(Some(&BrowserKind::Floater { is_pool: false }), false));
+        assert!(takes_pane_path(Some(&BrowserKind::Floater { is_pool: true }), false));
+    }
+
+    /// Unresolvable kind (browser not registered yet / identity lookup miss)
+    /// must fall back to the client flag — the pre-fix behaviour — rather
+    /// than guessing. Never silently reclassify on missing evidence.
+    #[test]
+    fn an_unresolvable_kind_falls_back_to_the_client_flag() {
+        assert!(takes_pane_path(None, true));
+        assert!(!takes_pane_path(None, false));
+    }
+
+    /// A popup is CEF-owned and Chrome-style (shown at creation); it was not
+    /// on the pane path before this change and must not move onto it.
+    #[test]
+    fn a_popup_is_unchanged_by_this_gate() {
+        assert!(!takes_pane_path(Some(&BrowserKind::Popup), false));
+    }
 }
 
 #[cfg(test)]
