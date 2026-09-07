@@ -294,6 +294,19 @@ fn mdns_instance_label(hostname: &str, port: u16) -> String {
     // the port alone still disambiguates instances on this host, and remote
     // peers are disambiguated by address.
     let host_part = if sanitized.is_empty() { "unknown".to_string() } else { sanitized };
+    // A DNS label is capped at 63 bytes. "agentmux-" (9) + "-" + a 5-digit port
+    // (6) leaves 48; truncate to 45 for headroom. Windows caps hostnames at 15
+    // but Linux allows 64, so this is reachable in practice, and an
+    // over-length label would be rejected or silently mangled rather than
+    // failing loudly [Manpo review, PR #3048].
+    let host_part: String = host_part.chars().take(45).collect();
+    // Residual collision: two hosts sharing BOTH hostname and port — e.g. two
+    // fresh VM clones that are each "ubuntu" — still produce the same label and
+    // will be conflict-renamed. That no longer blinds either host (the
+    // self-check requires port+address agreement, see `handle_event`), but the
+    // two do collapse into one peer-map entry with a flapping address. A
+    // persisted per-install random suffix would close it for good; not done
+    // here because it needs somewhere durable to live.
     format!("agentmux-{host_part}-{port}")
 }
 
@@ -662,6 +675,10 @@ impl LanDiscovery {
                     .to_string();
 
                 let mut instances = self.instances.write();
+                // Cloned for the log line below: `entry()` takes ownership of
+                // the key, and the peer's service name is the field that makes
+                // that line correlatable with the sender's own registration.
+                let fullname_for_log = fullname.clone();
                 let entry = instances.entry(fullname).or_insert_with(|| LanInstance {
                     instance_id: peer_id.clone(),
                     hostname: hostname.clone(),
@@ -700,6 +717,11 @@ impl LanDiscovery {
 
                 tracing::info!(
                     peer_id = %peer_id,
+                    // The peer's own service name. Without it this line could
+                    // not be correlated with the sender's registration, which
+                    // is what made the 2026-09-06 collision take two hosts and
+                    // an ssh session to pin down [Manpo review, PR #3048].
+                    fullname = %fullname_for_log,
                     address = %info.get_addresses().iter().next().map(|a| a.to_string()).unwrap_or_default(),
                     port = info.get_port(),
                     "LAN peer discovered"
@@ -1599,25 +1621,28 @@ mod handle_event_tests {
         // conflict-rename) must NOT be mistaken for us: it is on a different
         // port, which is proof it is somebody else.
         let discovery = test_discovery("collide", 59859);
-        let peer_with_our_exact_name = test_service_info(
-            "collide",
-            59859,
-            &[("instance_id", "v0.55.37"), ("hostname", "gamerlove")],
-        );
-        // Same fullname as ours, by construction.
-        assert_eq!(
-            peer_with_our_exact_name.get_fullname(),
-            discovery.service_fullname,
-            "fixture must actually reproduce the fullname collision"
-        );
 
-        // ...but arriving from a remote address, on a port that is not ours.
-        let remote_peer = test_service_info_at(
-            "collide",
+        // The peer must carry OUR EXACT fullname while arriving from a foreign
+        // address on a foreign port — that is the shape the old
+        // `fullname == self.service_fullname` guard silently dropped. Pin the
+        // label explicitly: deriving it from the peer's own (foreign) port
+        // would produce a DIFFERENT fullname, the old guard would never fire
+        // on it, and this test would pass against the unfixed code — vacuous.
+        // (Caught by Manpo@gamerlove reviewing this PR; verified by reverting
+        // the guard locally and watching this test go red.)
+        let self_label = super::mdns_instance_label("collide", 59859);
+        let remote_peer = test_service_info_with_label(
+            &self_label,
             60237,
             "192.168.1.68",
             &[("instance_id", "v0.55.37"), ("hostname", "gamerlove")],
         );
+        assert_eq!(
+            remote_peer.get_fullname(),
+            discovery.service_fullname,
+            "fixture must actually reproduce the fullname collision, or this test proves nothing"
+        );
+
         discovery.handle_event(ServiceEvent::ServiceResolved(remote_peer));
 
         assert_eq!(
