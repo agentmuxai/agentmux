@@ -69,4 +69,13 @@ Statuses rot (this doc's parent spec found shipped features still marked
 "no code yet" 48 hours after landing). Before trusting a spec's Status — or
 any checkable claim in it (a file path, "Phase N done", "PR merged") —
 **spot-verify against current code.** A Status line is a claim about the
-code; nothing re-verifies it automatically once written.
+code; nothing re-verifies it automatically once written — but as of
+2026-09-07 something does *flag* the likely-stale ones: the weekly
+docs stale-sweep (`scripts/docs-stale-sweep.mjs`, run by
+`.github/workflows/docs-stale-sweep.yml`) lists every doc that claims to be
+current, has not been touched in more than 8 weeks, and cites a file that
+has changed since or no longer exists, and keeps that list on one standing
+issue (label `docs-stale-sweep`). A doc on that list is a candidate, not a
+verdict: open it, spot-verify, then update it or restamp it
+`historical`/`superseded`. Run it locally with
+`node scripts/docs-stale-sweep.mjs [--weeks N] [--json]`.
