@@ -7,7 +7,9 @@
 //! Zone names: active = `agent:<defId>:current`,
 //! archived = `agent:<defId>:archive:<unix_ms>`. Each zone holds
 //! `output.state.json` (full UI snapshot) and `output` (raw NDJSON stream).
-//! See `docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md`.
+//! (This used to cite a SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23
+//! design doc that was never committed; the zone layout above is the
+//! contract.)
 //!
 //! ## Public API surface
 //!
@@ -34,7 +36,7 @@ pub use archive::{archive_session, list_archives};
 pub use global_store::{
     agent_zone_for_block_meta, global_transcript_store, set_global_transcript_store,
 };
-pub use migrations::{migrate_block_zones_v1, migrate_promote_template_sessions_v1};
+pub use migrations::{migrate_block_zones_v1, migrate_promote_template_sessions_v1, MIGRATION_MARKER_V1};
 pub use session_io::{
     append_session_output, heal_global_snapshot_source_block_ids, read_session_state,
     write_session_state, OUTPUT_FILE, SNAPSHOT_FILE, TSIDX_FILE,
