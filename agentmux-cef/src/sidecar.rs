@@ -457,13 +457,20 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     let mut sleep = tokio::time::sleep_until(deadline);
     tokio::pin!(sleep);
 
+    let migration_failed = |reason: String| format!("agentmux-srv database migration failed: {}", reason);
     let recv: Result<Option<BackendSpawnResult>, String> = loop {
         tokio::select! {
+            // `biased;` — failure arm first. The stderr thread sends the
+            // reason then exits (srv exits 1 right after the line), dropping
+            // all senders before this select! is next polled; unbiased,
+            // `rx.recv()` → None could win over the buffered reason and
+            // degrade to the generic "channel closed" error (reagent P1,
+            // post-merge on #3043). Same fix as srv_spawner.rs, which also
+            // re-checks the failure channel after the loop — mirrored below.
+            biased;
+            Some(reason) = failure_rx.recv() => break Err(migration_failed(reason)),
             result = rx.recv() => break Ok(result),
             _ = &mut sleep => break Err("Timeout waiting for agentmux-srv to start (30s)".to_string()),
-            Some(reason) = failure_rx.recv() => {
-                break Err(format!("agentmux-srv database migration failed: {}", reason));
-            }
             Some(()) = migration_rx.recv() => {
                 let new_deadline = tokio::time::Instant::now() + migration_timeout;
                 if new_deadline > deadline {
@@ -473,6 +480,15 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
                 }
             }
         }
+    };
+    // Second guard for the same race: if ESTART's channel closed but a
+    // failure reason is already buffered, the reason is the real outcome.
+    let recv = match recv {
+        Ok(None) => match failure_rx.try_recv() {
+            Ok(reason) => Err(migration_failed(reason)),
+            Err(_) => Ok(None),
+        },
+        other => other,
     };
     let result = recv?
         .ok_or_else(|| "agentmux-srv channel closed before sending endpoints".to_string())?;
