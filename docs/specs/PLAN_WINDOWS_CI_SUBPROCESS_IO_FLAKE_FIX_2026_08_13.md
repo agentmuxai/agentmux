@@ -1,7 +1,7 @@
 # Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI
 
 **Date:** 2026-08-13
-**Status:** proposed, not yet implemented
+**Status:** active — the 08-13 instrumentation shipped and paid off (it falsified the AV hypothesis on the very next occurrence); the cold-start fix it pointed to shipped 2026-09-07 as `warm_node()`. Verified 2026-09-07.
 **Context:** follow-up to
 [retro-nightly-ci-red-windows-not-macos-2026-08-13.md](../retro/retro-nightly-ci-red-windows-not-macos-2026-08-13.md),
 written after that retro concluded "one-off flake, no fix needed unless it
@@ -33,6 +33,7 @@ end-to-end (unit tests / `cargo check` can't).
 |---|---|
 | 2026-06-28 | First known failure. Timed out at the **original 5s** timeout. Fixed in `410875c55` by widening to **15s**, reasoning: "node.exe cold-start under CREATE_NO_WINDOW exceeding the 5s read timeout on a loaded CI runner." |
 | 2026-08-13 | Second known failure, at **15s** — the same test, the same assertion, the same stated cause ("cold start on a loaded runner"), just a higher number. |
+| 2026-09-07 | Third known failure, at **15s × 2 attempts** (seen on PR #3046). The first occurrence with the diagnostics this plan asked for — and they settle two things. **Hypothesis 2 (AV scan delay) is falsified for this run:** the Defender dump the 08-13 fix added reported `RealTimeProtectionEnabled: False`, `OnAccessProtectionEnabled: False`, `BehaviorMonitorEnabled: False`. **Hypothesis 1 (cold start) is supported and narrowed:** both attempts burned their full 15s (~49s for the test), and then the *other six* node-spawning tests in the same binary finished in ~0.8s combined. It is specifically the FIRST node spawn in the process that is slow; node is fast once warm. Fixed by `warm_node()` — paying the page-in outside the measured window instead of widening the timeout a third time. |
 
 Two occurrences of the identical symptom, ~6.5 weeks apart, both "fixed" by
 raising the same timeout, is a pattern: **the timeout bump is not the actual

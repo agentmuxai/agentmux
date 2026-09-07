@@ -178,7 +178,7 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
-### implemented (136)
+### implemented
 
 | Spec | Title |
 |---|---|
@@ -319,10 +319,11 @@ partial list.
 | [`jekt-visibility-completion`](jekt-visibility-completion.md) | Spec: Jekt Visibility Completion — persistent-agent visibility + outgoing echo |
 | [`swarm-active-pane-sync`](swarm-active-pane-sync.md) | Swarm ↔ Pane Two-Way Active-Row Sync |
 
-### active (16)
+### active
 
 | Spec | Title |
 |---|---|
+| [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
 | [`SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04`](SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md) | Agent Recurring-Task / Polling Primitives — Design Hardening |
@@ -340,13 +341,12 @@ partial list.
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 
-### proposed (96)
+### proposed
 
 | Spec | Title |
 |---|---|
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17`](PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17.md) | Plan — enforce the same per-agent Claude auth isolation on macOS that already holds on Windows |
-| [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
 | [`SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05`](SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md) | SPEC — Activity dock: title over-truncates; tail glyph renders wrong near the time |
 | [`SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22`](SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22.md) | Agent Busy Bar (Marching Ants) Refinement |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
@@ -441,7 +441,7 @@ partial list.
 | [`uptime-adaptive-width-help-zoom`](uptime-adaptive-width-help-zoom.md) | Spec: Adaptive Uptime Width + Help View Zoom |
 | [`widget-visibility-rearchitecture`](widget-visibility-rearchitecture.md) | Widget Visibility Re-Architecture |
 
-### draft (242)
+### draft
 
 | Spec | Title |
 |---|---|
@@ -688,7 +688,7 @@ partial list.
 | [`web-widget`](web-widget.md) | Web Widget Implementation Spec - Tauri v2 |
 | [`widget-dnd-reorder`](widget-dnd-reorder.md) | Widget Drag-and-Drop Reorder |
 
-### living (3)
+### living
 
 | Spec | Title |
 |---|---|
@@ -696,14 +696,14 @@ partial list.
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 
-### historical (2)
+### historical
 
 | Spec | Title |
 |---|---|
 | [`MASTER_REDUCER_STACK_STATUS_2026-05-05`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md) | Master Reducer-Stack Status — 2026-05-05 |
 | [`SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13`](SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13.md) | SPEC — active-tab color line: stop at the tab strip's right edge, not the viewport edge |
 
-### superseded (3)
+### superseded
 
 | Spec | Title |
 |---|---|
@@ -711,7 +711,7 @@ partial list.
 | [`SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06`](SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md) | Spec: Continuous AgentWorkingRow background through the scrollbar gutter |
 | [`SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24`](SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) | SPEC: Composer strip — balance misc elements across left/right zones |
 
-### no status line (149)
+### no status line
 
 Predate the closed vocabulary. Not a backlog to bulk-restamp —
 an unverified restamp turns "unknown" into "confidently wrong".
@@ -869,7 +869,7 @@ Fix one when you touch it and know its real state.
 | [`xterm-v6-size-opacity-fix`](xterm-v6-size-opacity-fix.md) | xterm v6: Terminal Size & Opacity Regression Fix |
 | [`zoom-architecture`](zoom-architecture.md) | AgentMux Zoom System Architecture |
 
-### non-canonical status (210)
+### non-canonical status
 
 These carry a `**Status:**` line whose first word is not in the closed enum
 (`docs/specs/README.md`). Grouped by the word actually found, so the
