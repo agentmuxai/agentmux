@@ -25,7 +25,7 @@
  * our own last write (switching bundles, a fresh load).
  */
 
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, Show, type JSX } from "solid-js";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import {
@@ -103,10 +103,17 @@ export const BundleProviderInstructionsSection = (
                     </div>
                 }
             >
-                <For each={rows()}>
+                {/* <Index>, NOT <For>: these rows are index-addressed and every
+                    edit replaces the row object, which <For> keys by identity —
+                    so it would dispose and recreate the row's DOM on every
+                    keystroke, dropping focus after each character and making
+                    the field unusable for normal typing (codex P1, #3063).
+                    <Index> keys by position and hands the item in as an
+                    accessor, so the input element survives edits. */}
+                <Index each={rows()}>
                     {(row, index) => {
-                        const problem = () => providerKeyProblem(row.provider);
-                        const duped = () => dupes().has(row.provider.trim());  // keyed on the raw trimmed key, which is what duplicateProviderKeys reports
+                        const problem = () => providerKeyProblem(row().provider);
+                        const duped = () => dupes().has(row().provider.trim());  // keyed on the raw trimmed key, which is what duplicateProviderKeys reports
                         return (
                             <div class="memory-view-provider-instruction-row">
                                 <div class="memory-view-provider-instruction-head">
@@ -114,16 +121,16 @@ export const BundleProviderInstructionsSection = (
                                         class="memory-view-input"
                                         list="abf-known-providers"
                                         placeholder="Provider (e.g. claude)"
-                                        value={row.provider}
+                                        value={row().provider}
                                         onInput={(e) =>
-                                            updateRow(index(), { provider: e.currentTarget.value })
+                                            updateRow(index, { provider: e.currentTarget.value })
                                         }
                                         onContextMenu={showTextInputContextMenu}
                                     />
                                     <button
                                         type="button"
                                         class="memory-view-provider-instruction-remove"
-                                        onClick={() => removeRow(index())}
+                                        onClick={() => removeRow(index)}
                                         title="Remove this provider override"
                                     >
                                         Remove
@@ -144,7 +151,7 @@ export const BundleProviderInstructionsSection = (
                                           warning, so it vanishes from the .abf. */}
                                     <div class="memory-view-provider-instruction-warn">
                                         {problem()}{" "}
-                                        {row.provider.trim().length === 0
+                                        {row().provider.trim().length === 0
                                             ? "This row will not be saved until you name it."
                                             : "It will still be saved, but skipped when this bundle is exported."}
                                     </div>
@@ -158,9 +165,9 @@ export const BundleProviderInstructionsSection = (
                                 <textarea
                                     class="memory-view-textarea"
                                     rows={5}
-                                    value={row.content}
+                                    value={row().content}
                                     onInput={(e) =>
-                                        updateRow(index(), { content: e.currentTarget.value })
+                                        updateRow(index, { content: e.currentTarget.value })
                                     }
                                     onContextMenu={showTextInputContextMenu}
                                     placeholder="Instructions used only when this bundle runs on this provider."
@@ -168,7 +175,7 @@ export const BundleProviderInstructionsSection = (
                             </div>
                         );
                     }}
-                </For>
+                </Index>
 
                 <datalist id="abf-known-providers">
                     <For each={knownProviders()}>{(p) => <option value={p} />}</For>
