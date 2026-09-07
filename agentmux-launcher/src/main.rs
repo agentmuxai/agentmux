@@ -129,9 +129,20 @@ fn main() {
     // until the host signals first paint. See `splash_mac`.
     #[cfg(target_os = "macos")]
     {
-        // Splash disabled → no AppKit splash; run the supervisor directly on the
-        // main thread (there's no runloop to pump without a splash window).
         if splash_config::splash_disabled() {
+            if tray::background_service_from_env() {
+                // Splash disabled BUT background-service mode on: the main
+                // thread must still pump AppKit, or there is no reopen
+                // delegate and no menu-bar item once every window is closed
+                // (design doc §7.5.1). Same thread layout as the splash path,
+                // minus the window.
+                splash_mac::prepare_headless_app();
+                spawn_supervisor_thread(None);
+                splash_mac::pump_forever();
+            }
+            // Splash disabled, ordinary mode → no AppKit at all; run the
+            // supervisor directly on the main thread (there's no runloop to
+            // pump without a window or a tray).
             tokio::runtime::Runtime::new()
                 .expect("failed to build Tokio runtime")
                 .block_on(launcher_main(None));
@@ -146,25 +157,7 @@ fn main() {
         // TELEMETRY_2026_07_02.md §B.3-B.4.
         let (startup_sink, startup_rx) = startup_events::StartupEventSink::new();
         let splash = splash_mac::Splash::show(startup_rx);
-        std::thread::Builder::new()
-            .name("launcher-supervisor".into())
-            .spawn(move || {
-                // Catch panics so a supervisor crash always exits the process
-                // rather than leaving the main-thread AppKit runloop spinning
-                // as an invisible orphan.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    tokio::runtime::Runtime::new()
-                        .expect("failed to build Tokio runtime")
-                        .block_on(launcher_main(Some(startup_sink)));
-                }));
-                if result.is_err() {
-                    eprintln!("AgentMux launcher supervisor panicked — exiting");
-                    std::process::exit(1);
-                }
-                // Supervisor finished cleanly (host exited / fatal).
-                std::process::exit(0);
-            })
-            .expect("failed to spawn launcher supervisor thread");
+        spawn_supervisor_thread(Some(startup_sink));
         splash.run_until_dismissed(); // pumps the runloop, then parks forever
         return;
     }
@@ -194,6 +187,33 @@ fn main() {
             .expect("failed to build Tokio runtime")
             .block_on(launcher_main(linux_startup_sink));
     }
+}
+
+/// macOS: run the srv+host supervisor (`launcher_main`) on a worker thread with
+/// its own Tokio runtime, leaving the main thread to AppKit. The thread owns
+/// process lifetime: it `exit`s when the supervisor returns, which is what ends
+/// the main thread's pump loop.
+#[cfg(target_os = "macos")]
+fn spawn_supervisor_thread(startup_sink: Option<startup_events::StartupEventSink>) {
+    std::thread::Builder::new()
+        .name("launcher-supervisor".into())
+        .spawn(move || {
+            // Catch panics so a supervisor crash always exits the process
+            // rather than leaving the main-thread AppKit runloop spinning
+            // as an invisible orphan.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                tokio::runtime::Runtime::new()
+                    .expect("failed to build Tokio runtime")
+                    .block_on(launcher_main(startup_sink));
+            }));
+            if result.is_err() {
+                eprintln!("AgentMux launcher supervisor panicked — exiting");
+                std::process::exit(1);
+            }
+            // Supervisor finished cleanly (host exited / fatal).
+            std::process::exit(0);
+        })
+        .expect("failed to spawn launcher supervisor thread");
 }
 
 /// `--splash-selftest`: show the splash with no srv/host behind it, hold it for a

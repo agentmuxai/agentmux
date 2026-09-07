@@ -48,6 +48,8 @@ use std::sync::mpsc;
 
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
 
 /// What the user picked from the tray menu. Platform backends translate their
 /// native click/menu events into these; everything downstream is
@@ -275,7 +277,9 @@ pub fn start_if_enabled(
     }
     #[cfg(target_os = "windows")]
     let started = windows::spawn(_data_dir, _dir_hash).map(|rx| ("windows", rx));
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    let started = macos::spawn(_data_dir, _dir_hash).map(|rx| ("macos", rx));
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let started: Result<(&str, mpsc::Receiver<TrayAction>), String> =
         // Linux (`ksni`) is the remaining backend. Wire it here and call
         // `spawn_action_loop` from `supervisor/unix.rs` — already done for

@@ -657,6 +657,10 @@ impl Splash {
             send_void(pool, sel(b"drain\0"));
             result
         };
+        // `run_until_dismissed` pumps for the process lifetime and ticks the
+        // tray each iteration. Declared here, before `main` spawns the
+        // supervisor thread, so the tray's `spawn` can rely on it.
+        crate::tray::macos::mark_main_pump_available();
         Splash {
             window,
             image_view,
@@ -775,6 +779,7 @@ impl Splash {
             // arrives mid-splash is delivered to our delegate. See pump_app_events.
             unsafe {
                 pump_app_events(0.016);
+                tray_tick();
             }
 
             // Drain pending startup events (non-blocking) into the stage
@@ -859,9 +864,62 @@ impl Splash {
         loop {
             unsafe {
                 pump_app_events(0.2);
+                tray_tick();
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+}
+
+/// One tray iteration inside its own autorelease pool. The manual pump here
+/// (unlike a real `-[NSApplication run]`) establishes no per-iteration pool,
+/// and the tray's `set_tooltip`/`set_text` allocate autoreleased AppKit
+/// objects — same reason `update_stage_fields` wraps itself.
+unsafe fn tray_tick() {
+    let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
+    let pool = send(pool, sel(b"init\0"));
+    crate::tray::macos::pump_tick();
+    send_void(pool, sel(b"drain\0"));
+}
+
+// -----------------------------------------------------------------------------
+// Headless AppKit pump — background-service mode with the splash disabled.
+//
+// Design doc §7.5.1 recorded the gap: `install_reopen_handler` only ran from
+// `Splash::show`, so with the splash off there was no `NSApplication`, no
+// pump, and no reopen delegate — a user who closed every window had no way
+// back except a second launch, and the menu-bar item could not exist at all.
+// `main` now routes background-service mode through this pair instead of
+// running the supervisor on the main thread.
+// -----------------------------------------------------------------------------
+
+/// Create the accessory `NSApplication` (no Dock tile — the host owns the
+/// single tile), install the reopen delegate, and declare the pump. MUST run
+/// on the main thread, BEFORE the supervisor thread is spawned.
+pub fn prepare_headless_app() {
+    unsafe {
+        let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
+        let pool = send(pool, sel(b"init\0"));
+        let app = send(class(b"NSApplication\0"), sel(b"sharedApplication\0"));
+        // NSApplicationActivationPolicyAccessory == 1.
+        send_void_i64(app, sel(b"setActivationPolicy:\0"), 1);
+        install_reopen_handler();
+        send_void(app, sel(b"finishLaunching\0"));
+        send_void(pool, sel(b"drain\0"));
+    }
+    crate::tray::macos::mark_main_pump_available();
+    crate::log("headless AppKit pump prepared (background-service mode, splash disabled)");
+}
+
+/// Pump `NSApplication` on the main thread until the supervisor thread exits
+/// the process. Same cadence as `run_until_dismissed`'s post-splash loop.
+pub fn pump_forever() -> ! {
+    loop {
+        unsafe {
+            pump_app_events(0.2);
+            tray_tick();
+        }
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
