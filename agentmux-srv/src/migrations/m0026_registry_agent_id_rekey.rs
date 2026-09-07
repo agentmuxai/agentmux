@@ -119,28 +119,60 @@ pub(super) fn rekey_registry(conn: &Connection, registry: &Registry) -> Result<R
     let records = registry
         .list_active()
         .map_err(|e| format!("list registry: {e}"))?;
-    for mut rec in records {
+
+    // Group by the agent every record re-keys to BEFORE writing anything.
+    // Several legacy head launches of one user agent each have their own
+    // active registry file, and they all collapse onto that agent's single
+    // id. Upserting them in `list_active()`'s filesystem order would let
+    // whichever ran last win, so an older launch could overwrite a newer
+    // `session_id` and the next continuation would `--resume` stale
+    // conversation state (codex P1 on #3080). The newest launch wins
+    // explicitly instead.
+    let mut groups: HashMap<String, Vec<_>> = HashMap::new();
+    for rec in records {
         let old_id = rec.data.instance_id.clone();
         let Some(agent_id) = agent_id_for_launch(&old_id, &launches, &is_user_agent) else {
             stats.unresolved += 1;
             continue;
         };
-        if agent_id == old_id {
+        groups.entry(agent_id).or_default().push(rec);
+    }
+
+    for (agent_id, mut group) in groups {
+        // Newest launch wins; the launch id breaks a tie so the outcome is
+        // deterministic rather than filesystem-order dependent.
+        group.sort_by(|a, b| {
+            a.data
+                .last_launched_at_ms
+                .cmp(&b.data.last_launched_at_ms)
+                .then_with(|| a.data.instance_id.cmp(&b.data.instance_id))
+        });
+        let mut winner = group.pop().expect("groups only holds non-empty vecs");
+        let mut stale: Vec<String> = group.into_iter().map(|r| r.data.instance_id).collect();
+        if winner.data.instance_id == agent_id {
             stats.already_current += 1;
-            continue;
+        } else {
+            // The winner's own file is keyed by its launch id and has to go
+            // with the rest once its content lands under the agent id.
+            stale.push(winner.data.instance_id.clone());
+            // Write the record under the agent id, then drop the old files. An
+            // interrupted run leaves both (the next boot re-runs this and the
+            // duplicate resolves), never neither.
+            winner.data.instance_id = agent_id.clone();
+            winner.data.definition_id = agent_id.clone();
+            registry
+                .upsert(&winner)
+                .map_err(|e| format!("write registry record {agent_id}: {e}"))?;
+            stats.rekeyed += 1;
         }
-        // Write the record under the agent id, then drop the old file. An
-        // interrupted run leaves both (the next boot re-runs this and the
-        // duplicate resolves), never neither.
-        rec.data.instance_id = agent_id.clone();
-        rec.data.definition_id = agent_id.clone();
-        registry
-            .upsert(&rec)
-            .map_err(|e| format!("write registry record {agent_id}: {e}"))?;
-        registry
-            .hard_delete(&old_id)
-            .map_err(|e| format!("remove stale registry record {old_id}: {e}"))?;
-        stats.rekeyed += 1;
+        for old_id in stale {
+            if old_id == agent_id {
+                continue;
+            }
+            registry
+                .hard_delete(&old_id)
+                .map_err(|e| format!("remove stale registry record {old_id}: {e}"))?;
+        }
     }
     Ok(stats)
 }
@@ -274,6 +306,45 @@ mod tests {
         // The head's own record is already keyed by the agent id.
         let stats = rekey_registry(&conn, &reg).unwrap();
         assert_eq!((stats.rekeyed, stats.already_current), (0, 1), "idempotent: {stats:?}");
+    }
+
+    /// Codex P1 on #3080: several legacy launches of ONE user agent each
+    /// carry their own active registry file, and every one of them re-keys
+    /// to that agent's single id. `list_active()` is filesystem-ordered, so
+    /// without an explicit newest-wins rule an older launch's `session_id`
+    /// could be written last and the next continuation would `--resume` a
+    /// conversation the user has since moved on from.
+    #[test]
+    fn several_launches_of_one_agent_collapse_to_the_newest_record() {
+        let (dir, conn) = store_with_launches();
+        conn.execute_batch(
+            "INSERT INTO db_agent_instances
+                (id, definition_id, parent_instance_id, block_id, session_id, status,
+                 github_context, started_at, ended_at, created_at,
+                 identity_id, memory_id, instance_name, working_directory, display_hidden)
+             VALUES ('launch-on-user-2', 'user-agent', '', '', '', '', '', 3, 0, 3, '', '', 'Maks', '', 0);",
+        )
+        .unwrap();
+        let reg = open_registry(&dir);
+        let mut older = record("launch-on-user", "user-agent", "Maks");
+        older.data.last_launched_at_ms = 100;
+        older.data.session_id = Some("stale".to_string());
+        let mut newer = record("launch-on-user-2", "user-agent", "Maks");
+        newer.data.last_launched_at_ms = 200;
+        newer.data.session_id = Some("current".to_string());
+        reg.upsert(&older).unwrap();
+        reg.upsert(&newer).unwrap();
+
+        let stats = rekey_registry(&conn, &reg).unwrap();
+        assert_eq!(stats.rekeyed, 1, "one agent keeps one record: {stats:?}");
+        assert!(reg.get("launch-on-user").unwrap().is_none());
+        assert!(reg.get("launch-on-user-2").unwrap().is_none());
+        let moved = reg.get("user-agent").unwrap().expect("re-keyed record");
+        assert_eq!(
+            moved.data.session_id.as_deref(),
+            Some("current"),
+            "the newest launch's session must win, not whichever file was listed last"
+        );
     }
 
     #[test]

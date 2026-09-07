@@ -3005,6 +3005,22 @@
         // transient field db_agents retains, so My Agents can locate the
         // filestore snapshot). Non-empty value → non-vacuous assertion.
         assert_eq!(read_agent_field(&store, "inst-dw", "last_block_id"), Some("blk-head".to_string()));
+        // A retry of the SAME launch id (the App-API stub path) takes the
+        // ON CONFLICT arm, which must carry a corrected working directory
+        // through — reagent P1 on PR #3080. Keeping the first attempt's value
+        // would strand the row outside the agents root, where the
+        // cross-version registry mirror silently skips it.
+        let retry = AgentInstance {
+            working_directory: "/wd/maks-corrected".to_string(),
+            ..inst.clone()
+        };
+        store.instance_create(&retry).unwrap();
+        assert_eq!(count_agents(&store, "id = 'inst-dw'"), 1, "a retry updates, never duplicates");
+        assert_eq!(
+            read_agent_field(&store, "inst-dw", "working_directory"),
+            Some("/wd/maks-corrected".to_string())
+        );
+
         // Continuation rows skipped.
         let cont = AgentInstance {
             id: "inst-cont".to_string(),
@@ -3676,5 +3692,39 @@
             count_agents(&store, "id = 'user-rt'"),
             1,
             "instance_delete on user-clone-def is a no-op (def projection persists)",
+        );
+    }
+
+    /// Codex P2 on #3080: deleting a user agent must clear its legacy
+    /// `db_agent_definitions` row too. The startup gap repair recreates a
+    /// `db_agents` row for every definition missing one, so a definition left
+    /// behind resurrects the deleted agent on the next boot — with its launch
+    /// state reset, which is worse than not deleting it at all.
+    #[test]
+    fn deleting_an_agent_does_not_leave_a_definition_for_gap_repair_to_resurrect() {
+        let store = make_store();
+        let mut def = sample_agent("agent-gone", "agent-gone");
+        store.agent_def_insert(&mut def).unwrap();
+        assert_eq!(count_agents(&store, "id = 'agent-gone'"), 1);
+
+        assert!(store.instance_delete("agent-gone").unwrap());
+        assert_eq!(count_agents(&store, "id = 'agent-gone'"), 0);
+        {
+            let conn = store.conn.lock().unwrap();
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM db_agent_definitions WHERE id = 'agent-gone'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 0, "the legacy definition must go with the agent");
+        }
+
+        assert_eq!(store.repair_agent_def_gaps().unwrap(), 0);
+        assert_eq!(
+            count_agents(&store, "id = 'agent-gone'"),
+            0,
+            "a deleted agent must stay deleted across the next boot's gap repair",
         );
     }

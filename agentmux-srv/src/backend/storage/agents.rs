@@ -1576,6 +1576,7 @@ impl Store {
                         name = excluded.name,
                         identity_id = excluded.identity_id,
                         memory_id = excluded.memory_id,
+                        working_directory = excluded.working_directory,
                         github_context = excluded.github_context,
                         instance_name = excluded.instance_name,
                         updated_at = excluded.updated_at,
@@ -1919,7 +1920,24 @@ impl Store {
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?
+            let rows =
+                conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
+            if rows > 0 {
+                // A user agent still has a same-id `db_agent_definitions` row
+                // (the definition side is dual-written until PR 3). Leaving it
+                // behind lets the startup gap repair — which recreates a
+                // `db_agents` row for any definition missing one — resurrect
+                // the agent on the next boot, with its launch state reset
+                // (codex P2 on #3080). `agent_def_delete` already clears both
+                // sides; this is the same deletion arriving from the other
+                // direction. A template-launch agent has no definition row of
+                // its own, so this is a no-op for one.
+                conn.execute(
+                    "DELETE FROM db_agent_definitions WHERE id = ?1 AND is_seeded = 0",
+                    params![id],
+                )?;
+            }
+            rows
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {

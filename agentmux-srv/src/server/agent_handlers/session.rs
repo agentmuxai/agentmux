@@ -359,16 +359,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // the eventual snapshot read for the top-20.
                 let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
                 for inst in instances {
-                    // The agent's own row, and the template it came from.
                     // Consolidation Phase 3b: `definition_id` is the agent's
-                    // own id, so "which kind of agent is this" is the
-                    // template on `parent_id` (empty for an agent that was
-                    // never cloned from one, where the row IS the answer).
-                    let own = defs.iter().find(|d| d.id == inst.definition_id);
-                    let def = own
+                    // own id, so its own row answers every display question
+                    // (name, provider, model, type, created_at) — those are
+                    // the agent's current values, which may well have drifted
+                    // from the template it was launched off.
+                    let def = defs.iter().find(|d| d.id == inst.definition_id);
+                    // The template it came from, used ONLY for the identity-
+                    // link fallback below (empty `parent_id` for an agent that
+                    // was never cloned from one).
+                    let template = def
                         .filter(|d| !d.parent_id.is_empty())
-                        .and_then(|d| defs.iter().find(|t| t.id == d.parent_id))
-                        .or(own);
+                        .and_then(|d| defs.iter().find(|t| t.id == d.parent_id));
                     // The agent's own account links, falling back to the
                     // template's. The fallback is legacy-shaped:
                     // `db_agent_identity_links` still has its FK on
@@ -379,7 +381,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // re-points that FK; this fallback goes with it.
                     let links_key = match links_by_agent.get(inst.definition_id.as_str()) {
                         Some(_) => inst.definition_id.as_str(),
-                        None => def.map(|d| d.id.as_str()).unwrap_or(inst.definition_id.as_str()),
+                        None => template
+                            .map(|t| t.id.as_str())
+                            .unwrap_or(inst.definition_id.as_str()),
                     };
                     let identity_name = match links_by_agent.get(links_key) {
                         Some(links) if !links.is_empty() => {
@@ -1122,6 +1126,50 @@ mod tests {
         let row = &result.rows[0];
         assert!(!row.has_snapshot);
         assert_eq!(row.preview, "", "no summary persisted yet — preview must stay empty, not fabricated");
+    }
+
+    /// Consolidation Phase 3b (reagent P1 on PR #3080): the row's display
+    /// fields must come from the AGENT's own row, never from the template it
+    /// was launched off. The template is consulted for exactly one thing —
+    /// the legacy-shaped identity-link fallback — and an agent whose
+    /// provider/name/type has since drifted from its template must report its
+    /// own current values, as it did before consolidation.
+    #[tokio::test]
+    async fn a_launched_agents_row_reports_its_own_config_not_its_templates() {
+        let state = test_state();
+        let mut tmpl = local_agent_def("tmpl-drift");
+        tmpl.is_seeded = 1;
+        tmpl.name = "Template".to_string();
+        tmpl.provider = "claude".to_string();
+        tmpl.agent_type = "standalone".to_string();
+        state.wstore.agent_def_insert(&mut tmpl).unwrap();
+
+        let mut own = local_agent_def("agent-drift");
+        own.parent_id = "tmpl-drift".to_string();
+        state.wstore.agent_def_insert(&mut own).unwrap();
+        state
+            .wstore
+            .instance_create(&local_agent_instance("launch-1", "agent-drift", "block-drift"))
+            .unwrap();
+
+        // The agent drifts from the template it was cloned from.
+        own.name = "Renamed by the user".to_string();
+        own.provider = "codex".to_string();
+        own.agent_type = "orchestrator".to_string();
+        state.wstore.agent_def_update(&mut own).unwrap();
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        let row = &result.rows[0];
+        assert_eq!(row.definition_name, "Renamed by the user");
+        assert_eq!(row.provider, "codex", "the template's 'claude' must not shadow the agent's own provider");
+        assert_eq!(row.agent_type, "orchestrator");
     }
 
     /// docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
