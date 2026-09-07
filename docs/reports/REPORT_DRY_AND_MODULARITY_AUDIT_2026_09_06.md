@@ -169,7 +169,7 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 Ordered by payoff ÷ risk. Each step is independently shippable.
 
-**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 landed in #3041: `TileLayout` measured **437 of 598 lines identical across all three platform files** (73%); the shared body is now `TileLayout.core.tsx` + three `TileLayoutPlatform` hook objects (1,652 → 957 lines), and the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models.
+**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 landed in #3041: `TileLayout` measured **437 of 598 lines identical across all three platform files** (73%); the shared body is now `TileLayout.core.tsx` + three `TileLayoutPlatform` hook objects (1,652 → 957 lines), and the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models. **Later the same day:** Phase 4's storage half landed as #3045 — `storage/managed.rs`, one `ManagedResource` implementation behind the eighteen skill and MCP store methods each (the frontend half and the "does memory bundles fit as a third?" test remain). Phase 2 is designed, not built: `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` explains why a command registry has to exist before any generator can, and sets the migration order. Phase 5 has a recommendation awaiting the repo owner: `docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md` (keep both frameworks, document the split where a reader hits it).
 
 ### Phase 1 — mechanical lifts into `agentmux-common` (low risk, immediate)
 
@@ -184,7 +184,7 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 
 ### Phase 2 — codegen the Rust↔TS boundary (medium effort, highest leverage)
 
-7. Generate `gotypes.d.ts` and the 322 RPC stubs from srv `rpc_types` (`Command*` structs already carry the shape; `serde` attributes carry the wire names). A `scripts/gen-rpc-bindings.sh` + a CI gate ("bindings are current," same pattern as the existing "specs index is current" gate) turns 200+ sync comments into a build error.
+7. Generate `gotypes.d.ts` and the 322 RPC stubs (the 284 command stubs plus the 38 service methods of §2.1) from srv `rpc_types` (`Command*` structs already carry the shape; `serde` attributes carry the wire names). A `scripts/gen-rpc-bindings.sh` + a CI gate ("bindings are current," same pattern as the existing "specs index is current" gate) turns 200+ sync comments into a build error. **Designed in `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`** — the registry-first shape, because the command → type mapping is not data anywhere today.
 8. Emit shared *constants* through the same generator — `persistent.rs:785`'s "no shared constant crosses the boundary" becomes false.
 9. Move the default layout tree, the provider catalog's `pinned_version`, and the two formatter mirrors (`format_global_brain_block`, `dim_agent_color`) to single-source: backend owns them, frontend receives them over RPC or from generated constants. The layout preset's inability to express 20/80 sizing goes away with it.
 
@@ -196,11 +196,11 @@ Expected: ~1,200 lines removed, seven sync comments retired, and — more import
 
 ### Phase 4 — the managed-primitive abstraction (higher effort, architectural)
 
-13. Extract the `mcp`/`skill` shape: a `ManagedResource` trait on the storage side (global list, per-agent bind, bundle ref, effective-set merge — `effective_skills` / `effective_mcp_servers` are already the same algorithm twice) and a generic manager pane + agent modal on the frontend side parameterized on the resource. Validate by making `skill` the generic path first, then porting `mcp`, then checking whether memory bundles fit. If the third one fits, the abstraction is real; if not, stop at two and the 58–71% duplication is still gone.
+13. Extract the `mcp`/`skill` shape: a `ManagedResource` trait on the storage side (global list, per-agent bind, bundle ref, effective-set merge — `effective_skills` / `effective_mcp_servers` are already the same algorithm twice) and a generic manager pane + agent modal on the frontend side parameterized on the resource. Validate by making `skill` the generic path first, then porting `mcp`, then checking whether memory bundles fit. If the third one fits, the abstraction is real; if not, stop at two and the 58–71% duplication is still gone. **Storage side done in #3045**; frontend side and the third-primitive test open.
 
 ### Phase 5 — a decision on saga/reducer (no code until decided)
 
-14. Choose: one shared saga/reducer crate, or rename the launcher's and srv's types so the shared vocabulary stops implying a shared implementation. Write the choice into an ADR. Either outcome is fine; the current state is the only bad one.
+14. Choose: one shared saga/reducer crate, or rename the launcher's and srv's types so the shared vocabulary stops implying a shared implementation. Write the choice into an ADR. Either outcome is fine; the current state is the only bad one. **Recommendation written** — `docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md`, status proposed.
 
 ### Anytime — contained cleanups
 
