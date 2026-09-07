@@ -333,3 +333,67 @@
     margin: 4px 0 0;
     font-style: italic;
 }
+
+/* ABF v0.2 §2.2 per-provider instruction overrides — see
+   BundleProviderInstructionsSection.tsx. Deliberately reuses the existing
+   field/input/textarea vars rather than introducing a parallel palette, so the
+   section reads as part of the same form rather than a bolted-on panel. */
+.memory-view-provider-instructions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.memory-view-provider-instruction-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+}
+
+.memory-view-provider-instruction-head {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+
+    .memory-view-input {
+        flex: 1;
+    }
+}
+
+.memory-view-provider-instruction-remove,
+.memory-view-provider-instruction-add {
+    padding: 4px 10px;
+    background: transparent;
+    color: var(--secondary-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+        border-color: var(--accent-color);
+    }
+}
+
+.memory-view-provider-instruction-add {
+    align-self: flex-start;
+}
+
+/* Advisory, never blocking — matches the Validate button's posture. The user
+   can still save; the key simply will not be exported. */
+.memory-view-provider-instruction-warn,
+.memory-view-provider-instructions-malformed {
+    font-size: 12px;
+    color: var(--warning-color, #d08770);
+    line-height: 1.4;
+}
+
+.memory-view-provider-instructions-malformed {
+    padding: 8px;
+    border: 1px solid var(--warning-color, #d08770);
+}

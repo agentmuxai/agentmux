@@ -411,3 +411,185 @@ export class MemoryViewModel implements ViewModel {
         this.unsubChanged();
     }
 }
+
+// -- ABF v0.2 §2.2 per-provider instructions: authoring-model seam --------
+//
+// The draft carries `instructions_by_provider` as a RAW JSON string, not a
+// parsed structure, and that is deliberate: reagent P1 on PR #2523 found that
+// editing any field of an imported bundle silently wiped its provider variants,
+// because `bundle_memory_upsert`'s ON CONFLICT UPDATE overwrites the column
+// unconditionally. Round-tripping the raw string is what fixed it.
+//
+// The authoring UI needs a list, so these three functions are the seam. The
+// wipe-safety property has to be enforced here: `parse` reports malformed input
+// as `malformed` WITHOUT yielding an empty list, so the UI can refuse to edit
+// and keep the original string byte-for-byte rather than serializing `{}` over
+// variants it merely failed to understand.
+
+export interface ProviderInstruction {
+    provider: string;
+    content: string;
+}
+
+export interface ParsedInstructionsByProvider {
+    entries: ProviderInstruction[];
+    /** True when the stored value is not a flat object of string values. The
+     *  caller MUST leave the raw string untouched in this case — an empty
+     *  `entries` here means "could not read", never "there is nothing". */
+    malformed: boolean;
+}
+
+/** Parse the stored JSON object into sorted, editable entries.
+ *
+ *  Empty/whitespace/`{}` are a legitimately empty set, not malformed — that is
+ *  the normal state of a bundle nobody has added a variant to. Anything that is
+ *  not an object of strings (array, scalar, null, or an object with a
+ *  non-string value) is malformed. */
+export function parseInstructionsByProvider(raw: string): ParsedInstructionsByProvider {
+    const trimmed = (raw ?? "").trim();
+    if (trimmed.length === 0) return { entries: [], malformed: false };
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(trimmed);
+    } catch {
+        return { entries: [], malformed: true };
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { entries: [], malformed: true };
+    }
+    const entries: ProviderInstruction[] = [];
+    for (const [provider, content] of Object.entries(parsed as Record<string, unknown>)) {
+        // Coercing a non-string here would rewrite the user's data on the next
+        // save; refusing to parse leaves it exactly as imported.
+        if (typeof content !== "string") return { entries: [], malformed: true };
+        entries.push({ provider, content });
+    }
+    entries.sort((a, b) => a.provider.localeCompare(b.provider));
+    return { entries, malformed: false };
+}
+
+/** Serialize edited entries back to the stored JSON-object form.
+ *
+ *  Provider keys are trimmed (a stray space would become a distinct variant,
+ *  and on export a distinct directory); content is never trimmed, since leading
+ *  and trailing whitespace in a system prompt is the author's business. Rows
+ *  with a blank key are dropped — they cannot be exported and would serialize
+ *  as a `""` key. */
+export function serializeInstructionsByProvider(entries: ProviderInstruction[]): string {
+    // Null prototype, deliberately: on a plain `{}`, assigning the key
+    // "__proto__" hits Object.prototype's inherited legacy setter instead of
+    // creating an own property, so JSON.stringify silently omits it. A bundle
+    // that imported a `__proto__` override would lose it the moment the user
+    // edited ANY row — the same wipe class the raw-string round-trip exists to
+    // prevent, arriving through a different door (codex P2, #3063). Provider
+    // keys are free text and can arrive from an untrusted .abf, so this is
+    // reachable, not theoretical.
+    const out: Record<string, string> = Object.create(null);
+    for (const { provider, content } of entries) {
+        const key = provider.trim();
+        if (key.length === 0) continue;
+        out[key] = content;
+    }
+    return JSON.stringify(out);
+}
+
+/** Faithful port of `sanitize_context_relative_path` (bundle_export.rs).
+ *
+ *  Returns the sanitized path a key would be exported under, or `null` if the
+ *  backend would reject it (in which case export SKIPS the variant with a
+ *  warning). Kept deliberately mechanical rather than "improved", because its
+ *  only job is to agree with the Rust — a stricter frontend rule warns about
+ *  keys that in fact work, and a looser one stays silent about keys that get
+ *  dropped. Mirrors, in order: empty, `\` normalized to `/`, leading `/`
+ *  rejected, any `:` rejected, `..` segments rejected, `.`/empty segments
+ *  skipped, and "nothing left" rejected.
+ *
+ *  NOTE what this does NOT reject, because the backend does not either:
+ *  nested segments (`a/b` is legal and exports to instructions/a/b/AGENTS.md)
+ *  and control characters. */
+export function sanitizeProviderKey(provider: string): string | null {
+    // The stored key is the trimmed one (see serializeInstructionsByProvider),
+    // so validate what will actually be stored, not what was typed.
+    const key = provider.trim();
+    if (key.length === 0) return null;
+    const normalized = key.split("\\").join("/");
+    if (normalized.startsWith("/") || normalized.includes(":")) return null;
+    const parts: string[] = [];
+    for (const component of normalized.split("/")) {
+        if (component === "" || component === ".") continue;
+        if (component === "..") return null;
+        parts.push(component);
+    }
+    if (parts.length === 0) return null;
+    return parts.join("/");
+}
+
+/** Why a provider key would not survive export, or `null` if it is fine.
+ *
+ *  Advisory. The key IS still saved to the bundle (serialization drops only
+ *  blank keys) — what it loses is the export: `bundle_export.rs` skips any key
+ *  this rejects, with a warning, so the variant silently vanishes from the
+ *  `.abf`. Better to say so while the user is typing than at export time. */
+export function providerKeyProblem(provider: string): string | null {
+    const key = provider.trim();
+    if (key.length === 0) return "Provider key cannot be empty.";
+    if (sanitizeProviderKey(key) !== null) return null;
+    const normalized = key.split("\\").join("/");
+    if (normalized.startsWith("/")) {
+        return "Provider key cannot start with a path separator.";
+    }
+    if (normalized.includes(":")) return "Provider key cannot contain a colon.";
+    if (normalized.split("/").some((c) => c === "..")) {
+        return 'Provider key cannot contain a ".." segment.';
+    }
+    return "Provider key has no usable path segment.";
+}
+
+/** Keys that collide once sanitized.
+ *
+ *  Compares SANITIZED paths, not raw strings, because that is what collides in
+ *  `bundle_export.rs`: it keys `seen_safe_providers` on the sanitized value and
+ *  keeps only the sorted-first of a colliding set, warning about the rest. So
+ *  `a/b` and `a\b` are the same export path and one of them is silently lost —
+ *  comparing raw strings would miss exactly that case. Keys the backend
+ *  rejects outright are excluded; `providerKeyProblem` already covers those. */
+export function duplicateProviderKeys(entries: ProviderInstruction[]): string[] {
+    // Order is part of the contract, not an implementation detail:
+    // `bundle_export.rs` sorts the RAW keys ascending and keeps the FIRST of
+    // each colliding set, skipping the rest with a warning. Walking the
+    // caller's array order instead marks whichever row the form happens to
+    // hold first — which can be the row export actually KEEPS, so the warning
+    // lands on the survivor while the row that really gets dropped shows
+    // nothing at all (reagent P1, #3063).
+    //
+    // Plain `<`/`>` rather than localeCompare, to match Rust's `String::cmp`
+    // (byte order). localeCompare is locale-aware and would disagree — e.g. it
+    // ignores punctuation differences that decide this exact comparison.
+    // Blank-CONTENT rows are excluded before collision resolution, because
+    // export excludes them first too: `if content.trim().is_empty() { continue }`
+    // runs BEFORE the sanitize/collision check, so such a row never occupies a
+    // collision slot. Ignoring content here re-created the same wrong-row
+    // warning the sort above removes — with {"a/b": ""} and {"a\b": "real"},
+    // export silently skips the empty "a/b" and writes "a\b" with no collision
+    // at all, while we flagged "a\b" as the casualty (reagent P1 round 3,
+    // #3063).
+    //
+    // Deliberately NOT also warning "this row's empty content will not be
+    // exported": a row the user just added is empty by definition, so that
+    // fires on every new row before they have typed anything.
+    const sortedKeys = entries
+        .filter((e) => e.content.trim().length > 0)
+        .map((e) => e.provider.trim())
+        .filter((key) => key.length > 0)
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+    const seen = new Set<string>();
+    const dupes = new Set<string>();
+    for (const key of sortedKeys) {
+        const safe = sanitizeProviderKey(key);
+        if (safe === null) continue;
+        if (seen.has(safe)) dupes.add(key);
+        else seen.add(safe);
+    }
+    return [...dupes].sort();
+}

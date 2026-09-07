@@ -1,8 +1,17 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { draftFromMemory, draftToWire, emptyDraft } from "./memory-model";
+import { beforeEach, describe, expect, it, test, vi } from "vitest";
+import {
+    draftFromMemory,
+    draftToWire,
+    duplicateProviderKeys,
+    emptyDraft,
+    parseInstructionsByProvider,
+    providerKeyProblem,
+    sanitizeProviderKey,
+    serializeInstructionsByProvider,
+} from "./memory-model";
 
 // reagent P1, PR #2523: instructions_by_provider (ABF v0.2 §2.2) was
 // previously dropped by the edit round-trip. Since this form has no field
@@ -239,5 +248,222 @@ describe("validateDraft", () => {
         // change to the content it described.
         model.setValidation(null);
         expect(model.validationAtom()).toBeNull();
+    });
+});
+
+// -- ABF v0.2 §2.2 per-provider instructions: authoring-UI model layer --
+//
+// The authoring UI edits a parsed list, but the draft still carries the raw
+// JSON string, because that string is what round-trips (see the suite above,
+// which exists because reagent P1 on #2523 caught an edit silently wiping an
+// imported bundle's variants). These functions are the seam between the two,
+// so the wipe-safety property has to hold HERE or the UI reintroduces the bug.
+describe("instructions_by_provider authoring model", () => {
+    it("parses an object into sorted entries", () => {
+        const r = parseInstructionsByProvider('{"codex":"C","claude":"A"}');
+        expect(r.malformed).toBe(false);
+        expect(r.entries).toEqual([
+            { provider: "claude", content: "A" },
+            { provider: "codex", content: "C" },
+        ]);
+    });
+
+    it("treats empty/missing as an empty, editable set (not malformed)", () => {
+        for (const raw of ["", "   ", "{}"]) {
+            const r = parseInstructionsByProvider(raw);
+            expect(r.malformed).toBe(false);
+            expect(r.entries).toEqual([]);
+        }
+    });
+
+    // THE wipe-safety property. Malformed input must be reported as such and
+    // must NOT yield an empty entry list that the UI would then serialize back
+    // over the top of, destroying variants it merely failed to parse.
+    it("flags malformed JSON as malformed rather than as empty", () => {
+        for (const raw of ["not json", "[1,2]", '"a string"', "null", "42"]) {
+            const r = parseInstructionsByProvider(raw);
+            expect(r.malformed).toBe(true);
+            expect(r.entries).toEqual([]);
+        }
+    });
+
+    it("ignores non-string values rather than coercing them", () => {
+        const r = parseInstructionsByProvider('{"claude":"ok","codex":123}');
+        expect(r.malformed).toBe(true);
+        expect(r.entries).toEqual([]);
+    });
+
+    it("serializes entries back to a JSON object", () => {
+        expect(
+            serializeInstructionsByProvider([
+                { provider: "claude", content: "A" },
+                { provider: "codex", content: "C" },
+            ]),
+        ).toBe('{"claude":"A","codex":"C"}');
+    });
+
+    it("drops rows with a blank provider key on serialize", () => {
+        expect(
+            serializeInstructionsByProvider([
+                { provider: "  ", content: "orphaned" },
+                { provider: "claude", content: "A" },
+            ]),
+        ).toBe('{"claude":"A"}');
+    });
+
+    it("trims the provider key but never the content", () => {
+        expect(
+            serializeInstructionsByProvider([{ provider: " claude ", content: "  padded  " }]),
+        ).toBe(JSON.stringify({ claude: "  padded  " }));
+    });
+
+    it("round-trips parse -> serialize without altering content", () => {
+        const raw = JSON.stringify({ claude: ["line1", "line2"].join("\n"), codex: "  padded  " });
+        const { entries } = parseInstructionsByProvider(raw);
+        expect(serializeInstructionsByProvider(entries)).toBe(raw);
+    });
+
+    // Authoring-time mirror of the export-side rule. These assertions are
+    // pinned to sanitize_context_relative_path (bundle_export.rs) EXACTLY —
+    // reagent P1 on #3063 caught the first version inventing stricter rules
+    // than the backend has, so it warned "It will not be saved" about keys
+    // that in fact export fine. A mirror that disagrees with what it mirrors
+    // is worse than no mirror.
+    it("rejects only the keys the backend actually rejects", () => {
+        // empty / no usable segment
+        expect(providerKeyProblem("")).not.toBeNull();
+        expect(providerKeyProblem("   ")).not.toBeNull();
+        expect(providerKeyProblem(".")).not.toBeNull();
+        expect(providerKeyProblem("./.")).not.toBeNull();
+        expect(providerKeyProblem("/")).not.toBeNull();
+        // leading separator, colon, traversal
+        expect(providerKeyProblem("/abs")).not.toBeNull();
+        expect(providerKeyProblem("C:/x")).not.toBeNull();
+        expect(providerKeyProblem("a:b")).not.toBeNull();
+        expect(providerKeyProblem("..")).not.toBeNull();
+        expect(providerKeyProblem("a/../b")).not.toBeNull();
+    });
+
+    // The backend normalizes "\" to "/" and splits — nested segments are legal
+    // and export to instructions/a/b/AGENTS.md. Warning about them was the
+    // actual defect in #3063's first cut.
+    it("accepts keys the backend accepts, including nested and odd ones", () => {
+        for (const ok of ["claude", "codex", "my-harness", "my_harness2", "a/b"]) {
+            expect(providerKeyProblem(ok)).toBeNull();
+        }
+        // Real backslash, via String.raw. The previous version of this test
+        // wrote "a\b", which JS reads as a BACKSPACE control character, so the
+        // separator case was never exercised and passed only by accident
+        // (reagent P2, #3063).
+        expect(providerKeyProblem(String.raw`a\b`)).toBeNull();
+        // Control characters are not rejected by the backend, so we must not
+        // claim they are.
+        expect(providerKeyProblem("a\bb")).toBeNull();
+    });
+
+    // codex P2 on #3063. `out[key] = content` for key "__proto__" hits the
+    // inherited legacy setter instead of creating an own property, so
+    // JSON.stringify omits it — editing ANY row would then silently delete an
+    // imported __proto__ override. Same wipe-class bug the raw-string
+    // round-trip exists to prevent, arriving through a different door.
+    it("serializes a __proto__ key as an own property", () => {
+        expect(
+            serializeInstructionsByProvider([{ provider: "__proto__", content: "P" }]),
+        ).toBe('{"__proto__":"P"}');
+    });
+
+    it("round-trips a __proto__ key without losing it", () => {
+        const raw = '{"__proto__":"P","claude":"A"}';
+        const { entries, malformed } = parseInstructionsByProvider(raw);
+        expect(malformed).toBe(false);
+        expect(entries.map((e) => e.provider).sort()).toEqual(["__proto__", "claude"]);
+        const out = JSON.parse(serializeInstructionsByProvider(entries));
+        expect(Object.keys(out).sort()).toEqual(["__proto__", "claude"]);
+    });
+
+    it("sanitizes to the path export will actually write", () => {
+        expect(sanitizeProviderKey("claude")).toBe("claude");
+        expect(sanitizeProviderKey(String.raw`a\b`)).toBe("a/b");
+        expect(sanitizeProviderKey("./a//b")).toBe("a/b");
+        expect(sanitizeProviderKey("..")).toBeNull();
+    });
+
+    // Export keys its collision set on the SANITIZED path, so two keys that
+    // differ as strings but normalize identically are a real collision — one
+    // of them is silently dropped from the .abf.
+    it("flags duplicates that collide only after sanitizing", () => {
+        expect(
+            duplicateProviderKeys([
+                { provider: "a/b", content: "A" },
+                { provider: String.raw`a\b`, content: "B" },
+            ]),
+        ).toEqual([String.raw`a\b`]);
+        expect(
+            duplicateProviderKeys([
+                { provider: "claude", content: "A" },
+                { provider: "claude", content: "B" },
+            ]),
+        ).toEqual(["claude"]);
+        expect(duplicateProviderKeys([{ provider: "claude", content: "A" }])).toEqual([]);
+    });
+
+    // reagent P1 on #3063. bundle_export.rs sorts RAW keys ascending and keeps
+    // the FIRST of a colliding set. Flagging by array order instead marks
+    // whichever row the UI happens to hold first — which can be the row export
+    // actually KEEPS, warning on the survivor while the row that is really
+    // dropped shows nothing. "a/b" (0x2F) sorts before "a\b" (0x5C), so the
+    // loser here is the backslash row even though it was added first.
+    it("flags the row export drops, not the one it keeps, regardless of UI order", () => {
+        // Built from a char code on purpose: a literal backslash in this
+        // file has been mangled by tooling more than once (it is what
+        // produced codex P2 on this very PR — "a-backslash-b" read as a backspace
+        // escape, so the separator case was never exercised).
+        const backslashKey = "a" + String.fromCharCode(92) + "b";
+        const uiOrder = [
+            { provider: backslashKey, content: "added first" },
+            { provider: "a/b", content: "added second" },
+        ];
+        expect(duplicateProviderKeys(uiOrder)).toEqual([backslashKey]);
+        // Reversing the UI order must not change the verdict — export does not
+        // care what order the form holds them in.
+        expect(duplicateProviderKeys([...uiOrder].reverse())).toEqual([backslashKey]);
+    });
+
+    // reagent P1 (round 3) on #3063. bundle_export.rs skips an entry whose
+    // content is blank BEFORE it reaches the sanitize/collision check
+    // (content.trim().is_empty() -> continue), so an empty-content row never
+    // occupies a collision slot. Ignoring content here re-created the exact
+    // "warning on the wrong row" defect the ordering fix had just removed,
+    // this time via emptiness instead of insertion order.
+    it("ignores blank-content rows when resolving collisions, as export does", () => {
+        const backslashKey = "a" + String.fromCharCode(92) + "b";
+        // "a/b" sorts first but is empty, so export skips it entirely and
+        // exports the backslash row with NO collision at all.
+        const entries = [
+            { provider: "a/b", content: "   " },
+            { provider: backslashKey, content: "real" },
+        ];
+        expect(duplicateProviderKeys(entries)).toEqual([]);
+    });
+
+    it("still flags a real collision when both rows have content", () => {
+        const backslashKey = "a" + String.fromCharCode(92) + "b";
+        expect(
+            duplicateProviderKeys([
+                { provider: "a/b", content: "kept" },
+                { provider: backslashKey, content: "dropped" },
+            ]),
+        ).toEqual([backslashKey]);
+    });
+
+    it("does not report backend-rejected keys as duplicates", () => {
+        // They are already flagged by providerKeyProblem; double-warning about
+        // a key that never reaches export is noise.
+        expect(
+            duplicateProviderKeys([
+                { provider: "..", content: "A" },
+                { provider: "..", content: "B" },
+            ]),
+        ).toEqual([]);
     });
 });
