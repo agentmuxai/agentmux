@@ -335,6 +335,17 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // lone conversation shows just the "+" (no pill for itself). The
     // moment a 2nd tab exists, both (including the first) appear.
     const visibleTabs = createMemo(() => (combinedTabs().length > 1 ? combinedTabs() : []));
+    // Single source of truth for whether the strip renders — read both by
+    // the <Show> that mounts it and by the picker host's strip-clearance
+    // custom property below, so the space reserved for the strip can never
+    // disagree with whether the strip is actually there.
+    const showTabStrip = createMemo(() =>
+        shouldShowTabStrip({
+            visibleTabCount: visibleTabs().length,
+            hasAgent: !!agentId(),
+            isHistoryTab: isHistoryTab(),
+        }),
+    );
     const activeBlockId = createMemo(() => {
         layoutModel.localTreeStateAtom();
         return layoutModel.getNodeByBlockId(model.blockId)?.data?.activeBlockId ?? model.blockId;
@@ -549,13 +560,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                         back the moment the pane is a real conversation; see
                         shouldShowTabStrip for why a 2nd blank tab still keeps
                         the strip up. */}
-                    <Show
-                        when={shouldShowTabStrip({
-                            visibleTabCount: visibleTabs().length,
-                            hasAgent: !!agentId(),
-                            isHistoryTab: isHistoryTab(),
-                        })}
-                    >
+                    <Show when={showTabStrip()}>
                         <PaneTabStrip
                             tabs={visibleTabs()}
                             activeId={activeBlockId()}
@@ -600,6 +605,20 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                                 <Show when={pickerVisible()}>
                                     <div
                                         class="agent-picker-host"
+                                        // Strip clearance, inherited by
+                                        // `.agent-picker`'s padding-top (see
+                                        // _picker.scss). The strip floats over
+                                        // the content, so the picker pads
+                                        // itself out of the way — but on a
+                                        // fresh pane the strip isn't rendered
+                                        // at all (shouldShowTabStrip), and
+                                        // reserving its height there is pure
+                                        // dead space above "My Agents".
+                                        style={{
+                                            "--pane-tab-strip-reserve": showTabStrip()
+                                                ? "var(--pane-tab-strip-height, 28px)"
+                                                : "0px",
+                                        }}
                                         classList={{
                                             // Applied the instant agentId()
                                             // is set (same render as

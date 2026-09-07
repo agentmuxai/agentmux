@@ -18,14 +18,20 @@
         // Reserves the pane tab strip's rendered height so the picker's own
         // top row (the "My Agents"/"+ New from template" header + first
         // cards) never renders behind it — same overlay problem, same fix,
-        // as .agent-document's padding-top in _document.scss (the strip
-        // renders for a blank/picker tab too, agent-view.tsx: "the strip
-        // stays visible whether the active member is a launched
-        // conversation OR a blank/picker tab"). Unconditional (not gated on
-        // whether the strip actually has >1 tab to show) — same tradeoff
-        // _document.scss makes: a little extra top whitespace when the
-        // strip is empty beats the content staying hidden when it isn't.
-        padding-top: calc(var(--space-4) + var(--pane-tab-strip-height, 28px));
+        // as .agent-document's padding-top in _document.scss.
+        //
+        // The amount is NOT a constant: `--pane-tab-strip-reserve` is set
+        // per-pane on `.agent-picker-host` (agent-view.tsx) from the same
+        // `shouldShowTabStrip` predicate that decides whether the strip
+        // mounts at all, and inherits down to here. It resolves to 0px on a
+        // FRESH pane — picker showing, no agent launched — because #2984
+        // stopped rendering the strip there entirely. This rule used to
+        // reserve the strip's height unconditionally, which was correct
+        // when the strip always rendered (collapsing to a lone 28×28 "+"),
+        // but after #2984 left ~44px of dead space above "My Agents"
+        // reserved for a strip that isn't there. The fallback keeps the old
+        // behavior for any caller that doesn't set the property.
+        padding-top: calc(var(--space-4) + var(--pane-tab-strip-reserve, var(--pane-tab-strip-height, 28px)));
         gap: var(--space-3);
         overflow-y: auto;
         // Min tile width for the My Agents / Templates grids. The grids
