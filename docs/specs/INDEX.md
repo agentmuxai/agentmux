@@ -178,7 +178,7 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
-### implemented (134)
+### implemented (135)
 
 | Spec | Title |
 |---|---|
@@ -256,6 +256,7 @@ partial list.
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
 | [`SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03`](SPEC_MEDIA_PANE_V4_MCP_OPEN_TOOL_2026_08_03.md) | Spec: Media pane v4 — agent-facing `OpenMedia` MCP tool |
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
+| [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22`](SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md) | SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict |
 | [`SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22`](SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md) | SPEC: `muxspect find` — cross-instance block/agent lookup |
 | [`SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06`](SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md) | SPEC — `muxspect dock`: diagnose and clear stuck Activity Dock entries |
@@ -391,7 +392,6 @@ partial list.
 | [`SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05`](SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md) | Memory carry-over: loading and management across the three agent-awareness cases |
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
 | [`SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02`](SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md) | Spec: fix agent:memory:{list,read_file,write_file,revert} for a blank working_directory |
-| [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02`](SPEC_MODEL_EFFORT_CAPABILITY_VALIDATION_2026_07_02.md) | SPEC — Per-model effort-capability validation for the composer strip |
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
 | [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
@@ -694,10 +694,11 @@ partial list.
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
 
-### historical (1)
+### historical (2)
 
 | Spec | Title |
 |---|---|
+| [`MASTER_REDUCER_STACK_STATUS_2026-05-05`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md) | Master Reducer-Stack Status — 2026-05-05 |
 | [`SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13`](SPEC_ACTIVE_TAB_COLOR_LINE_STOP_AT_TAB_STRIP_2026_07_13.md) | SPEC — active-tab color line: stop at the tab strip's right edge, not the viewport edge |
 
 ### superseded (3)
@@ -708,7 +709,7 @@ partial list.
 | [`SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06`](SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md) | Spec: Continuous AgentWorkingRow background through the scrollbar gutter |
 | [`SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24`](SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) | SPEC: Composer strip — balance misc elements across left/right zones |
 
-### no status line (150)
+### no status line (149)
 
 Predate the closed vocabulary. Not a backlog to bulk-restamp —
 an unverified restamp turns "unknown" into "confidently wrong".
@@ -722,7 +723,6 @@ Fix one when you touch it and know its real state.
 | [`ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27`](ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md) | ANALYSIS: AgentMux Window/Process State Inventory |
 | [`BUG_MACOS26_DUAL_DOCK_ICON_2026_06_20`](BUG_MACOS26_DUAL_DOCK_ICON_2026_06_20.md) | BUG: Dual Dock Icon on macOS 26 Tahoe |
 | [`CLEANUP_LEGACY_REMNANTS`](CLEANUP_LEGACY_REMNANTS.md) | Cleanup Spec: Remove Legacy Remnants |
-| [`MASTER_REDUCER_STACK_STATUS_2026-05-05`](MASTER_REDUCER_STACK_STATUS_2026-05-05.md) | Master Reducer-Stack Status — 2026-05-05 |
 | [`OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14`](OAUTH_FLOW_SMOKE_DIAGNOSTIC_2026_05_14.md) | OAuth Pre-Launch Smoke-Test Diagnostic — 2026-05-14 |
 | [`OAUTH_RESUME_AFTER_REBOOT_2026_05_14`](OAUTH_RESUME_AFTER_REBOOT_2026_05_14.md) | OAuth pre-launch — resume notes after PC reboot (2026-05-14) |
 | [`PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30`](PHASE_E_SAGAS_EXECUTION_PLAN_2026-04-30.md) | Phase E.5 Sagas — Execution Plan |
