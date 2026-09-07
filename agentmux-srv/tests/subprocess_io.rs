@@ -38,6 +38,46 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+/// Pay node.exe's cold start outside a timed assertion.
+///
+/// Runs the cheapest possible node invocation (`node -e ""`) and waits for
+/// it, so the image page-in and V8/ICU initialisation are already done when
+/// a caller starts measuring. Every failure is swallowed on purpose: this is
+/// an optimisation of *when* a cost is paid, never a thing under test. If
+/// node is missing or hangs here, the caller's own attempt still runs and
+/// still produces the real diagnostic.
+///
+/// Motivated by the 2026-09-07 `create_no_window_flag_set` failure, where
+/// the first spawn burned two 15s timeouts and the six node spawns after it
+/// finished in ~0.8s combined. See that test's comment.
+///
+/// `#[cfg(windows)]` because its only caller is, so on the ubuntu/macos legs
+/// an unconditional definition would be dead code (reagent P2 on #3056).
+#[cfg(windows)]
+async fn warm_node() {
+    let mut cmd = tokio::process::Command::new("node");
+    cmd.args(["-e", ""]);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+    cmd.kill_on_drop(true);
+    // No inner `#[cfg(windows)]` — the whole function is already gated, so
+    // one would be an always-true condition. (`spawn_node` below does need
+    // its inner cfg: that function is compiled on every platform.)
+    //
+    // No `use std::os::windows::process::CommandExt` either: on
+    // `tokio::process::Command` (unlike `std`'s) `creation_flags` is an
+    // inherent method, so importing the extension trait only earns an
+    // unused-import warning.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(mut child) = cmd.spawn() {
+        // Bounded so a pathological runner can't stall the suite here; the
+        // caller's own timeout is the one that decides pass/fail.
+        let _ = timeout(Duration::from_secs(30), child.wait()).await;
+    }
+}
+
 /// Spawn node with a fixture script. Returns the child process.
 fn spawn_node(script: &str, extra_args: &[&str]) -> tokio::process::Child {
     let script_path = fixtures_dir().join(script);
@@ -222,8 +262,40 @@ async fn create_no_window_flag_set() {
     // start in the 11-15s range (the exact case that timeout was widened
     // for) fail on *every* attempt instead of passing on the first one,
     // making this leg fail more often, not less.
-    const ATTEMPTS: u32 = 2;
+    //
+    // 2026-09-07, THIRD failure — and the first one with enough evidence to
+    // name the mechanism instead of guessing at it. Two things the Defender
+    // dump added by the 08-13 fix settled:
+    //
+    //   1. Defender was NOT scanning. `RealTimeProtectionEnabled: False`,
+    //      `OnAccessProtectionEnabled: False`, `BehaviorMonitorEnabled:
+    //      False`. Hypothesis 2 of the PLAN doc (AV scan delay on an
+    //      infrequently-invoked executable) is falsified for this run.
+    //   2. It is specifically the FIRST node spawn in the process that is
+    //      slow. Both attempts burned their full 15s (~49s for this test),
+    //      and then the other six node-spawning tests in this same binary
+    //      passed in ~0.8s TOTAL immediately afterwards. node.exe is fast
+    //      once warm; the cost is paying its cold start inside a window
+    //      that is also asserting a correctness property.
+    //
+    // So the fix is to stop measuring the cold start, rather than widen the
+    // timeout a third time — that is the move this comment already calls
+    // "moving the goalpost", and doing it again would be the third instance
+    // of the same non-fix. `warm_node()` below pays the page-in cost outside
+    // the measured window; the timed attempts then measure what the test is
+    // actually about (does stdout reach the pipe under CREATE_NO_WINDOW).
+    //
+    // ATTEMPTS goes 2 -> 3 as cheap insurance: attempts are only paid on
+    // failure, so the common case is still one fast attempt.
+    const ATTEMPTS: u32 = 3;
     const PER_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
+
+    // Pay node.exe's cold start (image page-in, ICU/V8 init) BEFORE the
+    // timed attempts. Deliberately unasserted and time-boxed: if this fails
+    // or times out, the real attempts below still run and still report the
+    // genuine failure — a warm-up that could itself fail the test would just
+    // relocate the flake.
+    warm_node().await;
 
     let mut last_elapsed = Duration::ZERO;
     let mut last_failure_reason = String::new();

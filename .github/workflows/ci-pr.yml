@@ -77,6 +77,12 @@ jobs:
       - name: Doc Status vocabulary (changed docs only)
         run: bash scripts/check-doc-status.sh
 
+      # Blocking, and safe to be: INDEX.md's committed form no longer carries
+      # any derived count, so two spec-adding branches three-way-merge to the
+      # correct union instead of to a silently-wrong file. A failure here now
+      # means real drift — a spec added without regenerating — which is the
+      # author's to fix and takes one command. See the history note at the top
+      # of scripts/gen-docs-index.sh for why it used to fail for everyone.
       - name: Specs index is current
         run: bash scripts/gen-docs-index.sh --check
 

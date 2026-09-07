@@ -39,12 +39,20 @@
 #
 # Two failure modes worth knowing, both hit while building this:
 #
-#   - CI tests the PR MERGE commit, not your branch head. If --check passes
-#     locally and fails on CI, your branch is stale: git will happily merge a
-#     new spec's ROW in from main while keeping YOUR section header count, so
-#     the merged file is internally inconsistent in a way neither parent was.
-#     Merge main, regenerate. The "N specs" line printed on every run is the
-#     fastest way to spot it — a count differing from yours means exactly this.
+#   - CI tests the PR MERGE commit, not your branch head, so a stale branch
+#     shows up there rather than locally. This USED to be far worse: the
+#     section headers carried a row count ("### proposed (95)"), and when two
+#     spec-adding PRs merged, git merged both ROWS cleanly but resolved the
+#     one-line COUNT to a single side — leaving N+1 rows under a count of N,
+#     a state neither parent was in and neither author could prevent. It
+#     failed the gate for every open PR, including ones touching no docs, and
+#     for main itself; 16 of 24 PR CI failures in the 90 runs before it was
+#     removed (2026-09-07). The counts are gone for exactly that reason: rows
+#     from different branches now three-way-merge to the correct union, and
+#     the only thing left to conflict is two rows landing adjacently, which
+#     is an honest conflict a human resolves by keeping both. Do not
+#     reintroduce a count, a total, or any other derived scalar into this
+#     file's committed output — that is the whole bug.
 #   - Verifying with a `(?<!...)` lookbehind silently finds nothing: ripgrep's
 #     default engine rejects lookaround, and a redirected stderr turns that
 #     parse error into a confident "0 matches".
@@ -122,9 +130,9 @@ build() {
         n=$(printf '%s' "$rows" | grep -c '^|')
         shown=$((shown + n))
         printf '
-### %s (%s)
+### %s
 
-' "$st" "$n"
+' "$st"
         printf '| Spec | Title |
 |---|---|
 '
@@ -138,9 +146,9 @@ build() {
         n=$(printf '%s' "$rows" | grep -c '^|')
         shown=$((shown + n))
         printf '
-### no status line (%s)
+### no status line
 
-' "$n"
+'
         printf 'Predate the closed vocabulary. Not a backlog to bulk-restamp —
 '
         printf 'an unverified restamp turns "unknown" into "confidently wrong".
@@ -178,8 +186,8 @@ build() {
         done
         shown=$((shown + n))
         printf '
-### non-canonical status (%s)
-' "$n"
+### non-canonical status
+'
         printf '
 These carry a `**Status:**` line whose first word is not in the closed enum
 '
