@@ -25,7 +25,9 @@
 #
 # Usage:
 #   bash scripts/gen-docs-index.sh          # rewrite the generated section
-#   bash scripts/gen-docs-index.sh --check  # fail if it would change (CI)
+#   bash scripts/gen-docs-index.sh --check      # CI: assert, but only when
+#                                              # this branch touches docs/specs
+#   bash scripts/gen-docs-index.sh --check-all  # assert against the whole tree
 #
 # MERGE CONFLICT IN INDEX.md? Do not hand-resolve it.
 #
@@ -39,20 +41,12 @@
 #
 # Two failure modes worth knowing, both hit while building this:
 #
-#   - CI tests the PR MERGE commit, not your branch head, so a stale branch
-#     shows up there rather than locally. This USED to be far worse: the
-#     section headers carried a row count ("### proposed (95)"), and when two
-#     spec-adding PRs merged, git merged both ROWS cleanly but resolved the
-#     one-line COUNT to a single side — leaving N+1 rows under a count of N,
-#     a state neither parent was in and neither author could prevent. It
-#     failed the gate for every open PR, including ones touching no docs, and
-#     for main itself; 16 of 24 PR CI failures in the 90 runs before it was
-#     removed (2026-09-07). The counts are gone for exactly that reason: rows
-#     from different branches now three-way-merge to the correct union, and
-#     the only thing left to conflict is two rows landing adjacently, which
-#     is an honest conflict a human resolves by keeping both. Do not
-#     reintroduce a count, a total, or any other derived scalar into this
-#     file's committed output — that is the whole bug.
+#   - CI tests the PR MERGE commit, not your branch head. If --check passes
+#     locally and fails on CI, your branch is stale: git will happily merge a
+#     new spec's ROW in from main while keeping YOUR section header count, so
+#     the merged file is internally inconsistent in a way neither parent was.
+#     Merge main, regenerate. The "N specs" line printed on every run is the
+#     fastest way to spot it — a count differing from yours means exactly this.
 #   - Verifying with a `(?<!...)` lookbehind silently finds nothing: ripgrep's
 #     default engine rejects lookaround, and a redirected stderr turns that
 #     parse error into a confident "0 matches".
@@ -71,7 +65,95 @@ BEGIN="<!-- BEGIN GENERATED INDEX — edit scripts/gen-docs-index.sh, not this s
 END="<!-- END GENERATED INDEX -->"
 
 check_only=0
-[ "${1:-}" = "--check" ] && check_only=1
+check_scope="changed"
+case "${1:-}" in
+    --check)     check_only=1 ;;
+    # Assert against the whole tree regardless of what this branch changed.
+    # For local/manual verification and for anyone auditing the index itself;
+    # CI deliberately does NOT use it (see below).
+    --check-all) check_only=1; check_scope="all" ;;
+esac
+
+# ── Why --check is scoped to branches that touch docs/specs ─────────────────
+#
+# INDEX.md is generated but committed, so it is a shared mutable file that
+# every spec-touching PR writes. An unscoped assertion made ANY staleness on
+# main fail the gate on EVERY open PR, including PRs that touch no docs at
+# all — the PR that caused it is never the PR that fails (issue #3059: five
+# regeneration PRs in one session, each blocking unrelated work).
+#
+# Scoping it makes the failure attributable: a branch that adds a spec or
+# changes a Status is the one that must regenerate, and it is the only one
+# asked to. A branch that touches no specs cannot make the index stale, so it
+# is not held responsible for someone else's omission. This matches what the
+# two sibling doc gates already do — `check-doc-status.sh` and
+# `check-spec-citations.sh` are both changed-files-only; the index check was
+# the odd one out.
+#
+# Scoping alone would only stop the SPREAD, not the drift — that is issue
+# #3059's option 3, which its author correctly called incomplete. The other
+# half is already done: #3056 removed the section-header counts, which were
+# the only part of the file whose correctness depended on what OTHER branches
+# did (two branches each adding a spec merged cleanly into an arithmetically
+# wrong total that neither computed). Rows are per-line and merge correctly,
+# so concurrent regenerations now compose.
+#
+# What #3056 cannot cover, and this does: a branch that adds a spec and never
+# regenerates at all. The row is simply missing, no arithmetic involved, and
+# under an unscoped check that lands on whoever opens a PR next. Scoped, it
+# lands on the branch that omitted it. The two together close the class.
+should_check() {
+    [ "$check_scope" = "all" ] && return 0
+    base="${GITHUB_BASE_REF:-main}"
+    if git rev-parse --verify --quiet "origin/$base" >/dev/null 2>&1; then
+        ref="origin/$base"
+    elif git rev-parse --verify --quiet "$base" >/dev/null 2>&1; then
+        ref="$base"
+    else
+        # Same posture as check-doc-status.sh: an unresolvable base is a CI
+        # environment problem, not a docs problem. Skip rather than fail a
+        # PR for it.
+        echo "gen-docs-index: cannot resolve base ref '$base' — skipping."
+        return 1
+    fi
+    # --name-status, not --name-only, and BOTH sides of a rename (Codex P2 on
+    # PR #3069). --name-only reports only a rename's DESTINATION, so moving a
+    # spec out of docs/specs/ (say, reclassifying it under docs/reports/)
+    # showed up as a non-spec path, skipped the check, and left the index
+    # carrying a row for a file no longer there. Verified against git 2.55:
+    # for a spec moved out of the tree, `--name-only --find-renames` prints
+    # the destination path alone, while `--name-status` prints an `R100` row
+    # carrying the old path and the new one. (Spelled out rather than shown
+    # as a literal example path — check-spec-citations.sh reads any
+    # spec-shaped path in a comment as a citation, and a made-up one is a
+    # dangling citation by its definition. It caught exactly that here.)
+    #
+    # Deliberately UNLIKE check-doc-status.sh, which skips pure renames (R100)
+    # because relocating a file makes no claim about its Status. The opposite
+    # is true here: a pure rename is exactly the kind of change that alters
+    # the index, since the row is keyed on the filename.
+    #
+    # The generator itself is in scope too. A change to it can alter the
+    # generated output with no spec touched at all — this very PR changes it —
+    # and without this the committed INDEX.md would drift silently until some
+    # later spec PR failed for it, which is the unattributable failure this
+    # whole change exists to remove.
+    #
+    # INDEX.md itself counts as well: a hand-edit to it must still be caught.
+    if git diff --name-status --find-renames "$ref"...HEAD 2>/dev/null \
+        | awk '{ for (i = 2; i <= NF; i++) print $i }' \
+        | grep -qE '^(docs/specs/.*[.]md|scripts/gen-docs-index\.sh)$'; then
+        return 0
+    fi
+    echo "gen-docs-index: no specs changed on this branch — index not asserted."
+    echo "  (run 'bash scripts/gen-docs-index.sh --check-all' to assert anyway)"
+    return 1
+}
+
+# Nothing to assert on this branch — exit before doing the work.
+if [ "$check_only" -eq 1 ] && ! should_check; then
+    exit 0
+fi
 
 # ── Build the generated section ─────────────────────────────────────────────
 #
