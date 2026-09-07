@@ -10,12 +10,37 @@
 
 ---
 
+## What actually ships (as of 2026-09-07) — read this before the design below
+
+`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 6 asked for one place that
+describes the architecture as built, superseding the subprocess model the rest of
+this document designs. This section is that place; the sections below it are the
+original design and are kept for the rationale, with notes where they no longer
+match. Operator steps live in `docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`.
+
+| Concern | What ships | Where |
+|---|---|---|
+| **When migrations run** | **In-process, inside `agentmux-srv` at startup**, before any store is opened for normal use (`run_pending_migrations`). Not as a launcher-spawned subprocess. The `agentmux-srv migrate` subcommand exists and works, but nothing spawns it during a normal launch — see "why the subprocess path exists but is unused" below. | `agentmux-srv/src/bootstrap.rs`, `migrations/runner.rs` |
+| **Failure** | **Fatal** (Phase 1a, #3043 / #3047). A failed migration logs at error, writes one `AGENTMUXSRV-MIGRATION-FAILED error:<reason>` line to stderr and exits 1 before ESTART. The launcher and the CEF host parse that line (`agentmux_common::srv_stderr`), fail fast instead of timing out, and the launcher shows a fatal dialog with the reason. The "silently logs a warning and boots anyway" bullet in Problem below described the code until 2026-09-06; it is no longer true. | `bootstrap.rs`, `agentmux-common/src/srv_stderr.rs`, `agentmux-launcher/src/srv_spawner.rs`, `agentmux-cef/src/sidecar.rs` |
+| **Backup** | As designed: `~/.agentmux/shared/backups/pre-migration-<version>-<ts>/` (`store.db` + `objects.db`), taken **before** any migration runs, 30-day prune. Backup failure aborts the run before anything is applied. A separate best-effort snapshot (`~/.agentmux/snapshots/`) is taken by `bootstrap.rs` and is non-fatal. | `runner.rs::backup_stores`, `storage/snapshot.rs` |
+| **Verification** | `agentmux-srv migrate --verify` (Phase 1b, #3058): read-only doctor pass that asks each **applied** migration for its post-condition (`Migration::verify`); exit 3 on any mismatch or unreadable tracking table. 0007 and 0002 implement real checks; 0003 is deliberately not verifiable (its helper ignores its marker and re-asserts its invariant every start). Default is `NotVerifiable`. | `migrations/mod.rs` (`VerifyOutcome`), `runner.rs` verify section |
+| **Concurrency** | Cross-process lock (Phase 3, #3062): `~/.agentmux/shared/migrations.lock.db`, `BEGIN IMMEDIATE` held across check → run → mark on both the in-process runner and the CLI apply path; 30-minute wait; OS-released on holder death. | `runner.rs::MigrationLock` |
+| **Tracking** | `db_migrations` in the **shared** store for `Global` migrations and in the **channel** store (`<data-dir>/db/objects.db`) for `Channel` ones — two tracking tables, not the single shared table the design below implies. | `runner.rs::tracking_store` |
+| **Markers** | Some migrations still keep their own marker files (`migration_agent_zones_v1.flag`; 0007's consolidation marker). Since Phase 0b existence alone is not trusted for 0007 (content-checked); Phase 2 (retire or unify the rest) has **not** been done. | `agent_session/migrations/`, `storage/agents_consolidate.rs` |
+| **Splash / UI** | `AGENTMUXSRV-MIGRATING migrations:<n>` on stderr before a batch extends the supervisors' ESTART deadline to 30 min; the `pending_migrations:<n>` field on ESTART drives the status-bar "Migration failed — restart to retry" hint (which, post-1a, no longer indicates a thrown migration — see the runbook §3). The JSON progress events below are emitted only by the subcommand. | `bootstrap.rs::emit_estart`, `srv_spawner.rs`, `sidecar.rs` |
+
+**Why the subprocess path exists but is unused.** The design below has the launcher run `agentmux-srv migrate` as a separate process before spawning the daemon, reading NDJSON progress for the splash. That shipped, then was superseded by the in-process runner because the extra process cost measurable startup latency and the ESTART-deadline extension gave the splash what it needed (see the hardening spec §1.5). The subcommand is kept because it is the operator surface (`--list`, `--dry-run`, `--verify`) and a possible future recovery flow; the launcher's `run_migrate` caller is retained as dead code with a comment saying so. Do not delete either without deciding Phase 4 of the hardening spec first.
+
+**Still open** (tracked in the hardening spec): Phase 1c (verify report in `muxspect`), Phase 2 (marker unification), Phase 4 (the stalled SQL consolidation), the rest of Phase 5's tests.
+
+---
+
 ## Problem
 
 AgentMux currently embeds 17 one-time data migrations directly into the srv startup sequence (`main.rs`). Every launch pays the cost of checking whether each migration has already run. The startup sequence has grown fragile: migrations have ordering dependencies on each other and on startup seeding steps, bugs in those ordering constraints have required multiple revision rounds to resolve, and the accumulation of migrations has made `main.rs` difficult to reason about.
 
 For public release, this pattern becomes untenable:
-- A failed migration silently logs a warning and boots anyway — acceptable internally, a potential data corruption incident for end users
+- A failed migration silently logs a warning and boots anyway — acceptable internally, a potential data corruption incident for end users *(resolved 2026-09-06: failure is fatal and surfaced — see "What actually ships" above)*
 - No user-visible feedback during long-running migrations (the app appears frozen)
 - No rollback path if a migration partially corrupts the data dir
 - No clear contract about which version of the data dir the app expects to find at startup
@@ -144,6 +169,12 @@ Backups older than 30 days are pruned on successful migration. If the migration 
 
 ### Failure Handling
 
+> **As built (2026-09-07):** the in-process runner does steps 1–2 as described and then
+> emits `AGENTMUXSRV-MIGRATION-FAILED` and exits 1; the modal below is the launcher's
+> `show_fatal_dialog` with srv's reason text, not a "Show details / Report issue" dialog,
+> and `migration-error.log` is written only by the `migrate` subcommand path. See "What
+> actually ships" above and the runbook.
+
 Migrations run inside a SQLite transaction where possible. If a migration returns `Err`, the runner:
 
 1. Rolls back the transaction
@@ -170,6 +201,13 @@ Migrations that read from sibling or prior-version `objects.db` files must open 
 ---
 
 ## Launcher Integration
+
+> **As built (2026-09-07):** the launcher does **not** spawn the runner. Migrations run
+> inside srv; the launcher learns about them from `AGENTMUXSRV-MIGRATING` (deadline
+> extension) and `AGENTMUXSRV-MIGRATION-FAILED` (fatal) on srv's stderr. The NDJSON
+> events below are still emitted by the `migrate` subcommand and still parsed by the
+> launcher's dead-code `run_migrate`, so this section documents a path that exists but is
+> unused — see "What actually ships" above.
 
 The launcher passes the channel data dir and version to the migration runner:
 
