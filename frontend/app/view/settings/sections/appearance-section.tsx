@@ -31,6 +31,20 @@ export function AppearanceSection(): JSX.Element {
                 }
             />
             <SettingRow
+                label="Startup splash screen"
+                description="Show the AgentMux splash while the app starts. Applies at the next launch — the launcher reads this before the app itself is running."
+                control={
+                    <ToggleControl
+                        // Stored inverted (`splash:disabled`, false by default) because
+                        // the launcher reads the raw file before any of this code runs;
+                        // the label stays positive so the toggle reads the way the
+                        // splash behaves.
+                        checked={!(s()["splash:disabled"] as boolean)}
+                        onChange={(v) => set("splash:disabled", !v)}
+                    />
+                }
+            />
+            <SettingRow
                 label="Window transparency"
                 description="Enable background transparency and blur"
                 control={

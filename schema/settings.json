@@ -316,6 +316,11 @@
           "default": true,
           "description": "Insert a file-reference token into the composer on drop (in addition to attaching the file). Default true."
         },
+        "splash:disabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Suppress the startup splash screen entirely (no window is created). Read by agentmux-launcher BEFORE the host and backend exist, so a change applies at the NEXT launch, not the current one. Env AGENTMUX_SPLASH=0 / AGENTMUX_NO_SPLASH=1 override this for a single run. See docs/specs/SPEC_SPLASH_USERINFO_AND_DISABLE_2026_06_21.md §6."
+        },
         "agent:askquestiontimeoutms": {
           "type": "integer",
           "minimum": 1000,
