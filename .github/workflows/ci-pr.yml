@@ -83,7 +83,11 @@ jobs:
       # means real drift — a spec added without regenerating — which is the
       # author's to fix and takes one command. See the history note at the top
       # of scripts/gen-docs-index.sh for why it used to fail for everyone.
-      - name: Specs index is current
+      # Scoped to PRs that actually touch docs/specs (issue #3059) — an
+      # unscoped assertion failed every open PR whenever main went stale,
+      # including PRs with no docs in them at all. Same posture as the two
+      # gates either side of it.
+      - name: Specs index is current (changed specs only)
         run: bash scripts/gen-docs-index.sh --check
 
       - name: Spec citations resolve (changed files only)
