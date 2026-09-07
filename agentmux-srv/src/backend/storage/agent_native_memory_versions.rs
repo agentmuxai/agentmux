@@ -375,11 +375,28 @@ impl Store {
     /// - `parent_version_id IS NULL` — a FIRST-EVER version for that
     ///   `(agent_id, filename)`, i.e. genuine first sight rather than an
     ///   observed change to something already tracked;
-    /// - `created_at` inside a 5-minute window starting at `m0023`'s own
-    ///   `applied_at`. This is the load-bearing one: a memory file created
-    ///   out-of-band NEXT WEEK is also first-sight-via-sweep, and that one
-    ///   is a real external write whose label must stand. Only the burst
-    ///   that raced this specific migration is in scope.
+    /// - `created_at` inside a short window starting at `m0023`'s own
+    ///   `applied_at` — the load-bearing clause, since a memory file
+    ///   created out-of-band next week is also first-sight-via-sweep and
+    ///   that one is a real external write whose label must stand.
+    ///
+    /// ## The limit of the window, stated plainly
+    ///
+    /// Inside the window this cannot tell the rollout burst from a
+    /// genuinely new out-of-band file, and will relabel both (ReAgent P2
+    /// on PR #3055 — an earlier revision of this comment claimed an
+    /// absolute guarantee it does not deliver). Nothing in the row or the
+    /// file distinguishes them: mtime is no help either, since a burst
+    /// row's file may have been legitimately edited since.
+    ///
+    /// What makes the trade acceptable is the shape of the two errors, not
+    /// their likelihood alone. Getting it wrong costs one just-created file
+    /// a benign "Agent" label instead of "detected outside AgentMux", on an
+    /// install where the user is watching a fresh upgrade. Not acting costs
+    /// every pre-existing memory file on every affected install a permanent
+    /// security-flavored warning it did not earn — which is the bug this
+    /// repairs. The window is kept as small as the evidence allows so the
+    /// ambiguous region stays tiny.
     ///
     /// `source_detail` keeps the original `detected_via` and records that
     /// the row was relabeled, so the audit trail says what happened rather
@@ -391,7 +408,12 @@ impl Store {
     pub fn agent_native_memory_version_relabel_rollout_first_sight(
         &self,
     ) -> Result<usize, StoreError> {
-        const ROLLOUT_WINDOW_MS: i64 = 5 * 60 * 1000;
+        // The sweep's `tokio::time::interval` fires immediately on its
+        // first tick, so the burst lands milliseconds after migrations
+        // finish — 61ms on the install this was diagnosed from. A minute is
+        // three orders of magnitude of slack for a loaded machine's first
+        // sweep, while keeping the ambiguous region (see above) short.
+        const ROLLOUT_WINDOW_MS: i64 = 60 * 1000;
         let conn = self.conn.lock().unwrap();
         // strftime() parses m0023's ISO-8601 `applied_at` (offset included)
         // to epoch seconds; the version table stores epoch millis.
@@ -501,7 +523,7 @@ mod tests {
     }
 
     /// An ISO-8601 stamp for "now", so versions inserted by a test land
-    /// inside the 5-minute rollout window.
+    /// inside the rollout window.
     fn now_iso() -> String {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -544,11 +566,11 @@ mod tests {
     }
 
     #[test]
-    fn leaves_a_genuine_later_external_write_alone() {
-        // A memory file created out-of-band LONG after the upgrade is also
-        // first-sight-via-sweep. That one is a real external write and its
-        // label must stand — this is what the time window protects, and the
-        // single most important thing this repair must not get wrong.
+    fn leaves_a_genuine_external_write_outside_the_window_alone() {
+        // A memory file created out-of-band after the upgrade is also
+        // first-sight-via-sweep. Once it is outside the window that one is a
+        // real external write and its label must stand — the single most
+        // important thing this repair must not get wrong.
         let store = shared_store();
         record_m0023(&store, "2020-01-01T00:00:00+00:00");
         sweep_first_sight(&store, "agent-1", "MEMORY.md");
@@ -558,6 +580,23 @@ mod tests {
             store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap()[0].source,
             "external_fs_write"
         );
+    }
+
+    #[test]
+    fn relabels_a_genuinely_new_file_inside_the_window_too() {
+        // Pins a KNOWN, accepted limitation rather than a desired property
+        // (ReAgent P2 on PR #3055): inside the window the burst and a
+        // genuinely new out-of-band file are indistinguishable, so this one
+        // is relabeled too. Documented in the method's own doc comment; the
+        // mitigation is that the window is small, not that the case cannot
+        // happen. Here so nobody reads the guarantee as absolute, and so
+        // narrowing it later is a deliberate change with a failing test
+        // rather than a silent one.
+        let store = shared_store();
+        record_m0023(&store, &now_iso());
+        sweep_first_sight(&store, "agent-1", "BRAND-NEW.md");
+
+        assert_eq!(store.agent_native_memory_version_relabel_rollout_first_sight().unwrap(), 1);
     }
 
     #[test]
