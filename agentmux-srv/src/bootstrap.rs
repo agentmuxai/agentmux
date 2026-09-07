@@ -419,13 +419,13 @@ pub fn load_config() -> config::Config {
     let args = CliArgs::parse();
 
     // Dispatch migrate subcommand before loading config (no AUTH_KEY needed).
-    if let Some(config::SrvCommand::Migrate { dry_run, list }) = &args.command {
+    if let Some(config::SrvCommand::Migrate { dry_run, list, verify }) = &args.command {
         let data_dir: std::path::PathBuf = args.wavedata
             .as_deref()
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var("AGENTMUX_DATA_HOME").ok().map(std::path::PathBuf::from))
             .unwrap_or_else(|| std::path::PathBuf::from(base::get_wave_data_dir()));
-        let code = migrations::run_migrate_command(&data_dir, *dry_run, *list);
+        let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify);
         std::process::exit(code);
     }
 

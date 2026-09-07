@@ -30,6 +30,14 @@ pub enum SrvCommand {
         /// List all migrations and their applied/pending status.
         #[arg(long)]
         list: bool,
+        /// Check every APPLIED migration post-condition (row counts, marker
+        /// files) instead of running anything. Exit 0 if every check holds or
+        /// is not verifiable, 2 if any is a mismatch or errored. This is the
+        /// doctor pass from SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1:
+        /// db_migrations only records that up() returned Ok, never that it
+        /// wrote what it was meant to.
+        #[arg(long)]
+        verify: bool,
     },
 }
 

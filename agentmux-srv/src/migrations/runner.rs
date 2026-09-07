@@ -52,9 +52,16 @@ fn resolve_home() -> Option<PathBuf> {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
+/// Exit code of `migrate --verify` when at least one applied migration's
+/// post-condition is a mismatch or its check errored. Distinct from 1 (a
+/// migration RUN failed) so a caller can tell "your data is inconsistent"
+/// from "the migrate command itself broke". See docs/exe-return-codes.md.
+pub const VERIFY_FAILED_EXIT_CODE: i32 = 2;
+
 /// Called from `main.rs` when the `migrate` subcommand is active.
-/// Returns the exit code (0 = success, 1 = failure).
-pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
+/// Returns the exit code (0 = success, 1 = failure, 2 = `--verify` found a
+/// mismatch — see `VERIFY_FAILED_EXIT_CODE`).
+pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool, verify: bool) -> i32 {
     // Unresolvable shared store path means we're in CI or an unusual env that
     // has no AGENTMUX_SHARED_DIR. Mirror the daemon's behaviour: treat as a
     // no-op and exit 0 so the launcher proceeds normally.
@@ -122,6 +129,10 @@ pub fn run_migrate_command(data_dir: &Path, dry_run: bool, list: bool) -> i32 {
 
     if list {
         return cmd_list(&shared_store, channel_store.as_ref());
+    }
+
+    if verify {
+        return cmd_verify(&ctx, &shared_store, channel_store.as_ref());
     }
 
     // A migration is pending if its tracking store does not record it applied.
@@ -419,6 +430,220 @@ fn write_error_log(home: &Path, msg: &str) {
     let path = log_dir.join("migration-error.log");
     let content = format!("{}\n", msg);
     let _ = std::fs::write(path, content);
+}
+
+// ── Verify (doctor pass) ──────────────────────────────────────────────────────
+//
+// SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03 Phase 1, second bullet: "applied"
+// in `db_migrations` means `up()` returned Ok — nothing re-checks that it
+// wrote anything. `migrate --verify` asks each APPLIED migration for its own
+// post-condition (`Migration::verify`) and reports per migration. Unapplied
+// migrations are skipped: there is nothing to verify yet, and `--list`
+// already shows them.
+
+/// One line of the verify report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifyRecord {
+    pub id: &'static str,
+    pub scope: &'static str,
+    pub outcome: super::VerifyOutcome,
+}
+
+/// Run `verify()` for every migration in `regs` that its tracking store
+/// records as applied. Generic over the registry slice so the harness can be
+/// tested with fakes; production passes `REGISTRY`.
+pub fn verify_applied(
+    regs: &[&(dyn super::Migration + Sync)],
+    ctx: &MigrationContext,
+    shared: &Store,
+    channel: Option<&Store>,
+) -> Vec<VerifyRecord> {
+    let mut out = Vec::new();
+    for m in regs {
+        let applied = tracking_store(m.scope(), shared, channel)
+            .map_or(false, |s| s.migration_is_applied(m.id()));
+        if !applied {
+            continue;
+        }
+        out.push(VerifyRecord { id: m.id(), scope: m.scope().as_str(), outcome: m.verify(ctx) });
+    }
+    out
+}
+
+/// Exit code for a verify report: 0 unless any record is a mismatch or an
+/// error. `NotVerifiable` is not a failure — it is the honest default.
+pub fn verify_exit_code(records: &[VerifyRecord]) -> i32 {
+    if records.iter().any(|r| r.outcome.is_failure()) {
+        VERIFY_FAILED_EXIT_CODE
+    } else {
+        0
+    }
+}
+
+fn cmd_verify(ctx: &MigrationContext, shared: &Store, channel: Option<&Store>) -> i32 {
+    let records = verify_applied(REGISTRY, ctx, shared, channel);
+    let mut counts = [0usize; 4]; // ok, mismatch, error, n/a
+    for r in &records {
+        let detail = r.outcome.detail();
+        if detail.is_empty() {
+            println!("verify: {} [{}] [{}]", r.id, r.scope, r.outcome.label());
+        } else {
+            println!("verify: {} [{}] [{}] — {}", r.id, r.scope, r.outcome.label(), detail);
+        }
+        // NDJSON alongside the human line, same channel the launcher's
+        // `run_migrate` reader already tails (event names are additive).
+        emit(
+            "migration_verify",
+            r.id,
+            &format!(
+                "\"status\":\"{}\",\"detail\":\"{}\"",
+                r.outcome.label(),
+                detail.replace('\\', "\\\\").replace('"', "\\\"")
+            ),
+        );
+        match r.outcome {
+            super::VerifyOutcome::Ok(_) => counts[0] += 1,
+            super::VerifyOutcome::Mismatch(_) => counts[1] += 1,
+            super::VerifyOutcome::Error(_) => counts[2] += 1,
+            super::VerifyOutcome::NotVerifiable => counts[3] += 1,
+        }
+    }
+    println!(
+        "verify: {} applied checked — {} ok, {} mismatch, {} error, {} not verifiable",
+        records.len(),
+        counts[0],
+        counts[1],
+        counts[2],
+        counts[3]
+    );
+    println!(
+        "{{\"event\":\"verify_complete\",\"checked\":{},\"ok\":{},\"mismatch\":{},\"error\":{},\"not_verifiable\":{}}}",
+        records.len(),
+        counts[0],
+        counts[1],
+        counts[2],
+        counts[3]
+    );
+    verify_exit_code(&records)
+}
+
+/// `SELECT COUNT(*) FROM <table>`, treating a missing table as 0 rows — a
+/// store from before the table existed has nothing in it, which is exactly
+/// the answer a post-condition wants. Any other SQLite error is surfaced.
+/// `table` must be a literal identifier from the calling migration, never
+/// user input (it is interpolated, not bound).
+pub(super) fn table_count(store: &Store, table: &str) -> Result<i64, String> {
+    let conn = store.conn().lock().map_err(|e| format!("store lock poisoned: {}", e))?;
+    match conn.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get::<_, i64>(0)) {
+        Ok(n) => Ok(n),
+        Err(rusqlite::Error::SqliteFailure(_, Some(msg))) if msg.contains("no such table") => Ok(0),
+        Err(e) => Err(format!("count {}: {}", table, e)),
+    }
+}
+
+#[cfg(test)]
+mod verify_tests {
+    use super::*;
+    use crate::migrations::{Migration, MigrationError, VerifyOutcome};
+
+    /// A migration whose `verify()` returns a canned outcome. `up()` is never
+    /// called by the verify harness.
+    struct Fake {
+        id: &'static str,
+        scope: MigrationScope,
+        outcome: VerifyOutcome,
+    }
+    impl Migration for Fake {
+        fn id(&self) -> &'static str { self.id }
+        fn scope(&self) -> MigrationScope { self.scope }
+        fn description(&self) -> &'static str { "fake" }
+        fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> { Ok(()) }
+        fn verify(&self, _ctx: &MigrationContext) -> VerifyOutcome { self.outcome.clone() }
+    }
+
+    /// Default `verify()` — a migration that never opted in.
+    struct Silent;
+    impl Migration for Silent {
+        fn id(&self) -> &'static str { "9998_silent" }
+        fn scope(&self) -> MigrationScope { MigrationScope::Global }
+        fn description(&self) -> &'static str { "no verify impl" }
+        fn up(&self, _ctx: &MigrationContext) -> Result<(), MigrationError> { Ok(()) }
+    }
+
+    fn harness() -> (tempfile::TempDir, MigrationContext, Store, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let shared_path = dir.path().join("shared").join("store.db");
+        std::fs::create_dir_all(shared_path.parent().unwrap()).unwrap();
+        let channel_path = dir.path().join("data").join("db").join("objects.db");
+        std::fs::create_dir_all(channel_path.parent().unwrap()).unwrap();
+        let shared = Store::open_shared(&shared_path).expect("open shared");
+        let channel = Store::open(&channel_path).expect("open channel");
+        let ctx = MigrationContext {
+            home: dir.path().to_path_buf(),
+            data_dir: dir.path().join("data"),
+            shared_store_path: shared_path,
+            channel_store_path: channel_path,
+        };
+        (dir, ctx, shared, channel)
+    }
+
+    #[test]
+    fn only_applied_migrations_are_verified_and_unapplied_are_skipped() {
+        let (_dir, ctx, shared, channel) = harness();
+        let applied = Fake { id: "9001_applied", scope: MigrationScope::Global, outcome: VerifyOutcome::Ok("fine".into()) };
+        let pending = Fake { id: "9002_pending", scope: MigrationScope::Global, outcome: VerifyOutcome::Mismatch("would fail".into()) };
+        shared.migration_mark_applied(applied.id(), "global", 1).unwrap();
+
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&applied, &pending];
+        let records = verify_applied(&regs, &ctx, &shared, Some(&channel));
+        assert_eq!(records.len(), 1, "the pending one has nothing to verify yet");
+        assert_eq!(records[0].id, "9001_applied");
+        assert_eq!(records[0].outcome, VerifyOutcome::Ok("fine".into()));
+        assert_eq!(verify_exit_code(&records), 0);
+    }
+
+    #[test]
+    fn channel_scoped_migrations_consult_the_channel_store() {
+        let (_dir, ctx, shared, channel) = harness();
+        let m = Fake { id: "9003_channel", scope: MigrationScope::Channel, outcome: VerifyOutcome::Ok("ok".into()) };
+        // Marked in the SHARED store only: for a Channel migration that is
+        // the wrong tracking store, so it must read as unapplied.
+        shared.migration_mark_applied(m.id(), "channel", 1).unwrap();
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&m];
+        assert!(verify_applied(&regs, &ctx, &shared, Some(&channel)).is_empty());
+
+        channel.migration_mark_applied(m.id(), "channel", 1).unwrap();
+        assert_eq!(verify_applied(&regs, &ctx, &shared, Some(&channel)).len(), 1);
+        // No channel store at all → a channel migration cannot be applied.
+        assert!(verify_applied(&regs, &ctx, &shared, None).is_empty());
+    }
+
+    #[test]
+    fn a_migration_without_a_verify_impl_reports_not_verifiable_and_passes() {
+        let (_dir, ctx, shared, channel) = harness();
+        shared.migration_mark_applied(Silent.id(), "global", 1).unwrap();
+        let regs: Vec<&(dyn Migration + Sync)> = vec![&Silent];
+        let records = verify_applied(&regs, &ctx, &shared, Some(&channel));
+        assert_eq!(records[0].outcome, VerifyOutcome::NotVerifiable);
+        assert_eq!(verify_exit_code(&records), 0, "not verifiable is honest, not a failure");
+    }
+
+    #[test]
+    fn mismatch_or_error_fails_the_pass_with_the_distinct_exit_code() {
+        let mk = |o: VerifyOutcome| VerifyRecord { id: "x", scope: "global", outcome: o };
+        assert_eq!(verify_exit_code(&[mk(VerifyOutcome::Ok("a".into())), mk(VerifyOutcome::NotVerifiable)]), 0);
+        assert_eq!(verify_exit_code(&[mk(VerifyOutcome::Ok("a".into())), mk(VerifyOutcome::Mismatch("gone".into()))]), VERIFY_FAILED_EXIT_CODE);
+        assert_eq!(verify_exit_code(&[mk(VerifyOutcome::Error("locked".into()))]), VERIFY_FAILED_EXIT_CODE);
+        assert_ne!(VERIFY_FAILED_EXIT_CODE, 1, "must be distinguishable from a failed migration run");
+    }
+
+    #[test]
+    fn table_count_treats_a_missing_table_as_zero_rows() {
+        let (_dir, _ctx, _shared, channel) = harness();
+        assert_eq!(table_count(&channel, "db_table_that_never_existed").unwrap(), 0);
+        // A table the schema does create counts normally (may be 0 or more).
+        assert!(table_count(&channel, "db_migrations").is_ok());
+    }
 }
 
 #[cfg(test)]

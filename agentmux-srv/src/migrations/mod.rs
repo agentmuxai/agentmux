@@ -114,11 +114,66 @@ impl From<&str> for MigrationError {
     }
 }
 
+/// Result of an applied migration's post-condition check
+/// (`agentmux-srv migrate --verify`, SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03
+/// Phase 1). `db_migrations` records only that `up()` returned `Ok` — never
+/// that it wrote what it was meant to. A migration that can state its own
+/// effect as a cheap query implements [`Migration::verify`]; the rest report
+/// `NotVerifiable` and the doctor pass says so rather than guessing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerifyOutcome {
+    /// The migration declares no checkable post-condition (the default).
+    NotVerifiable,
+    /// The post-condition holds. The string is the evidence (counts, paths).
+    Ok(String),
+    /// Recorded applied, but the effect is not there — the F1/F2 "marker
+    /// present, wrote nothing" shape the spec was written about.
+    Mismatch(String),
+    /// The check itself could not run (store unreadable, etc.). Treated
+    /// like a mismatch for exit-code purposes: an unverifiable applied
+    /// migration is not a passing one.
+    Error(String),
+}
+
+impl VerifyOutcome {
+    /// `true` for `Mismatch` and `Error` — the two outcomes that fail the pass.
+    pub fn is_failure(&self) -> bool {
+        matches!(self, Self::Mismatch(_) | Self::Error(_))
+    }
+
+    /// Short status word for CLI / NDJSON output.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::NotVerifiable => "n/a",
+            Self::Ok(_) => "ok",
+            Self::Mismatch(_) => "MISMATCH",
+            Self::Error(_) => "error",
+        }
+    }
+
+    /// The detail string, if any.
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::NotVerifiable => "",
+            Self::Ok(s) | Self::Mismatch(s) | Self::Error(s) => s,
+        }
+    }
+}
+
 pub trait Migration: Send + Sync {
     fn id(&self) -> &'static str;
     fn scope(&self) -> MigrationScope;
     fn description(&self) -> &'static str;
     fn up(&self, ctx: &MigrationContext) -> Result<(), MigrationError>;
+
+    /// Post-condition check for an APPLIED migration. Must be read-only and
+    /// cheap (a handful of queries / `exists()` calls) — it runs from a CLI
+    /// doctor pass, never from startup. Default: nothing checkable. Override
+    /// where the effect can be stated as a query; see `m0007` for the
+    /// row-count shape and `m0002` for the marker-file shape.
+    fn verify(&self, _ctx: &MigrationContext) -> VerifyOutcome {
+        VerifyOutcome::NotVerifiable
+    }
 }
 
 // ── Registry ─────────────────────────────────────────────────────────────────
