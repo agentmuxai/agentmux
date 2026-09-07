@@ -195,14 +195,41 @@ spec_files() {
         # purpose. Caught by asserting the regenerated file was byte-identical
         # on a clean checkout: it grew 76 archive rows. The grep, not the
         # pathspec, is what bounds the depth.
-        git ls-files -- docs/specs | grep -E '^docs/specs/[^/]+\.md$' | while IFS= read -r f; do
-            [ -f "$f" ] && printf '%s\n' "$f"
-        done
-    else
-        for f in docs/specs/*.md; do
-            [ -f "$f" ] && printf '%s\n' "$f"
-        done
+        #
+        # `awk '!seen[$0]++'` deduplicates while preserving ls-files' sorted
+        # order (Codex P2, PR #3073). During an unresolved merge conflict
+        # `git ls-files` emits a conflicted path once PER INDEX STAGE, which
+        # would render three identical rows — and the completeness assertion
+        # below could not catch it, since both of its totals come from this
+        # same tripled list. That is not a hypothetical: this script's own
+        # header documents regenerating DURING a conflict as the way to
+        # resolve one, so it is a normal thing to be mid-merge here. Not
+        # `git ls-files --deduplicate`, which needs git >= 2.31; awk is
+        # portable and this script is run by contributors, not just CI.
+        tracked=$(git ls-files -- docs/specs 2>/dev/null \
+            | grep -E '^docs/specs/[^/]+\.md$' \
+            | awk '!seen[$0]++')
+        # An EMPTY result means this tree is not the one that git found
+        # (Codex P2, PR #3073): unpack a source tarball inside an unrelated
+        # checkout and `git rev-parse` happily resolves the ancestor repo,
+        # which tracks none of these files. Taking the git answer there would
+        # silently overwrite INDEX.md with an empty generated section — and
+        # again the completeness assertion cannot object, because 0 == 0.
+        # Falling through to the glob covers that and the plain
+        # not-a-repo case with one condition.
+        if [ -n "$tracked" ]; then
+            printf '%s\n' "$tracked" | while IFS= read -r f; do
+                # Tracked but deleted in the working tree (`rm` without
+                # `git rm`): no file to read, so no row built from a failed
+                # read.
+                [ -f "$f" ] && printf '%s\n' "$f"
+            done
+            return
+        fi
     fi
+    for f in docs/specs/*.md; do
+        [ -f "$f" ] && printf '%s\n' "$f"
+    done
 }
 
 build() {
