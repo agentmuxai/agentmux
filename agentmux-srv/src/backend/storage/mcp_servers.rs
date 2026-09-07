@@ -7,10 +7,10 @@
 //! the full server object JSON (command/args/env for stdio; url/headers for
 //! SSE) that gets merged into `.mcp.json` at agent launch.
 
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
+use super::managed::{ManagedResource, Owner};
 use super::store::Store;
 
 /// A standalone MCP Server primitive (v1 composable model).
@@ -23,6 +23,49 @@ pub struct McpServer {
     pub is_global: bool,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+impl ManagedResource for McpServer {
+    const TABLE: &'static str = "db_mcp_servers";
+    const REF_COL: &'static str = "mcp_id";
+    const AGENT_REF_TABLE: &'static str = "db_agent_mcp_ref";
+    const BUNDLE_REF_TABLE: &'static str = "db_bundle_mcp_ref";
+    const COLUMNS: &'static [&'static str] =
+        &["id", "name", "transport", "config", "is_global", "created_at", "updated_at"];
+    const UPDATE_COLUMNS: &'static [&'static str] = &["name", "transport", "config", "updated_at"];
+    const NAME_NOUN: &'static str = "server";
+    const ARTICLE_NOUN: &'static str = "an MCP server";
+    const KIND: &'static str = "MCP server";
+
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(McpServer {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            transport: row.get(2)?,
+            config: row.get(3)?,
+            is_global: row.get::<_, i64>(4)? != 0,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    }
+    fn values(&self) -> Vec<rusqlite::types::Value> {
+        use rusqlite::types::Value;
+        vec![
+            Value::Text(self.id.clone()),
+            Value::Text(self.name.clone()),
+            Value::Text(self.transport.clone()),
+            Value::Text(self.config.clone()),
+            Value::Integer(if self.is_global { 1 } else { 0 }),
+            Value::Integer(self.created_at),
+            Value::Integer(self.updated_at),
+        ]
+    }
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
 }
 
 /// `mcp_server_list`'s response shape: the server plus whether the requesting
@@ -63,34 +106,11 @@ impl Store {
     /// List all MCP servers visible to an agent: own (referenced) + global,
     /// each annotated with whether this specific agent holds the bind ref.
     pub fn mcp_server_list(&self, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
-                    EXISTS(SELECT 1 FROM db_agent_mcp_ref r WHERE r.mcp_id = s.id AND r.agent_id = ?1) AS bound_to_agent
-             FROM db_mcp_servers s
-             WHERE s.is_global = 1
-                OR s.id IN (SELECT mcp_id FROM db_agent_mcp_ref WHERE agent_id = ?1)
-             ORDER BY s.is_global DESC, s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(McpServerListItem {
-                server: McpServer {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    transport: row.get(2)?,
-                    config: row.get(3)?,
-                    is_global: row.get::<_, i64>(4)? != 0,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                },
-                bound_to_agent: row.get::<_, i64>(7)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list::<McpServer>(Owner::Agent, agent_id)?
+            .into_iter()
+            .map(|(server, bound_to_agent)| McpServerListItem { server, bound_to_agent })
+            .collect())
     }
 
     /// Every MCP server visible to an agent for config materialization:
@@ -109,15 +129,7 @@ impl Store {
             .into_iter()
             .map(|item| item.server)
             .collect();
-        if let Ok(Some(def)) = self.agent_def_get(agent_id) {
-            if !def.memory_id.is_empty() {
-                for item in self.bundle_mcp_list(&def.memory_id).unwrap_or_default() {
-                    if !visible.iter().any(|s| s.id == item.server.id) {
-                        visible.push(item.server);
-                    }
-                }
-            }
-        }
+        self.managed_union_bundle_refs(agent_id, &mut visible);
         visible
     }
 
@@ -129,33 +141,11 @@ impl Store {
     /// `db_agent_mcp_ref` to it — per SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md
     /// §8 ("used by N agents"), tracked as gap #2 of #1960.
     pub fn mcp_server_list_global(&self) -> Result<Vec<McpServerCatalogItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
-                    (SELECT COUNT(*) FROM db_agent_mcp_ref r WHERE r.mcp_id = s.id) AS bound_count
-             FROM db_mcp_servers s
-             WHERE s.is_global = 1
-             ORDER BY s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(McpServerCatalogItem {
-                server: McpServer {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    transport: row.get(2)?,
-                    config: row.get(3)?,
-                    is_global: row.get::<_, i64>(4)? != 0,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                },
-                bound_count: row.get(7)?,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list_global::<McpServer>()?
+            .into_iter()
+            .map(|(server, bound_count)| McpServerCatalogItem { server, bound_count })
+            .collect())
     }
 
     /// Catalog-tier sibling of `mcp_server_list` (above) — same
@@ -172,70 +162,23 @@ impl Store {
     /// alongside a caller-chosen agent's bind status is safe.
     /// reagentx P0 on PR #2329.
     pub fn mcp_server_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
-                    EXISTS(SELECT 1 FROM db_agent_mcp_ref r WHERE r.mcp_id = s.id AND r.agent_id = ?1) AS bound_to_agent
-             FROM db_mcp_servers s
-             WHERE s.is_global = 1
-             ORDER BY s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map(params![agent_id], |row| {
-            Ok(McpServerListItem {
-                server: McpServer {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    transport: row.get(2)?,
-                    config: row.get(3)?,
-                    is_global: row.get::<_, i64>(4)? != 0,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                },
-                bound_to_agent: row.get::<_, i64>(7)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list_global_for_agent::<McpServer>(agent_id)?
+            .into_iter()
+            .map(|(server, bound_to_agent)| McpServerListItem { server, bound_to_agent })
+            .collect())
     }
 
     /// Get a standalone MCP server by id.
     pub fn mcp_server_get(&self, id: &str) -> Result<Option<McpServer>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let result = conn.query_row(
-            "SELECT id, name, transport, config, is_global, created_at, updated_at
-             FROM db_mcp_servers WHERE id = ?1",
-            params![id],
-            |row| {
-                Ok(McpServer {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    transport: row.get(2)?,
-                    config: row.get(3)?,
-                    is_global: row.get::<_, i64>(4)? != 0,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                })
-            },
-        );
-        match result {
-            Ok(s) => Ok(Some(s)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(StoreError::Sqlite(e)),
-        }
+        self.managed_get::<McpServer>(id)
     }
 
     /// Delete a standalone MCP server and purge ref rows (both agent- and
     /// bundle-level — FK cascades may be off on some builds, same reasoning
     /// as `skill_delete`). Returns true if deleted.
     pub fn mcp_server_delete(&self, id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM db_agent_mcp_ref WHERE mcp_id = ?1", params![id])?;
-        conn.execute("DELETE FROM db_bundle_mcp_ref WHERE mcp_id = ?1", params![id])?;
-        let rows = conn.execute("DELETE FROM db_mcp_servers WHERE id = ?1", params![id])?;
-        Ok(rows > 0)
+        self.managed_delete::<McpServer>(id)
     }
 
     /// Bind an MCP server to an agent (insert ref row). Idempotent —
@@ -253,32 +196,12 @@ impl Store {
     /// skill_bind — see
     /// docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
     pub fn mcp_server_bind(&self, agent_id: &str, mcp_id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let agent_exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
-            params![agent_id],
-            |row| row.get(0),
-        )?;
-        if !agent_exists {
-            return Err(StoreError::Other(format!(
-                "agent {agent_id} not found in this channel's local registry — cross-channel MCP server binding is not supported"
-            )));
-        }
-        conn.execute(
-            "INSERT OR IGNORE INTO db_agent_mcp_ref (agent_id, mcp_id) VALUES (?1, ?2)",
-            params![agent_id, mcp_id],
-        )?;
-        Ok(())
+        self.managed_bind_agent::<McpServer>(agent_id, mcp_id)
     }
 
     /// Unbind an MCP server from an agent. Returns true if a row was removed.
     pub fn mcp_server_unbind(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_agent_mcp_ref WHERE agent_id = ?1 AND mcp_id = ?2",
-            params![agent_id, mcp_id],
-        )?;
-        Ok(rows > 0)
+        self.managed_unbind::<McpServer>(Owner::Agent, agent_id, mcp_id)
     }
 
     /// Atomically upsert an MCP server enforcing per-agent name uniqueness, and
@@ -292,42 +215,7 @@ impl Store {
         server: &McpServer,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        let dup: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM db_mcp_servers
-             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
-               SELECT mcp_id FROM db_agent_mcp_ref WHERE agent_id = ?3
-             ))",
-            params![server.name, server.id, agent_id],
-            |r| r.get(0),
-        )?;
-        if dup > 0 {
-            return Err(StoreError::Other(format!(
-                "server name '{}' already bound to this agent",
-                server.name
-            )));
-        }
-        tx.execute(
-            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, transport=excluded.transport, config=excluded.config,
-               updated_at=excluded.updated_at",
-            params![
-                server.id, server.name, server.transport, server.config,
-                if server.is_global { 1i64 } else { 0i64 },
-                server.created_at, server.updated_at,
-            ],
-        )?;
-        if bind_new {
-            tx.execute(
-                "INSERT OR IGNORE INTO db_agent_mcp_ref (agent_id, mcp_id) VALUES (?1, ?2)",
-                params![agent_id, server.id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.managed_upsert_unique(Owner::Agent, agent_id, server, bind_new, None)
     }
 
     /// Atomically upsert a GLOBAL MCP server enforcing catalog-wide name
@@ -339,59 +227,19 @@ impl Store {
     /// clobber each other's config for every agent that has either bound.
     /// `server.is_global` must already be `true`; caller's job.
     pub fn mcp_server_upsert_unique_global(&self, server: &McpServer) -> Result<(), StoreError> {
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        let dup: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM db_mcp_servers WHERE name = ?1 AND id <> ?2 AND is_global = 1",
-            params![server.name, server.id],
-            |r| r.get(0),
-        )?;
-        if dup > 0 {
-            return Err(StoreError::Other(format!(
-                "a global server named '{}' already exists",
-                server.name
-            )));
-        }
-        tx.execute(
-            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, transport=excluded.transport, config=excluded.config,
-               updated_at=excluded.updated_at",
-            params![
-                server.id, server.name, server.transport, server.config,
-                server.created_at, server.updated_at,
-            ],
-        )?;
-        tx.commit()?;
-        Ok(())
+        self.managed_upsert_unique_global(server)
     }
 
     /// Return true if the given MCP server is accessible to the agent (global or bound).
     /// Used for read and mutation access checks.
     pub fn mcp_server_is_accessible_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_mcp_servers
-             WHERE id = ?1 AND (is_global = 1 OR id IN (
-               SELECT mcp_id FROM db_agent_mcp_ref WHERE agent_id = ?2
-             ))",
-            rusqlite::params![mcp_id, agent_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_accessible_to::<McpServer>(Owner::Agent, agent_id, mcp_id)
     }
 
     /// Return true if the agent has a direct ref binding to this MCP server.
     /// Used for delete access — an agent may only delete servers it directly bound.
     pub fn mcp_server_is_bound_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_agent_mcp_ref WHERE agent_id = ?1 AND mcp_id = ?2",
-            rusqlite::params![agent_id, mcp_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_bound_to::<McpServer>(Owner::Agent, agent_id, mcp_id)
     }
 
     // ── Bundle-level references (composable model v2) ──────────────────
@@ -406,34 +254,11 @@ impl Store {
     /// (referenced) + global servers, each annotated with whether this
     /// specific bundle holds the `db_bundle_mcp_ref` row.
     pub fn bundle_mcp_list(&self, bundle_id: &str) -> Result<Vec<McpServerBundleListItem>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
-                    EXISTS(SELECT 1 FROM db_bundle_mcp_ref r WHERE r.mcp_id = s.id AND r.bundle_id = ?1) AS bound_to_bundle
-             FROM db_mcp_servers s
-             WHERE s.is_global = 1
-                OR s.id IN (SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?1)
-             ORDER BY s.is_global DESC, s.updated_at DESC",
-        )?;
-        let rows = stmt.query_map(params![bundle_id], |row| {
-            Ok(McpServerBundleListItem {
-                server: McpServer {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    transport: row.get(2)?,
-                    config: row.get(3)?,
-                    is_global: row.get::<_, i64>(4)? != 0,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                },
-                bound_to_bundle: row.get::<_, i64>(7)? != 0,
-            })
-        })?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row?);
-        }
-        Ok(out)
+        Ok(self
+            .managed_list::<McpServer>(Owner::Bundle, bundle_id)?
+            .into_iter()
+            .map(|(server, bound_to_bundle)| McpServerBundleListItem { server, bound_to_bundle })
+            .collect())
     }
 
     /// Bind an MCP server to a bundle (insert ref row). Idempotent — binding
@@ -451,25 +276,7 @@ impl Store {
     /// application layer, not via FK" pattern as
     /// `identity::resolver::resolve_account`'s cross-store lookups.
     pub fn bundle_mcp_bind(&self, id_store: &Store, bundle_id: &str, mcp_id: &str) -> Result<(), StoreError> {
-        let bundle_exists: bool = {
-            let conn = id_store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
-                params![bundle_id],
-                |row| row.get(0),
-            )?
-        };
-        if !bundle_exists {
-            return Err(StoreError::Other(format!(
-                "bundle {bundle_id} not found — cannot bind an MCP server to a nonexistent bundle"
-            )));
-        }
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
-            params![bundle_id, mcp_id],
-        )?;
-        Ok(())
+        self.managed_bind_bundle::<McpServer>(id_store, bundle_id, mcp_id)
     }
 
     /// Atomically create a NEW, PRIVATE (never global) MCP server scoped
@@ -494,83 +301,18 @@ impl Store {
         server: &McpServer,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        let bundle_exists: bool = {
-            let conn = id_store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
-                params![bundle_id],
-                |row| row.get(0),
-            )?
-        };
-        if !bundle_exists {
-            return Err(StoreError::Other(format!(
-                "bundle {bundle_id} not found — cannot create an MCP server for a nonexistent bundle"
-            )));
-        }
-        let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
-        let dup: i64 = tx.query_row(
-            "SELECT COUNT(*) FROM db_mcp_servers
-             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
-               SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?3
-             ))",
-            params![server.name, server.id, bundle_id],
-            |r| r.get(0),
-        )?;
-        if dup > 0 {
-            return Err(StoreError::Other(format!(
-                "server name '{}' already bound to this bundle",
-                server.name
-            )));
-        }
-        // is_global hardcoded to 0 — this method's entire purpose is
-        // creating PRIVATE bundle-scoped content (mirrors
-        // mcp_server_upsert_unique_global's opposite hardcode of 1).
-        // Referencing an EXISTING global server is bundle_mcp_bind's job.
-        tx.execute(
-            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6)
-             ON CONFLICT(id) DO UPDATE SET
-               name=excluded.name, transport=excluded.transport, config=excluded.config,
-               updated_at=excluded.updated_at",
-            params![
-                server.id, server.name, server.transport, server.config,
-                server.created_at, server.updated_at,
-            ],
-        )?;
-        if bind_new {
-            tx.execute(
-                "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
-                params![bundle_id, server.id],
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        self.managed_upsert_unique_for_bundle(id_store, bundle_id, server, bind_new)
     }
 
     /// Unbind an MCP server from a bundle. Returns true if a row was removed.
     pub fn bundle_mcp_unbind(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let rows = conn.execute(
-            "DELETE FROM db_bundle_mcp_ref WHERE bundle_id = ?1 AND mcp_id = ?2",
-            params![bundle_id, mcp_id],
-        )?;
-        Ok(rows > 0)
+        self.managed_unbind::<McpServer>(Owner::Bundle, bundle_id, mcp_id)
     }
 
     /// Return true if the given MCP server is accessible to the bundle
     /// (global or bundle-bound). Mirrors `mcp_server_is_accessible_to`.
     pub fn bundle_mcp_is_accessible_to(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_mcp_servers
-             WHERE id = ?1 AND (is_global = 1 OR id IN (
-               SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?2
-             ))",
-            rusqlite::params![mcp_id, bundle_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_accessible_to::<McpServer>(Owner::Bundle, bundle_id, mcp_id)
     }
 
     /// Return true if the bundle has a direct ref binding to this MCP
@@ -578,13 +320,7 @@ impl Store {
     /// for edit/delete-ownership checks, as opposed to
     /// `bundle_mcp_is_accessible_to`'s broader read-access check.
     pub fn bundle_mcp_is_bound_to(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM db_bundle_mcp_ref WHERE bundle_id = ?1 AND mcp_id = ?2",
-            rusqlite::params![bundle_id, mcp_id],
-            |row| row.get(0),
-        )?;
-        Ok(count > 0)
+        self.managed_is_bound_to::<McpServer>(Owner::Bundle, bundle_id, mcp_id)
     }
 }
 
