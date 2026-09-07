@@ -429,6 +429,33 @@ describe("instructions_by_provider authoring model", () => {
         expect(duplicateProviderKeys([...uiOrder].reverse())).toEqual([backslashKey]);
     });
 
+    // reagent P1 (round 3) on #3063. bundle_export.rs skips an entry whose
+    // content is blank BEFORE it reaches the sanitize/collision check
+    // (content.trim().is_empty() -> continue), so an empty-content row never
+    // occupies a collision slot. Ignoring content here re-created the exact
+    // "warning on the wrong row" defect the ordering fix had just removed,
+    // this time via emptiness instead of insertion order.
+    it("ignores blank-content rows when resolving collisions, as export does", () => {
+        const backslashKey = "a" + String.fromCharCode(92) + "b";
+        // "a/b" sorts first but is empty, so export skips it entirely and
+        // exports the backslash row with NO collision at all.
+        const entries = [
+            { provider: "a/b", content: "   " },
+            { provider: backslashKey, content: "real" },
+        ];
+        expect(duplicateProviderKeys(entries)).toEqual([]);
+    });
+
+    it("still flags a real collision when both rows have content", () => {
+        const backslashKey = "a" + String.fromCharCode(92) + "b";
+        expect(
+            duplicateProviderKeys([
+                { provider: "a/b", content: "kept" },
+                { provider: backslashKey, content: "dropped" },
+            ]),
+        ).toEqual([backslashKey]);
+    });
+
     it("does not report backend-rejected keys as duplicates", () => {
         // They are already flagged by providerKeyProblem; double-warning about
         // a key that never reaches export is noise.
