@@ -345,10 +345,7 @@ mod threshold_tests {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms()
 }
 
 fn register_fleet_group_create(engine: &Arc<WshRpcEngine>, state: &AppState) {

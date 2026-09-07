@@ -276,7 +276,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // See agentmux-common/src/cli.rs.
                     #[cfg(windows)]
                     {
-                        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                        use agentmux_common::win32::CREATE_NO_WINDOW;
                         c.creation_flags(CREATE_NO_WINDOW);
                     }
                     c

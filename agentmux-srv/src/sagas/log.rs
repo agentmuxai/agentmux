@@ -580,7 +580,7 @@ impl SagaLog {
 }
 
 fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    agentmux_common::time::now_ms()
 }
 
 /// Discriminant name for a `Command`. Uses the serde tag (the

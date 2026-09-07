@@ -32,10 +32,7 @@ use super::error::StoreError;
 use super::store::Store;
 
 fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
+    agentmux_common::time::now_secs()
 }
 
 impl Store {

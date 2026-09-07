@@ -17,7 +17,7 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use flate2::Compression;
 use flate2::read::GzDecoder;
@@ -53,10 +53,7 @@ const TSIDX_FILENAME: &str = crate::backend::agent_session::session_io::TSIDX_FI
 // ---------------------------------------------------------------------------
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
+    agentmux_common::time::now_ms()
 }
 
 /// Compress `data` with gzip and write to `dest_path`.

@@ -2552,7 +2552,7 @@ impl PersistentSubprocessController {
         // Matches acp.rs / subprocess.rs; sibling of shell.rs's PTY path.
         #[cfg(windows)]
         {
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            use agentmux_common::win32::CREATE_NO_WINDOW;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 

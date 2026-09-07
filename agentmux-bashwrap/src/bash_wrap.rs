@@ -47,7 +47,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -422,7 +422,7 @@ fn kill_process_tree(pid: u32) {
             // GUI-subsystem parent, so spawning taskkill without this pops a
             // visible console window. std::process::Command needs CommandExt.
             use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            use agentmux_common::win32::CREATE_NO_WINDOW;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
         match cmd.output() {
@@ -649,10 +649,7 @@ fn decode_command(b64: &str) -> Result<String> {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    agentmux_common::time::now_ms_u64()
 }
 
 /// Log which streaming-relevant env vars the wrapper actually received,
@@ -1328,7 +1325,7 @@ async fn run_via_pipes(
         // to call it here. Verified via a clean `cargo check --target
         // x86_64-pc-windows-msvc` (0 errors) and this crate's windows-latest
         // CI job, both passing without the import. See PR #2042 discussion.
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        use agentmux_common::win32::CREATE_NO_WINDOW;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = cmd

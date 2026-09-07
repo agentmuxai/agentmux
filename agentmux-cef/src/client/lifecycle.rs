@@ -408,11 +408,10 @@ impl AgentMuxHandler {
             // Phase B.5 (window_meta step d) — kind/parent come
             // from the pending entry we popped at the top of this
             // fn, not a window_meta lookup.
-            let wire_kind = match pending_kind {
-                WindowKind::FullInstance => agentmux_common::ipc::WindowKind::FullInstance,
-                WindowKind::Subwindow => agentmux_common::ipc::WindowKind::Subwindow,
-            };
-            crate::launcher_ipc::report_window_opened(label.clone(), wire_kind, pending_parent.clone());
+            // `WindowKind` IS the wire type now (`state/window_meta.rs`
+            // re-exports `agentmux_common::ipc::WindowKind`), so the
+            // variant-by-variant mapping that used to live here is gone.
+            crate::launcher_ipc::report_window_opened(label.clone(), pending_kind, pending_parent.clone());
 
             // Phase B.9.1 (WRR) — authoritative HWND link. We have
             // both the label (popped from PendingWindowCreation

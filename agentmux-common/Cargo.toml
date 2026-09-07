@@ -5,7 +5,10 @@ edition = "2021"
 description = "Shared utilities for AgentMux crates"
 
 [dependencies]
-tokio = { version = "1", features = ["process"] }
+# `fs` / `io-util` / `sync` for `event_log::run_disk_writer` (lifted here
+# from launcher + srv — see event_log.rs); `rt` + `macros` for its
+# `#[tokio::test]`.
+tokio = { version = "1", features = ["process", "fs", "io-util", "sync", "rt", "macros"] }
 tracing = "0.1"
 thiserror = "1"
 # Phase B.2: shared IPC protocol types (Command/Event) between
@@ -15,7 +18,7 @@ thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Cross-platform home/data/config-dir lookup for the unified data-dir
-# layout (see docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md).
+# layout (see docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md).
 dirs = "5"
 # Host-tier jekt sender signing (jekt_sign.rs) — shared by agentmux-srv
 # (verification) and agentmux-mcp (signing), so the two can never drift on
@@ -29,6 +32,11 @@ base64 = "0.22"
 # single srv that minted its own key — see
 # docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+
+# `process::kill_pid` / `kill_process_group` — SIGTERM/SIGKILL by pid and
+# process group. Same pin as agentmux-srv.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 # Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
 # and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.

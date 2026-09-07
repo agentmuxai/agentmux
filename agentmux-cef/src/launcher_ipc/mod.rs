@@ -600,12 +600,10 @@ pub(crate) fn apply_shadow_projection(state: &std::sync::Arc<crate::state::AppSt
         }
         Event::WindowOpened { label, kind, parent_label, .. } => {
             // Phase B.5 (window_meta step b) — shadow projection
-            // + drift compare. Map the wire `WindowKind` back to
-            // host's `crate::state::WindowKind` (one-to-one).
-            let host_kind = match kind {
-                agentmux_common::ipc::WindowKind::FullInstance => crate::state::WindowKind::FullInstance,
-                agentmux_common::ipc::WindowKind::Subwindow => crate::state::WindowKind::Subwindow,
-            };
+            // + drift compare. The wire `WindowKind` IS the host's
+            // `crate::state::WindowKind` (a re-export, `state/window_meta.rs`),
+            // so the variant-by-variant mapping this used to do is gone.
+            let host_kind = *kind;
             let shadow_meta = crate::state::WindowMeta {
                 label: label.clone(),
                 kind: host_kind,
