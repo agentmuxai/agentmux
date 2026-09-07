@@ -1,6 +1,6 @@
 # Spec: optional system-tray + persistent background service, cross-platform
 
-**Status:** in progress — Windows and macOS tray backends shipped, auto-start shipped with deviations, Linux tray pending. See §7.6 for the running status; issue #2977 is the box-level tracker.
+**Status:** active — Windows and macOS tray backends shipped, auto-start shipped with deviations, Linux tray pending. See §7.6 for the running status; issue #2977 is the box-level tracker.
 **Author:** Agent5
 **Tracking issue:** [agentmuxai/agentmux#2977](https://github.com/agentmuxai/agentmux/issues/2977)
 **Verified against:** `main` @ (2026-09-04 pull), codebase research + external best-practices research, no live prototype built.
