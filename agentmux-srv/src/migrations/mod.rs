@@ -70,6 +70,8 @@ mod m0022_identity_store_links_backfill;
 mod m0023_native_memory_versions_backfill;
 mod m0024_native_memory_backfill_from_fs;
 mod m0025_agents_launch_state_backfill;
+mod m0026_registry_agent_id_rekey;
+mod m0027_agents_workspace_backfill;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;
@@ -230,4 +232,6 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0023_native_memory_versions_backfill::M0023NativeMemoryVersionsBackfill,
     &m0024_native_memory_backfill_from_fs::M0024NativeMemoryBackfillFromFs,
     &m0025_agents_launch_state_backfill::M0025AgentsLaunchStateBackfill,
+    &m0026_registry_agent_id_rekey::M0026RegistryAgentIdRekey,
+    &m0027_agents_workspace_backfill::M0027AgentsWorkspaceBackfill,
 ];

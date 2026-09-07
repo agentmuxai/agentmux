@@ -446,6 +446,10 @@ mod recent_sessions_tests {
             updated_at: 0,
         };
         wstore.identity_upsert(&account).unwrap();
+        // Linked to the template: `db_agent_identity_links` still has its FK
+        // on `db_agent_definitions`, so a launched agent's own row cannot
+        // hold a link until Phase 3c re-points it. The handler therefore
+        // falls back to the template's links — see its own note.
         wstore
             .agent_identity_link("def-claude", "acct-work", "github")
             .unwrap();
@@ -571,7 +575,12 @@ mod recent_sessions_tests {
         assert_eq!(rows[2].preview, "");
 
         // Joins: definition + identity + memory names resolved.
-        assert_eq!(rows[0].definition_name, "Claude Code");
+        // Consolidation Phase 3b: the row's name IS the agent's own name, and
+        // `instance_create` names a template launch after the launch. The
+        // template's "Claude Code" is no longer what this field carries — the
+        // picker renders `instance_name || definition_name` (MyAgentsList.tsx),
+        // so this is a fallback the UI only reaches for a nameless row.
+        assert_eq!(rows[0].definition_name, "name-inst-recent");
         assert_eq!(rows[0].identity_name, "Work");
         assert_eq!(rows[0].memory_name, "Notes");
         assert_eq!(rows[0].block_id_hint, "blk-recent");
