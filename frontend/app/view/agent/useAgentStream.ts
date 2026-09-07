@@ -39,7 +39,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
-import type { PendingMessage, SignalPair } from "./state";
+import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
@@ -155,16 +155,17 @@ interface UseAgentStreamOpts {
      */
     model: AgentPaneModel;
     outputFormat: string;
-    documentAtom: SignalPair<DocumentNode[]>;
+    /** Reactive accessor for the pane document nodes (`model.document`). */
+    documentNodes: Accessor<DocumentNode[]>;
     /**
-     * The reducer's turn-phase signal — read by the hook to detect
+     * The reducer turn-phase signal — read by the hook to detect
      * "was this a user-initiated stop?" at session_end so the
      * "⏹ Interrupted by user" markdown row can be appended for
      * durable visual confirmation. Replaces the legacy
      * `turnActiveAtom` / `stoppingAtom` props dropped in PR G; the
      * predicate is `turnPhase.kind === "Interrupting"`.
      */
-    turnPhaseAtom: SignalPair<TurnPhase>;
+    turnPhase: Accessor<TurnPhase>;
     /**
      * The reducer's live "compaction in progress" signal — read by
      * `useCompactionStream` to push the "Compacting conversation…"
@@ -179,14 +180,14 @@ interface UseAgentStreamOpts {
      * access to this hook's document-node infrastructure) still get their
      * transcript node pushed from one unified place.
      */
-    compactingAtom: SignalPair<CompactionState | null>;
+    compacting: Accessor<CompactionState | null>;
     /**
      * Pending queue shared with the composer's `sendMessage` path. On
      * `agent-message-accepted` events, the hook removes the matching
      * entry and promotes it to a `user_message` document node — this is
      * the visible "accepted" transition for the user.
      */
-    pendingMessagesAtom?: SignalPair<PendingMessage[]>;
+    pendingMessages?: Accessor<PendingMessage[]>;
     enabled: boolean;
     /**
      * Provider id (from CLI_CATALOG — "claude", "codex", "gemini", …).
@@ -221,10 +222,10 @@ export function useAgentStream({
     blockId,
     model,
     outputFormat,
-    documentAtom,
-    turnPhaseAtom,
-    compactingAtom,
-    pendingMessagesAtom,
+    documentNodes,
+    turnPhase,
+    compacting,
+    pendingMessages,
     enabled,
     provider,
     agentName,
@@ -257,7 +258,7 @@ export function useAgentStream({
     // rather than scheduling their own flush.
     useToolChunkStream({ blockId, queue });
     useShellNodeStream({ blockId, queue });
-    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId, compacting: compactingAtom[0] });
+    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId, compacting });
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
     // mutation of one existing node, not a streaming producer. Uses
     // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
@@ -289,7 +290,7 @@ export function useAgentStream({
         const { finalizeTurn } = useTurnLifecycle({
             blockId,
             model,
-            turnPhaseAtom,
+            turnPhase,
             provider,
             queue,
             flushParserPending: () => parser.flushPending(),
@@ -298,11 +299,11 @@ export function useAgentStream({
         });
 
         // Promotes accepted pending messages into user_message document
-        // nodes. No-ops internally if pendingMessagesAtom wasn't provided.
+        // nodes. No-ops internally if pendingMessages was not provided.
         usePendingMessageAcceptance({
             blockId,
             model,
-            pendingMessagesAtom,
+            pendingMessages,
             queue,
             hasNodeId,
             addNodeId,
@@ -662,7 +663,7 @@ export function useAgentStream({
             // Defer SessionEnd to a microtask so it fires AFTER the synchronous
             // disposal chain completes. During error-boundary cleanup the <Key>
             // streaming-buffer scope is still partially live while onCleanup runs;
-            // a synchronous documentAtom write here re-triggers reconcileArrays
+            // a synchronous document-nodes publish here re-triggers reconcileArrays
             // on a half-torn-down DOM → replaceChild NotFoundError (observed
             // 2026-06-06 crash 2, confirmed in
             // SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md §3.1).

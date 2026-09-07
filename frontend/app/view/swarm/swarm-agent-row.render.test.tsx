@@ -33,7 +33,7 @@ const BLOCK = "b1";
 
 /** A pane whose only activity is a bare sleep — promoted immediately. */
 function seedSleepingPane() {
-    registerPane(BLOCK, () => {});
+    registerPane(BLOCK);
     const node: DocumentNode = {
         type: "tool",
         id: "t1",
@@ -103,7 +103,7 @@ describe("AgentRow — an agent whose only activity is a long-running tool call"
     });
 
     it("renders no bucket for an agent with nothing running", () => {
-        registerPane(BLOCK, () => {});
+        registerPane(BLOCK);
         const { container } = renderRow(false);
         expect(container.querySelector(".swarm-bucket--longrunning")).toBeNull();
     });

@@ -24,7 +24,6 @@ import {
 } from "./agent-document-store";
 import {
     __resetAllSlots as resetPaneStateSlots,
-    type AgentPaneProjections,
     snapshot as paneStateSnapshot,
 } from "./agent-pane-state-store";
 import {
@@ -35,25 +34,8 @@ import {
     unregisterPane,
 } from "./agent-pane-registration";
 
-function noopProjections(): AgentPaneProjections {
-    return {
-        streaming: () => {},
-        sessionStats: () => {},
-        sessionTotals: () => {},
-        currentTool: () => {},
-        turnTokens: () => {},
-        pending: () => {},
-        initPhase: () => {},
-        turnPhase: () => {},
-    };
-}
-
 function defaultRegistration(): PaneRegistration {
-    return {
-        agentId: "agent-1",
-        documentSetter: () => {},
-        projections: noopProjections(),
-    };
+    return { agentId: "agent-1" };
 }
 
 describe("AgentPaneModel (PR-4 — model-level dispatchIfAlive)", () => {
@@ -147,22 +129,15 @@ describe("AgentPaneModel (PR-4 — model-level dispatchIfAlive)", () => {
         });
 
         it("before dispose, dispatchPane forwards to the store and updates reducer state", () => {
-            const turnPhaseKinds: string[] = [];
-            const model = registerPane("blk-7", {
-                agentId: "a",
-                documentSetter: () => {},
-                projections: {
-                    ...noopProjections(),
-                    turnPhase: (next) => turnPhaseKinds.push(next.kind),
-                },
-            });
+            const model = registerPane("blk-7", { agentId: "a" });
 
             model.dispatchPane({ type: "InitReady", at: 0 });
             model.dispatchPane({ type: "StreamSubscribe", at: 1 });
             model.dispatchPane({ type: "TurnStart", at: 2 });
 
-            // State updated through the dispatch path.
-            expect(turnPhaseKinds).toContain("Submitting");
+            // State updated through the dispatch path, visible on both the
+            // reactive view and the plain snapshot.
+            expect(model.state.turnPhase.kind).toBe("Submitting");
             const snap = paneStateSnapshot("blk-7");
             expect(snap).not.toBeNull();
             expect(snap?.turnPhase.kind).toBe("Submitting");
@@ -188,12 +163,7 @@ describe("AgentPaneModel (PR-4 — model-level dispatchIfAlive)", () => {
         });
 
         it("before dispose, dispatchDoc forwards to the store and updates reducer state", () => {
-            const setterCalls: number[] = [];
-            const model = registerPane("blk-9", {
-                agentId: "a",
-                documentSetter: (nodes) => setterCalls.push(nodes.length),
-                projections: noopProjections(),
-            });
+            const model = registerPane("blk-9", { agentId: "a" });
 
             model.dispatchDoc({
                 type: "StreamFlush",
@@ -203,7 +173,7 @@ describe("AgentPaneModel (PR-4 — model-level dispatchIfAlive)", () => {
                 updatedNodes: [],
             });
 
-            expect(setterCalls).toEqual([1]);
+            expect(model.document().length).toBe(1);
             expect(docSnapshot("blk-9")?.nodes.length).toBe(1);
         });
     });

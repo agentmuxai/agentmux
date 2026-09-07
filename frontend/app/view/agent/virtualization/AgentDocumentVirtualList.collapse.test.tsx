@@ -74,7 +74,7 @@ const documentState = (expandedTools: Set<string>): DocumentState => ({
 
 function setup(expandedTools: Set<string>) {
     const documentAtom = createSignal<DocumentNode[]>([toolNode]);
-    const viewState = createAgentViewState(documentAtom);
+    const viewState = createAgentViewState(documentAtom[0]);
     const [docState] = createSignal(documentState(expandedTools));
     const onReleaseToolOpen = vi.fn();
 

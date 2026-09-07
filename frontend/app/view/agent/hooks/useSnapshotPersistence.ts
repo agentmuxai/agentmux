@@ -29,10 +29,12 @@ export interface UseSnapshotPersistenceOptions {
     blockId: string;
     /** AgentDefinition slug/UUID — used for the agent-anchored snapshot zone. */
     definitionId: string;
-    /** Lazy accessor to the per-pane atoms (agentAtoms()). */
+    /** Lazy accessor to the per-pane view-local atoms (documentStateAtom lives there). */
     getAtoms: () => AgentAtoms;
-    /** Read-only accessor for the document nodes (agentAtoms().documentAtom[0]). */
+    /** Read-only accessor for the document nodes (`model.document`). */
     getDocument: () => DocumentNode[];
+    /** Reducer-owned composer-details flag (`model.state.detailsOpen`). */
+    getDetailsOpen: () => boolean;
     /** Returns true if the current snapshot belongs to a foreign block. */
     snapshotIsForeignBlock: () => boolean;
     log: LogFn;
@@ -64,7 +66,7 @@ export function useSnapshotPersistence(opts: UseSnapshotPersistenceOptions): voi
         // regardless of conversation length, eliminating the renderer OOM.
         // See docs/specs/SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12.md.
         const [docState] = opts.getAtoms().documentStateAtom;
-        const [detailsOpen] = opts.getAtoms().detailsOpenAtom;
+        const detailsOpen = opts.getDetailsOpen;
         const capturedDocState = docState();
         const capturedDetailsOpen = detailsOpen();
 

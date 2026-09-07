@@ -17,7 +17,7 @@
  *   (D1 dock vs swarm · D3 ordering · D4 retention · D6 cap/overflow)
  */
 
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -30,7 +30,6 @@ import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
 import { nextToolPromotionAt, toolActivities } from "../activity/tool-adapter";
 import { EXIT_FLASH_MS, RETENTION_MS, type ActivityKind, type ActivityStatus, type PinnedActivity } from "../activity/types";
-import type { SignalPair } from "../state";
 import type { DocumentNode } from "../types";
 
 const MAX_INLINE = 3;
@@ -49,7 +48,8 @@ function overflowSummary(items: PinnedActivity[]): string {
 }
 
 interface ActivityDockProps {
-    documentAtom: SignalPair<DocumentNode[]>;
+    /** Reactive accessor for this pane document nodes (`model.document`). */
+    documentNodes: Accessor<DocumentNode[]>;
     /** This pane's own block id — scopes the subagent adapter to subagents
      *  spawned by THIS agent (D5: the dock is block-scoped), same as shells
      *  are already scoped by living in this pane's own document. */
@@ -62,7 +62,7 @@ interface ActivityDockProps {
 }
 
 export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
-    const [nodes] = props.documentAtom;
+    const nodes = props.documentNodes;
     const tick = useTick(1000);
     const [dismissed, setDismissed] = createSignal<Set<string>>(new Set());
     const [overflowOpen, setOverflowOpen] = createSignal(false);

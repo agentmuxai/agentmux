@@ -3,133 +3,81 @@
 
 /**
  * Agent pane state store — slice #4 of the frontend reducer roadmap.
- * Bundles the per-pane lifecycle/turn/tool/tokens/stop/pending atoms.
+ * Bundles the per-pane lifecycle/turn/tool/tokens/stop/pending state.
  *
- * Pattern matches agent-document-store.ts: per-blockId slot, atoms as
- * write-only projections, throw on unregistered dispatch. Conventions
- * §4–§5 (frontend-reducer-conventions-2026-05-03.md).
+ * Pattern matches agent-document-store.ts: per-blockId slot, throw on
+ * unregistered dispatch. Conventions §4–§5
+ * (frontend-reducer-conventions-2026-05-03.md).
+ *
+ * The reactive read side lives HERE (see `AgentPaneView`), not in a
+ * view-owned mirror. Before A6 of issue #1549 the view created 17 Solid
+ * signals (`createAgentAtoms`), handed their setters in through an
+ * `AgentPaneProjections` interface, and this store wrote each changed field
+ * through the matching setter — adding a reducer field meant editing the
+ * state type, `initialState`, the projections interface, `createAgentAtoms`,
+ * and the wiring block in `agent-view.tsx`, and forgetting one was silent.
+ * The view could also write an atom directly, bypassing the reducer that
+ * owned the field (it did, for `detailsOpen`).
  */
 
-import type { PendingMessage } from "../view/agent/state";
-import type {
-    SessionStats,
-    StreamingState,
-    TurnTokens,
-} from "../view/agent/types";
+import { type Accessor, batch, createSignal, type Setter } from "solid-js";
+
 import { update } from "./agent-pane-state/reducer";
 import {
     AgentPaneCommand,
     AgentPaneEvent,
     AgentPaneState,
-    type AttachedTaskState,
-    type CompactionState,
-    type InitPhase,
     initialState,
-    type PaneFailure,
-    type ResumeRetryState,
-    type TurnPhase,
     workingFromPhase,
 } from "./agent-pane-state/types";
 import { type CommandSource, recordDispatch } from "./command-source";
 
 /**
- * The set of projection setters the slot writes to. Each one corresponds
- * to a pre-existing per-pane Solid signal in `createAgentAtoms`. Readers
- * keep using the existing accessors; only writes are routed through this
- * store.
+ * Reactive, read-only view of a pane's reducer state — one Solid signal per
+ * top-level `AgentPaneState` field, generated from the state's own keys.
+ * Reads are plain property access (`view.turnPhase.kind`) and track like
+ * any signal read.
  *
- * PR G dropped the `turnActive` and `stopping` setters — the legacy
- * fields they backed are gone. The view binds its "working" animation
- * to `workingFromPhase(turnPhase)` and its "Stopping…" label to
- * `turnPhase.kind === "Interrupting"`.
+ * Semantics are exactly the old per-field projections': each field is its
+ * own signal with referential (`===`) equality, so a dispatch that leaves a
+ * field's object untouched does not notify that field's readers. The
+ * reducer keeps treating state as immutable (fresh objects on change), which
+ * is what makes per-field identity a valid change signal.
+ *
+ * Why not `createStore` + `reconcile` (the `launch-flow-store` pattern):
+ * `reconcile` diffs INTO the store's existing object tree in place. That tree
+ * would come to alias the reducer's own state objects, so a later reconcile
+ * would mutate a `prev` the diagnostics in `dispatch()` still compare
+ * against — and any `snapshot()` a caller was holding. Per-field signals
+ * never mutate anything the reducer produced.
  */
-export interface AgentPaneProjections {
-    streaming: (next: StreamingState) => void;
-    sessionStats: (next: SessionStats | null) => void;
-    /** Cumulative session totals — see SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md. */
-    sessionTotals: (next: SessionStats | null) => void;
-    currentTool: (next: string | null) => void;
-    turnTokens: (next: TurnTokens | null) => void;
-    pending: (next: PendingMessage[]) => void;
-    /** Init phase — drives the "Loading history…" overlay (issue #728 gap 1). */
-    initPhase?: (next: InitPhase) => void;
-    /**
-     * Single-source-of-truth turn phase. Since PR G this is the only
-     * working/stopping signal the view binds to (via
-     * `workingFromPhase(turnPhase)` and `turnPhase.kind === "Interrupting"`).
-     * Optional so existing callers (and the cascade-store test's no-op
-     * projection) keep compiling.
-     */
-    turnPhase?: (next: TurnPhase) => void;
-    /**
-     * Composer details panel — open/closed. Reducer-owned (PR #1068).
-     * Drives the chevron orientation in the composer strip + the
-     * conditional render of the details panel. Optional for back-compat
-     * with existing test projections.
-     */
-    detailsOpen?: (next: boolean) => void;
-    /**
-     * First significant argument of the active tool call (file path for
-     * read/write, command string for bash, etc.). Cleared on ToolEnd.
-     * Drives enriched AgentWorkingRow display.
-     */
-    currentToolArg?: (next: string | null) => void;
-    /**
-     * Current input-token count as of the last message_start — equals the
-     * total context fill (all conversation history) sent to the model.
-     * Driven by the same TokensIn command as turnTokens.input; fires once
-     * per turn at message_start. Persists through TurnEnd so the bar stays
-     * visible between turns. Clears only on TurnReset (session wipe).
-     */
-    contextTokens?: (next: number | null) => void;
-    /** Learned context-window size for the current model (null → view uses the
-     *  provider's static fallback). Driven by TokensIn alongside contextTokens. */
-    contextWindow?: (next: number | null) => void;
-    /**
-     * Active classified failure for this pane, or null. Reducer-owned
-     * (see `AgentPaneState.failure` / `FailureObserved` / `FailureCleared`).
-     * See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
-     */
-    failure?: (next: PaneFailure | null) => void;
-    /**
-     * Live "compaction in progress" state, or null. Reducer-owned (see
-     * `AgentPaneState.compacting` / `CompactionStarted` / `CompactionBoundary`).
-     * Drives the "Compacting…" status chip + elapsed counter. See
-     * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
-     */
-    compacting?: (next: CompactionState | null) => void;
-    /**
-     * Live "≥1 agent-declared long-running activity attached" state, or
-     * null. Reducer-owned (see `AgentPaneState.attachedTask` /
-     * `AttachedTaskObserved` / `AttachedTaskCleared`). Drives the
-     * "Running…" footer status once `turnPhase` is otherwise idle — the
-     * fix for the Agent1 "stuck Working for 12h" retro
-     * (retro-persistent-agent-working-status-stuck-2026-07-16.md). See
-     * docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md.
-     */
-    attachedTask?: (next: AttachedTaskState | null) => void;
-    /**
-     * Live registry-derived attached-task floor, or null. Reducer-owned
-     * (see `AgentPaneState.registryAttachedTaskSince` /
-     * `RegistryAttachedTaskObserved` / `RegistryAttachedTaskCleared`) — a
-     * SEPARATE axis from `attachedTask` above, combined with it by
-     * `agent-view.tsx`'s attached-task effect rather than merged into it.
-     * See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md.
-     */
-    registryAttachedTaskSince?: (next: number | null) => void;
-    /**
-     * Live "reconnecting after a stale `--resume` session id" state, or
-     * null. Reducer-owned (see `AgentPaneState.reconnecting` /
-     * `ResumeRetryStarted` / `ResumeRetryResolved`). Drives the
-     * "Reconnecting…" status chip + elapsed counter, mirroring `compacting`.
-     * See docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
-     */
-    reconnecting?: (next: ResumeRetryState | null) => void;
+export type AgentPaneView = { readonly [K in keyof AgentPaneState]: AgentPaneState[K] };
+
+type FieldSignals = {
+    [K in keyof AgentPaneState]: [Accessor<AgentPaneState[K]>, Setter<AgentPaneState[K]>];
+};
+
+function createFieldSignals(init: AgentPaneState): { signals: FieldSignals; view: AgentPaneView } {
+    // Built key-by-key, so the per-key generic type can't be expressed to
+    // TS inside the loop (it would need the intersection of every field's
+    // signal type). The erased-type map is cast once at the end; the
+    // public `FieldSignals` / `AgentPaneView` shapes are what callers see.
+    const signals: Record<string, [Accessor<unknown>, Setter<unknown>]> = {};
+    const view: Record<string, unknown> = {};
+    for (const key of Object.keys(init) as (keyof AgentPaneState)[]) {
+        // createSignal's default equality is `===` — the same test the old
+        // `proj()` helper applied before calling a setter.
+        const sig = createSignal<unknown>(init[key]);
+        signals[key] = sig;
+        Object.defineProperty(view, key, { get: sig[0], enumerable: true });
+    }
+    return { signals: signals as unknown as FieldSignals, view: Object.freeze(view) as AgentPaneView };
 }
 
 interface Slot {
     state: AgentPaneState;
-    proj: AgentPaneProjections;
+    signals: FieldSignals;
+    view: AgentPaneView;
     // Edge-trigger for the `[wave-turn]` stream-stuck watchdog line — logs
     // once per stall episode (on the first threshold crossing) instead of
     // every 5s watchdog tick for as long as the stall lasts. Reset on every
@@ -203,17 +151,24 @@ export function __resetListeners(): void {
  * @internal — production callers MUST use `registerPane` from
  * `agent-pane-registration.ts` so the pane is registered atomically
  * across BOTH stores (document + pane-state). Direct callers of this
- * function are limited to single-store unit tests (cascade-detection
- * scenarios that need a custom single-store projection). PR-3 of the
- * cascade follow-up sequence — see agent-pane-registration.ts for
- * rationale + Option A/B discussion.
+ * function are limited to single-store unit tests. PR-3 of the cascade
+ * follow-up sequence — see agent-pane-registration.ts for rationale +
+ * Option A/B discussion.
  */
-export function registerPane(
-    blockId: string,
-    agentId: string,
-    proj: AgentPaneProjections,
-): void {
-    slots.set(blockId, { state: initialState(agentId), proj, stuckLogged: false, watchdogTickCount: 0 });
+export function registerPane(blockId: string, agentId: string): void {
+    const state = initialState(agentId);
+    const { signals, view } = createFieldSignals(state);
+    slots.set(blockId, { state, signals, view, stuckLogged: false, watchdogTickCount: 0 });
+}
+
+/**
+ * The pane's reactive state view (see `AgentPaneView`), or `null` if the
+ * pane is not registered. Production code reaches this through
+ * `AgentPaneModel.state` (agent-pane-registration.ts hands the model the
+ * view at register time); this export is for tests and diagnostics.
+ */
+export function paneView(blockId: string): AgentPaneView | null {
+    return slots.get(blockId)?.view ?? null;
 }
 
 /**
@@ -326,49 +281,49 @@ export function dispatch(
         }
     }
 
-    // Project changes — only call setters for fields that actually
-    // changed (referential equality). Avoids redundant signal writes.
-    // Per-setter cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
-    // A reactive subscriber on the atom backing one of these setters can
-    // synchronously unmount the pane (call `unregisterPane`) inside the
-    // setter call. Capture which setter triggers the dispose — the next
-    // dispatch in the caller's frame will throw and the log line below
-    // pinpoints the cause.
-    let cascadeSetter: string | null = null;
-    const proj = <T>(name: string, prev: T, next: T, set: ((v: T) => void) | undefined): void => {
-        if (prev === next) return;
-        set?.(next);
-        if (cascadeSetter == null && !slots.has(blockId)) cascadeSetter = name;
-    };
-    proj("streaming", prev.streaming, slot.state.streaming, slot.proj.streaming);
-    proj("sessionStats", prev.sessionStats, slot.state.sessionStats, slot.proj.sessionStats);
-    proj("sessionTotals", prev.sessionTotals, slot.state.sessionTotals, slot.proj.sessionTotals);
-    proj("currentTool", prev.currentTool, slot.state.currentTool, slot.proj.currentTool);
-    proj("turnTokens", prev.turnTokens, slot.state.turnTokens, slot.proj.turnTokens);
-    proj("contextTokens",
-        prev.lastContextTokens ?? null,
-        slot.state.lastContextTokens ?? null,
-        slot.proj.contextTokens);
-    proj("contextWindow",
-        prev.lastContextWindow ?? null,
-        slot.state.lastContextWindow ?? null,
-        slot.proj.contextWindow);
-    proj("pending", prev.pending, slot.state.pending, slot.proj.pending);
-    proj("initPhase", prev.initPhase, slot.state.initPhase, slot.proj.initPhase);
-    proj("turnPhase", prev.turnPhase, slot.state.turnPhase, slot.proj.turnPhase);
-    proj("detailsOpen", prev.detailsOpen, slot.state.detailsOpen, slot.proj.detailsOpen);
-    proj("currentToolArg", prev.currentToolArg, slot.state.currentToolArg, slot.proj.currentToolArg);
-    proj("failure", prev.failure, slot.state.failure, slot.proj.failure);
-    proj("compacting", prev.compacting, slot.state.compacting, slot.proj.compacting);
-    proj("attachedTask", prev.attachedTask, slot.state.attachedTask, slot.proj.attachedTask);
-    proj("registryAttachedTaskSince", prev.registryAttachedTaskSince, slot.state.registryAttachedTaskSince, slot.proj.registryAttachedTaskSince);
-    proj("reconnecting", prev.reconnecting, slot.state.reconnecting, slot.proj.reconnecting);
-
-    if (cascadeSetter != null) {
+    // Publish changed fields to the reactive view — one signal write per
+    // field whose value identity changed (the same referential test the old
+    // per-field projection setters used), inside one `batch` so a reader of
+    // two fields sees them move together and effects run once per dispatch.
+    //
+    // Cascade detection: docs/analysis/LIFECYCLE_DISPATCH_LEAK_2026_05_15.md.
+    // A reactive subscriber of one of these fields can synchronously unmount
+    // the pane (call `unregisterPane`) when the batch flushes. Because every
+    // write lands inside one `batch()`, subscriber effects run only after all
+    // of them — so this narrows the trigger to the set of fields this
+    // dispatch changed (the disposing reader is subscribed to one of them),
+    // rather than the single field the old per-setter loop could pin. That
+    // set is what the warning below names. The next dispatch in the caller's
+    // frame will throw.
+    const next = slot.state;
+    const changed: string[] = [];
+    batch(() => {
+        for (const key of Object.keys(slot.signals) as (keyof AgentPaneState)[]) {
+            if (prev[key] === next[key]) continue;
+            changed.push(key);
+            // Always pass a thunk: a bare value that happened to be a function
+            // would be treated as an updater by Solid's setter.
+            (slot.signals[key][1] as Setter<unknown>)(() => next[key]);
+        }
+    });
+    if (import.meta.env.DEV) {
+        // A field the reducer produced but `initialState()` didn't declare has
+        // no signal and would silently never be reactive. Every field of
+        // `AgentPaneState` is required, so this only fires if someone adds an
+        // optional field and forgets `initialState` — the one place left.
+        for (const key of Object.keys(next)) {
+            if (!(key in slot.signals)) {
+                console.warn(
+                    `[agent-pane-state] field '${key}' is on the reducer state but missing from initialState() — it will not be reactive`,
+                );
+            }
+        }
+    }
+    if (changed.length > 0 && !slots.has(blockId)) {
         console.warn(
-            `[agent-pane-state] CASCADE_DETECTED: '${cascadeSetter}' setter disposed pane mid-dispatch ` +
+            `[agent-pane-state] CASCADE_DETECTED: a subscriber of '${changed.join("'/'")}' disposed pane mid-dispatch ` +
             `(cmd=${command.type}, blockId=${blockId.slice(0, 7)}, source=${source}). ` +
-            `A reactive subscriber on the '${cascadeSetter}' atom unmounted the pane during dispatch. ` +
+            `A reactive reader of one of those fields unmounted the pane during dispatch. ` +
             `Subsequent dispatches in the same callback will throw.`,
         );
     }
@@ -494,7 +449,7 @@ export function fireEvent(blockId: string, event: AgentPaneEvent): void {
     }
 }
 
-/** Snapshot — diagnostics + tests only. */
+/** Snapshot — diagnostics + tests only. Non-reactive; for reactive reads use `paneView`. */
 export function snapshot(blockId: string): AgentPaneState | null {
     return slots.get(blockId)?.state ?? null;
 }

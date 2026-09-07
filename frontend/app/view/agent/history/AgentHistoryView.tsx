@@ -247,7 +247,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
             </div>
             <div class="agent-history-body">
                 <AgentDocumentView
-                    documentAtom={[docNodes, setDocNodes]}
+                    documentNodes={docNodes}
                     documentStateAtom={[docState, setDocState]}
                     onLoadOlder={loadOlder}
                     loadingOlder={loadingOlder}
