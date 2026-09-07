@@ -169,7 +169,7 @@ Two teams (or one team at two times) built the same *idea* twice with the same *
 
 Ordered by payoff ÷ risk. Each step is independently shippable.
 
-**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 is next: `TileLayout` measures **437 of 598 lines identical across all three platform files** (73%), so the shared core is real; the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models.
+**Progress (2026-09-07):** Phase 1 steps 1–4 and 6 merged in #3033 (step 5, the ObjC externs, waits on a macOS build); Phase 3 step 10 merged in #3034; step 16 merged in #3036; steps 15 (as corrected) and 18, plus the `flyoutmenu` / `file-tree` clones from §3.2, landed in #3039. Step 11 landed in #3041: `TileLayout` measured **437 of 598 lines identical across all three platform files** (73%); the shared body is now `TileLayout.core.tsx` + three `TileLayoutPlatform` hook objects (1,652 → 957 lines), and the platform-specific remainder is the animate delay, the Win11 `dragend` safety net, the reflow notification, the `canDrag` resize-zone guard, `preventUnhandled`, `setJsDragActive`, and three different `ResizeHandle` pointer models.
 
 ### Phase 1 — mechanical lifts into `agentmux-common` (low risk, immediate)
 
