@@ -1,0 +1,106 @@
+name: Specs index — regenerate after merge
+
+# WHY THIS EXISTS
+#
+# `docs/specs/INDEX.md` is a GENERATED file that is also COMMITTED and GATED
+# (`gen-docs-index.sh --check`, run by ci-pr.yml). In a repo where several
+# agents open spec-adding PRs in parallel, that combination fails on its own:
+#
+#   PR A and PR B each add a spec and each regenerate the index. Git text-
+#   merges both ROWS cleanly, but the section header count ("### proposed
+#   (95)") is a one-line conflict resolved in favour of one side. The merged
+#   file then has N+1 rows under a count of N — internally inconsistent in a
+#   way NEITHER parent was, so the gate fails for every subsequent PR until
+#   a human regenerates by hand.
+#
+# The generator's own header comment (scripts/gen-docs-index.sh:42-47)
+# describes this exact failure. Measured over the 90 PR CI runs before this
+# workflow landed: 24 failed, and 16 of those (67%) were this gate — five of
+# them on `main` itself, and several on PRs touching no docs at all.
+#
+# So: regenerate the index automatically once the merge that invalidated it
+# has actually landed, which is the only point where the true state is known.
+#
+# WHY A PR AND NOT A DIRECT PUSH
+#
+# `main` is protected (required_pull_request_reviews, 1 approval). Pushing
+# straight to it from CI would mean bypassing branch protection, which this
+# repo forbids outright. So this opens/updates a single, always-reused PR
+# instead. It is a one-line diff that a human can approve at a glance.
+
+on:
+  push:
+    branches: [main]
+    # Only a change under docs/specs/ can invalidate the index. The generator
+    # walks docs/specs/*.md and reads each file's Status line, so a doc added,
+    # deleted, or re-Statused there is the complete set of triggers.
+    paths:
+      - 'docs/specs/**'
+      - 'scripts/gen-docs-index.sh'
+
+# Never race two regenerations against each other: a second merge landing
+# while this is running should supersede it, not append to it.
+concurrency:
+  group: specs-index-autoregen
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate:
+    name: regenerate specs index
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate
+        run: bash scripts/gen-docs-index.sh
+
+      - name: Open or update the fix PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- docs/specs/INDEX.md; then
+            echo "specs index is already current — nothing to do."
+            exit 0
+          fi
+
+          echo "index drifted; opening/updating the regeneration PR:"
+          git diff --stat -- docs/specs/INDEX.md
+
+          BRANCH=chore/regen-specs-index
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # One long-lived branch, force-updated. Re-using it means repeated
+          # drift collapses into a single open PR rather than a queue of them.
+          git checkout -B "$BRANCH"
+          git add docs/specs/INDEX.md
+          git commit \
+            -m "chore(docs): regenerate the specs index" \
+            -m "Automated: docs/specs/ changed on main and INDEX.md no longer matched. See .github/workflows/docs-index-autoregen.yml for why this is automated."
+          git push --force origin "$BRANCH"
+
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            {
+              echo 'Automated by `.github/workflows/docs-index-autoregen.yml`.'
+              echo
+              echo '`docs/specs/` changed on `main` and the committed `INDEX.md` no'
+              echo 'longer matched what `scripts/gen-docs-index.sh` produces, so the'
+              echo '`Specs index is current` check would report stale on every open PR'
+              echo '— including ones touching no docs at all.'
+              echo
+              echo 'Generated output only: expect section counts and/or rows. If the'
+              echo 'diff is anything else, that is worth a look before approving.'
+            } > /tmp/index-pr-body.md
+            gh pr create \
+              --base main --head "$BRANCH" \
+              --title "chore(docs): regenerate the specs index" \
+              --body-file /tmp/index-pr-body.md
+          else
+            echo "PR already open for $BRANCH — updated it in place."
+          fi
