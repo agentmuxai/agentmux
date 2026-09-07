@@ -38,7 +38,7 @@ A milestone upgrade is not "bump a number." It is "forward-port every patch, reb
 | # | Patch | Upstream status | Used by | Port required? |
 |---|---|---|---|---|
 | 1 | `agentmux_process_requirement.patch` (`GetPeerValidationPolicy() → kNoValidation`, the -67030 renderer fix) | Not upstream | All platforms | **Yes** — mandatory, registered in `patch/patch.cfg` |
-| 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | Linux + Windows native drag; `patched-libcef` feature | **Yes**, if native drag stays in scope |
+| 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | **Linux only.** Windows uses its own Win32 path (`post_win32_begin_move`) and never calls this — `scripts/cef-build/args-windows.gn:4` states the patch "never [was] needed" there; macOS uses AppKit drag regions. Gated by the `patched-libcef` feature | **Yes, if Linux native drag stays in scope** — nothing else depends on it |
 | 3 | HTCAPTION right-click fall-through to renderer | Not upstream as of 148 — **re-check against 152** | Title-bar right-click menus | Yes, if that UX is kept |
 | 4 | Transparency cascade (RWHView/WebContents bg) | **Partial** upstream since 148 | Window opacity | Re-verify; may be droppable |
 
@@ -55,7 +55,7 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 
 - The per-milestone cost is dominated by *rebuild* (3–6 h × 3 platforms), not by *porting*. Stepping through 149 → 150 → 151 → 152 multiplies the expensive part by four while only marginally easing the porting part.
 - Our patch set is small (4 items, one mandatory) and touches stable CEF surface (`cef_window.h`, `window_impl.{cc,h}`, `window_view.cc`, `browser_view_impl.cc`).
-- We have an ABI safety net: `ui_tasks.rs` checks the runtime `_cef_window_t` struct size and degrades to a manual move loop rather than crashing when the patched symbol is absent.
+- We have an ABI safety net, though a narrower one than "drag keeps working": `agentmux-cef/src/ui_tasks/drag.rs` compares the runtime `_cef_window_t.size` against the compiled binding's and **returns early with a warning** if they diverge, so an unpatched or mismatched runtime cannot read the extension slot (which would be UB). It prevents memory unsafety; it does **not** preserve the feature. On Linux the practical result is that native window drag becomes a no-op. Windows and macOS are unaffected either way — they never route through this patch (see §2, patch #2).
 
 **Counter-case, stated honestly:** if the port hits a wall on 152, the fallback is to land on 7871 (150) — still three milestones of progress — rather than abandoning the effort. Decide this only if 152 porting exceeds ~2 days.
 
@@ -109,6 +109,10 @@ Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create
 - `.github/workflows/build-{linux,macos,windows}.yml` — the `cef-runtime-tag` input default
 - `docs/cef-build/*` version references
 
+**Changing those input defaults is not sufficient, and assuming otherwise would silently un-pin releases.** `.github/workflows/release.yml` passes `cef-runtime-tag: ""` explicitly to all three build jobs (lines 92, 111, 150), and every callee documents blank as "latest". A caller-supplied empty string overrides the callee default, so **release builds today do not pin CEF at all — they float to whatever the newest `agentmuxai/cef` release happens to be.** Phase E must therefore set an explicit tag in `release.yml`'s three call sites, not just in the callees' defaults.
+
+This is worth treating as its own finding, not merely a step: it means the CEF version in any given release artifact is determined by release *timing* rather than by anything in the commit, so two builds of the same commit can ship different Chromium versions. Pinning it explicitly is a prerequisite for the rollback story in Phase G being real.
+
 **Fix the tag scheme while doing this (see §7.1).**
 
 ### Phase F — Verification matrix
@@ -127,7 +131,9 @@ Per platform, before its release tag is considered good:
 | `task package` version-integrity assertion passes | Crate major ↔ binary major agreement |
 
 ### Phase G — Rollback
-Release tags are immutable and consumers pin them explicitly, so rollback is: revert the consumer-side PR (Taskfile/workflow/Cargo pins) back to the `148.0.7778.180` tags. Keep the 148 releases in place permanently — do not delete them.
+Release tags are immutable, so rollback is: revert the consumer-side PR (Taskfile / workflow tags / Cargo pins) back to the `148.0.7778.180` tags. Keep the 148 releases in place permanently — do not delete them.
+
+**This only works once Phase E's explicit pinning lands.** Until `release.yml` stops passing `cef-runtime-tag: ""`, reverting a consumer PR would *not* restore CEF 148 — a release build would still resolve "latest" and pick up the new runtime. Treat explicit pinning as the gate that makes this phase meaningful rather than as an incidental cleanup.
 
 ---
 
@@ -180,7 +186,7 @@ The `patched-libcef` feature comment cites `https://github.com/a5af/cef, branch 
 
 ## 8. Open questions for the repo owner
 
-1. **Is native window drag still a requirement on Linux/Windows?** If it were dropped, patches #2 and #3 stop needing forward-porting and this upgrade gets materially cheaper (the `patched-libcef` feature is already default-off, and there's a working fallback).
+1. **Is native window drag still a requirement on Linux specifically?** This is a Linux-only question — Windows drags via its own Win32 path and macOS via AppKit, so neither is affected by the answer (§2, patch #2). If Linux native drag were dropped, patch #2 stops needing forward-porting and this upgrade gets cheaper. Note the honest trade: the `patched-libcef` feature is already default-off, but dropping the patch means Linux window drag is a **no-op**, not a graceful fallback (§3) — so this is a real product decision, not a free saving.
 2. **Is 152 the right target, or should we sit on 150/151** to stay one milestone behind the bleeding edge?
 3. **Who owns the three build machines**, and do all three currently have ≥120 GB free?
 4. **Should the patch-level 148 rebase (`.180 → .218`) happen now**, independent of the milestone jump, for the security fixes?
