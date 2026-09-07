@@ -1,6 +1,6 @@
 # Spec: optional system-tray + persistent background service, cross-platform
 
-**Status:** proposed — design only, nothing implemented.
+**Status:** in progress — Windows and macOS tray backends shipped, auto-start shipped with deviations, Linux tray pending. See §7.6 for the running status; issue #2977 is the box-level tracker.
 **Author:** Agent5
 **Tracking issue:** [agentmuxai/agentmux#2977](https://github.com/agentmuxai/agentmux/issues/2977)
 **Verified against:** `main` @ (2026-09-04 pull), codebase research + external best-practices research, no live prototype built.
@@ -182,6 +182,24 @@ with the Workstream 1 macOS work.
 Implication for the tray work: the tray's "open AgentMux" menu item does not
 need a new mechanism — it can invoke the same `open_new_window` path both
 routes already use. That removes a chunk of assumed scope from Workstream 3.
+
+## 7.6. Implementation status (2026-09-06)
+
+Kept deliberately short — issue #2977 has the per-box detail and the corrections.
+
+| Area | State | Where |
+|---|---|---|
+| WS0 decouple last-window-close from teardown | Done, verified live on Windows after a real bug (#3018) | #2983, #2987, #3018 |
+| WS1 Windows tray | Done; icon + click seen by the repo owner | #2996, #3006, #3008, #3013, #3019 |
+| WS1 macOS menu-bar item | Done; glyph + a real Quit click seen by the repo owner (`tray: quit_app forwarded`) | #3037 |
+| WS1 Linux (`ksni`) | **Not started.** After #3037 only `tray/linux.rs`, the dep and one `cfg` arm in `start_if_enabled` are missing; the Unix supervisor already calls `spawn_action_loop`. Needs a real desktop session, with/without the GNOME AppIndicator extension | — |
+| WS2 auto-start | Done on all three, with two deviations: no Windows code signing (blocks shipping), macOS writes a LaunchAgent plist rather than `SMAppService` | #2999 |
+| WS3 panel | Done as a CEF window at panel size; not reachable from the tray menu for now | #3002, #3013 |
+| WS4 consent / indicator / uninstall | Done; unattended *activity* audit still only records lifecycle | #2996, #2999, #3001 |
+
+**§7.5.1's macOS gap is closed by #3037.** With the splash disabled, background-service mode now runs a headless accessory `NSApplication` pump on the main thread (`splash_mac::prepare_headless_app` + `pump_forever`), with the supervisor on a worker thread — the same layout the splash path uses — so the reopen delegate and the menu-bar item exist without a splash. That path is compiled and unit-tested but has not been run live.
+
+**One macOS-specific finding worth keeping next to §7.5:** the main-thread pump assumption held, but AppKit also requires the status item to be *created* on the main thread, so the macOS backend owns no thread at all — the supervisor thread queues a request and the pump services it each tick. It is the inverse of Windows, where the pump had to be introduced on a dedicated thread. `tray-icon`'s `rect()` is meaningless on the first tick after creation (height 0, origin at the screen bottom); the status window is laid out a beat later.
 
 ## 8. What this spec does not decide
 
