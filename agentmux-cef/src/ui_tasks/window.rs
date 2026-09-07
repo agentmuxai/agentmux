@@ -1541,7 +1541,10 @@ wrap_task! {
             use std::cell::RefCell;
 
             // Phase 1 diagnostic tracing — see
-            // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md.
+            // docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md, which
+            // superseded the never-landed SPEC_HOST_WINDOW_CREATION_RUNNER
+            // this used to cite (that spec's own companion-doc list records
+            // the supersession; PR #651 was closed).
             // Identify which exact CEF call wedges the UI thread under
             // concurrent window creation.
             let t0 = std::time::Instant::now();
