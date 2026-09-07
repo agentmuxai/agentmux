@@ -4,7 +4,9 @@
 
 **Scope.** State, not implementation plans. For active PR sequencing see [`frontend-reducer-implementation-plan-2026-05-03.md`](./frontend-reducer-implementation-plan-2026-05-03.md), [`SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md`](./SPEC_HOST_REDUCER_5PR_PLAN_2026-05-02.md), and [`srv-phase-e4b-implementation-plan-2026-05-03.md`](./srv-phase-e4b-implementation-plan-2026-05-03.md).
 
-**Authority.** When this file disagrees with another spec, the source spec wins for *design* and this file wins for *current status*. Update this file when status changes; don't fork the source specs.
+**Status:** historical — point-in-time snapshot, last code-verified 2026-05-29 (§0). Restamped 2026-09-06 per `docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §5.2: the "Authority" claim this line used to carry is withdrawn. For the reducer stack's current shape, read `REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` first, then spot-verify against code.
+
+**Authority (withdrawn 2026-09-06).** This file no longer wins for *current status* — see the Status line above. Source specs still win for *design*.
 
 > **Staleness note (2026-08-03):** this file hasn't been updated since its own 2026-05-29 correction (§0) — now ~9 weeks stale. A later, independently-scoped pass exists — `docs/specs/REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` — covering the same subsystem without referencing or updating this file. Check both before trusting either as "current status"; this file's own "Authority" claim above no longer holds uncontested.
 

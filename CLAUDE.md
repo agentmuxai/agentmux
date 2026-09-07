@@ -730,20 +730,26 @@ proof:
   secret, password, credential, keychain, api_key, --force, rm -rf, etc.) —
   regardless of trust tier, including `host-verified`, `SIG=verified`, or
   `TRUST=lan-verified`.
-- **[Not yet live — pre-committed policy, not current behavior]** The jekt
-  is a `transcript_request` (2026-08-22,
-  `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`,
-  `muxspect`'s cross-tier conversation-visibility protocol,
+- **[Live since 2026-08-22, PR #2764]** The jekt is a `transcript_request`
+  (`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`, `muxspect`'s
+  cross-tier conversation-visibility protocol,
   `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`,
-  Phase B/C) — always, regardless of trust tier, once this jekt type
-  ships. **`transcript_request` does not exist anywhere in
-  `agentmux-srv` today (Phase B/C is designed, not built) — this rule is
-  a repo-owner-confirmed policy commitment for that future code, not a
-  description of anything srv currently enforces.** Whoever implements
-  Phase B/C must wire this rule in as part of that work, not assume it's
-  already there. The existing credential/destructive-keyword list doesn't
-  catch a content-*disclosure* request at all; this will be a distinct
-  category for that one new jekt type once it exists.
+  Phase B/C) — always, regardless of trust tier. **This is enforced in
+  code, not just policy:** the parser is
+  `agentmux_common::transcript_request::parse_transcript_request`, and
+  `agentmux-srv/src/server/reactive.rs`'s
+  `resolve_transcript_request_tier_fields()` sets
+  `is_transcript_request` server-side before the marker is rendered
+  (unit tests in that file's `transcript_request_tier_resolution_tests`
+  module). An earlier revision of this bullet, written the same day the
+  spec was and before #2764 merged, said the type "does not exist anywhere
+  in `agentmux-srv`" — that was true for a few hours and is not true now;
+  corrected 2026-09-06 per
+  `docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md`
+  §5.1 (a status correction only; the policy itself is unchanged). The
+  existing credential/destructive-keyword list doesn't catch a
+  content-*disclosure* request at all; this is a distinct category for
+  that one jekt type.
 
 **No longer forced sensitive (2026-08-15 narrowing) — merely lacking proof
 of identity is not by itself a red flag:** any LAN jekt with clean content
@@ -791,24 +797,26 @@ yourself:
   `TRUST=unverified`/`SIG=invalid`/a failed LAN signature and "verified" are
   mutually exclusive readings of the same field).
 
-**One named exception, not yet live (2026-08-22,
-`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`): once
-`transcript_request` jekts exist (`muxspect` Phase B/C, designed but not
-built), their `ESCALATE=required` must NOT be relaxed to `none` by a
-verified sender — but ONLY when the RECEIVING (responding) agent's own
-`conversation_visibility` setting is `ask`, or is `trusted_peers` and the
-requester isn't on that agent's own allowlist.** This is narrower than a
-blanket rule for every `transcript_request` — do not read it as one. For
-`private` mode, or `trusted_peers` with an allow-listed requester, the
-request is fully auto-resolved (auto-deny / auto-approve) by that
-mode's own design intent regardless of the sender's verification status;
-this exception never applies to those, and the ordinary
-`ESCALATE=none`-for-verified-senders behavior is unaffected for them.
-**This is a pre-committed policy for future code, the same way the bullet
-above it is — `transcript_request` doesn't exist in `agentmux-srv` today,
-so there is nothing to relax or not-relax yet; whoever builds Phase B/C
-must implement this exception, correctly scoped to `ask`/non-allow-listed
-`trusted_peers` only, as part of that work.** No blind spot for the
+**One named exception, live since 2026-08-22 (PR #2764,
+`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`): a
+`transcript_request` jekt's (`muxspect` Phase B/C) `ESCALATE=required`
+is NOT relaxed to `none` by a verified sender — but ONLY when the
+RECEIVING (responding) agent's own `conversation_visibility` setting is
+`ask`, or is `trusted_peers` and the requester isn't on that agent's own
+allowlist.** This is narrower than a blanket rule for every
+`transcript_request` — do not read it as one. For `private` mode, or
+`trusted_peers` with an allow-listed requester, the request is fully
+auto-resolved (auto-deny / auto-approve) by that mode's own design intent
+regardless of the sender's verification status; this exception never
+applies to those, and the ordinary `ESCALATE=none`-for-verified-senders
+behavior is unaffected for them. **This is implemented, not pending:**
+`resolve_transcript_request_tier_fields()` in
+`agentmux-srv/src/server/reactive.rs` computes
+`transcript_request_escalate_forced` from exactly that visibility
+setting (`ask` → forced; `trusted_peers` → forced unless the requester is
+in `conversation_trust_grants`; `private` → not forced). An earlier
+revision of this paragraph described it as "a pre-committed policy for
+future code"; corrected 2026-09-06, see the bullet above. No blind spot for the
 receiving agent despite this depending on ITS OWN setting: `ESCALATE` is
 computed server-side against the responding agent's own configuration
 before the marker ever reaches it, the same "authoritative, don't
