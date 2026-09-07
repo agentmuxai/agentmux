@@ -446,6 +446,10 @@ mod recent_sessions_tests {
             updated_at: 0,
         };
         wstore.identity_upsert(&account).unwrap();
+        // Linked to the template: `db_agent_identity_links` still has its FK
+        // on `db_agent_definitions`, so a launched agent's own row cannot
+        // hold a link until Phase 3c re-points it. The handler therefore
+        // falls back to the template's links — see its own note.
         wstore
             .agent_identity_link("def-claude", "acct-work", "github")
             .unwrap();

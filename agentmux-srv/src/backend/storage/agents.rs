@@ -372,48 +372,6 @@ impl Store {
     /// each appear once. `parent_id` is sourced from
     /// `db_agents.parent_template_id`.
     ///
-    /// Find user-clone definitions for a given seeded template (rows
-    /// in `db_agent_definitions` with `is_seeded = 0` and
-    /// `parent_id = <template.id>`). Returns the most-recent-first.
-    ///
-    /// Reads `db_agent_definitions` directly — NOT the `db_agents`
-    /// consolidated view — because the latter surfaces template-
-    /// instance projection rows under the same
-    /// `is_template = 0 AND parent_template_id = <tpl>` shape as
-    /// user-clone defs, which would conflate two distinct things.
-    ///
-    /// Sole production caller today is the `template_promote`
-    /// migration's "did the user delete the deterministic-id
-    /// clone?" diagnostic logging and its tests. Kept public so
-    /// follow-up callers (e.g. a cleanup pass that GCs orphaned
-    /// pre-deterministic-id clones from earlier migration code)
-    /// can use it without re-deriving the schema.
-    pub fn user_clone_defs_for_template(
-        &self,
-        template_id: &str,
-    ) -> Result<Vec<AgentDefinition>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description,
-                    working_directory, shell, provider_flags, auto_start,
-                    restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_id, branch_label, updated_at,
-                    user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
-                    conversation_visibility
-             FROM db_agent_definitions
-             WHERE is_seeded = 0 AND parent_id = ?1
-             ORDER BY updated_at DESC, created_at DESC",
-        )?;
-        let rows = stmt.query_map(params![template_id], map_agent_definition_row)?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
-    }
-
     /// Fetch a single agent definition by primary key. Reads
     /// `db_agent_definitions` directly (not the `db_agents`
     /// consolidated view that `agent_def_list` reads), so it
@@ -478,18 +436,7 @@ impl Store {
         // Local SQLite: this channel's templates (seeded) + its own user agents.
         let local: Vec<AgentDefinition> = {
             let conn = self.conn.lock().unwrap();
-            let mut stmt = conn.prepare(
-                "SELECT id, slug, name, icon, provider, description,
-                        working_directory, shell, provider_flags, auto_start,
-                        restart_on_crash, idle_timeout_minutes, created_at,
-                        agent_type, environment, agent_bus_id, is_seeded,
-                        accounts, parent_template_id, branch_label, updated_at,
-                        user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled,
-                        default_memory_id, conversation_visibility
-                 FROM db_agents
-                 ORDER BY updated_at DESC, created_at ASC",
-            )?;
+            let mut stmt = conn.prepare(&format!("{AGENT_DEFINITION_SELECT} ORDER BY updated_at DESC, created_at ASC"))?;
             let rows = stmt.query_map([], map_agent_definition_row)?;
             let mut agents = Vec::new();
             for row in rows {
@@ -599,31 +546,17 @@ impl Store {
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
     pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
-        // Reagent P1 round 4 on #1013: capture the cascaded instance ids
-        // BEFORE the FK cascade fires. The bulk delete on
-        // `db_agent_definitions` triggers `ON DELETE CASCADE` on
-        // `db_agent_instances` for every instance keyed off those
-        // templates; once the cascade runs, we can't query them anymore,
-        // and `db_agents` would be left holding orphaned instance
-        // projections. Capture → delete → drop projections.
-        let (rows, cascaded_inst_ids) = {
+        // Consolidation Phase 3b (PR 2): only the template rows go. Every
+        // `is_template = 0` row — a user clone OR an agent launched from a
+        // template — is an agent in its own right and persists across a
+        // reseed, keeping its `parent_template_id` (templates have stable
+        // ids, so the lineage survives the re-insert). The legacy FK cascade
+        // still clears stale `db_agent_instances` rows on its own.
+        let rows = {
             let conn = self.conn.lock().unwrap();
-            let mut stmt = conn.prepare(
-                "SELECT i.id FROM db_agent_instances i
-                 INNER JOIN db_agent_definitions d ON i.definition_id = d.id
-                 WHERE d.is_seeded = 1",
-            )?;
-            let ids: Vec<String> = stmt
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(stmt);
-            let rows = conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?;
-            (rows, ids)
+            conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?
         };
-        // Drop template projections AND any cascaded instance projections from
-        // db_agents. User-clone definition projections (`is_template = 0`, `id`
-        // is a def_id) are NOT touched here — they persist with the def row.
-        self.agents_dual_write_seeded_delete(&cascaded_inst_ids)?;
+        self.agents_dual_write_seeded_delete()?;
         Ok(rows)
     }
 
@@ -1358,38 +1291,29 @@ impl Store {
         // SQL DELETE's FK cascade fires inside SQLite while we hold
         // the mutex, so the snapshot exactly matches the rows that
         // got removed by the cascade.
-        let (cascaded_instance_ids, rows) = {
+        // Consolidation Phase 3b (PR 2): the legacy FK cascade still clears
+        // stale `db_agent_instances` rows, but launches are no longer rows of
+        // their own — a user agent launched from this template keeps its own
+        // `db_agents` row (it is an agent, not a launch of the template), the
+        // same way user clones always survived deleting their template. The
+        // JSON registry mirror for the deleted definition's own row is
+        // covered by `registry_def_retire` below.
+        let rows = {
             let conn = self.conn.lock().unwrap();
-            let cascaded_instance_ids: Vec<String> = {
-                let mut stmt = conn
-                    .prepare("SELECT id FROM db_agent_instances WHERE definition_id = ?1")?;
-                let iter = stmt.query_map(params![id], |row| row.get::<_, String>(0))?;
-                iter.collect::<Result<Vec<_>, _>>()?
-            };
-            let rows = conn.execute(
-                "DELETE FROM db_agent_definitions WHERE id=?1",
-                params![id],
-            )?;
-            (cascaded_instance_ids, rows)
+            conn.execute("DELETE FROM db_agent_definitions WHERE id=?1", params![id])?
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {
-                for instance_id in &cascaded_instance_ids {
-                    if let Err(e) = reg.hard_delete(instance_id) {
-                        tracing::warn!(
-                            instance_id = %instance_id,
-                            agent_def_id = %id,
-                            error = %e,
-                            "registry: failed to mirror agent_def_delete cascade"
-                        );
-                    }
+                if let Err(e) = reg.hard_delete(id) {
+                    tracing::warn!(
+                        agent_def_id = %id,
+                        error = %e,
+                        "registry: failed to mirror agent_def_delete"
+                    );
                 }
             }
             // Mirror deleted definition out of db_agents.
             self.agents_dual_write_definition_delete(id)?;
-            for instance_id in &cascaded_instance_ids {
-                self.agents_dual_write_instance_delete(instance_id)?;
-            }
         }
         // Tombstone the global definition record so another channel's stale
         // SQLite can't resurrect this deleted user agent — AND so an agent
@@ -1445,175 +1369,55 @@ impl Store {
 impl Store {
 
     // ---- Agent instance CRUD ----
+    //
+    // Agent-concept consolidation Phase 3b, PR 2 of 4
+    // (SPEC_AGENT_ARCHITECTURE_2026_05_27.md): every method in this block
+    // reads and writes `db_agents` only. `db_agent_instances` is no longer
+    // touched by the live instance API; it stays on disk until PR 4 drops it.
+    //
+    // What an "instance" is now: the launch-side view of a non-template
+    // `db_agents` row. One row per agent, so:
+    //   - `id` / `definition_id` are both the row's `id` — the agent's
+    //     identity (the rule `instance_list` adopted in PR #1111).
+    //   - `block_id`/`session_id`/`status`/`started_at`/`ended_at` are the
+    //     row's LATEST launch state (schema v29); a continuation moves them
+    //     to the new launch instead of adding a row, so `parent_instance_id`
+    //     is always empty and chains are pre-collapsed.
+    //   - Launching a TEMPLATE creates a new user-agent row keyed by the
+    //     launch's instance id (`parent_template_id` = the template);
+    //     launching a USER agent folds into its own row.
+    //   - `display_hidden` is `user_hidden` (one flag, one row).
 
-    /// List instances. Both filters are optional — pass `None` to scan
-    /// all instances. Ordered by `updated_at` descending, with
-    /// `created_at` as a tiebreaker (most recent activity first; the
-    /// dual-write bumps `updated_at` on every launch / continuation,
-    /// so a continued older agent ranks ahead of a brand-new untouched
-    /// one).
+    /// List agents as instances. Both filters are optional — pass `None`
+    /// to scan all. Ordered by `updated_at` descending, `created_at` as a
+    /// tiebreaker (most recent activity first — every launch, continuation
+    /// and lifecycle write bumps `updated_at`).
     ///
-    /// Reads from the consolidated `db_agents` table (`is_template = 0`,
-    /// `user_hidden = 0`) for the no-status case.
-    /// Continuation chains pre-collapse — one row per logical agent.
-    /// The `definition_id` filter, when supplied, matches the agent's
-    /// own `id` only (templates aren't agents and user-clones derived
-    /// from a template are SEPARATE agents — see the implementation
-    /// note below for why `parent_template_id` traversal was dropped).
-    ///
-    /// Field mapping for fields with no consolidated-row analog:
-    /// - `block_id`, `session_id`, `status`, `ended_at`,
-    ///   `parent_instance_id` → type defaults (`""` / `0`). Truly
-    ///   transient per-launch state; not modelled on `db_agents`.
-    /// - `started_at` → `db_agents.created_at`. Same proxy used by
-    ///   `instance_get_by_name` (3b.2); the consolidated row's
-    ///   creation IS the agent's launch moment in the new model.
-    /// - `display_hidden` → always `false`. The WHERE clause filters
-    ///   `user_hidden = 0`, so hidden rows never surface here.
-    ///
-    /// Callers passing a
-    /// `status` filter need transient runtime state that `db_agents`
-    /// doesn't model. Route those to the legacy `db_agent_instances`
-    /// path so existing semantics are preserved until the
-    /// updateagentinstance handler's "fetch + merge transient fields"
-    /// pattern is refactored. (Currently no production caller passes
-    /// `status` — `listagentinstances` RPC frontends call with empty
-    /// filters — so the legacy path is exercised only by tests.)
-    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.3.
+    /// The `definition_id` filter matches the agent's own `id` only:
+    /// templates are not agents and user agents derived from one template
+    /// are separate agents (see `instance_list_named` for the one caller
+    /// that wants "everything derived from this template"). The `status`
+    /// filter reads the row's latest launch status (v29).
     pub fn instance_list(
         &self,
         definition_id: Option<&str>,
         status: Option<&str>,
     ) -> Result<Vec<AgentInstance>, StoreError> {
-        if status.is_some() {
-            return self.instance_list_legacy(definition_id, status);
-        }
         let conn = self.conn.lock().unwrap();
-        // `definition_id` filter: match the agent's own `id` only.
-        //
-        // In the consolidated model every `is_template = 0` row IS an
-        // agent identifiable by its `id`:
-        //   - User-clone def projection: `id` = the clone def's id.
-        //   - Template-instance projection: `id` = the original inst.id.
-        //
-        // The legacy `definition_id` filter conflated "agent identity"
-        // with "parent template" because the old schema split them
-        // across two tables. The new model has no such split. A
-        // template-id filter would over-match (user-clones of X share
-        // `parent_template_id` with template-instances of X — see
-        // codex P2 on PR #1111), so we route template-id callers to
-        // an empty result. No live caller exercises that path; the
-        // only frontend consumer (`listagentinstances` RPC via
-        // swarm-model) passes empty filters.
-        let mut filter_clause = String::new();
+        let mut sql = format!(
+            "SELECT {INSTANCE_COLUMNS} FROM db_agents WHERE is_template = 0 AND user_hidden = 0"
+        );
         let mut param_vals: Vec<String> = Vec::new();
         if let Some(d) = definition_id {
-            filter_clause.push_str("\n               AND id = ?1");
-            param_vals.push(d.to_string());
-        }
-        // Projection for `definition_id`: use the row's own id.
-        //
-        // Reagent P2 on PR #1111 round 2: the earlier "parent_template_id
-        // with id fallback" projection diverged from legacy for
-        // user-clones derived from a template — those rows have
-        // `parent_template_id` SET (the lineage), but their legacy
-        // `db_agent_instances.definition_id` was the clone's own def
-        // id, not the template's. Template-instance projections and
-        // user-clone projections aren't schema-distinguishable in
-        // db_agents (both `is_template = 0`, `is_seeded = 0`), so any
-        // consistent projection must pick one rule. The consolidated
-        // model treats the row's `id` as the agent's identity (== legacy
-        // `definition_id` for the user-clone case), so use that. The
-        // template-instance case yields the inst.id instead of the
-        // template id, but no live caller depends on this field — it's
-        // a back-compat surface for the AgentInstance struct shape.
-        //
-        // `ORDER BY updated_at DESC`: reagent P2 on PR #1111 round 2.
-        // Continuation chains keep the head's `created_at` (the row is
-        // never re-inserted) while the dual-write bumps `updated_at` on
-        // every launch / continuation. So `created_at DESC` would rank
-        // a brand-new agent ahead of an actively-continued older one,
-        // violating "most recent activity first". `updated_at` tracks
-        // recency correctly and matches the ordering `agent_def_list`
-        // uses elsewhere in this file.
-        let mut sql = String::from(
-            "SELECT id, id AS def_id,
-                    github_context, created_at,
-                    identity_id, memory_id, instance_name, working_directory
-             FROM db_agents
-             WHERE is_template = 0
-               AND user_hidden = 0",
-        );
-        sql.push_str(&filter_clause);
-        sql.push_str("\n             ORDER BY updated_at DESC, created_at DESC");
-        let mut stmt = conn.prepare(&sql)?;
-        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), |row| {
-            Ok(AgentInstance {
-                id: row.get(0)?,
-                definition_id: row.get(1)?,
-                parent_instance_id: String::new(),
-                block_id: String::new(),
-                session_id: String::new(),
-                status: String::new(),
-                github_context: row.get(2)?,
-                started_at: row.get(3)?,
-                ended_at: 0,
-                created_at: row.get(3)?,
-                identity_id: row.get(4)?,
-                memory_id: row.get(5)?,
-                instance_name: row.get(6)?,
-                working_directory: row.get(7)?,
-                // Filter above guarantees the row is visible; column
-                // omitted from SELECT to match. Reagent P2 on PR #1111.
-                display_hidden: false,
-            })
-        })?;
-        let mut out = Vec::new();
-        for r in iter {
-            out.push(r?);
-        }
-        Ok(out)
-    }
-
-    /// Legacy `db_agent_instances` read — preserved for the
-    /// status-filter case (transient state). Will retire when the
-    /// updateagentinstance handler's fetch-and-merge pattern is
-    /// refactored. Do NOT add new callers; use
-    /// `instance_list` instead.
-    fn instance_list_legacy(
-        &self,
-        definition_id: Option<&str>,
-        status: Option<&str>,
-    ) -> Result<Vec<AgentInstance>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut sql = String::from(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances",
-        );
-        let mut clauses: Vec<&str> = Vec::new();
-        if definition_id.is_some() {
-            clauses.push("definition_id = ?");
-        }
-        if status.is_some() {
-            clauses.push("status = ?");
-        }
-        if !clauses.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&clauses.join(" AND "));
-        }
-        sql.push_str(" ORDER BY created_at DESC");
-
-        let mut stmt = conn.prepare(&sql)?;
-        let mut param_vals: Vec<String> = Vec::new();
-        if let Some(d) = definition_id {
+            sql.push_str(&format!(" AND id = ?{}", param_vals.len() + 1));
             param_vals.push(d.to_string());
         }
         if let Some(s) = status {
+            sql.push_str(&format!(" AND status = ?{}", param_vals.len() + 1));
             param_vals.push(s.to_string());
         }
+        sql.push_str(" ORDER BY updated_at DESC, created_at DESC");
+        let mut stmt = conn.prepare(&sql)?;
         let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), map_instance_row)?;
         let mut out = Vec::new();
         for r in iter {
@@ -1622,120 +1426,291 @@ impl Store {
         Ok(out)
     }
 
+    /// One agent by id, as an instance. `None` for a template or an
+    /// unknown id.
     pub fn instance_get(&self, id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances WHERE id = ?1",
-        )?;
-        let result = stmt.query_row(params![id], map_instance_row);
-        match result {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {INSTANCE_COLUMNS} FROM db_agents WHERE id = ?1 AND is_template = 0"
+        ))?;
+        match stmt.query_row(params![id], map_instance_row) {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
 
-    /// Insert a new instance row. Caller is responsible for the id (UUID).
-    pub fn instance_create(&self, inst: &AgentInstance) -> Result<(), StoreError> {
-        // `definition_id` FKs to `db_agent_definitions(id)` — an agent
-        // created/last touched under a different channel (or a much
-        // older version) can have a real definition in the global
-        // cross-channel registry while this channel's local SQLite has
-        // never seen a row for it, which would otherwise fail this
-        // INSERT with a FOREIGN KEY error (root cause of
-        // docs/specs/REPORT_AGENT_DEFINITION_DB_GAP_2026_07_27.md and
-        // the "Moras" container-agent launch failure it was extended
-        // to cover). Backfill a local shadow row first when that's the
-        // case; if the registry doesn't have it either, this is a
-        // genuinely orphaned definition_id and the raw INSERT below
-        // should still surface its FK error unchanged.
-        if self.agent_def_get_local_only(&inst.definition_id)?.is_none() {
-            if let Some(reg) = self.shared_def_registry() {
-                match reg.get(&inst.definition_id) {
-                    Ok(Some(record)) => {
-                        if let Err(e) = self.agent_def_backfill_local_from_registry(&record) {
+    /// A single `db_agents` row in the `AgentDefinition` shape, no registry
+    /// overlay — the definition a launch resolves against. Templates and
+    /// user agents alike.
+    fn agent_row_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!("{AGENT_DEFINITION_SELECT} WHERE id = ?1"))?;
+        match stmt.query_row(params![id], map_agent_definition_row) {
+            Ok(d) => Ok(Some(d)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Record a launch. Returns the agent row the launch now lives on, as an
+    /// instance — **its `id` may differ from `inst.id`**: a launch of a user
+    /// agent folds into that agent's row, and a continuation (non-empty
+    /// `parent_instance_id` naming an existing row) folds into the row it
+    /// continues. Only a fresh launch of a TEMPLATE creates a new row, keyed
+    /// by `inst.id`. Callers must persist the returned id, not the one they
+    /// passed (the frontend stores it as the block's `agentInstanceId`).
+    ///
+    /// `inst.definition_id` must name a `db_agents` row; when it only exists
+    /// in the global cross-channel definition registry (an agent created in
+    /// another channel), the local definition is backfilled first, exactly
+    /// as before (`REPORT_AGENT_DEFINITION_DB_GAP_2026_07_27.md`). A
+    /// definition that exists nowhere is `StoreError::NotFound` — the error
+    /// the legacy FK used to raise, minus the FK.
+    pub fn instance_create(&self, inst: &AgentInstance) -> Result<AgentInstance, StoreError> {
+        let def = match self.agent_row_get(&inst.definition_id)? {
+            Some(d) => d,
+            None => {
+                if let Some(reg) = self.shared_def_registry() {
+                    match reg.get(&inst.definition_id) {
+                        Ok(Some(record)) => {
+                            if let Err(e) = self.agent_def_backfill_local_from_registry(&record) {
+                                tracing::warn!(
+                                    definition_id = %inst.definition_id,
+                                    error = %e,
+                                    "instance_create: registry backfill failed"
+                                );
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
                             tracing::warn!(
                                 definition_id = %inst.definition_id,
                                 error = %e,
-                                "instance_create: registry backfill failed, proceeding to raw insert"
+                                "instance_create: registry lookup failed"
                             );
                         }
                     }
-                    Ok(None) => {
-                        // Not in the registry either — genuinely orphaned
-                        // id. Let the FK error surface below, unchanged.
-                    }
-                    Err(e) => {
+                }
+                match self.agent_row_get(&inst.definition_id)? {
+                    Some(d) => d,
+                    None => {
                         tracing::warn!(
                             definition_id = %inst.definition_id,
-                            error = %e,
-                            "instance_create: registry lookup failed, proceeding to raw insert"
+                            instance_id = %inst.id,
+                            "instance_create: definition exists nowhere; refusing the launch"
                         );
+                        return Err(StoreError::NotFound);
                     }
                 }
             }
-        }
+        };
+
+        let display_name = if inst.instance_name.is_empty() { def.name.clone() } else { inst.instance_name.clone() };
+        let hidden = if inst.display_hidden { 1_i64 } else { 0_i64 };
+        // The agent's working directory is the launch's RESOLVED path when
+        // the launch supplies one (`agent.open` resolves it, including slug
+        // collision suffixing), falling back to the definition's configured
+        // cwd. Phase 3a's dual-write always wrote the definition's, on the
+        // reasoning that "db_agents holds durable agent config; the
+        // per-launch resolved cwd lives on the block" — that split ends with
+        // the instance table: one row per agent means the row holds the
+        // agent's real workspace, which is also what the cross-version JSON
+        // registry mirror records (and it silently skips any row whose
+        // working_directory is not under the agents root).
+        let working_directory = if inst.working_directory.is_empty() {
+            def.working_directory.clone()
+        } else {
+            inst.working_directory.clone()
+        };
+        // The row this launch lands on. A user agent IS its row; a template
+        // launch is its own row unless it continues one that already exists.
+        let key = if def.is_seeded == 0 {
+            def.id.clone()
+        } else if !inst.parent_instance_id.is_empty() && self.instance_get(&inst.parent_instance_id)?.is_some() {
+            inst.parent_instance_id.clone()
+        } else {
+            inst.id.clone()
+        };
         {
             let conn = self.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO db_agent_instances
-                    (id, definition_id, parent_instance_id, block_id, session_id, status,
-                     github_context, started_at, ended_at, created_at,
-                     identity_id, memory_id,
-                     instance_name, working_directory, display_hidden)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15)",
-                params![
-                    inst.id,
-                    inst.definition_id,
-                    inst.parent_instance_id,
-                    inst.block_id,
-                    inst.session_id,
-                    inst.status,
-                    inst.github_context,
-                    inst.started_at,
-                    inst.ended_at,
-                    inst.created_at,
-                    inst.identity_id,
-                    inst.memory_id,
-                    inst.instance_name,
-                    inst.working_directory,
-                    if inst.display_hidden { 1_i64 } else { 0_i64 },
-                ],
-            )?;
+            let now_ms = Self::monotonic_updated_at(&conn, inst.created_at);
+            if key == inst.id {
+                // Fresh template launch — its own user-agent row, config
+                // copied from the template, bindings + launch state from the
+                // launch. ON CONFLICT covers an id the caller reuses on a
+                // retry (the App-API stub path).
+                conn.execute(
+                    "INSERT INTO db_agents (
+                        id, name, icon, description,
+                        is_template, parent_template_id,
+                        provider, provider_flags, shell, environment,
+                        agent_type, agent_bus_id, accounts,
+                        auto_start, restart_on_crash, idle_timeout_minutes,
+                        slug, branch_label,
+                        identity_id, memory_id, working_directory, github_context,
+                        instance_name,
+                        created_at, updated_at, is_seeded, user_hidden,
+                        last_block_id,
+                        container_image, container_volumes, container_name,
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                        conversation_visibility,
+                        session_id, status, started_at, ended_at
+                     ) VALUES (
+                        ?1, ?2, ?3, ?4,
+                        0, ?5,
+                        ?6, ?7, ?8, ?9,
+                        ?10, ?11, ?12,
+                        ?13, ?14, ?15,
+                        ?16, ?17,
+                        ?18, ?19, ?20, ?21,
+                        ?22,
+                        ?23, ?24, 0, ?25,
+                        ?26,
+                        ?27, ?28, ?29,
+                        ?30, ?31, ?32,
+                        ?33,
+                        ?34, ?35, ?36, ?37
+                     )
+                     ON CONFLICT(id) DO UPDATE SET
+                        name = excluded.name,
+                        identity_id = excluded.identity_id,
+                        memory_id = excluded.memory_id,
+                        github_context = excluded.github_context,
+                        instance_name = excluded.instance_name,
+                        updated_at = excluded.updated_at,
+                        user_hidden = excluded.user_hidden,
+                        last_block_id = CASE WHEN excluded.last_block_id = '' THEN db_agents.last_block_id ELSE excluded.last_block_id END,
+                        session_id = CASE WHEN excluded.session_id = '' THEN db_agents.session_id ELSE excluded.session_id END,
+                        status = excluded.status,
+                        started_at = excluded.started_at,
+                        ended_at = excluded.ended_at",
+                    params![
+                        inst.id,
+                        display_name,
+                        def.icon,
+                        def.description,
+                        def.id,
+                        def.provider,
+                        def.provider_flags,
+                        def.shell,
+                        def.environment,
+                        def.agent_type,
+                        def.agent_bus_id,
+                        def.accounts,
+                        def.auto_start,
+                        def.restart_on_crash,
+                        def.idle_timeout_minutes,
+                        def.slug,
+                        def.branch_label,
+                        inst.identity_id,
+                        inst.memory_id,
+                        working_directory,
+                        inst.github_context,
+                        inst.instance_name,
+                        inst.created_at,
+                        now_ms,
+                        hidden,
+                        inst.block_id,
+                        def.container_image,
+                        def.container_volumes,
+                        def.container_name,
+                        def.use_ambient_login,
+                        def.model_vendor_base_url,
+                        def.auto_continue_enabled,
+                        def.conversation_visibility,
+                        inst.session_id,
+                        inst.status,
+                        inst.started_at,
+                        inst.ended_at,
+                    ],
+                )?;
+            } else {
+                // Fold: the launch (or continuation) moves the row's bindings
+                // and launch state to this launch. Config stays the row's own.
+                //
+                // An EMPTY `session_id` never clears the row's: a fresh
+                // continuation is created session-less and the CLI only
+                // reports the real session id later, so overwriting here
+                // would drop the pointer `--resume` needs (the same reason
+                // `last_block_id` is guarded). A deliberate clear goes
+                // through `instance_update_partial(Some(""))`, which does
+                // write it — see `poison_resume`.
+                conn.execute(
+                    "UPDATE db_agents SET
+                        name = ?2,
+                        identity_id = ?3,
+                        memory_id = ?4,
+                        working_directory = ?14,
+                        github_context = ?5,
+                        instance_name = ?6,
+                        updated_at = ?7,
+                        user_hidden = ?8,
+                        last_block_id = CASE WHEN ?9 = '' THEN last_block_id ELSE ?9 END,
+                        session_id = CASE WHEN ?10 = '' THEN session_id ELSE ?10 END,
+                        status = ?11,
+                        started_at = ?12,
+                        ended_at = ?13
+                     WHERE id = ?1 AND is_template = 0",
+                    params![
+                        key,
+                        display_name,
+                        inst.identity_id,
+                        inst.memory_id,
+                        inst.github_context,
+                        inst.instance_name,
+                        now_ms,
+                        hidden,
+                        inst.block_id,
+                        inst.session_id,
+                        inst.status,
+                        inst.started_at,
+                        inst.ended_at,
+                        working_directory,
+                    ],
+                )?;
+            }
         }
-        self.registry_upsert_if_named(inst);
-        // A freshly created row's session_id is never a genuine capture —
-        // production always creates continuations with session_id = ""
-        // (see registry_propagate_continuation_session_id's doc comment).
-        // Skip so we don't clobber the chain root's still-valid registry
-        // pointer with an empty one on every ordinary "Continue agent".
+        let canonical = self.instance_get(&key)?.ok_or(StoreError::NotFound)?;
+        self.registry_upsert_if_named(&canonical);
+        // A freshly created launch's session_id is never a genuine capture
+        // in production (continuations start with ""), so only a non-empty
+        // one is worth propagating to the registry.
         if !inst.session_id.is_empty() {
-            self.registry_propagate_continuation_session_id(inst);
+            self.registry_propagate_continuation_session_id(&canonical);
         }
-        // Mirror new instance into db_agents.
-        self.agents_dual_write_instance_create(inst)?;
-        Ok(())
+        Ok(canonical)
     }
 
-    /// Set the `display_hidden` flag on an existing instance row. Used
-    /// by the "Forget agent" affordance — soft-delete only; the row +
-    /// working directory remain on disk for audit + recovery.
+    /// An `updated_at` strictly greater than any already on `db_agents`, so
+    /// recency ordering survives fast successive writes within one
+    /// millisecond (reagent P2 round 3 on #1013 — the rule the dual-write
+    /// used; inherited here).
+    fn monotonic_updated_at(conn: &rusqlite::Connection, floor: i64) -> i64 {
+        let wall_now: i64 = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(floor);
+        let global_prior: i64 = conn
+            .query_row("SELECT COALESCE(MAX(updated_at), 0) FROM db_agents", [], |row| row.get::<_, i64>(0))
+            .unwrap_or(0);
+        std::cmp::max(wall_now, global_prior.saturating_add(1))
+    }
+
+    /// Set the hidden flag on an agent row. Used by the "Forget agent"
+    /// affordance — soft-delete only; the row + working directory remain on
+    /// disk for audit + recovery.
     ///
-    /// Cross-version case: an agent migrated into the registry from
-    /// another version's SQLite won't have a row in the current
-    /// version's SQLite. The UPDATE returns 0 rows, but the registry
-    /// still needs to flip — otherwise "Forget agent" silently no-ops
-    /// on cross-version entries. Returns `true` if either side acted.
+    /// Cross-version case: an agent migrated into the registry from another
+    /// version's SQLite won't have a row in the current version's SQLite.
+    /// The UPDATE returns 0 rows, but the registry still needs to flip —
+    /// otherwise "Forget agent" silently no-ops for those. Returns `true`
+    /// when either side acted.
     pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "UPDATE db_agent_instances SET display_hidden = ?1 WHERE id = ?2",
+                "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 0",
                 params![if hidden { 1_i64 } else { 0_i64 }, id],
             )?
         };
@@ -1745,11 +1720,7 @@ impl Store {
             // (in either active or retired). Avoids logging spurious
             // "failed to retire" warnings on a no-op for unrelated ids.
             if reg.exists_anywhere(id) {
-                let res = if hidden {
-                    reg.retire(id)
-                } else {
-                    reg.unretire(id)
-                };
+                let res = if hidden { reg.retire(id) } else { reg.unretire(id) };
                 match res {
                     Ok(()) => registry_acted = true,
                     Err(e) => tracing::warn!(
@@ -1761,235 +1732,52 @@ impl Store {
                 }
             }
         }
-        // Flip the hidden bit on db_agents.
-        self.agents_dual_write_instance_set_hidden(id, hidden)?;
         Ok(rows > 0 || registry_acted)
     }
 
-    /// List named instances for the launch-modal "Continue agent"
-    /// dropdown (`include_continuations = false`) or the picker
-    /// "My Agents" surface (`include_continuations = true`). Filters
-    /// to non-hidden + named rows, sorted by `started_at DESC`,
-    /// capped by `limit`.
+    /// Named agents for the launch modal's "Continue agent" dropdown and the
+    /// picker's "My Agents" surface: non-hidden rows with an `instance_name`,
+    /// newest launch first, capped by `limit`.
     ///
-    /// `definition_id`, when provided, restricts the result to
-    /// instances of that definition. Server-side filtering is
-    /// necessary because the launch modal opens per-definition: a
-    /// user with 200+ named agents across many definitions could
-    /// have the current definition's older instances cut off by a
-    /// purely global limit otherwise.
+    /// `definition_id` restricts the result to that agent itself OR every
+    /// agent derived from it (`parent_template_id`) — the launch modal opens
+    /// per template, and what a user wants to continue there is any agent
+    /// they launched from it. `identity_id` filters on the row's identity
+    /// binding.
     ///
-    /// `include_continuations` controls whether rows with
-    /// `parent_instance_id != ''` (continuation chains) are
-    /// returned:
-    ///
-    /// - **`false`** (legacy "head-of-chain only"). Pre-Option-E
-    ///   semantics: hides continuation rows so the launch-modal
-    ///   dropdown shows one entry per chain root. `listnamedagents`
-    ///   ALSO uses this mode for its same-version SQLite enrichment
-    ///   of registry-sourced rows — the registry mirror filter at
-    ///   `registry_upsert_if_named` excludes continuations
-    ///   symmetrically, and breaking that symmetry under a `limit`
-    ///   truncation would let continuation rows displace
-    ///   registry-head rows in the top-N and miss the
-    ///   merge-by-id enrichment. (Codex P1 on PR #1016 first cut:
-    ///   regresses running-state badges and focus-existing-pane
-    ///   hints for any user whose latest instance is a continuation.)
-    ///
-    /// - **`true`** (Option-E "include continuations"). For the
-    ///   picker's `listrecentsessions` flow and the
-    ///   `template_promote` migration's instance-name lookup. Under
-    ///   Option E the session zone is anchored on `definition_id`,
-    ///   so a continuation row is simply the most-recent named
-    ///   instance of an agent the user actively used — exactly
-    ///   what those callers want visible. Excluding them hides
-    ///   real agents (the original 2026-05-24 "Maks doesn't appear
-    ///   under My Agents" report) and makes `template_promote`'s
-    ///   name lookup miss the real `instance_name`, falling back
-    ///   to the template name.
+    /// `include_continuations` is accepted for API compatibility but no
+    /// longer changes the query: chains are pre-collapsed (one row per
+    /// agent carrying its latest launch), so the legacy "heads only" and
+    /// "latest per chain" modes both yield exactly this list.
     pub fn instance_list_named(
         &self,
         limit: usize,
         definition_id: Option<&str>,
         identity_id: Option<&str>,
-        include_continuations: bool,
+        _include_continuations: bool,
     ) -> Result<Vec<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
-
-        // Dynamic bind-index assignment. We accumulate optional
-        // string params into `extra_params` in the same order they
-        // appear in the SQL, then bind the limit last.
-        let mut extra_params: Vec<&str> = Vec::with_capacity(2);
-
-        if !include_continuations {
-            // Legacy "dropdown" mode: only chain heads (no parent).
-            // Used by the launch modal's `Continue agent` dropdown +
-            // the registry-enrichment path. Symmetric with
-            // `registry_upsert_if_named` — chains show up as one
-            // head entry, not N entries per resume.
-            let mut sql = String::from(
-                "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                        status, github_context, started_at, ended_at, created_at,
-                        identity_id, memory_id, instance_name, working_directory,
-                        display_hidden
-                 FROM db_agent_instances
-                 WHERE display_hidden = 0
-                   AND instance_name <> ''
-                   AND parent_instance_id = ''",
-            );
-            let mut next_idx = 1usize;
-            if let Some(id) = identity_id {
-                sql.push_str(&format!("\n                   AND identity_id = ?{}", next_idx));
-                extra_params.push(id);
-                next_idx += 1;
-            }
-            if let Some(def) = definition_id {
-                sql.push_str(&format!("\n                   AND definition_id = ?{}", next_idx));
-                extra_params.push(def);
-                next_idx += 1;
-            }
-            sql.push_str(&format!(
-                "\n                 ORDER BY started_at DESC\n                 LIMIT ?{}",
-                next_idx
-            ));
-            let mut stmt = conn.prepare(&sql)?;
-            let limit_i64 = limit as i64;
-            let mut bindings: Vec<&dyn rusqlite::ToSql> =
-                Vec::with_capacity(extra_params.len() + 1);
-            for s in &extra_params {
-                bindings.push(s);
-            }
-            bindings.push(&limit_i64);
-            let iter = stmt.query_map(bindings.as_slice(), map_instance_row)?;
-            let mut out = Vec::new();
-            for r in iter {
-                out.push(r?);
-            }
-            return Ok(out);
-        }
-
-        // Picker ("My Agents") mode: dedupe continuation chains so
-        // each logical agent surfaces as exactly one row — the most
-        // recent in its chain (by `started_at`, tiebreaker `id`).
-        //
-        // Before this dedup, a user with 5 continuations of one
-        // logical agent saw 5 entries in My Agents. See discussion
-        // #1095 / `docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md`.
-        //
-        // Mechanics:
-        //   - A recursive CTE walks `parent_instance_id` from each
-        //     head (parent_instance_id = '') down to its
-        //     descendants, stamping every row with the head's
-        //     `root_id`.
-        //   - `ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY
-        //     started_at DESC, id DESC)` picks the latest row per
-        //     chain. The id tiebreaker keeps the ordering
-        //     deterministic when two rows share `started_at` (only
-        //     happens in tests / on adjacent inserts).
-        //   - **Hidden filter must run AFTER ranking.** Otherwise
-        //     `hidenamedagent` becomes a no-op for any chain with
-        //     older visible siblings: the SQL excludes the hidden
-        //     row before ranking, so the next-newest visible row
-        //     inherits `rn = 1` and the "forgotten" agent
-        //     immediately reappears in the picker. Codex P2 on PR
-        //     #1096. By ranking first and filtering
-        //     `display_hidden` last, hiding the surfaced row
-        //     suppresses the whole chain — exactly what the user's
-        //     forget action means.
-        //   - The unnamed-row filter (`instance_name <> ''`) stays
-        //     pre-rank: an unnamed continuation row should never
-        //     win, but also shouldn't influence chain ranking — it
-        //     simply isn't a candidate.
-        let mut sql = String::from(
-            r#"WITH RECURSIVE
-            roots(id, definition_id, parent_instance_id, block_id, session_id,
-                  status, github_context, started_at, ended_at, created_at,
-                  identity_id, memory_id, instance_name, working_directory,
-                  display_hidden, root_id) AS (
-                -- Anchor: a row is its own root if it has no parent OR
-                -- its parent no longer exists in the table. The latter
-                -- case (orphan continuation) happens when
-                -- `deleteagentinstance` hard-deletes a chain head —
-                -- there's no FK cascade, so descendant rows remain. If
-                -- we seeded only from `parent_instance_id = ''`,
-                -- orphans would be unreachable by the recursive walk
-                -- and disappear from My Agents even though they're
-                -- recoverable sessions. Codex P2 on PR #1096
-                -- bbe897cc → orphan-as-root anchor.
-                SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                       status, github_context, started_at, ended_at, created_at,
-                       identity_id, memory_id, instance_name, working_directory,
-                       display_hidden,
-                       id
-                FROM db_agent_instances p
-                WHERE p.parent_instance_id = ''
-                   OR NOT EXISTS (
-                       SELECT 1 FROM db_agent_instances q
-                       WHERE q.id = p.parent_instance_id
-                   )
-                UNION ALL
-                SELECT c.id, c.definition_id, c.parent_instance_id, c.block_id,
-                       c.session_id, c.status, c.github_context, c.started_at,
-                       c.ended_at, c.created_at, c.identity_id, c.memory_id,
-                       c.instance_name, c.working_directory, c.display_hidden,
-                       r.root_id
-                FROM db_agent_instances c
-                JOIN roots r ON c.parent_instance_id = r.id
-            ),
-            ranked AS (
-                SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                       status, github_context, started_at, ended_at, created_at,
-                       identity_id, memory_id, instance_name, working_directory,
-                       display_hidden, root_id,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY root_id
-                           ORDER BY started_at DESC, id DESC
-                       ) AS rn
-                FROM roots
-                WHERE instance_name <> ''"#
-                .to_string(),
+        let mut sql = format!(
+            "SELECT {INSTANCE_COLUMNS} FROM db_agents
+             WHERE is_template = 0 AND user_hidden = 0 AND instance_name <> ''"
         );
-        // Identity filter MUST run inside the `ranked` CTE (i.e.,
-        // before ROW_NUMBER) so the newest row matching the requested
-        // identity per chain wins. If we filtered identity in the
-        // outer SELECT instead, a chain whose newest row uses a
-        // different identity would be dropped even if an older row in
-        // the chain matched. Codex P2 #3 on PR #1096 0c4c8c46.
-        let mut next_idx = 1usize;
+        let mut param_vals: Vec<String> = Vec::new();
         if let Some(id) = identity_id {
-            sql.push_str(&format!("\n                  AND identity_id = ?{}", next_idx));
-            extra_params.push(id);
-            next_idx += 1;
+            sql.push_str(&format!(" AND identity_id = ?{}", param_vals.len() + 1));
+            param_vals.push(id.to_string());
         }
-        sql.push_str(
-            r#"
-            )
-            SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                   status, github_context, started_at, ended_at, created_at,
-                   identity_id, memory_id, instance_name, working_directory,
-                   display_hidden
-            FROM ranked
-            WHERE rn = 1
-              AND display_hidden = 0"#,
-        );
         if let Some(def) = definition_id {
-            sql.push_str(&format!("\n              AND definition_id = ?{}", next_idx));
-            extra_params.push(def);
-            next_idx += 1;
+            let n = param_vals.len() + 1;
+            sql.push_str(&format!(" AND (id = ?{n} OR parent_template_id = ?{n})"));
+            param_vals.push(def.to_string());
         }
         sql.push_str(&format!(
-            "\n            ORDER BY started_at DESC\n            LIMIT ?{}",
-            next_idx
+            " ORDER BY started_at DESC, updated_at DESC, id DESC LIMIT ?{}",
+            param_vals.len() + 1
         ));
+        param_vals.push(limit.to_string());
         let mut stmt = conn.prepare(&sql)?;
-        let limit_i64 = limit as i64;
-        let mut bindings: Vec<&dyn rusqlite::ToSql> =
-            Vec::with_capacity(extra_params.len() + 1);
-        for s in &extra_params {
-            bindings.push(s);
-        }
-        bindings.push(&limit_i64);
-        let iter = stmt.query_map(bindings.as_slice(), map_instance_row)?;
+        let iter = stmt.query_map(rusqlite::params_from_iter(param_vals.iter()), map_instance_row)?;
         let mut out = Vec::new();
         for r in iter {
             out.push(r?);
@@ -1997,157 +1785,39 @@ impl Store {
         Ok(out)
     }
 
-    /// Look up the canonical named-agent row matching `instance_name`.
-    /// Used by the launch modal to detect name collisions ("did you
-    /// mean to continue?") and by `ContinueNamedAgentCommand` to
-    /// resolve the consolidated row when the caller only knows the
-    /// name. Hidden rows are excluded.
-    ///
-    /// Reads from the consolidated `db_agents` table —
-    /// `is_template = 0` (named user agent), `instance_name` matches,
-    /// `user_hidden = 0`. Continuation chains are pre-collapsed in
-    /// `db_agents` (one row per logical agent), so this returns the
-    /// canonical agent regardless of how many launches its chain has.
-    /// MRU tiebreak is by `updated_at` (the dual-write touches it on
-    /// every continuation), then `created_at` for stable order.
-    ///
-    /// The legacy `db_agent_instances` carried per-launch runtime
-    /// state (`block_id`, `session_id`, `status`, `started_at`,
-    /// `ended_at`, `parent_instance_id`) that has no analog in
-    /// `db_agents` — those fields are returned as their `AgentInstance`
-    /// defaults (empty strings, 0). Callers wanting transient state
-    /// should consult runtime sources (the controller, the block
-    /// row); none of the documented use cases need it (collision
-    /// detection only cares about identity / cwd; ContinueNamed only
-    /// cares about `id` + bindings).
-    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
-    /// Resolve an instance by its literal `instance_name` — the
-    /// "named agent" continuation lookup (picker collision detection,
-    /// `ContinueNamed`). Matches ONLY `instance_name`; unrelated to App
-    /// API self-lookup (see `instance_get_by_slug` below) — kept
-    /// deliberately single-purpose after reagentx P1 on PR #2428 (round
-    /// 2): an earlier version of this function ALSO matched `OR slug =
-    /// ?1` in the same query, which meant a coincidental cross-namespace
-    /// collision (an unrelated agent's `instance_name` happening to equal
-    /// this agent's `slug`, or vice versa) could match both rows
-    /// simultaneously, with `ORDER BY updated_at DESC LIMIT 1` silently
-    /// picking whichever was touched most recently instead of ever
-    /// signaling the ambiguity — i.e. one agent's App-API self-lookup
-    /// could silently return a completely unrelated agent's memory/
-    /// identity/bundle. Two single-purpose, unambiguous functions (each
-    /// backed by an exact match on ONE column) instead of one function
-    /// serving two different namespaces closes that off entirely, rather
-    /// than trying to prioritize/tie-break between them.
-    pub fn instance_get_by_name(
-        &self,
-        instance_name: &str,
-    ) -> Result<Option<AgentInstance>, StoreError> {
-        if instance_name.is_empty() {
-            return Ok(None);
-        }
-        let conn = self.conn.lock().unwrap();
-        // `definition_id` projection: use the row's own `id`.
-        //
-        // The earlier "parent_template_id with id fallback" rule
-        // misrendered the legacy semantics for user-clones derived
-        // from a template — those rows have `parent_template_id` SET
-        // (lineage record) but their legacy `definition_id` was the
-        // clone's own def id, NOT the template's. Template-instance
-        // and user-clone projections aren't schema-distinguishable in
-        // db_agents, so any consistent rule must pick one. The
-        // consolidated model treats `id` as the agent's identity, so
-        // that's what we expose — matches `instance_list` (3b.3a)
-        // after the same fix. Reagent P2 on PR #1111 round 2.
-        let mut stmt = conn.prepare(
-            "SELECT id, id AS def_id,
-                    github_context, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    user_hidden
-             FROM db_agents
-             WHERE instance_name = ?1
-               AND is_template = 0
-               AND user_hidden = 0
-             ORDER BY updated_at DESC, created_at DESC
-             LIMIT 1",
-        )?;
-        let result = stmt.query_row(params![instance_name], map_agent_instance_row);
-        match result {
-            Ok(a) => Ok(Some(a)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Resolve an instance by its persisted `slug` — the App-API
-    /// self-lookup path (`memory.*`, `identity.self.*`,
-    /// `bundle.self.get`). Every one of those callers' `agent_id`
-    /// actually comes from `AGENTMUX_AGENT_ID`, the routing slug
-    /// stamped onto the MCP server's env straight from `agent.slug`
-    /// (`app_api::agent_open`) — the same stable, collision-resolved
-    /// value stored in `db_agents.slug` (`agent_def_insert_local_only`,
-    /// never changes after creation, unlike the renameable
-    /// `instance_name` — see `AgentDefinition::slug`'s own doc comment).
-    /// Deliberately does NOT also try `instance_name` — see
-    /// `instance_get_by_name`'s doc comment for why merging the two
-    /// namespaces into one query was unsafe (reagentx P1 on PR #2428).
-    /// `slug` is globally unique by construction (the collision-resolve
-    /// loop in `agent_def_insert_local_only`), so an exact match here is
-    /// unambiguous; `LIMIT 1` is a defensive no-op, not a tie-break.
-    ///
-    /// Confirmed live against a real agent named "AgentY" (slug
-    /// "agenty"): before this existed, `MemoryList` failed with "agent
-    /// agenty not found" and `IdentityAccounts` with "unknown agent
-    /// 'agenty'" — both resolved once App-API callers switched to this.
-    pub fn instance_get_by_slug(
-        &self,
-        slug: &str,
-    ) -> Result<Option<AgentInstance>, StoreError> {
+    /// Resolve an agent by its persisted `slug` — the App-API self-lookup
+    /// (`AGENTMUX_AGENT_ID` is the slug). Matches ONLY `slug`; deliberately
+    /// single-purpose after reagentx P1 on PR #2428 (round 2): a lookup
+    /// that also matched another column let a coincidental cross-namespace
+    /// collision return an unrelated agent's memory/identity/bundle. Hidden
+    /// rows are excluded.
+    pub fn instance_get_by_slug(&self, slug: &str) -> Result<Option<AgentInstance>, StoreError> {
         if slug.is_empty() {
             return Ok(None);
         }
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, id AS def_id,
-                    github_context, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    user_hidden
-             FROM db_agents
-             WHERE slug = ?1
-               AND is_template = 0
-               AND user_hidden = 0
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {INSTANCE_COLUMNS} FROM db_agents
+             WHERE slug = ?1 AND is_template = 0 AND user_hidden = 0
              ORDER BY updated_at DESC, created_at DESC
-             LIMIT 1",
-        )?;
-        let result = stmt.query_row(params![slug], map_agent_instance_row);
-        match result {
+             LIMIT 1"
+        ))?;
+        match stmt.query_row(params![slug], map_instance_row) {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
 
-    /// Partial update of an instance's mutable runtime fields. Only
-    /// `Some` fields are written; `None` leaves that column untouched.
+    /// Partial update of an agent's launch state. Only `Some` fields are
+    /// written; `None` leaves that column untouched. `Some("")` explicitly
+    /// clears (the `updateagentinstance` command contract, and
+    /// `poison_resume`'s deliberate stale-session clear).
     ///
-    /// Replaces the `updateagentinstance` handler's fetch-and-merge
-    /// (read the full row → fill the unspecified fields → write the
-    /// whole struct back). That read was the only production caller
-    /// that needed `instance_get`'s transient per-launch fields, which
-    /// pinned `instance_get` to the legacy `db_agent_instances` table.
-    /// With a partial write the handler no longer reads the row at all.
-    /// See docs/specs/SPEC_UPDATEAGENTINSTANCE_PARTIAL_UPDATE_2026_05_29.md.
-    ///
-    /// Returns the post-update row so callers that need `definition_id`
-    /// for an event scope — or want to echo the row back — get it from
-    /// the same authoritative reload this method already runs to refresh
-    /// the registry mirror + dual-write. Those consumers read
-    /// only non-transient fields, so the reload survives a future
-    /// `instance_get` → db_agents flip.
-    ///
-    /// `None` is reserved for **not-found** (the id doesn't exist). An
-    /// all-`None` update on an existing id is a no-op that returns the
-    /// unchanged row — so callers can distinguish "nothing to change"
-    /// from "no such instance".
+    /// Returns the post-update row. `None` is reserved for **not-found**;
+    /// an all-`None` update on an existing id is a no-op that returns the
+    /// unchanged row, so callers can tell "nothing to change" from "no such
+    /// agent". See SPEC_UPDATEAGENTINSTANCE_PARTIAL_UPDATE_2026_05_29.md.
     pub fn instance_update_partial(
         &self,
         id: &str,
@@ -2158,7 +1828,7 @@ impl Store {
         let mut sets: Vec<&str> = Vec::new();
         let mut vals: Vec<Box<dyn ToSql>> = Vec::new();
         if let Some(v) = &upd.block_id {
-            sets.push("block_id = ?");
+            sets.push("last_block_id = ?");
             vals.push(Box::new(v.clone()));
         }
         if let Some(v) = &upd.session_id {
@@ -2170,7 +1840,6 @@ impl Store {
             vals.push(Box::new(v.clone()));
         }
         if let Some(v) = &upd.github_context {
-            // `Some("")` explicitly clears (matches the command contract).
             sets.push("github_context = ?");
             vals.push(Box::new(v.clone()));
         }
@@ -2179,20 +1848,15 @@ impl Store {
             vals.push(Box::new(v));
         }
         if sets.is_empty() {
-            // No fields to write. Return the current row unchanged (or
-            // `None` if the id genuinely doesn't exist) so the caller can
-            // still tell a no-op apart from not-found — rather than
-            // conflating both as `None`. No write, no registry/dual-write
-            // reload needed since nothing changed.
             return self.instance_get(id);
         }
 
         let rows = {
             let conn = self.conn.lock().unwrap();
-            let sql = format!(
-                "UPDATE db_agent_instances SET {} WHERE id = ?",
-                sets.join(", ")
-            );
+            let now_ms = Self::monotonic_updated_at(&conn, 0);
+            sets.push("updated_at = ?");
+            vals.push(Box::new(now_ms));
+            let sql = format!("UPDATE db_agents SET {} WHERE id = ? AND is_template = 0", sets.join(", "));
             vals.push(Box::new(id.to_string()));
             let params: Vec<&dyn ToSql> = vals.iter().map(|b| b.as_ref()).collect();
             conn.execute(&sql, params.as_slice())?
@@ -2200,107 +1864,62 @@ impl Store {
         if rows == 0 {
             return Ok(None);
         }
-        // Reload the authoritative post-update row and refresh the
-        // registry mirror + dual-write — identical to `instance_update`.
         let fresh = self.instance_get(id)?;
         if let Some(f) = &fresh {
             self.registry_upsert_if_named(f);
             // Only propagate when THIS call actually targeted session_id —
-            // `upd.session_id` is `None` for e.g. a bare status change, in
-            // which case `f.session_id` just reflects whatever the row
-            // already had (possibly still empty, pre-first-capture) and
-            // propagating it would clobber a valid root pointer for no
-            // reason. `Some("")` (poison_resume's deliberate stale-resume
-            // clear) and `Some(real_sid)` (a genuine capture) both DO mean
-            // this call wrote session_id and must propagate either way —
-            // see registry_propagate_continuation_session_id's doc comment.
+            // `Some("")` (a deliberate clear) and `Some(real_sid)` both mean
+            // this call wrote it; `None` means the row's existing value is
+            // not this call's to broadcast. See
+            // registry_propagate_continuation_session_id's doc comment.
             if upd.session_id.is_some() {
                 self.registry_propagate_continuation_session_id(f);
             }
-            // Mirror update to db_agents.
-            self.agents_dual_write_instance_update(f)?;
         }
         Ok(fresh)
     }
 
-    /// Update mutable instance fields. `id`, `definition_id`,
-    /// `parent_instance_id`, `started_at`, `created_at` are immutable
-    /// after insert (they describe provenance, not state).
-    ///
-    /// Retained as a full-struct convenience for store tests + internal
-    /// callers; the `updateagentinstance` handler now uses
-    /// [`Self::instance_update_partial`] so it no longer reads the row
-    /// to merge.
+    /// Full-struct update of the mutable launch-state fields (`block_id`,
+    /// `session_id`, `status`, `github_context`, `ended_at`). Retained as a
+    /// convenience for tests + internal callers; the `updateagentinstance`
+    /// handler uses [`Self::instance_update_partial`].
     pub fn instance_update(&self, inst: &AgentInstance) -> Result<bool, StoreError> {
-        let rows = {
-            let conn = self.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE db_agent_instances SET
-                    block_id = ?1,
-                    session_id = ?2,
-                    status = ?3,
-                    github_context = ?4,
-                    ended_at = ?5
-                 WHERE id = ?6",
-                params![
-                    inst.block_id,
-                    inst.session_id,
-                    inst.status,
-                    inst.github_context,
-                    inst.ended_at,
-                    inst.id,
-                ],
-            )?
+        let upd = InstanceUpdate {
+            block_id: Some(inst.block_id.clone()),
+            session_id: Some(inst.session_id.clone()),
+            status: Some(inst.status.clone()),
+            github_context: Some(inst.github_context.clone()),
+            ended_at: Some(inst.ended_at),
         };
-        if rows > 0 {
-            // Refresh the registry from the post-update authoritative row.
-            // `inst` is the caller's pre-update view; SQL UPDATE only
-            // touches a subset of fields, so we reload to keep registry
-            // mirror exact.
-            if let Ok(Some(fresh)) = self.instance_get(&inst.id) {
-                self.registry_upsert_if_named(&fresh);
-                self.registry_propagate_continuation_session_id(&fresh);
-                // Mirror status fields to db_agents.
-                self.agents_dual_write_instance_update(&fresh)?;
-            }
-        }
-        Ok(rows > 0)
+        Ok(self.instance_update_partial(&inst.id, &upd)?.is_some())
     }
 
-    /// Repoint every instance currently referencing `old_def_id` to
-    /// `new_def_id`. Used by the Phase 1 two-tier-picker migration
-    /// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md): when a seeded
-    /// template has been used directly (carries an `agent:<id>:current`
-    /// zone), the migration clones the template into a user agent and
-    /// repoints any instances so the existing reattach flow
-    /// (`continueOfInstanceId`) keeps working against the new
-    /// definition_id. Returns the number of rows updated.
-    ///
-    /// `definition_id` is declared immutable post-insert on the normal
-    /// `instance_update` path. This is the migration escape hatch.
-    pub fn instance_repoint_definition(
-        &self,
-        old_def_id: &str,
-        new_def_id: &str,
-    ) -> Result<usize, StoreError> {
-        let rows = {
-            let conn = self.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE db_agent_instances SET definition_id = ?1 WHERE definition_id = ?2",
-                params![new_def_id, old_def_id],
-            )?
-        };
-        // Re-aim parent_template_id on user-clone projection rows in db_agents.
-        if rows > 0 {
-            self.agents_dual_write_instance_repoint(old_def_id, new_def_id)?;
-        }
-        Ok(rows)
+    /// Repoint every agent derived from `old_def_id` at `new_def_id`. Used by
+    /// the Phase 1 two-tier-picker migration
+    /// (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md): when a seeded template has
+    /// been used directly, the migration clones it into a user agent and
+    /// repoints its launches so the existing reattach flow keeps working.
+    /// Returns the number of rows updated.
+    pub fn instance_repoint_definition(&self, old_def_id: &str, new_def_id: &str) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute(
+            // `id != ?1` keeps the promote target out of its own result set:
+            // the clone is itself derived from the template, so an unguarded
+            // update would re-parent it to itself and count as a repoint.
+            "UPDATE db_agents SET parent_template_id = ?1
+             WHERE parent_template_id = ?2 AND is_template = 0 AND id != ?1",
+            params![new_def_id, old_def_id],
+        )?)
     }
 
+    /// Delete an agent row (never a template). The row IS the agent in the
+    /// consolidated model, so this removes the agent — previously a launch
+    /// row of a user-clone definition could be deleted while the definition
+    /// stayed; there is no such split any more.
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agent_instances WHERE id = ?1", params![id])?
+            conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {
@@ -2312,57 +1931,22 @@ impl Store {
                     );
                 }
             }
-            // Drop the user-clone projection from db_agents.
-            self.agents_dual_write_instance_delete(id)?;
         }
         Ok(rows > 0)
     }
 
     /// Resolve the agent bindings tied to a block.
     ///
-    /// Resolve through `block.meta.agentId` (or legacy
-    /// `agent:id`) against `db_agents` for the user-clone case;
-    /// fall back to the legacy `db_agent_instances` lookup by
-    /// `block_id` for seeded-template launches and any other block
-    /// the consolidated path can't satisfy.
+    /// Resolves through `block.meta.agentId` (or legacy `agent:id`) first —
+    /// the block says which agent it shows — returning that agent's row
+    /// with `block_id` set to the asked-for block. Falls back to the agent
+    /// whose latest launch is on this block and still active, which is what
+    /// a block from before the block meta carried `agentId` needs.
     ///
-    /// We deliberately do NOT consult `block.meta.agentInstanceId`:
-    /// codex P1 on PR #1114 round 3 surfaced that pane reuse
-    /// (`backToPicker` clears `agentId` but not `agentInstanceId`)
-    /// and quick-launch (no instance-id stamp) leave the key stale.
-    /// Trusting it would silently bleed the prior agent's identity
-    /// across reopens — exactly the regression the legacy active-
-    /// instance query avoided. The agentId-then-legacy path covers
-    /// every launch shape without needing instance-id stamping:
-    ///   - User-clone: db_agents.id == def.id, hits is_template=0.
-    ///   - Template direct-launch: agentId points at a template
-    ///     (is_template=1, filtered out). Legacy fallback finds the
-    ///     active instance row keyed on block_id.
-    ///   - Pane reuse: stale `agentInstanceId` is ignored; current
-    ///     `agentId` wins.
-    ///
-    /// Replaces the legacy "find most recent active instance for
-    /// this block" as the PRIMARY path for user-clones; the legacy
-    /// query remains as fallback for templates + edge cases.
-    /// Retires fully when Phase 3c drops the legacy table.
-    /// Spec: docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md §3b.
-    ///
-    /// `user_hidden` is NOT filtered — hiding a named agent
-    /// ("forget") is a picker-visibility concept; the pane bound to
-    /// that agent must keep resolving credentials. Codex P2 on PR
-    /// #1114 round 2.
-    ///
-    /// Used by the identity resolver to pull `identity_id` /
-    /// `memory_id` for environment injection on every command
-    /// dispatch. Caller only reads `identity_id` from the returned
-    /// `AgentInstance` — transient per-launch fields (status,
-    /// session_id, started_at, ended_at, parent_instance_id) come
-    /// back as type defaults. `block_id` echoes back the caller's
-    /// argument.
-    pub fn instance_get_active_for_block(
-        &self,
-        block_id: &str,
-    ) -> Result<Option<AgentInstance>, StoreError> {
+    /// We deliberately do NOT consult `block.meta.agentInstanceId`: codex
+    /// P1 on PR #1114 round 3 surfaced that pane reuse can leave a stale
+    /// one behind.
+    pub fn instance_get_active_for_block(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let block: crate::backend::obj::Block = match self.get(block_id)? {
             Some(b) => b,
             None => return Ok(None),
@@ -2374,85 +1958,29 @@ impl Store {
             .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
             .unwrap_or("")
             .to_string();
-        let conn = self.conn.lock().unwrap();
         if !agent_id.is_empty() {
-            let mut stmt = conn.prepare(
-                "SELECT id, github_context, created_at,
-                        identity_id, memory_id, instance_name, working_directory
-                 FROM db_agents
-                 WHERE id = ?1
-                   AND is_template = 0",
-            )?;
-            let block_id_owned = block_id.to_string();
-            let result = stmt.query_row(params![agent_id], |row| {
-                Ok(AgentInstance {
-                    id: row.get(0)?,
-                    definition_id: row.get(0)?, // consolidated model — see 3b.3a
-                    parent_instance_id: String::new(),
-                    block_id: block_id_owned.clone(),
-                    session_id: String::new(),
-                    status: String::new(),
-                    github_context: row.get(1)?,
-                    started_at: row.get(2)?,
-                    ended_at: 0,
-                    created_at: row.get(2)?,
-                    identity_id: row.get(3)?,
-                    memory_id: row.get(4)?,
-                    instance_name: row.get(5)?,
-                    working_directory: row.get(6)?,
-                    display_hidden: false,
-                })
-            });
-            match result {
-                Ok(a) => return Ok(Some(a)),
+            // Any non-template row, hidden or not: an existing pane of a
+            // "forgotten" agent must still resolve its bindings.
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {INSTANCE_COLUMNS} FROM db_agents WHERE id = ?1 AND is_template = 0"
+            ))?;
+            match stmt.query_row(params![agent_id], map_instance_row) {
+                Ok(mut a) => {
+                    a.block_id = block_id.to_string();
+                    return Ok(Some(a));
+                }
                 Err(rusqlite::Error::QueryReturnedNoRows) => {}
                 Err(e) => return Err(e.into()),
             }
         }
-        // Legacy-block fallback: seeded-template launches and any
-        // block whose agentId references a row that doesn't exist
-        // in the consolidated view. The active-instance query is
-        // robust to pane reuse (it picks the most recent active
-        // row keyed on block_id).
-        let mut legacy_stmt = conn.prepare(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE block_id = ?1 AND status IN ('running', 'paused')
-             ORDER BY created_at DESC
-             LIMIT 1",
-        )?;
-        match legacy_stmt.query_row(params![block_id], map_instance_row) {
-            Ok(a) => Ok(Some(a)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Find the `db_agent_instances` row for `block_id`, regardless of
-    /// status — unlike `instance_get_active_for_block`, this reads
-    /// `db_agent_instances` directly (not the `db_agents` consolidated
-    /// projection) and returns the row's REAL `session_id`, so callers
-    /// that need to write back to that exact row (e.g. keeping
-    /// `session_id` live as the CLI emits it — see
-    /// `persist_session_id`/SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md
-    /// §4.1) have a real `id` to pass to `instance_update_partial`.
-    /// Most-recently-created row wins if a block_id was somehow reused
-    /// across rows (shouldn't happen in practice, but avoids ambiguity).
-    pub fn instance_get_by_block_id(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, definition_id, parent_instance_id, block_id, session_id,
-                    status, github_context, started_at, ended_at, created_at,
-                    identity_id, memory_id, instance_name, working_directory,
-                    display_hidden
-             FROM db_agent_instances
-             WHERE block_id = ?1
-             ORDER BY created_at DESC
-             LIMIT 1",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {INSTANCE_COLUMNS} FROM db_agents
+             WHERE last_block_id = ?1 AND is_template = 0 AND status IN ('running', 'paused')
+             ORDER BY updated_at DESC
+             LIMIT 1"
+        ))?;
         match stmt.query_row(params![block_id], map_instance_row) {
             Ok(a) => Ok(Some(a)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -2460,52 +1988,74 @@ impl Store {
         }
     }
 
-    // Dual-write helpers live in `super::dual_write`.
+    /// The agent whose latest launch is on `block_id`, regardless of status
+    /// — with its real `session_id`, so callers that write back to that
+    /// exact row (keeping `session_id` live as the CLI emits it — see
+    /// `persist_session_id` /
+    /// SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1) have
+    /// the right id to pass to `instance_update_partial`. Most recently
+    /// updated row wins if a block was somehow reused.
+    pub fn instance_get_by_block_id(&self, block_id: &str) -> Result<Option<AgentInstance>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {INSTANCE_COLUMNS} FROM db_agents
+             WHERE last_block_id = ?1 AND is_template = 0
+             ORDER BY updated_at DESC
+             LIMIT 1"
+        ))?;
+        match stmt.query_row(params![block_id], map_instance_row) {
+            Ok(a) => Ok(Some(a)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
+/// The `db_agents` columns every instance read selects, in the order
+/// [`map_instance_row`] expects.
+const INSTANCE_COLUMNS: &str = "id, last_block_id, session_id, status, github_context, started_at, ended_at, \
+     created_at, identity_id, memory_id, instance_name, working_directory, user_hidden";
+
+/// Project a non-template `db_agents` row (selected with
+/// [`INSTANCE_COLUMNS`]) into the `AgentInstance` shape: the row's id is
+/// both `id` and `definition_id`, `last_block_id` is `block_id`, chains are
+/// pre-collapsed so `parent_instance_id` is empty, and a row that never
+/// recorded a launch reports `created_at` as `started_at`.
 fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
-    let display_hidden_int: i64 = row.get(14)?;
+    let id: String = row.get(0)?;
+    let started_at: i64 = row.get(5)?;
+    let created_at: i64 = row.get(7)?;
     Ok(AgentInstance {
-        id: row.get(0)?,
-        definition_id: row.get(1)?,
-        parent_instance_id: row.get(2)?,
-        block_id: row.get(3)?,
-        session_id: row.get(4)?,
-        status: row.get(5)?,
-        github_context: row.get(6)?,
-        started_at: row.get(7)?,
-        ended_at: row.get(8)?,
-        created_at: row.get(9)?,
-        identity_id: row.get(10)?,
-        memory_id: row.get(11)?,
-        instance_name: row.get(12)?,
-        working_directory: row.get(13)?,
-        display_hidden: display_hidden_int != 0,
+        definition_id: id.clone(),
+        id,
+        parent_instance_id: String::new(),
+        block_id: row.get(1)?,
+        session_id: row.get(2)?,
+        status: row.get(3)?,
+        github_context: row.get(4)?,
+        started_at: if started_at == 0 { created_at } else { started_at },
+        ended_at: row.get(6)?,
+        created_at,
+        identity_id: row.get(8)?,
+        memory_id: row.get(9)?,
+        instance_name: row.get(10)?,
+        working_directory: row.get(11)?,
+        display_hidden: row.get::<_, i64>(12)? != 0,
     })
 }
 
-/// Row mapper for `instance_get_by_name`'s two queries (exact-match and
-/// the slug-normalized fallback scan) — column order MUST match both
-/// SELECTs there.
-fn map_agent_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
-    Ok(AgentInstance {
-        id: row.get(0)?,
-        definition_id: row.get(1)?,
-        parent_instance_id: String::new(),
-        block_id: String::new(),
-        session_id: String::new(),
-        status: String::new(),
-        github_context: row.get(2)?,
-        started_at: row.get(3)?, // created_at — best proxy for the consolidated row
-        ended_at: 0,
-        created_at: row.get(3)?,
-        identity_id: row.get(4)?,
-        memory_id: row.get(5)?,
-        instance_name: row.get(6)?,
-        working_directory: row.get(7)?,
-        display_hidden: row.get::<_, i64>(8)? != 0,
-    })
-}
+/// The `db_agents` SELECT that reads a row in the `AgentDefinition` shape —
+/// the column order [`map_agent_definition_row`] expects. Shared by
+/// `agent_def_list` (all rows) and `agent_row_get` (one row).
+const AGENT_DEFINITION_SELECT: &str = "SELECT id, slug, name, icon, provider, description,
+            working_directory, shell, provider_flags, auto_start,
+            restart_on_crash, idle_timeout_minutes, created_at,
+            agent_type, environment, agent_bus_id, is_seeded,
+            accounts, parent_template_id, branch_label, updated_at,
+            user_hidden, container_image, container_volumes, container_name,
+            use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+            default_memory_id, conversation_visibility
+     FROM db_agents";
 
 /// Row mapper for `db_agents` rows projected back into the
 /// `AgentDefinition` shape. The column order MUST match the SELECT in
@@ -2839,10 +2389,10 @@ mod tests {
         inst_b.instance_name = "Agent B Display".to_string();
         store.instance_create(&inst_b).unwrap();
 
-        let by_name = store.instance_get_by_name("shared-name").unwrap()
-            .expect("must find agent A by literal instance_name");
-        assert_eq!(by_name.id, "def-a", "instance_name lookup must never resolve to B's row");
-
+        // `instance_get_by_name` was deleted in consolidation Phase 3b (PR 2)
+        // — it had no production caller — so the slug side is the whole
+        // guarantee now: the slug lookup must never resolve to A's row just
+        // because A's literal instance_name equals B's slug.
         let by_slug = store.instance_get_by_slug("shared-name").unwrap()
             .expect("must find agent B by slug");
         assert_eq!(by_slug.id, "def-b", "slug lookup must never resolve to A's row");

@@ -359,8 +359,29 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // the eventual snapshot read for the top-20.
                 let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
                 for inst in instances {
-                    let def = defs.iter().find(|d| d.id == inst.definition_id);
-                    let identity_name = match links_by_agent.get(inst.definition_id.as_str()) {
+                    // The agent's own row, and the template it came from.
+                    // Consolidation Phase 3b: `definition_id` is the agent's
+                    // own id, so "which kind of agent is this" is the
+                    // template on `parent_id` (empty for an agent that was
+                    // never cloned from one, where the row IS the answer).
+                    let own = defs.iter().find(|d| d.id == inst.definition_id);
+                    let def = own
+                        .filter(|d| !d.parent_id.is_empty())
+                        .and_then(|d| defs.iter().find(|t| t.id == d.parent_id))
+                        .or(own);
+                    // The agent's own account links, falling back to the
+                    // template's. The fallback is legacy-shaped:
+                    // `db_agent_identity_links` still has its FK on
+                    // `db_agent_definitions`, so an agent that only exists as
+                    // a `db_agents` row (launched from a template) cannot
+                    // hold links of its own yet — its bindings live on the
+                    // template, exactly as before consolidation. Phase 3c
+                    // re-points that FK; this fallback goes with it.
+                    let links_key = match links_by_agent.get(inst.definition_id.as_str()) {
+                        Some(_) => inst.definition_id.as_str(),
+                        None => def.map(|d| d.id.as_str()).unwrap_or(inst.definition_id.as_str()),
+                    };
+                    let identity_name = match links_by_agent.get(links_key) {
                         Some(links) if !links.is_empty() => {
                             let mut names: Vec<String> = links
                                 .iter()

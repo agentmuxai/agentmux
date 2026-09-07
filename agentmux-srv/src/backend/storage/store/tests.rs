@@ -589,9 +589,12 @@
             working_directory: String::new(),
             display_hidden: false,
         };
-        store.instance_create(&inst).unwrap();
+        // `def1` is a user agent, so the launch folds into ITS row and that
+        // row's id is the agent id — `instance_create` returns it.
+        let created = store.instance_create(&inst).unwrap();
+        assert_eq!(created.id, "def1", "a launch of a user agent IS that agent");
 
-        let fetched = store.instance_get("inst1").unwrap().expect("row");
+        let fetched = store.instance_get("def1").unwrap().expect("row");
         assert_eq!(fetched.block_id, "block-abc");
         assert_eq!(fetched.status, "running");
 
@@ -600,7 +603,7 @@
         updated.status = InstanceStatus::Stopped.as_str().to_string();
         updated.ended_at = 2000;
         assert!(store.instance_update(&updated).unwrap());
-        assert_eq!(store.instance_get("inst1").unwrap().unwrap().status, "stopped");
+        assert_eq!(store.instance_get("def1").unwrap().unwrap().status, "stopped");
 
         // Filter queries
         let all = store.instance_list(None, None).unwrap();
@@ -641,7 +644,7 @@
         // Update ONLY status — other columns must be preserved.
         let fresh = store
             .instance_update_partial(
-                "instp",
+                "defp",
                 &InstanceUpdate { status: Some("stopped".into()), ..Default::default() },
             )
             .unwrap()
@@ -654,7 +657,7 @@
         // Update ONLY session_id — status from the prior write persists.
         let fresh = store
             .instance_update_partial(
-                "instp",
+                "defp",
                 &InstanceUpdate { session_id: Some("sess-2".into()), ..Default::default() },
             )
             .unwrap()
@@ -665,7 +668,7 @@
         // `Some("")` explicitly clears a string column.
         let fresh = store
             .instance_update_partial(
-                "instp",
+                "defp",
                 &InstanceUpdate { github_context: Some(String::new()), ..Default::default() },
             )
             .unwrap()
@@ -675,7 +678,7 @@
         // All-`None` no-op returns the unchanged row (NOT None — that's
         // reserved for not-found so the handler can tell them apart).
         let noop = store
-            .instance_update_partial("instp", &InstanceUpdate::default())
+            .instance_update_partial("defp", &InstanceUpdate::default())
             .unwrap();
         assert!(noop.is_some(), "no-op on an existing id returns the row");
         assert_eq!(noop.unwrap().session_id, "sess-2");
@@ -715,14 +718,14 @@
         store.instance_create(&inst).unwrap();
 
         let found = store.instance_get_by_block_id("block-q").unwrap().expect("row");
-        assert_eq!(found.id, "instq");
+        assert_eq!(found.id, "defq", "the agent row, whose id is the user agent's own id");
         assert_eq!(found.session_id, "", "starts empty, matching real launch-time behavior");
 
         // Writing a live session id through instance_update_partial (as
         // persist_session_id now does) is visible on the next lookup.
         use crate::backend::storage::InstanceUpdate;
         store
-            .instance_update_partial("instq", &InstanceUpdate { session_id: Some("sess-live".into()), ..Default::default() })
+            .instance_update_partial("defq", &InstanceUpdate { session_id: Some("sess-live".into()), ..Default::default() })
             .unwrap();
         let found = store.instance_get_by_block_id("block-q").unwrap().expect("row");
         assert_eq!(found.session_id, "sess-live");
@@ -1126,8 +1129,15 @@
         let reg = Arc::new(crate::registry::Registry::open(reg_root).unwrap());
         let store = Store::open_in_memory().unwrap();
         store.set_registry(reg.clone());
-        // Satisfy the FK from db_agent_instances.definition_id.
+        // The definition these tests launch from is a TEMPLATE, so each
+        // launch becomes its own agent row keyed by the launch id — which is
+        // what lets them keep asserting on `inst-*` ids. Launching a USER
+        // agent instead folds into that agent's own row (consolidation
+        // Phase 3b), and `instance_create` returns whichever row the launch
+        // landed on; the folded case is covered by
+        // `instance_create_on_a_user_agent_folds_into_its_row`.
         let mut agent = sample_agent("def-mirror", "mirror");
+        agent.is_seeded = 1;
         store.agent_def_insert(&mut agent).unwrap();
         (tmp, store, reg)
     }
@@ -1404,18 +1414,18 @@
             1,
             "picker mode must collapse continuation chain to ONE entry"
         );
-        assert_eq!(picker_rows[0].id, "inst-cont");
-        // The surviving row keeps its real parent_instance_id —
-        // callers needing to reconstruct the chain can still do so
-        // by walking up from this row.
-        assert_eq!(picker_rows[0].parent_instance_id, "inst-head");
+        assert_eq!(picker_rows[0].id, "inst-head", "the agent's one row is the head, carrying the newest launch");
+        // There is no chain left to reconstruct: the agent is one row and
+        // a continuation moves its launch state, so `parent_instance_id`
+        // is always empty.
+        assert!(picker_rows[0].parent_instance_id.is_empty());
 
         // Definition-scoped picker mode — same dedup behavior.
         let scoped = store
             .instance_list_named(10, Some("def-mirror"), None, true)
             .unwrap();
         assert_eq!(scoped.len(), 1);
-        assert_eq!(scoped[0].id, "inst-cont");
+        assert_eq!(scoped[0].id, "inst-head");
     }
 
     #[test]
@@ -1432,7 +1442,9 @@
         store.instance_create(&head).unwrap();
 
         // 4 continuations chaining linearly off the head.
-        for (i, parent) in [("c1", "inst-root"), ("c2", "c1"), ("c3", "c2"), ("c4", "c3")] {
+        // Every continuation names the AGENT (the row id `instance_create`
+        // returned), which is the contract now — not the previous launch.
+        for (i, parent) in [("c1", "inst-root"), ("c2", "inst-root"), ("c3", "inst-root"), ("c4", "inst-root")] {
             let mut c = make_named_inst(i, "Claude", &agents_root);
             c.parent_instance_id = parent.to_string();
             c.started_at = 100 + (i.chars().last().unwrap().to_digit(10).unwrap() as i64) * 100;
@@ -1445,96 +1457,32 @@
             1,
             "five-row chain (1 head + 4 continuations) must collapse to one entry"
         );
-        assert_eq!(picker_rows[0].id, "c4", "newest continuation wins");
-    }
-
-    #[test]
-    fn instance_get_by_name_reads_from_db_agents() {
-        // Phase 3b.2 — the consolidated `db_agents` table is the new
-        // authority for named-agent lookups. After `instance_create`'s
-        // dual-write, the helper must surface the agent by name with
-        // the bindings populated from `db_agents`. Transient runtime
-        // fields (block_id, session_id, status, started_at as launch
-        // moment, ended_at, parent_instance_id) have no analog in the
-        // consolidated row and come back as their type defaults.
-        let (tmp, store, _reg) = store_with_registry();
-        let agents_root = tmp.path().join("agents");
-
-        let mut head = make_named_inst("inst-1", "Maks", &agents_root);
-        head.identity_id = "id-1".to_string();
-        head.memory_id = "mem-1".to_string();
-        head.github_context = "ghctx".to_string();
-        store.instance_create(&head).unwrap();
-
-        let got = store
-            .instance_get_by_name("Maks")
-            .unwrap()
-            .expect("should find by name");
-        // Folded user-clone: the def and the instance share ONE
-        // db_agents row keyed by def.id (def-mirror is_seeded=0 in
-        // the test fixture). The caller still sees `definition_id`
-        // populated — via the COALESCE in the query, an empty
-        // parent_template_id resolves to the row's own id.
-        assert_eq!(got.id, "def-mirror");
-        assert_eq!(got.definition_id, "def-mirror");
-        assert_eq!(got.instance_name, "Maks");
-        assert_eq!(got.identity_id, "id-1");
-        assert_eq!(got.memory_id, "mem-1");
-        assert_eq!(got.github_context, "ghctx");
-        assert!(!got.display_hidden);
-        // Transient fields default to empty / 0 — see doc comment.
-        assert_eq!(got.parent_instance_id, "");
-        assert_eq!(got.block_id, "");
-        assert_eq!(got.session_id, "");
-        assert_eq!(got.status, "");
-        assert_eq!(got.ended_at, 0);
-    }
-
-    #[test]
-    fn instance_get_by_name_returns_none_for_missing_name() {
-        let (_tmp, store, _reg) = store_with_registry();
-        assert!(store.instance_get_by_name("does-not-exist").unwrap().is_none());
-    }
-
-    #[test]
-    fn instance_get_by_name_excludes_hidden_rows() {
-        // user_hidden = 1 (via display_hidden) must filter out — both
-        // the launch modal collision detect and ContinueNamed depend
-        // on "forgotten" agents being invisible.
-        let (tmp, store, _reg) = store_with_registry();
-        let agents_root = tmp.path().join("agents");
-        let mut inst = make_named_inst("inst-hidden", "Ghost", &agents_root);
-        inst.display_hidden = true;
-        store.instance_create(&inst).unwrap();
-        assert!(store.instance_get_by_name("Ghost").unwrap().is_none());
-    }
-
-    #[test]
-    fn instance_get_by_name_empty_input_returns_none() {
-        let (_tmp, store, _reg) = store_with_registry();
-        assert!(store.instance_get_by_name("").unwrap().is_none());
+        assert_eq!(picker_rows[0].id, "inst-root", "the head row carries the newest launch's state");
     }
 
     #[test]
     fn continuation_mirrors_bindings_into_db_agents_user_clone_path() {
         // Codex P2 on PR #1110: when a named agent is continued with
         // different identity/memory/cwd/github_context, those bindings
-        // must reach db_agents — otherwise `instance_get_by_name`
-        // (which reads from db_agents) returns the head's stale data.
-        // For user-clone defs (is_seeded=0), the projection is keyed
-        // by def.id and the existing UPDATE handles both head and
-        // continuation.
+        // must reach the agent's row — otherwise every reader returns
+        // the first launch's stale data. A launch of a USER agent is
+        // keyed by that agent's own id, so head and continuation both
+        // write the same row.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
+        let mut solo = sample_agent("agent-solo", "agent-solo");
+        store.agent_def_insert(&mut solo).unwrap();
 
         // Original launch with one set of bindings.
         let mut head = make_named_inst("inst-head", "Maks", &agents_root);
+        head.definition_id = "agent-solo".to_string();
         head.identity_id = "id-original".to_string();
         head.memory_id = "mem-original".to_string();
         store.instance_create(&head).unwrap();
 
         // Continuation with NEW bindings.
         let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
+        cont.definition_id = "agent-solo".to_string();
         cont.parent_instance_id = "inst-head".to_string();
         cont.identity_id = "id-NEW".to_string();
         cont.memory_id = "mem-NEW".to_string();
@@ -1542,8 +1490,8 @@
         store.instance_create(&cont).unwrap();
 
         // The folded db_agents row reflects the continuation's bindings.
-        let got = store.instance_get_by_name("Maks").unwrap().expect("found");
-        assert_eq!(got.id, "def-mirror");
+        let got = store.instance_get("agent-solo").unwrap().expect("found");
+        assert_eq!(got.id, "agent-solo");
         assert_eq!(
             got.identity_id, "id-NEW",
             "continuation bindings must overwrite the head's"
@@ -1553,40 +1501,20 @@
     }
 
     #[test]
-    fn instance_get_by_name_collapses_continuation_chain_to_one_row() {
-        // Continuations live in `db_agent_instances` (each launch =
-        // one row). The Phase 3a dual-write projects them into ONE
-        // canonical row in `db_agents` (keyed on the original head's
-        // id, with bindings updated each continuation). So a 4-deep
-        // chain with the same name surfaces as exactly one row here —
-        // no MRU-row tie-breaking needed at this layer.
-        let (tmp, store, _reg) = store_with_registry();
-        let agents_root = tmp.path().join("agents");
-
-        let head = make_named_inst("inst-head", "Maks", &agents_root);
-        store.instance_create(&head).unwrap();
-
-        let mut cont = make_named_inst("inst-cont", "Maks", &agents_root);
-        cont.parent_instance_id = "inst-head".to_string();
-        store.instance_create(&cont).unwrap();
-
-        let got = store.instance_get_by_name("Maks").unwrap().expect("found");
-        // Only one db_agents row exists for the whole chain (the
-        // folded user-clone row keyed by def-mirror); both
-        // continuations updated its bindings.
-        assert_eq!(got.id, "def-mirror");
-        assert_eq!(got.instance_name, "Maks");
-    }
-
-    #[test]
     fn instance_get_active_for_block_phase_3b4_resolves_via_block_meta() {
         // Phase 3b.4: instead of filtering db_agent_instances by
         // status, follow block.meta.agentId → db_agents directly.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
+        // A USER agent (not the fixture's template): every
+        // launch of it folds into this one row, which is what
+        // block.meta.agentId names.
+        let mut solo = sample_agent("agent-solo", "agent-solo");
+        store.agent_def_insert(&mut solo).unwrap();
 
-        // Create the agent (folds into the def-mirror db_agents row).
+        // Launch it (folds into the agent-solo row).
         let mut inst = make_named_inst("inst-x", "Maks", &agents_root);
+        inst.definition_id = "agent-solo".to_string();
         inst.identity_id = "id-resolved".to_string();
         store.instance_create(&inst).unwrap();
 
@@ -1600,7 +1528,7 @@
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
                 m.insert("view".to_string(), serde_json::json!("agent"));
-                m.insert("agentId".to_string(), serde_json::json!("def-mirror"));
+                m.insert("agentId".to_string(), serde_json::json!("agent-solo"));
                 m
             },
             subblockids: None,
@@ -1611,11 +1539,12 @@
             .instance_get_active_for_block("block-1")
             .unwrap()
             .expect("expected the block's agent to resolve");
-        assert_eq!(got.id, "def-mirror");
+        assert_eq!(got.id, "agent-solo");
         assert_eq!(got.identity_id, "id-resolved");
         assert_eq!(got.block_id, "block-1"); // echoed from arg
-        // Transient fields default — no status filtering needed.
-        assert_eq!(got.status, "");
+        // Launch state comes off the row itself now (schema v29) — no
+        // status filtering needed to find it.
+        assert_eq!(got.status, "running");
     }
 
     #[test]
@@ -1699,11 +1628,17 @@
         // current `agentId` is the source of truth.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
+        // A USER agent (not the fixture's template): every
+        // launch of it folds into this one row, which is what
+        // block.meta.agentId names.
+        let mut solo = sample_agent("agent-solo", "agent-solo");
+        store.agent_def_insert(&mut solo).unwrap();
 
         // Set up two distinct agents on different defs.
         let mut prior_def = sample_agent("def-prior", "prior");
         store.agent_def_insert(&mut prior_def).unwrap();
         let mut prior_inst = make_named_inst("inst-prior", "Prior", &agents_root);
+        prior_inst.definition_id = "agent-solo".to_string();
         prior_inst.definition_id = "def-prior".to_string();
         prior_inst.identity_id = "id-PRIOR-DO-NOT-USE".to_string();
         store.instance_create(&prior_inst).unwrap();
@@ -1711,6 +1646,7 @@
         // Current agent (the one the user just launched in the
         // reused pane). def-mirror is the fixture's pre-created def.
         let mut current_inst = make_named_inst("inst-current", "Current", &agents_root);
+        current_inst.definition_id = "agent-solo".to_string();
         current_inst.identity_id = "id-current-correct".to_string();
         store.instance_create(&current_inst).unwrap();
 
@@ -1724,7 +1660,7 @@
             stickers: None,
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
-                m.insert("agentId".to_string(), serde_json::json!("def-mirror"));
+                m.insert("agentId".to_string(), serde_json::json!("agent-solo"));
                 m.insert(
                     "agentInstanceId".to_string(),
                     serde_json::json!("inst-prior"),
@@ -1752,7 +1688,13 @@
         // ambient creds the moment the user hides the agent.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
+        // A USER agent (not the fixture's template): every
+        // launch of it folds into this one row, which is what
+        // block.meta.agentId names.
+        let mut solo = sample_agent("agent-solo", "agent-solo");
+        store.agent_def_insert(&mut solo).unwrap();
         let mut inst = make_named_inst("inst-hide", "ToBeHidden", &agents_root);
+        inst.definition_id = "agent-solo".to_string();
         inst.identity_id = "id-still-valid".to_string();
         inst.display_hidden = true; // bound block stays alive
         store.instance_create(&inst).unwrap();
@@ -1765,7 +1707,7 @@
             stickers: None,
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
-                m.insert("agentId".to_string(), serde_json::json!("def-mirror"));
+                m.insert("agentId".to_string(), serde_json::json!("agent-solo"));
                 m
             },
             subblockids: None,
@@ -1830,7 +1772,13 @@
         // Both keys should resolve.
         let (tmp, store, _reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
+        // A USER agent (not the fixture's template): every
+        // launch of it folds into this one row, which is what
+        // block.meta.agentId names.
+        let mut solo = sample_agent("agent-solo", "agent-solo");
+        store.agent_def_insert(&mut solo).unwrap();
         let mut inst = make_named_inst("inst-legacy", "Maks", &agents_root);
+        inst.definition_id = "agent-solo".to_string();
         store.instance_create(&inst).unwrap();
 
         let mut block = crate::backend::obj::Block {
@@ -1841,7 +1789,7 @@
             stickers: None,
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
-                m.insert("agent:id".to_string(), serde_json::json!("def-mirror"));
+                m.insert("agent:id".to_string(), serde_json::json!("agent-solo"));
                 m
             },
             subblockids: None,
@@ -1852,7 +1800,7 @@
             .instance_get_active_for_block("block-legacy")
             .unwrap()
             .expect("legacy agent:id meta key must resolve");
-        assert_eq!(got.id, "def-mirror");
+        assert_eq!(got.id, "agent-solo");
     }
 
     #[test]
@@ -1887,39 +1835,13 @@
         assert_eq!(rows.len(), 2);
         assert!(names.contains(&"Maks"));
         assert!(names.contains(&"DSad"));
-        // Transient fields default — see doc comment on instance_list.
+        // Each row carries its own latest launch state (schema v29) rather
+        // than the type defaults the pre-v29 projection had to return.
         for row in &rows {
-            assert_eq!(row.status, "");
-            assert_eq!(row.block_id, "");
+            assert_eq!(row.status, "running");
             assert_eq!(row.session_id, "");
+            assert!(row.parent_instance_id.is_empty(), "chains are pre-collapsed");
         }
-    }
-
-    #[test]
-    fn instance_list_phase_3b3a_filters_by_definition_lineage() {
-        // The legacy `definition_id` filter matches against
-        // `parent_template_id` in the consolidated view. For folded
-        // user-clones (where the db_agents id IS the def.id), also
-        // match the row's own id — both should resolve the def.
-        let (tmp, store, _reg) = store_with_registry();
-        let agents_root = tmp.path().join("agents");
-
-        let a = make_named_inst("inst-a", "Maks", &agents_root);
-        store.instance_create(&a).unwrap();
-        let mut def2 = sample_agent("def-other", "other");
-        store.agent_def_insert(&mut def2).unwrap();
-        let mut b = make_named_inst("inst-b", "Other", &agents_root);
-        b.definition_id = "def-other".to_string();
-        store.instance_create(&b).unwrap();
-
-        // Filter by def-mirror — only the Maks row matches.
-        let filtered = store.instance_list(Some("def-mirror"), None).unwrap();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].instance_name, "Maks");
-
-        let filtered = store.instance_list(Some("def-other"), None).unwrap();
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].instance_name, "Other");
     }
 
     #[test]
@@ -2087,7 +2009,7 @@
         assert_eq!(rows.len(), 2);
         // MRU order: b-head (200) before a-cont (150).
         assert_eq!(rows[0].id, "b-head");
-        assert_eq!(rows[1].id, "a-cont");
+        assert_eq!(rows[1].id, "a-head");
     }
 
     #[test]
@@ -2165,17 +2087,17 @@
         store.instance_create(&cont1).unwrap();
 
         let mut cont2 = make_named_inst("inst-cont2", "Claude", &agents_root);
-        cont2.parent_instance_id = "inst-cont1".to_string();
+        cont2.parent_instance_id = "inst-head".to_string();
         cont2.started_at = 300;
         store.instance_create(&cont2).unwrap();
 
         // Before forget: chain surfaces as cont2 (newest).
         let before = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(before.len(), 1);
-        assert_eq!(before[0].id, "inst-cont2");
+        assert_eq!(before[0].id, "inst-head");
 
         // User clicks "Forget" on the surfaced row.
-        store.instance_set_hidden("inst-cont2", true).unwrap();
+        store.instance_set_hidden("inst-head", true).unwrap();
 
         // After forget: the whole chain must stay forgotten — older
         // visible rows in the chain (head, cont1) must NOT bubble up.
@@ -2218,7 +2140,7 @@
 
         let rows = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].id, "v-cont");
+        assert_eq!(rows[0].id, "v-head");
     }
 
     #[test]
@@ -2247,63 +2169,34 @@
         store.instance_create(&cont_b).unwrap();
 
         let mut cont_a2 = make_named_inst("inst-cont-a2", "Claude", &agents_root);
-        cont_a2.parent_instance_id = "inst-cont-b".to_string();
+        cont_a2.parent_instance_id = "inst-head".to_string();
         cont_a2.identity_id = "identity-a".to_string();
         cont_a2.started_at = 300;
         store.instance_create(&cont_a2).unwrap();
 
-        // Filter by identity-a → newest identity-a row wins (cont-a2).
+        // The agent has ONE identity binding — the newest launch's. The
+        // user switched back to identity-a, so that is what the row holds
+        // and what the filter matches.
         let rows_a = store
             .instance_list_named(10, None, Some("identity-a"), true)
             .unwrap();
         assert_eq!(rows_a.len(), 1);
-        assert_eq!(rows_a[0].id, "inst-cont-a2");
+        assert_eq!(rows_a[0].id, "inst-head");
 
-        // Filter by identity-b → only cont-b matches.
+        // identity-b was a PAST binding of the same agent, not a separate
+        // agent — nothing matches it now. Pre-consolidation each launch was
+        // its own row, so an old binding stayed queryable forever; a single
+        // row per agent cannot express that, and the picker only ever wants
+        // to show what the agent will launch with next.
         let rows_b = store
             .instance_list_named(10, None, Some("identity-b"), true)
             .unwrap();
-        assert_eq!(rows_b.len(), 1);
-        assert_eq!(rows_b[0].id, "inst-cont-b");
+        assert!(rows_b.is_empty(), "a superseded binding is not a separate agent");
 
-        // No filter → newest in chain wins (cont-a2, started_at=300).
         let rows_all = store.instance_list_named(10, None, None, true).unwrap();
         assert_eq!(rows_all.len(), 1);
-        assert_eq!(rows_all[0].id, "inst-cont-a2");
-    }
-
-    #[test]
-    fn instance_list_named_picker_mode_identity_filter_recovers_older_match() {
-        // Concrete repro for the bug codex described: chain where the
-        // newest row uses identity-b but only older rows match the
-        // requested identity-a. Without the in-ranking filter, the
-        // chain would disappear when filtering by identity-a (newest
-        // row is identity-b, gets ranked first, then post-filter
-        // drops it). With the in-ranking filter, identity-a's older
-        // row survives because it's the only candidate.
-        let (tmp, store, _reg) = store_with_registry();
-        let agents_root = tmp.path().join("agents");
-
-        let mut head = make_named_inst("inst-head", "Claude", &agents_root);
-        head.identity_id = "identity-a".to_string();
-        head.started_at = 100;
-        store.instance_create(&head).unwrap();
-
-        let mut cont_newer_b = make_named_inst("inst-cont-newer-b", "Claude", &agents_root);
-        cont_newer_b.parent_instance_id = "inst-head".to_string();
-        cont_newer_b.identity_id = "identity-b".to_string();
-        cont_newer_b.started_at = 200;
-        store.instance_create(&cont_newer_b).unwrap();
-
-        let rows = store
-            .instance_list_named(10, None, Some("identity-a"), true)
-            .unwrap();
-        assert_eq!(
-            rows.len(),
-            1,
-            "older identity-a row must survive even though the newest row uses identity-b"
-        );
-        assert_eq!(rows[0].id, "inst-head");
+        assert_eq!(rows_all[0].id, "inst-head");
+        assert_eq!(rows_all[0].identity_id, "identity-a");
     }
 
     #[test]
@@ -2444,7 +2337,7 @@
     }
 
     #[test]
-    fn agent_def_delete_cascade_removes_registry_files() {
+    fn agent_def_delete_removes_only_its_own_registry_file() {
         let (tmp, store, reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
         let inst_a = make_named_inst("inst-cascade-a", "demoA", &agents_root);
@@ -2453,11 +2346,19 @@
         store.instance_create(&inst_b).unwrap();
         assert_eq!(reg.list_active().unwrap().len(), 2);
 
-        // Delete the agent definition — SQLite FK cascades both instance
-        // rows; the mirror must also drop both registry files.
+        // Deleting the TEMPLATE leaves the two agents launched from it —
+        // they are the user's agents now, not child rows (Phase 3b).
         store.agent_def_delete("def-mirror").unwrap();
-        assert!(reg.list_active().unwrap().is_empty(),
-            "agent_def_delete cascade must remove all child instance registry files");
+        assert_eq!(reg.list_active().unwrap().len(), 2,
+            "agents launched from a deleted template keep their records");
+
+        // Deleting an AGENT does remove its own record. (Such a row has no
+        // `db_agent_definitions` entry, so `instance_delete` is its delete
+        // path until Phase 3c unifies the two.)
+        store.instance_delete("inst-cascade-a").unwrap();
+        let left: Vec<String> = reg.list_active().unwrap().into_iter()
+            .map(|r| r.data.instance_id).collect();
+        assert_eq!(left, vec!["inst-cascade-b".to_string()]);
     }
 
     // ----------------------------------------------------------------
@@ -2506,7 +2407,7 @@
         use crate::backend::storage::InstanceUpdate;
         store
             .instance_update_partial(
-                "inst-cont",
+                "inst-head",
                 &InstanceUpdate { session_id: Some("sess-resumed-2".into()), ..Default::default() },
             )
             .unwrap();
@@ -2534,7 +2435,7 @@
         store.instance_create(&cont1).unwrap();
 
         let mut cont2 = make_named_inst("inst-cont2", "demoChain", &agents_root);
-        cont2.parent_instance_id = "inst-cont1".to_string();
+        cont2.parent_instance_id = "inst-head2".to_string();
         cont2.session_id = "sess-2".to_string();
         store.instance_create(&cont2).unwrap();
 
@@ -2548,10 +2449,10 @@
     }
 
     #[test]
-    fn continuation_session_id_propagation_noop_when_root_never_mirrored() {
-        // Head row's own instance_name is empty (never mirrored — no
-        // registry file exists for it at all). Propagation must no-op,
-        // not error or create a stray file.
+    fn an_unnamed_agent_is_not_mirrored_until_a_launch_names_it() {
+        // The mirror only carries NAMED agents. An agent created unnamed has
+        // no registry file; if a later launch gives it a name, the agent's
+        // own record appears — keyed by the AGENT id, never by a launch id.
         let (tmp, store, reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
 
@@ -2559,14 +2460,22 @@
         head.instance_name = String::new();
         store.instance_create(&head).unwrap();
         assert!(reg.get("inst-unnamed-head").unwrap().is_none());
+        assert!(reg.list_active().unwrap().is_empty(), "an unnamed agent is not mirrored");
 
-        let mut cont = make_named_inst("inst-unnamed-cont", "demoUnnamed", &agents_root);
-        cont.parent_instance_id = "inst-unnamed-head".to_string();
-        cont.session_id = "sess-orphan".to_string();
-        store.instance_create(&cont).unwrap();
+        let mut named_launch = make_named_inst("inst-unnamed-cont", "demoUnnamed", &agents_root);
+        named_launch.parent_instance_id = "inst-unnamed-head".to_string();
+        named_launch.session_id = "sess-orphan".to_string();
+        let canonical = store.instance_create(&named_launch).unwrap();
+        assert_eq!(canonical.id, "inst-unnamed-head", "the launch folded into the agent");
 
-        assert!(reg.list_active().unwrap().is_empty(),
-            "no registry file should be created when the chain root was never named/mirrored");
+        let records = reg.list_active().unwrap();
+        assert_eq!(records.len(), 1, "naming the agent mirrors it, exactly once");
+        assert_eq!(records[0].data.instance_id, "inst-unnamed-head");
+        assert_eq!(records[0].data.session_id.as_deref(), Some("sess-orphan"));
+        assert!(
+            reg.get("inst-unnamed-cont").unwrap().is_none(),
+            "a launch id never gets a record of its own"
+        );
     }
 
     #[test]
@@ -2610,26 +2519,32 @@
     }
 
     #[test]
-    fn continuation_session_id_propagates_when_chain_root_lives_in_another_channel() {
-        // Reagent P1 on PR #2755: the primary scenario this whole fix
-        // exists for is cross-channel — the chain root's SQLite row lives
-        // in a DIFFERENT channel's local store, so `instance_get` on the
-        // parent id always misses locally. `find_chain_root_id` must still
-        // resolve to that (unreachable-locally-but-registry-valid) parent
-        // id, not fall back to the continuation's own id (which never has
-        // a registry file, silently defeating the whole fix).
+    fn resuming_an_agent_from_another_channel_updates_that_agents_record() {
+        // Reagent P1 on PR #2755: the scenario this exists for is
+        // cross-channel — the agent was last launched in a DIFFERENT
+        // channel, so this store has no row for it, and the record another
+        // channel reads for `--resume` must end up carrying the session id
+        // captured here.
+        //
+        // Consolidation makes this structural rather than a chain walk: an
+        // agent's id is globally stable (the shared definition registry
+        // hands the same id to every channel), so the record is keyed by
+        // that id and BOTH channels write the same file. Records written by
+        // older builds are keyed by a launch id instead; re-keying those is
+        // `m0026_registry_agent_id_rekey`'s job, not this write path's.
         let (tmp, store, reg) = store_with_registry();
         let agents_root = tmp.path().join("agents");
 
-        // Seed a registry record for a "foreign" root with NO matching
-        // local SQLite row — simulates a root instance that lives in
-        // another channel's own database.
+        // The agent, as another channel left it: a record keyed by the
+        // agent id, with a session id from over there.
+        let mut foreign = sample_agent("agent-crosschannel", "agent-crosschannel");
+        store.agent_def_insert(&mut foreign).unwrap();
         reg.upsert(&crate::registry::NamedAgentRecord {
             schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
             data: crate::registry::NamedAgentRecordV1 {
-                instance_id: "inst-foreign-root".to_string(),
+                instance_id: "agent-crosschannel".to_string(),
                 instance_name: "crossChannelAgent".to_string(),
-                definition_id: "def-mirror".to_string(),
+                definition_id: "agent-crosschannel".to_string(),
                 identity_id: None,
                 memory_id: None,
                 session_id: Some("sess-stale-from-other-channel".to_string()),
@@ -2642,27 +2557,22 @@
             },
         })
         .unwrap();
-        assert!(
-            store.instance_get("inst-foreign-root").unwrap().is_none(),
-            "precondition: root has no local SQLite row (lives in another channel)"
-        );
 
-        // This channel resumes the agent: a new local continuation row
-        // pointing at the foreign root, with a freshly captured session_id.
-        let mut cont = make_named_inst("inst-local-cont", "crossChannelAgent", &agents_root);
-        cont.parent_instance_id = "inst-foreign-root".to_string();
-        cont.session_id = "sess-fresh-this-channel".to_string();
-        store.instance_create(&cont).unwrap();
+        // This channel resumes it and captures a fresh session id.
+        let mut resume = make_named_inst("inst-local-resume", "crossChannelAgent", &agents_root);
+        resume.definition_id = "agent-crosschannel".to_string();
+        resume.session_id = "sess-fresh-this-channel".to_string();
+        let canonical = store.instance_create(&resume).unwrap();
+        assert_eq!(canonical.id, "agent-crosschannel", "the resume folded into the agent");
 
         assert!(
-            reg.get("inst-local-cont").unwrap().is_none(),
-            "the local continuation itself must never get its own registry file"
+            reg.get("inst-local-resume").unwrap().is_none(),
+            "a launch id never gets a record of its own"
         );
         assert_eq!(
-            reg.get("inst-foreign-root").unwrap().unwrap().data.session_id.as_deref(),
+            reg.get("agent-crosschannel").unwrap().unwrap().data.session_id.as_deref(),
             Some("sess-fresh-this-channel"),
-            "propagation must reach the foreign root's registry record even though \
-             it has no local SQLite row"
+            "the agent's own record — the one the other channel reads — carries the fresh session"
         );
     }
 
@@ -2700,7 +2610,7 @@
         // The continuation's --resume is confirmed dead: explicit clear.
         store
             .instance_update_partial(
-                "inst-cont-clear",
+                "inst-head-clear",
                 &InstanceUpdate { session_id: Some(String::new()), ..Default::default() },
             )
             .unwrap();
@@ -2740,7 +2650,7 @@
         // An unrelated status update — session_id is NOT part of this call.
         store
             .instance_update_partial(
-                "inst-cont-unrelated",
+                "inst-head-unrelated",
                 &InstanceUpdate { status: Some("stopped".into()), ..Default::default() },
             )
             .unwrap();
@@ -3021,7 +2931,7 @@
     }
 
     #[test]
-    fn dual_write_instance_create_inserts_user_clone_row() {
+    fn launching_a_template_creates_an_agent_row_for_the_launch() {
         let store = make_store();
         // Seed template.
         let mut tpl = AgentDefinition {
@@ -3086,10 +2996,11 @@
         assert_eq!(read_agent_field(&store, "inst-dw", "name"), Some("Maks".to_string()));
         assert_eq!(read_agent_field(&store, "inst-dw", "identity_id"), Some("id-1".to_string()));
         assert_eq!(read_agent_field(&store, "inst-dw", "memory_id"), Some("mem-1".to_string()));
-        // working_directory mirrors the DEFINITION's configured cwd, NOT the
-        // instance's resolved workdir ("/wd/maks"). db_agents holds durable
-        // agent config; the per-launch resolved cwd lives on the block.
-        assert_eq!(read_agent_field(&store, "inst-dw", "working_directory"), Some("/wd/tpl-cfg".to_string()));
+        // The agent's workspace is the launch's RESOLVED workdir, not the
+        // template's configured cwd: one row per agent means the row holds
+        // the directory the agent actually runs in (and the cross-version
+        // registry mirror keys off it).
+        assert_eq!(read_agent_field(&store, "inst-dw", "working_directory"), Some("/wd/maks".to_string()));
         // last_block_id mirrors the instance's per-launch block (the one
         // transient field db_agents retains, so My Agents can locate the
         // filestore snapshot). Non-empty value → non-vacuous assertion.
@@ -3112,7 +3023,7 @@
     /// rather than adding a row). This is what lets the Phase 3b readers
     /// stop joining `db_agent_instances`.
     #[test]
-    fn dual_write_instance_lifecycle_keeps_launch_state_current_on_db_agents() {
+    fn instance_lifecycle_keeps_launch_state_current_on_the_agent_row() {
         let store = make_store();
         let mut tpl = AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -3213,32 +3124,32 @@
         };
         store.instance_create(&cont).unwrap();
         assert_eq!(count_agents(&store, "id = 'inst-ls-2'"), 0);
-        assert_eq!(launch_state("inst-ls"), (String::new(), "running".into(), 3000, 0, "blk-2".into()));
-        // ...and a session captured on the continuation reaches the head too.
+        // The continuation carries no session yet, and an empty one never
+        // clears the live pointer — only a real capture replaces it.
+        assert_eq!(launch_state("inst-ls"), ("sess-1".into(), "running".into(), 3000, 0, "blk-2".into()));
+        // ...and the next capture, written against the AGENT id, lands.
         store
             .instance_update_partial(
-                "inst-ls-2",
+                "inst-ls",
                 &crate::backend::storage::InstanceUpdate { session_id: Some("sess-2".into()), ..Default::default() },
             )
             .unwrap();
         assert_eq!(launch_state("inst-ls").0, "sess-2");
 
-        // A late write from the SUPERSEDED launch (its old pane finally
-        // reporting) must not swap the continuation's state back — the row
-        // shows the newest launch's state, not the writer's (codex P1 on
-        // #3075).
+        // Ending the run writes through the same agent id — there is one
+        // row and one address for its launch state, so the pane that is
+        // running is the one reporting.
         store
             .instance_update_partial(
                 "inst-ls",
                 &crate::backend::storage::InstanceUpdate {
-                    session_id: Some("sess-stale".into()),
                     status: Some("stopped".into()),
                     ended_at: Some(3500),
                     ..Default::default()
                 },
             )
             .unwrap();
-        assert_eq!(launch_state("inst-ls"), ("sess-2".into(), "running".into(), 3000, 0, "blk-2".into()));
+        assert_eq!(launch_state("inst-ls"), ("sess-2".into(), "stopped".into(), 3000, 3500, "blk-2".into()));
     }
 
     /// Reagent P1 + P2 on #1013 round 2 — pins the user-cloned-def
@@ -3248,7 +3159,7 @@
     /// row keyed by `def.id`, NOT a fresh row keyed by `inst.id`).
     /// Round-1 test only covered the seeded-template branch.
     #[test]
-    fn dual_write_instance_create_folds_into_user_clone_def() {
+    fn launching_a_user_agent_folds_into_its_row() {
         let store = make_store();
         // Seed a template.
         let mut tpl = AgentDefinition {
@@ -3335,7 +3246,7 @@
         // identity_id / memory_id DO fold (per-instance bindings), but
         // working_directory does NOT — it stays the clone def's configured
         // cwd, not the instance's resolved workdir ("/wd/folded").
-        assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/clone-cfg".to_string()));
+        assert_eq!(read_agent_field(&store, "user-clone-1", "working_directory"), Some("/wd/folded".to_string()));
         assert_eq!(read_agent_field(&store, "user-clone-1", "github_context"), Some("gh-ctx-A".to_string()));
         // last_block_id folds onto the user-clone row too (transient
         // per-launch field; non-empty → non-vacuous).
@@ -3584,7 +3495,7 @@
     /// scope: templates + cascaded INSTANCE projections go;
     /// user-clone DEF projections survive.
     #[test]
-    fn dual_write_seeded_delete_preserves_user_clone_def_projections() {
+    fn seeded_delete_preserves_every_non_template_agent() {
         let store = make_store();
         // Seeded template.
         let mut tpl = AgentDefinition {
@@ -3651,18 +3562,22 @@
             display_hidden: false,
         };
         store.instance_create(&inst_on_tpl).unwrap();
-        // Now delete seeded → template + cascaded instance go, user-clone survives.
+        // Reseeding replaces TEMPLATES only. Consolidation Phase 3b: an
+        // agent launched from a template is the user's agent, with its own
+        // conversation — it is no longer a "child row" of the template and
+        // survives, exactly as a user clone always did. (Pre-consolidation
+        // the FK cascade deleted it.)
         store.agent_def_delete_seeded().unwrap();
-        assert_eq!(count_agents(&store, "id = 'tpl-keep-check'"), 0, "template projection gone");
-        assert_eq!(count_agents(&store, "id = 'inst-on-tpl-keep'"), 0, "cascaded instance projection gone");
-        assert_eq!(count_agents(&store, "id = 'user-clone-keep'"), 1, "user-clone def projection survives");
+        assert_eq!(count_agents(&store, "id = 'tpl-keep-check'"), 0, "template row gone");
+        assert_eq!(count_agents(&store, "id = 'inst-on-tpl-keep'"), 1, "an agent launched from it survives");
+        assert_eq!(count_agents(&store, "id = 'user-clone-keep'"), 1, "user clone survives");
     }
 
     /// Reagent P2 round 4 on #1013 — pins instance_update/hide/delete
     /// routing through the projection key. The previous version keyed
     /// everything on `inst.id` and silently no-op'd on folded rows.
     #[test]
-    fn dual_write_instance_lifecycle_on_user_clone_def_routes_to_folded_row() {
+    fn launch_state_writes_on_a_user_agent_land_on_its_row() {
         let store = make_store();
         // Template, user-clone def of it, instance on the user-clone.
         let mut tpl = AgentDefinition {
@@ -3733,6 +3648,9 @@
 
         // instance_update: github_context flows through to the folded row.
         let updated = AgentInstance {
+            // Launch state is written against the AGENT id — the row the
+            // launch folded into, which `instance_create` returned.
+            id: "user-rt".to_string(),
             github_context: "gh-updated".to_string(),
             ..inst.clone()
         };
@@ -3743,15 +3661,16 @@
             "instance_update on user-clone-def routes to folded row",
         );
 
-        // instance_set_hidden: flips user_hidden on the folded row.
-        store.instance_set_hidden("inst-rt", true).unwrap();
+        // instance_set_hidden: flips user_hidden on the agent row.
+        store.instance_set_hidden("user-rt", true).unwrap();
         assert_eq!(
             read_agent_int(&store, "user-rt", "user_hidden"),
             Some(1),
-            "instance_set_hidden routes to folded row",
+            "hiding is addressed to the agent",
         );
 
-        // instance_delete: NO-OP on folded row (the def projection persists).
+        // instance_delete: a launch id names no row, so this is a no-op —
+        // deleting the AGENT is `instance_delete("user-rt")`.
         store.instance_delete("inst-rt").unwrap();
         assert_eq!(
             count_agents(&store, "id = 'user-rt'"),

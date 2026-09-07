@@ -49,15 +49,27 @@ pub(super) fn infer_provider_from_model(model: &str) -> String {
     }
 }
 
-/// Returns `(stub_id, newly_inserted)`. `newly_inserted = false` when the
-/// UNIQUE constraint fires (stub already existed); callers use this to avoid
-/// broadcasting `agents:changed` on no-op calls.
+/// Returns `(agent_row_id, newly_inserted)`. In the consolidated model the
+/// definition row IS the agent, so the "stub instance" that makes a defined
+/// agent visible in My Agents is that same row carrying an `instance_name`;
+/// `instance_create` folds into it. `newly_inserted = false` when the row
+/// already carries a name (the stub already existed); callers use this to
+/// avoid broadcasting `agents:changed` on no-op calls. The returned id is
+/// the row's id, which is what `instance_create` reports back.
 pub(super) fn make_stub_idempotent(
     wstore: &crate::backend::storage::store::Store,
     def_id: &str,
     name: &str,
     now: i64,
 ) -> Result<(String, bool), String> {
+    if let Some(existing) = wstore
+        .instance_get(def_id)
+        .map_err(|e| format!("agent.define: read agent row: {e}"))?
+    {
+        if !existing.instance_name.is_empty() {
+            return Ok((existing.id, false));
+        }
+    }
     let stub_id = format!("si-{}", def_id.replace('-', ""));
     let inst = AgentInstance {
         id: stub_id.clone(),
@@ -77,10 +89,7 @@ pub(super) fn make_stub_idempotent(
         display_hidden: false,
     };
     match wstore.instance_create(&inst) {
-        Ok(_) => Ok((stub_id, true)),
-        Err(e) if e.to_string().contains("UNIQUE constraint") => {
-            Ok((stub_id, false)) // stub already existed — idempotent
-        }
+        Ok(canonical) => Ok((canonical.id, true)),
         Err(e) => Err(format!("agent.define: create stub instance: {e}")),
     }
 }

@@ -100,7 +100,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     working_directory: cmd.working_directory.clone(),
                     display_hidden: false,
                 };
-                wstore
+                // The row the launch landed on — its id can differ from
+                // `inst.id` (a launch of a user agent folds into that agent's
+                // row; a continuation folds into the row it continues). The
+                // frontend stores THIS id as the block's `agentInstanceId`,
+                // so the response must carry the canonical row. The session
+                // zone stamp and the change event below deliberately keep
+                // using the REQUESTED definition id: Option E anchors the
+                // zone on the definition the launch modal opened
+                // (`agent:<defId>:current`), and the frontend subscribes to
+                // `agentinstances:changed:<defId>` by that same id.
+                let created = wstore
                     .instance_create(&inst)
                     .map_err(|e| format!("createagentinstance: {e}"))?;
 
@@ -146,7 +156,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&inst).unwrap_or_default()))
+                Ok(Some(serde_json::to_value(&created).unwrap_or_default()))
             })
         }),
     );
