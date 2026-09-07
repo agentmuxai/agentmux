@@ -1,0 +1,84 @@
+# Docs stale-sweep — SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md Phase 5, item 2.
+#
+# Weekly: run scripts/docs-stale-sweep.mjs (docs that claim to be current,
+# untouched for > 8 weeks, citing a file that has since changed or vanished)
+# and post the result to ONE standing issue, updated in place. Not a gate —
+# nothing fails here; the point is a list that stays current without anyone
+# remembering to re-run an audit. `check-doc-status.sh` (ci-pr.yml) is the
+# per-PR half of the same phase.
+name: Docs stale sweep
+
+on:
+  schedule:
+    - cron: '30 6 * * 1' # Mondays 06:30 UTC
+  workflow_dispatch:
+    inputs:
+      weeks:
+        description: 'Untouched-for threshold in weeks'
+        required: false
+        default: '8'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ISSUE_TITLE: 'Docs stale-sweep triage (auto-updated weekly)'
+      ISSUE_LABEL: docs-stale-sweep
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The sweep's recency check is one `git log --name-only` over the
+          # whole history; a shallow clone would make every path look
+          # untouched since the clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run the sweep
+        env:
+          # Passed through env, never interpolated into the script: a
+          # workflow_dispatch input is caller-controlled text (reagent P2 on
+          # #3068). The script validates it as a positive number itself.
+          WEEKS: ${{ github.event.inputs.weeks || '8' }}
+        run: |
+          node scripts/docs-stale-sweep.mjs --weeks "$WEEKS" > sweep.md
+          node scripts/docs-stale-sweep.mjs --weeks "$WEEKS" --json > sweep.json
+          echo '## Docs stale-sweep' >> "$GITHUB_STEP_SUMMARY"
+          cat sweep.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs-stale-sweep
+          path: |
+            sweep.md
+            sweep.json
+          retention-days: 90
+
+      - name: Upsert the standing triage issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh label create "$ISSUE_LABEL" --force \
+            --description 'Auto-updated weekly by docs-stale-sweep.yml' --color 'c5def5'
+          {
+            cat sweep.md
+            echo
+            echo "---"
+            echo "_Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} · workflow \`docs-stale-sweep.yml\` · re-run on demand from the Actions tab (workflow_dispatch, adjustable \`weeks\`)._"
+          } > body.md
+          existing=$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file body.md
+            echo "updated issue #$existing"
+          else
+            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file body.md
+          fi
