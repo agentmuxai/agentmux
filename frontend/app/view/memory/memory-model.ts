@@ -565,7 +565,20 @@ export function duplicateProviderKeys(entries: ProviderInstruction[]): string[] 
     // Plain `<`/`>` rather than localeCompare, to match Rust's `String::cmp`
     // (byte order). localeCompare is locale-aware and would disagree — e.g. it
     // ignores punctuation differences that decide this exact comparison.
+    // Blank-CONTENT rows are excluded before collision resolution, because
+    // export excludes them first too: `if content.trim().is_empty() { continue }`
+    // runs BEFORE the sanitize/collision check, so such a row never occupies a
+    // collision slot. Ignoring content here re-created the same wrong-row
+    // warning the sort above removes — with {"a/b": ""} and {"a\b": "real"},
+    // export silently skips the empty "a/b" and writes "a\b" with no collision
+    // at all, while we flagged "a\b" as the casualty (reagent P1 round 3,
+    // #3063).
+    //
+    // Deliberately NOT also warning "this row's empty content will not be
+    // exported": a row the user just added is empty by definition, so that
+    // fires on every new row before they have typed anything.
     const sortedKeys = entries
+        .filter((e) => e.content.trim().length > 0)
         .map((e) => e.provider.trim())
         .filter((key) => key.length > 0)
         .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
