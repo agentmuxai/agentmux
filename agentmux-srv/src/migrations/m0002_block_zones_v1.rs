@@ -30,25 +30,38 @@ impl Migration for M0002BlockZonesV1 {
         Ok(())
     }
 
-    /// Phase 1 doctor check — the legacy-marker shape. `migrate_block_zones_v1`
-    /// writes `migration_agent_zones_v1.flag` under the data dir when it
-    /// completes (even on partial failure — see its doc comment) and
-    /// deliberately does NOT write it when it bails before doing any work
-    /// (`get_all::<Block>` failed, "let the next start retry"). So: channel
-    /// store present + marker absent means `up()` returned Ok around a
-    /// helper that never finished — recorded applied, did nothing.
+    /// Doctor check, content-based since Phase 2 of
+    /// SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03: the post-condition is
+    /// "no agent block still holds a snapshot whose agent `:current` zone is
+    /// empty" (`block_zones_look_incomplete`), read through the same
+    /// read-only connections `--verify` uses everywhere. The marker file is
+    /// reported as evidence only — Phase 1b's version of this check trusted
+    /// its presence, which is the F1 shape Phase 2 exists to remove.
     fn verify(&self, ctx: &MigrationContext) -> VerifyOutcome {
         if !ctx.channel_store_path.exists() {
             return VerifyOutcome::Ok("no channel store on this data dir; nothing to migrate".into());
         }
+        let filestore_path = ctx.data_dir.join("db").join("filestore.db");
+        if !filestore_path.exists() {
+            return VerifyOutcome::Ok("no filestore on this data dir; no block snapshots to migrate".into());
+        }
+        let wstore = match Store::open(&ctx.channel_store_path) {
+            Ok(s) => s,
+            Err(e) => return VerifyOutcome::Error(format!("open channel store: {}", e)),
+        };
+        let filestore = match FileStore::open(&filestore_path) {
+            Ok(f) => f,
+            Err(e) => return VerifyOutcome::Error(format!("open filestore: {}", e)),
+        };
         let marker = ctx.data_dir.join(crate::backend::agent_session::MIGRATION_MARKER_V1);
-        if marker.exists() {
-            VerifyOutcome::Ok(format!("marker present: {}", marker.display()))
-        } else {
+        let marker_note = if marker.exists() { "marker present" } else { "marker absent" };
+        if crate::backend::agent_session::block_zones_look_incomplete(&wstore, &filestore) {
             VerifyOutcome::Mismatch(format!(
-                "channel store exists but {} is missing — the zone migration never completed on this data dir",
-                marker.display()
+                "an agent block still holds a snapshot whose agent :current zone is empty — recorded applied, zones not migrated ({})",
+                marker_note
             ))
+        } else {
+            VerifyOutcome::Ok(format!("every block snapshot has a populated agent :current zone ({})", marker_note))
         }
     }
 }

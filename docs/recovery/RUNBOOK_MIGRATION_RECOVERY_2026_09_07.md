@@ -76,7 +76,7 @@ Only for a confirmed `MISMATCH` from §4, and only after confirming a backup exi
    ```
    sqlite3 <data-dir>/db/objects.db "DELETE FROM db_migrations WHERE id = '0007_agents_consolidate';"
    ```
-   For `0002_block_zones_v1` also delete `<data-dir>/migration_agent_zones_v1.flag`. `0007` needs no marker removal: since Phase 0b its marker gate is content-checked and re-runs on its own when the target is empty.
+   Neither `0002_block_zones_v1` nor `0007_agents_consolidate` needs its flag file removed: since Phase 0b (`0007`) and Phase 2 (`0002`) both decide from the data, not the flag, and re-run safely over already-migrated rows.
 4. Relaunch. The runner takes a fresh backup, re-applies that migration, and marks it. Run `--verify` again.
 
 Do **not** delete `db_migrations` wholesale, and do not edit data tables by hand — re-running a migration is what the backup-then-apply path is for.

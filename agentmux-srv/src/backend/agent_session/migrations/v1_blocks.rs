@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! One-time migration: per-block zones → per-agent zones.
+//!
+//! Gated by the migration framework (`db_migrations`, via
+//! `migrations::m0002_block_zones_v1`), NOT by its own marker file — see
+//! `migrate_block_zones_v1`'s doc comment for what the marker is still for.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,7 +19,19 @@ use super::super::helpers::{now_ms, write_zone_file};
 use super::super::session_io::SNAPSHOT_FILE;
 use super::super::zone_naming::{agent_archive_zone, agent_current_zone, is_valid_definition_id};
 
-/// Marker file name for the per-data-dir one-shot migration gate.
+/// Marker file written under the data dir when the migration completes.
+///
+/// It is **evidence, not a gate**: `m0000_bootstrap` reads it (together with
+/// [`block_zones_look_incomplete`]) to stamp `0002` as already applied on an
+/// install that ran this migration before the framework existed, and
+/// `m0002`'s doctor check reports it. The migration itself no longer
+/// short-circuits on its presence — SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03
+/// Phase 2: a marker whose mere *existence* is trusted as "done" is exactly
+/// the shape that left `0007`'s target table empty (§1.2/F1); a restored
+/// `objects.db` beside a stale flag would have skipped every block's
+/// conversation for good. Whether work is needed is now decided from the
+/// data, and the work is content-idempotent, so running twice is safe
+/// without a flag.
 pub const MIGRATION_MARKER_V1: &str = "migration_agent_zones_v1.flag";
 
 /// Stats from `migrate_block_zones_v1`. Logged at INFO at startup.
@@ -23,33 +39,95 @@ pub const MIGRATION_MARKER_V1: &str = "migration_agent_zones_v1.flag";
 pub struct MigrationStats {
     pub blocks_scanned: usize,
     pub archives_written: usize,
+    /// Block snapshots whose bytes already existed as an archive for the
+    /// same agent — a re-run over migrated data, written nothing.
+    pub archives_already_present: usize,
     pub current_zones_seeded: usize,
     pub skipped_no_snapshot: usize,
     pub failures: usize,
 }
 
-/// One-shot migration of per-block agent session zones to per-agent
-/// zones. Gated by a marker file under `data_dir`; running twice is a
-/// no-op.
+/// The agent definition id a block carries, if it is an agent block with a
+/// valid one. Stored under `agentId` (current shape, set by `agent.open` +
+/// the frontend launch flow) or the legacy `agent:id`.
+fn agent_definition_id(block: &Block) -> Option<&str> {
+    let view = block.meta.get("view").and_then(|v| v.as_str()).unwrap_or("");
+    if view != "agent" {
+        return None;
+    }
+    let def_id = block
+        .meta
+        .get("agentId")
+        .and_then(|v| v.as_str())
+        .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
+        .unwrap_or("");
+    is_valid_definition_id(def_id).then_some(def_id)
+}
+
+/// Every archive snapshot already stored for `def_id`, by bytes. Read once
+/// per definition so the dedupe below is O(archives) per agent, not per
+/// block. Enumerates zone ids directly rather than through `list_archives`,
+/// which caps at 100 rows and reads previews this has no use for.
+fn existing_archive_snapshots(filestore: &FileStore, def_id: &str) -> Vec<Vec<u8>> {
+    let prefix = format!("agent:{}:archive:", def_id);
+    let Ok(zones) = filestore.get_all_zone_ids() else {
+        return Vec::new();
+    };
+    zones
+        .iter()
+        .filter(|z| z.starts_with(&prefix))
+        .filter_map(|z| filestore.read_file(z, SNAPSHOT_FILE).ok().flatten())
+        .collect()
+}
+
+/// Read-only content check: is there an agent block whose per-block
+/// snapshot has bytes, while its agent's `:current` zone is still empty?
+/// That is the state this migration exists to fix, so `true` means it has
+/// not (fully) run on this data — regardless of what any marker says.
 ///
-/// Failure mode: per-block errors are logged + counted; we do NOT
-/// abort startup. The marker file is written even on partial failure
-/// so we don't retry indefinitely — operators can delete the marker
-/// to force a re-run.
+/// Used by `m0000_bootstrap` (never stamp `0002` off the flag alone) and by
+/// `m0002`'s `verify()`. Never writes.
+pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> bool {
+    let Ok(blocks) = wstore.get_all::<Block>() else {
+        // Can't read the blocks table at all — nothing to judge. The
+        // migration's own run reports that as a failure; a doctor must not
+        // claim incompleteness it could not observe.
+        return false;
+    };
+    let mut current_populated: HashMap<String, bool> = HashMap::new();
+    for block in &blocks {
+        let Some(def_id) = agent_definition_id(block) else { continue };
+        let has_snapshot = matches!(filestore.stat(&block.oid, SNAPSHOT_FILE), Ok(Some(f)) if f.size > 0);
+        if !has_snapshot {
+            continue;
+        }
+        let populated = *current_populated.entry(def_id.to_string()).or_insert_with(|| {
+            matches!(filestore.stat(&agent_current_zone(def_id), SNAPSHOT_FILE), Ok(Some(f)) if f.size > 0)
+        });
+        if !populated {
+            return true;
+        }
+    }
+    false
+}
+
+/// One-shot migration of per-block agent session zones to per-agent
+/// zones. Content-idempotent: an archive is only written when no archive
+/// for that agent already holds the same bytes, and `:current` is only
+/// seeded when empty — so running twice (or over a data dir that a stale
+/// [`MIGRATION_MARKER_V1`] wrongly calls done) writes nothing twice. The
+/// framework's `db_migrations` row is the gate; the marker is written at the
+/// end as evidence only.
+///
+/// Failure mode: per-block errors are logged + counted; we do NOT abort
+/// startup. A `get_all::<Block>` failure returns early without the marker so
+/// `m0000`'s stamping cannot mistake it for a completed run.
 pub fn migrate_block_zones_v1(
     wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     data_dir: &Path,
 ) -> MigrationStats {
     let marker_path = data_dir.join(MIGRATION_MARKER_V1);
-    if marker_path.exists() {
-        tracing::debug!(
-            marker = %marker_path.display(),
-            "agent_session migration: marker present, skipping"
-        );
-        return MigrationStats::default();
-    }
-
     let mut stats = MigrationStats::default();
 
     let blocks: Vec<Block> = match wstore.get_all::<Block>() {
@@ -67,24 +145,13 @@ pub fn migrate_block_zones_v1(
     // Track the most-recently-modified block snapshot per definition_id.
     // Value: (modts_ms, snapshot_bytes).
     let mut per_def_latest: HashMap<String, (i64, Vec<u8>)> = HashMap::new();
+    // Archive bytes already on disk per definition, loaded on first use and
+    // extended as this run writes, so two blocks with identical snapshots
+    // within one run also collapse to one archive.
+    let mut known_archives: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
 
     for block in &blocks {
-        let view = block.meta.get("view").and_then(|v| v.as_str()).unwrap_or("");
-        if view != "agent" {
-            continue;
-        }
-        // The agent definition id is stored under either `agentId`
-        // (current shape, set by `agent.open` + frontend launch flow)
-        // or the legacy `agent:id`. Skip blocks without an id.
-        let def_id = block
-            .meta
-            .get("agentId")
-            .and_then(|v| v.as_str())
-            .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
-            .unwrap_or("");
-        if !is_valid_definition_id(def_id) {
-            continue;
-        }
+        let Some(def_id) = agent_definition_id(block) else { continue };
         stats.blocks_scanned += 1;
 
         // Read the per-block snapshot. Both missing and zero-byte are
@@ -118,10 +185,28 @@ pub fn migrate_block_zones_v1(
             }
         };
 
+        // 2) (tracked before 1 so a deduped archive still competes for
+        //    `:current`) Track the most-recently-modified per definition so
+        //    we can seed the `:current` zone after the scan.
+        let entry = per_def_latest
+            .entry(def_id.to_string())
+            .or_insert_with(|| (0, Vec::new()));
+        if snapshot_stat.modts > entry.0 {
+            *entry = (snapshot_stat.modts, snapshot_bytes.clone());
+        }
+
         // 1) Backfill an archive zone keyed on the block snapshot's
         //    createdts (closest available proxy for "when this
         //    conversation started"). Falls back to modts when
-        //    createdts is missing/zero.
+        //    createdts is missing/zero. Skipped when an archive with these
+        //    exact bytes already exists for this agent — the re-run case.
+        let archives = known_archives
+            .entry(def_id.to_string())
+            .or_insert_with(|| existing_archive_snapshots(filestore, def_id));
+        if archives.iter().any(|a| *a == snapshot_bytes) {
+            stats.archives_already_present += 1;
+            continue;
+        }
         let mut archive_ts: u64 = if snapshot_stat.createdts > 0 {
             snapshot_stat.createdts as u64
         } else if snapshot_stat.modts > 0 {
@@ -154,22 +239,14 @@ pub fn migrate_block_zones_v1(
             stats.failures += 1;
             continue;
         }
+        archives.push(snapshot_bytes);
         stats.archives_written += 1;
-
-        // 2) Track the most-recently-modified per definition so we
-        //    can seed the `:current` zone after the scan.
-        let entry = per_def_latest
-            .entry(def_id.to_string())
-            .or_insert_with(|| (0, Vec::new()));
-        if snapshot_stat.modts > entry.0 {
-            *entry = (snapshot_stat.modts, snapshot_bytes);
-        }
     }
 
     // 3) Seed `:current` for each definition from its
     //    most-recently-modified per-block snapshot. If a `:current`
-    //    zone is already populated (e.g. a partial prior migration
-    //    left it behind), skip — we don't want to overwrite live data.
+    //    zone is already populated (a prior run, or live data), skip — we
+    //    don't want to overwrite it.
     for (def_id, (_modts, bytes)) in per_def_latest {
         let current_zone = agent_current_zone(&def_id);
         let already = matches!(
@@ -194,18 +271,20 @@ pub fn migrate_block_zones_v1(
         }
     }
 
-    // Write marker — even on partial failure (see doc comment).
+    // Write the marker — evidence for m0000's pre-framework stamping and
+    // the doctor, never consulted by this function (see its doc comment).
     if let Err(e) = std::fs::write(&marker_path, b"v1\n") {
         tracing::warn!(
             marker = %marker_path.display(),
             error = %e,
-            "agent_session migration: marker write failed; migration may re-run on next startup"
+            "agent_session migration: marker write failed"
         );
     }
 
     tracing::info!(
         blocks_scanned = stats.blocks_scanned,
         archives_written = stats.archives_written,
+        archives_already_present = stats.archives_already_present,
         current_zones_seeded = stats.current_zones_seeded,
         skipped_no_snapshot = stats.skipped_no_snapshot,
         failures = stats.failures,

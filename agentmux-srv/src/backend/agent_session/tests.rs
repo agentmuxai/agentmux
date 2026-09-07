@@ -483,12 +483,74 @@ fn migration_is_idempotent() {
     let first = migrate_block_zones_v1(&wstore, &filestore, dir.path());
     assert_eq!(first.archives_written, 1);
     assert_eq!(first.current_zones_seeded, 1);
+    assert!(dir.path().join(MIGRATION_MARKER_V1).exists());
 
-    // Second run is gated by the marker.
+    // Second run is idempotent by CONTENT, not by the marker (hardening
+    // Phase 2): it scans the block again, finds its bytes already archived
+    // and `:current` already populated, and writes nothing.
     let second = migrate_block_zones_v1(&wstore, &filestore, dir.path());
-    assert_eq!(second.blocks_scanned, 0);
+    assert_eq!(second.blocks_scanned, 1);
     assert_eq!(second.archives_written, 0);
+    assert_eq!(second.archives_already_present, 1);
     assert_eq!(second.current_zones_seeded, 0);
+    assert_eq!(list_archives(&filestore, "def-a", 0).unwrap().len(), 1, "no duplicate archive");
+
+    // And the marker is not what makes it idempotent: delete it, run again,
+    // still nothing written.
+    std::fs::remove_file(dir.path().join(MIGRATION_MARKER_V1)).unwrap();
+    let third = migrate_block_zones_v1(&wstore, &filestore, dir.path());
+    assert_eq!(third.archives_written, 0);
+    assert_eq!(third.current_zones_seeded, 0);
+    assert_eq!(list_archives(&filestore, "def-a", 0).unwrap().len(), 1);
+    assert!(dir.path().join(MIGRATION_MARKER_V1).exists(), "re-written as evidence");
+}
+
+#[test]
+fn a_stale_marker_no_longer_skips_unmigrated_blocks() {
+    // The F1 shape for 0002 (SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03
+    // Phase 2): the flag says done, the data says otherwise. Before Phase 2
+    // the helper returned early on the flag and every block's conversation
+    // stayed unmigrated for good.
+    let dir = tempdir().unwrap();
+    let wstore = open_temp_wstore(dir.path());
+    let filestore = fresh_filestore();
+    std::fs::write(dir.path().join(MIGRATION_MARKER_V1), b"v1\n").unwrap();
+
+    let block = insert_agent_block(&wstore, "def-stale");
+    seed_block_snapshot(
+        &filestore,
+        &block,
+        r#"{"nodes":[{"type":"user_message","message":"orphaned"}]}"#,
+    );
+    assert!(block_zones_look_incomplete(&wstore, &filestore), "the content check sees the gap");
+
+    let stats = migrate_block_zones_v1(&wstore, &filestore, dir.path());
+    assert_eq!(stats.blocks_scanned, 1);
+    assert_eq!(stats.archives_written, 1);
+    assert_eq!(stats.current_zones_seeded, 1);
+    assert!(!block_zones_look_incomplete(&wstore, &filestore));
+    let (content, _) = read_session_state(&filestore, "def-stale").unwrap();
+    assert!(content.unwrap().contains("orphaned"));
+}
+
+#[test]
+fn block_zones_look_incomplete_is_false_with_no_blocks_empty_snapshots_or_populated_current() {
+    let dir = tempdir().unwrap();
+    let wstore = open_temp_wstore(dir.path());
+    let filestore = fresh_filestore();
+    assert!(!block_zones_look_incomplete(&wstore, &filestore), "nothing at all");
+
+    // An agent block with an EMPTY snapshot has nothing to migrate.
+    let empty = insert_agent_block(&wstore, "def-empty");
+    seed_block_snapshot(&filestore, &empty, "");
+    assert!(!block_zones_look_incomplete(&wstore, &filestore), "empty snapshot is not a gap");
+
+    // A populated `:current` satisfies every block of that agent.
+    let block = insert_agent_block(&wstore, "def-done");
+    seed_block_snapshot(&filestore, &block, r#"{"nodes":[{"type":"user_message","message":"x"}]}"#);
+    assert!(block_zones_look_incomplete(&wstore, &filestore));
+    write_zone_file(&filestore, &agent_current_zone("def-done"), SNAPSHOT_FILE, b"{\"nodes\":[]}").unwrap();
+    assert!(!block_zones_look_incomplete(&wstore, &filestore));
 }
 
 // ---- Two-tier picker Phase 1 migration tests ----
