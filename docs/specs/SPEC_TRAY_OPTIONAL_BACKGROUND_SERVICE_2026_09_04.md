@@ -194,8 +194,8 @@ Kept deliberately short — issue #2977 has the per-box detail and the correctio
 | WS1 macOS menu-bar item | Done; glyph + a real Quit click seen by the repo owner (`tray: quit_app forwarded`) | #3037 |
 | WS1 Linux (`ksni`) | **Not started.** After #3037 only `tray/linux.rs`, the dep and one `cfg` arm in `start_if_enabled` are missing; the Unix supervisor already calls `spawn_action_loop`. Needs a real desktop session, with/without the GNOME AppIndicator extension | — |
 | WS2 auto-start | Done on all three, with two deviations: no Windows code signing (blocks shipping), macOS writes a LaunchAgent plist rather than `SMAppService` | #2999 |
-| WS3 panel | Done as a CEF window at panel size; not reachable from the tray menu for now | #3002, #3013 |
-| WS4 consent / indicator / uninstall | Done; unattended *activity* audit still only records lifecycle | #2996, #2999, #3001 |
+| WS3 panel | **Partial.** The `open_panel` host IPC and a CEF window at panel dimensions exist, but it shows the normal UI (no simplified panel design yet) and the tray menu entry was removed per the repo owner, so it is not reachable from the tray | #3002, #3013 |
+| WS4 consent / indicator / uninstall | **Partial.** Opt-in pairing, honest running indicator and a real uninstall path are done; the unattended-activity audit still records only lifecycle, not what the service did, so that box stays open | #2996, #2999, #3001 |
 
 **§7.5.1's macOS gap is closed by #3037.** With the splash disabled, background-service mode now runs a headless accessory `NSApplication` pump on the main thread (`splash_mac::prepare_headless_app` + `pump_forever`), with the supervisor on a worker thread — the same layout the splash path uses — so the reopen delegate and the menu-bar item exist without a splash. That path is compiled and unit-tested but has not been run live.
 
