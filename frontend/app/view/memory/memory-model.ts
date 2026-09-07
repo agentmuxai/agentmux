@@ -411,3 +411,112 @@ export class MemoryViewModel implements ViewModel {
         this.unsubChanged();
     }
 }
+
+// -- ABF v0.2 §2.2 per-provider instructions: authoring-model seam --------
+//
+// The draft carries `instructions_by_provider` as a RAW JSON string, not a
+// parsed structure, and that is deliberate: reagent P1 on PR #2523 found that
+// editing any field of an imported bundle silently wiped its provider variants,
+// because `bundle_memory_upsert`'s ON CONFLICT UPDATE overwrites the column
+// unconditionally. Round-tripping the raw string is what fixed it.
+//
+// The authoring UI needs a list, so these three functions are the seam. The
+// wipe-safety property has to be enforced here: `parse` reports malformed input
+// as `malformed` WITHOUT yielding an empty list, so the UI can refuse to edit
+// and keep the original string byte-for-byte rather than serializing `{}` over
+// variants it merely failed to understand.
+
+export interface ProviderInstruction {
+    provider: string;
+    content: string;
+}
+
+export interface ParsedInstructionsByProvider {
+    entries: ProviderInstruction[];
+    /** True when the stored value is not a flat object of string values. The
+     *  caller MUST leave the raw string untouched in this case — an empty
+     *  `entries` here means "could not read", never "there is nothing". */
+    malformed: boolean;
+}
+
+/** Parse the stored JSON object into sorted, editable entries.
+ *
+ *  Empty/whitespace/`{}` are a legitimately empty set, not malformed — that is
+ *  the normal state of a bundle nobody has added a variant to. Anything that is
+ *  not an object of strings (array, scalar, null, or an object with a
+ *  non-string value) is malformed. */
+export function parseInstructionsByProvider(raw: string): ParsedInstructionsByProvider {
+    const trimmed = (raw ?? "").trim();
+    if (trimmed.length === 0) return { entries: [], malformed: false };
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(trimmed);
+    } catch {
+        return { entries: [], malformed: true };
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { entries: [], malformed: true };
+    }
+    const entries: ProviderInstruction[] = [];
+    for (const [provider, content] of Object.entries(parsed as Record<string, unknown>)) {
+        // Coercing a non-string here would rewrite the user's data on the next
+        // save; refusing to parse leaves it exactly as imported.
+        if (typeof content !== "string") return { entries: [], malformed: true };
+        entries.push({ provider, content });
+    }
+    entries.sort((a, b) => a.provider.localeCompare(b.provider));
+    return { entries, malformed: false };
+}
+
+/** Serialize edited entries back to the stored JSON-object form.
+ *
+ *  Provider keys are trimmed (a stray space would become a distinct variant,
+ *  and on export a distinct directory); content is never trimmed, since leading
+ *  and trailing whitespace in a system prompt is the author's business. Rows
+ *  with a blank key are dropped — they cannot be exported and would serialize
+ *  as a `""` key. */
+export function serializeInstructionsByProvider(entries: ProviderInstruction[]): string {
+    const out: Record<string, string> = {};
+    for (const { provider, content } of entries) {
+        const key = provider.trim();
+        if (key.length === 0) continue;
+        out[key] = content;
+    }
+    return JSON.stringify(out);
+}
+
+/** Why a provider key would not survive export, or `null` if it is fine.
+ *
+ *  Mirrors the export-side rule in `bundle_export.rs`, which runs each key
+ *  through `sanitize_context_relative_path` before writing
+ *  `instructions/<provider>/AGENTS.md` and SKIPS the variant with a warning if
+ *  it is unsafe. Surfacing that while the user is typing beats losing the
+ *  variant silently at export time. Advisory — the caller should warn, not
+ *  block, matching the Validate button's posture. */
+export function providerKeyProblem(provider: string): string | null {
+    const key = provider.trim();
+    if (key.length === 0) return "Provider key cannot be empty.";
+    if (key === "." || key === "..") return `"${key}" is not a usable directory name.`;
+    if (key.includes("/") || key.includes("\\")) {
+        return "Provider key cannot contain path separators.";
+    }
+    // eslint-disable-next-line no-control-regex
+    if (/[\x00-\x1f]/.test(key)) return "Provider key cannot contain control characters.";
+    return null;
+}
+
+/** Keys that appear more than once after trimming.
+ *
+ *  Export keeps exactly one of a colliding pair (sorted-first wins) and warns
+ *  about the rest, so duplicates mean silent data loss on export. */
+export function duplicateProviderKeys(entries: ProviderInstruction[]): string[] {
+    const seen = new Set<string>();
+    const dupes = new Set<string>();
+    for (const { provider } of entries) {
+        const key = provider.trim();
+        if (key.length === 0) continue;
+        if (seen.has(key)) dupes.add(key);
+        seen.add(key);
+    }
+    return [...dupes].sort();
+}

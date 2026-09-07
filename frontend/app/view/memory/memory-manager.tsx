@@ -26,6 +26,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
 import { BundleMcpSection } from "./BundleMcpSection";
+import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsSection";
 import { BundleSkillsSection } from "./BundleSkillsSection";
 
 import "./memory-view.scss";
@@ -389,7 +390,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             <label class="memory-view-field">
                                 <span class="memory-view-field-label">
                                     Instructions
-                                    <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. ABF v0.2 supports additional per-provider variants (instructions_by_provider) that override this for a specific harness; there's no authoring UI for those yet, but an imported bundle's variants round-trip through this form unchanged." />
+                                    <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. To override it for one specific harness, add a per-provider variant below; the default still applies to every provider without one." />
                                 </span>
                                 <textarea
                                     class="memory-view-textarea"
@@ -400,6 +401,19 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     }
                                     onContextMenu={showTextInputContextMenu}
                                     placeholder="System prompt. The agent's soul."
+                                />
+                            </label>
+
+                            <label class="memory-view-field">
+                                <span class="memory-view-field-label">
+                                    Per-provider instruction overrides
+                                    <FieldHelp text="ABF v0.2 §2.2. Each entry replaces the Instructions above when this bundle runs on that provider — it is an override, not an addition, and providers without an entry use the default unchanged. On export each becomes instructions/<provider>/AGENTS.md, so a key that is not a usable directory name is skipped; this form flags those before you save." />
+                                </span>
+                                <BundleProviderInstructionsSection
+                                    value={draft().instructions_by_provider}
+                                    onChange={(next) =>
+                                        updateDraft("instructions_by_provider", next)
+                                    }
                                 />
                             </label>
 

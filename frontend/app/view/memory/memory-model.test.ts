@@ -1,8 +1,16 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { draftFromMemory, draftToWire, emptyDraft } from "./memory-model";
+import { beforeEach, describe, expect, it, test, vi } from "vitest";
+import {
+    draftFromMemory,
+    draftToWire,
+    duplicateProviderKeys,
+    emptyDraft,
+    parseInstructionsByProvider,
+    providerKeyProblem,
+    serializeInstructionsByProvider,
+} from "./memory-model";
 
 // reagent P1, PR #2523: instructions_by_provider (ABF v0.2 §2.2) was
 // previously dropped by the edit round-trip. Since this form has no field
@@ -239,5 +247,103 @@ describe("validateDraft", () => {
         // change to the content it described.
         model.setValidation(null);
         expect(model.validationAtom()).toBeNull();
+    });
+});
+
+// -- ABF v0.2 §2.2 per-provider instructions: authoring-UI model layer --
+//
+// The authoring UI edits a parsed list, but the draft still carries the raw
+// JSON string, because that string is what round-trips (see the suite above,
+// which exists because reagent P1 on #2523 caught an edit silently wiping an
+// imported bundle's variants). These functions are the seam between the two,
+// so the wipe-safety property has to hold HERE or the UI reintroduces the bug.
+describe("instructions_by_provider authoring model", () => {
+    it("parses an object into sorted entries", () => {
+        const r = parseInstructionsByProvider('{"codex":"C","claude":"A"}');
+        expect(r.malformed).toBe(false);
+        expect(r.entries).toEqual([
+            { provider: "claude", content: "A" },
+            { provider: "codex", content: "C" },
+        ]);
+    });
+
+    it("treats empty/missing as an empty, editable set (not malformed)", () => {
+        for (const raw of ["", "   ", "{}"]) {
+            const r = parseInstructionsByProvider(raw);
+            expect(r.malformed).toBe(false);
+            expect(r.entries).toEqual([]);
+        }
+    });
+
+    // THE wipe-safety property. Malformed input must be reported as such and
+    // must NOT yield an empty entry list that the UI would then serialize back
+    // over the top of, destroying variants it merely failed to parse.
+    it("flags malformed JSON as malformed rather than as empty", () => {
+        for (const raw of ["not json", "[1,2]", '"a string"', "null", "42"]) {
+            const r = parseInstructionsByProvider(raw);
+            expect(r.malformed).toBe(true);
+            expect(r.entries).toEqual([]);
+        }
+    });
+
+    it("ignores non-string values rather than coercing them", () => {
+        const r = parseInstructionsByProvider('{"claude":"ok","codex":123}');
+        expect(r.malformed).toBe(true);
+        expect(r.entries).toEqual([]);
+    });
+
+    it("serializes entries back to a JSON object", () => {
+        expect(
+            serializeInstructionsByProvider([
+                { provider: "claude", content: "A" },
+                { provider: "codex", content: "C" },
+            ]),
+        ).toBe('{"claude":"A","codex":"C"}');
+    });
+
+    it("drops rows with a blank provider key on serialize", () => {
+        expect(
+            serializeInstructionsByProvider([
+                { provider: "  ", content: "orphaned" },
+                { provider: "claude", content: "A" },
+            ]),
+        ).toBe('{"claude":"A"}');
+    });
+
+    it("trims the provider key but never the content", () => {
+        expect(
+            serializeInstructionsByProvider([{ provider: " claude ", content: "  padded  " }]),
+        ).toBe(JSON.stringify({ claude: "  padded  " }));
+    });
+
+    it("round-trips parse -> serialize without altering content", () => {
+        const raw = JSON.stringify({ claude: ["line1", "line2"].join("\n"), codex: "  padded  " });
+        const { entries } = parseInstructionsByProvider(raw);
+        expect(serializeInstructionsByProvider(entries)).toBe(raw);
+    });
+
+    // Authoring-time mirror of the export-side rule
+    // (bundle_export.rs sanitize_context_relative_path): a key that is not a
+    // safe path segment is SKIPPED on export with a warning, so the variant is
+    // silently lost. Better to say so while the user is typing it.
+    it("rejects provider keys that would not survive export", () => {
+        for (const bad of ["", "   ", "a/b", "a\b", ".", "..", "with space/../esc"]) {
+            expect(providerKeyProblem(bad)).not.toBeNull();
+        }
+    });
+
+    it("accepts ordinary provider keys", () => {
+        for (const ok of ["claude", "codex", "gemini", "my-harness", "my_harness2"]) {
+            expect(providerKeyProblem(ok)).toBeNull();
+        }
+    });
+
+    it("flags duplicate keys, which export resolves by dropping all but one", () => {
+        const entries = [
+            { provider: "claude", content: "A" },
+            { provider: "claude", content: "B" },
+        ];
+        expect(duplicateProviderKeys(entries)).toEqual(["claude"]);
+        expect(duplicateProviderKeys([{ provider: "claude", content: "A" }])).toEqual([]);
     });
 });
