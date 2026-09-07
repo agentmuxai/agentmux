@@ -7,6 +7,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Accessor, createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import { resolveLanIndicator } from "./lan-indicator";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
@@ -375,6 +376,15 @@ const HostPopover = (): JSX.Element => {
     const lanDiscoveryEnabled = () => !!settingsAtom()?.["network:lan_discovery"];
     const lanDiscoveryError = lanDiscoveryErrorAtom;
 
+    // Glyph + label + state in one place (`lan-indicator.ts`), so the tooltip
+    // a user reads can never disagree with the glyph they see.
+    const lanIndicator = () =>
+        resolveLanIndicator({
+            enabled: lanDiscoveryEnabled(),
+            peerCount: lanCount(),
+            error: lanDiscoveryError(),
+        });
+
     // Toggle the network:lan_discovery setting. The backend's setconfig handler
     // calls LanDiscoveryController.apply, which starts/stops the mDNS daemon
     // live — no restart. On Windows, the first enable triggers the firewall
@@ -437,9 +447,22 @@ const HostPopover = (): JSX.Element => {
                 <span class="status-hostname">
                     {hostname}
                 </span>
-                <Show when={lanCount() > 0}>
-                    <span style={{ color: "var(--accent-color)", "margin-left": "4px" }}>{"◆"}</span>
-                </Show>
+                {/* Three states, always one of them rendered — see
+                    docs/retro/retro-lan-diamond-vanished-after-self-peer-fix-2026-09-06.md.
+                    Peer-count alone used to drive this, so the indicator
+                    disappeared entirely once #3025 stopped an instance
+                    discovering ITSELF as a phantom peer: a lone instance with
+                    discovery genuinely on then looked identical to one with it
+                    off. Enabled-but-idle and off are distinct facts and each
+                    now has its own glyph. */}
+                <span
+                    class="status-lan-diamond"
+                    classList={{ [`status-lan-diamond--${lanIndicator().state}`]: true }}
+                    data-tip={lanIndicator().label}
+                    aria-label={lanIndicator().label}
+                >
+                    {lanIndicator().glyph}
+                </span>
                 <Show when={muxbus.isConfigured() && muxbus.status() !== null}>
                     <span
                         class="status-muxbus-dot"
