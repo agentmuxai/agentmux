@@ -89,23 +89,28 @@ export function plausibleCitation(token) {
 
 /**
  * Map a cited token onto a tracked repo path.
- *   exact tracked path            -> that path
- *   unique tracked path ending in "/<token>" (token has a slash) -> that path
- *   unique tracked basename (token is a bare filename)           -> that path
- *   otherwise                     -> null (ambiguous or absent)
- * `tracked` is a Set of repo-relative paths; `byBasename` maps basename ->
- * array of paths.
+ *   exact tracked path            -> { kind: "resolved", path }
+ *   unique tracked path ending in "/<token>" (token has a slash) -> resolved
+ *   unique tracked basename (token is a bare filename)           -> resolved
+ *   several candidates            -> { kind: "ambiguous" }
+ *   none                          -> { kind: "absent" }
+ * Ambiguous and absent are kept apart on purpose: `reducer/tests.rs` matching
+ * three files is not evidence the file is gone, and "missing" is the report's
+ * strongest signal (codex P2 on #3068). `tracked` is a Set of repo-relative
+ * paths; `byBasename` maps basename -> array of paths.
  */
 export function resolveCitation(token, tracked, byBasename) {
-    if (tracked.has(token)) return token;
+    if (tracked.has(token)) return { kind: "resolved", path: token };
+    let hits;
     if (token.includes("/")) {
         const suffix = "/" + token;
-        const hits = [];
+        hits = [];
         for (const p of tracked) if (p.endsWith(suffix)) hits.push(p);
-        return hits.length === 1 ? hits[0] : null;
+    } else {
+        hits = byBasename.get(token) ?? [];
     }
-    const hits = byBasename.get(token) ?? [];
-    return hits.length === 1 ? hits[0] : null;
+    if (hits.length === 1) return { kind: "resolved", path: hits[0] };
+    return { kind: hits.length === 0 ? "absent" : "ambiguous" };
 }
 
 /**
@@ -127,14 +132,16 @@ export function classifyDoc({ doc, text, touched, tracked, byBasename, now, week
     const seen = new Set();
     for (const token of extractCitations(text)) {
         if (token === doc) continue;
-        const resolved = resolveCitation(token, tracked, byBasename);
-        if (resolved === null) {
+        const r = resolveCitation(token, tracked, byBasename);
+        if (r.kind === "ambiguous") continue;
+        if (r.kind === "absent") {
             // Only a path with a directory in it is a confident "this file
-            // is gone" — a bare `config.rs` that matches nothing (or several
-            // things) is not evidence of anything.
+            // is gone" — a bare `config.rs` that matches nothing is not
+            // evidence of anything.
             if (token.includes("/")) missing.push(token);
             continue;
         }
+        const resolved = r.path;
         if (resolved === doc || seen.has(resolved)) continue;
         seen.add(resolved);
         const t = touched.get(resolved);
@@ -170,7 +177,17 @@ export function lastTouchedMap(root) {
     return out;
 }
 
+/**
+ * Ask git, rather than infer: a shallow clone's `git log --name-only` still
+ * lists every path at the boundary commit, so the map is never empty there
+ * (codex P2 on #3068).
+ */
+function isShallow(root) {
+    return git(root, ["rev-parse", "--is-shallow-repository"]).trim() === "true";
+}
+
 export function sweep({ root = process.cwd(), weeks = 8, now = Math.floor(Date.now() / 1000) } = {}) {
+    const shallow = isShallow(root);
     const trackedList = git(root, ["ls-files", "-z"]).split("\0").filter(Boolean);
     const tracked = new Set(trackedList);
     const byBasename = new Map();
@@ -203,7 +220,7 @@ export function sweep({ root = process.cwd(), weeks = 8, now = Math.floor(Date.n
     return {
         generatedAt: new Date(now * 1000).toISOString(),
         weeks,
-        shallow: touched.size === 0,
+        shallow,
         counts: {
             docs: docs.length,
             noStatus,

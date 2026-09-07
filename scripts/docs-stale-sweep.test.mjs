@@ -48,15 +48,16 @@ describe("docs-stale-sweep resolveCitation", () => {
     ]);
 
     it("resolves exact paths, unique suffixes, and unique basenames", () => {
-        expect(resolveCitation("agentmux-srv/src/migrations/runner.rs", tracked, byBasename)).toBe("agentmux-srv/src/migrations/runner.rs");
-        expect(resolveCitation("migrations/runner.rs", tracked, byBasename)).toBe("agentmux-srv/src/migrations/runner.rs");
-        expect(resolveCitation("runner.rs", tracked, byBasename)).toBe("agentmux-srv/src/migrations/runner.rs");
+        const want = { kind: "resolved", path: "agentmux-srv/src/migrations/runner.rs" };
+        expect(resolveCitation("agentmux-srv/src/migrations/runner.rs", tracked, byBasename)).toEqual(want);
+        expect(resolveCitation("migrations/runner.rs", tracked, byBasename)).toEqual(want);
+        expect(resolveCitation("runner.rs", tracked, byBasename)).toEqual(want);
     });
 
-    it("refuses to guess between an ambiguous basename, and returns null for an absent path", () => {
-        expect(resolveCitation("main.rs", tracked, byBasename)).toBeNull();
-        expect(resolveCitation("src/main.rs", tracked, byBasename)).toBeNull();
-        expect(resolveCitation("agentmux-srv/src/gone.rs", tracked, byBasename)).toBeNull();
+    it("keeps ambiguous apart from absent — an ambiguous suffix is never 'missing'", () => {
+        expect(resolveCitation("main.rs", tracked, byBasename)).toEqual({ kind: "ambiguous" });
+        expect(resolveCitation("src/main.rs", tracked, byBasename)).toEqual({ kind: "ambiguous" });
+        expect(resolveCitation("agentmux-srv/src/gone.rs", tracked, byBasename)).toEqual({ kind: "absent" });
     });
 });
 
@@ -90,6 +91,16 @@ describe("docs-stale-sweep classifyDoc", () => {
         const r = classifyDoc({ ...base, touched, text: "**Status:** proposed\n`a/b/gone.rs` and `whatever.rs`" });
         expect(r.missing).toEqual(["a/b/gone.rs"]);
         expect(r.flagged).toBe(true);
+    });
+
+    it("does not count an ambiguous short path as missing (codex P2 on #3068)", () => {
+        const tracked2 = new Set([...tracked, "x/reducer/tests.rs", "y/reducer/tests.rs"]);
+        const byBasename2 = new Map([...byBasename, ["tests.rs", ["x/reducer/tests.rs", "y/reducer/tests.rs"]]]);
+        const touched = new Map([["docs/fixtures/SPEC_X.md", now - 100 * DAY]]);
+        const r = classifyDoc({ ...base, tracked: tracked2, byBasename: byBasename2, touched, text: "**Status:** active\n`reducer/tests.rs`" });
+        expect(r.missing).toEqual([]);
+        expect(r.drifted).toEqual([]);
+        expect(r.flagged).toBe(false);
     });
 
     it("does not flag a recently touched doc, or a stale one whose citations are all older than it", () => {
