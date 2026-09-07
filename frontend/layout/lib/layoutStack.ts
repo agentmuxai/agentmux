@@ -24,8 +24,20 @@
  * block within a stack works by forcing a remount, not by reactively
  * updating a live component in place. The remount itself is driven by the
  * tile renderer keying each leaf's subtree on `activeKeyFor(node)`
- * (`TileLayout.{win32,linux,darwin}.tsx`) instead of the bare node id — see
- * that key function's own comment for why.
+ * (`frontend/layout/lib/tilelayout-shared.tsx`, the two `<Key each={leafs()}>`
+ * call sites) instead of the bare node id — see that key function's own
+ * comment for why. That pointer used to read
+ * `TileLayout.{win32,linux,darwin}.tsx`; the per-platform copies were folded
+ * into one core in #3041 and the keying moved with them.
+ *
+ * COST, recorded because it is not obvious from here: keying the whole leaf
+ * means an in-pane tab switch tears down and rebuilds the leaf's ENTIRE
+ * subtree — `<Block>`, and therefore the pane header and the tab strip too,
+ * not just the view whose blockId actually changed. That rebuild is why
+ * `SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md`'s reveal gate hides the
+ * whole tile while it settles. See
+ * `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md` for why
+ * that is wider than it needs to be and what narrowing it would take.
  */
 
 import { findNode } from "./layoutNode";
