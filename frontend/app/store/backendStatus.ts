@@ -33,7 +33,7 @@ interface BackendStatusApi {
     getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>;
 }
 
-/// Wire up the Tauri event listeners that drive backendStatusAtom.
+/// Wire up the host event listeners that drive backendStatusAtom.
 ///
 /// Call once during app init (from initGlobalSignals).
 /// The api and reconnectWS parameters are injected so tests can pass mocks
@@ -71,7 +71,7 @@ export function initBackendStatusListeners(
     });
 
     // The backend-ready event may have already fired before this listener was
-    // registered (when initTauriApi resolved via invoke rather than waiting for
+    // registered (when the host API bootstrap resolved via invoke rather than waiting for
     // the event). Catch up by checking whether the backend is already up.
     api.getBackendInfo().then(() => {
         if (backendStatusAtom() === "connecting") {

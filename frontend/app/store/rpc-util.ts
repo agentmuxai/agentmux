@@ -19,7 +19,7 @@ function initWshrpc(tabId: string): WSControl {
         DefaultRouter.recvRpcMessage(event.data);
     };
 
-    // For Tauri: Get auth key from API and pass it to WebSocket
+    // Host app: get the auth key from the API and pass it to WebSocket
     // Browser WebSocket doesn't support custom headers, so wsutil.ts will
     // append it as a query parameter: ws://endpoint?authkey=xxx
     const authKey = getApi().getAuthKey();

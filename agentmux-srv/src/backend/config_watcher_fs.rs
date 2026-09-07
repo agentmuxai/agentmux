@@ -24,7 +24,7 @@ use super::wconfig::{self, ConfigState, SettingsType};
 /// Resolve the directory containing settings.json.
 ///
 /// Priority:
-/// 1. `AGENTMUX_SETTINGS_DIR` env var (set by Tauri host to app_config_dir)
+/// 1. `AGENTMUX_SETTINGS_DIR` env var (set by the host app to its config dir)
 /// 2. If [`agentmux_common::isolated_settings_enabled`] — the default for
 ///    every channel except `stable`, see
 ///    `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` —

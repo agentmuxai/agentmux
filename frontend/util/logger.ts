@@ -13,7 +13,7 @@ function log(level: string, module: string, message: string, data?: LogData) {
     try {
         getApi().sendLogStructured(level, module, message, data ?? null);
     } catch {
-        // Silently ignore if Tauri bridge not ready
+        // Silently ignore if the host bridge is not ready
     }
 }
 

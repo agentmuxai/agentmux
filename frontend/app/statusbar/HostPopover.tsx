@@ -411,7 +411,7 @@ const HostPopover = (): JSX.Element => {
             const info = await invokeCommand<HostInfo>("get_host_info", {});
             setHostInfo(info);
         } catch {
-            // Fallback for Tauri (doesn't have get_host_info yet)
+            // Fallback for a host build without get_host_info
             setHostInfo(null);
         }
         void muxbus.refresh();

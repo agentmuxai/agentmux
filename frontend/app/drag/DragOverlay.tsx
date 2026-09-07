@@ -7,7 +7,7 @@
  * Renders a full-window overlay when a cross-window drag is hovering
  * over this window. Shows a visual indicator that a drop will be accepted.
  *
- * Listens for "cross-drag-update" and "cross-drag-end" Tauri events.
+ * Listens for "cross-drag-update" and "cross-drag-end" host events.
  * Only visible when this window is the target of an active cross-drag.
  */
 

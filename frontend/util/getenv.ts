@@ -21,7 +21,7 @@ function getApi(): AppApi {
 export function getEnv(paramName: string): string {
     const win = getWindow();
 
-    // In Tauri, check window globals first (set by initTauriApi)
+    // In the host app, check window globals first (set by the CEF bootstrap)
     if (win != null) {
         const windowGlobalName = `__${paramName}__`;
         if ((win as any)[windowGlobalName] !== undefined) {

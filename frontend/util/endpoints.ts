@@ -6,7 +6,7 @@ import { getEnv } from "./getenv";
 const WebServerEndpointVarName = "WAVE_SERVER_WEB_ENDPOINT";
 const WSServerEndpointVarName = "WAVE_SERVER_WS_ENDPOINT";
 
-// Not memoized: endpoints are set asynchronously after module load (by setupTauriApi),
+// Not memoized: endpoints are set asynchronously after module load (by the CEF bootstrap),
 // so lazy() would cache "http://null" if called too early.
 export const getWebServerEndpoint = () => `http://${getEnv(WebServerEndpointVarName)}`;
 

@@ -78,7 +78,7 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
         >
             {/* CSS zoom (not font-size) is intentional: scales the full layout box so
                 @container breakpoints respond and the grid reflows responsively.
-                Tauri/WebKit handles zoom correctly; font-size only scales text. */}
+                Chromium handles CSS zoom correctly; font-size only scales text. */}
             <div style={{ zoom: zoom(), padding: "10px 5px" }}>
                 <QuickTips />
             </div>

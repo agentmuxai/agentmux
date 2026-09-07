@@ -4,7 +4,7 @@
 // CEF API shim — provides the same window.api (AppApi) interface
 // using the platform-agnostic invokeCommand()/listenEvent() from ipc.ts.
 //
-// This is the CEF equivalent of tauri-api.ts. Must be loaded before
+// The CEF host API bridge (successor of the old tauri-api.ts). Must be loaded before
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
