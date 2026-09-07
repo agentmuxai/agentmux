@@ -267,7 +267,23 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        column (same collision class as this file's own v20→v22 and
 ///        v24→v25 history, see those entries above). See
 ///        docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §5a.
-pub const OBJECT_SCHEMA_VERSION: i64 = 28;
+///   v29 — db_agents.session_id / status / started_at / ended_at: the
+///        agent's LATEST launch state, the four `db_agent_instances`
+///        columns the consolidated row never got (Phase 3a deliberately
+///        left them "on the block", but the recent-sessions picker, the
+///        pane close/reopen continuity write-back and the status-filtered
+///        instance list all kept reading them from the legacy table — the
+///        reason it could not be dropped). One row per agent ⇒ one launch
+///        state per agent; a continuation moves it to the new block/session.
+///        Backfilled from the legacy rows by
+///        `m0025_agents_launch_state_backfill` (latest instance per
+///        projection key), kept current by the instance dual-write, and
+///        the read flip in `SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase
+///        3b retires the legacy reads on top of it. No unique index on
+///        `db_agents(slug)` is added: template-launch projections copy
+///        their template's slug, so uniqueness stays a definition-level
+///        rule enforced by the slug collision scan in `agent_def_insert`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 29;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -565,13 +581,26 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             github_context       TEXT NOT NULL DEFAULT '',
             instance_name        TEXT NOT NULL DEFAULT '',
 
-            -- Latest launch's block (Phase 3c): pointer to the most-recent
-            -- session's block so the consolidated read can locate the
-            -- conversation snapshot without joining db_agent_instances. The
-            -- only transient per-launch field db_agents retains; the rest
-            -- (status/session_id/started_at/ended_at) live on the block and
-            -- retire with db_agent_instances.
+            -- Latest launch's block: pointer to the most-recent session's
+            -- block so the consolidated read can locate the conversation
+            -- snapshot without joining db_agent_instances. Was the only
+            -- per-launch field db_agents retained until v29 added the
+            -- four launch-state columns right below it.
             last_block_id        TEXT NOT NULL DEFAULT '',
+
+            -- Latest launch's state (v29, consolidation Phase 3b/3c). The
+            -- original 3a design left status/session_id/started_at/ended_at
+            -- to the block; in practice the recent-sessions picker, the
+            -- pane close/reopen continuity guarantee
+            -- (SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1)
+            -- and the status-filtered instance list all still read them from
+            -- db_agent_instances, which is what kept that table alive. One
+            -- row per agent means one launch state per agent: a continuation
+            -- moves these to the new block/session rather than adding a row.
+            session_id           TEXT NOT NULL DEFAULT '',
+            status               TEXT NOT NULL DEFAULT '',
+            started_at           INTEGER NOT NULL DEFAULT 0,
+            ended_at             INTEGER NOT NULL DEFAULT 0,
 
             -- Provenance
             created_at           INTEGER NOT NULL DEFAULT 0,
@@ -982,6 +1011,16 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v27: AgentMux-controlled, highest-priority Global Memory tier —
         // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
+        // v29: the agent's latest launch state on db_agents — the four
+        // db_agent_instances columns the consolidated row still lacked. See
+        // OBJECT_SCHEMA_VERSION's v29 doc comment above and the column doc in
+        // db_agents' CREATE TABLE. Backfilled from db_agent_instances by
+        // m0025_agents_launch_state_backfill; kept current by the instance
+        // dual-write until the legacy table is dropped.
+        "ALTER TABLE db_agents ADD COLUMN session_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN status TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN started_at INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE db_agents ADD COLUMN ended_at INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

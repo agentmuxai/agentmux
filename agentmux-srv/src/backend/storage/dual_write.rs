@@ -302,7 +302,11 @@ impl Store {
                     instance_name = ?7,
                     updated_at = ?8,
                     user_hidden = ?9,
-                    last_block_id = ?10
+                    last_block_id = ?10,
+                    session_id = ?11,
+                    status = ?12,
+                    started_at = ?13,
+                    ended_at = ?14
                  WHERE id = ?1",
                 params![
                     def.id,
@@ -315,6 +319,10 @@ impl Store {
                     now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
                     inst.block_id,
+                    inst.session_id,
+                    inst.status,
+                    inst.started_at,
+                    inst.ended_at,
                 ],
             )
         } else if is_continuation {
@@ -345,7 +353,11 @@ impl Store {
                     instance_name = ?7,
                     updated_at = ?8,
                     user_hidden = ?9,
-                    last_block_id = ?10
+                    last_block_id = ?10,
+                    session_id = ?11,
+                    status = ?12,
+                    started_at = ?13,
+                    ended_at = ?14
                  WHERE id = ?1 AND is_template = 0",
                 params![
                     root_id,
@@ -358,6 +370,10 @@ impl Store {
                     now_ms,
                     if inst.display_hidden { 1_i64 } else { 0_i64 },
                     inst.block_id,
+                    inst.session_id,
+                    inst.status,
+                    inst.started_at,
+                    inst.ended_at,
                 ],
             )
         } else {
@@ -375,7 +391,8 @@ impl Store {
                     created_at, updated_at, is_seeded, user_hidden,
                     last_block_id,
                     container_image, container_volumes, container_name,
-                    use_ambient_login
+                    use_ambient_login,
+                    session_id, status, started_at, ended_at
                  ) VALUES (
                     ?1, ?2, ?3, ?4,
                     0, ?5,
@@ -388,7 +405,8 @@ impl Store {
                     ?23, ?24, 0, ?25,
                     ?26,
                     ?27, ?28, ?29,
-                    ?30
+                    ?30,
+                    ?31, ?32, ?33, ?34
                  )
                  ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
@@ -399,7 +417,11 @@ impl Store {
                     instance_name = excluded.instance_name,
                     updated_at = excluded.updated_at,
                     user_hidden = excluded.user_hidden,
-                    last_block_id = excluded.last_block_id",
+                    last_block_id = excluded.last_block_id,
+                    session_id = excluded.session_id,
+                    status = excluded.status,
+                    started_at = excluded.started_at,
+                    ended_at = excluded.ended_at",
                 params![
                     inst.id,
                     name,
@@ -431,6 +453,10 @@ impl Store {
                     def.container_volumes,
                     def.container_name,
                     def.use_ambient_login,
+                    inst.session_id,
+                    inst.status,
+                    inst.started_at,
+                    inst.ended_at,
                 ],
             )
         };
@@ -462,20 +488,31 @@ impl Store {
         // instance was folded at create. The previous version keyed by
         // `inst.id` always and silently no-op'd on every folded
         // instance's lifecycle event.
-        let key = match Self::agents_projection_key_for_inst(&conn, &inst.id) {
-            Some((k, _)) => k,
+        let (key, is_folded) = match Self::agents_projection_key_for_inst(&conn, &inst.id) {
+            Some(k) => k,
             None => return Ok(()),
         };
-        // `instance_update` only touches block_id/session_id/status/
-        // github_context/ended_at. Of those, only `github_context` lands
-        // on db_agents (block/session/status/ended_at are not modelled
-        // on the consolidated row — they're block/session-machine
-        // concerns the consolidation deliberately drops). We DO refresh
-        // updated_at so a Phase-3b reader can sort by recency. Apply
-        // the same monotonic-floor trick as the fold branch in
-        // `agents_dual_write_instance_create` — wall clock alone
+        // `instance_update` touches block_id/session_id/status/
+        // github_context/ended_at. As of schema v29 every one of them is
+        // modelled on the consolidated row (the launch-state columns —
+        // see OBJECT_SCHEMA_VERSION's v29 entry). The row holds the agent's
+        // LATEST launch state, so the launch-state fields are taken from
+        // the newest instance in the chain, not from `inst`: an older
+        // chain member can still receive a late write (a delayed
+        // session/status capture from its old pane) after a continuation
+        // has superseded it, and mirroring that write would swap the
+        // continuation's session for the old one — resuming the wrong
+        // conversation (codex P1 on #3075). `github_context` is not launch
+        // state and mirrors from `inst` as before. `last_block_id` only
+        // moves when the newest launch actually has a block — an empty
+        // block_id must not erase the pointer My Agents uses to find the
+        // snapshot. We also refresh updated_at so a Phase-3b reader can
+        // sort by recency, with the same monotonic-floor trick as the fold
+        // branch in `agents_dual_write_instance_create` — wall clock alone
         // collides under millisecond resolution on fast successive
         // mutations.
+        let latest = Self::latest_launch_state_for_key(&conn, &key, is_folded)?
+            .unwrap_or_else(|| (inst.block_id.clone(), inst.session_id.clone(), inst.status.clone(), inst.ended_at));
         let global_prior: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(updated_at), 0) FROM db_agents",
@@ -487,11 +524,53 @@ impl Store {
         conn.execute(
             "UPDATE db_agents SET
                 github_context = ?1,
-                updated_at = ?2
+                updated_at = ?2,
+                session_id = ?4,
+                status = ?5,
+                ended_at = ?6,
+                last_block_id = CASE WHEN ?7 = '' THEN last_block_id ELSE ?7 END
              WHERE id = ?3 AND is_template = 0",
-            params![inst.github_context, now_monotonic, key],
+            params![inst.github_context, now_monotonic, key, latest.1, latest.2, latest.3, latest.0],
         )?;
         Ok(())
+    }
+
+    /// The `(block_id, session_id, status, ended_at)` of the NEWEST legacy
+    /// instance in the chain a projection key stands for — the state the
+    /// consolidated row must show. A folded key (`is_folded`) is a
+    /// user-clone definition id, whose launches and continuations all carry
+    /// that `definition_id`; a template-launch key is the chain head's own
+    /// id, whose descendants are found by walking `parent_instance_id`
+    /// downward. Newest by `created_at`, then id, so the choice is
+    /// deterministic on equal timestamps. `None` when no instance is found
+    /// (the caller falls back to the row it was handed).
+    fn latest_launch_state_for_key(
+        conn: &Connection,
+        key: &str,
+        is_folded: bool,
+    ) -> Result<Option<(String, String, String, i64)>, StoreError> {
+        let sql = if is_folded {
+            "SELECT block_id, session_id, status, ended_at
+             FROM db_agent_instances
+             WHERE definition_id = ?1
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1"
+        } else {
+            "WITH RECURSIVE chain(id) AS (
+                SELECT id FROM db_agent_instances WHERE id = ?1
+                UNION ALL
+                SELECT c.id FROM db_agent_instances c JOIN chain ON c.parent_instance_id = chain.id
+             )
+             SELECT i.block_id, i.session_id, i.status, i.ended_at
+             FROM db_agent_instances i JOIN chain ON i.id = chain.id
+             ORDER BY i.created_at DESC, i.id DESC
+             LIMIT 1"
+        };
+        match conn.query_row(sql, params![key], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))) {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Mirror `instance_set_hidden` into `db_agents.user_hidden`.

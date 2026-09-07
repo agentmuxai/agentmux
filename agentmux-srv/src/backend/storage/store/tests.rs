@@ -3104,6 +3104,143 @@
         assert_eq!(count_agents(&store, "id = 'inst-cont'"), 0);
     }
 
+    /// Schema v29 (agent consolidation Phase 3b, PR 1): the consolidated
+    /// row carries the agent's LATEST launch state, and every instance
+    /// write path keeps it current — create (template launch = own row),
+    /// partial update (session capture, status change, block move), and a
+    /// continuation (which moves the chain head's state to the new launch
+    /// rather than adding a row). This is what lets the Phase 3b readers
+    /// stop joining `db_agent_instances`.
+    #[test]
+    fn dual_write_instance_lifecycle_keeps_launch_state_current_on_db_agents() {
+        let store = make_store();
+        let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: "tpl-ls".to_string(),
+            slug: String::new(),
+            name: "Coder".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut tpl).unwrap();
+        let launch_state = |id: &str| {
+            let conn = store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT session_id, status, started_at, ended_at, last_block_id FROM db_agents WHERE id = ?1",
+                [id],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)),
+            )
+            .unwrap()
+        };
+
+        // Create: a template launch is its own row, launch state copied.
+        let head = AgentInstance {
+            id: "inst-ls".to_string(),
+            definition_id: "tpl-ls".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "blk-1".to_string(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 2000,
+            ended_at: 0,
+            created_at: 2000,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: "Maks".to_string(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        store.instance_create(&head).unwrap();
+        assert_eq!(launch_state("inst-ls"), (String::new(), "running".into(), 2000, 0, "blk-1".into()));
+
+        // Partial update: a session capture lands on the row; an update
+        // that carries no block leaves last_block_id alone.
+        store
+            .instance_update_partial(
+                "inst-ls",
+                &crate::backend::storage::InstanceUpdate { session_id: Some("sess-1".into()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(launch_state("inst-ls"), ("sess-1".into(), "running".into(), 2000, 0, "blk-1".into()));
+        store
+            .instance_update_partial(
+                "inst-ls",
+                &crate::backend::storage::InstanceUpdate {
+                    status: Some("stopped".into()),
+                    ended_at: Some(2500),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(launch_state("inst-ls"), ("sess-1".into(), "stopped".into(), 2000, 2500, "blk-1".into()));
+
+        // Continuation: no new row; the head's state moves to the new launch.
+        let cont = AgentInstance {
+            id: "inst-ls-2".to_string(),
+            parent_instance_id: "inst-ls".to_string(),
+            block_id: "blk-2".to_string(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            started_at: 3000,
+            created_at: 3000,
+            ended_at: 0,
+            ..head.clone()
+        };
+        store.instance_create(&cont).unwrap();
+        assert_eq!(count_agents(&store, "id = 'inst-ls-2'"), 0);
+        assert_eq!(launch_state("inst-ls"), (String::new(), "running".into(), 3000, 0, "blk-2".into()));
+        // ...and a session captured on the continuation reaches the head too.
+        store
+            .instance_update_partial(
+                "inst-ls-2",
+                &crate::backend::storage::InstanceUpdate { session_id: Some("sess-2".into()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(launch_state("inst-ls").0, "sess-2");
+
+        // A late write from the SUPERSEDED launch (its old pane finally
+        // reporting) must not swap the continuation's state back — the row
+        // shows the newest launch's state, not the writer's (codex P1 on
+        // #3075).
+        store
+            .instance_update_partial(
+                "inst-ls",
+                &crate::backend::storage::InstanceUpdate {
+                    session_id: Some("sess-stale".into()),
+                    status: Some("stopped".into()),
+                    ended_at: Some(3500),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(launch_state("inst-ls"), ("sess-2".into(), "running".into(), 3000, 0, "blk-2".into()));
+    }
+
     /// Reagent P1 + P2 on #1013 round 2 — pins the user-cloned-def
     /// branch of `agents_dual_write_instance_create` so it matches
     /// the backfill rule (`agents_consolidate.rs::backfill_instances`
