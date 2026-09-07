@@ -116,9 +116,29 @@ should_check() {
         echo "gen-docs-index: cannot resolve base ref '$base' — skipping."
         return 1
     fi
-    # INDEX.md itself counts: a hand-edit to it must still be caught.
-    if git diff --name-only --find-renames "$ref"...HEAD 2>/dev/null \
-        | grep -qE '^docs/specs/.*[.]md$'; then
+    # --name-status, not --name-only, and BOTH sides of a rename (Codex P2 on
+    # PR #3069). --name-only reports only a rename's DESTINATION, so moving a
+    # spec out of docs/specs/ (say, reclassifying it under docs/reports/)
+    # showed up as a non-spec path, skipped the check, and left the index
+    # carrying a row for a file no longer there. Verified against git 2.55:
+    # `--name-only --find-renames` prints just `docs/reports/X.md`, while
+    # `--name-status` prints `R100  docs/specs/X.md  docs/reports/X.md`.
+    #
+    # Deliberately UNLIKE check-doc-status.sh, which skips pure renames (R100)
+    # because relocating a file makes no claim about its Status. The opposite
+    # is true here: a pure rename is exactly the kind of change that alters
+    # the index, since the row is keyed on the filename.
+    #
+    # The generator itself is in scope too. A change to it can alter the
+    # generated output with no spec touched at all — this very PR changes it —
+    # and without this the committed INDEX.md would drift silently until some
+    # later spec PR failed for it, which is the unattributable failure this
+    # whole change exists to remove.
+    #
+    # INDEX.md itself counts as well: a hand-edit to it must still be caught.
+    if git diff --name-status --find-renames "$ref"...HEAD 2>/dev/null \
+        | awk '{ for (i = 2; i <= NF; i++) print $i }' \
+        | grep -qE '^(docs/specs/.*[.]md|scripts/gen-docs-index\.sh)$'; then
         return 0
     fi
     echo "gen-docs-index: no specs changed on this branch — index not asserted."
