@@ -75,7 +75,7 @@ Do **not** delete `db_migrations` wholesale, and do not edit data tables by hand
 
 ## 6. "another runner may still hold it"
 
-Since Phase 3 (#3062) migrations run under a cross-process lock: `~/.agentmux/shared/migrations.lock.db`, held with a SQLite `BEGIN IMMEDIATE` for the length of the batch. A second `agentmux-srv` (or a `migrate` CLI run) **waits up to 30 minutes** for the first, then fails with that message. It is an OS-level lock, so it cannot go stale: if you see the message, another process really is (or was, within the wait) migrating. Find it:
+Since Phase 3 (#3062) migrations run under two cross-process locks, taken in a fixed order: `~/.agentmux/shared/migrations.lock.db` (beside the shared store) and then `<data-dir>/db/migrations.lock.db` (beside the channel store), each held with a SQLite `BEGIN IMMEDIATE` for the length of the batch. Two locks because isolated-auth instances can share a data dir while resolving different shared stores. A second `agentmux-srv` (or a `migrate` CLI run) **waits up to 30 minutes** for the first, then fails with that message. It is an OS-level lock, so it cannot go stale: if you see the message, another process really is (or was, within the wait) migrating. Find it:
 
 ```
 # Windows
@@ -84,7 +84,7 @@ tasklist | findstr agentmux-srv
 pgrep -fl agentmux-srv
 ```
 
-Wait for it or stop it, then relaunch. Deleting `migrations.lock.db` is safe when no srv is running (it holds no data) but is never necessary.
+Wait for it or stop it, then relaunch. Deleting either `migrations.lock.db` is safe when no srv is running (they hold no data) but is never necessary.
 
 ## 7. What to include in a bug report
 
