@@ -56,6 +56,8 @@ mod m0022_identity_store_links_backfill;
 mod m0023_native_memory_versions_backfill;
 mod m0024_native_memory_backfill_from_fs;
 mod runner;
+#[cfg(test)]
+mod phase5_tests;
 
 pub use runner::count_pending_migrations;
 pub use runner::run_migrate_command;
