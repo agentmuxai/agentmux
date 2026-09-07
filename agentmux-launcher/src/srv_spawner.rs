@@ -111,16 +111,32 @@ impl std::fmt::Display for SrvSpawnError {
 pub const MIGRATION_FAILED_DIALOG_TITLE: &str = "AgentMux — database migration failed";
 
 /// Body for that dialog. Kept here (not in each supervisor) so Windows and
-/// Unix show the same words. Restart-to-retry is accurate: srv re-runs every
-/// unapplied migration on the next launch, and a pre-migration snapshot of the
-/// store was written before the attempt (bootstrap.rs `maybe_snapshot_pre_migration`).
+/// Unix show the same words.
+///
+/// Every sentence is something the launcher actually knows:
+/// - Restart-to-retry: srv re-runs every unapplied migration on the next
+///   launch (`run_pending_migrations` filters on `migration_is_applied`).
+/// - The backup ordering: `runner.rs::run_pending_migrations` calls
+///   `backup_stores` (→ `~/.agentmux/shared/backups/pre-migration-<ver>-<ts>/`)
+///   BEFORE applying anything, and returns `Err("... backup failed: ...")`
+///   without running a migration if that copy fails. So the reason text
+///   itself tells the user which case they are in; we state the ordering
+///   and let it do so, rather than asserting a backup exists.
+///
+/// We deliberately do NOT claim "your data has not been changed" or "a
+/// snapshot was taken": the backup step is one of the things that can be
+/// the failure, and bootstrap.rs's separate `maybe_snapshot_pre_migration`
+/// is best-effort (non-fatal on error, `Ok(None)` when it decides none is
+/// needed). An earlier revision of this text made that claim
+/// unconditionally — reagent P1 on PR #3043.
 pub fn migration_failed_dialog_body(reason: &str) -> String {
     format!(
         "AgentMux could not update its data store and will not start.\n\n\
          {}\n\n\
-         Your data has not been changed: a snapshot was taken before the \
-         attempt. Restart AgentMux to retry. If this keeps happening, run \
-         `muxlog srv` and report the error above.",
+         Restart AgentMux to retry. Migrations only run after a copy of the \
+         store is written to ~/.agentmux/shared/backups/pre-migration-*/ — \
+         if the error above is about writing that copy, nothing was changed. \
+         Run `muxlog srv` for the full log.",
         reason
     )
 }
@@ -741,7 +757,20 @@ mod migration_failed_tests {
         let body = migration_failed_dialog_body("open shared store: database is locked");
         assert!(body.contains("open shared store: database is locked"));
         assert!(body.contains("Restart AgentMux to retry"));
-        assert!(body.contains("snapshot"), "must tell the user their data is intact");
+        assert!(body.contains("shared/backups/pre-migration-"), "must say where the pre-run copy lives");
+    }
+
+    #[test]
+    fn dialog_body_never_asserts_a_backup_exists() {
+        // reagent P1 on #3043: `backup_stores` failing is itself one of the
+        // error paths, so the body must not promise a snapshot/backup was
+        // taken. The wording states the ordering (copy first, then migrate)
+        // and lets the reason text — which names the backup step when that
+        // is what failed — carry the rest.
+        let body = migration_failed_dialog_body("run_pending_migrations: backup failed: disk full");
+        assert!(!body.contains("has not been changed:"), "unconditional data-safety claim");
+        assert!(!body.contains("a snapshot was taken"), "unconditional snapshot claim");
+        assert!(body.contains("if the error above is about writing that copy, nothing was changed"));
     }
 
     #[test]
