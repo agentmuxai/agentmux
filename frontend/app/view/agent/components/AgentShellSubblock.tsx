@@ -217,7 +217,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // whole pane instead of just this shell. Mirrors term.tsx:212-231,
         // writing to the sub-block's OWN meta rather than the agent's.
         const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey) return;
+            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+            // (app.tsx) — let it bubble there instead of zooming just this
+            // sub-block. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+            if (!ev.ctrlKey || ev.shiftKey) return;
             const id = subBlockId();
             if (!id) return;
             ev.preventDefault();

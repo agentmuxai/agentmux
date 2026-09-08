@@ -40,6 +40,16 @@ export function getAllBlockComponentModels(): BlockComponentModel[] {
     return Array.from(blockComponentModelMap.values());
 }
 
+// `ViewModel`'s base interface does not declare `blockId` (concrete view
+// models each carry it as their own implementation detail, not a common
+// interface field), so a caller that needs BOTH the id and the model — e.g.
+// zoom.ts's all-panes stepper — cannot recover it from a plain
+// getAllBlockComponentModels() value. The map is already keyed on blockId;
+// this just exposes that key alongside its value instead of discarding it.
+export function getAllBlockComponentModelEntries(): [string, BlockComponentModel][] {
+    return Array.from(blockComponentModelMap.entries());
+}
+
 export function getFocusedBlockId(): string {
     const layoutModel = getLayoutModelForStaticTab();
     const focusedLayoutNode = layoutModel.focusedNode();
