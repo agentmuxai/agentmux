@@ -110,7 +110,7 @@ mislabeled in its own header.
 |---|---|---|
 | Restore-on-relaunch (Feature 1 of the 08-13 spec) | **Shipped** (PR #2560) despite that spec's header still saying "Proposed — not yet implemented" | `agentmux-srv/src/server/service/session_restore.rs` (875 lines), called from `window_close.rs:143,229` and `window_create.rs:56` |
 | Snapshot storage | **Shipped** | JSON blob at `Client.meta["session:last_topology"]` — `SNAPSHOT_META_KEY`, `session_restore.rs:41`. Generic `meta` sidecar, no schema migration needed |
-| Named saved "Layouts" (Feature 2 of the 08-13 spec) | Not built | Proposed only; **out of scope here** (§8) |
+| Named saved "Layouts" (Feature 2 of the 08-13 spec) | Not built | Proposed only; **out of scope here** (§6.2) |
 | Shutdown countdown + progress modal | **Proposed, not built** | `SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md` (PR #2981) |
 | Continuous/debounced auto-persist of the *layout tree* | **Shipped** | `frontend/layout/lib/layoutPersistence.ts:396-420` — 100ms debounce |
 | Interval + dirty-gated snapshot with serialized writer | **Shipped** | `frontend/app/view/agent/hooks/useSnapshotPersistence.ts:43,51,73,139` — `SNAPSHOT_INTERVAL_MS = 30_000` |
@@ -194,6 +194,23 @@ failed to save is told nothing, and finds out only on next launch.
 Four phases, independently shippable, in dependency order. Phase 0 alone
 fixes the motivating incident; Phase A delivers most of the remaining value.
 
+### 4.0 Phase 0 — handle OS shutdown notifications
+
+**Ship this first.** It is the smallest change here and independently
+valuable even if nothing else in this spec is ever built: today, an OS restart
+loses a workspace that a manual close would have preserved, which is a
+surprising and hard-to-explain inconsistency for users. (It does *not* fix the
+§1 incident — nothing needs to, that was intended behavior — but it is
+verified real per §1.1.)
+
+Handle `WM_QUERYENDSESSION`/`WM_ENDSESSION` on Windows and
+`applicationShouldTerminate:`/`NSWorkspaceWillPowerOffNotification` on macOS,
+routing both into the same snapshot-flush the graceful close already performs
+(§3.0). Ordering note: this must flush the snapshot but must **not** attempt
+the full `delete_workspace` teardown cascade — the OS is about to reclaim
+everything anyway, and the 5s-per-shell grace will not fit in the OS's
+shutdown budget. Save, then let the process die.
+
 ### 4.1 Phase A — continuous session record
 
 **Mechanism:** promote the session snapshot from write-once-at-close to a
@@ -252,23 +269,6 @@ the migration-marker reasoning already established in
 `SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md` Phase 0a/0b — a marker's
 *existence* is not proof of *effect*, so the marker must be written after the
 work it attests to, not before.
-
-### 4.0 Phase 0 — handle OS shutdown notifications
-
-**Ship this first.** It is the smallest change here and independently
-valuable even if nothing else in this spec is ever built: today, an OS restart
-loses a workspace that a manual close would have preserved, which is a
-surprising and hard-to-explain inconsistency for users. (It does *not* fix the
-§1 incident — nothing needs to, that was intended behavior — but it is
-verified real per §1.1.)
-
-Handle `WM_QUERYENDSESSION`/`WM_ENDSESSION` on Windows and
-`applicationShouldTerminate:`/`NSWorkspaceWillPowerOffNotification` on macOS,
-routing both into the same snapshot-flush the graceful close already performs
-(§3.0). Ordering note: this must flush the snapshot but must **not** attempt
-the full `delete_workspace` teardown cascade — the OS is about to reclaim
-everything anyway, and the 5s-per-shell grace will not fit in the OS's
-shutdown budget. Save, then let the process die.
 
 ### 4.3 Phase C — make the shutdown path worth trusting
 
