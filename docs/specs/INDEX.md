@@ -191,6 +191,7 @@ partial list.
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
 | [`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07`](SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md) | SPEC: GitHub review-notification agent detection — username-first, tag as fallback |
+| [`SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08`](SPEC_AGENT_LAUNCH_NAME_NO_AUTOFILL_2026_09_08.md) | SPEC: Agent launch name — no autofill, ghost-text placeholder only |
 | [`SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20`](SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md) | SPEC: Vault Icon on the Agent-Setup Button + Responsive Tabs in the Per-Agent "Armory" |
 | [`SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26`](SPEC_AGENT_PANE_AUTH_NOTIFICATIONS_2026_07_26.md) | Agent Pane Mount/Auth Notifications & Launch-Auth Reducer |
 | [`SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29`](SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md) | Spec: force stick-to-bottom on an agent pane's first-ever overflow |
