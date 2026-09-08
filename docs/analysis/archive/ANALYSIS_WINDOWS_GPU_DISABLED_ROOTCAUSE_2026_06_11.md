@@ -1,9 +1,40 @@
-> **Archived 2026-07-17:** Resolved. Root-caused issue #1345, now closed. Kept for
-> historical reference only.
+> **⚠️ RETRACTED 2026-06-11 — the root cause below is WRONG. Do not cite it.**
+>
+> This document blames the `agentmuxai/cef` fork's Windows `libcef.dll` for
+> being a "non-official / DCHECK-enabled build." That attribution was
+> **retracted by its own author** the same day, in issue #1345:
+>
+> - The Windows `libcef` at the time was **not** a custom or DCHECK build — it
+>   was the stock official CEF release from `cef-builds.spotifycdn.com`. The
+>   "source paths in logs" evidence cited below is normal for any CEF app
+>   (CEF ships `is_official_build=false` by design) and does **not** indicate
+>   a DCHECK build.
+> - **The actual cause:** the exe shipped without a Windows `supportedOS`
+>   application manifest, so Windows reported the OS as 6.2 (Win8). That sent
+>   Chromium's OS-version-gated GPU init down a path that CHECK-crashed the
+>   GPU process. Adding the manifest (#1354, merged 2026-06-11) made the OS
+>   report 10.0 → zero crashes → hardware GPU works.
+>
+> Kept only as a record of how the wrong conclusion was reached. **Anyone
+> scoping CEF fork/build work should not treat this as evidence that the fork's
+> build configuration causes GPU failures** — see
+> `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §7.3, which
+> flagged this doc as misleading for exactly that reason.
+>
+> (Separately: the custom codec-enabled `agentmuxai/cef` runtime builds that
+> AgentMux ships *today* postdate this document —
+> `SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`. The "stock
+> official CEF" statement above describes June 2026, not the current setup.)
+>
+> **Archived 2026-07-17:** Kept for historical reference only.
 
 # Root-Cause Analysis: Windows GPU Disabled (CEF GPU-process STATUS_BREAKPOINT)
 
-**Status:** Complete — empirically verified (CDP `SystemInfo`/`chrome://gpu`, CEF logs, A/B build, VS Code comparison)
+**Status:** historical — **conclusion RETRACTED** (see banner above; real cause
+was a missing `supportedOS` manifest, #1354). The investigation below was
+empirically thorough (CDP `SystemInfo`/`chrome://gpu`, CEF logs, A/B build, VS
+Code comparison) but reached the wrong root cause; kept as a record of the
+effort, not as a finding anyone should cite.
 **Author:** AgentX
 **Date:** 2026-06-11
 **This PR:** SwiftShader software-GL safety net (`agentx/gpu-hardware-fix`)

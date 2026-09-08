@@ -26,7 +26,18 @@ sandbox = ["cef/sandbox"]
 # Opt-in for dev_authfile unit tests that touch the filesystem and Win32 ACL APIs
 test-authfile = []
 # Enables call sites that depend on the AgentMux libcef fork
-# (https://github.com/a5af/cef, branch agentmux/7680-drag-rightclick-and-transparency).
+# (https://github.com/agentmuxai/cef). Two branches there matter and they are
+# NOT interchangeable:
+#   - `agentmux/7778-drag-rightclick-and-transparency` — where this patch was
+#     authored, and where the shipped runtime binaries were actually built
+#     from (e.g. macOS `148.23.23-codecs` was built at `6c570e249` on it).
+#   - `7778` — the milestone integration branch the above was merged into via
+#     that repo's PR #3. Also carries `BeginWindowDrag`.
+# As of 2026-09-08 those two have DIVERGED (the build commit is 4 ahead / 2
+# behind `7778`), so "which branch" matters when reproducing a build — prefer
+# the recorded build commit over either branch tip. The old
+# `agentmux/7680-…` branch this used to cite is CEF 146-era; the `a5af` org
+# also redirects to `agentmuxai` now.
 # Specifically: `_cef_window_t::begin_window_drag` (used by StartWindowDragTask).
 # Requires a matching patched cef-dll-sys via [patch.crates-io] in the workspace
 # Cargo.toml. Default OFF so unpatched checkouts compile — native left-click
