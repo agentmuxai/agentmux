@@ -8,7 +8,9 @@ verdict is **go** on targeting 152 directly. **Phases B–G not started.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3087),
-and surfaces a shipped-binary gap that outranks this upgrade (§5 of the report).
+and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
+registered in `patch.cfg`, so it is absent from the shipped macOS binary —
+fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
 Verified 2026-09-08.
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
@@ -89,10 +91,13 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 
 ## 4. Work breakdown
 
-### Phase A — Reconnaissance ✅ **COMPLETE 2026-09-08**
+### Phase A — Reconnaissance ⚠️ **MOSTLY COMPLETE 2026-09-08** (2 checks open)
 
 Output: `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`.
-**Verdict: go** on targeting 152 directly. Answers to the three tasks below:
+**Verdict: conditional go** on targeting 152 directly — two checks below are
+NOT closed (patches #3/#4 not test-applied against real 152 source; macOS Xcode
+pin unconfirmed), so do not treat this as clearance to start Phase B blind.
+Answers to the three tasks below:
 (1) patch inventory corrected — see §2's callout; `BeginWindowDrag` confirmed
 still not upstream at 152, so nothing was deleted; #3/#4 still need a real
 test-apply against a 152 checkout, which is Phase B's first task. (2) **yes**,
@@ -100,6 +105,11 @@ test-apply against a 152 checkout, which is Phase B's first task. (2) **yes**,
 the binding fork is still needed. (3) Windows and Linux toolchain pins are
 **unchanged** between the two Chromium tags; macOS's Xcode pin is
 **unconfirmed** — verify at Phase D build time.
+
+**Phase B already started** (opportunistically, since patch #1's check could be
+made real): patch #1 is verified to apply to Chromium 152 **unchanged**, and
+`7977` + `agentmux/7977-process-requirement` now exist in `agentmuxai/cef` with
+the patch registered in 152's `patch.cfg`.
 
 *(original task list, for reference)*
 1. Diff each of the four patches against upstream 7977; determine which are now upstream, which apply cleanly, which need real porting.
