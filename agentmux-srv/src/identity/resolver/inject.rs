@@ -158,6 +158,20 @@ struct IdentityBinding {
 /// direct link, and the m0013/m0014 migrations (#1927/#1952) backfilled
 /// direct links for every pre-existing bundle binding before the drop.
 ///
+/// `parent_template_id`: the launch's own `db_agents.parent_template_id`
+/// (empty for an agent that was never cloned from one). Agent-concept
+/// consolidation's definition flip (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md`
+/// Phase 3d, codex P1 on #3092) made `agent_def_get` resolve a template
+/// launch's own row for the first time, which enabled Step 5's
+/// definition-provider gate for that whole agent class — but binding an
+/// identity to a TEMPLATE (the Agent Setup modal's supported target) has
+/// always written the link under the TEMPLATE's id, never the launch's own
+/// id, since nothing writes a launch-scoped link. Without this fallback,
+/// enabling Step 5 would have converted every template launch with a
+/// genuinely configured account into a hard spawn failure — the direct
+/// link lookup below finds nothing under the launch's own id regardless of
+/// whether an account is actually bound, because it never was.
+///
 /// `broker` publishes `identity:no-direct-links` when the direct set is
 /// empty — a standing diagnostic for a non-sentinel identity resolving to
 /// zero links (e.g. a stale/migrated-away instance). `None` in tests /
@@ -165,6 +179,7 @@ struct IdentityBinding {
 fn resolve_bindings_for_instance(
     id_store: &Store,
     instance: &crate::backend::storage::store::AgentInstance,
+    parent_template_id: &str,
     broker: Option<&Arc<Broker>>,
 ) -> Vec<IdentityBinding> {
     let direct = id_store
@@ -178,6 +193,26 @@ fn resolve_bindings_for_instance(
             );
             Vec::new()
         });
+
+    if direct.is_empty() && !parent_template_id.is_empty() {
+        let from_template = id_store
+            .agent_identity_list_for_agent(parent_template_id)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    target: "identity",
+                    "template link fallback failed for template {}: {}",
+                    parent_template_id,
+                    e,
+                );
+                Vec::new()
+            });
+        if !from_template.is_empty() {
+            return from_template
+                .into_iter()
+                .map(|l| IdentityBinding { provider: l.provider, account_id: l.account_id })
+                .collect();
+        }
+    }
 
     if direct.is_empty() {
         // Distinct log line + event so a non-sentinel identity resolving
@@ -323,7 +358,7 @@ pub fn resolve_bound_oauth_config_dir(
         return None;
     }
 
-    let bindings = resolve_bindings_for_instance(identity_store, &instance, None);
+    let bindings = resolve_bindings_for_instance(identity_store, &instance, &def.parent_id, None);
     let binding = bindings
         .iter()
         .find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;
@@ -425,12 +460,16 @@ pub fn inject_identity_env_with_broker(
     // bundle already carries the canonical id doesn't get re-aliased
     // incorrectly (resolve_provider_alias is idempotent on an
     // already-canonical id, so this is safe either way).
-    let (use_ambient, def_provider) = match wstore.agent_def_get(&instance.definition_id) {
+    let (use_ambient, def_provider, parent_template_id) = match wstore.agent_def_get(&instance.definition_id) {
         Ok(Some(d)) => {
             let effective_provider = id_store.resolve_effective_provider_id(&d);
-            (d.use_ambient_login != 0, Some(resolve_provider_alias(&effective_provider).to_string()))
+            (
+                d.use_ambient_login != 0,
+                Some(resolve_provider_alias(&effective_provider).to_string()),
+                d.parent_id,
+            )
         }
-        Ok(None) => (false, None),
+        Ok(None) => (false, None, String::new()),
         Err(e) => {
             tracing::warn!(
                 target: "identity",
@@ -438,21 +477,24 @@ pub fn inject_identity_env_with_broker(
                 instance.definition_id,
                 e,
             );
-            (false, None)
+            (false, None, String::new())
         }
     };
 
     // Step 3: bindings — global, reads from id_store. Direct-links-only
     // as of Phase 3 slice 2 PR-B (the flip) — see resolve_bindings_for_instance's
     // doc comment for the transitional gap this closes and the one it
-    // doesn't (#1624 PR-C).
+    // doesn't (#1624 PR-C). Falls back to the launch's TEMPLATE's own links
+    // when the launch has none of its own (codex P1 on #3092) — binding an
+    // identity to a template has always written the link under the
+    // template's id, never a launch's.
     //
     // NOTE: an empty set no longer short-circuits — it falls through to the
     // definition-provider gate below (spec §2.2 edge case: an agent whose
     // oauth-class CLI provider has no binding at all is blocked unless the
     // ambient opt-in is set; the m0017 migration grandfathers pre-existing
     // linkless agents).
-    let bindings = resolve_bindings_for_instance(&identity_store, &instance, broker.as_ref());
+    let bindings = resolve_bindings_for_instance(&identity_store, &instance, &parent_template_id, broker.as_ref());
 
     // Step 4: per-binding resolution + env injection.
     //
@@ -1785,6 +1827,12 @@ mod tests {
     /// `spawn_still_blocked_when_bound_oauth_account_missing_and_flag_true`
     /// above — this test does not depend on it and sets it to demonstrate
     /// that non-effect explicitly.)
+    ///
+    /// This template genuinely has NO identity link either — the sibling
+    /// test `spawn_proceeds_when_a_template_launch_inherits_the_templates_
+    /// own_identity_link` covers the case that made enabling Step 5 for
+    /// launches unsafe on its own (codex P1 on #3092): a template WITH a
+    /// real bound account must still let its launches spawn.
     #[test]
     fn spawn_is_gated_for_a_template_launch_with_no_binding_where_it_used_to_be_invisible_to_the_gate() {
         let store = make_store();
@@ -1827,6 +1875,69 @@ mod tests {
             "a template launch's zero-binding oauth-class provider must now reach Step 5's gate, not skip it",
         );
         assert!(env.is_empty());
+    }
+
+    /// Codex P1 on #3092: enabling Step 5 for launch rows (the previous
+    /// test) would have converted every LEGITIMATELY-configured template
+    /// launch into a hard spawn failure, without this fallback. Binding an
+    /// identity to a template — the Agent Setup modal's supported target —
+    /// has always written the link under the TEMPLATE's id; nothing writes
+    /// a launch-scoped link. `resolve_bindings_for_instance` now falls back
+    /// to the template's own links when the launch has none of its own, so
+    /// a template's real binding still resolves (and injects) once launched.
+    #[test]
+    fn spawn_proceeds_when_a_template_launch_inherits_the_templates_own_identity_link() {
+        let store = make_store();
+        let mut tpl = gate_def(0);
+        tpl.id = "tpl-bound".to_string();
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+
+        let claude = make_account(
+            "acct-tpl",
+            "claude",
+            SecretRef::OAuthConfigDir { dir: test_config_dir("id-tpl-bound") },
+        );
+        store.identity_upsert(&claude).unwrap();
+        // The link is bound to the TEMPLATE's own id, exactly as the Agent
+        // Setup modal does today — never the launch's.
+        store.agent_identity_link("tpl-bound", "acct-tpl", "claude").unwrap();
+
+        let inst = crate::backend::storage::store::AgentInstance {
+            id: "launch-bound".to_string(),
+            definition_id: "tpl-bound".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-gate-bound".to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 0,
+            ended_at: 0,
+            created_at: 0,
+            identity_id: "id-tpl-bound".to_string(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        let canonical = store.instance_create(&inst).unwrap();
+        assert_eq!(canonical.id, "launch-bound", "sanity: a template launch creates its own row");
+        // Sanity: the launch's own row genuinely has no direct link — any
+        // pass here must come from the template fallback, not a stray
+        // direct one.
+        assert!(store.agent_identity_list_for_agent("launch-bound").unwrap().is_empty());
+
+        insert_block_for_agent(&store, "block-gate-bound", "launch-bound");
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-gate-bound", &mut env);
+
+        assert_eq!(res, Ok(()), "a template's own real binding must still let its launches spawn");
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some(test_config_dir("id-tpl-bound").as_str()),
+            "the template's bound config dir must actually be injected, not just pass the gate",
+        );
     }
 
     #[test]
