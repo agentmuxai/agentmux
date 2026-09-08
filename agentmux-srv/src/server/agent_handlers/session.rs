@@ -372,13 +372,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .filter(|d| !d.parent_id.is_empty())
                         .and_then(|d| defs.iter().find(|t| t.id == d.parent_id));
                     // The agent's own account links, falling back to the
-                    // template's. The fallback is legacy-shaped:
-                    // `db_agent_identity_links` still has its FK on
-                    // `db_agent_definitions`, so an agent that only exists as
-                    // a `db_agents` row (launched from a template) cannot
-                    // hold links of its own yet — its bindings live on the
-                    // template, exactly as before consolidation. Phase 3c
-                    // re-points that FK; this fallback goes with it.
+                    // template's. `db_agent_identity_links`' FK now targets
+                    // `db_agents` (Phase 3c, #3088) — a launch-only agent
+                    // CAN hold a link of its own — but nothing writes one
+                    // there yet: the Agent Setup modal, the only identity
+                    // binding UI, only ever targets a template or user
+                    // agent's own definition id. Until a launch-scoped
+                    // binding path exists, this fallback stays exactly as
+                    // necessary as it was before the FK moved; removing it
+                    // now would just make a launched agent's identity
+                    // silently disappear. Retire alongside that writer path
+                    // (Phase 3d).
                     let links_key = match links_by_agent.get(inst.definition_id.as_str()) {
                         Some(_) => inst.definition_id.as_str(),
                         None => template

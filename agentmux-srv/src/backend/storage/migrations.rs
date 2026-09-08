@@ -747,7 +747,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- config generation alongside the agent-level refs.
         --
         -- reagentx P0 review on PR #2639: NO foreign key to db_bundles here,
-        -- unlike the agent-level ref tables' FK to db_agent_definitions.
+        -- unlike the agent-level ref tables' FK to db_agents (v30: was
+        -- db_agent_definitions — see OBJECT_SCHEMA_VERSION's v30 doc comment).
         -- Bundles are authoritatively written through `id_store` (the
         -- shared store in a normal production install — see
         -- `bundle.rs::register_bundle_upsert`), not `wstore`/objects.db,
