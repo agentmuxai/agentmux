@@ -13,7 +13,7 @@ import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import { activeKeyFor, getNodeByBlockId } from "@/layout/lib/layoutNodeModels";
 import { closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
-import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
+import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
 // Same mock harness as layoutModel.test.ts.
@@ -181,6 +181,42 @@ describe("layoutStack", () => {
             expect(freshNodeModel.isFocused()).toBe(false);
         });
 
+        // reagent P1 on #3091: getNodeAdditionalPropertiesAtom used to be
+        // called UNCONDITIONALLY in getNodeModel, before the cache-miss
+        // check and outside the nested createRoot the P1 fix's own memos
+        // live in — so it built and leaked its own separate, uncached memo
+        // on every single getNodeModel/useNodeModel call (cache hits
+        // included, since it ran before the cache was even consulted), not
+        // just on the eviction path the other test above covers. Same
+        // frozen-vs-live differentiation, targeting THIS specific field.
+        it("disposes additionalProps' own memo too, not just the fields built inside the cache-miss block", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const node = model.treeState.rootNode!;
+
+            const evictedNodeModel = model.getNodeModel(node);
+            // The lone leaf already has real geometry (from
+            // createLayoutModel's mocked 800x600 bounding rect) — capture
+            // it rather than assume undefined.
+            const initialAddlProps = evictedNodeModel.additionalProps();
+            expect(initialAddlProps).toBeDefined();
+
+            pushBlockOntoStack(model, nodeId, "b2"); // triggers disposeNodeModel
+
+            // Set additionalProps for this node to a DIFFERENT value after
+            // disposal. A live memo would now read the new value; a
+            // disposed one stays frozen at its pre-disposal value.
+            model.setter(model.additionalProps, {
+                [nodeId]: { treeKey: "test" } as LayoutNodeAdditionalProps,
+            });
+            expect(evictedNodeModel.additionalProps()).toEqual(initialAddlProps); // frozen — proves disposal
+
+            // Contrast: a fresh NodeModel for the same node correctly sees
+            // the live value.
+            const freshNodeModel = model.getNodeModel(node);
+            expect(freshNodeModel.additionalProps()).toEqual({ treeKey: "test" });
+        });
+
         it("appending an already-present blockId re-activates it instead of duplicating the stack entry", () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
@@ -308,6 +344,52 @@ describe("layoutStack", () => {
             expect(data.blockStack).toEqual(["b2", "b3"]);
             expect(data.activeBlockId).toBe("b3"); // untouched — b1 wasn't active
             expect(onNodeDelete).toHaveBeenCalledWith(expect.objectContaining({ blockId: "b1" }));
+        });
+
+        // codex P1 on #3091: closing a BACKGROUND member leaves activeBlockId
+        // untouched, so activeKeyFor's key doesn't change and the leaf's
+        // DisplayNode component never remounts — it's STILL holding its
+        // existing NodeModel reference from its last real mount. The first
+        // version of this PR's leak fix disposed unconditionally here
+        // anyway, which doesn't just leak less — it actively FREEZES that
+        // still-in-use component's isFocused/isMagnified/innerRect/etc,
+        // since nothing will ever remount it to pick up a fresh NodeModel.
+        // Same frozen-vs-live differentiation as the eviction tests above,
+        // proving the opposite property this time: the memo must stay LIVE.
+        it("does NOT dispose the NodeModel when closing a background member — nothing remounts to replace it", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2"); // stack: [b1,b2], active b2
+            const node = model.treeState.rootNode!;
+
+            const stillMountedNodeModel = model.getNodeModel(node);
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+
+            void closeBlockInStack(model, nodeId, "b1"); // b1 is NOT active — background close
+
+            // Disposer must still be there — nothing should have consumed it.
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+
+            // Focus this node — a LIVE memo reacts; a wrongly-disposed one
+            // would stay frozen at its pre-close value (false, since this
+            // node was never explicitly focused above).
+            model.treeState.focusedNodeId = nodeId;
+            model.setter(model.localTreeStateAtom, { ...model.treeState });
+            expect(stillMountedNodeModel.isFocused()).toBe(true); // live — proves NOT disposed
+        });
+
+        it("DOES dispose the NodeModel when closing the active member — this case genuinely remounts", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2"); // stack: [b1,b2], active b2
+            const node = model.treeState.rootNode!;
+
+            const evictedNodeModel = model.getNodeModel(node);
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+
+            void closeBlockInStack(model, nodeId, "b2"); // b2 IS active — closing it changes activeBlockId
+
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(false); // disposer consumed — confirms the fix didn't overcorrect into never disposing
         });
 
         it("closing the ACTIVE member picks its right neighbor", async () => {

@@ -24,7 +24,6 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
     // the active member works via a remount, driven by the tile renderer's
     // key function, not by this value changing under a live NodeModel.
     const blockId = node.data.activeBlockId || node.data.blockId;
-    const addlPropsAtom = getNodeAdditionalPropertiesAtom(model, nodeid);
     if (!model.nodeModels.has(nodeid)) {
         // Create memos inside the model's own reactive root so they survive
         // component mount/unmount cycles during tab switches — AND inside a
@@ -35,8 +34,37 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
         // dispose just one node's set — `disposeNodeModel` below is what
         // actually uses the boundary this creates. See that function's
         // comment for why this matters (a real, previously-shipped leak).
+        //
+        // reagent P1 / codex P2 on #3091, two rounds: `getNodeAdditionalPropertiesAtom`
+        // used to be called UNCONDITIONALLY above this `if`, before the
+        // cache check, leaking an extra memo on every call including cache
+        // hits (round 1 fix: moved the CALL inside the cache gate). That
+        // was NOT enough — `getNodeAdditionalPropertiesAtom`'s own body
+        // wraps its `createMemo` in `model.runInModelRoot(...)`, which uses
+        // `runWithOwner(this._modelOwner, fn)`: this REPLACES whatever
+        // ambient owner is active at the CALL site with `_modelOwner`
+        // directly, so calling that function from inside the nested
+        // `createRoot` below still attached its memo to the MODEL's root,
+        // not to this node's disposal boundary — moving the call site
+        // changed WHEN it ran, not WHERE its memo was owned. `disposeNodeModel`
+        // still left it running. Fixed for real by NOT calling that
+        // function at all here — inlining its logic as a plain `createMemo`
+        // call, which (with no explicit `runWithOwner` of its own) correctly
+        // picks up whatever owner is ambient at ITS OWN call site: this
+        // nested `createRoot`. Confirmed by the same frozen-vs-live test
+        // pattern the disposal fix itself uses — round 1's version of this
+        // comment claimed the fix without that verification catching this;
+        // the standalone `getNodeAdditionalPropertiesAtom` export is now
+        // unused (zero other callers) and removed below rather than left as
+        // a landmine with the same owner-escaping behavior for a future
+        // caller.
         model.runInModelRoot(() => {
             createRoot((disposeThisNodeModel) => {
+                const addlPropsAtom = createMemo(() => {
+                    const addlProps = model.additionalProps();
+                    if (addlProps.hasOwnProperty(nodeid)) return addlProps[nodeid];
+                    return undefined;
+                });
                 model.nodeModelDisposers.set(nodeid, disposeThisNodeModel);
                 model.nodeModels.set(nodeid, {
                 additionalProps: addlPropsAtom,
@@ -179,21 +207,6 @@ export function activeKeyFor(node: LayoutNode): string {
     return node.data?.activeBlockId ? `${node.id}:${node.data.activeBlockId}` : node.id;
 }
 
-/**
- * Get a signal accessor containing the additional properties associated with a given node.
- * @param model The LayoutModel instance.
- * @param nodeId The ID of the node for which to retrieve the additional properties.
- * @returns A signal accessor containing the additional properties associated with the given node.
- */
-export function getNodeAdditionalPropertiesAtom(model: LayoutModel, nodeId: string): () => LayoutNodeAdditionalProps {
-    return model.runInModelRoot(() =>
-        createMemo(() => {
-            const addlProps = model.additionalProps();
-            if (addlProps.hasOwnProperty(nodeId)) return addlProps[nodeId];
-            return undefined;
-        })
-    );
-}
 
 /**
  * Get additional properties associated with a given node.
