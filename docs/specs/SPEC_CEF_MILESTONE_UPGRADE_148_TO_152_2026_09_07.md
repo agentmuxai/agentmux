@@ -2,7 +2,21 @@
 
 **Author:** AgentX
 **Created:** 2026-09-07
-**Status:** proposed — analysis complete, not yet implemented
+**Status:** active — Phase A mostly shipped 2026-09-08 (`agentmuxai/cef` PR #7,
+plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
+verdict is **conditional go** on targeting 152 directly — **two Phase A checks
+are still open** (patches #3/#4 not test-applied against real 152 source; macOS
+Xcode pin unconfirmed), so this is not clearance to start Phase B blind. See §4
+Phase A for both conditions. **Phase B started opportunistically** (patch #1
+verified against 152 and ported; `7977` + `agentmux/7977-process-requirement`
+exist in the fork); **Phases C–G not started.** The
+recon **corrects two errors in §2's patch table** (marked inline below), makes
+§4's Phase E work different from what's written there (see the callout in that
+section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
+and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
+registered in `patch.cfg`, so it is absent from the shipped macOS binary —
+fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
+Verified 2026-09-08.
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
 ---
@@ -37,7 +51,7 @@ A milestone upgrade is not "bump a number." It is "forward-port every patch, reb
 
 | # | Patch | Upstream status | Used by | Port required? |
 |---|---|---|---|---|
-| 1 | `agentmux_process_requirement.patch` (`GetPeerValidationPolicy() → kNoValidation`, the -67030 renderer fix) | Not upstream | All platforms | **Yes** — mandatory, registered in `patch/patch.cfg` |
+| 1 | `agentmux_process_requirement.patch` (`GetPeerValidationPolicy() → kNoValidation`, the -67030 renderer fix) | Not upstream | ~~All platforms~~ → **macOS only** ⁽¹⁾ | **Yes** — mandatory; ~~registered in `patch/patch.cfg`~~ → **was not registered or merged until 2026-09-08** ⁽²⁾ |
 | 2 | `CefWindow::BeginWindowDrag()` (native HTCLIENT-region window drag) | Not upstream as of 148 — **re-check against 152** | **Linux only.** Windows uses its own Win32 path (`post_win32_begin_move`) and never calls this — `scripts/cef-build/args-windows.gn:4` states the patch "never [was] needed" there; macOS uses AppKit drag regions. Gated by the `patched-libcef` feature | **Yes, if Linux native drag stays in scope** — nothing else depends on it |
 | 3 | HTCAPTION right-click fall-through to renderer | Not upstream as of 148 — **re-check against 152** | Title-bar right-click menus | Yes, if that UX is kept |
 | 4 | Transparency cascade (RWHView/WebContents bg) | **Partial** upstream since 148 | Window opacity | Re-verify; may be droppable |
@@ -46,6 +60,25 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 `scripts/cef-build/args.gn` (Linux), `args-darwin.gn` (macOS), `args-windows.gn` (Windows). These carry `proprietary_codecs=true`, `ffmpeg_branding="Chrome"`, HEVC/AC3/EAC3/Dolby Vision enables, Widevine, and (critically) the `dcheck_always_on=false` requirement — a from-source `is_official_build=false` build defaults DCHECKs *on*, which crashes on drag/close (see `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`).
 
 **Re-checking #2, #3 and #4 against upstream 152 is the first task in this spec, because the answer can delete work.** Between 146 and 148, several AgentMux patches (`CefV8BackingStore`, `CefComponentUpdater`, `blink_ax_viewport_collapse`, the task-manager shutdown fix) were upstreamed and stopped being ours to carry. The same may have happened again across four milestones.
+
+> **Phase A corrections (2026-09-08)** — full detail in
+> `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`:
+>
+> ⁽¹⁾ Patch #1 touches `base/apple/mach_port_rendezvous_mac.cc`. Mach ports are
+> Darwin-only and Chromium's `base/apple/` is not compiled on Windows/Linux, so
+> this patch is **macOS-only** and cannot affect the other two platforms.
+>
+> ⁽²⁾ It was neither registered in `patch.cfg` nor merged into `7778` — it sat
+> on an unmerged, diverged branch from 2026-06-02 until `agentmuxai/cef` PR #7
+> (2026-09-08). That PR also fixed a defect that would have broken *every*
+> source build from that branch: the patch's diff header used `a/`/`b/`
+> prefixes, which CEF's `git apply -p0` patcher cannot resolve.
+>
+> **Patch #2 (`BeginWindowDrag`) is confirmed still NOT upstream at 152** —
+> checked `include/views/cef_window.h` at upstream `7977` directly. It still
+> needs forward-porting, and the `cef-dll-sys` binding patch is still required.
+> Patches #3/#4 have **not** been test-applied against real 152 source (needs a
+> checkout); that is the first task for whoever takes Phase B.
 
 ---
 
@@ -63,7 +96,27 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 
 ## 4. Work breakdown
 
-### Phase A — Reconnaissance (no builds; do this before committing to the rest)
+### Phase A — Reconnaissance ⚠️ **MOSTLY COMPLETE 2026-09-08** (2 checks open)
+
+Output: `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`.
+**Verdict: conditional go** on targeting 152 directly — two checks below are
+NOT closed (patches #3/#4 not test-applied against real 152 source; macOS Xcode
+pin unconfirmed), so do not treat this as clearance to start Phase B blind.
+Answers to the three tasks below:
+(1) patch inventory corrected — see §2's callout; `BeginWindowDrag` confirmed
+still not upstream at 152, so nothing was deleted; #3/#4 still need a real
+test-apply against a 152 checkout, which is Phase B's first task. (2) **yes**,
+`cef 152.0.0+152.0.5` is published; `begin_window_drag` is **not** in it, so
+the binding fork is still needed. (3) Windows and Linux toolchain pins are
+**unchanged** between the two Chromium tags; macOS's Xcode pin is
+**unconfirmed** — verify at Phase D build time.
+
+**Phase B already started** (opportunistically, since patch #1's check could be
+made real): patch #1 is verified to apply to Chromium 152 **unchanged**, and
+`7977` + `agentmux/7977-process-requirement` now exist in `agentmuxai/cef` with
+the patch registered in 152's `patch.cfg`.
+
+*(original task list, for reference)*
 1. Diff each of the four patches against upstream 7977; determine which are now upstream, which apply cleanly, which need real porting.
 2. Check whether `cef-rs`/`cef-dll-sys` publishes a 152-compatible crate, and whether `begin_window_drag` is in its generated bindings (it wasn't for 148 — hence our `AgentU-asaf/cef-rs` patch fork).
 3. Confirm the CEF 152 build toolchain requirements haven't moved (VS version on Windows, Xcode on macOS, sysroot on Linux).
@@ -112,6 +165,28 @@ Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create
 **Changing those input defaults is not sufficient, and assuming otherwise would silently un-pin releases.** `.github/workflows/release.yml` passes `cef-runtime-tag: ""` explicitly to all three build jobs (lines 92, 111, 150), and every callee documents blank as "latest". A caller-supplied empty string overrides the callee default, so **release builds today do not pin CEF at all — they float to whatever the newest `agentmuxai/cef` release happens to be.** Phase E must therefore set an explicit tag in `release.yml`'s three call sites, not just in the callees' defaults.
 
 This is worth treating as its own finding, not merely a step: it means the CEF version in any given release artifact is determined by release *timing* rather than by anything in the commit, so two builds of the same commit can ship different Chromium versions. Pinning it explicitly is a prerequisite for the rollback story in Phase G being real.
+
+> **✅ FIXED 2026-09-08 — this finding no longer describes current behaviour.**
+> The two paragraphs above are kept for the reasoning; the defect itself is
+> closed, by three PRs in this repo:
+>
+> - **#3086** pinned all three `cef-runtime-tag` call sites to literal tags,
+>   replacing the blank-means-latest behaviour.
+> - **#3085** centralized those three pins into a single `cef-runtime-pins`
+>   job (so a bump can't update one platform and miss the others) and added a
+>   Chromium-**milestone** cross-check that fails the release if they diverge.
+>   The macOS half of that check is gated on `check-macos.outputs.available`,
+>   so a dormant macOS pin can't block a Windows/Linux-only release.
+> - **#3089** added a `workflow_dispatch` guard: an emergency rebuild must be
+>   dispatched *from the tag being rebuilt*, since a run's own workflow
+>   definition (and therefore its CEF pins) comes from the dispatch ref, not
+>   from `inputs.tag`.
+>
+> **What Phase E must do now is different:** update the three literals in
+> `release.yml`'s `cef-runtime-pins` job (one place, not three call sites),
+> and keep all three on the same Chromium milestone or the new gate will fail
+> the release by design. **Do not blank them back out.** Phase G's rollback
+> story is now real, as this finding required.
 
 **Fix the tag scheme while doing this (see §7.1).**
 
@@ -176,11 +251,26 @@ cef-macos-arm64-148.0.9                  ← different scheme again
 
 Three version schemes (Chromium `148.0.7778.180`, CEF `148.23.23`, CEF `148.0.9`) and ad-hoc suffixes (`-codecs`, `-2`, `-3`). A human can resolve these; **an automated drift checker cannot** — which matters directly, because the companion spec `SPEC_VERSION_DRIFT_REPORTER_2026_09_07.md` (in `a5af/shared-infrastructure`, under its own `docs/specs/`) proposes machine-comparing our shipped CEF against upstream. Recommend standardizing new tags on `cef-<platform>-<arch>-<chromium-version>[-rN]` and normalizing at read time for the historical ones.
 
-### 7.2 A stale comment in `agentmux-cef/Cargo.toml`
+### 7.2 A stale comment in `agentmux-cef/Cargo.toml` — ✅ FIXED 2026-09-08
 The `patched-libcef` feature comment cites `https://github.com/a5af/cef, branch agentmux/7680-…`. The org redirects (`a5af` → `agentmuxai`) and that branch does still exist, so nothing breaks — but it names a CEF 146-era branch while root `Cargo.toml` documents `7778` as current. Worth correcting to whatever milestone this upgrade lands on.
 
-### 7.3 A superseded root-cause doc
+> **Fixed:** now cites both relevant branches and distinguishes them, because
+> they are not interchangeable: `agentmux/7778-drag-rightclick-and-transparency`
+> (where the patch was authored AND where the shipped binaries were actually
+> built from — macOS `148.23.23-codecs` at `6c570e249`) versus `7778` (the
+> milestone integration branch it was merged into via that repo's PR #3). As of
+> 2026-09-08 those two have **diverged** — the build commit is 4 ahead / 2
+> behind `7778` — so the comment now says to prefer the recorded build commit
+> over either branch tip when reproducing a build. Also notes the `a5af` →
+> `agentmuxai` org redirect. Re-point if 152 lands on a new branch.
+
+### 7.3 A superseded root-cause doc — ✅ FIXED 2026-09-08
 `docs/analysis/archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md` attributes a Windows GPU failure to the fork's libcef being a non-official/DCHECK build. Its own tracking issue (#1345) retracts that: the real cause was a missing `supportedOS` manifest (#1354, merged 2026-06-11). The archived doc still reads as if the fork were at fault, which could mislead someone scoping this upgrade. Worth a status-correction header.
+
+> **Fixed:** the doc now opens with a RETRACTED banner stating the real cause
+> (missing `supportedOS` manifest, #1354) and explicitly warning against citing
+> it as evidence that the fork's build config causes GPU failures. Verified the
+> retraction against #1345's own comments before writing it.
 
 ---
 
