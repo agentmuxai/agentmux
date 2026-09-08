@@ -1149,6 +1149,103 @@ impl ReactiveHandler {
             .register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce)
     }
 
+    /// Like [`register_agent_with_nonce`], but never blocks: if the lock is
+    /// already held, this returns an error immediately instead of waiting
+    /// for it.
+    ///
+    /// The case that matters is this exact call running on the same OS
+    /// thread as an in-flight `inject_message` — the reactive-delivery spawn
+    /// fallback (`bootstrap.rs`'s `install_agent_turn_delivery`) runs a
+    /// respawn synchronously on the injecting thread via `block_in_place`,
+    /// and that respawn's own auto-registration (this method's caller,
+    /// `PersistentSubprocessController::spawn_process`) used to re-lock this
+    /// same non-reentrant `Mutex<Handler>` two modules away from the
+    /// call site `TurnRegistration::Skip` actually guards — permanently
+    /// deadlocking the reactive handler process-wide (every persistent
+    /// agent's first message after an idle period, or after any srv
+    /// restart). See `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
+    ///
+    /// Skipping in that case loses nothing: `inject_message` only reaches
+    /// the spawn fallback after resolving `target_agent` through
+    /// `agent_to_block`, so this exact agent/block pair is registered BY
+    /// CONSTRUCTION before this call is ever reached on that path — the
+    /// same "redundant, not just deadlock-prone" reasoning documented on
+    /// `TurnRegistration::Skip` for the sibling re-lock it guards.
+    ///
+    /// Genuine cross-thread contention is a real, separate risk this
+    /// method does not get to treat as harmless: `respawn_once_for_
+    /// leftover_queue` and other internal callers reach `spawn_process`
+    /// directly, with no `run_agent_turn` `Register`-tail behind them to
+    /// repair a skip — a losing race there can leave a live respawned
+    /// agent unregistered and unreachable until a human intervenes via
+    /// the UI (reagent P1 on PR #3084's review). The retry loop below
+    /// exists for exactly that case: a same-thread reentrant call can
+    /// never succeed no matter how many times it retries (nothing on
+    /// that call stack can release the lock), but ordinary cross-thread
+    /// contention — a few HashMap reads under the same lock elsewhere,
+    /// typically microseconds — very likely clears within the retry
+    /// budget. See the loop's own comment for the full reasoning.
+    ///
+    /// A skip's caller (`spawn_process`) is also responsible for not
+    /// trusting `registration_nonce` as this spawn's exit-time cleanup
+    /// key when the call returns `Err` here — the registration this
+    /// skip left in place (if any) still belongs to whichever nonce is
+    /// actually on record, not to this spawn's own unwritten one. See
+    /// `spawn_process`'s handling of this method's `Err` arm.
+    pub fn try_register_agent_with_nonce(
+        &self,
+        agent_id: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        registration_nonce: u64,
+    ) -> Result<(), String> {
+        // Bounded retry, not a single attempt (reagent P1 on PR #3084 —
+        // review of INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md's
+        // fix): this method has exactly one call site
+        // (`PersistentSubprocessController::spawn_process`'s
+        // auto-registration), shared by every caller that spawns a
+        // process — including `respawn_once_for_leftover_queue`, which
+        // calls `spawn_process` directly with no `run_agent_turn`
+        // `Register`-tail to repair a skip. A single `try_lock` cannot
+        // tell "the SAME thread already holds this lock" (the reentrant
+        // deadlock this method exists to avoid — retrying never helps,
+        // nothing on this call stack can release it) apart from "a
+        // DIFFERENT thread holds it briefly for an unrelated op" (e.g.
+        // `list_agents()` — a few HashMap reads, typically microseconds).
+        // Retrying costs the reentrant case a few bounded, wasted
+        // milliseconds and still correctly returns `Err`; it costs the
+        // ordinary-contention case nothing in the near-universal case
+        // where the next attempt lands after the brief holder is done —
+        // "bounded stalling beats silent loss", the same tradeoff
+        // `bootstrap.rs`'s `block_in_place` fallback already makes.
+        const MAX_ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.inner.try_lock() {
+                Ok(mut guard) => {
+                    return guard.register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce);
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return Err(
+                            "reactive handler lock busy after retrying — skipping \
+                             registration (either a same-thread reentrant call, \
+                             redundant by construction on that path, or contention \
+                             that outlasted the retry budget; see \
+                             INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md)"
+                                .to_string(),
+                        );
+                    }
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    return Err(format!("reactive handler mutex poisoned: {e}"));
+                }
+            }
+        }
+        unreachable!("loop always returns on its final attempt");
+    }
+
     pub fn unregister_agent(&self, agent_id: &str) {
         self.inner.lock().unwrap().unregister_agent(agent_id);
     }
@@ -1185,13 +1282,53 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().get_agent(agent_id).cloned()
     }
 
-    #[allow(dead_code)]
+    /// Used by `server/app_api/fleet.rs`'s ordinary (non-reentrant) request
+    /// handlers — no longer dead code, but NOT safe to call from
+    /// `spawn_process`'s skip-arm; see [`try_get_agent_by_block`] for why.
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
         self.inner
             .lock()
             .unwrap()
             .get_agent_by_block(block_id)
             .cloned()
+    }
+
+    /// Non-blocking counterpart to [`get_agent_by_block`], for the one
+    /// caller that can be running on a thread already holding this lock:
+    /// `spawn_process`'s handling of a skipped registration
+    /// (`try_register_agent_with_nonce` returning `Err`).
+    ///
+    /// reagent P0 on PR #3084 (caught twice — the fix for the P1 nonce-leak
+    /// finding introduced this exact regression on its first attempt): that
+    /// fix originally called the plain, blocking [`get_agent_by_block`]
+    /// from inside the skip arm. In the routine reentrant case — the same
+    /// thread already holds `self.inner` via an in-flight `inject_message`
+    /// — that blocking `.lock()` reproduces INCIDENT_2026_09_07's exact
+    /// permanent self-deadlock, on the very thread `try_register_agent_
+    /// with_nonce`'s own retry-then-fail was designed to protect. Same
+    /// bounded-retry reasoning as that method: a same-thread reentrant call
+    /// can never succeed (nothing on this call stack releases the lock) and
+    /// correctly returns `None` after exhausting the budget — the caller's
+    /// nonce-leak mitigation simply doesn't apply in that sub-case, which is
+    /// a strict improvement on the pre-this-PR baseline (no cleanup, but no
+    /// deadlock either), not a regression. Ordinary cross-thread contention
+    /// gets a real chance to succeed, same as the sibling method.
+    pub fn try_get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
+        const MAX_ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.inner.try_lock() {
+                Ok(guard) => return guard.get_agent_by_block(block_id).cloned(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return None;
+                    }
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => return None,
+            }
+        }
+        unreachable!("loop always returns on its final attempt");
     }
 
     pub fn list_agents(&self) -> Vec<AgentRegistration> {
