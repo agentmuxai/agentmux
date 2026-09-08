@@ -2791,6 +2791,11 @@ impl PersistentSubprocessController {
         // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
         let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
         *self.agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
+        // Defaults to this spawn's own nonce; overridden below if
+        // registration is skipped (reagent P1 on PR #3084 — see the `Err`
+        // arm just below for why `my_registration_nonce` alone is wrong
+        // once a skip is possible).
+        let mut exit_cleanup_nonce = my_registration_nonce;
         if let Some(ref agent_id) = agent_id_for_muxbus {
             // `_with_nonce` variants record this spawn's process-wide
             // registration nonce so this exact spawn's exit-handler can
@@ -2798,8 +2803,17 @@ impl PersistentSubprocessController {
             // blindly wiping a fallback respawn's (or replacement
             // controller's) fresh ones (issue #2363; codex P1 on PR
             // #2500 for why not the controller-local generation).
+            // `try_register_agent_with_nonce`, not the plain
+            // `register_agent_with_nonce` — this spawn can be running on the
+            // same thread as an in-flight `inject_message` (the
+            // reactive-delivery fallback's synchronous respawn), and that
+            // call already holds this same handler's lock. The plain
+            // version would re-lock it on that thread and deadlock the
+            // reactive handler process-wide. See
+            // `ReactiveHandler::try_register_agent_with_nonce`'s doc comment
+            // and `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
             match crate::backend::reactive::get_global_handler()
-                .register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
+                .try_register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
             {
                 Ok(()) => {
                     tracing::info!(
@@ -2829,12 +2843,46 @@ impl PersistentSubprocessController {
                         );
                     }
                 }
-                Err(e) => tracing::warn!(
-                    block_id = %self.block_id,
-                    agent_id = %agent_id,
-                    error = %e,
-                    "muxbus: persistent auto-register failed"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        agent_id = %agent_id,
+                        error = %e,
+                        "muxbus: persistent auto-register failed"
+                    );
+                    // reagent P1 on PR #3084: registration was skipped, so
+                    // `my_registration_nonce` was never written to the
+                    // handler. Using it as this spawn's exit-time cleanup
+                    // key would always mismatch whatever nonce IS on
+                    // record, making the exit-handler wrongly conclude "a
+                    // newer respawn already took over" and skip BOTH the
+                    // reactive-handler unregister and the cloud_subscriber
+                    // deregister — leaking both on every skip. Target
+                    // whichever nonce is actually on record instead, so
+                    // this spawn's own eventual exit can still correctly
+                    // clean it up. `registration_nonce == 0` (no nonce on
+                    // record at all) is handled safely by
+                    // `unregister_block_if_nonce` itself — it never
+                    // matches, so this degrades to today's no-cleanup
+                    // behavior rather than a wrong one.
+                    //
+                    // `try_get_agent_by_block`, NOT the plain
+                    // `get_agent_by_block` — this Err arm is reached
+                    // precisely when we might be on the same thread as an
+                    // in-flight `inject_message` (reagent P0 on PR #3084,
+                    // caught after the first attempt used the blocking
+                    // version here and reproduced INCIDENT_2026_09_07's
+                    // exact deadlock). In that reentrant case this
+                    // correctly returns `None` after its own retry budget
+                    // instead of hanging forever; `exit_cleanup_nonce`
+                    // then simply stays at its default, same safe
+                    // no-cleanup degradation as before this fix existed.
+                    if let Some(current) = crate::backend::reactive::get_global_handler()
+                        .try_get_agent_by_block(&self.block_id)
+                    {
+                        exit_cleanup_nonce = current.registration_nonce;
+                    }
+                }
             }
         }
 
@@ -3412,10 +3460,15 @@ impl PersistentSubprocessController {
         // unconditional clear could wipe a fallback respawn's fresh
         // registration (issue #2363, see clear_active_pid_if_pid).
         let pid_wait = pid;
-        // This exact spawn's registration identity, for the guarded
+        // This spawn's registration identity, for the guarded
         // muxbus/registry removals below (issue #2363 / codex P1 on PR
-        // #2500 — see `my_registration_nonce`'s own doc comment).
-        let nonce_wait = my_registration_nonce;
+        // #2500 — see `my_registration_nonce`'s own doc comment). NOT
+        // `my_registration_nonce` directly — `exit_cleanup_nonce` is that
+        // same value UNLESS registration was skipped above, in which case
+        // it's whatever nonce actually ended up on record instead (reagent
+        // P1 on PR #3084; see the skip arm's own comment for why using our
+        // own never-written nonce here would leak the registration).
+        let nonce_wait = exit_cleanup_nonce;
 
         tokio::spawn(async move {
             tokio::select! {
