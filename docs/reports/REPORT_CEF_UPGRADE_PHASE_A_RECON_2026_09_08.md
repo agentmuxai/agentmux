@@ -3,15 +3,19 @@
 **Author:** Agent5
 **Date:** 2026-09-08
 **Status:** active — Phase A's recon is delivered by this document and its one
-source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), **All four patches are now verified against real 152
-source** (§2.4/§2.5), closing the condition this report originally carried. One
-minor check is deferred: the macOS hermetic Xcode pin is unconfirmed (§4), which
-is a Phase D build-time check. Phase B's patch port is also done (§5b) — but
-nothing is built, so this stays `active`. This is the Phase A output that
+source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), **Patches #1/#2/#3 are verified against real 152
+source** (§2.4/§2.5). **Patch #4 is only PARTIALLY verified** — its Chromium-side
+file applies cleanly, but its five-commit CEF-side transparency cascade is not
+verified (§2.4 caveat, §5b). Also deferred: the macOS hermetic Xcode pin (§4), a
+Phase D build-time check. **Phase B's port is PARTIAL — 3 of 18 files** (§5b).
+Nothing is built. This is the Phase A output that
 `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates on.
-**Verdict:** **Go** on §3's "straight to 152" decision — the patch-applicability
-condition is closed (§2.4). Also corrects two errors in the spec's patch
-inventory, and records one shipped-binary gap (§5).
+**Verdict:** **Go** on §3's "straight to 152" decision — the *milestone target*
+is sound: nothing found makes 152 harder, and 16 of the 18 fork-modified CEF
+files are byte-identical upstream. **This is not a statement that the port is
+done or fully verified** — patch #4 is partially verified and Phase B is 3/18
+(§2.4, §5b). Also corrects two errors in the spec's patch inventory, and records
+one shipped-binary gap (§5).
 
 ---
 
@@ -23,7 +27,7 @@ inventory, and records one shipped-binary gap (§5).
 | Does `cef-rs`/`cef-dll-sys` have a 152-compatible crate? | **Yes** — `cef 152.0.0+152.0.5`, published 2026-09-07. |
 | Is `begin_window_drag` in its generated bindings? | **No** — same as 148, so the binding fork is still required. |
 | Have the build toolchain requirements moved? | **Windows: no. Linux: no.** macOS: unconfirmed, see §4. |
-| Go / no-go on targeting 152 directly? | **Go** — all four patches verified against real 152 source; the patch set moves for ~free. Only the macOS Xcode pin is deferred to Phase D. |
+| Go / no-go on targeting 152 directly? | **Go on the target**, not on readiness. #1/#2/#3 verified vs real 152 source; **#4 only partially** (§2.4). 16 of 18 CEF files are byte-identical upstream so most of the port is free, but **Phase B is 3/18** and 2 files genuinely drifted. macOS Xcode pin deferred to Phase D. |
 
 **A separate finding, not about 152:** patch #1 (the macOS -67030 renderer
 crash fix) was never registered in `patch/patch.cfg`, so no build on any
@@ -343,9 +347,12 @@ real porting cost.
 
 **Two conditions on that "go":**
 
-1. ~~**§2.4 is unfinished.**~~ **CLOSED** — all four patches are now verified
-   against real 152 source (§2.4, §2.5). This was the main condition; it no
-   longer blocks.
+1. **Patch applicability — PARTIALLY closed.** #1/#2/#3 are verified against
+   real 152 source (§2.4, §2.5). **#4 is not**: only its Chromium-side file was
+   test-applied; its five-commit CEF-side cascade is unverified (§5b). The
+   drift measurement (16 of 18 files byte-identical upstream) means the
+   remaining work is *probably* small, but "probably small" is not "verified" —
+   finish this with a checkout before Phase D.
 2. **§4's macOS toolchain row is unconfirmed**, not confirmed-fine. Establish
    the hermetic Xcode requirement on the actual machine before committing to a
    macOS Phase D slot.

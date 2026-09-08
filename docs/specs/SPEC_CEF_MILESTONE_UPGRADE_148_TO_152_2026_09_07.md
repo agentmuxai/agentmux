@@ -86,10 +86,12 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 > carrying it is nearly free: upstream never touched any of its three target
 > files across four milestones (`cmp`-identical 7778 ↔ 7977), so the port is a
 > copy rather than a forward-port. Done — see the report's §5b.
-> Patches #3/#4 **have since been test-applied** against real Chromium 152
-> source and apply cleanly, and patch #2's three target files are
-> `cmp`-identical between 7778 and 7977 — so all four are verified. See the
-> report's §2.4/§2.5.
+> Patch #3 **has since been test-applied** against real Chromium 152 source and
+> applies cleanly, and patch #2's three target files are `cmp`-identical between
+> 7778 and 7977. **Patch #4 is only partially verified** — its Chromium-side
+> file applies cleanly, but its five-commit CEF-side transparency cascade
+> (`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §3) is not verified. See the
+> report's §2.4/§2.5/§5b.
 
 ---
 
@@ -110,16 +112,19 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 ### Phase A — Reconnaissance ✅ **COMPLETE 2026-09-08** (1 minor check deferred to Phase D)
 
 Output: `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`.
-**Verdict: go** on targeting 152 directly. The patch-applicability condition is
-closed — all four patches verified against real 152 source (see the report's
-§2.4/§2.5). Only the macOS hermetic Xcode pin remains unconfirmed, which is a
-Phase D build-time check rather than a blocker on starting.
+**Verdict: go on the 152 target** — nothing found makes it harder, and 16 of the
+18 fork-modified CEF files are byte-identical upstream. **Not a readiness
+statement:** patches #1/#2/#3 are verified against real 152 source, **#4 only
+partially** (its CEF-side cascade is unverified), and Phase B is 3/18 files. The
+macOS hermetic Xcode pin also remains unconfirmed — a Phase D build-time check.
+See the report's §2.4/§2.5/§5b.
 Answers to the three tasks below:
 (1) patch inventory corrected — see §2's callout; `BeginWindowDrag` confirmed
-still not upstream at 152, so nothing was deleted. **All four patches are now
-test-applied/verified against real 152 source** (#1/#3/#4 by real
-`git apply -p0`; #2's three target files are `cmp`-identical between 7778 and
-7977) — report §2.4/§2.5. (2) **yes**,
+still not upstream at 152, so nothing was deleted. **Patches #1/#2/#3 are
+verified against real 152 source** (#1/#3 by real `git apply -p0`; #2's three
+target files `cmp`-identical between 7778 and 7977). **Patch #4 is only
+partially verified** — its Chromium-side file applies, its CEF-side cascade does
+not — report §2.4/§2.5/§5b. (2) **yes**,
 `cef 152.0.0+152.0.5` is published; `begin_window_drag` is **not** in it, so
 the binding fork is still needed. (3) Windows and Linux toolchain pins are
 **unchanged** between the two Chromium tags; macOS's Xcode pin is
