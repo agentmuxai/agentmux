@@ -38,6 +38,49 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
+      # Guards the CEF pinning fix below, per codex's review of that change
+      # (PR #3087): a workflow_dispatch run's OWN DEFINITION — including the
+      # cef-runtime-tag literals a few jobs down — is read from whatever ref
+      # GitHub resolved this run FROM (github.ref_name), which for a manual
+      # dispatch is normally main, the default branch. `inputs.tag` only
+      # controls what SOURCE gets checked out inside each job (the `ref:`
+      # lines below and in build-windows/linux/macos.yml) — it does NOT
+      # change which copy of this workflow file runs. So an emergency
+      # workflow_dispatch rebuild of an OLD tag, launched from main, would
+      # silently rebuild that release's SOURCE with WHATEVER CEF pins are
+      # on main today — reintroducing the exact "same tag, different
+      # Chromium runtime depending on when you happened to run it" gap the
+      # pinning fix exists to close, just moved from "any time" to "any time
+      # you forget to dispatch from the right ref."
+      #
+      # Fails loudly instead: workflow_dispatch must be launched FROM the
+      # tag being rebuilt (`gh workflow run release.yml --ref <tag> -f
+      # tag=<tag>`), so this run's own release.yml — and its CEF pins — are
+      # read from that tag's own commit, matching what it originally shipped
+      # with. The push-tag trigger is unaffected: github.ref_name already
+      # equals the pushed tag there, so this condition is trivially satisfied
+      # and no inputs.tag exists to compare against.
+      - name: Guard — workflow_dispatch must run from the tag being rebuilt
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          # codex P2 (round 2): git ref/tag names permit backticks, $(), quotes
+          # and ; — git-check-ref-format does NOT exclude shell metacharacters,
+          # only things like spaces and control chars — so github.ref_name is
+          # NOT safe to treat as inert just because it's "GitHub-controlled."
+          # Raw ${{ }} interpolation is substituted into this YAML string
+          # BEFORE bash ever parses it, so an attacker-crafted ref name could
+          # inject arbitrary shell commands here, running with this job's own
+          # permissions. Both values go through env: now — REF_NAME added
+          # alongside the TAG hardening from round 1 — and are referenced only
+          # as quoted shell variables from here on.
+          TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$REF_NAME" != "$TAG" ]; then
+            echo "::error::This run's own workflow definition (including the CEF runtime pins a few jobs down) comes from '$REF_NAME' — the ref you dispatched from — not from the 'tag' input ('$TAG'). Rebuilding an old release from any ref other than that release's own tag risks shipping it with today's (possibly newer) CEF pins instead of what it originally shipped with. Re-run with: gh workflow run release.yml --ref $TAG -f tag=$TAG"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
