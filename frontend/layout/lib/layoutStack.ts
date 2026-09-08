@@ -141,8 +141,20 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         const nextActive = nextStack[Math.min(idx, nextStack.length - 1)];
         node.data.activeBlockId = nextActive;
         node.data.blockId = nextActive;
+        // codex P1 on #3091: dispose ONLY here, inside this branch — this
+        // is the ONLY case where activeKeyFor's key actually changes, so
+        // it's the only case where the leaf genuinely remounts. Closing a
+        // BACKGROUND (non-active) member leaves activeBlockId untouched:
+        // the key doesn't change, the DisplayNode component stays mounted,
+        // and it's STILL holding a reference to this exact NodeModel via
+        // whatever `useNodeModel()` call it made at its last real mount.
+        // Disposing unconditionally (the bug this comment replaces) would
+        // tear down that STILL-IN-USE component's isFocused/isMagnified/
+        // innerRect/etc out from under it — not a leak, an active
+        // regression: focus/magnify/geometry would freeze at whatever they
+        // were the instant a completely unrelated background tab closed.
+        disposeNodeModel(model, nodeId);
     }
-    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();

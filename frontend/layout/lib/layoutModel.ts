@@ -75,7 +75,6 @@ import {
     getNodeModel as getNodeModelImpl,
     cleanupNodeModels as cleanupNodeModelsImpl,
     getNodeByBlockId as getNodeByBlockIdImpl,
-    getNodeAdditionalPropertiesAtom as getNodeAdditionalPropertiesAtomImpl,
     getNodeAdditionalPropertiesById as getNodeAdditionalPropertiesByIdImpl,
     getNodeTransformById as getNodeTransformByIdImpl,
     getNodeRectById as getNodeRectByIdImpl,
@@ -870,10 +869,6 @@ export class LayoutModel {
 
     getNodeByBlockId(blockId: string): LayoutNode {
         return getNodeByBlockIdImpl(this, blockId);
-    }
-
-    getNodeAdditionalPropertiesAtom(nodeId: string): () => LayoutNodeAdditionalProps {
-        return getNodeAdditionalPropertiesAtomImpl(this, nodeId);
     }
 
     getNodeAdditionalPropertiesById(nodeId: string): LayoutNodeAdditionalProps {
