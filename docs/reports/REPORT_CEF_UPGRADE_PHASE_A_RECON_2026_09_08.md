@@ -111,7 +111,7 @@ because it edits CEF's *own* sources rather than Chromium's.
 | Patch | Target(s) | Method | Result |
 |---|---|---|---|
 | #3 `views_caption_rightclick_passthrough` | `ui/views/widget/desktop_aura/window_event_filter_linux.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
-| #4 `rwhv_background_opaque_check` | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
+| #4 `rwhv_background_opaque_check` (**Chromium-side file only — NOT all of patch #4**) | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
 | #2 `BeginWindowDrag` | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` | `cmp` upstream 7778 vs 7977 | **all three byte-identical** → port is mechanical |
 
 Patch #2's result is the notable one: **upstream CEF did not touch any of its
@@ -123,9 +123,16 @@ there is ~103 changed lines across the three files.
 Note also that the spec lists four files for patch #2; `libcef/browser/views/window_view.cc`
 contains no `BeginWindowDrag` reference on either side and is **not** part of it.
 
-**Consequence: the patch set costs essentially nothing to move to 152.** The
-expensive part of this upgrade is entirely the rebuilds, as §3 of the spec
-predicted — but for a stronger reason than it assumed.
+> **Caveat on patch #4 (Codex, PR #3095).** The row above covers only patch #4's
+> single *Chromium-side* file. Patch #4's transparency cascade is five coupled
+> **CEF-side** commits as well; those are part of the 18-file surface in §5b and
+> are **not** all verified. Treat #1/#2/#3 as verified and #4 as partially
+> verified.
+
+**Consequence: most of the patch surface costs little to move to 152** — 16 of
+18 fork-modified CEF files are byte-identical upstream, so they copy rather than
+port. But **2 genuinely drifted** and need real merge + compile work (§5b), and
+the rebuilds remain the dominant cost as §3 of the spec predicted.
 
 ### 2.5 Patch #1 verified to apply cleanly to Chromium 152
 
@@ -260,9 +267,35 @@ Recorded so the next person doesn't repeat it.
 
 ---
 
-## 5b. Phase B — patch port to 7977 (done 2026-09-08)
+## 5b. Phase B — patch port to 7977 (⚠️ PARTIAL — scope correction)
 
-All four patches are ported. Branch layout mirrors the 7778 lineage:
+> **Scope correction (2026-09-08, Codex review on PR #3095).** An earlier
+> revision said "all four patches are ported" and §2.4 said all four were
+> "verified." **Both over-claimed patch #4.** Patch #4 is not the single
+> `rwhv_background_opaque_check.patch` file I tested — per
+> `SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §3 it is **five tightly
+> coupled CEF-side commits** (WebContents propagation, RWHView update, a
+> `WebContentsObserver` for renderer swaps, keeping it alive across process
+> swaps, deferred top-level transparent background) which that spec says
+> "should be ported as a unit."
+>
+> Measured properly: **18 hand-written CEF source files** differ between
+> upstream 7778 and the fork's shipped source. **I ported 3.**
+
+### Actual porting surface
+
+| | Count | Meaning |
+|---|---|---|
+| Fork-modified CEF source files | **18** | `libcef/**` + `include/{views,internal}/**`, excluding generated `capi`/`libcef_dll` |
+| Byte-identical upstream 7778 ↔ 7977 | **16** | mechanical copy — correct by construction |
+| **Drifted, need real forward-porting** | **2** | `include/internal/cef_types.h`, `libcef/renderer/render_manager.cc` |
+| Ported so far | **3** | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` |
+
+The *shape* of the earlier conclusion survives — most of the port is mechanical
+because upstream barely touched this surface in four milestones — but "done" was
+wrong, and the two drifted files need a checkout to merge and compile-check.
+
+### Branch layout (mirrors the 7778 lineage)
 
 | Branch | Contents |
 |---|---|
@@ -283,8 +316,10 @@ registered on the 152 branch. This is the same divergence noted in §5.1: the
 build branch and the integration branch are 4 ahead / 2 behind each other, and
 they do not contain the same patch set.
 
-**Still unbuilt.** Phase B is source-only; nothing here is compiled or tested,
-and `agentmuxai/cef` has no CI. Phase D remains the gate.
+**Still unbuilt, and incomplete.** Phase B is source-only; nothing is compiled
+or tested, and `agentmuxai/cef` has no CI. 15 of 18 files remain unported
+(13 mechanical + 2 needing real merge work), so **Phase B is not ready for
+Phase D.**
 
 ---
 
