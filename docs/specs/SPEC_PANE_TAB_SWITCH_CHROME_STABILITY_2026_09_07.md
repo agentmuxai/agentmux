@@ -248,3 +248,46 @@ takes the pane header and tab strip with it, and that this is what the reveal
 gate exists to hide. That cost was previously only discoverable by reading
 four files in sequence; a future reader of `layoutStack.ts` now finds it in
 place, with a pointer here.
+
+---
+
+## 9. A real bug found while scoping Option B, fixed separately (PR TBD)
+
+Tracing exactly what "evict the NodeModel" (`layoutStack.ts:80,104,145`)
+does to design a safer, smaller first slice of Option B surfaced a
+genuine, currently-shipping leak, unrelated to whether Option B itself
+ever gets built:
+
+`getNodeModel` (`layoutNodeModels.ts`) builds each NodeModel's memos
+(`isFocused`, `isMagnified`, `isMinimized`, `innerRect`, `blockNum`, …)
+inside `model.runInModelRoot(...)`, which ties them to the WHOLE
+`LayoutModel`'s reactive root — i.e., the tab's entire lifetime, not to
+that one `nodeModels` map entry. Every eviction site (all three
+`layoutStack.ts` mutators, plus `cleanupNodeModels`'s leaf-close path) used
+to be a bare `model.nodeModels.delete(nodeId)`, which removes the MAP
+ENTRY but disposes nothing — the memos it pointed to keep running,
+still subscribed to `model.localTreeStateAtom()`/`model.numLeafs()`/etc,
+for the rest of the tab's lifetime. **Every in-pane tab switch and every
+pane close leaked one full set of ~10 live memos.** A long session with
+several terminal-tab switches would accumulate that many orphaned,
+never-disposed reactive computations.
+
+Fixed by giving each NodeModel its own nested `createRoot` (inside the
+existing `runInModelRoot` call), and a matching per-nodeid disposer map
+(`LayoutModel.nodeModelDisposers`) that a new `disposeNodeModel(model,
+nodeid)` helper consumes before removing the map entry. Every prior
+`model.nodeModels.delete(nodeId)` caller now goes through that helper
+instead. Verified falsifiably, not just by inspection: a new test
+(`layoutStack.test.ts`) captures a live memo reference before eviction,
+evicts, mutates the SAME dependency the memo tracks, and asserts the old
+reference's value stays frozen (proving disposal) rather than updating
+(what a merely-orphaned-but-still-alive memo would do) — confirmed to
+actually fail against the pre-fix code by temporarily reverting the three
+call sites back to a bare `.delete()` and re-running it.
+
+This is why Option B's own design work (§4.2, §5) is careful to say
+`getNodeModel`'s eviction mechanism stays unchanged in spirit for any
+future Step 1/2 slice — the fix here changes HOW eviction disposes
+(properly, now), not WHEN it fires or what the outer `<Key>` contract is.
+Nothing in this section is a precondition for Option B; it was simply
+found in the course of trying to build it safely.
