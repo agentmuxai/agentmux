@@ -129,9 +129,13 @@ impl Store {
             )?;
         }
         // conn dropped — re-mirror the definition so the global cross-channel
-        // record carries the updated content (no-op for seeded templates).
-        // (P0.2b.)
-        self.registry_def_upsert(&content.agent_id);
+        // record carries the updated content, but only if one already
+        // exists (no-op for a seeded template, and — as of the definition
+        // flip, reagent P1 on #3092 — no-op for a bare template-launch row
+        // too, which must never be mirrored for the first time by a
+        // routine content write; see registry_def_refresh_if_mirrored's
+        // doc comment). (P0.2b.)
+        self.registry_def_refresh_if_mirrored(&content.agent_id);
         Ok(())
     }
 
@@ -239,8 +243,10 @@ impl Store {
         // `agent_content_set`: without this a reset-to-default (e.g. ui:zoom)
         // clears the local row but leaves the stale value in the shared
         // def-registry, which a cross-channel/other-instance reopen would
-        // resurrect via the `agent_content_get` registry fallback. (P0.2b.)
-        self.registry_def_upsert(agent_id);
+        // resurrect via the `agent_content_get` registry fallback. Only
+        // refreshes an EXISTING mirror — see `agent_content_set`'s call
+        // just above for why. (P0.2b.)
+        self.registry_def_refresh_if_mirrored(agent_id);
         Ok(rows > 0)
     }
 }

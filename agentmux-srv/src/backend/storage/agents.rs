@@ -683,7 +683,7 @@ impl Store {
     /// insert-with-no-content-yet would overwrite the registry's real
     /// content/skills with empty arrays. Content/skill rows are instead
     /// copied here via direct INSERTs (bypassing `agent_content_set`/
-    /// `agent_skill_insert`, which each call `registry_def_upsert`
+    /// `agent_skill_insert`, which each call `registry_def_refresh_if_mirrored`
     /// themselves) so nothing re-mirrors mid-backfill.
     ///
     /// Copy failures for content/skills are logged and otherwise

@@ -142,8 +142,11 @@ impl Store {
                 ],
             )?;
         }
-        // Re-mirror the owning definition (no-op for seeded templates). (P0.2b.)
-        self.registry_def_upsert(&skill.agent_id);
+        // Re-mirror the owning definition — only refreshes an EXISTING
+        // mirror; never creates one for a bare template-launch row (reagent
+        // P1 on #3092; see registry_def_refresh_if_mirrored's doc comment).
+        // No-op for seeded templates too. (P0.2b.)
+        self.registry_def_refresh_if_mirrored(&skill.agent_id);
         Ok(())
     }
 
@@ -164,9 +167,11 @@ impl Store {
                 ],
             )?
         };
-        // conn dropped — re-mirror the definition (no-op for seeded). (P0.2b.)
+        // conn dropped — re-mirror the definition (no-op for seeded, and
+        // for a bare template-launch row — see registry_def_refresh_if_mirrored).
+        // (P0.2b.)
         if rows > 0 {
-            self.registry_def_upsert(&skill.agent_id);
+            self.registry_def_refresh_if_mirrored(&skill.agent_id);
         }
         Ok(rows > 0)
     }
@@ -190,10 +195,11 @@ impl Store {
             (rows, agent_id)
         };
         // conn dropped — re-mirror the definition so the global record drops
-        // the removed skill (no-op for seeded templates). (P0.2b.)
+        // the removed skill (no-op for seeded templates, and for a bare
+        // template-launch row — see registry_def_refresh_if_mirrored). (P0.2b.)
         if rows > 0 {
             if let Some(aid) = agent_id {
-                self.registry_def_upsert(&aid);
+                self.registry_def_refresh_if_mirrored(&aid);
             }
         }
         Ok(rows > 0)
