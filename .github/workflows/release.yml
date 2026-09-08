@@ -80,6 +80,20 @@ jobs:
   # steps (windows-portable/windows-installer/windows-msix) are what
   # `publish` downloads below, exactly as when this was inlined.
   # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
+  #
+  # cef-runtime-tag is PINNED below (not blank), one tag per platform. It used
+  # to be left blank on all three, which each build-*.yml resolves to "latest
+  # published release for that platform" -- meaning a release build's CEF
+  # version was decided by release TIMING, not by anything in the commit: two
+  # builds of the identical commit could ship different Chromium versions, and
+  # reverting a consumer PR to roll back CEF would not actually roll anything
+  # back, since the next release would still resolve to whatever is newest on
+  # agentmuxai/cef. Found while scoping the CEF 148->152 milestone upgrade
+  # (docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md).
+  #
+  # To bump: cut the new agentmuxai/cef release(s) first, then update the
+  # three tags below in the same PR as the consumer-side change (Cargo.toml /
+  # Taskfile / docs). Do not blank these back out.
   build-windows:
     name: Build — Windows portable + installer + MSIX
     needs: verify
@@ -89,7 +103,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: ""
+      cef-runtime-tag: "cef-windows-x86_64-148.0.7778.180"
     secrets: inherit
 
   # Reuses build-linux.yml's own job instead of inlining a second copy of the
@@ -108,7 +122,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: ""
+      cef-runtime-tag: "cef-linux-x86_64-148.0.7778.180-codecs"
     secrets: inherit
 
   # check-macos probes the APPLE_CEF_AVAILABLE secret and exposes it as a job
@@ -147,7 +161,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: ""
+      cef-runtime-tag: "cef-macos-arm64-148.23.23-codecs"
     secrets: inherit
 
   # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
