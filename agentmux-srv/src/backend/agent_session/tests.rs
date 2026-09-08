@@ -744,9 +744,12 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
     };
     wstore.bundle_memory_upsert(&bundle).unwrap();
 
-    let mut template = insert_template(&wstore, "tpl-drift", "Drifted", "codex");
-    template.memory_id = "bundle-claude".to_string();
-    wstore.agent_def_update(&mut template).unwrap();
+    let template = insert_template(&wstore, "tpl-drift", "Drifted", "codex");
+    // `agent_def_update`'s SET clause deliberately never touches memory_id
+    // (readonly-after-creation); the documented, supported way to bind a
+    // bundle is `agent_def_set_memory_id_if_empty`, same as
+    // `agent_def_provision_and_bind_bundle` uses at real creation time.
+    assert!(wstore.agent_def_set_memory_id_if_empty(&template.id, "bundle-claude").unwrap());
     write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
 
     let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());

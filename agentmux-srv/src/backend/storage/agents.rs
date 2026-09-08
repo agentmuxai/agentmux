@@ -7,27 +7,21 @@
 //! `instance_*` methods (per-launch instance rows, named-agent
 //! continuation, identity-bound active-for-block resolution), the
 //! `AgentDefinition` / `AgentInstance` structs, and the `InstanceStatus` enum.
-//! `db_agent_definitions` and `db_agent_instances` remain the write targets
-//! with dual-write mirrors into `db_agents` (see `dual_write.rs`). The read
-//! side is **not** uniformly flipped to `db_agents` — it is decided per
-//! function, and the two states currently coexist on purpose:
-//!   - `agent_def_list()` reads the consolidated `db_agents` table (a
-//!     partial Phase 3b flip that landed undocumented alongside unrelated
-//!     work — see `ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.1's
-//!     2026-08-15 correction).
-//!   - `agent_def_get()` / `user_clone_defs_for_template()` deliberately
-//!     still read `db_agent_definitions` directly — `db_agents` surfaces
-//!     template-instance projection rows under the same shape as real
-//!     user-clone definitions, which these two callers must NOT see. See
-//!     each function's own doc comment.
-//!   - `instance_list()` / `instance_get()` and friends still read
-//!     `db_agent_instances` directly — Phase 3b has not touched the
-//!     instance side at all.
-//! Do not describe this as "Phase 3a" or "Phase 3b" as a single global
-//! state in a new comment; say which function you mean. See
-//! `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
-//! P4, and `agent_def_list_and_agent_def_get_read_different_tables_by_design`
-//! below for an executable check of the current split.
+//!
+//! Every method in both groups reads and writes `db_agents` only, as of the
+//! agent-concept consolidation's definition flip
+//! (`docs/specs/SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase 3d) — the
+//! instance side flipped first (Phase 3b, PR 2 of 4, #3080), the definition
+//! side followed once the six agent-child tables' FK re-pointed to
+//! `db_agents` (Phase 3c, PR 3 of 4, #3088) removed the reason
+//! `agent_def_get` had to stay scoped to `db_agent_definitions`. Neither
+//! legacy table has a live writer left in this file; `dual_write.rs`, which
+//! used to mirror definition writes into `db_agents`, is gone — there is no
+//! second table left to mirror into one from.
+//!
+//! `db_agent_definitions` and `db_agent_instances` are still physically
+//! present in the schema (dropped in a later PR) — do not read either as a
+//! live source anywhere in this file; every read here is `db_agents`.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -161,12 +155,11 @@ pub struct AgentDefinition {
     /// still be pointed at a different bundle on purpose — this is just the
     /// default a launch inherits when it doesn't override). Empty string =
     /// not yet provisioned (legacy row predating this field, or a definition
-    /// awaiting `m0021`'s backfill). Deliberately NOT dual-written into
-    /// `db_agents` (see `dual_write.rs`'s module doc and
-    /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1) — that table's
-    /// own `memory_id` column is instance-only by existing convention, and
-    /// this field predates Phase 3b (the reader flip that would need a
-    /// decision about how the two interact). Schema v19.
+    /// awaiting `m0021`'s backfill). Stored in `db_agents.default_memory_id`
+    /// — a separate column from `db_agents.memory_id`, which is the
+    /// instance-scoped field this doc paragraph opens by distinguishing it
+    /// from. Schema v19; the two-column split dates to
+    /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
     #[serde(default)]
     pub memory_id: String,
     /// This agent's own disclosure policy for an incoming cross-tier
@@ -359,24 +352,14 @@ pub struct AgentInstance {
 }
 
 impl Store {
-    /// List all agent definitions, **most-recently-used first**.
-    ///
-    /// Reads from the consolidated `db_agents` table, ordered by
-    /// `updated_at DESC` then `created_at ASC`. Dual-write keeps
-    /// `db_agents.updated_at` fresh on every definition mutation AND every
-    /// instance lifecycle touch, so recency on a row tracks the last time
-    /// the agent was either edited or launched.
-    ///
-    /// Result-set shape: every `db_agents` row is returned — templates
-    /// (`is_template = 1`) and user-clone projections (`is_template = 0`)
-    /// each appear once. `parent_id` is sourced from
-    /// `db_agents.parent_template_id`.
-    ///
-    /// Fetch a single agent definition by primary key. Reads
-    /// `db_agent_definitions` directly (not the `db_agents`
-    /// consolidated view that `agent_def_list` reads), so it
-    /// returns user-clone definitions and seeded templates, never
-    /// template-instance projection rows.
+    /// Fetch a single agent definition by primary key. Reads `db_agents`
+    /// directly (the same source `agent_def_list` reads, via the shared
+    /// private `agent_row_get`) — as of the definition flip this is no longer
+    /// scoped to definitions/templates only: any `db_agents` row, including
+    /// a bare template launch with no `db_agent_definitions` counterpart,
+    /// resolves here, matching what `agent_def_list` already returns for
+    /// it. Falls back to the global cross-channel registry when the row
+    /// doesn't exist locally at all.
     ///
     /// Used by the `template_promote` migration's deterministic-id
     /// idempotency check (see
@@ -384,7 +367,7 @@ impl Store {
     /// "does the promote-target clone for this template already
     /// exist?" and either reuses it or inserts it.
     pub fn agent_def_get(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
-        let local = self.agent_def_get_local_only(id)?;
+        let local = self.agent_row_get(id)?;
         if local.is_some() {
             return Ok(local);
         }
@@ -403,35 +386,18 @@ impl Store {
         }
     }
 
-    /// Local-only lookup — queries `db_agent_definitions` directly, no
-    /// registry fallback. Shared by `agent_def_get` (public read path,
-    /// unchanged behavior) and `instance_create`'s FK-backfill gate,
-    /// which specifically needs to know whether the FK-target table
-    /// itself has a row — NOT `agent_def_exists_local`, which queries
-    /// the newer, separately-maintained `db_agents` consolidated table
-    /// and isn't guaranteed to agree with `db_agent_definitions` in
-    /// every code path.
-    fn agent_def_get_local_only(&self, id: &str) -> Result<Option<AgentDefinition>, StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, slug, name, icon, provider, description,
-                    working_directory, shell, provider_flags, auto_start,
-                    restart_on_crash, idle_timeout_minutes, created_at,
-                    agent_type, environment, agent_bus_id, is_seeded,
-                    accounts, parent_id, branch_label, updated_at,
-                    user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
-                    conversation_visibility
-             FROM db_agent_definitions
-             WHERE id = ?1",
-        )?;
-        let mut rows = stmt.query_map(params![id], map_agent_definition_row)?;
-        match rows.next() {
-            Some(row) => Ok(Some(row?)),
-            None => Ok(None),
-        }
-    }
-
+    /// List all agent definitions, **most-recently-used first**.
+    ///
+    /// Reads from the consolidated `db_agents` table, ordered by
+    /// `updated_at DESC` then `created_at ASC`. Every definition mutation
+    /// AND every instance lifecycle touch bumps `db_agents.updated_at`, so
+    /// recency on a row tracks the last time the agent was either edited or
+    /// launched.
+    ///
+    /// Result-set shape: every `db_agents` row is returned — templates
+    /// (`is_template = 1`) and user-clone projections (`is_template = 0`)
+    /// each appear once. `parent_id` is sourced from
+    /// `db_agents.parent_template_id`.
     pub fn agent_def_list(&self) -> Result<Vec<AgentDefinition>, StoreError> {
         // Local SQLite: this channel's templates (seeded) + its own user agents.
         let local: Vec<AgentDefinition> = {
@@ -550,14 +516,9 @@ impl Store {
         // `is_template = 0` row — a user clone OR an agent launched from a
         // template — is an agent in its own right and persists across a
         // reseed, keeping its `parent_template_id` (templates have stable
-        // ids, so the lineage survives the re-insert). The legacy FK cascade
-        // still clears stale `db_agent_instances` rows on its own.
-        let rows = {
-            let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agent_definitions WHERE is_seeded=1", [])?
-        };
-        self.agents_dual_write_seeded_delete()?;
-        Ok(rows)
+        // ids, so the lineage survives the re-insert).
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute("DELETE FROM db_agents WHERE is_template=1", [])?)
     }
 
     /// Insert a new agent definition. Auto-derives slug from name if empty,
@@ -579,18 +540,24 @@ impl Store {
         Ok(())
     }
 
-    /// Insert into local `db_agent_definitions` + dual-write `db_agents`
-    /// only — does NOT mirror to the global registry. Used directly by
-    /// `agent_def_insert` (which mirrors right after) and by
-    /// `agent_def_backfill_local_from_registry` (which must NOT mirror —
-    /// see that function's doc comment for why re-mirroring immediately
-    /// after this call would wipe the registry's real content/skills).
+    /// Insert into `db_agents` only — does NOT mirror to the global
+    /// registry. Used directly by `agent_def_insert` (which mirrors right
+    /// after) and by `agent_def_backfill_local_from_registry` (which must
+    /// NOT mirror — see that function's doc comment for why re-mirroring
+    /// immediately after this call would wipe the registry's real
+    /// content/skills).
     ///
     /// `updated_at_override`: `None` stamps `updated_at = created_at`
     /// (the original, unchanged behavior for genuinely new definitions).
     /// `Some(ts)` stamps `updated_at = ts` instead — used by the backfill
     /// path to preserve the registry record's real `updated_at` rather
     /// than resetting it.
+    ///
+    /// `is_seeded = 1` rows become `is_template = 1` (a template; bindings
+    /// stay empty). `is_seeded = 0` rows become `is_template = 0` with
+    /// `parent_template_id = parent_id` — same is_template/parent_template_id
+    /// derivation the old dual-write mirror used (frozen intent, no longer
+    /// a second write).
     fn agent_def_insert_local_only(
         &self,
         agent: &mut AgentDefinition,
@@ -621,40 +588,59 @@ impl Store {
             n += 1;
         }
         agent.slug = candidate;
+        let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
+        let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
+        let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
         conn.execute(
-            "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
-             working_directory, shell, provider_flags, auto_start, restart_on_crash,
-             idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-             is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-             container_image, container_volumes, container_name, use_ambient_login,
-             model_vendor_base_url, auto_continue_enabled, memory_id, conversation_visibility)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+            "INSERT INTO db_agents (
+                id, name, icon, description,
+                is_template, parent_template_id,
+                provider, provider_flags, shell, environment,
+                agent_type, agent_bus_id, accounts,
+                auto_start, restart_on_crash, idle_timeout_minutes,
+                slug, branch_label, working_directory,
+                created_at, updated_at, is_seeded, user_hidden,
+                container_image, container_volumes, container_name,
+                use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                default_memory_id, conversation_visibility
+             ) VALUES (
+                ?1, ?2, ?3, ?4,
+                ?5, ?6,
+                ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13,
+                ?14, ?15, ?16,
+                ?17, ?18, ?19,
+                ?20, ?21, ?22, ?23,
+                ?24, ?25, ?26,
+                ?27, ?28, ?29,
+                ?30, ?31
+             )",
             params![
                 agent.id,
-                agent.slug,
                 agent.name,
                 agent.icon,
-                agent.provider,
                 agent.description,
-                agent.working_directory,
-                agent.shell,
+                is_template,
+                parent_template_id,
+                agent.provider,
                 agent.provider_flags,
+                agent.shell,
+                agent.environment,
+                agent.agent_type,
+                agent.agent_bus_id,
+                agent.accounts,
                 agent.auto_start,
                 agent.restart_on_crash,
                 agent.idle_timeout_minutes,
-                agent.created_at,
-                agent.agent_type,
-                agent.environment,
-                agent.agent_bus_id,
-                agent.is_seeded,
-                agent.accounts,
-                agent.parent_id,
+                agent.slug,
                 agent.branch_label,
+                agent.working_directory,
+                agent.created_at,
                 // New definitions: updated_at == created_at, unless the
                 // caller supplied an override (backfill path preserving
                 // the registry record's real updated_at).
-                updated_at_override.unwrap_or(agent.created_at),
+                stamped_updated_at,
+                agent.is_seeded,
                 // Phase 2 (hide templates): new rows start visible. The
                 // user only hides via the explicit `agent_def_hide` RPC,
                 // and the agent-seed re-sync forces user_hidden = 0 on
@@ -672,14 +658,6 @@ impl Store {
                 agent.conversation_visibility,
             ],
         )?;
-        // Persist the stamped updated_at before we leave the lock so the
-        // dual-write helper sees the same value the SQL row carries.
-        let stamped_updated_at = updated_at_override.unwrap_or(agent.created_at);
-        drop(conn);
-        let mut snapshot = agent.clone();
-        snapshot.updated_at = stamped_updated_at;
-        // Mirror new definition into db_agents immediately.
-        self.agents_dual_write_definition_upsert(&snapshot)?;
         // Reagent P1 on #1013 round 2: do NOT mutate the caller's
         // `&mut AgentDefinition` here. The PR is supposed to be
         // zero-behaviour-change; the previous version reflected
@@ -692,10 +670,10 @@ impl Store {
     }
 
     /// Materialize a local shadow of a registry-only definition — this
-    /// channel's `db_agent_definitions`/`db_agents` row plus a best-
-    /// effort local copy of content/skills — so `instance_create`'s FK
-    /// can succeed for an agent whose definition exists cross-channel
-    /// but was never created in THIS channel's SQLite.
+    /// channel's `db_agents` row plus a best-effort local copy of
+    /// content/skills — so `instance_create`'s FK can succeed for an agent
+    /// whose definition exists cross-channel but was never created in THIS
+    /// channel's SQLite.
     ///
     /// Deliberately does NOT call `registry_def_upsert` (unlike
     /// `agent_def_insert`, which does): the registry is already
@@ -784,25 +762,22 @@ impl Store {
         let name_lower = agent.name.trim().to_lowercase();
         let derived_slug = derive_slug(agent.name.trim());
 
-        let stamped_updated_at = {
+        {
             let conn = self.conn.lock().unwrap();
 
             // Check under the same lock to close the TOCTOU window.
-            let mut stmt = conn.prepare(
-                "SELECT id, slug, name, icon, provider, description,
-                        working_directory, shell, provider_flags, auto_start,
-                        restart_on_crash, idle_timeout_minutes, created_at,
-                        agent_type, environment, agent_bus_id, is_seeded,
-                        accounts, parent_id, branch_label, updated_at,
-                        user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
-                        conversation_visibility
-                 FROM db_agent_definitions
+            // `is_seeded = 0` already excludes templates; it does NOT
+            // exclude a template-launch row (also `is_seeded = 0`, no
+            // `db_agent_definitions` counterpart) — same as before this
+            // read moved to `db_agents`, since the legacy table never held
+            // launch rows to exclude in the first place.
+            let mut stmt = conn.prepare(&format!(
+                "{AGENT_DEFINITION_SELECT}
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
                  ORDER BY CASE WHEN lower(trim(name)) = ?1 THEN 0 ELSE 1 END
-                 LIMIT 1",
-            )?;
+                 LIMIT 1"
+            ))?;
             let mut rows = stmt.query_map(
                 params![name_lower, derived_slug],
                 map_agent_definition_row,
@@ -822,10 +797,6 @@ impl Store {
             };
             let mut candidate = base.clone();
             let mut n: u32 = 2;
-            // Query db_agents (the superset view) for slug uniqueness — matches
-            // agent_def_insert at line 440. Template-instance projections add rows to
-            // db_agents without a corresponding db_agent_definitions entry; checking
-            // only db_agent_definitions would miss those slugs and allow collisions.
             loop {
                 let count: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM db_agents WHERE slug = ?1",
@@ -839,27 +810,59 @@ impl Store {
                 n += 1;
             }
             agent.slug = candidate;
+            let is_template = if agent.is_seeded == 1 { 1_i64 } else { 0_i64 };
+            let parent_template_id = if agent.is_seeded == 1 { String::new() } else { agent.parent_id.clone() };
             conn.execute(
-                "INSERT INTO db_agent_definitions
-                   (id, slug, name, icon, provider, description,
-                    working_directory, shell, provider_flags, auto_start, restart_on_crash,
-                    idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-                    is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-                    container_image, container_volumes, container_name, use_ambient_login,
-                    model_vendor_base_url, auto_continue_enabled, memory_id, conversation_visibility)
-                 VALUES
-                   (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
+                "INSERT INTO db_agents (
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label, working_directory,
+                    created_at, updated_at, is_seeded, user_hidden,
+                    container_image, container_volumes, container_name,
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                    default_memory_id, conversation_visibility
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4,
+                    ?5, ?6,
+                    ?7, ?8, ?9, ?10,
+                    ?11, ?12, ?13,
+                    ?14, ?15, ?16,
+                    ?17, ?18, ?19,
+                    ?20, ?21, ?22, ?23,
+                    ?24, ?25, ?26,
+                    ?27, ?28, ?29,
+                    ?30, ?31
+                 )",
                 params![
-                    agent.id, agent.slug, agent.name, agent.icon, agent.provider,
-                    agent.description, agent.working_directory, agent.shell,
-                    agent.provider_flags, agent.auto_start, agent.restart_on_crash,
-                    agent.idle_timeout_minutes, agent.created_at, agent.agent_type,
-                    agent.environment, agent.agent_bus_id, agent.is_seeded,
-                    agent.accounts, agent.parent_id, agent.branch_label,
+                    agent.id,
+                    agent.name,
+                    agent.icon,
+                    agent.description,
+                    is_template,
+                    parent_template_id,
+                    agent.provider,
+                    agent.provider_flags,
+                    agent.shell,
+                    agent.environment,
+                    agent.agent_type,
+                    agent.agent_bus_id,
+                    agent.accounts,
+                    agent.auto_start,
+                    agent.restart_on_crash,
+                    agent.idle_timeout_minutes,
+                    agent.slug,
+                    agent.branch_label,
+                    agent.working_directory,
+                    agent.created_at,
                     agent.created_at, // updated_at = created_at for new rows
+                    agent.is_seeded,
                     agent.user_hidden,
-                    agent.container_image, agent.container_volumes, agent.container_name,
+                    agent.container_image,
+                    agent.container_volumes,
+                    agent.container_name,
                     agent.use_ambient_login,
                     agent.model_vendor_base_url,
                     agent.auto_continue_enabled,
@@ -867,13 +870,11 @@ impl Store {
                     agent.conversation_visibility,
                 ],
             )?;
-            agent.created_at
-            // conn guard drops here; dual-write acquires the lock again below
-        };
-
-        let mut snapshot = agent.clone();
-        snapshot.updated_at = stamped_updated_at;
-        self.agents_dual_write_definition_upsert(&snapshot)?;
+        }
+        // Do NOT mutate `agent.updated_at` here — matches
+        // `agent_def_insert_local_only`'s own "zero-behaviour-change"
+        // posture (reagent P1 on #1013 round 2): callers that need the
+        // freshly-stamped value re-fetch the row via the normal read path.
         // Mirror the freshly-defined agent into the global store (agent.define
         // path). Without this a define-created agent stays channel-local until
         // a later edit. (codex P2 on #1385.)
@@ -915,51 +916,33 @@ impl Store {
                  user-owned definitions must use delete/archive paths, not hide"
             )));
         }
-        // The hide flag is per-row; the write must still hit the legacy
-        // table (cascade source) — dual-write mirrors into `db_agents`
-        // for the next read. (Templates are seeded; they do NOT go to the
-        // global cross-channel def store, so no mirror here.)
+        // Templates are seeded; they do NOT go to the global cross-channel
+        // def store, so no registry mirror here.
         let rows = conn.execute(
-            "UPDATE db_agent_definitions SET user_hidden = ?1 WHERE id = ?2",
+            "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 1",
             params![if hidden { 1_i64 } else { 0_i64 }, id],
         )?;
-        if rows > 0 {
-            // Mirror the flag into `db_agents` so the next read of the
-            // template projection sees the update without waiting for a
-            // round-trip through definition_upsert.
-            if let Err(e) = conn.execute(
-                "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 1",
-                params![if hidden { 1_i64 } else { 0_i64 }, id],
-            ) {
-                tracing::error!(
-                    id = %id,
-                    hidden,
-                    error = %e,
-                    "db_agents dual-write: template hide flag mirror failed",
-                );
-            }
-        }
         Ok(rows > 0)
     }
 
-    /// Set `memory_id` on a LOCAL agent definition — but only if it's
-    /// currently empty. Exists because `agent_def_update`'s SET clause
+    /// Set `db_agents.default_memory_id` on a LOCAL agent — but only if
+    /// it's currently empty. Exists because `agent_def_update`'s SET clause
     /// deliberately never touches this column (readonly-after-creation, see
     /// its own field doc comment) — this is the one narrow, explicit path
     /// allowed to set it, and only the FIRST time, for `m0021`'s backfill
     /// and definition-time provisioning to use. Returns `Ok(true)` if the
-    /// row existed and had an empty `memory_id` (write applied), `Ok(false)`
-    /// if the row doesn't exist locally OR already has a non-empty value
-    /// (no-op, not an error — matches the "set once" semantic silently
-    /// rather than requiring every caller to pre-check).
+    /// row existed and had an empty `default_memory_id` (write applied),
+    /// `Ok(false)` if the row doesn't exist locally OR already has a
+    /// non-empty value (no-op, not an error — matches the "set once"
+    /// semantic silently rather than requiring every caller to pre-check).
     ///
     /// LOCAL ONLY, deliberately — a cross-channel (global-registry-only)
     /// definition can't be reached this way today because
     /// `DefinitionRecordV1` doesn't carry `memory_id` yet (same accepted gap
     /// as `model_vendor_base_url`, see `def_registry_mirror.rs`). Callers
     /// backfilling across the whole agent population must check
-    /// `agent_def_get_local_only` first and skip (with a log) anything that
-    /// only resolves via the global registry.
+    /// `agent_def_get` first and skip (with a log) anything that only
+    /// resolves via the global registry.
     pub fn agent_def_set_memory_id_if_empty(
         &self,
         id: &str,
@@ -967,29 +950,9 @@ impl Store {
     ) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
-            "UPDATE db_agent_definitions SET memory_id = ?1 WHERE id = ?2 AND memory_id = ''",
+            "UPDATE db_agents SET default_memory_id = ?1 WHERE id = ?2 AND default_memory_id = ''",
             params![memory_id, id],
         )?;
-        if rows > 0 {
-            // Mirror into db_agents' SEPARATE default_memory_id column (see
-            // its own CREATE TABLE comment) so agent_def_list — which reads
-            // from db_agents, not db_agent_definitions — sees the binding
-            // too. Same secondary-mirror pattern as agent_def_set_hidden
-            // just above. Best-effort: a mirror failure here would leave
-            // db_agents transiently stale, same posture as that function's
-            // own error handling (log + continue, not fail the caller).
-            if let Err(e) = conn.execute(
-                "UPDATE db_agents SET default_memory_id = ?1 WHERE id = ?2",
-                params![memory_id, id],
-            ) {
-                tracing::error!(
-                    id = %id,
-                    memory_id = %memory_id,
-                    error = %e,
-                    "db_agents dual-write: default_memory_id mirror failed",
-                );
-            }
-        }
         Ok(rows > 0)
     }
 
@@ -1224,7 +1187,7 @@ impl Store {
         let rows = {
             let conn = self.conn.lock().unwrap();
             conn.execute(
-                "UPDATE db_agent_definitions SET name=?1, icon=?2, provider=?3, description=?4,
+                "UPDATE db_agents SET name=?1, icon=?2, provider=?3, description=?4,
                  working_directory=?5, shell=?6, provider_flags=?7, auto_start=?8,
                  restart_on_crash=?9, idle_timeout_minutes=?10,
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
@@ -1263,9 +1226,7 @@ impl Store {
         // Reflect the persisted timestamp back to the caller's struct so an
         // RPC response carries the fresh value, not the pre-update one.
         agent.updated_at = now;
-        // Mirror updated definition into db_agents.
         if rows > 0 {
-            self.agents_dual_write_definition_upsert(agent)?;
             // Mirror the updated definition into the global store. (P0.2b.)
             self.registry_def_upsert(&agent.id);
         }
@@ -1285,22 +1246,15 @@ impl Store {
 
     /// Delete a agent definition by id. Returns true if a row was deleted.
     pub fn agent_def_delete(&self, id: &str) -> Result<bool, StoreError> {
-        // Snapshot cascaded instance ids AND issue the parent DELETE
-        // under one lock acquisition so no thread can `instance_create`
-        // a new row for this definition between the two steps. The
-        // SQL DELETE's FK cascade fires inside SQLite while we hold
-        // the mutex, so the snapshot exactly matches the rows that
-        // got removed by the cascade.
-        // Consolidation Phase 3b (PR 2): the legacy FK cascade still clears
-        // stale `db_agent_instances` rows, but launches are no longer rows of
-        // their own — a user agent launched from this template keeps its own
-        // `db_agents` row (it is an agent, not a launch of the template), the
-        // same way user clones always survived deleting their template. The
-        // JSON registry mirror for the deleted definition's own row is
-        // covered by `registry_def_retire` below.
+        // Consolidation Phase 3b (PR 2): a user agent launched from this
+        // template keeps its own `db_agents` row (it is an agent, not a
+        // launch of the template), the same way user clones always survived
+        // deleting their template — deleting `id` here removes only its own
+        // row. The JSON registry mirror for the deleted row is covered by
+        // `registry_def_retire` below.
         let rows = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agent_definitions WHERE id=?1", params![id])?
+            conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {
@@ -1312,8 +1266,6 @@ impl Store {
                     );
                 }
             }
-            // Mirror deleted definition out of db_agents.
-            self.agents_dual_write_definition_delete(id)?;
         }
         // Tombstone the global definition record so another channel's stale
         // SQLite can't resurrect this deleted user agent — AND so an agent
@@ -1331,10 +1283,11 @@ impl Store {
     /// were de-facto ambient users → `use_ambient_login = 1`; agents WITH
     /// links opted into managed accounts → `0` (honest failure is the new
     /// behavior for them). `linked_agent_ids` comes from the SHARED store
-    /// (the live links table); this method writes both the legacy
-    /// `db_agent_definitions` and the consolidated `db_agents` projections
-    /// of the CURRENT channel store. Returns (rows set to 1, rows set to 0)
-    /// across `db_agent_definitions`.
+    /// (the live links table); this method writes `db_agents` — the
+    /// definition flip's only remaining caller of this is `m0017` on an
+    /// install upgrading through the whole migration chain for the first
+    /// time, where `db_agents` is already the sole live source. Returns
+    /// (rows set to 1, rows set to 0).
     pub fn agents_grandfather_ambient_login(
         &self,
         linked_agent_ids: &std::collections::HashSet<String>,
@@ -1342,18 +1295,10 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         // Set everyone ambient first, then flip the linked set back to the
         // fail-by-default 0 — two passes instead of a dynamic IN() list.
-        let ambient_defs = conn.execute(
-            "UPDATE db_agent_definitions SET use_ambient_login = 1",
-            [],
-        )?;
-        conn.execute("UPDATE db_agents SET use_ambient_login = 1", [])?;
+        let ambient_defs = conn.execute("UPDATE db_agents SET use_ambient_login = 1", [])?;
         let mut linked_rows = 0usize;
         for id in linked_agent_ids {
             linked_rows += conn.execute(
-                "UPDATE db_agent_definitions SET use_ambient_login = 0 WHERE id = ?1",
-                params![id],
-            )?;
-            conn.execute(
                 "UPDATE db_agents SET use_ambient_login = 0 WHERE id = ?1",
                 params![id],
             )?;
@@ -1916,28 +1861,17 @@ impl Store {
     /// Delete an agent row (never a template). The row IS the agent in the
     /// consolidated model, so this removes the agent — previously a launch
     /// row of a user-clone definition could be deleted while the definition
-    /// stayed; there is no such split any more.
+    /// stayed; there is no such split any more. As of the definition flip,
+    /// this and `agent_def_delete` are the same operation reached from two
+    /// names: neither writes `db_agent_definitions`, and nothing reads it
+    /// per-boot any more to resurrect what either one deletes (the startup
+    /// gap-repair that once could is gone — codex P2 on #3080 closed the
+    /// resurrection path this way rather than by re-adding a legacy-table
+    /// delete here).
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
-            let rows =
-                conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
-            if rows > 0 {
-                // A user agent still has a same-id `db_agent_definitions` row
-                // (the definition side is dual-written until PR 3). Leaving it
-                // behind lets the startup gap repair — which recreates a
-                // `db_agents` row for any definition missing one — resurrect
-                // the agent on the next boot, with its launch state reset
-                // (codex P2 on #3080). `agent_def_delete` already clears both
-                // sides; this is the same deletion arriving from the other
-                // direction. A template-launch agent has no definition row of
-                // its own, so this is a no-op for one.
-                conn.execute(
-                    "DELETE FROM db_agent_definitions WHERE id = ?1 AND is_seeded = 0",
-                    params![id],
-                )?;
-            }
-            rows
+            conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?
         };
         if rows > 0 {
             if let Some(reg) = self.registry() {
@@ -2127,11 +2061,14 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
 }
 
 /// Shared test fixture: an `AgentDefinition` with every field defaulted to
-/// an empty/zero value except the ones callers actually vary. Both
-/// `tests::bare_agent_def` and `bundle_provisioning_store_separation_tests
-/// ::base_agent` used to hardcode this 30-field struct literal
-/// independently (reagentx P2 on PR #2602) — kept as one definition here so
-/// a future field addition only needs updating once.
+/// an empty/zero value except the ones callers actually vary. Originally
+/// shared to avoid `tests::bare_agent_def` and
+/// `bundle_provisioning_store_separation_tests::base_agent` each hardcoding
+/// this 30-field struct literal independently (reagentx P2 on PR #2602);
+/// `bare_agent_def` is gone (its only caller pinned pre-flip behavior this
+/// module no longer has), leaving `base_agent` as the remaining caller —
+/// kept as one definition here regardless, so a future field addition only
+/// needs updating once.
 #[cfg(test)]
 pub(crate) fn test_agent_def(
     id: &str,
@@ -2248,7 +2185,7 @@ mod tests {
         assert!(result.is_ok(), "instance_create failed: {result:?}");
 
         // The backfilled local row must exist and satisfy the FK.
-        let local = store.agent_def_get_local_only("remote-1").unwrap();
+        let local = store.agent_row_get("remote-1").unwrap();
         assert!(local.is_some(), "backfill must create a local definition row");
 
         // Critical regression guard: the registry's real content/skills
@@ -2432,65 +2369,47 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
-        def_store
-            .upsert(&global_user_agent("remote-2", "Remote2"))
-            .unwrap();
+        let record = global_user_agent("remote-2", "Remote2");
+        def_store.upsert(&record).unwrap();
         store.set_def_registry(def_store);
 
-        store
-            .instance_create(&instance("inst-3", "remote-2"))
-            .unwrap();
+        // Call the backfill directly rather than through a full
+        // `instance_create`: "remote-2" is a user agent (is_seeded = 0), so
+        // `instance_create` immediately follows the backfill with its own
+        // launch-state fold, which legitimately bumps `updated_at` again —
+        // by design, every launch touch does (see `agent_def_list`'s doc
+        // comment). That second, later bump isn't what this test is
+        // pinning; the backfill INSERT preserving the registry's real
+        // `updated_at`, rather than resetting it to `created_at`, is.
+        store.agent_def_backfill_local_from_registry(&record).unwrap();
 
-        let local = store.agent_def_get_local_only("remote-2").unwrap().unwrap();
+        let local = store.agent_row_get("remote-2").unwrap().unwrap();
         assert_eq!(
             local.updated_at, 42,
             "backfilled row must preserve the registry's real updated_at, not reset to created_at"
         );
     }
 
-    fn bare_agent_def(id: &str, name: &str) -> AgentDefinition {
-        super::test_agent_def(id, name, "claude", "standalone", 1, "")
-    }
-
-    /// Pins down the module doc's claimed read-side split (this file's
-    /// header comment, plus `OBJECT_SCHEMA_VERSION`'s v4 entry and
-    /// `dual_write.rs`'s module doc) as an executable check, per
-    /// `SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
-    /// P4: migration-phase state must be verifiable, not just a comment
-    /// someone has to remember to update. Builds two rows that exist in
-    /// only ONE of the two tables each (bypassing the normal
-    /// `agent_def_insert` path, which always keeps both in sync) and
-    /// proves `agent_def_list()` and `agent_def_get()` disagree about
-    /// which table is authoritative, on purpose. If this test starts
-    /// failing, one of the two functions' read target changed — go
-    /// update the three comments this test is guarding, not just this
-    /// assertion.
+    /// Pins the definition flip's actual point: `agent_def_list()` and
+    /// `agent_def_get()` now read the SAME table, so a row visible to one
+    /// is visible to the other. Before the flip these deliberately
+    /// disagreed (`agent_def_get` was scoped to `db_agent_definitions`
+    /// only) — that inconsistency meant an agent visible in "My Agents"
+    /// (`agent_def_list`) could 404 the moment something tried to open its
+    /// detail view (`agent_def_get`) if it existed only as a `db_agents`
+    /// row (a template launch). A row written directly into `db_agents`,
+    /// bypassing `agent_def_insert` entirely, now resolves through both.
     #[test]
-    fn agent_def_list_and_agent_def_get_read_different_tables_by_design() {
+    fn agent_def_list_and_agent_def_get_agree_on_the_same_row() {
         let store = Store::open_in_memory().unwrap();
 
-        // Exists ONLY in the consolidated `db_agents` table (as if some
-        // write path populated it without touching the legacy table —
-        // agent_def_list()'s actual read target).
-        store
-            .agents_dual_write_definition_upsert(&bare_agent_def("only-in-db-agents", "OnlyConsolidated"))
-            .unwrap();
-
-        // Exists ONLY in the legacy `db_agent_definitions` table — a raw
-        // insert bypassing `agent_def_insert`'s automatic dual-write,
-        // standing in for agent_def_get()'s actual read target.
+        // A `db_agents` row with no `agent_def_insert` ever having run for
+        // it — stands in for a template-launch row, which never had one.
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
-                 working_directory, shell, provider_flags, auto_start, restart_on_crash,
-                 idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
-                 is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
-                 container_image, container_volumes, container_name, use_ambient_login,
-                 model_vendor_base_url, auto_continue_enabled, memory_id, conversation_visibility)
-                 VALUES ('only-in-legacy', 'only-in-legacy', 'OnlyLegacy', '', 'claude', '',
-                 '', '', '', 0, 0, 0, 1, 'standalone', '', '', 0, '', '', '', 1, 0, '', '[]', '',
-                 0, '', 0, '', 'private')",
+                "INSERT INTO db_agents (id, slug, name, provider, is_template, created_at, updated_at, is_seeded)
+                 VALUES ('launch-only', 'launch-only', 'LaunchOnly', 'claude', 0, 1, 1, 0)",
                 [],
             )
             .unwrap();
@@ -2498,26 +2417,15 @@ mod tests {
 
         let listed = store.agent_def_list().unwrap();
         assert!(
-            listed.iter().any(|d| d.id == "only-in-db-agents"),
+            listed.iter().any(|d| d.id == "launch-only"),
             "agent_def_list() must read db_agents"
         );
+        let got = store.agent_def_get("launch-only").unwrap();
         assert!(
-            !listed.iter().any(|d| d.id == "only-in-legacy"),
-            "agent_def_list() must NOT see a db_agent_definitions-only row \
-             (documents the current partial-flip state — fails if this ever \
-             also starts overlaying the legacy table)"
+            got.is_some(),
+            "agent_def_get() must resolve a row agent_def_list() already shows — no more disagreement between the two"
         );
-
-        assert!(
-            store.agent_def_get("only-in-legacy").unwrap().is_some(),
-            "agent_def_get() must still read db_agent_definitions directly"
-        );
-        assert!(
-            store.agent_def_get("only-in-db-agents").unwrap().is_none(),
-            "agent_def_get() must NOT see a db_agents-only row — it \
-             deliberately avoids the consolidated table's template-instance \
-             projection rows (see its own doc comment)"
-        );
+        assert_eq!(got.unwrap().name, "LaunchOnly");
     }
 }
 

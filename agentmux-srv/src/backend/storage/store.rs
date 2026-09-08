@@ -256,14 +256,6 @@ impl Store {
         Ok(())
     }
 
-    /// Backfill any `db_agent_definitions` rows that are missing from
-    /// `db_agents`. Not marker-gated — runs cheaply on every startup.
-    /// See `agents_consolidate::repair_def_gaps` for details.
-    pub fn repair_agent_def_gaps(&self) -> Result<usize, StoreError> {
-        let mut conn = self.conn.lock().unwrap();
-        super::agents_consolidate::repair_def_gaps(&mut *conn)
-    }
-
     /// True when `db_agent_definitions`/`db_agent_instances` have rows but
     /// `db_agents` doesn't — i.e. the consolidation backfill's marker/stamp
     /// can't be trusted as proof it actually ran. See

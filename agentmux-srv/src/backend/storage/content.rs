@@ -86,15 +86,22 @@ impl Store {
 
     /// Upsert a content blob for an agent.
     pub fn agent_content_set(&self, content: &AgentContent) -> Result<(), StoreError> {
-        // Cross-channel agents have no local `db_agent_definitions` row; the FK
+        // Cross-channel agents have no local `db_agents` row; the FK
         // constraint on `db_agent_content` would reject the INSERT. Route those
         // writes directly to the global registry instead so content (e.g. ui:zoom)
         // persists and is readable via the cross-channel fallback in
         // `agent_content_get`. (#1700 zoom persistence P0.)
+        //
+        // `db_agent_content`'s FK targets `db_agents`, not
+        // `db_agent_definitions`, as of Phase 3c (#3088) — checking the
+        // latter here would misclassify any agent that exists ONLY as a
+        // `db_agents` row (a template launch) as "not local" and silently
+        // reroute its content writes to the global registry instead of the
+        // local table the FK actually requires.
         let is_local = {
             let conn = self.conn.lock().unwrap();
             conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
                 params![&content.agent_id],
                 |row| row.get::<_, bool>(0),
             )
@@ -198,10 +205,11 @@ impl Store {
     ) -> Result<bool, StoreError> {
         // Cross-channel agents: remove the field from the global registry
         // record directly; there is no local SQLite row to delete. (#1700.)
+        // Checks `db_agents` — see `agent_content_set`'s comment above.
         let is_local = {
             let conn = self.conn.lock().unwrap();
             conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
                 params![agent_id],
                 |row| row.get::<_, bool>(0),
             )

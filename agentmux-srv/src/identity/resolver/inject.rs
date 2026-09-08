@@ -1765,6 +1765,70 @@ mod tests {
         assert!(env.is_empty());
     }
 
+    /// Regression guard for the definition flip (agent-concept
+    /// consolidation, `SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase 3d).
+    ///
+    /// `agent_def_get(&instance.definition_id)` used to be scoped to
+    /// `db_agent_definitions` and 404 for ANY template launch, since a
+    /// launch's own row lives only in `db_agents` with no legacy
+    /// counterpart. `def_provider` (Step 2, above) was therefore always
+    /// `None` for a template launch — and Step 5's definition-provider gate
+    /// (`if let Some(p) = def_provider { ... }`) is a no-op when
+    /// `def_provider` is `None`. So a template-launched agent whose CLI
+    /// provider is oauth-class, with genuinely ZERO identity binding, was
+    /// launching WITHOUT ever being checked by the one gate that exists
+    /// specifically to block exactly that — the definition flip closes
+    /// this by letting `agent_def_get` resolve the launch's own row, so
+    /// `def_provider` is `Some("claude")` and Step 5 applies to it like any
+    /// other agent. (`use_ambient_login` is confirmed inert for this gate
+    /// either way, per `gate_oauth_failure`'s own doc comment and
+    /// `spawn_still_blocked_when_bound_oauth_account_missing_and_flag_true`
+    /// above — this test does not depend on it and sets it to demonstrate
+    /// that non-effect explicitly.)
+    #[test]
+    fn spawn_is_gated_for_a_template_launch_with_no_binding_where_it_used_to_be_invisible_to_the_gate() {
+        let store = make_store();
+        let mut tpl = gate_def(1); // use_ambient_login=1 — must NOT matter, see doc comment.
+        tpl.id = "tpl-ambient".to_string();
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+
+        // A launch of the template: `is_seeded = 1` means `instance_create`
+        // creates a NEW row keyed by the launch id, not the template's —
+        // exactly the shape that used to be invisible to `agent_def_get`.
+        let inst = crate::backend::storage::store::AgentInstance {
+            id: "launch-ambient".to_string(),
+            definition_id: "tpl-ambient".to_string(),
+            parent_instance_id: String::new(),
+            block_id: "block-gate-ambient".to_string(),
+            session_id: String::new(),
+            status: InstanceStatus::Running.as_str().to_string(),
+            github_context: String::new(),
+            started_at: 0,
+            ended_at: 0,
+            created_at: 0,
+            identity_id: "id-ambient".to_string(),
+            memory_id: String::new(),
+            instance_name: String::new(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        let canonical = store.instance_create(&inst).unwrap();
+        assert_eq!(canonical.id, "launch-ambient", "sanity: a template launch creates its own row");
+
+        insert_block_for_agent(&store, "block-gate-ambient", "launch-ambient");
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-gate-ambient", &mut env);
+
+        assert_eq!(
+            res,
+            Err(SpawnGateError::MissingCredentials { provider: "claude".to_string() }),
+            "a template launch's zero-binding oauth-class provider must now reach Step 5's gate, not skip it",
+        );
+        assert!(env.is_empty());
+    }
+
     #[test]
     fn inject_no_instance_does_nothing() {
         let store = make_store();
