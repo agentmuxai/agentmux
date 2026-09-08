@@ -4,12 +4,15 @@
 **Created:** 2026-09-07
 **Status:** active — Phase A mostly shipped 2026-09-08 (`agentmuxai/cef` PR #7,
 plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
-verdict is **conditional go** on targeting 152 directly — **two Phase A checks
-are still open** (patches #3/#4 not test-applied against real 152 source; macOS
-Xcode pin unconfirmed), so this is not clearance to start Phase B blind. See §4
-Phase A for both conditions. **Phase B started opportunistically** (patch #1
-verified against 152 and ported; `7977` + `agentmux/7977-process-requirement`
-exist in the fork); **Phases C–G not started.** The
+verdict is **go** on targeting 152 directly — the patch-applicability condition
+is now **closed**: all four patches are verified against real CEF/Chromium 152
+source (#1/#3/#4 by real `git apply -p0`; #2's three target files are
+`cmp`-identical between 7778 and 7977, so its port is mechanical). One minor
+check remains open: the macOS hermetic Xcode pin is unconfirmed — settle it at
+Phase D build time. **Phase B's patch port is DONE** (`7977`,
+`agentmux/7977-process-requirement`, `agentmux/7977-drag-rightclick-and-transparency`
+all exist with patches registered); **Phases C–G not started, and nothing is
+built or tested yet — `agentmuxai/cef` has no CI.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
@@ -96,12 +99,13 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 
 ## 4. Work breakdown
 
-### Phase A — Reconnaissance ⚠️ **MOSTLY COMPLETE 2026-09-08** (2 checks open)
+### Phase A — Reconnaissance ✅ **COMPLETE 2026-09-08** (1 minor check deferred to Phase D)
 
 Output: `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`.
-**Verdict: conditional go** on targeting 152 directly — two checks below are
-NOT closed (patches #3/#4 not test-applied against real 152 source; macOS Xcode
-pin unconfirmed), so do not treat this as clearance to start Phase B blind.
+**Verdict: go** on targeting 152 directly. The patch-applicability condition is
+closed — all four patches verified against real 152 source (see the report's
+§2.4/§2.5). Only the macOS hermetic Xcode pin remains unconfirmed, which is a
+Phase D build-time check rather than a blocker on starting.
 Answers to the three tasks below:
 (1) patch inventory corrected — see §2's callout; `BeginWindowDrag` confirmed
 still not upstream at 152, so nothing was deleted; #3/#4 still need a real
@@ -111,10 +115,12 @@ the binding fork is still needed. (3) Windows and Linux toolchain pins are
 **unchanged** between the two Chromium tags; macOS's Xcode pin is
 **unconfirmed** — verify at Phase D build time.
 
-**Phase B already started** (opportunistically, since patch #1's check could be
-made real): patch #1 is verified to apply to Chromium 152 **unchanged**, and
-`7977` + `agentmux/7977-process-requirement` now exist in `agentmuxai/cef` with
-the patch registered in 152's `patch.cfg`.
+**Phase B's patch port is DONE** — see the report's §5b. All four patches are on
+152 branches mirroring the 7778 layout, with `patch.cfg` registrations. Notably
+patch #2 needed no forward-porting at all: upstream CEF did not touch any of its
+three target files across four milestones. A registration gap on `7778` (patch
+#4 registered only on the build branch, not the integration branch) was found
+and deliberately not carried forward. **Nothing is built — Phase D is the gate.**
 
 *(original task list, for reference)*
 1. Diff each of the four patches against upstream 7977; determine which are now upstream, which apply cleanly, which need real porting.
