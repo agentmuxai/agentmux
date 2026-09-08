@@ -162,6 +162,25 @@ impl TempHome {
         let channel_store = self.channel_store();
         drop(Store::open(&channel_store).expect("create channel store"));
         let conn = Connection::open(&channel_store).unwrap();
+        // `db_agent_definitions` is gone from the base schema entirely as of
+        // v32 (`OBJECT_SCHEMA_VERSION`'s v32 doc comment) — this fixture is
+        // deliberately pre-0007/pre-consolidation, so it stands the legacy
+        // table up by hand rather than relying on `Store::open` for it.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS db_agent_definitions (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+                icon TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '', shell TEXT NOT NULL DEFAULT '',
+                provider_flags TEXT NOT NULL DEFAULT '', auto_start INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash INTEGER NOT NULL DEFAULT 0, idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0, agent_type TEXT NOT NULL DEFAULT '',
+                environment TEXT NOT NULL DEFAULT '', agent_bus_id TEXT NOT NULL DEFAULT '',
+                is_seeded INTEGER NOT NULL DEFAULT 0, accounts TEXT NOT NULL DEFAULT '',
+                parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT 0, user_hidden INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .unwrap();
         let working_directory = self.agent_working_dir(id).to_string_lossy().into_owned();
         conn.execute(
             "INSERT INTO db_agent_definitions
@@ -404,6 +423,22 @@ fn a_crash_between_a_migrations_effect_and_its_mark_resumes_without_duplicating_
     // already-consolidated rows writes nothing twice (codex P2 on #3066:
     // deleting only the tracking row would have left the marker to
     // short-circuit the re-run and proved nothing about that).
+    //
+    // This simulation runs later than the crash it's modeling actually
+    // could: `first` above already ran the REAL, full registry to
+    // completion, including `m0029_drop_legacy_agent_tables` — which is
+    // registered after `0007` and physically drops
+    // `db_agent_definitions`/`db_agent_instances` once nothing needs them
+    // any more (agent-concept consolidation Phase 3e,
+    // `SPEC_AGENT_ARCHITECTURE_2026_05_27.md`). A REAL crash between 0007's
+    // commit and its marker write happens mid-pass, before the pass ever
+    // reaches 0029 — so on the real next boot, 0007 retries while its
+    // source tables still exist, same as the assertions below used to
+    // assume unconditionally. Forcing the retry here, AFTER 0029 has
+    // already run, tests the harder edge of the same claim: even with the
+    // source gone, the retry must still not duplicate `db_agents` rows —
+    // it just can't rewrite a marker for a backfill that no longer has
+    // anything left to read.
     std::fs::remove_file(home.data_dir().join(CONSOLIDATE_FLAG)).unwrap();
     Connection::open(home.channel_store())
         .unwrap()
@@ -415,8 +450,14 @@ fn a_crash_between_a_migrations_effect_and_its_mark_resumes_without_duplicating_
     assert_eq!(second.applied, 1, "exactly the unmarked migration re-runs");
     assert_eq!(second.skipped, REGISTRY.len() - 1);
     assert_eq!(count(&home.channel_store(), "db_agents"), 2, "a from-scratch retry must not duplicate rows");
-    assert!(home.data_dir().join(CONSOLIDATE_FLAG).exists(), "the retry re-writes the marker");
-    assert!(home.applied(MigrationScope::Channel).contains(&CONSOLIDATE_ID.to_string()), "and it is marked again");
+    // NOT re-written: db_agent_definitions is gone (dropped by 0029 during
+    // `first`), so `run_consolidate_migration` correctly finds nothing to
+    // consolidate and returns before ever reaching the marker-write step —
+    // the same "no source table" tolerance that lets 0007 run harmlessly
+    // on a channel that never had the legacy tables at all (see
+    // `agents_consolidate::consolidate_looks_incomplete`'s doc comment).
+    assert!(!home.data_dir().join(CONSOLIDATE_FLAG).exists(), "nothing left to consolidate — the marker stays absent, not stale");
+    assert!(home.applied(MigrationScope::Channel).contains(&CONSOLIDATE_ID.to_string()), "0007 is still marked applied — up() returning Ok(()) with nothing to do is success, same as every other migration's exists()-guard no-op");
 
     // Third boot: nothing to do.
     assert_eq!(home.apply_all(None).applied, 0);

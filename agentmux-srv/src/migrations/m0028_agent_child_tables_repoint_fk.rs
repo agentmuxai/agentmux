@@ -234,8 +234,20 @@ fn rebuild_table(conn: &Connection, spec: &TableSpec) -> Result<usize, String> {
 /// with no matching `db_agents` id (written between the Phase 3a marker and
 /// Phase 3b dual-write landing) and projects one, `INSERT OR IGNORE` so it
 /// is safe to call every time this migration runs. Returns the number
-/// inserted.
+/// inserted. `Ok(0)` if `db_agent_definitions` doesn't exist at all —
+/// dropped entirely as of v32 (`OBJECT_SCHEMA_VERSION`'s v32 doc comment);
+/// nothing to repair a gap in when there's no source table left to have one.
 fn frozen_repair_def_gaps(conn: &mut Connection) -> Result<usize, String> {
+    let defs_exist: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_definitions')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("gap-repair: probe db_agent_definitions: {e}"))?;
+    if !defs_exist {
+        return Ok(0);
+    }
     let mut stmt = conn
         .prepare(
             "SELECT d.id, d.name, d.icon, d.provider, d.description,
@@ -401,18 +413,33 @@ mod tests {
     /// The six tables in their PRE-repoint shape (FK on
     /// `db_agent_definitions`), on top of a store whose base schema is the
     /// REAL current one (`Store::open`) — everything else (`db_agents`,
-    /// `db_agent_definitions`, `db_accounts`, `db_skills`, `db_mcp_servers`)
-    /// is exactly what production has, so `repair_def_gaps`'s full-column
-    /// read/write works unmodified. Only the six tables under test are
-    /// dropped and recreated with the OLD FK to simulate a pre-migration
-    /// store.
+    /// `db_accounts`, `db_skills`, `db_mcp_servers`) is exactly what
+    /// production has. `db_agent_definitions` is gone from the base schema
+    /// as of v32 (`OBJECT_SCHEMA_VERSION`'s v32 doc comment), so this
+    /// fixture stands it up by hand — the full column set
+    /// `frozen_repair_def_gaps`'s SELECT reads, so its full-column
+    /// read/write still works unmodified. Only the six tables under test
+    /// are dropped and recreated with the OLD FK to simulate a
+    /// pre-migration store.
     fn legacy_store() -> (tempfile::TempDir, Connection) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("objects.db");
         drop(Store::open(&path).unwrap());
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
-            "PRAGMA foreign_keys=OFF;
+            "CREATE TABLE db_agent_definitions (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+                icon TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '', shell TEXT NOT NULL DEFAULT '',
+                provider_flags TEXT NOT NULL DEFAULT '', auto_start INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash INTEGER NOT NULL DEFAULT 0, idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0, agent_type TEXT NOT NULL DEFAULT '',
+                environment TEXT NOT NULL DEFAULT '', agent_bus_id TEXT NOT NULL DEFAULT '',
+                is_seeded INTEGER NOT NULL DEFAULT 0, accounts TEXT NOT NULL DEFAULT '',
+                parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT 0, user_hidden INTEGER NOT NULL DEFAULT 0
+             );
+             PRAGMA foreign_keys=OFF;
              DROP TABLE db_agent_content;
              DROP TABLE db_agent_skills;
              DROP TABLE db_agent_history;
@@ -601,12 +628,13 @@ mod tests {
         assert_eq!(content, "still here");
     }
 
-    /// `db_agent_definitions` always exists at this point in the migration
-    /// sequence (it's dropped only in Phase 3d), so this exercises the
-    /// scenario that IS realistic: a fresh channel where `run_object_schema`
-    /// has already created all six tables with the new FK, so there is
-    /// nothing left for THIS migration to rebuild — the `TABLES` loop finds
-    /// every one of them already pointing at `db_agents`.
+    /// A fresh channel: `run_object_schema` has already created all six
+    /// tables with the new FK, so there is nothing left for THIS migration
+    /// to rebuild — the `TABLES` loop finds every one of them already
+    /// pointing at `db_agents`. `db_agent_definitions` itself doesn't even
+    /// exist here (dropped from the base schema entirely as of v32,
+    /// `OBJECT_SCHEMA_VERSION`'s v32 doc comment) — `frozen_repair_def_gaps`
+    /// tolerating that absence is what this test actually exercises.
     #[test]
     fn a_fresh_schema_with_no_agent_child_rows_at_all_is_a_no_op() {
         let dir = tempfile::tempdir().unwrap();

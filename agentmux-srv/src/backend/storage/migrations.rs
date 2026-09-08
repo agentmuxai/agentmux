@@ -311,7 +311,37 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `update`/`delete` still target `db_agent_definitions` and would
 ///        404 on them, or replay stale legacy values back into `db_agents`
 ///        on edit. Stamping 31 makes that downgrade refuse to open instead.
-pub const OBJECT_SCHEMA_VERSION: i64 = 31;
+///   v32 — `db_agent_definitions` and `db_agent_instances` are dropped.
+///        Nothing has read or written either table since v31 (agent-concept
+///        consolidation's definition and instance flips, #3080/#3092); this
+///        is the final phase (Phase 3e,
+///        `SPEC_AGENT_ARCHITECTURE_2026_05_27.md`) closing out the tracking
+///        spec. `db_agent_instances`' `CREATE TABLE`/indexes and
+///        `db_agent_definitions`' `CREATE TABLE` are gone from this function
+///        — leaving either would silently recreate the tables (empty) on
+///        the very next `Store::open()` after the drop migration runs,
+///        since migrations execute before this function does on every
+///        boot. `db_agent_definitions`' own `ALTER TABLE ADD COLUMN`
+///        entries, by contrast, are KEPT — gated on the table still
+///        existing (see that block's own comment below) — because several
+///        pending migrations (m0007, m0025, m0026, m0028) call
+///        `Store::open()` internally, running this function, before m0029
+///        (numbered last) ever drops the table in the SAME upgrade pass; a
+///        store old enough to be missing one of those columns would fail
+///        those migrations' own reads with "no such column" otherwise
+///        (Codex P1 on #3096). An existing store's tables are actually
+///        removed by `m0029_drop_legacy_agent_tables`; a fresh install
+///        never has them to begin with, so the gate is a no-op for it.
+///        `adopt_legacy_table_names`'s
+///        `db_forge_agents` → `db_agent_definitions` rename entry is left
+///        in place deliberately: an install old enough to still carry
+///        `db_forge_agents` reaches it during an EARLIER migration's own
+///        `Store::open()` call (every migration in this chain lays down
+///        schema that way), so the rename still fires before
+///        `m0029` runs later in the same upgrade pass and correctly drops
+///        what the rename just produced — no special-casing needed, and no
+///        data is stranded under the old name.
+pub const OBJECT_SCHEMA_VERSION: i64 = 32;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -421,41 +451,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 
     // ---- Agent + identity + memory + drone schema ----
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS db_agent_definitions (
-            id                   TEXT PRIMARY KEY,
-            slug                 TEXT NOT NULL DEFAULT '',
-            name                 TEXT NOT NULL,
-            icon                 TEXT NOT NULL DEFAULT '✦',
-            provider             TEXT NOT NULL,
-            description          TEXT NOT NULL DEFAULT '',
-            working_directory    TEXT NOT NULL DEFAULT '',
-            shell                TEXT NOT NULL DEFAULT '',
-            provider_flags       TEXT NOT NULL DEFAULT '',
-            auto_start           INTEGER NOT NULL DEFAULT 0,
-            restart_on_crash     INTEGER NOT NULL DEFAULT 0,
-            idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
-            agent_type           TEXT NOT NULL DEFAULT 'standalone',
-            environment          TEXT NOT NULL DEFAULT '',
-            agent_bus_id         TEXT NOT NULL DEFAULT '',
-            is_seeded            INTEGER NOT NULL DEFAULT 0,
-            accounts             TEXT NOT NULL DEFAULT '',
-            parent_id            TEXT NOT NULL DEFAULT '',
-            branch_label         TEXT NOT NULL DEFAULT '',
-            created_at           INTEGER NOT NULL DEFAULT 0,
-            updated_at           INTEGER NOT NULL DEFAULT 0,
-            user_hidden          INTEGER NOT NULL DEFAULT 0,
-            container_image      TEXT NOT NULL DEFAULT '',
-            container_volumes    TEXT NOT NULL DEFAULT '[]',
-            container_name       TEXT NOT NULL DEFAULT '',
-            use_ambient_login    INTEGER NOT NULL DEFAULT 0,
-            model_vendor_base_url TEXT NOT NULL DEFAULT '',
-            auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
-            memory_id            TEXT NOT NULL DEFAULT ''
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
-            ON db_agent_definitions(slug);
-
-        CREATE TABLE IF NOT EXISTS db_agent_content (
+        "CREATE TABLE IF NOT EXISTS db_agent_content (
             agent_id     TEXT NOT NULL,
             content_type TEXT NOT NULL,
             content      TEXT NOT NULL DEFAULT '',
@@ -539,38 +535,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_bundles_is_blank
             ON db_bundles(is_blank);
 
-        CREATE TABLE IF NOT EXISTS db_agent_instances (
-            id                 TEXT PRIMARY KEY,
-            definition_id      TEXT NOT NULL,
-            parent_instance_id TEXT NOT NULL DEFAULT '',
-            block_id           TEXT NOT NULL DEFAULT '',
-            session_id         TEXT NOT NULL DEFAULT '',
-            status             TEXT NOT NULL DEFAULT 'running',
-            github_context     TEXT NOT NULL DEFAULT '',
-            identity_id        TEXT NOT NULL DEFAULT '',
-            memory_id          TEXT NOT NULL DEFAULT '',
-            instance_name      TEXT NOT NULL DEFAULT '',
-            working_directory  TEXT NOT NULL DEFAULT '',
-            display_hidden     INTEGER NOT NULL DEFAULT 0,
-            started_at         INTEGER NOT NULL DEFAULT 0,
-            ended_at           INTEGER NOT NULL DEFAULT 0,
-            created_at         INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (definition_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_definition
-            ON db_agent_instances(definition_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_block
-            ON db_agent_instances(block_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_status
-            ON db_agent_instances(status);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_parent
-            ON db_agent_instances(parent_instance_id);
-        CREATE INDEX IF NOT EXISTS idx_agent_instances_name_recent
-            ON db_agent_instances(instance_name, started_at DESC)
-            WHERE display_hidden = 0 AND instance_name != '';
-
-        -- Phase 3a consolidation: `db_agents` collapses `db_agent_definitions`
-        -- + `db_agent_instances` into one table per
+        -- Phase 3a consolidation: `db_agents` collapses the legacy
+        -- definitions + instances tables into one table per
         -- `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`.
         -- WRITE-ONLY in 3a: every old-table mutation dual-writes here, but
         -- every read still hits the old tables. Phase 3b migrates readers,
@@ -965,12 +931,13 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     // across builds) forward. Idempotent: the "duplicate column" error is
     // swallowed. New additive columns append here + bump OBJECT_SCHEMA_VERSION.
     //
-    // v2: db_agent_definitions.updated_at — last-modified timestamp
-    //     (created_at already existed; updates now stamp updated_at).
-    // v3: db_agent_definitions.user_hidden — per-user hide flag for
-    //     templates (Phase 2 of the two-tier picker spec, Q2 Decision Y).
-    //     Defaults to 0 (visible) for all existing rows so a migration
-    //     never silently hides previously-visible templates.
+    // db_agent_definitions' own v2/v3+ ALTERs (updated_at, user_hidden,
+    // container_image/volumes/name, use_ambient_login, model_vendor_base_url,
+    // auto_continue_enabled, memory_id, conversation_visibility) are run
+    // separately below, conditionally on the table still existing — see that
+    // block's own comment for why they can't simply be deleted even though
+    // the table itself is dropped as of v32 (OBJECT_SCHEMA_VERSION's v32 doc
+    // comment).
     // v5: db_agents.last_block_id — most-recent launch's block (Phase 3c).
     //     Defaults to '' for existing rows; the dual-write populates it on
     //     the next launch/continuation. Read side (3b.1b) treats '' as
@@ -997,13 +964,52 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         )",
     )?;
 
+    // db_agent_definitions' own additive columns, conditional on the table
+    // still existing. Removing these outright (rather than gating them) broke
+    // a real upgrade path: several pending migrations (m0007, m0025, m0026,
+    // m0028) call Store::open() internally as part of their own up() logic —
+    // which runs THIS function, under the CURRENT binary's code — before
+    // m0029 (numbered last) ever drops the table in the same pass. A store
+    // old enough to still be missing one of these columns (e.g. a genuine
+    // pre-v2 install jumping straight to the latest binary) would hit a live
+    // "no such column" error from m0007's consolidate pass or m0025/m0028's
+    // frozen_repair_def_gaps/project_template_launch_row — both of which
+    // SELECT several of these columns from db_agent_definitions — well
+    // before m0029 ever runs. Gating on table existence keeps this a no-op
+    // once the table is gone (fresh v32+ installs never create it at all;
+    // upgraded stores lose it only after m0029 runs later in the same pass)
+    // without reintroducing an unconditional dependency on a table this
+    // release otherwise no longer declares. Found in review of PR #3096
+    // (Codex P1).
+    let legacy_defs_exist: bool = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='db_agent_definitions'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1;
+    if legacy_defs_exist {
+        for stmt in &[
+            "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE db_agent_definitions ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
+        ] {
+            if let Err(e) = conn.execute_batch(stmt) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
     for stmt in &[
-        "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN last_block_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE db_agent_definitions ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE db_agent_definitions ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
-        "ALTER TABLE db_agent_definitions ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
         "ALTER TABLE db_agents ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
@@ -1015,12 +1021,10 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_bundles ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
         // v12: explicit per-agent ambient-login opt-in (fail-by-default spawn
         // gating — SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3).
-        "ALTER TABLE db_agent_definitions ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
         // v15: model vendor override — redirects a harness at a non-default
         // backend (e.g. ANTHROPIC_BASE_URL). Formalizes harness vs. model
         // vendor as distinct concepts; see ProviderConfig::base_url_env_var.
-        "ALTER TABLE db_agent_definitions ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
         // v16: provider-scoped bundle instructions (ABF v0.2 §2.2) — JSON
         // object of {provider_id: content} variants, additive to the
@@ -1029,20 +1033,17 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v17: Warden Supervisor auto-continue opt-in (fail-by-default,
         // same posture as use_ambient_login) — see
         // ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-        "ALTER TABLE db_agent_definitions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
         // v19: the agent's own dedicated ABF bundle, set once at creation.
         // db_agents gets a SEPARATE default_memory_id column (not the
         // existing instance-scoped memory_id) — see its own CREATE TABLE
         // comment for why, and OBJECT_SCHEMA_VERSION's v19 entry.
-        "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN default_memory_id TEXT NOT NULL DEFAULT ''",
         // v26: muxspect Phase B/C per-agent conversation-disclosure policy —
         // see OBJECT_SCHEMA_VERSION's v26 doc comment above. Dual-written
         // to db_agents under the SAME column name (a simple opt-in-style
         // setting, like auto_continue_enabled above — not a differently-
         // named-on-db_agents case like memory_id/default_memory_id).
-        "ALTER TABLE db_agent_definitions ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
         "ALTER TABLE db_agents ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
         // v27: AgentMux-controlled, highest-priority Global Memory tier —
         // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
@@ -1813,14 +1814,12 @@ mod tests {
         "db_layout",
         "db_block",
         "db_temp",
-        "db_agent_definitions",
         "db_agent_content",
         "db_agent_skills",
         "db_agent_history",
         "db_accounts",
         "db_agent_identity_links",
         "db_bundles",
-        "db_agent_instances",
         "db_agents",
         "db_drone_definitions",
         "db_drone_runs",
@@ -1869,13 +1868,10 @@ mod tests {
         }
         // De-forged + bundle indexes.
         for idx in &[
-            "idx_agent_definitions_slug",
             "idx_agent_history_agent_date",
             "idx_agent_identity_links_account",
             "idx_accounts_provider",
             "idx_bundles_is_blank",
-            "idx_agent_instances_definition",
-            "idx_agent_instances_name_recent",
             "idx_agents_is_template",
             "idx_agents_parent_template_id",
             "idx_agents_is_seeded",
@@ -1915,30 +1911,32 @@ mod tests {
     }
 
     #[test]
-    fn test_object_schema_has_model_vendor_base_url_on_both_tables() {
+    fn test_object_schema_has_model_vendor_base_url_on_db_agents() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         run_object_schema(&conn).unwrap();
         // Second pass: the ALTER TABLE array's duplicate-column guard must
         // not error when the column already exists (fresh installs get it
         // via CREATE TABLE; the ALTER is for upgrading pre-v15 databases).
+        // Was "on_both_tables" — db_agent_definitions is gone as of v32, so
+        // this is db_agents-only now (see OBJECT_SCHEMA_VERSION's v32 doc
+        // comment).
         run_object_schema(&conn).unwrap();
 
-        assert!(column_exists(&conn, "db_agent_definitions", "model_vendor_base_url"));
         assert!(column_exists(&conn, "db_agents", "model_vendor_base_url"));
     }
 
     #[test]
-    fn test_object_schema_has_auto_continue_enabled_on_both_tables() {
+    fn test_object_schema_has_auto_continue_enabled_on_db_agents() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         run_object_schema(&conn).unwrap();
         // Second pass: the ALTER TABLE array's duplicate-column guard must
         // not error when the column already exists (fresh installs get it
         // via CREATE TABLE; the ALTER is for upgrading pre-v17 databases).
+        // Was "on_both_tables" — see the v15 test just above for why.
         run_object_schema(&conn).unwrap();
 
-        assert!(column_exists(&conn, "db_agent_definitions", "auto_continue_enabled"));
         assert!(column_exists(&conn, "db_agents", "auto_continue_enabled"));
     }
 
@@ -2018,9 +2016,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(name, "Coder");
-        // Old index dropped, new index present.
+        // Old index dropped. No new index takes its place — db_agent_definitions
+        // is dropped whole as of v32 (OBJECT_SCHEMA_VERSION's v32 doc comment),
+        // so the flat schema no longer declares a unique index for it; the
+        // renamed table exists only transiently, until the drop migration
+        // that runs later in the same upgrade removes it.
         assert!(!index_exists(&conn, "idx_forge_agents_slug"));
-        assert!(index_exists(&conn, "idx_agent_definitions_slug"));
         // Dead table dropped.
         assert!(!table_exists(&conn, "db_workflow_definitions"));
     }
@@ -2031,8 +2032,11 @@ mod tests {
         run_object_schema(&conn).unwrap();
         // Re-running schema (which re-runs adopt) on the already-flat DB
         // leaves the de-forged tables intact and creates no legacy names.
+        // db_agent_definitions itself is gone from the flat schema as of
+        // v32, so a live de-forged table that's still declared (db_agents)
+        // stands in for "the flat schema is present, nothing to adopt".
         run_object_schema(&conn).unwrap();
-        assert!(table_exists(&conn, "db_agent_definitions"));
+        assert!(table_exists(&conn, "db_agents"));
         assert!(!table_exists(&conn, "db_forge_agents"));
     }
 
@@ -2043,9 +2047,15 @@ mod tests {
         // row. The adopt step must NOT drop the legacy table — silent
         // data loss is the bug class behind PR #933's Codex P1.
         let conn = Connection::open_in_memory().unwrap();
-        run_object_schema(&conn).unwrap(); // creates db_agent_definitions
+        run_object_schema(&conn).unwrap();
+        // db_agent_definitions is gone from the flat schema as of v32, so
+        // this fixture has to construct the "downgrade-era db already has
+        // the de-forged table too" scenario by hand — minimal shape, this
+        // test only cares about existence + data survival, not full column
+        // parity.
         conn.execute_batch(
-            "CREATE TABLE db_forge_agents (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+            "CREATE TABLE db_agent_definitions (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+             CREATE TABLE db_forge_agents (id TEXT PRIMARY KEY, name TEXT NOT NULL);
              INSERT INTO db_forge_agents (id, name) VALUES ('downgrade-era', 'Recover Me');",
         )
         .unwrap();
@@ -2115,38 +2125,15 @@ mod tests {
     }
 
     #[test]
-    fn test_user_hidden_column_present_on_fresh_db() {
-        // Schema v3 (Phase 2 hide-templates) adds db_agent_definitions
-        // .user_hidden. A fresh database lands the column via the flat
-        // CREATE statement; an existing-but-stale database lands it via
-        // the additive ALTER below.
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        run_object_schema(&conn).unwrap();
-
-        // Column exists with the documented default — INSERT without
-        // user_hidden must succeed and read back as 0.
-        conn.execute_batch(
-            "INSERT INTO db_agent_definitions (id, name, provider)
-             VALUES ('a-fresh', 'Fresh', 'claude');",
-        )
-        .unwrap();
-        let hidden: i64 = conn
-            .query_row(
-                "SELECT user_hidden FROM db_agent_definitions WHERE id='a-fresh'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(hidden, 0);
-    }
-
-    #[test]
-    fn test_user_hidden_column_added_to_existing_db_via_alter() {
-        // Simulate an existing dev database created before Phase 2:
-        // db_agent_definitions exists but lacks the user_hidden column.
-        // run_object_schema must ALTER it in, preserving every existing
-        // row at the default 0. Idempotent on subsequent runs.
+    fn legacy_column_added_to_a_still_present_db_agent_definitions_via_alter() {
+        // Codex P1 on #3096: the flat schema no longer CREATEs
+        // db_agent_definitions (dropped as of v32), but several pending
+        // migrations (m0007, m0025, m0028) call Store::open() internally —
+        // running run_object_schema — before m0029 (numbered last) actually
+        // drops the table in the same upgrade pass. A store old enough to
+        // still carry the table but missing a column those migrations read
+        // (e.g. user_hidden) must still get it ALTERed in, or their own
+        // reads fail with "no such column" before they ever reach m0029.
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         conn.execute_batch(
@@ -2191,6 +2178,19 @@ mod tests {
             hidden, 0,
             "ALTER must default existing rows to 0 (visible), never to 1",
         );
+    }
+
+    #[test]
+    fn legacy_alter_is_skipped_once_db_agent_definitions_is_gone() {
+        // The other half of the gate: once the table doesn't exist at all
+        // (a fresh v32+ install, or an upgraded store after m0029 has
+        // already dropped it), the conditional ALTER block must not even
+        // attempt the statement — "no such table" is not "duplicate
+        // column" and would not be swallowed.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+        assert!(!table_exists(&conn, "db_agent_definitions"));
     }
 
     #[test]
