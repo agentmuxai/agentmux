@@ -1149,6 +1149,58 @@ impl ReactiveHandler {
             .register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce)
     }
 
+    /// Like [`register_agent_with_nonce`], but never blocks: if the lock is
+    /// already held, this returns an error immediately instead of waiting
+    /// for it.
+    ///
+    /// The case that matters is this exact call running on the same OS
+    /// thread as an in-flight `inject_message` — the reactive-delivery spawn
+    /// fallback (`bootstrap.rs`'s `install_agent_turn_delivery`) runs a
+    /// respawn synchronously on the injecting thread via `block_in_place`,
+    /// and that respawn's own auto-registration (this method's caller,
+    /// `PersistentSubprocessController::spawn_process`) used to re-lock this
+    /// same non-reentrant `Mutex<Handler>` two modules away from the
+    /// call site `TurnRegistration::Skip` actually guards — permanently
+    /// deadlocking the reactive handler process-wide (every persistent
+    /// agent's first message after an idle period, or after any srv
+    /// restart). See `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
+    ///
+    /// Skipping in that case loses nothing: `inject_message` only reaches
+    /// the spawn fallback after resolving `target_agent` through
+    /// `agent_to_block`, so this exact agent/block pair is registered BY
+    /// CONSTRUCTION before this call is ever reached on that path — the
+    /// same "redundant, not just deadlock-prone" reasoning documented on
+    /// `TurnRegistration::Skip` for the sibling re-lock it guards.
+    ///
+    /// A `WouldBlock` from genuine cross-thread contention (unrelated to the
+    /// reentrant case above) is possible in principle but not a correctness
+    /// risk here either, for the same reason: every caller of this method
+    /// reaches it only for an agent/block pair the reactive handler already
+    /// knows about, so a missed refresh of the nonce/tab_id/registry mirror
+    /// is at worst a slightly stale bookkeeping entry, not a lost
+    /// registration.
+    pub fn try_register_agent_with_nonce(
+        &self,
+        agent_id: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        registration_nonce: u64,
+    ) -> Result<(), String> {
+        match self.inner.try_lock() {
+            Ok(mut guard) => {
+                guard.register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce)
+            }
+            Err(std::sync::TryLockError::WouldBlock) => Err(
+                "reactive handler lock busy — skipping registration (redundant \
+                 by construction on this call path; see INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md)"
+                    .to_string(),
+            ),
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                Err(format!("reactive handler mutex poisoned: {e}"))
+            }
+        }
+    }
+
     pub fn unregister_agent(&self, agent_id: &str) {
         self.inner.lock().unwrap().unregister_agent(agent_id);
     }

@@ -2798,8 +2798,17 @@ impl PersistentSubprocessController {
             // blindly wiping a fallback respawn's (or replacement
             // controller's) fresh ones (issue #2363; codex P1 on PR
             // #2500 for why not the controller-local generation).
+            // `try_register_agent_with_nonce`, not the plain
+            // `register_agent_with_nonce` — this spawn can be running on the
+            // same thread as an in-flight `inject_message` (the
+            // reactive-delivery fallback's synchronous respawn), and that
+            // call already holds this same handler's lock. The plain
+            // version would re-lock it on that thread and deadlock the
+            // reactive handler process-wide. See
+            // `ReactiveHandler::try_register_agent_with_nonce`'s doc comment
+            // and `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
             match crate::backend::reactive::get_global_handler()
-                .register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
+                .try_register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
             {
                 Ok(()) => {
                     tracing::info!(
