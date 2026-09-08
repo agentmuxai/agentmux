@@ -3,16 +3,19 @@
 **Author:** Agent5
 **Date:** 2026-09-08
 **Status:** active — Phase A's recon is delivered by this document and its one
-source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), but **two
-of the spec's three Phase A checks are not fully closed**: patches #3/#4 have
-not been test-applied against real 152 source (§2.4), and the macOS Xcode
-toolchain pin is unconfirmed (§4). Per Codex review on PR #3093, Phase A stays
-`active` until those close — the "go" in §6 is therefore conditional, not a
-clearance to start Phase B blind. This is the Phase A output that
+source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), **Patches #1/#2/#3 are verified against real 152
+source** (§2.4/§2.5). **Patch #4 is only PARTIALLY verified** — its Chromium-side
+file applies cleanly, but its five-commit CEF-side transparency cascade is not
+verified (§2.4 caveat, §5b). Also deferred: the macOS hermetic Xcode pin (§4), a
+Phase D build-time check. **Phase B's port is PARTIAL — 3 of 18 files** (§5b).
+Nothing is built. This is the Phase A output that
 `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates on.
-**Verdict:** **Conditional go** on §3's "straight to 152" decision — see §6 for
-the two conditions. Also corrects two errors in the spec's patch inventory, and
-records one shipped-binary gap (§5).
+**Verdict:** **Go** on §3's "straight to 152" decision — the *milestone target*
+is sound: nothing found makes 152 harder, and 16 of the 18 fork-modified CEF
+files are byte-identical upstream. **This is not a statement that the port is
+done or fully verified** — patch #4 is partially verified and Phase B is 3/18
+(§2.4, §5b). Also corrects two errors in the spec's patch inventory, and records
+one shipped-binary gap (§5).
 
 ---
 
@@ -24,7 +27,7 @@ records one shipped-binary gap (§5).
 | Does `cef-rs`/`cef-dll-sys` have a 152-compatible crate? | **Yes** — `cef 152.0.0+152.0.5`, published 2026-09-07. |
 | Is `begin_window_drag` in its generated bindings? | **No** — same as 148, so the binding fork is still required. |
 | Have the build toolchain requirements moved? | **Windows: no. Linux: no.** macOS: unconfirmed, see §4. |
-| Go / no-go on targeting 152 directly? | **Conditional go** — nothing found makes 152 harder than assumed, but two Phase A checks remain open (§6). |
+| Go / no-go on targeting 152 directly? | **Go on the target**, not on readiness. #1/#2/#3 verified vs real 152 source; **#4 only partially** (§2.4). 16 of 18 CEF files are byte-identical upstream so most of the port is free, but **Phase B is 3/18** and 2 files genuinely drifted. macOS Xcode pin deferred to Phase D. |
 
 **A separate finding, not about 152:** patch #1 (the macOS -67030 renderer
 crash fix) was never registered in `patch/patch.cfg`, so no build on any
@@ -93,23 +96,52 @@ Checked `include/views/cef_window.h` at upstream branch `7977` directly: it has
 `SetDraggableRegions()` and no `BeginWindowDrag()`. Our fork's `7778` does have
 it (`/*--cef(added=14800)--*/ virtual bool BeginWindowDrag() = 0;`).
 
-So patch #2 still needs forward-porting for 152, and the corresponding
+So patch #2 must still be **carried** for 152, and the corresponding
 `cef-dll-sys` binding patch is still required. **Nothing was deleted by
 upstream here** — the spec's hope that four milestones might have upstreamed
-some of this did not materialize for this patch.
+some of this did not materialize. Note that "carried" turned out to be much
+cheaper than "forward-ported": see §2.4 — upstream never touched the files it
+edits, so moving it is a copy.
 
-### 2.4 Patches #2/#3/#4 status
+### 2.4 Patches #2/#3/#4 status — ✅ NOW VERIFIED against real 152 source
 
-These live on `7778` (merged via that repo's PR #3, 2026-06-25):
-`views_caption_rightclick_passthrough` (registered in `patch.cfg`) and the
-transparency work (`rwhv_background_opaque_check.patch` plus renderer-side
-changes in `libcef/`).
+An earlier revision left this open, assuming a ~100 GB Chromium checkout was
+needed. For the **Chromium-side** files it wasn't: those were fetched at tag
+`152.0.7977.83` and the patch applied with CEF's own patcher config
+(`git apply -p0 --ignore-whitespace`). Patch #2 needed a different method
+because it edits CEF's *own* sources rather than Chromium's.
 
-**Not individually re-diffed against 152's source.** Doing that properly needs
-a real 152 checkout to `git apply --check` against; asserting "applies cleanly"
-from file inspection alone would be a guess. This is the one Phase A item that
-is genuinely incomplete, and it is the item most likely to change Phase B's
-size. Whoever takes Phase B should do this first, with a checkout.
+**Read this table narrowly.** It reports per-*file* apply results, not
+per-*patch* completeness. Patch #3 is fully covered by its one Chromium file.
+**Patch #4 is not** — it also carries a five-commit CEF-side transparency
+cascade that this table does **not** cover and that is **not** verified; see the
+caveat below and §5b. Patch #1 is in §2.5.
+
+| Patch | Target(s) | Method | Result |
+|---|---|---|---|
+| #3 `views_caption_rightclick_passthrough` | `ui/views/widget/desktop_aura/window_event_filter_linux.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
+| #4 — ⚠️ `rwhv_background_opaque_check` **only** (this is *one part of* patch #4, **not** patch #4) | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **that file applies cleanly** — patch #4 overall is **NOT verified** (§5b) |
+| #2 `BeginWindowDrag` | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` | `cmp` upstream 7778 vs 7977 | **all three byte-identical** → port is mechanical |
+
+Patch #2's result is the notable one: **upstream CEF did not touch any of its
+three target files across four milestones** (confirmed with `cmp`, not a
+line-diff heuristic). So the fork's 7778 copies equal upstream-7977 plus our
+changes exactly, and the "port" is a copy rather than a forward-port. Our delta
+there is ~103 changed lines across the three files.
+
+Note also that the spec lists four files for patch #2; `libcef/browser/views/window_view.cc`
+contains no `BeginWindowDrag` reference on either side and is **not** part of it.
+
+> **Caveat on patch #4 (Codex, PR #3095).** The row above covers only patch #4's
+> single *Chromium-side* file. Patch #4's transparency cascade is five coupled
+> **CEF-side** commits as well; those are part of the 18-file surface in §5b and
+> are **not** all verified. Treat #1/#2/#3 as verified and #4 as partially
+> verified.
+
+**Consequence: most of the patch surface costs little to move to 152** — 16 of
+18 fork-modified CEF files are byte-identical upstream, so they copy rather than
+port. But **2 genuinely drifted** and need real merge + compile work (§5b), and
+the rebuilds remain the dominant cost as §3 of the spec predicted.
 
 ### 2.5 Patch #1 verified to apply cleanly to Chromium 152
 
@@ -244,10 +276,66 @@ Recorded so the next person doesn't repeat it.
 
 ---
 
+## 5b. Phase B — patch port to 7977 (⚠️ PARTIAL — scope correction)
+
+> **Scope correction (2026-09-08, Codex review on PR #3095).** An earlier
+> revision said "all four patches are ported" and §2.4 said all four were
+> "verified." **Both over-claimed patch #4.** Patch #4 is not the single
+> `rwhv_background_opaque_check.patch` file I tested — per
+> `SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §3 it is **five tightly
+> coupled CEF-side commits** (WebContents propagation, RWHView update, a
+> `WebContentsObserver` for renderer swaps, keeping it alive across process
+> swaps, deferred top-level transparent background) which that spec says
+> "should be ported as a unit."
+>
+> Measured properly: **18 hand-written CEF source files** differ between
+> upstream 7778 and the fork's shipped source. **I ported 3.**
+
+### Actual porting surface
+
+| | Count | Meaning |
+|---|---|---|
+| Fork-modified CEF source files | **18** | `libcef/**` + `include/{views,internal}/**`, excluding generated `capi`/`libcef_dll` |
+| Byte-identical upstream 7778 ↔ 7977 | **16** | mechanical copy — correct by construction |
+| **Drifted, need real forward-porting** | **2** | `include/internal/cef_types.h`, `libcef/renderer/render_manager.cc` |
+| Ported so far | **3** | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` |
+
+The *shape* of the earlier conclusion survives — most of the port is mechanical
+because upstream barely touched this surface in four milestones — but "done" was
+wrong, and the two drifted files need a checkout to merge and compile-check.
+
+### Branch layout (mirrors the 7778 lineage)
+
+| Branch | Contents |
+|---|---|
+| `7977` | upstream mirror (CEF 152 / Chromium 152.0.7977.83) |
+| `agentmux/7977-process-requirement` | patch #1, registered in `patch.cfg` |
+| `agentmux/7977-drag-rightclick-and-transparency` | patch #2's three source files; patches #3 and #4 with both registered in `patch.cfg` |
+
+Note 152's `patch.cfg` tail differs from 148's (it ends with
+`chrome_browser_extensions_background`, not `chrome_browser_task_manager`), so
+insertion points are not copyable between milestones.
+
+**A registration gap was found and deliberately not carried forward.** Patch #4
+(`rwhv_background_opaque_check`) is registered on
+`agentmux/7778-drag-rightclick-and-transparency` — the branch the shipped
+binaries were actually built from — but **not** on the `7778` integration
+branch. So a port done "from `7778`" would have silently dropped it. It is
+registered on the 152 branch. This is the same divergence noted in §5.1: the
+build branch and the integration branch are 4 ahead / 2 behind each other, and
+they do not contain the same patch set.
+
+**Still unbuilt, and incomplete.** Phase B is source-only; nothing is compiled
+or tested, and `agentmuxai/cef` has no CI. 15 of 18 files remain unported
+(13 mechanical + 2 needing real merge work), so **Phase B is not ready for
+Phase D.**
+
+---
+
 ## 6. Go / no-go
 
-**Conditional go**, targeting 152 directly, per the spec's §3 reasoning.
-Nothing in this recon makes 152 harder than assumed:
+**Go**, targeting 152 directly, per the spec's §3 reasoning. Nothing in this
+recon makes 152 harder than assumed, and the patch work turned out cheaper:
 
 - the binding exists and is current;
 - Windows/Linux toolchains are unchanged;
@@ -259,9 +347,12 @@ real porting cost.
 
 **Two conditions on that "go":**
 
-1. **§2.4 is unfinished.** Patches #2/#3/#4 have not been test-applied against
-   real 152 source. Phase B should start there, and Phase B's estimate is not
-   trustworthy until it does. (Patch #1 *is* now verified — §2.5.)
+1. **Patch applicability — PARTIALLY closed.** #1/#2/#3 are verified against
+   real 152 source (§2.4, §2.5). **#4 is not**: only its Chromium-side file was
+   test-applied; its five-commit CEF-side cascade is unverified (§5b). The
+   drift measurement (16 of 18 files byte-identical upstream) means the
+   remaining work is *probably* small, but "probably small" is not "verified" —
+   finish this with a checkout before Phase D.
 2. **§4's macOS toolchain row is unconfirmed**, not confirmed-fine. Establish
    the hermetic Xcode requirement on the actual machine before committing to a
    macOS Phase D slot.
