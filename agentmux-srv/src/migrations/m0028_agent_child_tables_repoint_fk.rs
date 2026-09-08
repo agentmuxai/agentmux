@@ -223,9 +223,113 @@ fn rebuild_table(conn: &Connection, spec: &TableSpec) -> Result<usize, String> {
     result
 }
 
+/// Frozen copy of `agents_consolidate::repair_def_gaps` as of v30 (codex P2
+/// on #3088): a migration must produce the same rows on every machine it
+/// ever runs on, so it cannot call a live helper whose behavior a later
+/// release may change (`migrations/mod.rs`'s "migrations freeze copies of
+/// live logic" doc) — doubly so here, since the Phase 4 plan
+/// (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md`) schedules
+/// `agents_consolidate.rs` itself for removal, which would strand a live
+/// call the moment that PR lands. Finds every `db_agent_definitions` row
+/// with no matching `db_agents` id (written between the Phase 3a marker and
+/// Phase 3b dual-write landing) and projects one, `INSERT OR IGNORE` so it
+/// is safe to call every time this migration runs. Returns the number
+/// inserted.
+fn frozen_repair_def_gaps(conn: &mut Connection) -> Result<usize, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT d.id, d.name, d.icon, d.provider, d.description,
+                    d.working_directory, d.shell, d.provider_flags, d.auto_start,
+                    d.restart_on_crash, d.idle_timeout_minutes, d.created_at,
+                    d.agent_type, d.environment, d.agent_bus_id, d.is_seeded,
+                    d.accounts, d.parent_id, d.branch_label, d.updated_at,
+                    d.slug, d.user_hidden
+             FROM db_agent_definitions d
+             LEFT JOIN db_agents a ON a.id = d.id
+             WHERE a.id IS NULL",
+        )
+        .map_err(|e| format!("gap-repair: prepare: {e}"))?;
+    #[allow(clippy::type_complexity)]
+    let missing: Vec<(
+        String, String, String, String, String, String, String, String,
+        i64, i64, i64, i64, String, String, String, i64, String, String,
+        String, i64, String, i64,
+    )> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?, row.get::<_, String>(7)?, row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?, row.get::<_, i64>(10)?, row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?, row.get::<_, String>(13)?, row.get::<_, String>(14)?,
+                row.get::<_, i64>(15)?, row.get::<_, String>(16)?, row.get::<_, String>(17)?,
+                row.get::<_, String>(18)?, row.get::<_, i64>(19)?, row.get::<_, String>(20)?,
+                row.get::<_, i64>(21)?,
+            ))
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| format!("gap-repair: read db_agent_definitions: {e}"))?;
+    drop(stmt);
+    if missing.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn.transaction().map_err(|e| format!("gap-repair: begin: {e}"))?;
+    let mut inserted = 0usize;
+    for (
+        id, name, icon, provider, description, working_directory, shell,
+        provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+        created_at, agent_type, environment, agent_bus_id, is_seeded,
+        accounts, parent_id, branch_label, updated_at, slug, user_hidden,
+    ) in &missing
+    {
+        let is_template = if *is_seeded == 1 { 1_i64 } else { 0_i64 };
+        let parent_template_id = if *is_seeded == 1 { String::new() } else { parent_id.clone() };
+        let affected = tx
+            .execute(
+                "INSERT OR IGNORE INTO db_agents (
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    identity_id, memory_id, working_directory, github_context,
+                    instance_name,
+                    created_at, updated_at, is_seeded, user_hidden
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4,
+                    ?5, ?6,
+                    ?7, ?8, ?9, ?10,
+                    ?11, ?12, ?13,
+                    ?14, ?15, ?16,
+                    ?17, ?18,
+                    '', '', ?19, '',
+                    '',
+                    ?20, ?21, ?22, ?23
+                 )",
+                rusqlite::params![
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    working_directory,
+                    created_at, updated_at, is_seeded, user_hidden,
+                ],
+            )
+            .map_err(|e| format!("gap-repair: insert {id}: {e}"))?;
+        if affected > 0 {
+            inserted += 1;
+        }
+    }
+    tx.commit().map_err(|e| format!("gap-repair: commit: {e}"))?;
+    Ok(inserted)
+}
+
 pub(super) fn repoint(conn: &mut Connection) -> Result<usize, String> {
-    crate::backend::storage::agents_consolidate::repair_def_gaps(conn)
-        .map_err(|e| format!("repair definition gaps: {e}"))?;
+    frozen_repair_def_gaps(conn)?;
     let mut orphans_dropped = 0usize;
     for spec in TABLES {
         if already_targets_db_agents(conn, spec.name)? {
