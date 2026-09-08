@@ -665,7 +665,6 @@ impl Store {
         // observable mutation downstream callers may rely on remaining
         // untouched. Callers that need the freshly-stamped value can
         // re-fetch the row via the normal read path.
-        let _ = stamped_updated_at;
         Ok(())
     }
 
