@@ -4,15 +4,18 @@
 **Created:** 2026-09-07
 **Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7,
 plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
-verdict is **go** on targeting 152 directly — the patch-applicability condition
-is now **closed**: all four patches are verified against real CEF/Chromium 152
-source (#1/#3/#4 by real `git apply -p0`; #2's three target files are
-`cmp`-identical between 7778 and 7977, so its port is mechanical). One minor
-check remains open: the macOS hermetic Xcode pin is unconfirmed — settle it at
-Phase D build time. **Phase B's patch port is DONE** (`7977`,
+verdict is **go** on targeting 152 directly — patches #1/#2/#3 are verified
+against real CEF/Chromium 152 source, and of the 18 fork-modified CEF files,
+**16 are byte-identical upstream 7778↔7977** (mechanical copy) with only **2
+genuinely drifted** (`include/internal/cef_types.h`,
+`libcef/renderer/render_manager.cc`). Open: the macOS hermetic Xcode pin
+(Phase D build-time check), and **patch #4 is only partially verified** — it is
+five coupled CEF-side commits, not just the one Chromium-side file that was
+test-applied (Codex, PR #3095). **Phase B's port is PARTIAL — 3 of 18 files
+done, NOT ready for Phase D.** Branches `7977`,
 `agentmux/7977-process-requirement`, `agentmux/7977-drag-rightclick-and-transparency`
-all exist with patches registered); **Phases C–G not started, and nothing is
-built or tested yet — `agentmuxai/cef` has no CI.** The
+exist. **Phases C–G not started; nothing is built or tested — `agentmuxai/cef`
+has no CI.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
@@ -122,12 +125,15 @@ the binding fork is still needed. (3) Windows and Linux toolchain pins are
 **unchanged** between the two Chromium tags; macOS's Xcode pin is
 **unconfirmed** — verify at Phase D build time.
 
-**Phase B's patch port is DONE** — see the report's §5b. All four patches are on
-152 branches mirroring the 7778 layout, with `patch.cfg` registrations. Notably
-patch #2 needed no forward-porting at all: upstream CEF did not touch any of its
-three target files across four milestones. A registration gap on `7778` (patch
-#4 registered only on the build branch, not the integration branch) was found
-and deliberately not carried forward. **Nothing is built — Phase D is the gate.**
+**Phase B's port is PARTIAL** — see the report's §5b. 3 of 18 fork-modified CEF
+files are on the 152 branches, with `patch.cfg` registrations for the
+`.patch`-file patches. Patch #2 needed no forward-porting (upstream never
+touched its three files in four milestones), and 16 of the 18 files are likewise
+byte-identical so they copy rather than port — but **2 drifted files need real
+merge + compile work**, and patch #4's five-commit CEF-side cascade is not fully
+ported or verified. A registration gap on `7778` (patch #4 registered only on
+the build branch, not the integration branch) was found and not carried forward.
+**Nothing is built — Phase D is the gate, and Phase B must finish first.**
 
 *(original task list, for reference)*
 1. Diff each of the four patches against upstream 7977; determine which are now upstream, which apply cleanly, which need real porting.
