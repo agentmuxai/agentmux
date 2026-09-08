@@ -7,7 +7,7 @@ the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
 verdict is **go** on targeting 152 directly. **Phases B–G not started.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
-section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3087),
+section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
 and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
 registered in `patch.cfg`, so it is absent from the shipped macOS binary —
 fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
@@ -172,7 +172,7 @@ This is worth treating as its own finding, not merely a step: it means the CEF v
 >   Chromium-**milestone** cross-check that fails the release if they diverge.
 >   The macOS half of that check is gated on `check-macos.outputs.available`,
 >   so a dormant macOS pin can't block a Windows/Linux-only release.
-> - **#3087** added a `workflow_dispatch` guard: an emergency rebuild must be
+> - **#3089** added a `workflow_dispatch` guard: an emergency rebuild must be
 >   dispatched *from the tag being rebuilt*, since a run's own workflow
 >   definition (and therefore its CEF pins) comes from the dispatch ref, not
 >   from `inputs.tag`.
