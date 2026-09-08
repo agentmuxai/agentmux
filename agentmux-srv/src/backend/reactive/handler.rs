@@ -1282,15 +1282,53 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().get_agent(agent_id).cloned()
     }
 
-    /// Used by `PersistentSubprocessController::spawn_process` to find the
-    /// nonce actually on record when its own registration was skipped
-    /// (reagent P1 on PR #3084) — no longer dead code.
+    /// Used by `server/app_api/fleet.rs`'s ordinary (non-reentrant) request
+    /// handlers — no longer dead code, but NOT safe to call from
+    /// `spawn_process`'s skip-arm; see [`try_get_agent_by_block`] for why.
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
         self.inner
             .lock()
             .unwrap()
             .get_agent_by_block(block_id)
             .cloned()
+    }
+
+    /// Non-blocking counterpart to [`get_agent_by_block`], for the one
+    /// caller that can be running on a thread already holding this lock:
+    /// `spawn_process`'s handling of a skipped registration
+    /// (`try_register_agent_with_nonce` returning `Err`).
+    ///
+    /// reagent P0 on PR #3084 (caught twice — the fix for the P1 nonce-leak
+    /// finding introduced this exact regression on its first attempt): that
+    /// fix originally called the plain, blocking [`get_agent_by_block`]
+    /// from inside the skip arm. In the routine reentrant case — the same
+    /// thread already holds `self.inner` via an in-flight `inject_message`
+    /// — that blocking `.lock()` reproduces INCIDENT_2026_09_07's exact
+    /// permanent self-deadlock, on the very thread `try_register_agent_
+    /// with_nonce`'s own retry-then-fail was designed to protect. Same
+    /// bounded-retry reasoning as that method: a same-thread reentrant call
+    /// can never succeed (nothing on this call stack releases the lock) and
+    /// correctly returns `None` after exhausting the budget — the caller's
+    /// nonce-leak mitigation simply doesn't apply in that sub-case, which is
+    /// a strict improvement on the pre-this-PR baseline (no cleanup, but no
+    /// deadlock either), not a regression. Ordinary cross-thread contention
+    /// gets a real chance to succeed, same as the sibling method.
+    pub fn try_get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
+        const MAX_ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.inner.try_lock() {
+                Ok(guard) => return guard.get_agent_by_block(block_id).cloned(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return None;
+                    }
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => return None,
+            }
+        }
+        unreachable!("loop always returns on its final attempt");
     }
 
     pub fn list_agents(&self) -> Vec<AgentRegistration> {

@@ -2981,3 +2981,84 @@ fn non_reentrant_try_register_agent_with_nonce_still_registers() {
     let agent = handler.get_agent("agent1").expect("agent must now be registered");
     assert_eq!(agent.block_id, "block1");
 }
+
+/// reagent P0 on PR #3084 (caught twice — the fix for the nonce-leak P1
+/// finding introduced this exact regression on its first attempt): the
+/// skip arm's nonce-recovery lookup must ALSO be non-blocking. The first
+/// cut called the plain `get_agent_by_block` — which blocking-locks — from
+/// inside the same reentrant scenario `try_register_agent_with_nonce`
+/// exists to escape, reproducing INCIDENT_2026_09_07's exact permanent
+/// deadlock one call later. This test exercises `try_get_agent_by_block`
+/// itself under the identical reentrant shape as the sibling test above:
+/// called from within a message sender that is running under
+/// `inject_message`'s lock, on the same thread.
+#[test]
+fn reentrant_try_get_agent_by_block_fails_fast_not_hangs() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let handler = std::sync::Arc::new(super::handler::ReactiveHandler::new());
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let handler_for_sender = handler.clone();
+    let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Option<super::types::AgentRegistration>>();
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+        // Simulates spawn_process's skip-arm nonce lookup, running
+        // synchronously on the injecting thread while inject_message's
+        // lock is held — exactly where the real regression lived.
+        let result = handler_for_sender.try_get_agent_by_block("block1");
+        reentrant_result_tx.send(result).unwrap();
+        Ok(true)
+    }));
+
+    let injector = handler.clone();
+    let (done_tx, done_rx) = mpsc::channel::<bool>();
+    std::thread::spawn(move || {
+        let resp = injector.inject_message(InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: "hello".to_string(),
+            source_agent: None,
+            request_id: None,
+            priority: None,
+            wait_for_idle: false,
+            ..Default::default()
+        });
+        let _ = done_tx.send(resp.success);
+    });
+
+    let reentrant_result = reentrant_result_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect(
+            "the reentrant lookup must return within 5s — a hang here means \
+             try_get_agent_by_block regressed to blocking, reproducing \
+             INCIDENT_2026_09_07's permanent srv deadlock one call later \
+             than try_register_agent_with_nonce alone would catch",
+        );
+    assert_eq!(
+        reentrant_result, None,
+        "a same-thread reentrant lookup must yield None (not hang, and not \
+         fabricate a result) — the caller degrades to no-cleanup, which is \
+         safe, rather than deadlocking",
+    );
+
+    let succeeded = done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("inject_message itself must also complete promptly");
+    assert!(succeeded);
+}
+
+/// Guards the other direction for the read path, mirroring the register
+/// path's own non-reentrant test: an uncontended call must actually find
+/// the registration, not just fail to hang.
+#[test]
+fn non_reentrant_try_get_agent_by_block_finds_the_registration() {
+    let handler = super::handler::ReactiveHandler::new();
+    handler
+        .register_agent_with_nonce("agent1", "block1", None, 42)
+        .unwrap();
+
+    let found = handler
+        .try_get_agent_by_block("block1")
+        .expect("an uncontended call must find the registration");
+    assert_eq!(found.registration_nonce, 42);
+}

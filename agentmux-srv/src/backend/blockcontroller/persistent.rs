@@ -2865,8 +2865,20 @@ impl PersistentSubprocessController {
                     // `unregister_block_if_nonce` itself — it never
                     // matches, so this degrades to today's no-cleanup
                     // behavior rather than a wrong one.
+                    //
+                    // `try_get_agent_by_block`, NOT the plain
+                    // `get_agent_by_block` — this Err arm is reached
+                    // precisely when we might be on the same thread as an
+                    // in-flight `inject_message` (reagent P0 on PR #3084,
+                    // caught after the first attempt used the blocking
+                    // version here and reproduced INCIDENT_2026_09_07's
+                    // exact deadlock). In that reentrant case this
+                    // correctly returns `None` after its own retry budget
+                    // instead of hanging forever; `exit_cleanup_nonce`
+                    // then simply stays at its default, same safe
+                    // no-cleanup degradation as before this fix existed.
                     if let Some(current) = crate::backend::reactive::get_global_handler()
-                        .get_agent_by_block(&self.block_id)
+                        .try_get_agent_by_block(&self.block_id)
                     {
                         exit_cleanup_nonce = current.registration_nonce;
                     }
