@@ -316,14 +316,23 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        consolidation's definition and instance flips, #3080/#3092); this
 ///        is the final phase (Phase 3e,
 ///        `SPEC_AGENT_ARCHITECTURE_2026_05_27.md`) closing out the tracking
-///        spec. Neither table's `CREATE TABLE`/`ALTER TABLE ADD COLUMN`
-///        entries exist in this function any more — leaving them would
-///        silently recreate the tables (empty) on the very next
-///        `Store::open()` after the drop migration runs, since migrations
-///        execute before this function does on every boot. An existing
-///        store's tables are actually removed by
-///        `m0029_drop_legacy_agent_tables`; a fresh install never has them
-///        to begin with. `adopt_legacy_table_names`'s
+///        spec. `db_agent_instances`' `CREATE TABLE`/indexes and
+///        `db_agent_definitions`' `CREATE TABLE` are gone from this function
+///        — leaving either would silently recreate the tables (empty) on
+///        the very next `Store::open()` after the drop migration runs,
+///        since migrations execute before this function does on every
+///        boot. `db_agent_definitions`' own `ALTER TABLE ADD COLUMN`
+///        entries, by contrast, are KEPT — gated on the table still
+///        existing (see that block's own comment below) — because several
+///        pending migrations (m0007, m0025, m0026, m0028) call
+///        `Store::open()` internally, running this function, before m0029
+///        (numbered last) ever drops the table in the SAME upgrade pass; a
+///        store old enough to be missing one of those columns would fail
+///        those migrations' own reads with "no such column" otherwise
+///        (Codex P1 on #3096). An existing store's tables are actually
+///        removed by `m0029_drop_legacy_agent_tables`; a fresh install
+///        never has them to begin with, so the gate is a no-op for it.
+///        `adopt_legacy_table_names`'s
 ///        `db_forge_agents` → `db_agent_definitions` rename entry is left
 ///        in place deliberately: an install old enough to still carry
 ///        `db_forge_agents` reaches it during an EARLIER migration's own
@@ -922,11 +931,13 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
     // across builds) forward. Idempotent: the "duplicate column" error is
     // swallowed. New additive columns append here + bump OBJECT_SCHEMA_VERSION.
     //
-    // v2 and v3 (db_agent_definitions.updated_at / .user_hidden) no longer
-    // have entries here — the table they targeted is dropped as of v32 (see
-    // OBJECT_SCHEMA_VERSION's v32 doc comment). Their history stays in that
-    // doc comment's own v2/v3 entries; this list only needs to keep
-    // carrying forward what a store COULD STILL have today.
+    // db_agent_definitions' own v2/v3+ ALTERs (updated_at, user_hidden,
+    // container_image/volumes/name, use_ambient_login, model_vendor_base_url,
+    // auto_continue_enabled, memory_id, conversation_visibility) are run
+    // separately below, conditionally on the table still existing — see that
+    // block's own comment for why they can't simply be deleted even though
+    // the table itself is dropped as of v32 (OBJECT_SCHEMA_VERSION's v32 doc
+    // comment).
     // v5: db_agents.last_block_id — most-recent launch's block (Phase 3c).
     //     Defaults to '' for existing rows; the dual-write populates it on
     //     the next launch/continuation. Read side (3b.1b) treats '' as
@@ -952,6 +963,50 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             user_sub       TEXT NOT NULL DEFAULT ''
         )",
     )?;
+
+    // db_agent_definitions' own additive columns, conditional on the table
+    // still existing. Removing these outright (rather than gating them) broke
+    // a real upgrade path: several pending migrations (m0007, m0025, m0026,
+    // m0028) call Store::open() internally as part of their own up() logic —
+    // which runs THIS function, under the CURRENT binary's code — before
+    // m0029 (numbered last) ever drops the table in the same pass. A store
+    // old enough to still be missing one of these columns (e.g. a genuine
+    // pre-v2 install jumping straight to the latest binary) would hit a live
+    // "no such column" error from m0007's consolidate pass or m0025/m0028's
+    // frozen_repair_def_gaps/project_template_launch_row — both of which
+    // SELECT several of these columns from db_agent_definitions — well
+    // before m0029 ever runs. Gating on table existence keeps this a no-op
+    // once the table is gone (fresh v32+ installs never create it at all;
+    // upgraded stores lose it only after m0029 runs later in the same pass)
+    // without reintroducing an unconditional dependency on a table this
+    // release otherwise no longer declares. Found in review of PR #3096
+    // (Codex P1).
+    let legacy_defs_exist: bool = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='db_agent_definitions'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? == 1;
+    if legacy_defs_exist {
+        for stmt in &[
+            "ALTER TABLE db_agent_definitions ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN user_hidden INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN container_image TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN container_volumes TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE db_agent_definitions ADD COLUMN container_name TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN use_ambient_login INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN model_vendor_base_url TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE db_agent_definitions ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
+        ] {
+            if let Err(e) = conn.execute_batch(stmt) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column") {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
 
     for stmt in &[
         "ALTER TABLE db_agents ADD COLUMN last_block_id TEXT NOT NULL DEFAULT ''",
@@ -2067,6 +2122,75 @@ mod tests {
             remaining, 0,
             "FK cascade must survive the forge→agent table rename"
         );
+    }
+
+    #[test]
+    fn legacy_column_added_to_a_still_present_db_agent_definitions_via_alter() {
+        // Codex P1 on #3096: the flat schema no longer CREATEs
+        // db_agent_definitions (dropped as of v32), but several pending
+        // migrations (m0007, m0025, m0028) call Store::open() internally —
+        // running run_object_schema — before m0029 (numbered last) actually
+        // drops the table in the same upgrade pass. A store old enough to
+        // still carry the table but missing a column those migrations read
+        // (e.g. user_hidden) must still get it ALTERed in, or their own
+        // reads fail with "no such column" before they ever reach m0029.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_agent_definitions (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '',
+                name TEXT NOT NULL, icon TEXT NOT NULL DEFAULT '✦',
+                provider TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '',
+                shell TEXT NOT NULL DEFAULT '',
+                provider_flags TEXT NOT NULL DEFAULT '',
+                auto_start INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash INTEGER NOT NULL DEFAULT 0,
+                idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                agent_type TEXT NOT NULL DEFAULT 'standalone',
+                environment TEXT NOT NULL DEFAULT '',
+                agent_bus_id TEXT NOT NULL DEFAULT '',
+                is_seeded INTEGER NOT NULL DEFAULT 0,
+                accounts TEXT NOT NULL DEFAULT '',
+                parent_id TEXT NOT NULL DEFAULT '',
+                branch_label TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO db_agent_definitions (id, name, provider, is_seeded)
+                VALUES ('pre-existing', 'Old Template', 'claude', 1);",
+        )
+        .unwrap();
+
+        run_object_schema(&conn).unwrap();
+        // Idempotent — second pass must not error and must not
+        // re-default existing rows.
+        run_object_schema(&conn).unwrap();
+
+        let hidden: i64 = conn
+            .query_row(
+                "SELECT user_hidden FROM db_agent_definitions WHERE id='pre-existing'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            hidden, 0,
+            "ALTER must default existing rows to 0 (visible), never to 1",
+        );
+    }
+
+    #[test]
+    fn legacy_alter_is_skipped_once_db_agent_definitions_is_gone() {
+        // The other half of the gate: once the table doesn't exist at all
+        // (a fresh v32+ install, or an upgraded store after m0029 has
+        // already dropped it), the conditional ALTER block must not even
+        // attempt the statement — "no such table" is not "duplicate
+        // column" and would not be swallowed.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+        assert!(!table_exists(&conn, "db_agent_definitions"));
     }
 
     #[test]
