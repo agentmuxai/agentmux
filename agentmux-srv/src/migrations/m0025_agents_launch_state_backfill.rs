@@ -495,6 +495,40 @@ mod tests {
         // projections the Phase 3a dual-write left with default launch state.
         let conn = Connection::open(&path).unwrap();
 
+        // Neither legacy table exists at all any more (v32,
+        // `OBJECT_SCHEMA_VERSION`'s v32 doc comment) — this fixture stands
+        // up the pre-drop shape by hand.
+        conn.execute_batch(
+            "CREATE TABLE db_agent_definitions (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,
+                icon TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '', shell TEXT NOT NULL DEFAULT '',
+                provider_flags TEXT NOT NULL DEFAULT '', auto_start INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash INTEGER NOT NULL DEFAULT 0, idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0, agent_type TEXT NOT NULL DEFAULT 'standalone',
+                environment TEXT NOT NULL DEFAULT '', agent_bus_id TEXT NOT NULL DEFAULT '',
+                is_seeded INTEGER NOT NULL DEFAULT 0, accounts TEXT NOT NULL DEFAULT '',
+                parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT 0, user_hidden INTEGER NOT NULL DEFAULT 0,
+                container_image TEXT NOT NULL DEFAULT '', container_volumes TEXT NOT NULL DEFAULT '[]',
+                container_name TEXT NOT NULL DEFAULT '', use_ambient_login INTEGER NOT NULL DEFAULT 0,
+                model_vendor_base_url TEXT NOT NULL DEFAULT '', auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
+                memory_id TEXT NOT NULL DEFAULT '', conversation_visibility TEXT NOT NULL DEFAULT 'private'
+             );
+             CREATE TABLE db_agent_instances (
+                id TEXT PRIMARY KEY, definition_id TEXT NOT NULL,
+                parent_instance_id TEXT NOT NULL DEFAULT '', block_id TEXT NOT NULL DEFAULT '',
+                session_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'running',
+                github_context TEXT NOT NULL DEFAULT '', identity_id TEXT NOT NULL DEFAULT '',
+                memory_id TEXT NOT NULL DEFAULT '', instance_name TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '', display_hidden INTEGER NOT NULL DEFAULT 0,
+                started_at INTEGER NOT NULL DEFAULT 0, ended_at INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (definition_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+             );",
+        )
+        .unwrap();
+
         // `db_agent_instances.definition_id` still FKs to
         // `db_agent_definitions(id)` — un-repointed, since that table is
         // dropped whole rather than having its FK moved. `agent_def_insert`
@@ -607,11 +641,13 @@ mod tests {
 
     #[test]
     fn tolerates_a_store_without_the_legacy_table() {
+        // A plain `Store::open` already has neither legacy table as of v32
+        // (`OBJECT_SCHEMA_VERSION`'s v32 doc comment) — no DROP needed to
+        // construct this scenario any more; it's the default shape.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("objects.db");
         drop(Store::open(&path).unwrap());
         let mut conn = Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE db_agent_instances;").unwrap();
         assert_eq!(backfill_launch_state(&mut conn).unwrap(), BackfillStats::default());
     }
 

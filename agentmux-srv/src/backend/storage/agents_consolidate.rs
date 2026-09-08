@@ -73,12 +73,42 @@ pub struct ConsolidateStats {
 /// file with no matching data) is now detectable instead of silently
 /// trusted.
 ///
-/// Cheap: three `COUNT(*)` queries, safe to call on every startup.
+/// Cheap: up to three `COUNT(*)` queries, safe to call on every startup.
+///
+/// Tolerates either source table being physically absent (Phase 3e,
+/// `SPEC_AGENT_ARCHITECTURE_2026_05_27.md` — `db_agent_definitions`/
+/// `db_agent_instances` are dropped by `m0029_drop_legacy_agent_tables`):
+/// an absent table categorically has no rows, so it can never be the
+/// "source has rows but the target doesn't" shape this function detects.
+/// Load-bearing, not defensive-only — a fresh (v32+) channel is stamped
+/// `0007_agents_consolidate` applied via its own early-return no-op
+/// (`m0007_agents_consolidate.rs::up`'s `channel_store_path.exists()`
+/// guard, for a channel created before migrations ever ran), and a later
+/// `muxspect migrations --verify` doctor pass calls `m0007`'s `verify()` —
+/// which calls this — against that channel once it has real, ordinarily-
+/// populated `db_agents` data. Without this guard that doctor pass would
+/// error on "no such table" for every fresh install, not just an upgraded
+/// one that genuinely went through the old table pair.
 pub fn consolidate_looks_incomplete(conn: &Connection) -> Result<bool, StoreError> {
-    let defs: i64 = conn.query_row("SELECT COUNT(*) FROM db_agent_definitions", [], |r| r.get(0))?;
-    let insts: i64 = conn.query_row("SELECT COUNT(*) FROM db_agent_instances", [], |r| r.get(0))?;
+    let defs = table_row_count_if_exists(conn, "db_agent_definitions")?;
+    let insts = table_row_count_if_exists(conn, "db_agent_instances")?;
     let agents: i64 = conn.query_row("SELECT COUNT(*) FROM db_agents", [], |r| r.get(0))?;
     Ok((defs > 0 || insts > 0) && agents == 0)
+}
+
+/// `SELECT COUNT(*) FROM <table>`, or `0` if the table doesn't exist at
+/// all — distinct from a genuinely empty table, which also counts as `0`
+/// here on purpose (both mean "no source rows to backfill").
+fn table_row_count_if_exists(conn: &Connection, table: &str) -> Result<i64, StoreError> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(0);
+    }
+    Ok(conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))?)
 }
 
 /// Run the one-shot consolidation backfill, gated by the marker file.
@@ -112,6 +142,22 @@ pub fn run_consolidate_migration(
                  treating as stale and re-running instead of trusting it",
             );
         }
+    }
+
+    // Nothing to consolidate FROM if neither source table exists — a fresh
+    // (v32+) channel, or one already past `m0029_drop_legacy_agent_tables`.
+    // `up()`'s own `channel_store_path.exists()` guard already keeps this
+    // from firing for a channel created after this shipped (see
+    // `consolidate_looks_incomplete`'s doc comment for the doctor-pass path
+    // that reaches this function on an EXISTING, already-migrated channel
+    // instead).
+    let defs_exist: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_definitions')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !defs_exist {
+        return Ok(ConsolidateStats::default());
     }
 
     // The backfill runs inside a transaction so a mid-flight failure
@@ -228,11 +274,24 @@ pub fn run_consolidate_migration(
         }
     }
 
-    // Pass 3 + 4 — instances.
+    // Pass 3 + 4 — instances. Tolerates `db_agent_instances` not existing
+    // even though `db_agent_definitions` does (checked separately from the
+    // guard at the top of this function, which only covers "neither table
+    // exists at all") — a definition with no instance ever recorded against
+    // it is a legitimate shape (pre-consolidation agents that were defined
+    // but never launched), not a reason to skip Pass 1/2 too.
+    //
     // Order by created_at DESC so the FIRST instance we see for a
     // given user-cloned def is the most recent (the spec wants
     // most-recent bindings to win on collision).
-    let inst_rows: Vec<InstanceRow> = {
+    let insts_exist: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'db_agent_instances')",
+        [],
+        |row| row.get(0),
+    )?;
+    let inst_rows: Vec<InstanceRow> = if !insts_exist {
+        Vec::new()
+    } else {
         let mut stmt = tx.prepare(
             "SELECT i.id, i.definition_id, i.parent_instance_id,
                     i.instance_name, i.identity_id, i.memory_id,
@@ -525,10 +584,64 @@ mod tests {
     use super::*;
     use crate::backend::storage::migrations::run_object_schema;
 
+    /// `db_agent_definitions`/`db_agent_instances` are gone from the flat
+    /// schema as of v32 (`OBJECT_SCHEMA_VERSION`'s v32 doc comment,
+    /// `SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase 3e) — this fixture
+    /// stands up the pre-drop legacy shape by hand, since `run_object_schema`
+    /// no longer will. Every column `insert_def`/`insert_instance` write is
+    /// present; the FK matches what the tables actually had before the
+    /// drop, so cascade behavior this module's own logic depends on
+    /// (`run_consolidate_migration` reads both, unrelated to cascades) still
+    /// matches production history.
     fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         run_object_schema(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE db_agent_definitions (
+                id                   TEXT PRIMARY KEY,
+                slug                 TEXT NOT NULL DEFAULT '',
+                name                 TEXT NOT NULL,
+                icon                 TEXT NOT NULL DEFAULT '✦',
+                provider             TEXT NOT NULL,
+                description          TEXT NOT NULL DEFAULT '',
+                working_directory    TEXT NOT NULL DEFAULT '',
+                shell                TEXT NOT NULL DEFAULT '',
+                provider_flags       TEXT NOT NULL DEFAULT '',
+                auto_start           INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash     INTEGER NOT NULL DEFAULT 0,
+                idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                agent_type           TEXT NOT NULL DEFAULT 'standalone',
+                environment          TEXT NOT NULL DEFAULT '',
+                agent_bus_id         TEXT NOT NULL DEFAULT '',
+                is_seeded            INTEGER NOT NULL DEFAULT 0,
+                accounts             TEXT NOT NULL DEFAULT '',
+                parent_id            TEXT NOT NULL DEFAULT '',
+                branch_label         TEXT NOT NULL DEFAULT '',
+                created_at           INTEGER NOT NULL DEFAULT 0,
+                updated_at           INTEGER NOT NULL DEFAULT 0,
+                user_hidden          INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE db_agent_instances (
+                id                 TEXT PRIMARY KEY,
+                definition_id      TEXT NOT NULL,
+                parent_instance_id TEXT NOT NULL DEFAULT '',
+                block_id           TEXT NOT NULL DEFAULT '',
+                session_id         TEXT NOT NULL DEFAULT '',
+                status             TEXT NOT NULL DEFAULT 'running',
+                github_context     TEXT NOT NULL DEFAULT '',
+                identity_id        TEXT NOT NULL DEFAULT '',
+                memory_id          TEXT NOT NULL DEFAULT '',
+                instance_name      TEXT NOT NULL DEFAULT '',
+                working_directory  TEXT NOT NULL DEFAULT '',
+                display_hidden     INTEGER NOT NULL DEFAULT 0,
+                started_at         INTEGER NOT NULL DEFAULT 0,
+                ended_at           INTEGER NOT NULL DEFAULT 0,
+                created_at         INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (definition_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+             );",
+        )
+        .unwrap();
         conn
     }
 
@@ -881,6 +994,35 @@ mod tests {
         let conn = fresh_conn();
         // No source rows, no db_agents rows — nothing to backfill, not "incomplete".
         assert!(!consolidate_looks_incomplete(&conn).unwrap());
+    }
+
+    /// The scenario `consolidate_looks_incomplete`'s own doc comment names:
+    /// a genuinely v32+ channel, born without either legacy table at all
+    /// (not just empty — physically absent, unlike `fresh_conn`'s fixture
+    /// above, which stands them up empty for the OTHER tests in this file
+    /// that still need to insert legacy rows). Must not error.
+    #[test]
+    fn consolidate_looks_incomplete_tolerates_both_tables_being_physically_absent() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+        assert!(!consolidate_looks_incomplete(&conn).unwrap());
+    }
+
+    /// Same scenario, through `run_consolidate_migration` directly (not
+    /// just its `consolidate_looks_incomplete` sub-check) — the doctor-pass
+    /// path this guards against calls `verify()`, which only reads via
+    /// `consolidate_looks_incomplete`, but `run_consolidate_migration`
+    /// itself must also tolerate this shape rather than erroring on the
+    /// first `SELECT ... FROM db_agent_definitions` if anything ever calls
+    /// it directly against a table-less store.
+    #[test]
+    fn run_consolidate_migration_tolerates_both_tables_being_physically_absent() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        run_object_schema(&conn).unwrap();
+        let stats = run_consolidate_migration(&mut conn, None).unwrap();
+        assert_eq!(stats, ConsolidateStats::default());
     }
 
     #[test]
