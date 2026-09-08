@@ -180,6 +180,57 @@ impl Store {
         }
     }
 
+    /// Same mirror as `registry_def_upsert`, but never CREATES a global
+    /// record — only refreshes one that already exists. Used by
+    /// `agent_content_set`/`agent_content_delete`/the skills equivalents:
+    /// their job is "keep an EXISTING mirror's content/skills in sync,"
+    /// never "make this agent globally mirrored for the first time" (that
+    /// is `agent_def_insert`/`agent_def_update`/`agent_def_find_or_insert`'s
+    /// job, and their own `registry_def_upsert` calls already cover it).
+    ///
+    /// Load-bearing as of the definition flip
+    /// (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md` Phase 3d, reagent P1 x2 on
+    /// #3092): `agent_def_get` now resolves a template LAUNCH's own row
+    /// too (is_seeded = 0, indistinguishable by column shape from a genuine
+    /// user agent — `instance_create`'s fresh-launch INSERT sets both
+    /// `is_template`/`is_seeded` to 0 the same way `agent_def_insert` does
+    /// for a real one). A launch never goes through `agent_def_insert`, so
+    /// it never has an existing global record — routing content/skill
+    /// writes through `registry_def_upsert`'s unconditional create-or-update
+    /// would mirror the launch into the shared cross-channel registry the
+    /// first time anything wrote its content (e.g. a routine `ui:zoom`
+    /// setting), making it appear as a new, permanent "My Agents" entry in
+    /// every other channel — one ghost per launch, accumulating forever.
+    /// This is not a template-vs-launch distinction this function has to
+    /// make: skipping creation entirely is correct for BOTH (a genuine
+    /// template's own content writes are also a no-op here, same as
+    /// `registry_def_upsert`'s explicit `is_seeded` check already intends).
+    pub(super) fn registry_def_refresh_if_mirrored(&self, def_id: &str) {
+        let Some(reg) = self.shared_def_registry() else {
+            return;
+        };
+        if !reg.exists(def_id) {
+            return;
+        }
+        let def = match self.agent_def_get(def_id) {
+            Ok(Some(d)) => d,
+            Ok(None) => return,
+            Err(e) => {
+                tracing::warn!(def_id, error = %e, "def registry: read definition failed, skipping refresh");
+                return;
+            }
+        };
+        if def.is_seeded != 0 {
+            return;
+        }
+        let content = self.agent_content_get_all_local(def_id).unwrap_or_default();
+        let skills = self.agent_skill_list_local(def_id).unwrap_or_default();
+        let rec = agent_definition_to_record(&def, &content, &skills);
+        if let Err(e) = reg.upsert(&rec) {
+            tracing::warn!(def_id, error = %e, "def registry: mirror refresh failed");
+        }
+    }
+
     /// Mirror a user-agent deletion as a global tombstone (`retired/`) so
     /// another channel's stale SQLite can't resurrect it via `upsert`.
     /// Best-effort.
@@ -660,5 +711,73 @@ mod tests {
             store.agent_content_get("remote-1", "ui:zoom").unwrap().is_none(),
             "deleted zoom must not reappear"
         );
+    }
+
+    /// reagent P1 x2 on #3092: a bare template-launch row (`is_seeded = 0`,
+    /// same shape as a genuine user agent — it never went through
+    /// `agent_def_insert`) must never be mirrored into the global registry
+    /// for the FIRST time by a routine content write, e.g. the `ui:zoom`
+    /// pane setting. Before the definition flip this was structurally
+    /// impossible (`agent_def_get` 404'd for a launch id, so
+    /// `registry_def_upsert`'s own read failed and it returned early);
+    /// once `agent_def_get` started resolving launch rows too, the same
+    /// `is_seeded` check no longer excluded them, and every launch that
+    /// ever had content/skills written on it would appear as a new,
+    /// permanent "My Agents" entry in every other channel sharing the
+    /// registry — one ghost per launch. `registry_def_refresh_if_mirrored`
+    /// closes this without inventing a template-vs-launch distinction at
+    /// all: it simply never CREATES a global record, only refreshes one
+    /// that's already there — which a raw launch's never is.
+    #[test]
+    fn a_template_launchs_first_content_write_does_not_create_a_global_registry_entry() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+        store.set_def_registry(def_store.clone());
+
+        let mut tpl = local_def("tpl-1", "Coder");
+        tpl.is_seeded = 1;
+        store.agent_def_insert(&mut tpl).unwrap();
+        // Sanity: seeded templates never mirror globally either.
+        assert!(!def_store.exists("tpl-1"));
+
+        let launch = crate::backend::storage::store::AgentInstance {
+            id: "launch-1".to_string(),
+            definition_id: "tpl-1".to_string(),
+            parent_instance_id: String::new(),
+            block_id: String::new(),
+            session_id: String::new(),
+            status: "running".to_string(),
+            github_context: String::new(),
+            started_at: 1,
+            ended_at: 0,
+            created_at: 1,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: "Coder".to_string(),
+            working_directory: String::new(),
+            display_hidden: false,
+        };
+        let canonical = store.instance_create(&launch).unwrap();
+        assert_eq!(canonical.id, "launch-1", "sanity: a template launch creates its own row");
+
+        // The routine write a real launch does all the time — e.g. the pane
+        // recording its zoom level.
+        store
+            .agent_content_set(&crate::backend::storage::store::AgentContent {
+                agent_id: "launch-1".to_string(),
+                content_type: "ui:zoom".to_string(),
+                content: "1.4".to_string(),
+                updated_at: 2,
+            })
+            .unwrap();
+
+        assert!(
+            !def_store.exists("launch-1"),
+            "a template launch's content write must never create a global registry entry",
+        );
+        // The feature itself still works — the write landed locally.
+        let local = store.agent_content_get("launch-1", "ui:zoom").unwrap();
+        assert_eq!(local.map(|c| c.content), Some("1.4".to_string()));
     }
 }

@@ -3695,13 +3695,18 @@
         );
     }
 
-    /// Codex P2 on #3080: deleting a user agent must clear its legacy
-    /// `db_agent_definitions` row too. The startup gap repair recreates a
-    /// `db_agents` row for every definition missing one, so a definition left
-    /// behind resurrects the deleted agent on the next boot — with its launch
-    /// state reset, which is worse than not deleting it at all.
+    /// Codex P2 on #3080 found that deleting a user agent left its legacy
+    /// `db_agent_definitions` row behind, and the per-boot gap repair then
+    /// recreated a `db_agents` row for it — resurrecting a deleted agent
+    /// with its launch state reset. The definition flip closes this a
+    /// different way than that round's fix did: `agent_def_insert` no
+    /// longer writes `db_agent_definitions` at all, and the per-boot gap
+    /// repair that used to read it is gone — so there is neither a stray
+    /// row to leave behind nor a pass that would resurrect one if there
+    /// were. This test locks in both halves: creation writes `db_agents`
+    /// only, and deletion is permanent with no repair pass left to undo it.
     #[test]
-    fn deleting_an_agent_does_not_leave_a_definition_for_gap_repair_to_resurrect() {
+    fn deleting_an_agent_is_permanent_with_no_repair_pass_left_to_resurrect_it() {
         let store = make_store();
         // A definition registry has to be attached for this to be a real
         // test: `agent_def_list` overlays every ACTIVE global record onto the
@@ -3720,9 +3725,6 @@
             def_store.exists("agent-gone"),
             "sanity: creating an agent mirrors it into the global registry",
         );
-
-        assert!(store.instance_delete("agent-gone").unwrap());
-        assert_eq!(count_agents(&store, "id = 'agent-gone'"), 0);
         {
             let conn = store.conn.lock().unwrap();
             let n: i64 = conn
@@ -3732,15 +3734,11 @@
                     |row| row.get(0),
                 )
                 .unwrap();
-            assert_eq!(n, 0, "the legacy definition must go with the agent");
+            assert_eq!(n, 0, "agent_def_insert must write db_agents only, never the legacy table");
         }
 
-        assert_eq!(store.repair_agent_def_gaps().unwrap(), 0);
-        assert_eq!(
-            count_agents(&store, "id = 'agent-gone'"),
-            0,
-            "a deleted agent must stay deleted across the next boot's gap repair",
-        );
+        assert!(store.instance_delete("agent-gone").unwrap());
+        assert_eq!(count_agents(&store, "id = 'agent-gone'"), 0);
 
         // ...and the global record is tombstoned, so the cross-channel
         // overlay can't put it back on the next read either.

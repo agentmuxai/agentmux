@@ -142,8 +142,11 @@ impl Store {
                 ],
             )?;
         }
-        // Re-mirror the owning definition (no-op for seeded templates). (P0.2b.)
-        self.registry_def_upsert(&skill.agent_id);
+        // Re-mirror the owning definition — only refreshes an EXISTING
+        // mirror; never creates one for a bare template-launch row (reagent
+        // P1 on #3092; see registry_def_refresh_if_mirrored's doc comment).
+        // No-op for seeded templates too. (P0.2b.)
+        self.registry_def_refresh_if_mirrored(&skill.agent_id);
         Ok(())
     }
 
@@ -164,9 +167,11 @@ impl Store {
                 ],
             )?
         };
-        // conn dropped — re-mirror the definition (no-op for seeded). (P0.2b.)
+        // conn dropped — re-mirror the definition (no-op for seeded, and
+        // for a bare template-launch row — see registry_def_refresh_if_mirrored).
+        // (P0.2b.)
         if rows > 0 {
-            self.registry_def_upsert(&skill.agent_id);
+            self.registry_def_refresh_if_mirrored(&skill.agent_id);
         }
         Ok(rows > 0)
     }
@@ -190,10 +195,11 @@ impl Store {
             (rows, agent_id)
         };
         // conn dropped — re-mirror the definition so the global record drops
-        // the removed skill (no-op for seeded templates). (P0.2b.)
+        // the removed skill (no-op for seeded templates, and for a bare
+        // template-launch row — see registry_def_refresh_if_mirrored). (P0.2b.)
         if rows > 0 {
             if let Some(aid) = agent_id {
-                self.registry_def_upsert(&aid);
+                self.registry_def_refresh_if_mirrored(&aid);
             }
         }
         Ok(rows > 0)
@@ -419,9 +425,10 @@ impl Store {
     /// Bind a skill to an agent (insert ref row). Idempotent — binding an
     /// already-bound pair is a silent no-op success.
     ///
-    /// Errors if `agent_id` isn't a LOCAL agent definition:
+    /// Errors if `agent_id` isn't a LOCAL agent:
     /// `db_agent_skills_ref.agent_id` has an ON-enforced FK to
-    /// `db_agent_definitions(id)` (store.rs), but the Armory's agent
+    /// `db_agents(id)` (store.rs; was `db_agent_definitions(id)` before
+    /// Phase 3c, #3088), but the Armory's agent
     /// picker (`ListAgentDefinitionsCommand` → `agent_def_list()`) also
     /// lists cross-channel agents that only exist in another channel's
     /// local database. Binding one of those would otherwise have the FK

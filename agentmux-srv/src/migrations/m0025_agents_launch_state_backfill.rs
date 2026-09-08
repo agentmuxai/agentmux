@@ -143,11 +143,112 @@ fn project_template_launch_row(conn: &Connection, root: &LegacyInstance) -> Resu
     Ok(n > 0)
 }
 
+/// Frozen copy of `agents_consolidate::repair_def_gaps` as it existed when
+/// this migration was written (deleted from live code by the definition
+/// flip — nothing writes `db_agent_definitions` without also
+/// writing `db_agents` any more, so the gap this backfills can no longer
+/// open going forward; it can still exist on an install upgrading THROUGH
+/// this exact migration from a pre-flip version, which is what this
+/// migration must keep repairing on every machine it ever runs on).
+/// Backfill any `db_agent_definitions` row missing from `db_agents`.
+/// `INSERT OR IGNORE`, so idempotent. Returns the number of rows inserted.
+fn frozen_repair_def_gaps(conn: &mut Connection) -> Result<usize, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT d.id, d.name, d.icon, d.provider, d.description,
+                    d.working_directory, d.shell, d.provider_flags, d.auto_start,
+                    d.restart_on_crash, d.idle_timeout_minutes, d.created_at,
+                    d.agent_type, d.environment, d.agent_bus_id, d.is_seeded,
+                    d.accounts, d.parent_id, d.branch_label, d.updated_at,
+                    d.slug, d.user_hidden
+             FROM db_agent_definitions d
+             LEFT JOIN db_agents a ON a.id = d.id
+             WHERE a.id IS NULL",
+        )
+        .map_err(|e| format!("gap-repair: prepare: {e}"))?;
+    #[allow(clippy::type_complexity)]
+    let missing: Vec<(
+        String, String, String, String, String, String, String, String,
+        i64, i64, i64, i64, String, String, String, i64, String, String,
+        String, i64, String, i64,
+    )> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?, row.get::<_, String>(7)?, row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?, row.get::<_, i64>(10)?, row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?, row.get::<_, String>(13)?, row.get::<_, String>(14)?,
+                row.get::<_, i64>(15)?, row.get::<_, String>(16)?, row.get::<_, String>(17)?,
+                row.get::<_, String>(18)?, row.get::<_, i64>(19)?, row.get::<_, String>(20)?,
+                row.get::<_, i64>(21)?,
+            ))
+        })
+        .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+        .map_err(|e| format!("gap-repair: read db_agent_definitions: {e}"))?;
+    drop(stmt);
+    if missing.is_empty() {
+        return Ok(0);
+    }
+
+    let tx = conn.transaction().map_err(|e| format!("gap-repair: begin: {e}"))?;
+    let mut inserted = 0usize;
+    for (
+        id, name, icon, provider, description, working_directory, shell,
+        provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+        created_at, agent_type, environment, agent_bus_id, is_seeded,
+        accounts, parent_id, branch_label, updated_at, slug, user_hidden,
+    ) in &missing
+    {
+        let is_template = if *is_seeded == 1 { 1_i64 } else { 0_i64 };
+        let parent_template_id = if *is_seeded == 1 { String::new() } else { parent_id.clone() };
+        let affected = tx
+            .execute(
+                "INSERT OR IGNORE INTO db_agents (
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    identity_id, memory_id, working_directory, github_context,
+                    instance_name,
+                    created_at, updated_at, is_seeded, user_hidden
+                 ) VALUES (
+                    ?1, ?2, ?3, ?4,
+                    ?5, ?6,
+                    ?7, ?8, ?9, ?10,
+                    ?11, ?12, ?13,
+                    ?14, ?15, ?16,
+                    ?17, ?18,
+                    '', '', ?19, '',
+                    '',
+                    ?20, ?21, ?22, ?23
+                 )",
+                params![
+                    id, name, icon, description,
+                    is_template, parent_template_id,
+                    provider, provider_flags, shell, environment,
+                    agent_type, agent_bus_id, accounts,
+                    auto_start, restart_on_crash, idle_timeout_minutes,
+                    slug, branch_label,
+                    working_directory,
+                    created_at, updated_at, is_seeded, user_hidden,
+                ],
+            )
+            .map_err(|e| format!("gap-repair: insert {id}: {e}"))?;
+        if affected > 0 {
+            inserted += 1;
+        }
+    }
+    tx.commit().map_err(|e| format!("gap-repair: commit: {e}"))?;
+    Ok(inserted)
+}
+
 /// The backfill proper, on an open connection.
 ///
 /// Order matters: first every definition missing from `db_agents` is
-/// repaired (the same `repair_def_gaps` bootstrap runs, but bootstrap runs
-/// it AFTER migrations — too late for this one), then every
+/// repaired (`frozen_repair_def_gaps`, above), then every
 /// template-launch chain head missing its projection row is projected,
 /// and only then is launch state copied. Otherwise a missing row would be
 /// skipped here, created later with default launch state, and never
@@ -164,7 +265,7 @@ pub(super) fn backfill_launch_state(conn: &mut Connection) -> Result<BackfillSta
         return Ok(BackfillStats::default());
     }
     let mut stats = BackfillStats {
-        definitions_repaired: crate::backend::storage::agents_consolidate::repair_def_gaps(conn)
+        definitions_repaired: frozen_repair_def_gaps(conn)
             .map_err(|e| format!("repair definition gaps: {e}"))?,
         ..Default::default()
     };
@@ -393,6 +494,28 @@ mod tests {
         // that looks like — one launch row per launch, plus the `db_agents`
         // projections the Phase 3a dual-write left with default launch state.
         let conn = Connection::open(&path).unwrap();
+
+        // `db_agent_instances.definition_id` still FKs to
+        // `db_agent_definitions(id)` — un-repointed, since that table is
+        // dropped whole rather than having its FK moved. `agent_def_insert`
+        // above no longer writes it (definition flip), so this fixture must
+        // add the row itself, standing in for "a definition an older build
+        // wrote the only way it still could."
+        let mut add_legacy_def = |id: &str, is_seeded: i64, parent_id: &str| {
+            conn.execute(
+                "INSERT INTO db_agent_definitions (
+                    id, slug, name, icon, provider, description, working_directory, shell,
+                    provider_flags, auto_start, restart_on_crash, idle_timeout_minutes,
+                    created_at, agent_type, environment, agent_bus_id, is_seeded, accounts,
+                    parent_id, branch_label, updated_at, user_hidden
+                 ) VALUES (?1, ?1, ?1, '', 'claude', '', '', 'bash', '', 0, 0, 0,
+                           1000, 'standalone', '', '', ?2, '', ?3, '', 1000, 0)",
+                params![id, is_seeded, parent_id],
+            )
+            .unwrap();
+        };
+        add_legacy_def("tpl", 1, "");
+        add_legacy_def("clone", 0, "tpl");
         let mut add_legacy = |id: &str, def_id: &str, parent: &str, block: &str, session: &str, status: &str, created: i64| {
             conn.execute(
                 "INSERT INTO db_agent_instances

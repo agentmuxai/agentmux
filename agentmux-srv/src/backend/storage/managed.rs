@@ -244,14 +244,20 @@ impl Store {
     }
 
     /// Insert the agent-level ref (idempotent). Errors if `agent_id` is not
-    /// a LOCAL agent definition: the ref table's FK would otherwise swallow
+    /// a LOCAL agent: the ref table's FK would otherwise swallow
     /// the `INSERT OR IGNORE` silently for a cross-channel agent, which is
     /// indistinguishable by row count from "already bound" (reagentx P1 on
     /// PR #2315; REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md).
+    ///
+    /// Checks `db_agents`, not `db_agent_definitions`: `R::AGENT_REF_TABLE`'s
+    /// FK targets `db_agents` as of Phase 3c (#3088), so checking the legacy
+    /// table here would reject a bind for any agent that exists ONLY as a
+    /// `db_agents` row (a template launch), even though the FK the INSERT
+    /// below actually depends on would accept it.
     pub(super) fn managed_bind_agent<R: ManagedResource>(&self, agent_id: &str, id: &str) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         let agent_exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM db_agent_definitions WHERE id = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
             params![agent_id],
             |row| row.get(0),
         )?;

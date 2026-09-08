@@ -874,18 +874,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // that migration's doc comment for why catalog-emptiness was dropped as
     // the gate.
 
-    // Gap-repair: backfill definitions written after the Phase 3a marker
-    // but before Phase 3b dual-write (they exist in db_agent_definitions
-    // but not in db_agents, making them invisible to Phase 3b readers).
-    match wstore.repair_agent_def_gaps() {
-        Ok(0) => {}
-        Ok(n) => {
-            tracing::info!(count = n, "agents_consolidate: gap-repair backfilled missing definitions");
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "agents_consolidate: gap-repair failed (non-fatal)");
-        }
-    }
+    // Gap-repair (backfilling a db_agent_definitions row missing its
+    // db_agents mirror) is gone as of the definition flip: every
+    // agent_def_* write lands on db_agents directly now, so that gap can no
+    // longer open. Removing the per-boot pass was required, not optional —
+    // once agent_def_delete/instance_delete stopped also clearing
+    // db_agent_definitions, a repair pass still reading it would have
+    // resurrected every deleted agent on the next boot.
 
     // Let the cross-instance agent registry publish each agent's Ed25519
     // PUBLIC key alongside its entry, so a peer instance in a *different
