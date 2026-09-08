@@ -3725,17 +3725,10 @@
             def_store.exists("agent-gone"),
             "sanity: creating an agent mirrors it into the global registry",
         );
-        {
-            let conn = store.conn.lock().unwrap();
-            let n: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM db_agent_definitions WHERE id = 'agent-gone'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(n, 0, "agent_def_insert must write db_agents only, never the legacy table");
-        }
+        // agent_def_insert writing db_agents only, never db_agent_definitions,
+        // no longer needs an assertion here — the table itself is gone as of
+        // v32 (`OBJECT_SCHEMA_VERSION`'s v32 doc comment), so there is
+        // nothing left it could have written to.
 
         assert!(store.instance_delete("agent-gone").unwrap());
         assert_eq!(count_agents(&store, "id = 'agent-gone'"), 0);

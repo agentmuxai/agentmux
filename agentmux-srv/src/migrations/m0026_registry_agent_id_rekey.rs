@@ -250,7 +250,35 @@ mod tests {
         drop(Store::open(&path).unwrap());
         let conn = Connection::open(&path).unwrap();
         conn.execute_batch(
-            "INSERT INTO db_agents (id, name, provider, is_template, parent_template_id, is_seeded, created_at, updated_at)
+            // Neither legacy table exists at all any more (v32,
+            // `OBJECT_SCHEMA_VERSION`'s v32 doc comment) — `rekey_registry`
+            // itself never reads `db_agent_definitions` (grep confirms it),
+            // so this fixture only needs enough of it to satisfy
+            // `db_agent_instances.definition_id`'s FK below.
+            "CREATE TABLE db_agent_definitions (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+                icon TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+                working_directory TEXT NOT NULL DEFAULT '', shell TEXT NOT NULL DEFAULT '',
+                provider_flags TEXT NOT NULL DEFAULT '', auto_start INTEGER NOT NULL DEFAULT 0,
+                restart_on_crash INTEGER NOT NULL DEFAULT 0, idle_timeout_minutes INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0, agent_type TEXT NOT NULL DEFAULT '',
+                environment TEXT NOT NULL DEFAULT '', agent_bus_id TEXT NOT NULL DEFAULT '',
+                is_seeded INTEGER NOT NULL DEFAULT 0, accounts TEXT NOT NULL DEFAULT '',
+                parent_id TEXT NOT NULL DEFAULT '', branch_label TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE db_agent_instances (
+                id TEXT PRIMARY KEY, definition_id TEXT NOT NULL,
+                parent_instance_id TEXT NOT NULL DEFAULT '', block_id TEXT NOT NULL DEFAULT '',
+                session_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '',
+                github_context TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL DEFAULT 0,
+                ended_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT 0,
+                identity_id TEXT NOT NULL DEFAULT '', memory_id TEXT NOT NULL DEFAULT '',
+                instance_name TEXT NOT NULL DEFAULT '', working_directory TEXT NOT NULL DEFAULT '',
+                display_hidden INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (definition_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+             );
+             INSERT INTO db_agents (id, name, provider, is_template, parent_template_id, is_seeded, created_at, updated_at)
              VALUES ('user-agent', 'Maks', 'claude', 0, 'tpl', 0, 1, 1),
                     ('tpl', 'Coder', 'claude', 1, '', 1, 1, 1),
                     ('launch-head', 'FromTemplate', 'claude', 0, 'tpl', 0, 1, 1);
@@ -362,11 +390,12 @@ mod tests {
 
     #[test]
     fn a_store_without_the_legacy_table_is_a_no_op() {
+        // A plain `Store::open` already has neither legacy table as of v32
+        // (`OBJECT_SCHEMA_VERSION`'s v32 doc comment) — no DROP needed.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("objects.db");
         drop(Store::open(&path).unwrap());
         let conn = Connection::open(&path).unwrap();
-        conn.execute_batch("DROP TABLE db_agent_instances;").unwrap();
         let reg = open_registry(&dir);
         reg.upsert(&record("whatever", "whatever", "Whatever")).unwrap();
         assert_eq!(rekey_registry(&conn, &reg).unwrap(), RekeyStats::default());
