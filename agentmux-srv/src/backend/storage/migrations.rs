@@ -283,7 +283,23 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `db_agents(slug)` is added: template-launch projections copy
 ///        their template's slug, so uniqueness stays a definition-level
 ///        rule enforced by the slug collision scan in `agent_def_insert`.
-pub const OBJECT_SCHEMA_VERSION: i64 = 29;
+///   v30 — `db_agent_content` / `db_agent_skills` / `db_agent_history` /
+///        `db_agent_identity_links` / `db_agent_skills_ref` /
+///        `db_agent_mcp_ref`: `agent_id`'s foreign key now targets
+///        `db_agents(id)` instead of `db_agent_definitions(id)`. Every
+///        existing row already satisfies the new target (its `agent_id` is
+///        a definition id, and every definition has a `db_agents` mirror
+///        at the same id) — what changes is that a `db_agents` row with NO
+///        definition counterpart (a template launch) can now hold these
+///        directly too, closing the gap `listrecentsessions`' template
+///        fallback (Phase 3b, #3080) exists for. SQLite has no in-place FK
+///        redefinition, so an existing store needs its six tables rebuilt;
+///        `m0028_agent_child_tables_repoint_fk` does that (rename,
+///        recreate, copy, drop, `PRAGMA foreign_key_check` before commit).
+///        A fresh install gets the new FK directly from the CREATE TABLE
+///        statements below — nothing to rebuild there. Phase 3c
+///        (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md`).
+pub const OBJECT_SCHEMA_VERSION: i64 = 30;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -433,7 +449,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             content      TEXT NOT NULL DEFAULT '',
             updated_at   INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, content_type),
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+            -- v30: targets db_agents(id), not db_agent_definitions(id) — see
+            -- OBJECT_SCHEMA_VERSION's v30 doc comment above.
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS db_agent_skills (
@@ -445,7 +463,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             description TEXT NOT NULL DEFAULT '',
             content     TEXT NOT NULL DEFAULT '',
             created_at  INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS db_agent_history (
@@ -454,7 +473,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             session_date TEXT NOT NULL,
             entry        TEXT NOT NULL,
             timestamp    INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE
+            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_agent_history_agent_date
             ON db_agent_history(agent_id, session_date);
@@ -479,7 +499,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             account_id TEXT NOT NULL,
             provider   TEXT NOT NULL,
             PRIMARY KEY (agent_id, provider),
-            FOREIGN KEY (agent_id)   REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
+            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
+            FOREIGN KEY (agent_id)   REFERENCES db_agents(id) ON DELETE CASCADE,
             FOREIGN KEY (account_id) REFERENCES db_accounts(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_agent_identity_links_account
@@ -703,7 +724,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id TEXT NOT NULL,
             skill_id TEXT NOT NULL,
             PRIMARY KEY (agent_id, skill_id),
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
+            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE,
             FOREIGN KEY (skill_id) REFERENCES db_skills(id) ON DELETE CASCADE
         );
 
@@ -711,7 +733,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id TEXT NOT NULL,
             mcp_id   TEXT NOT NULL,
             PRIMARY KEY (agent_id, mcp_id),
-            FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
+            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE,
             FOREIGN KEY (mcp_id)   REFERENCES db_mcp_servers(id) ON DELETE CASCADE
         );
 
@@ -724,7 +747,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- config generation alongside the agent-level refs.
         --
         -- reagentx P0 review on PR #2639: NO foreign key to db_bundles here,
-        -- unlike the agent-level ref tables' FK to db_agent_definitions.
+        -- unlike the agent-level ref tables' FK to db_agents (v30: was
+        -- db_agent_definitions — see OBJECT_SCHEMA_VERSION's v30 doc comment).
         -- Bundles are authoritatively written through `id_store` (the
         -- shared store in a normal production install — see
         -- `bundle.rs::register_bundle_upsert`), not `wstore`/objects.db,

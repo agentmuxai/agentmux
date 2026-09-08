@@ -1774,7 +1774,9 @@ pub(super) fn check_s1(ctx: &RpcContext, req_agent_id: &str) -> Result<(), Strin
 /// Every link-table operation reached from the App API must go through
 /// this: App API callers authenticate with the slug, but writing the slug
 /// into the link table either trips the per-channel schema's
-/// `FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id)` (loud
+/// `FOREIGN KEY (agent_id) REFERENCES db_agents(id)` (v30, #3088 — was
+/// `db_agent_definitions(id)`; a definition id still always satisfies it,
+/// since every definition has a `db_agents` mirror at the same id) (loud
 /// "FOREIGN KEY constraint failed" — the id_store fallback path when the
 /// 0011 shared-store backfill hasn't applied), or — on the shared store,
 /// whose links table carries no agent_id FK — silently writes a row keyed
