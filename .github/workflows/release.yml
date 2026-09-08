@@ -62,9 +62,17 @@ jobs:
       # and no inputs.tag exists to compare against.
       - name: Guard — workflow_dispatch must run from the tag being rebuilt
         if: github.event_name == 'workflow_dispatch'
+        env:
+          # ReAgent P2: inputs.tag is operator-supplied free text, interpolated
+          # here four times (comparison, ::error:: message, twice in the
+          # suggested command) — raw ${{ }} interpolation repeated that many
+          # times in one script is worth hardening even though triggering
+          # workflow_dispatch already requires repo write access. One `env:`
+          # substitution instead of four raw interpolations.
+          TAG: ${{ github.event.inputs.tag }}
         run: |
-          if [ "${{ github.ref_name }}" != "${{ github.event.inputs.tag }}" ]; then
-            echo "::error::This run's own workflow definition (including the CEF runtime pins a few jobs down) comes from '${{ github.ref_name }}' — the ref you dispatched from — not from the 'tag' input ('${{ github.event.inputs.tag }}'). Rebuilding an old release from any ref other than that release's own tag risks shipping it with today's (possibly newer) CEF pins instead of what it originally shipped with. Re-run with: gh workflow run release.yml --ref ${{ github.event.inputs.tag }} -f tag=${{ github.event.inputs.tag }}"
+          if [ "${{ github.ref_name }}" != "$TAG" ]; then
+            echo "::error::This run's own workflow definition (including the CEF runtime pins a few jobs down) comes from '${{ github.ref_name }}' — the ref you dispatched from — not from the 'tag' input ('$TAG'). Rebuilding an old release from any ref other than that release's own tag risks shipping it with today's (possibly newer) CEF pins instead of what it originally shipped with. Re-run with: gh workflow run release.yml --ref $TAG -f tag=$TAG"
             exit 1
           fi
 
