@@ -254,9 +254,15 @@ Three version schemes (Chromium `148.0.7778.180`, CEF `148.23.23`, CEF `148.0.9`
 ### 7.2 A stale comment in `agentmux-cef/Cargo.toml` — ✅ FIXED 2026-09-08
 The `patched-libcef` feature comment cites `https://github.com/a5af/cef, branch agentmux/7680-…`. The org redirects (`a5af` → `agentmuxai`) and that branch does still exist, so nothing breaks — but it names a CEF 146-era branch while root `Cargo.toml` documents `7778` as current. Worth correcting to whatever milestone this upgrade lands on.
 
-> **Fixed:** now cites `agentmuxai/cef`, branch `7778` (where the drag work
-> actually lives, merged via that repo's PR #3), and notes the `a5af` →
-> `agentmuxai` org redirect. Re-point again if 152 lands on a new branch.
+> **Fixed:** now cites both relevant branches and distinguishes them, because
+> they are not interchangeable: `agentmux/7778-drag-rightclick-and-transparency`
+> (where the patch was authored AND where the shipped binaries were actually
+> built from — macOS `148.23.23-codecs` at `6c570e249`) versus `7778` (the
+> milestone integration branch it was merged into via that repo's PR #3). As of
+> 2026-09-08 those two have **diverged** — the build commit is 4 ahead / 2
+> behind `7778` — so the comment now says to prefer the recorded build commit
+> over either branch tip when reproducing a build. Also notes the `a5af` →
+> `agentmuxai` org redirect. Re-point if 152 lands on a new branch.
 
 ### 7.3 A superseded root-cause doc — ✅ FIXED 2026-09-08
 `docs/analysis/archive/ANALYSIS_WINDOWS_GPU_DISABLED_ROOTCAUSE_2026_06_11.md` attributes a Windows GPU failure to the fork's libcef being a non-official/DCHECK build. Its own tracking issue (#1345) retracts that: the real cause was a missing `supportedOS` manifest (#1354, merged 2026-06-11). The archived doc still reads as if the fork were at fault, which could mislead someone scoping this upgrade. Worth a status-correction header.
