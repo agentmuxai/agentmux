@@ -184,9 +184,10 @@ impl Store {
     /// Bind an MCP server to an agent (insert ref row). Idempotent —
     /// binding an already-bound pair is a silent no-op success.
     ///
-    /// Errors if `agent_id` isn't a LOCAL agent definition:
+    /// Errors if `agent_id` isn't a LOCAL agent:
     /// `db_agent_mcp_ref.agent_id` has an ON-enforced FK to
-    /// `db_agent_definitions(id)` (store.rs), but the Armory's agent
+    /// `db_agents(id)` (store.rs; was `db_agent_definitions(id)` before
+    /// Phase 3c, #3088), but the Armory's agent
     /// picker (`ListAgentDefinitionsCommand` → `agent_def_list()`) also
     /// lists cross-channel agents that only exist in another channel's
     /// local database. Binding one of those would otherwise have the FK

@@ -299,7 +299,19 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        A fresh install gets the new FK directly from the CREATE TABLE
 ///        statements below — nothing to rebuild there. Phase 3c
 ///        (`SPEC_AGENT_ARCHITECTURE_2026_05_27.md`).
-pub const OBJECT_SCHEMA_VERSION: i64 = 30;
+///   v31 — No DDL change. Every `agent_def_*` write now lands on
+///        `db_agents` only — `db_agent_definitions` is no longer kept in
+///        sync (Phase 3d, #3092). Bumped anyway (codex P1 on #3092):
+///        `check_schema_compat` is a downgrade guard as much as a schema
+///        guard, and this release changes what a NEWER binary's writes
+///        mean to an OLDER one just as much as a column would. Without the
+///        bump, rolling back to the immediately preceding binary after
+///        this version has run would silently accept a store where new
+///        agents exist only in `db_agents` — that binary's `agent_def_get`/
+///        `update`/`delete` still target `db_agent_definitions` and would
+///        404 on them, or replay stale legacy values back into `db_agents`
+///        on edit. Stamping 31 makes that downgrade refuse to open instead.
+pub const OBJECT_SCHEMA_VERSION: i64 = 31;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.

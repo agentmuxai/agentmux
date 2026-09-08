@@ -19,7 +19,6 @@ pub mod content;
 pub mod conversation_trust_grants;
 pub mod cron;
 pub mod def_registry_mirror;
-pub mod dual_write;
 pub mod error;
 pub mod filestore;
 pub mod history;
