@@ -78,6 +78,7 @@ import {
     getNodeAdditionalPropertiesById as getNodeAdditionalPropertiesByIdImpl,
     getNodeTransformById as getNodeTransformByIdImpl,
     getNodeRectById as getNodeRectByIdImpl,
+    disposeNodeModel as disposeNodeModelImpl,
 } from "./layoutNodeModels";
 import {
     magnifyNodeToggle as magnifyNodeToggleImpl,
@@ -361,6 +362,29 @@ export class LayoutModel {
      */
     dispose() {
         if (this._disposeRoot) {
+            // reagent P1 on #3091: `createRoot` is DELIBERATELY detached
+            // from whatever owner is ambient when it's called — that's the
+            // entire point of the primitive (it's what lets `render()` be
+            // called from inside another reactive scope without being torn
+            // down by it). Confirmed empirically while fixing this, not
+            // assumed: nesting `createRoot` inside `runWithOwner(_modelOwner,
+            // ...)` (exactly what `getNodeModel`'s per-node root does) does
+            // NOT make the new root a child of `_modelOwner` for cascade-
+            // disposal purposes. So `this._disposeRoot()` below — which
+            // only tears down `_modelOwner` itself — never reaches any
+            // NodeModel's nested root. Before this PR, every NodeModel's
+            // memos were created directly under `_modelOwner` (no nested
+            // `createRoot`), so this correctly cascaded to all of them.
+            // Without this loop now, every leaf whose NodeModel was never
+            // explicitly evicted before the WHOLE TAB closes — the common
+            // case; eviction otherwise only fires for in-pane stack
+            // switches/closes and individual leaf removal, not for closing
+            // an entire tab — leaks its ~10-memo root forever: the same
+            // class of bug this PR exists to fix, just moved to the far
+            // more common "close a tab" path instead of in-pane switches.
+            for (const nodeid of [...this.nodeModelDisposers.keys()]) {
+                disposeNodeModelImpl(this, nodeid);
+            }
             this._disposeRoot();
             this._disposeRoot = null;
             this._modelOwner = null;

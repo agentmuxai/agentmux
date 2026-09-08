@@ -483,3 +483,60 @@ describe("activeKeyFor", () => {
         expect(keyBefore).not.toBe(keyAfter);
     });
 });
+
+describe("LayoutModel.dispose()", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    // reagent P1 on #3091, round 2: `dispose()` (ordinary tab close, via
+    // `deleteLayoutModelForTab`) used to only call `this._disposeRoot()` —
+    // which tears down `_modelOwner` — and never iterated
+    // `nodeModelDisposers`. `createRoot` (what `getNodeModel` nests every
+    // NodeModel's memos in, for the per-node disposal boundary the other
+    // tests in this file exercise) is DELIBERATELY DETACHED from whatever
+    // owner is ambient when it's called — confirmed empirically with a
+    // standalone scratch test before trusting this, since this PR had
+    // already gotten SolidJS ownership semantics wrong twice. So disposing
+    // only `_modelOwner` never reached any NodeModel's nested root: every
+    // leaf whose NodeModel was never explicitly evicted before the whole
+    // tab closed (the common case) leaked its ~10-memo root forever — the
+    // same class of bug this PR fixes, just on the far more common "close a
+    // tab" path instead of an in-pane switch. Falsifiable: removing the
+    // `for (const nodeid of [...this.nodeModelDisposers.keys()])` loop in
+    // `LayoutModel.dispose()` (layoutModel.ts) makes this test fail, since
+    // the frozen assertion below would instead observe the live, updated
+    // value, and the map-emptiness assertions would fail too.
+    it("disposes every cached NodeModel's reactive root on tab close, not just the model's own root", () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        const node = model.treeState.rootNode!;
+
+        const nodeModel = model.getNodeModel(node);
+        expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+        // insertRootBlock inserts with `focused: true` — the lone leaf
+        // starts out focused by default.
+        expect(nodeModel.isFocused()).toBe(true);
+
+        model.dispose();
+
+        // Map-level cleanup: nothing left cached or tracked for disposal.
+        expect(model.nodeModelDisposers.size).toBe(0);
+        expect(model.nodeModels.size).toBe(0);
+
+        // Frozen-vs-live: mutate the same underlying signal `isFocused`
+        // depends on (`localTreeStateAtom`, via the mocked WOS layer — this
+        // still works after dispose() since the mock signal itself isn't
+        // torn down, only the model's own reactive graph). A live memo
+        // would now read false; a disposed one stays frozen at whatever it
+        // was computed as right before disposal.
+        model.treeState.focusedNodeId = undefined;
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+        expect(nodeModel.isFocused()).toBe(true); // frozen — proves disposal, not just eviction
+    });
+});
