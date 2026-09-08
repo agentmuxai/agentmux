@@ -101,17 +101,22 @@ edits, so moving it is a copy.
 
 ### 2.4 Patches #2/#3/#4 status — ✅ NOW VERIFIED against real 152 source
 
-An earlier revision of this report left this open, on the assumption that a
-~100 GB Chromium checkout was needed. It wasn't: patches #3 and #4 each touch
-exactly **one** Chromium file, so each target file was fetched at tag
+An earlier revision left this open, assuming a ~100 GB Chromium checkout was
+needed. For the **Chromium-side** files it wasn't: those were fetched at tag
 `152.0.7977.83` and the patch applied with CEF's own patcher config
 (`git apply -p0 --ignore-whitespace`). Patch #2 needed a different method
 because it edits CEF's *own* sources rather than Chromium's.
 
+**Read this table narrowly.** It reports per-*file* apply results, not
+per-*patch* completeness. Patch #3 is fully covered by its one Chromium file.
+**Patch #4 is not** — it also carries a five-commit CEF-side transparency
+cascade that this table does **not** cover and that is **not** verified; see the
+caveat below and §5b. Patch #1 is in §2.5.
+
 | Patch | Target(s) | Method | Result |
 |---|---|---|---|
 | #3 `views_caption_rightclick_passthrough` | `ui/views/widget/desktop_aura/window_event_filter_linux.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
-| #4 `rwhv_background_opaque_check` (**Chromium-side file only — NOT all of patch #4**) | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
+| #4 — ⚠️ `rwhv_background_opaque_check` **only** (this is *one part of* patch #4, **not** patch #4) | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **that file applies cleanly** — patch #4 overall is **NOT verified** (§5b) |
 | #2 `BeginWindowDrag` | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` | `cmp` upstream 7778 vs 7977 | **all three byte-identical** → port is mechanical |
 
 Patch #2's result is the notable one: **upstream CEF did not touch any of its
