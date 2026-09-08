@@ -8,17 +8,24 @@ Feature 1 (shipped) — see §2 for exactly what is already built and what is ne
 
 ## 0. TL;DR
 
-Session restore exists today but only writes **once**, at the moment the last
-window closes. That single write is the only thing standing between a user and
-a lost workspace, and three separate properties of the current shutdown path
-make it untrustworthy: it never runs on a crash, it can be outrun by the
-process exiting, and when it fails it fails silently.
+Session restore works — it shipped 2026-08-14 (PR #2560) and correctly
+restores a workspace when the user closes AgentMux and reopens it. But it
+writes **once**, on that graceful close, and **the OS is never able to ask for
+that write**: AgentMux does not handle `WM_QUERYENDSESSION`/`WM_ENDSESSION`
+at all, so a Windows restart terminates the process without the snapshot ever
+being taken. Three further properties make even the wired-up path
+untrustworthy: it never runs on a crash, it can be outrun by process exit, and
+when it fails it fails silently.
 
-This spec makes the session record **continuous** (bounded crash-loss instead
-of total crash-loss) and makes the shutdown path that flushes it **actually
-finish before the process dies**. It deliberately reuses two auto-save
-patterns already proven elsewhere in this codebase rather than inventing a
-third.
+This spec (1) makes the app respond to OS shutdown at all, (2) makes the
+session record **continuous** — bounded crash-loss instead of total — and
+(3) makes the shutdown path that flushes it **actually finish before the
+process dies**. It deliberately reuses two auto-save patterns already proven
+elsewhere in this codebase rather than inventing a third.
+
+**Ship order matters**: Phase 0 (§4.0) is small, self-contained, and alone
+fixes the incident that prompted this — an OS restart losing a workspace that
+a manual close would have preserved.
 
 ## 1. Motivating incident (2026-09-08)
 
@@ -29,15 +36,35 @@ persists.
 
 Three findings from investigating it, all of which this spec responds to:
 
-1. **Restore-on-relaunch does exist and did not fire.** It is gated on a
-   graceful close writing a snapshot first. A reboot that terminates the app
-   (rather than the user closing the last window) never reaches that write.
-2. **The user's memory of it "working before" was real but was a bug.**
-   `docs/retro/retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md`
-   documents that pre-2026-07-16 layout restore was a side effect of a
-   window-cleanup leak (PR #2186), correctly fixed since. There is no shame in
-   the expectation — the app genuinely used to behave that way, by accident.
-3. **Even a graceful quit is not reliably durable today** (§3).
+1. **Restore-on-relaunch exists, works, and simply was not reached.** It is
+   gated on the graceful close path writing a snapshot first. The user was
+   right to expect it: `feat(window): restore last session's tabs/panes on
+   relaunch (#2560)` merged **2026-08-14**, and it does exactly what they
+   remembered — close AgentMux, reopen it, get the layout back. Nothing about
+   that feature is broken.
+2. **An OS restart never routes through that path at all.** This is the actual
+   root cause, and it is more specific than "a crash loses state":
+   **AgentMux does not handle `WM_QUERYENDSESSION` / `WM_ENDSESSION`** — a
+   repo-wide grep finds neither message anywhere in the Rust sources. Those are
+   the Windows notifications that tell an application the OS is shutting down
+   and give it its one chance to persist. Without a handler, Windows simply
+   terminates the process; `backend_close_window` is never called, so
+   `save_last_session_snapshot` never runs. The same class of gap exists for
+   macOS (`applicationShouldTerminate:`, `NSWorkspaceWillPowerOffNotification`)
+   — Linux is partially covered only because the Unix path already handles
+   SIGTERM.
+3. **Even a graceful quit is not reliably durable today** (§3) — a separate
+   set of problems from #2, affecting the path that *is* wired up.
+
+**Correcting an earlier misreading of this incident**, recorded here because it
+would otherwise mislead the next reader:
+`docs/retro/retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md`
+documents that layout restore *before* 2026-07-16 was an accidental side effect
+of a window-cleanup leak (PR #2186). That retro is accurate and worth knowing —
+but it describes a **different, earlier era**, and it is not the explanation for
+this incident. Restore was deliberately (re)built and shipped a month later, on
+2026-08-14. Attributing a user's correct memory of the shipped feature to the
+old bug is a mistake; the feature is real.
 
 ## 2. What already exists — do not rebuild these
 
@@ -60,6 +87,34 @@ for other state, and make the close path that flushes it trustworthy.
 ## 3. Why the current single write is not enough
 
 All three are real, verified in the current code — not hypothetical.
+
+### 3.0 The OS never gets to tell us it is shutting down
+
+Listed first because it is the highest-value, most self-contained fix in this
+document, and because it is the specific cause of the motivating incident.
+
+`WM_QUERYENDSESSION` and `WM_ENDSESSION` appear **nowhere** in the Rust
+sources. On a Windows restart or shutdown, the OS sends these to top-level
+windows precisely so an application can persist state before dying; with no
+handler, the default handling lets the session end and the process is
+terminated without `backend_close_window` ever being called.
+
+The fix is small and does not depend on any other phase here: handle
+`WM_QUERYENDSESSION` (return TRUE — we do not want to block shutdown, and
+`ShutdownBlockReasonCreate` is the wrong tool for a save this fast), and use
+`WM_ENDSESSION` as a synchronous flush point for the session snapshot. Note the
+OS grants only a **bounded window** (historically ~5s, and Windows will kill
+apps that dawdle), which is an argument for Phase A: a continuously-maintained
+record needs only a fast final flush, not a full snapshot build, inside that
+window.
+
+Platform parity:
+
+| Platform | Signal | Status today |
+|---|---|---|
+| Windows | `WM_QUERYENDSESSION` / `WM_ENDSESSION` | **Unhandled** |
+| macOS | `applicationShouldTerminate:`, `NSWorkspaceWillPowerOffNotification` | Unhandled (the macOS `terminate:`/Cmd+Q path is separately known to bypass `do_close` — `agentmux-cef/src/macos_menu.rs:325`) |
+| Linux | SIGTERM | Partially covered — the Unix graceful path handles SIGTERM (1500ms grace, then SIGKILL) |
 
 ### 3.1 It never runs on a crash, OOM, reboot, or force-quit
 
@@ -101,8 +156,8 @@ failed to save is told nothing, and finds out only on next launch.
 
 ## 4. Design
 
-Three phases, independently shippable, in dependency order. Phase A alone
-delivers most of the user-visible value.
+Four phases, independently shippable, in dependency order. Phase 0 alone
+fixes the motivating incident; Phase A delivers most of the remaining value.
 
 ### 4.1 Phase A — continuous session record
 
@@ -163,6 +218,22 @@ the migration-marker reasoning already established in
 *existence* is not proof of *effect*, so the marker must be written after the
 work it attests to, not before.
 
+### 4.0 Phase 0 — handle OS shutdown notifications
+
+**Ship this first.** It is the smallest change here, it directly fixes the
+motivating incident, and it is independently valuable even if nothing else in
+this spec is ever built: today, an OS restart loses a workspace that a manual
+close would have preserved, which is a surprising and hard-to-explain
+inconsistency for users.
+
+Handle `WM_QUERYENDSESSION`/`WM_ENDSESSION` on Windows and
+`applicationShouldTerminate:`/`NSWorkspaceWillPowerOffNotification` on macOS,
+routing both into the same snapshot-flush the graceful close already performs
+(§3.0). Ordering note: this must flush the snapshot but must **not** attempt
+the full `delete_workspace` teardown cascade — the OS is about to reclaim
+everything anyway, and the 5s-per-shell grace will not fit in the OS's
+shutdown budget. Save, then let the process die.
+
 ### 4.3 Phase C — make the shutdown path worth trusting
 
 Phase A's continuous writes reduce how much a broken shutdown costs, but they
@@ -196,7 +267,7 @@ describes something real: a record that is already near-current before shutdown
 even begins, flushed once more with a completion signal the launcher can
 actually wait on.
 
-Recommended sequencing: **Phase A → Phase C.1/C.2 → countdown modal → Phase
+Recommended sequencing: **Phase 0 → Phase A → Phase C.1/C.2 → countdown modal → Phase
 C.3**, so the modal is never in the position of narrating a stage that cannot
 be trusted.
 
