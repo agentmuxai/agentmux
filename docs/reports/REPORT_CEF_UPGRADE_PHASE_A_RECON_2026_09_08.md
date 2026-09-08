@@ -2,14 +2,17 @@
 
 **Author:** Agent5
 **Date:** 2026-09-08
-**Status:** implemented — Phase A recon executed and delivered by this document;
-the one source-side fix it produced shipped as `agentmuxai/cef` PR #7 (merged
-2026-09-08). This is the Phase A output that
-`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates the
-rest of the upgrade on. One item is deliberately incomplete — see §2.4.
-**Verdict:** **Go** on §3's "straight to 152" decision — with one correction to
-the spec's cost model, and one finding that is more urgent than the upgrade
-itself.
+**Status:** active — Phase A's recon is delivered by this document and its one
+source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), but **two
+of the spec's three Phase A checks are not fully closed**: patches #3/#4 have
+not been test-applied against real 152 source (§2.4), and the macOS Xcode
+toolchain pin is unconfirmed (§4). Per Codex review on PR #3093, Phase A stays
+`active` until those close — the "go" in §6 is therefore conditional, not a
+clearance to start Phase B blind. This is the Phase A output that
+`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates on.
+**Verdict:** **Conditional go** on §3's "straight to 152" decision — see §6 for
+the two conditions. Also corrects two errors in the spec's patch inventory, and
+records one shipped-binary gap (§5).
 
 ---
 
@@ -21,12 +24,15 @@ itself.
 | Does `cef-rs`/`cef-dll-sys` have a 152-compatible crate? | **Yes** — `cef 152.0.0+152.0.5`, published 2026-09-07. |
 | Is `begin_window_drag` in its generated bindings? | **No** — same as 148, so the binding fork is still required. |
 | Have the build toolchain requirements moved? | **Windows: no. Linux: no.** macOS: unconfirmed, see §4. |
-| Go / no-go on targeting 152 directly? | **Go.** Nothing found makes 152 harder than the spec assumed. |
+| Go / no-go on targeting 152 directly? | **Conditional go** — nothing found makes 152 harder than assumed, but two Phase A checks remain open (§6). |
 
-**The finding that matters most is not about 152 at all:** none of the four
-patches were in any shipped CEF binary (§5). One of them is a macOS renderer
-crash fix. That is now partially addressed (`agentmuxai/cef` PR #7, merged)
-but still needs builds.
+**A separate finding, not about 152:** patch #1 (the macOS -67030 renderer
+crash fix) was never registered in `patch/patch.cfg`, so no build on any
+platform could ever have applied it — it is absent from the shipped macOS
+binary. Now fixed at the source (`agentmux/cef` PR #7) but **not yet built**;
+needs one arm64 macOS rebuild. See §5, including a correction: an earlier draft
+of this report over-claimed that *no* fork patches ship, which was wrong — the
+other three do.
 
 ---
 
@@ -37,11 +43,16 @@ API — not read off the spec, which turned out to contain errors this pass
 corrected. Where a claim could not be verified from here, it says so rather
 than guessing.
 
-**Hard limit:** no Chromium checkout was available (~100 GB), and no
-macOS/Linux build machine. So "does this patch still apply to 152's source"
-was answered by inspecting upstream 152's actual source files for the code
-each patch targets — not by running `git apply` against a real 152 tree. That
-distinction matters and is called out per-patch below.
+**Hard limit:** no full Chromium checkout was available (~100 GB), and no
+macOS/Linux build machine.
+
+For **patch #1** this limit was worked around and the check is real: its target
+file is a single source file, so it was fetched at the exact Chromium 152 tag
+and the patch applied to it with CEF's own patcher config
+(`git apply -p0 --ignore-whitespace`) — see §2.5. For **patches #2/#3/#4**, which
+touch many files across `libcef/`, the limit stands: they were assessed by
+inspecting upstream 152's sources, **not** by a real apply. That distinction is
+called out per-patch, and §6 makes it a condition on the "go."
 
 ---
 
@@ -100,6 +111,23 @@ from file inspection alone would be a guess. This is the one Phase A item that
 is genuinely incomplete, and it is the item most likely to change Phase B's
 size. Whoever takes Phase B should do this first, with a checkout.
 
+### 2.5 Patch #1 verified to apply cleanly to Chromium 152
+
+Done as the first piece of Phase B, and it closes the patch-#1 half of Phase A
+task 1 properly rather than by inspection:
+
+- Fetched `base/apple/mach_port_rendezvous_mac.cc` at Chromium tag
+  `152.0.7977.83`. The target function `GetPeerValidationPolicy()` is
+  **byte-identical** to the 148 version the patch was written against — only
+  its line number moved (405 → 407), which `git apply` resolves by context.
+- Applied the patch (as merged on `7778`) with CEF's exact patcher config:
+  **applies cleanly**, producing the correct `kNoValidation` return.
+
+So patch #1 forward-ports to 152 with **zero modification**. Landed on
+`agentmux/7977-process-requirement` in the fork, registered in 152's
+`patch.cfg` (whose tail differs from 148's — it ends with
+`chrome_browser_extensions_background`, so the insertion point is not the same).
+
 ---
 
 ## 3. Rust binding (`cef-rs` / `cef-dll-sys`)
@@ -138,50 +166,88 @@ actual machine rather than trusting this table for that row.
 
 ---
 
-## 5. The finding that outranks the upgrade
+## 5. The shipped-binary gap — corrected
 
-While tracing patches, all three currently-pinned CEF release tags were
-resolved to their actual commits:
+> **Correction (2026-09-08, before merge).** An earlier draft of this section
+> claimed *"none of the four documented fork patches are in any CEF binary
+> AgentMux ships today,"* inferred from all three release tags' `target_commitish`
+> resolving to one April-23 commit. **That inference was invalid and the claim
+> was false.** A GitHub release's tag target is not build provenance — a release
+> cut without `--target` inherits the default branch's HEAD. Caught in review by
+> Codex on PR #3093. What follows is the corrected, directly-verified version.
+> The scope of the real problem is much narrower than the retracted claim.
 
-| Pinned tag | Commit | Cut |
-|---|---|---|
-| `cef-windows-x86_64-148.0.7778.180` | `05d7a247` | 2026-04-23 |
-| `cef-linux-x86_64-148.0.7778.180-codecs` | `05d7a247` | 2026-04-23 |
-| `cef-macos-arm64-148.23.23-codecs` | `05d7a247` | 2026-04-23 |
+### 5.1 What actually ships (verified, not inferred)
 
-All three are **the same commit**, cut **2026-04-23** — which predates the
-process-requirement patch (2026-06-02) and the drag/right-click/transparency
-merge (2026-06-25). Only one later release exists at all
-(`cef-macos-arm64-148.23.21`, 2026-07-02, built from the
-drag/rightclick/transparency branch), and nothing in this repo references it —
-note also that its version label (`148.23.21`) is *lower* than the tag we pin
-(`148.23.23`) despite being newer, which is §7.1's tag-scheme problem biting in
-practice.
+The authoritative provenance is the build records, not the tags:
 
-**So none of the four documented fork patches are in any CEF binary AgentMux
-ships today.**
+- **macOS** — `STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md` records
+  `cef-macos-arm64-148.23.23-codecs` as built 2026-07-28 from fork commit
+  `6c570e249`, with **112 patches applied, 3 skipped, 0 failed**, and
+  `BeginWindowDrag` explicitly re-verified in the built framework
+  (`verify-cef-framework-darwin.sh`, exit 0). The framework's own
+  `CEF_COMMIT_HASH` embeds `6c570e2490c9…`, which is the real provenance.
+- **Windows** — `docs/cef-build/build-patched-cef-windows.md` states it is
+  "built from the same fork branch anyway for one-canonical-source-branch"
+  reasons, with the drag/transparency patches "present but inert on Windows."
 
-The one that matters: per `docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md`,
-the -67030 Mach-port peer validation failure is "a *real* functional code-sign
-failure... not a DCHECK" and was "the only reason we went from-source [CEF] at
-all" — without it, the self-reexec CEF helper fails peer validation and the
-renderer crash-loops on macOS 26.
+Checked directly against that build commit (`6c570e249`):
 
-**Status:** source side is now fixed (PR #7 merged into `7778`, patch
-registered, apply-failure fixed). **Not shipped** — that needs an arm64 macOS
-build (Xcode, ≥120 GB, ≥32 GB RAM, 3–6 h) and a fresh release cut. Windows and
-Linux should be re-cut from the same tip at the same time so all three land on
-one source commit again.
+| Patch | In the shipped binaries? |
+|---|---|
+| #2 `BeginWindowDrag` | **Yes** — present in `include/views/cef_window.h` |
+| #3 rightclick passthrough | **Yes** — registered in `patch.cfg` |
+| #4 transparency cascade | **Yes** — same branch lineage |
+| #1 `process_requirement` | **No** — absent from `patch.cfg` at that commit |
 
-This is worth doing **independent of the 152 upgrade**, and is far cheaper:
-no porting, no API fallout — merge (done), build, release, repoint pins.
+So the fork's patch pipeline is working, and is demonstrably careful: that same
+status doc records catching a `patcher.py --root-dir` bug that would have
+silently skipped **all 112 patches**, before the long build started.
+
+### 5.2 The real gap, narrowed
+
+**Patch #1 alone is missing, and for a specific reason:** it was never
+registered in `patch/patch.cfg` on any branch, so `patcher.py` — which reads
+that file to decide what to apply — could never have applied it, on any build,
+on any platform. It was not a stale-release problem; it was an
+unregistered-patch problem. That part of the original finding stands, and was
+verified by direct file checks (404 on the file, zero `patch.cfg` matches), not
+by the tag inference that was wrong.
+
+This still matters, because per
+`docs/retro/retro-macos26-cef-dcheck-root-cause-2026-06-02.md` the -67030
+Mach-port peer validation failure is "a *real* functional code-sign failure...
+not a DCHECK" and was "the only reason we went from-source [CEF] at all" —
+without it, the self-reexec CEF helper fails peer validation and the renderer
+crash-loops on macOS 26.
+
+**Status:** source side fixed — `agentmuxai/cef` PR #7 merged the patch into
+`7778` *and registered it in `patch.cfg`*, which is the part that was actually
+missing. Also fixed a defect that would have made it fail to apply even once
+registered (`a/`/`b/` prefixes vs `git apply -p0`).
+
+**Still not shipped**, and this is now a **macOS-only** rebuild need — Windows
+and Linux are not affected by patch #1 (§2.1) and already carry the patches
+that do apply to them, so **the "re-cut all three platforms" recommendation in
+the retracted draft was unnecessary work**. One arm64 macOS build (Xcode,
+≥120 GB, ≥32 GB RAM, 3–6 h) and one release cut closes it.
+
+### 5.3 Method note, kept deliberately
+
+The retracted claim came from treating `target_commitish` as build provenance.
+It is not, and this repo's own docs say so — `STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md`
+notes that releases cut without `--target` inherit a default-branch timestamp,
+which is also why `gen-docs-index`-style ordering by release metadata is
+unreliable here. **Provenance for these binaries lives in the build status docs
+and in the framework's embedded `CEF_COMMIT_HASH` — check those, not the tag.**
+Recorded so the next person doesn't repeat it.
 
 ---
 
 ## 6. Go / no-go
 
-**Go**, targeting 152 directly, per the spec's §3 reasoning. Nothing in this
-recon makes 152 harder than assumed:
+**Conditional go**, targeting 152 directly, per the spec's §3 reasoning.
+Nothing in this recon makes 152 harder than assumed:
 
 - the binding exists and is current;
 - Windows/Linux toolchains are unchanged;
@@ -195,10 +261,15 @@ real porting cost.
 
 1. **§2.4 is unfinished.** Patches #2/#3/#4 have not been test-applied against
    real 152 source. Phase B should start there, and Phase B's estimate is not
-   trustworthy until it does.
-2. **Do §5 first, or at least in parallel.** Shipping a macOS renderer crash
-   fix that has been written since June should not wait behind a
-   four-milestone Chromium jump.
+   trustworthy until it does. (Patch #1 *is* now verified — §2.5.)
+2. **§4's macOS toolchain row is unconfirmed**, not confirmed-fine. Establish
+   the hermetic Xcode requirement on the actual machine before committing to a
+   macOS Phase D slot.
+3. **Do §5 in parallel, not after.** The macOS -67030 fix has been written
+   since June and still isn't in a shipped binary; it needs one macOS rebuild
+   and shouldn't wait behind a four-milestone Chromium jump. Note this is
+   **macOS-only** — the earlier draft's "re-cut all three platforms" was
+   over-scoped and is retracted.
 
 ---
 
@@ -207,8 +278,10 @@ real porting cost.
 - **§7.1 (tag schemes)** — untouched. Release tags are immutable, so the
   historical inconsistency can only be normalized at read time, not fixed in
   place. Worth doing before any automated drift checker is built against these
-  tags; §5's `148.23.21`-newer-than-`148.23.23` case shows it already misleads.
+  tags; the `148.23.21`-newer-than-`148.23.23` case shows it already misleads.
+  Related: §5.3's method note — release *tags* are not build provenance either.
 - **§8 open questions** (Linux native drag still required? 150/151 vs 152?
   who owns the build machines? do the `.180 → .218` patch-level rebase now?)
   are repo-owner decisions and remain open — recon does not answer them, though
-  §5 makes question 4 more pressing, since a rebuild is needed regardless now.
+  §5 makes question 4 more pressing for macOS specifically, since that platform
+  needs a rebuild regardless now.
