@@ -16,8 +16,11 @@
  * branch already uses (`layoutMagnify.ts`) for payload-only changes that
  * don't need `treeReducer`'s balance/validation machinery.
  *
- * Every mutation here evicts the target node's cached `NodeModel`
- * (`model.nodeModels.delete(nodeId)`). This is required, not optional:
+ * Every mutation here evicts the target node's cached `NodeModel` (via
+ * `disposeNodeModel`, `layoutNodeModels.ts` — NOT a bare
+ * `model.nodeModels.delete(nodeId)`; see that function's own comment for a
+ * real leak this fixed, found while investigating the chrome-stability spec
+ * below). This is required, not optional:
  * `NodeModel.blockId` is captured once at construction time (matching every
  * `ViewModel`'s own "one instance, one immutable blockId for its lifetime"
  * contract — see `frontend/app/block/block.tsx`), so switching the active
@@ -42,6 +45,7 @@
 
 import { findNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
+import { disposeNodeModel } from "./layoutNodeModels";
 import { closeNode } from "./layoutMagnify";
 
 /** The node's stack, or `[blockId]` when it has none yet (back-compat: a
@@ -73,7 +77,7 @@ export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: 
     const stack = effectiveStack(node.data);
     const nextStack = stack.includes(blockId) ? stack : [...stack, blockId];
     setActive(node.data, blockId, nextStack);
-    model.nodeModels.delete(nodeId);
+    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
@@ -97,7 +101,7 @@ export function setActiveBlockInStack(model: LayoutModel, nodeId: string, blockI
         return; // already active
     }
     setActive(node.data, blockId, stack);
-    model.nodeModels.delete(nodeId);
+    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
@@ -138,7 +142,7 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         node.data.activeBlockId = nextActive;
         node.data.blockId = nextActive;
     }
-    model.nodeModels.delete(nodeId);
+    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();

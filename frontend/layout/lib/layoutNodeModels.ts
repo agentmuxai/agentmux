@@ -3,7 +3,7 @@
 
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createMemo } from "solid-js";
+import { createMemo, createRoot } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
@@ -27,9 +27,18 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
     const addlPropsAtom = getNodeAdditionalPropertiesAtom(model, nodeid);
     if (!model.nodeModels.has(nodeid)) {
         // Create memos inside the model's own reactive root so they survive
-        // component mount/unmount cycles during tab switches.
+        // component mount/unmount cycles during tab switches — AND inside a
+        // nested `createRoot` so THIS specific NodeModel's memos have their
+        // own disposal boundary, separate from every other node's. Without
+        // the inner createRoot, all memos across every node/every eviction
+        // cycle share the SAME root (the model's), so nothing could ever
+        // dispose just one node's set — `disposeNodeModel` below is what
+        // actually uses the boundary this creates. See that function's
+        // comment for why this matters (a real, previously-shipped leak).
         model.runInModelRoot(() => {
-            model.nodeModels.set(nodeid, {
+            createRoot((disposeThisNodeModel) => {
+                model.nodeModelDisposers.set(nodeid, disposeThisNodeModel);
+                model.nodeModels.set(nodeid, {
                 additionalProps: addlPropsAtom,
                 innerRect: createMemo(() => {
                     const treeState = model.localTreeStateAtom();
@@ -91,6 +100,7 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 focusNode: () => model.focusNode(nodeid),
                 dragHandleRef: { current: null as HTMLDivElement | null },
                 displayContainerRef: model.displayContainerRef,
+                });
             });
         });
     }
@@ -108,8 +118,34 @@ export function cleanupNodeModels(model: LayoutModel, leafOrder: LeafOrderEntry[
         (id) => !leafOrder.find((leafEntry) => leafEntry.nodeid == id)
     );
     for (const id of orphanedNodeModels) {
-        model.nodeModels.delete(id);
+        disposeNodeModel(model, id);
     }
+}
+
+/**
+ * Evict a cached NodeModel AND dispose the reactive root its memos were
+ * created in — the two must happen together. `getNodeModel` builds each
+ * NodeModel's memos (isFocused, isMagnified, innerRect, blockNum, …) inside
+ * `model.runInModelRoot(...)`, which ties them to the WHOLE model's root
+ * (tab lifetime), not to that one map entry. A bare `model.nodeModels.delete`
+ * — what every call site here used before this fix — only removes the map
+ * entry; the memos it pointed to keep running, still subscribed to
+ * `model.localTreeStateAtom()`/`model.numLeafs()`/etc, for the rest of the
+ * tab's lifetime. Every in-pane tab switch AND every pane close hit this
+ * path, so a long session leaked one full set of ~10 live memos per switch —
+ * a real, previously-shipped bug, not hypothetical.
+ *
+ * `getNodeModel` now creates each NodeModel inside its own nested
+ * `createRoot`, giving it a disposal boundary independent of every other
+ * node's. This is the ONLY correct way to evict a NodeModel — every caller
+ * that used to call `model.nodeModels.delete(nodeId)` directly must call
+ * this instead. Safe to call for a nodeid with no cached NodeModel (the
+ * disposer lookup is a no-op `?.()`).
+ */
+export function disposeNodeModel(model: LayoutModel, nodeid: string): void {
+    model.nodeModelDisposers.get(nodeid)?.();
+    model.nodeModelDisposers.delete(nodeid);
+    model.nodeModels.delete(nodeid);
 }
 
 /**
