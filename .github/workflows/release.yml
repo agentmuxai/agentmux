@@ -80,6 +80,23 @@ jobs:
   # steps (windows-portable/windows-installer/windows-msix) are what
   # `publish` downloads below, exactly as when this was inlined.
   # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
+  # ── CEF runtime pinning for release builds ────────────────────────────────
+  # `cef-runtime-tag` is left blank in the standalone build-*.yml workflows on
+  # purpose (manual/CI-triggered test builds want "whatever's newest"), but a
+  # blank value there resolves to "most recently PUBLISHED agentmuxai/cef
+  # release for this platform" (see each build-*.yml's "Resolve codec-enabled
+  # CEF runtime tag" step) — evaluated fresh at EVERY run. In this file, that
+  # means two release runs of the exact same git tag could pull different
+  # Chromium runtimes if a new agentmuxai/cef release landed between them:
+  # a release artifact's CEF version would depend on build TIMING, not on
+  # anything in the commit being released. Pinned explicitly below instead.
+  #
+  # This trio is the current, verified-working set per
+  # docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md
+  # ("H.264/AAC verified on all three platforms. Verified 2026-08-10.").
+  # Bump all three together — and only after verifying the new set the same
+  # way — when qualifying a new agentmuxai/cef release (e.g. the 148→152
+  # milestone jump in docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md).
   build-windows:
     name: Build — Windows portable + installer + MSIX
     needs: verify
@@ -89,7 +106,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: ""
+      cef-runtime-tag: "cef-windows-x86_64-148.0.7778.180"
     secrets: inherit
 
   # Reuses build-linux.yml's own job instead of inlining a second copy of the
@@ -108,7 +125,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: ""
+      cef-runtime-tag: "cef-linux-x86_64-148.0.7778.180-codecs"
     secrets: inherit
 
   # check-macos probes the APPLE_CEF_AVAILABLE secret and exposes it as a job
@@ -147,7 +164,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: ""
+      cef-runtime-tag: "cef-macos-arm64-148.23.23-codecs"
     secrets: inherit
 
   # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
