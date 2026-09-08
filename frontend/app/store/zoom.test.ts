@@ -39,13 +39,19 @@ vi.mock("@/app/store/block-component-registry", () => ({
         Array.from(blockViewTypes.entries()).map(([id, vt]) => [id, { viewModel: { viewType: vt } }]),
 }));
 
-const setMetaMock = vi.fn((..._args: unknown[]) => {
+// Named so a test that overrides the mock's implementation (to reproduce
+// the real async round-trip — see the "computes the summary range..." test
+// below) can be reset back to this in beforeEach, rather than needing to
+// manually restore it and risk leaking a no-op implementation into every
+// test that runs after it if the override test fails before restoring.
+function defaultSetMetaImpl(..._args: unknown[]): Promise<undefined> {
     const opts = _args[1] as { oref: string; meta: Record<string, unknown> };
     const id = opts.oref.slice(opts.oref.indexOf(":") + 1);
     const prev = blockMetas.get(id) ?? {};
     blockMetas.set(id, { ...prev, ...opts.meta });
     return Promise.resolve(undefined);
-});
+}
+const setMetaMock = vi.fn(defaultSetMetaImpl);
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { SetMetaCommand: (...args: unknown[]) => setMetaMock(...args) },
 }));
@@ -75,6 +81,7 @@ beforeEach(() => {
     blockMetas = new Map();
     blockViewTypes = new Map();
     setMetaMock.mockClear();
+    setMetaMock.mockImplementation(defaultSetMetaImpl);
 });
 
 afterEach(() => {
@@ -94,19 +101,33 @@ describe("zoomAllPanesIn/Out", () => {
         expect(currentZoom("e1")).toBeCloseTo(1.05, 5);
     });
 
-    it("skips pane types getBlockZoom doesn't recognize (browser, warden) with zero new filtering", () => {
+    it("skips pane types getBlockZoom doesn't recognize (browser) with zero new filtering", () => {
         setBlock("t1", "term");
         setBlock("b1", "browser");
+
+        zoomAllPanesIn();
+
+        expect(currentZoom("t1")).toBeCloseTo(1.05, 5);
+        // No SetMetaCommand call should have targeted this block at all —
+        // proves getBlockZoom's own viewType guard is doing the exclusion,
+        // not some spec-specific filter that could drift from it.
+        expect(setMetaMock).not.toHaveBeenCalledWith(undefined, expect.objectContaining({ oref: "block:b1" }));
+    });
+
+    // Codex review, PR #3090: warden-view.tsx reads/writes the identical
+    // "term:zoom" meta key and applies it as CSS zoom exactly like
+    // armory/swarm (both already included) — leaving it out of
+    // getBlockZoom's allowlist was an oversight, not a deliberate
+    // exclusion (unlike browser, which is excluded on purpose — see the
+    // spec's Non-goals). A warden pane must be part of the batch.
+    it("includes warden panes in the batch — they already speak term:zoom identically to armory/swarm", () => {
+        setBlock("t1", "term");
         setBlock("w1", "warden");
 
         zoomAllPanesIn();
 
         expect(currentZoom("t1")).toBeCloseTo(1.05, 5);
-        // No SetMetaCommand call should have targeted these blocks at all —
-        // proves getBlockZoom's own viewType guard is doing the exclusion,
-        // not some spec-specific filter that could drift from it.
-        expect(setMetaMock).not.toHaveBeenCalledWith(undefined, expect.objectContaining({ oref: "block:b1" }));
-        expect(setMetaMock).not.toHaveBeenCalledWith(undefined, expect.objectContaining({ oref: "block:w1" }));
+        expect(currentZoom("w1")).toBeCloseTo(1.05, 5);
     });
 
     it("steps each pane relative to its OWN current zoom, not a shared baseline", () => {
@@ -134,7 +155,7 @@ describe("zoomAllPanesIn/Out", () => {
 
     it("does nothing (no indicator, no RPC calls) when the window has no zoomable pane", () => {
         setBlock("b1", "browser");
-        setBlock("w1", "warden");
+        setBlock("s1", "sysinfo");
 
         zoomAllPanesIn();
 
@@ -145,6 +166,38 @@ describe("zoomAllPanesIn/Out", () => {
         setBlock("t1", "term", 1.98);
         zoomAllPanesIn();
         expect(currentZoom("t1")).toBeLessThanOrEqual(2.0);
+    });
+
+    // ReAgent P1, PR #3090: the real RpcApi.SetMetaCommand is fire-and-forget
+    // — WOS's local object cache is NOT updated synchronously by it, only
+    // later when the backend pushes a WaveObjUpdate event back
+    // (global.ts's initGlobalEventSubs). Every OTHER test in this file uses
+    // a setMetaMock that updates blockMetas synchronously, which masked a
+    // real bug: stepAllPanes originally re-read getBlockZoom(blockId) right
+    // after stepZoom() to compute the summary range, which — against the
+    // real system's actual timing — would have read the STALE, pre-step
+    // value every single time. This test's mock deliberately does NOT
+    // update blockMetas at all, reproducing that stale-cache condition
+    // exactly, to prove the fix (using stepZoom's own return value instead
+    // of re-reading) doesn't depend on the cache having updated.
+    it("computes the summary range from the freshly stepped value, not a re-read of WOS's (unsynced) cache", () => {
+        // Deliberately never touches blockMetas — reproduces the real
+        // system's actual timing (RpcApi.SetMetaCommand is fire-and-forget;
+        // WOS's cache only updates later, off a WaveObjUpdate event).
+        // beforeEach resets this back to defaultSetMetaImpl for every other
+        // test, so this override cannot leak.
+        setMetaMock.mockImplementation(() => Promise.resolve(undefined));
+
+        setBlock("t1", "term", 1.0);
+        setBlock("a1", "agent", 1.0);
+
+        zoomAllPanesIn();
+
+        // blockMetas was never updated by the (deliberately inert) mock —
+        // getBlockZoom would still read the OLD 1.0 for both blocks here.
+        // The indicator must still reflect the NEW value regardless.
+        expect(currentZoom("t1")).toBe(1.0);
+        expect(zoomIndicatorTextAtom()).toBe("All panes: 105%");
     });
 
     describe("indicator", () => {

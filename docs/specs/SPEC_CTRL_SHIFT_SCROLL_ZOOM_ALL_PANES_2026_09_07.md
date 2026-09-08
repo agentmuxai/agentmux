@@ -65,9 +65,20 @@ Add a second wheel handler, `Ctrl+Shift+Scroll`, alongside the existing
   walk (by values only) for their own cross-block operations.
 
   `getBlockZoom`'s existing viewType allowlist (`term`, `agent`, `swarm`,
-  `editor`, `armory`) does all the filtering — a browser or warden pane is
-  silently skipped, exactly as it would be if you Ctrl+Scrolled over it
-  directly today. **Zero new filtering logic.**
+  `editor`, `armory`, and — as of Codex's review on PR #3090 — `warden`,
+  see below) does all the filtering — a browser pane is silently skipped,
+  exactly as it would be if you Ctrl+Scrolled over it directly today.
+  **Zero new filtering logic.**
+
+  **`warden` correction (Codex review, PR #3090):** the allowlist as first
+  drafted omitted `warden`, even though `warden-view.tsx` reads/writes the
+  identical `term:zoom` meta key and applies it as CSS zoom exactly like
+  `armory`/`swarm` (both already listed). That was an oversight in the
+  allowlist, not a deliberate exclusion like browser's — a warden pane was
+  already individually zoomable via its own Ctrl+Wheel handler using the
+  same mechanism, so silently skipping it in the all-panes batch broke the
+  feature's own "every pane" contract for a pane that already qualified.
+  Fixed by adding `warden` to the allowlist.
 
   Each pane keeps its own `term:zoom` meta and steps from *its own* current
   value — two panes at different zoom levels before the gesture stay at
@@ -82,6 +93,28 @@ Add a second wheel handler, `Ctrl+Shift+Scroll`, alongside the existing
   `"All panes: 120%"` if every affected pane landed on the same value,
   `"All panes: 90%–130%"` if they didn't — instead of N toasts each
   overwriting the last before it can be read.
+
+### Stale-cache bug found by review (ReAgent + Codex, both independently, PR #3090)
+
+The first draft of the all-panes stepper computed the summary range by
+calling `getBlockZoom(blockId)` again immediately after `stepZoom(...)`.
+That reads WOS's local object cache — which is **not** updated
+synchronously by `RpcApi.SetMetaCommand`. The write is fire-and-forget; the
+cache only updates later, when the backend pushes a `WaveObjUpdate` event
+back (`global.ts`'s `initGlobalEventSubs` → `WOS.updateWaveObject`). The
+re-read therefore always saw the *pre-step* value, so the toast reported
+the OLD zoom range on every single gesture — a batch from 100% to 105%
+would have displayed `"All panes: 100%"`.
+
+The PR's own first-draft tests didn't catch it because their `SetMetaCommand`
+mock updates its backing map synchronously — a reasonable simplification
+for testing the RPC call's *content*, but one that diverges from the real
+system's actual timing for exactly this read-after-write case. Fixed by
+having `stepZoom`/`setBlockZoom` **return** the clamped/rounded value they
+just computed, so the stepper uses that directly instead of re-reading
+anything. A regression test (`zoom.test.ts`) reproduces the real timing
+with a `SetMetaCommand` mock that deliberately never updates the backing
+map, and proves the indicator still reports the correct new value.
 
 ### Why this doesn't need a new keydown/preventDefault path
 
@@ -104,7 +137,7 @@ once again as part of `AppAllPanesZoomHandler`'s loop) relative to every
 other pane in the window, which only gets the one step. Fixed by adding the
 same `|| e.shiftKey` exclusion to `AppZoomHandler`'s existing gate.
 
-### Interaction with the six duplicated per-view Ctrl+Wheel handlers
+### Interaction with the duplicated per-view Ctrl+Wheel handlers — six found, a seventh missed
 
 `term.tsx:371-386`, `editor-view.tsx:118-131`, `armory-view.tsx:66-80`,
 `warden-view.tsx:43-57`, `swarm-view.tsx:30-71`, and
@@ -117,17 +150,33 @@ fire on Ctrl+Shift+Scroll — double-stepping the hovered pane (once from the
 per-view handler, once from this feature's window-level loop) while every
 *other* pane in the window only gets the one step from the loop.
 
+**A seventh handler, `helpview.tsx`'s `handleWheel`, was missed by the
+original research entirely** — found by Codex's review on PR #3090, after
+the six above had already shipped fixed and tested. It uses `onWheel={...}`
+(a JSX prop, not `addEventListener` with `capture: true` like the other
+six), which is why the original grep-based sweep for this pattern didn't
+surface it. Same bug, same fix: it had no `shiftKey` check at all, so
+Ctrl+Shift+Scroll over the Help pane zoomed only Help (via its own
+`stopPropagation()`) instead of reaching `AppAllPanesZoomHandler`. Note
+Help's own zoom lives under a *different* meta key (`help:zoom`, not the
+shared `term:zoom`) and a component-local `createSignal`, not
+`zoom.ts`/`getBlockZoom` at all — so even with the guard fixed, a Help
+pane's own zoom is never part of the all-panes batch, the same as a
+browser pane. The fix only stops it from swallowing the gesture before
+every *other* pane can be zoomed.
+
 This needs one of two fixes, and this spec takes the first:
 
-1. **Add a `!e.shiftKey` guard to each of the six handlers.** Small, and
+1. **Add a `!e.shiftKey` guard to each of the seven handlers.** Small, and
    consistent with how `AppZoomHandler` itself is scoped to bare
    `e.ctrlKey`, not `e.ctrlKey || e.shiftKey`-anything. This is the fix this
-   spec implements — six one-line changes, no behavior change to any
+   spec implements — seven one-line changes, no behavior change to any
    existing shortcut.
-2. Consolidate the six onto `zoom.ts`'s shared helpers, per the audit
-   report's existing recommendation. Correct long-term direction, but a
-   larger, separately-scoped refactor — not a prerequisite for this feature
-   and not done as a side effect of it here.
+2. Consolidate the six `zoom.ts`-backed ones onto its shared helpers, per
+   the audit report's existing recommendation (Help's separate `help:zoom`
+   key would stay its own thing regardless). Correct long-term direction,
+   but a larger, separately-scoped refactor — not a prerequisite for this
+   feature and not done as a side effect of it here.
 
 Whichever view is focused when the gesture fires, only option 1 is in scope
 for this change.
@@ -165,34 +214,46 @@ towards the smaller/pure-frontend option:
 
 | File | Change |
 |---|---|
-| `frontend/app/app.tsx` | new `AppAllPanesZoomHandler` (or fold into `AppZoomHandler` as a second branch — implementation's call) registering the Ctrl+Shift+Scroll `wheel` listener |
-| `frontend/app/view/term/term.tsx`, `editor-view.tsx`, `armory-view.tsx`, `warden-view.tsx`, `swarm-view.tsx`, `frontend/app/view/agent/components/AgentShellSubblock.tsx` | add `!e.shiftKey` to each handler's existing Ctrl+Wheel gate |
-| `frontend/app/store/zoom.ts` | no functional change — reuses `zoomBlockIn`/`zoomBlockOut`/`chromeZoomIn`/`chromeZoomOut` as-is; may add a small suppress/batch helper for the single end-of-gesture indicator |
+| `frontend/app/app.tsx` | new `AppAllPanesZoomHandler`; `AppZoomHandler`'s own gate gained `\|\| e.shiftKey` too (found during implementation, see above) |
+| `frontend/app/view/term/term.tsx`, `editor-view.tsx`, `armory-view.tsx`, `warden-view.tsx`, `swarm-view.tsx`, `frontend/app/view/agent/components/AgentShellSubblock.tsx`, `frontend/app/view/helpview/helpview.tsx` | add `!e.shiftKey`/`e.shiftKey` exclusion to each handler's existing Ctrl+Wheel gate — 7 files, the last found by Codex's review, not the original research |
+| `frontend/app/store/zoom.ts` | new `zoomAllPanesIn`/`zoomAllPanesOut`; `stepZoom`/`setBlockZoom` gained a `showIndicator` param and now return the computed value (stale-cache fix, see above); `getBlockZoom`'s allowlist gained `warden` (Codex review) |
+| `frontend/app/store/block-component-registry.ts` | new `getAllBlockComponentModelEntries()` |
+| `frontend/app/store/zoom.test.ts` (new), `armory-view.test.tsx`, `warden-view.test.tsx`, `frontend/app/view/helpview/helpview.test.tsx` (new) | test coverage, including the stale-cache regression test |
 
 ## Tests
 
 - Ctrl+Shift+Scroll over a non-chrome pane steps **every** pane currently
-  registered in the window (term, agent, swarm, editor, armory), each from
-  its own starting zoom, by one `WHEEL_STEP`.
+  registered in the window (term, agent, swarm, editor, armory, warden),
+  each from its own starting zoom, by one `WHEEL_STEP`.
 - A pane at a different starting zoom than its neighbor ends one step away
   from *its own* prior value, not snapped to a shared value — proves
   "relative to where they already are," not a new global zoom.
-- A browser or warden pane in the mix is left untouched by the loop (no
+- A browser pane in the mix is left untouched by the loop (no
   `SetMetaCommand` call for its block) — proves the existing
   `getBlockZoom` viewType allowlist is doing the exclusion, not new spec-
-  specific filtering.
+  specific filtering. A warden pane, by contrast, IS included (see the
+  `warden` correction above).
+- The summary toast reflects the freshly stepped value even when
+  `SetMetaCommand`'s mock never updates the backing block-meta map at all —
+  reproduces the real system's actual async timing and proves the fix
+  doesn't depend on the cache having updated (the stale-cache bug above).
 - Ctrl+Shift+Scroll over `.window-header` / `.status-bar` /
   `.block-frame-default-header` calls `chromeZoomIn`/`chromeZoomOut`
   exactly like plain Ctrl+Scroll over chrome does, and does **not** touch
   any pane's `term:zoom`.
 - Plain Ctrl+Scroll (no Shift) behavior is unchanged by this feature,
-  including inside the six views whose handlers gained a `!e.shiftKey`
-  guard.
-- Ctrl+Shift+Scroll inside one of those six views' focused pane does not
-  double-step that pane relative to its neighbors (regression test for the
-  interaction issue above).
+  including inside the seven views whose handlers gained a `shiftKey`
+  exclusion.
+- Ctrl+Shift+Scroll inside one of those seven views' focused pane does not
+  trigger that pane's own zoom RPC call (regression test for the
+  interaction issue above) — covered directly for `armory`/`warden`/`help`
+  against their existing test harnesses; `term`/`editor`/`swarm`/
+  `AgentShellSubblock` have no such harness to extend cheaply, so those
+  four are covered by the fix itself plus `app.tsx`'s own dispatch logic,
+  not a dedicated per-view test — noted here rather than left silent.
 - Only one zoom indicator toast is visible per gesture, regardless of pane
-  count.
+  count — verified by recording every value a Solid effect sees on the
+  indicator signal, not just its final one.
 
 ## Non-goals
 
