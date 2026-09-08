@@ -207,6 +207,19 @@ export class LayoutModel {
      * @internal
      */
     nodeModels: Map<string, NodeModel>;
+    /**
+     * Dispose functions for each cached NodeModel's own reactive root
+     * (populated by `getNodeModel`, consumed by `disposeNodeModel`). A
+     * NodeModel's memos are created via `runInModelRoot` so they survive
+     * component mount/unmount cycles — but that ties their lifetime to this
+     * WHOLE model's root, not to the individual map entry. Without an
+     * explicit per-nodeid dispose, evicting a NodeModel (every in-pane tab
+     * switch, every pane close) only removed the map entry; the memos it
+     * created kept running, un-disposed, for the rest of the tab's lifetime.
+     * See `disposeNodeModel`'s own comment for the fix.
+     * @internal
+     */
+    nodeModelDisposers: Map<string, () => void>;
 
     /**
      * Computed list of resize handle props derived from additionalProps.
@@ -406,6 +419,7 @@ export class LayoutModel {
             this.numLeafs = createMemo(() => this.leafOrder().length);
 
             this.nodeModels = new Map();
+            this.nodeModelDisposers = new Map();
             this.additionalProps = createSignalAtom<Record<string, LayoutNodeAdditionalProps>>({});
 
             this.spiralLeafOrder = createMemo(() => {
