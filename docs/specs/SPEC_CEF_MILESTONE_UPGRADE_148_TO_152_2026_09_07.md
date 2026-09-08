@@ -2,9 +2,14 @@
 
 **Author:** AgentX
 **Created:** 2026-09-07
-**Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7, plus
-the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
-verdict is **go** on targeting 152 directly. **Phases B–G not started.** The
+**Status:** active — Phase A mostly shipped 2026-09-08 (`agentmuxai/cef` PR #7,
+plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
+verdict is **conditional go** on targeting 152 directly — **two Phase A checks
+are still open** (patches #3/#4 not test-applied against real 152 source; macOS
+Xcode pin unconfirmed), so this is not clearance to start Phase B blind. See §4
+Phase A for both conditions. **Phase B started opportunistically** (patch #1
+verified against 152 and ported; `7977` + `agentmux/7977-process-requirement`
+exist in the fork); **Phases C–G not started.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
