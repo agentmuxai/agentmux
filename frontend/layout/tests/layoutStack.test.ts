@@ -13,7 +13,7 @@ import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import { activeKeyFor, getNodeByBlockId } from "@/layout/lib/layoutNodeModels";
 import { closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
-import { LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
+import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
 // Same mock harness as layoutModel.test.ts.
@@ -132,6 +132,89 @@ describe("layoutStack", () => {
             pushBlockOntoStack(model, nodeId, "b2");
 
             expect(model.nodeModels.has(nodeId)).toBe(false);
+        });
+
+        // Leak fix: eviction used to be a bare `model.nodeModels.delete(nodeId)`
+        // — it removed the MAP ENTRY but never disposed the reactive root
+        // `getNodeModel` created the NodeModel's memos in (`runInModelRoot`
+        // ties them to the whole MODEL's lifetime, not to that one map entry).
+        // Every switch left the old memo set running, still subscribed,
+        // forever. This proves the fix by DIFFERENTIATING a truly-disposed
+        // memo from a merely-orphaned one: a disposed memo's return value
+        // freezes at whatever it was computed as right before disposal and
+        // does not react to a LATER dependency change, whereas an orphaned
+        // (still-alive) one would keep updating. Falsifiable: reverting the
+        // `disposeNodeModel` change in layoutNodeModels.ts (back to a bare
+        // `.delete()`) makes this test fail, because the frozen assertion
+        // below would instead observe the live, updated value.
+        it("disposes the evicted NodeModel's reactive root, not just its map entry", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const node = model.treeState.rootNode!;
+
+            const evictedNodeModel = model.getNodeModel(node);
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+            // insertRootBlock inserts with `focused: true` — the lone leaf
+            // starts out focused by default.
+            expect(evictedNodeModel.isFocused()).toBe(true);
+
+            pushBlockOntoStack(model, nodeId, "b2"); // triggers disposeNodeModel
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(false); // disposer consumed, not leaked
+
+            // Un-focus — the identical treeState mutation layoutFocus.ts's
+            // own validateFocusedNode uses internally
+            // (model.treeState.focusedNodeId = id;
+            // model.setter(model.localTreeStateAtom, {...})), not the
+            // public focusNode() action, since there's no second node here
+            // to focus instead and that action's existence-check isn't the
+            // concern under test. A live isFocused memo would now read
+            // false; a disposed one stays frozen at its pre-disposal value.
+            model.treeState.focusedNodeId = undefined;
+            model.setter(model.localTreeStateAtom, { ...model.treeState });
+            expect(evictedNodeModel.isFocused()).toBe(true); // frozen — proves disposal, not just eviction
+
+            // Contrast: a FRESH NodeModel for the same node, built after the
+            // focus change, correctly reflects live state — confirms the
+            // mutation itself worked and this isn't a false pass from a
+            // broken focus update.
+            const freshNodeModel = model.getNodeModel(node);
+            expect(freshNodeModel.isFocused()).toBe(false);
+        });
+
+        // reagent P1 on #3091: getNodeAdditionalPropertiesAtom used to be
+        // called UNCONDITIONALLY in getNodeModel, before the cache-miss
+        // check and outside the nested createRoot the P1 fix's own memos
+        // live in — so it built and leaked its own separate, uncached memo
+        // on every single getNodeModel/useNodeModel call (cache hits
+        // included, since it ran before the cache was even consulted), not
+        // just on the eviction path the other test above covers. Same
+        // frozen-vs-live differentiation, targeting THIS specific field.
+        it("disposes additionalProps' own memo too, not just the fields built inside the cache-miss block", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            const node = model.treeState.rootNode!;
+
+            const evictedNodeModel = model.getNodeModel(node);
+            // The lone leaf already has real geometry (from
+            // createLayoutModel's mocked 800x600 bounding rect) — capture
+            // it rather than assume undefined.
+            const initialAddlProps = evictedNodeModel.additionalProps();
+            expect(initialAddlProps).toBeDefined();
+
+            pushBlockOntoStack(model, nodeId, "b2"); // triggers disposeNodeModel
+
+            // Set additionalProps for this node to a DIFFERENT value after
+            // disposal. A live memo would now read the new value; a
+            // disposed one stays frozen at its pre-disposal value.
+            model.setter(model.additionalProps, {
+                [nodeId]: { treeKey: "test" } as LayoutNodeAdditionalProps,
+            });
+            expect(evictedNodeModel.additionalProps()).toEqual(initialAddlProps); // frozen — proves disposal
+
+            // Contrast: a fresh NodeModel for the same node correctly sees
+            // the live value.
+            const freshNodeModel = model.getNodeModel(node);
+            expect(freshNodeModel.additionalProps()).toEqual({ treeKey: "test" });
         });
 
         it("appending an already-present blockId re-activates it instead of duplicating the stack entry", () => {
@@ -263,6 +346,52 @@ describe("layoutStack", () => {
             expect(onNodeDelete).toHaveBeenCalledWith(expect.objectContaining({ blockId: "b1" }));
         });
 
+        // codex P1 on #3091: closing a BACKGROUND member leaves activeBlockId
+        // untouched, so activeKeyFor's key doesn't change and the leaf's
+        // DisplayNode component never remounts — it's STILL holding its
+        // existing NodeModel reference from its last real mount. The first
+        // version of this PR's leak fix disposed unconditionally here
+        // anyway, which doesn't just leak less — it actively FREEZES that
+        // still-in-use component's isFocused/isMagnified/innerRect/etc,
+        // since nothing will ever remount it to pick up a fresh NodeModel.
+        // Same frozen-vs-live differentiation as the eviction tests above,
+        // proving the opposite property this time: the memo must stay LIVE.
+        it("does NOT dispose the NodeModel when closing a background member — nothing remounts to replace it", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2"); // stack: [b1,b2], active b2
+            const node = model.treeState.rootNode!;
+
+            const stillMountedNodeModel = model.getNodeModel(node);
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+
+            void closeBlockInStack(model, nodeId, "b1"); // b1 is NOT active — background close
+
+            // Disposer must still be there — nothing should have consumed it.
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+
+            // Focus this node — a LIVE memo reacts; a wrongly-disposed one
+            // would stay frozen at its pre-close value (false, since this
+            // node was never explicitly focused above).
+            model.treeState.focusedNodeId = nodeId;
+            model.setter(model.localTreeStateAtom, { ...model.treeState });
+            expect(stillMountedNodeModel.isFocused()).toBe(true); // live — proves NOT disposed
+        });
+
+        it("DOES dispose the NodeModel when closing the active member — this case genuinely remounts", () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2"); // stack: [b1,b2], active b2
+            const node = model.treeState.rootNode!;
+
+            const evictedNodeModel = model.getNodeModel(node);
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+
+            void closeBlockInStack(model, nodeId, "b2"); // b2 IS active — closing it changes activeBlockId
+
+            expect(model.nodeModelDisposers.has(nodeId)).toBe(false); // disposer consumed — confirms the fix didn't overcorrect into never disposing
+        });
+
         it("closing the ACTIVE member picks its right neighbor", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");
@@ -352,5 +481,62 @@ describe("activeKeyFor", () => {
         node.data!.blockId = "b2";
         const keyAfter = activeKeyFor(node);
         expect(keyBefore).not.toBe(keyAfter);
+    });
+});
+
+describe("LayoutModel.dispose()", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    // reagent P1 on #3091, round 2: `dispose()` (ordinary tab close, via
+    // `deleteLayoutModelForTab`) used to only call `this._disposeRoot()` —
+    // which tears down `_modelOwner` — and never iterated
+    // `nodeModelDisposers`. `createRoot` (what `getNodeModel` nests every
+    // NodeModel's memos in, for the per-node disposal boundary the other
+    // tests in this file exercise) is DELIBERATELY DETACHED from whatever
+    // owner is ambient when it's called — confirmed empirically with a
+    // standalone scratch test before trusting this, since this PR had
+    // already gotten SolidJS ownership semantics wrong twice. So disposing
+    // only `_modelOwner` never reached any NodeModel's nested root: every
+    // leaf whose NodeModel was never explicitly evicted before the whole
+    // tab closed (the common case) leaked its ~10-memo root forever — the
+    // same class of bug this PR fixes, just on the far more common "close a
+    // tab" path instead of an in-pane switch. Falsifiable: removing the
+    // `for (const nodeid of [...this.nodeModelDisposers.keys()])` loop in
+    // `LayoutModel.dispose()` (layoutModel.ts) makes this test fail, since
+    // the frozen assertion below would instead observe the live, updated
+    // value, and the map-emptiness assertions would fail too.
+    it("disposes every cached NodeModel's reactive root on tab close, not just the model's own root", () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        const node = model.treeState.rootNode!;
+
+        const nodeModel = model.getNodeModel(node);
+        expect(model.nodeModelDisposers.has(nodeId)).toBe(true);
+        // insertRootBlock inserts with `focused: true` — the lone leaf
+        // starts out focused by default.
+        expect(nodeModel.isFocused()).toBe(true);
+
+        model.dispose();
+
+        // Map-level cleanup: nothing left cached or tracked for disposal.
+        expect(model.nodeModelDisposers.size).toBe(0);
+        expect(model.nodeModels.size).toBe(0);
+
+        // Frozen-vs-live: mutate the same underlying signal `isFocused`
+        // depends on (`localTreeStateAtom`, via the mocked WOS layer — this
+        // still works after dispose() since the mock signal itself isn't
+        // torn down, only the model's own reactive graph). A live memo
+        // would now read false; a disposed one stays frozen at whatever it
+        // was computed as right before disposal.
+        model.treeState.focusedNodeId = undefined;
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+        expect(nodeModel.isFocused()).toBe(true); // frozen — proves disposal, not just eviction
     });
 });
