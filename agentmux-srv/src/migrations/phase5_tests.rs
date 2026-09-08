@@ -176,11 +176,20 @@ impl TempHome {
             params![id, name, working_directory],
         )
         .unwrap();
+        // `db_agent_content`'s agent_id FK targets db_agents as of Phase 3c —
+        // but this fixture is deliberately pre-0007 in every respect,
+        // `db_agents` is meant to start genuinely empty for several of these
+        // tests, and 0007 (not this helper) is what's supposed to create the
+        // mirror. FK checks off for just this insert, matching the same
+        // pre-existing-inconsistency workaround
+        // `m0028_agent_child_tables_repoint_fk`'s own tests use.
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
         conn.execute(
             "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at) VALUES (?1, 'env', ?2, 1000)",
             params![id, format!("CLAUDE_CONFIG_DIR={}\n", self.claude_config_dir().display())],
         )
         .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
     }
 }
 
