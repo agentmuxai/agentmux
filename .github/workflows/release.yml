@@ -71,6 +71,80 @@ jobs:
           echo "✓ Version $VER consistent across all locations"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
+  # ── Phase 1b: Single source of truth for the three pinned CEF runtime tags ──
+  # PR #3086 pinned each build-*.yml call's cef-runtime-tag to a literal
+  # string, fixing release-to-release reproducibility: a blank tag used to
+  # resolve to "latest published release for that platform" at build time, so
+  # two builds of the identical commit — or the same tagged release rebuilt
+  # later — could silently ship different Chromium versions. That fix has one
+  # gap: the three pins lived in three separate places (one per build-* call
+  # below), so a human bumping one platform's pin (e.g. Windows to CEF 152)
+  # and forgetting the other two reproduces the exact failure #3086 exists to
+  # prevent — via a stale manual edit instead of a live "latest" race. Nothing
+  # caught that.
+  #
+  # This job is now the ONE place the three pins are declared — build-windows/
+  # linux/macos below reference its outputs, not a literal string of their
+  # own — and it fails the release if they don't agree on Chromium MILESTONE
+  # before any build starts. Milestone, not full version equality: the three
+  # platforms don't even share a version-string format. Confirmed against the
+  # tags PR #3086 pinned: windows=148.0.7778.180, linux=148.0.7778.180-codecs
+  # (both Chromium's own major.minor.branch.patch), macos=148.23.23-codecs (an
+  # unrelated local build-counter scheme — 148.23.23 is not a Chromium build
+  # number). All three do keep the milestone as the leading dot-separated
+  # segment regardless of scheme, so that's the one component a comparison
+  # can mean something for.
+  #
+  # No GitHub API calls, no secrets: this only parses the three literal
+  # strings declared right here, so it's a fast, offline, always-reproducible
+  # check — not a live "resolve latest" query, which would silently undo
+  # #3086's reproducibility fix.
+  #
+  # To bump a pin: update the matching value below (this is now the only
+  # place to do it) in the same PR as the consumer-side CEF upgrade change,
+  # exactly as #3086's original guidance said — just centralized to one site
+  # instead of three, so there's no longer a second and third place to forget.
+  cef-runtime-pins:
+    name: CEF runtime tags (single source of truth + milestone check)
+    runs-on: ubuntu-latest
+    outputs:
+      windows-tag: ${{ steps.pins.outputs.windows-tag }}
+      linux-tag: ${{ steps.pins.outputs.linux-tag }}
+      macos-tag: ${{ steps.pins.outputs.macos-tag }}
+    steps:
+      - name: Declare pins and check milestone agreement
+        id: pins
+        run: |
+          WIN_TAG="cef-windows-x86_64-148.0.7778.180"
+          LINUX_TAG="cef-linux-x86_64-148.0.7778.180-codecs"
+          MACOS_TAG="cef-macos-arm64-148.23.23-codecs"
+
+          # Chromium milestone = the leading dot-separated numeric segment
+          # after the cef-<platform>-<arch>- prefix. Works across both
+          # version schemes above because both keep the milestone number
+          # first — it's the one component the three schemes agree on the
+          # meaning of.
+          milestone() {
+            echo "$1" | sed -E 's/^cef-[a-z0-9_]+-[a-z0-9_]+-//' | cut -d. -f1
+          }
+          WIN_MS=$(milestone "$WIN_TAG")
+          LINUX_MS=$(milestone "$LINUX_TAG")
+          MACOS_MS=$(milestone "$MACOS_TAG")
+          echo "Pinned CEF runtime tags: windows=$WIN_TAG (m$WIN_MS) linux=$LINUX_TAG (m$LINUX_MS) macos=$MACOS_TAG (m$MACOS_MS)"
+
+          if [ "$WIN_MS" != "$LINUX_MS" ] || [ "$WIN_MS" != "$MACOS_MS" ]; then
+            echo "ERROR: CEF Chromium milestone mismatch across the pinned tags — refusing to build a release from mismatched runtimes."
+            echo "  windows: $WIN_TAG (milestone $WIN_MS)"
+            echo "  linux:   $LINUX_TAG (milestone $LINUX_MS)"
+            echo "  macos:   $MACOS_TAG (milestone $MACOS_MS)"
+            echo "  One platform's pin was bumped without the others — update all three together, in the same PR."
+            exit 1
+          fi
+
+          echo "windows-tag=$WIN_TAG" >> "$GITHUB_OUTPUT"
+          echo "linux-tag=$LINUX_TAG" >> "$GITHUB_OUTPUT"
+          echo "macos-tag=$MACOS_TAG" >> "$GITHUB_OUTPUT"
+
   # ── Phase 2: Build all platforms (parallel) ───────────────────────────────
   # Reuses build-windows.yml's own job instead of inlining a second copy of
   # the CEF-provisioning + packaging steps — same pattern as build-linux/
@@ -81,29 +155,21 @@ jobs:
   # `publish` downloads below, exactly as when this was inlined.
   # See docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
   #
-  # cef-runtime-tag is PINNED below (not blank), one tag per platform. It used
-  # to be left blank on all three, which each build-*.yml resolves to "latest
-  # published release for that platform" -- meaning a release build's CEF
-  # version was decided by release TIMING, not by anything in the commit: two
-  # builds of the identical commit could ship different Chromium versions, and
-  # reverting a consumer PR to roll back CEF would not actually roll anything
-  # back, since the next release would still resolve to whatever is newest on
-  # agentmuxai/cef. Found while scoping the CEF 148->152 milestone upgrade
-  # (docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md).
-  #
-  # To bump: cut the new agentmuxai/cef release(s) first, then update the
-  # three tags below in the same PR as the consumer-side change (Cargo.toml /
-  # Taskfile / docs). Do not blank these back out.
+  # cef-runtime-tag comes from cef-runtime-pins above, the one place all
+  # three platforms' pins are declared and cross-checked — see that job's
+  # comment for the full history (PR #3086 pinned per-build-job literals
+  # fixing reproducibility; this closes the gap that left open: nothing
+  # caught one platform's pin drifting from the other two).
   build-windows:
     name: Build — Windows portable + installer + MSIX
-    needs: verify
+    needs: [verify, cef-runtime-pins]
     permissions:
       contents: write
     uses: ./.github/workflows/build-windows.yml
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: "cef-windows-x86_64-148.0.7778.180"
+      cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.windows-tag }}
     secrets: inherit
 
   # Reuses build-linux.yml's own job instead of inlining a second copy of the
@@ -115,14 +181,14 @@ jobs:
   # what `publish` downloads below, exactly as when this was inlined.
   build-linux:
     name: Build — Linux AppImage
-    needs: verify
+    needs: [verify, cef-runtime-pins]
     permissions:
       contents: write
     uses: ./.github/workflows/build-linux.yml
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: "cef-linux-x86_64-148.0.7778.180-codecs"
+      cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.linux-tag }}
     secrets: inherit
 
   # check-macos probes the APPLE_CEF_AVAILABLE secret and exposes it as a job
@@ -153,7 +219,7 @@ jobs:
   # `publish` downloads below, exactly as when this was inlined.
   build-macos:
     name: Build — macOS arm64 DMG
-    needs: [verify, check-macos]
+    needs: [verify, check-macos, cef-runtime-pins]
     if: needs.check-macos.outputs.available == 'true'
     permissions:
       contents: write
@@ -161,7 +227,7 @@ jobs:
     with:
       ref: ${{ github.event.inputs.tag || github.ref }}
       release-tag: ""
-      cef-runtime-tag: "cef-macos-arm64-148.23.23-codecs"
+      cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
   # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
@@ -170,9 +236,24 @@ jobs:
   # the assets into its OWN bucket (agentmux-landing-prod), and serves them from
   # agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
   # GitHub Release plus a repository_dispatch to redeploy the landing page.
+  #
+  # `if: !failure() && !cancelled()` rather than plain `success()` is
+  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
+  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
+  # not-a-success and block publish even though a Windows/Linux-only release
+  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
+  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
+  # documented behaviour: an `if:` that references one of these functions
+  # gets no implicit "all needs succeeded" check at all, unlike a plain
+  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
+  # be listed here explicitly, or its failure (a milestone mismatch) would
+  # cascade to skip every build job (invisible to failure()) while publish's
+  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
+  # confusingly later instead of being cleanly blocked at the real point of
+  # failure.
   publish:
     name: Publish release
-    needs: [verify, check-macos, build-windows, build-linux, build-macos]
+    needs: [verify, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
