@@ -2,7 +2,7 @@
 
 **Author:** AgentX
 **Created:** 2026-09-07
-**Status:** active — Phase A mostly shipped 2026-09-08 (`agentmuxai/cef` PR #7,
+**Status:** active — Phase A shipped 2026-09-08 (`agentmuxai/cef` PR #7,
 plus the recon output `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`);
 verdict is **go** on targeting 152 directly — the patch-applicability condition
 is now **closed**: all four patches are verified against real CEF/Chromium 152
@@ -78,10 +78,15 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 > prefixes, which CEF's `git apply -p0` patcher cannot resolve.
 >
 > **Patch #2 (`BeginWindowDrag`) is confirmed still NOT upstream at 152** —
-> checked `include/views/cef_window.h` at upstream `7977` directly. It still
-> needs forward-porting, and the `cef-dll-sys` binding patch is still required.
-> Patches #3/#4 have **not** been test-applied against real 152 source (needs a
-> checkout); that is the first task for whoever takes Phase B.
+> checked `include/views/cef_window.h` at upstream `7977` directly, so we must
+> still carry it, and the `cef-dll-sys` binding patch is still required. But
+> carrying it is nearly free: upstream never touched any of its three target
+> files across four milestones (`cmp`-identical 7778 ↔ 7977), so the port is a
+> copy rather than a forward-port. Done — see the report's §5b.
+> Patches #3/#4 **have since been test-applied** against real Chromium 152
+> source and apply cleanly, and patch #2's three target files are
+> `cmp`-identical between 7778 and 7977 — so all four are verified. See the
+> report's §2.4/§2.5.
 
 ---
 
@@ -108,8 +113,10 @@ closed — all four patches verified against real 152 source (see the report's
 Phase D build-time check rather than a blocker on starting.
 Answers to the three tasks below:
 (1) patch inventory corrected — see §2's callout; `BeginWindowDrag` confirmed
-still not upstream at 152, so nothing was deleted; #3/#4 still need a real
-test-apply against a 152 checkout, which is Phase B's first task. (2) **yes**,
+still not upstream at 152, so nothing was deleted. **All four patches are now
+test-applied/verified against real 152 source** (#1/#3/#4 by real
+`git apply -p0`; #2's three target files are `cmp`-identical between 7778 and
+7977) — report §2.4/§2.5. (2) **yes**,
 `cef 152.0.0+152.0.5` is published; `begin_window_drag` is **not** in it, so
 the binding fork is still needed. (3) Windows and Linux toolchain pins are
 **unchanged** between the two Chromium tags; macOS's Xcode pin is

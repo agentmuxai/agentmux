@@ -3,16 +3,15 @@
 **Author:** Agent5
 **Date:** 2026-09-08
 **Status:** active — Phase A's recon is delivered by this document and its one
-source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), but **two
-of the spec's three Phase A checks are not fully closed**: patches #3/#4 have
-not been test-applied against real 152 source (§2.4), and the macOS Xcode
-toolchain pin is unconfirmed (§4). Per Codex review on PR #3093, Phase A stays
-`active` until those close — the "go" in §6 is therefore conditional, not a
-clearance to start Phase B blind. This is the Phase A output that
+source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), **All four patches are now verified against real 152
+source** (§2.4/§2.5), closing the condition this report originally carried. One
+minor check is deferred: the macOS hermetic Xcode pin is unconfirmed (§4), which
+is a Phase D build-time check. Phase B's patch port is also done (§5b) — but
+nothing is built, so this stays `active`. This is the Phase A output that
 `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates on.
-**Verdict:** **Conditional go** on §3's "straight to 152" decision — see §6 for
-the two conditions. Also corrects two errors in the spec's patch inventory, and
-records one shipped-binary gap (§5).
+**Verdict:** **Go** on §3's "straight to 152" decision — the patch-applicability
+condition is closed (§2.4). Also corrects two errors in the spec's patch
+inventory, and records one shipped-binary gap (§5).
 
 ---
 
@@ -24,7 +23,7 @@ records one shipped-binary gap (§5).
 | Does `cef-rs`/`cef-dll-sys` have a 152-compatible crate? | **Yes** — `cef 152.0.0+152.0.5`, published 2026-09-07. |
 | Is `begin_window_drag` in its generated bindings? | **No** — same as 148, so the binding fork is still required. |
 | Have the build toolchain requirements moved? | **Windows: no. Linux: no.** macOS: unconfirmed, see §4. |
-| Go / no-go on targeting 152 directly? | **Conditional go** — nothing found makes 152 harder than assumed, but two Phase A checks remain open (§6). |
+| Go / no-go on targeting 152 directly? | **Go** — all four patches verified against real 152 source; the patch set moves for ~free. Only the macOS Xcode pin is deferred to Phase D. |
 
 **A separate finding, not about 152:** patch #1 (the macOS -67030 renderer
 crash fix) was never registered in `patch/patch.cfg`, so no build on any
@@ -93,10 +92,12 @@ Checked `include/views/cef_window.h` at upstream branch `7977` directly: it has
 `SetDraggableRegions()` and no `BeginWindowDrag()`. Our fork's `7778` does have
 it (`/*--cef(added=14800)--*/ virtual bool BeginWindowDrag() = 0;`).
 
-So patch #2 still needs forward-porting for 152, and the corresponding
+So patch #2 must still be **carried** for 152, and the corresponding
 `cef-dll-sys` binding patch is still required. **Nothing was deleted by
 upstream here** — the spec's hope that four milestones might have upstreamed
-some of this did not materialize for this patch.
+some of this did not materialize. Note that "carried" turned out to be much
+cheaper than "forward-ported": see §2.4 — upstream never touched the files it
+edits, so moving it is a copy.
 
 ### 2.4 Patches #2/#3/#4 status — ✅ NOW VERIFIED against real 152 source
 
@@ -289,8 +290,8 @@ and `agentmuxai/cef` has no CI. Phase D remains the gate.
 
 ## 6. Go / no-go
 
-**Conditional go**, targeting 152 directly, per the spec's §3 reasoning.
-Nothing in this recon makes 152 harder than assumed:
+**Go**, targeting 152 directly, per the spec's §3 reasoning. Nothing in this
+recon makes 152 harder than assumed, and the patch work turned out cheaper:
 
 - the binding exists and is current;
 - Windows/Linux toolchains are unchanged;
