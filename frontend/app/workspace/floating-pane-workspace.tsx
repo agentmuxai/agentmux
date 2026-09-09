@@ -420,7 +420,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 pendingRedockCoords = null;
                 arming.reset();
                 armedAtRelease = null;
-                startHoverHeartbeat();
+                capturedGhostForDrop = null;
+                capturedGhostForWindow = null;
                 invokeCommand<{ x: number; y: number }>("get_window_position", { label })
                     .then((pos) => {
                         if (myId !== jsDragMouseDownId) return;
@@ -441,6 +442,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                             );
                         }
                         dragging = true;
+                        // Started here, not in mousedown: a plain header click
+                        // can release before this IPC resolves, and onMouseUp
+                        // returns early while `dragging` is still false — so a
+                        // heartbeat armed up front would never be cleared and
+                        // would outlive the gesture. reagent P1 on #3124.
+                        startHoverHeartbeat();
                     })
                     .catch(() => {});
                 return;
@@ -457,6 +464,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             pendingRedockCoords = null;
             arming.reset();
             armedAtRelease = null;
+            capturedGhostForDrop = null;
+            capturedGhostForWindow = null;
             dragSessionId += 1;
         };
 
@@ -464,9 +473,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // Invalidate any in-flight JS-driven get_window_position IPC so a race
             // where mouseup fires before the promise resolves doesn't arm dragging.
             if (jsDrivenDrag) jsDragMouseDownId += 1;
+            // Before the !dragging early return: a click that never became a
+            // drag must still tear down anything mousedown started.
+            stopHoverHeartbeat();
             if (!dragging) return;
             dragging = false;
-            stopHoverHeartbeat();
             // On macOS/Linux, paneRect() returns unchanged client coords after a
             // window move, so browser-view's syncPosition dedupe guard skips the
             // browser_pane_resize re-send. Signal it to force one so the
@@ -482,14 +493,26 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // triggers clearPlaceholder on the target renderer. This avoids the cross-
             // process race where the target's set_floating_redock_target(null) arrives
             // before tryRedockAtCursorInner's delayed call to get_floating_redock_target.
-            const preGhostWindow = arming.target();
-            capturedGhostForWindow = preGhostWindow;
-            capturedGhostForDrop = preGhostWindow
-                ? invokeCommand<{ block_id?: string; dir?: number }>(
-                      "get_floating_redock_target",
-                      { window_label: preGhostWindow },
-                  ).catch(() => ({}))
-                : Promise.resolve({});
+            //
+            // Guarded, and NOT idempotent without the guard: on Windows
+            // window_drag_ended can run first, and it captures the ghost and
+            // then calls consumeArmedAtRelease(), which resets arming. Re-reading
+            // arming.target() here would overwrite that good capture with null
+            // and leave the in-flight redock to fall back to an empty ghost —
+            // docking the pane somewhere other than where the user saw it, with
+            // no error. The pre-PR code got away with an unguarded capture only
+            // because it read dwellCurrentHoverTarget, which nothing reset.
+            // reagent P1 on #3124.
+            if (!capturedGhostForDrop) {
+                capturedGhostForWindow = arming.target();
+                capturedGhostForDrop = capturedGhostForWindow
+                    ? invokeCommand<{ block_id?: string; dir?: number }>(
+                          "get_floating_redock_target",
+                          { window_label: capturedGhostForWindow },
+                      ).catch(() => ({}))
+                    : Promise.resolve({});
+            }
+            const preGhostWindow = capturedGhostForWindow;
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
             if (isWindows()) {
                 // On Windows the redock itself is committed by window_drag_ended
@@ -548,6 +571,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     pendingRedockCoords = null;
                     arming.reset();
                     armedAtRelease = null;
+                    capturedGhostForDrop = null;
+                    capturedGhostForWindow = null;
                 }
             },
         );
