@@ -159,16 +159,18 @@ gh release upload "v<VERSION>" ~/Desktop/AgentMux_<VERSION>_arm64.dmg --clobber
 
 ## CI / Automated Signing
 
+**[`.github/workflows/build-macos.yml`](../.github/workflows/build-macos.yml)** imports the
+Developer ID certificate into a short-lived per-run Keychain and signs + notarizes the DMG.
+**[`.github/workflows/release.yml`](../.github/workflows/release.yml)** invokes it (the
+`build-macos` job) as part of the release flow. Credentials are the GitHub Actions secrets
+listed at the top of this doc.
+
 **Corrected 2026-09-09 (Codex catch on PR #3122):** this section previously said
 `agentmux-builder` was *intended* to host the automated signing pipeline and that none
 existed yet — both wrong, and wrong independently of that repo having since vanished.
-The pipeline already exists, **in this repo**: `.github/workflows/build-macos.yml`
-imports the Developer ID certificate into a short-lived per-run Keychain and signs +
-notarizes the DMG; `.github/workflows/release.yml` invokes it (`build-macos` job) as
-part of the release flow. Credentials are the GitHub Actions secrets listed at the top
-of this doc — nothing here depends on `agentmux-builder`, which no longer exists
-(confirmed gone from the `agentmuxai` org, 2026-09-09) and, per the above, never actually
-held this pipeline regardless.
+Nothing here ever depended on `agentmux-builder`, which no longer exists (confirmed gone
+from the `agentmuxai` org, 2026-09-09) and, per the above, never actually held this
+pipeline regardless.
 
 See `docs/windows-code-signing.md` for the equivalent *Windows* research — signing
 there genuinely is unautomated and deferred, unlike macOS. That doc was recovered from
