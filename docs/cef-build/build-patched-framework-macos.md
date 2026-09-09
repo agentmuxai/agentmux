@@ -25,7 +25,13 @@ prerequisite for moving macOS onto the native drag path.
 
 The patches live in the same fork/branch as Linux:
 - **Repo:** https://github.com/agentmuxai/cef
-- **Branch:** `agentmux/7778-drag-rightclick-and-transparency`
+- **Branch:** `7778` — the **integration** branch for the milestone. Never build
+  from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
+  it may look newer and still be missing part of the carry-set, which is exactly
+  how the 2026-07 transparency gap happened. Verify with §5 of
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **11 `OK`**)
+  before building; if it fails, fix the integration branch rather than building
+  around it.
 - **Base:** Chromium 148 (CEF branch 7778)
 - **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` (pinned in
   `Cargo.toml` `[patch]`; the binding's `_cef_window_t` carries `begin_window_drag`
@@ -175,9 +181,16 @@ cd "$CEF_OUT"
 # adjust the CI extract step to `ditto -x -k`.
 tar -czf "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz" "Chromium Embedded Framework.framework"
 
+# Record the exact fork commit this artifact came from. This is the only thing
+# tying the three platforms' tags together -- the release job cross-checks just
+# the Chromium milestone, so two tags can agree on "148" and still come from
+# different fork commits with different carry-sets. See CEF_FORK_MAINTENANCE.md
+# section 8, practice P1.
+CEF_FORK_SHA=$(git -C ~/cef-build/chromium_git/cef rev-parse --short HEAD)
+
 gh release create "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}" --repo agentmuxai/cef \
   --title "Patched CEF framework — macOS arm64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + drag-rightclick + transparency. Branch: agentmux/7778-drag-rightclick-and-transparency. Unstripped (~547 MB); packager strips at bundle time." \
+  --notes "BeginWindowDrag + drag-rightclick + transparency. Built from agentmuxai/cef ${CEF_FORK_SHA} (branch 7778). Unstripped (~547 MB); packager strips at bundle time." \
   "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz"
 ```
 

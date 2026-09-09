@@ -15,9 +15,15 @@
 
 Patches live in the AgentMux fork of CEF:
 - **Repo:** https://github.com/agentmuxai/cef (canonical) / https://github.com/a5af/cef (personal fork, kept in sync)
-- **Branch:** `agentmux/7778-drag-rightclick-and-transparency`
+- **Branch:** `7778` — the **integration** branch for the milestone. Never build
+  from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
+  it may look newer and still be missing part of the carry-set. Verify with §5 of
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **11 `OK`**) first.
 - **Base:** Chromium 148 (CEF branch 7778)
-- **HEAD:** `c87bca497` ("views: deferred top-level transparent bg + observer cleanup")
+- **HEAD:** do not hard-code one here. This previously pinned `c87bca497`, a
+  commit on the now-dead feature branch, which contradicts the branch above.
+  Capture the SHA at build time (`git rev-parse --short HEAD`) and record it in
+  the release notes — see CEF_FORK_MAINTENANCE.md §8 (P1).
 - **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` — adds `begin_window_drag` field to `_cef_window_t` in the linux_x86_64 binding
 - **Workspace patch in `Cargo.toml`:** `[patch.crates-io] cef-dll-sys = { git = "…AgentU-asaf/cef-rs", rev = "515b3ac5…" }`
 
@@ -232,9 +238,13 @@ tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
   chrome_100_percent.pak chrome_200_percent.pak resources.pak \
   headless_command_resources.pak locales/
 
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+CEF_FORK_SHA=$(git -C ~/cef-build/chromium_git/cef rev-parse --short HEAD)
+
 gh release create "cef-linux-x86_64-${CEF_VERSION}" --repo agentmuxai/cef \
   --title "Patched libcef.so — Linux x86_64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + right-click passthrough. Branch: agentmux/7778-drag-rightclick-and-transparency @ c87bca4" \
+  --notes "BeginWindowDrag + right-click passthrough. Built from agentmuxai/cef ${CEF_FORK_SHA} (branch 7778)." \
   "cef-linux-x86_64-${CEF_VERSION}.tar.gz"
 ```
 

@@ -272,7 +272,7 @@ That one command, run in September, would have caught §1.1 in a second.
      changed underneath.
 3. **Merge every feature branch into `fork/<new-ms>`** (R4). Do not build from
    the feature branches.
-4. **Run §5 against `fork/<new-ms>`.** All eight probes must print `OK`.
+4. **Run §5 against `fork/<new-ms>`.** All **11** probes must print `OK`.
 5. **Build all three platforms from that one commit** — record the commit SHA.
 6. **Verify the built artifacts** (§7), per platform.
 7. **Cut three tags and update the pins together** (§8).
@@ -379,7 +379,7 @@ mechanical instead of a convention.
 **Before building a release framework:**
 - [ ] Building from `fork/<ms>`, not a feature branch (R3)
 - [ ] All feature branches for this milestone are merged (R4)
-- [ ] All eight §5 probes print `OK`
+- [ ] All **11** §5 probes print `OK`
 - [ ] `patcher.py` run with no args; Chromium tree shows hundreds of modified files (§7.1)
 
 **Before updating the pins:**
