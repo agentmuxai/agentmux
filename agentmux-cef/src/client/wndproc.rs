@@ -917,3 +917,236 @@ pub(crate) unsafe fn install_window_close_routing_hook(
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// OS session-end (shutdown / restart / logoff) snapshot flush
+// SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md Phase 0
+// ---------------------------------------------------------------------------
+
+/// Original wndprocs for HWNDs carrying the session-end hook.
+#[cfg(target_os = "windows")]
+static SESSION_END_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, isize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// AppState reachable from the fixed-shape `extern "system"` wndproc — same
+/// static-handoff pattern `close_routing_app_state` already uses, for the same
+/// reason (the OS calls a fixed-shape function pointer, so state cannot be
+/// captured).
+#[cfg(target_os = "windows")]
+fn session_end_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate::state::AppState>> {
+    static S: std::sync::OnceLock<std::sync::Arc<crate::state::AppState>> =
+        std::sync::OnceLock::new();
+    &S
+}
+
+/// Whether *any* flush attempt for the current shutdown round has already
+/// succeeded. Checked before every attempt in either phase below: once
+/// true, neither phase tries again.
+#[cfg(target_os = "windows")]
+static SESSION_END_SUCCEEDED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the query-phase (`WM_QUERYENDSESSION`) attempt has been made for
+/// the shutdown round currently in progress -- regardless of outcome.
+///
+/// `WM_QUERYENDSESSION` arrives once per top-level window, so with a main
+/// window plus Subwindows/pool windows it could otherwise trigger several
+/// concurrent flush attempts for what is still the SAME round. Codex P1 on
+/// #3106's fix-of-a-fix: an earlier version of this hook reset a single
+/// shared latch on any failure, which meant a failed flush on window A's
+/// query message left the latch open for window B's query message to also
+/// attempt one -- with several windows, a slow-or-unreachable srv could burn
+/// N sequential 1.5s timeouts inside the query phase alone, risking Windows
+/// terminating the process before the round even reaches `WM_ENDSESSION`,
+/// the phase that's actually meant to be the retry. Query-phase dedup and
+/// end-session-phase dedup are now tracked separately (see
+/// `SESSION_END_RETRY_ATTEMPTED` below) so the two phases combined make at
+/// most one attempt each -- never one attempt per window.
+#[cfg(target_os = "windows")]
+static SESSION_END_QUERY_ATTEMPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the end-session-phase (`WM_ENDSESSION` wParam TRUE) retry has
+/// been made for the current round -- the same per-phase dedup as
+/// `SESSION_END_QUERY_ATTEMPTED` above, kept as a separate flag because the
+/// two phases must each get their own independent one-shot budget.
+#[cfg(target_os = "windows")]
+static SESSION_END_RETRY_ATTEMPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Make at most one flush attempt for `phase_attempted`, and only if no
+/// attempt in either phase has already succeeded this round.
+/// `phase_attempted` is `SESSION_END_QUERY_ATTEMPTED` or
+/// `SESSION_END_RETRY_ATTEMPTED` depending on which message is calling -- each
+/// phase gets its own one-shot budget, so this never runs more than twice
+/// total per shutdown round (once per phase), regardless of window count.
+#[cfg(target_os = "windows")]
+fn flush_session_snapshot_once(
+    reason: &str,
+    phase_attempted: &'static std::sync::atomic::AtomicBool,
+) {
+    use std::sync::atomic::Ordering;
+
+    if SESSION_END_SUCCEEDED.load(Ordering::SeqCst) {
+        return;
+    }
+
+    // compare_exchange rather than load-then-store: session-end messages can
+    // reach several top-level windows, and a double attempt within the same
+    // phase burns budget we do not have.
+    if phase_attempted
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    let Some(state) = session_end_app_state().get() else {
+        tracing::warn!(
+            "[session-flush] no AppState registered -- cannot flush on {}",
+            reason
+        );
+        return;
+    };
+
+    tracing::info!(
+        "[session-flush] OS session ending ({}) -- flushing snapshot",
+        reason
+    );
+    // Same accessors the close path uses (`lifecycle.rs:1402-1403`): both are
+    // behind mutexes, so clone out before the blocking call rather than
+    // holding a lock across it during shutdown.
+    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+    let auth_key = state.auth_key.lock().clone();
+    let saved = super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key);
+
+    if saved {
+        SESSION_END_SUCCEEDED.store(true, Ordering::SeqCst);
+    }
+    // On failure, deliberately NOT re-armed here: `phase_attempted` staying
+    // true is what caps THIS phase at exactly one attempt across every
+    // window. The retry lives in the other phase (WM_ENDSESSION after a
+    // failed WM_QUERYENDSESSION), not in re-running this same phase again.
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn session_end_wndproc(
+    hwnd: *mut std::ffi::c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, WM_ENDSESSION, WM_NCDESTROY, WM_QUERYENDSESSION,
+    };
+
+    // WM_QUERYENDSESSION: the OS is ASKING whether it may shut down. Flush
+    // here and not only on WM_ENDSESSION, because this is the roomier of the
+    // two -- WM_ENDSESSION can be followed by termination almost immediately.
+    //
+    // Never return 0 from this arm: that vetoes the shutdown, which is not
+    // ours to decide, and `ShutdownBlockReasonCreate` is the sanctioned way to
+    // ask for more time if a save ever genuinely needs it. Passing through
+    // lets CEF/Views see the message and DefWindowProc supply the TRUE.
+    //
+    // The shutdown may still be cancelled afterwards (another app vetoes, or
+    // the user backs out) -- WM_ENDSESSION wParam FALSE below resets all three
+    // flags for exactly that case, so a later retry in this process gets its
+    // own fresh one-attempt-per-phase budget rather than finding both phases
+    // already marked attempted from the cancelled round.
+    if msg == WM_QUERYENDSESSION {
+        flush_session_snapshot_once("WM_QUERYENDSESSION", &SESSION_END_QUERY_ATTEMPTED);
+    }
+
+    // WM_ENDSESSION with wParam TRUE means the session really is ending. Kept
+    // as a second, independent-budget trigger because not every shutdown path
+    // is guaranteed to deliver a query round first, and because the query
+    // phase may have failed -- `flush_session_snapshot_once` itself checks
+    // `SESSION_END_SUCCEEDED` first, so this is a genuine no-op (not a wasted
+    // network call) once the query phase already landed.
+    //
+    // wParam FALSE means the reverse: this shutdown attempt was cancelled
+    // (another app vetoed, or the user backed out) -- the "may still be
+    // cancelled afterwards" case the WM_QUERYENDSESSION comment above already
+    // names. Reset all three flags here: shutdown can be retried later in the
+    // same process, state can drift between the cancelled attempt and the
+    // real one, and stale "already attempted" markers would silently skip
+    // the flush that actually matters, defeating the whole point of this
+    // hook.
+    if msg == WM_ENDSESSION {
+        if wparam != 0 {
+            flush_session_snapshot_once("WM_ENDSESSION", &SESSION_END_RETRY_ATTEMPTED);
+        } else {
+            use std::sync::atomic::Ordering;
+            SESSION_END_QUERY_ATTEMPTED.store(false, Ordering::SeqCst);
+            SESSION_END_RETRY_ATTEMPTED.store(false, Ordering::SeqCst);
+            SESSION_END_SUCCEEDED.store(false, Ordering::SeqCst);
+        }
+    }
+
+    let original = SESSION_END_WNDPROCS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(hwnd as usize)).copied())
+        .unwrap_or(0);
+    let result = if original != 0 {
+        CallWindowProcW(
+            Some(std::mem::transmute(original)),
+            hwnd,
+            msg,
+            wparam,
+            lparam,
+        )
+    } else {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    };
+
+    // Prune AFTER passthrough so the original proc still receives
+    // WM_NCDESTROY — same ordering requirement, and same HWND-reuse hazard,
+    // that the close-routing hook documents above.
+    if msg == WM_NCDESTROY {
+        if let Ok(mut m) = SESSION_END_WNDPROCS.lock() {
+            m.remove(&(hwnd as usize));
+        }
+    }
+
+    result
+}
+
+/// Subclass a top-level HWND so an OS shutdown flushes the session snapshot.
+///
+/// `SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` Phase 0. Windows sends
+/// session-end messages per top-level window, and which one arrives first is
+/// not ours to predict — so install on every top-level (`main` and Subwindows
+/// alike). The flush itself is deduplicated, so extra install sites cost
+/// nothing.
+///
+/// Idempotent: re-calling on an already-hooked HWND is a no-op.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn install_session_end_hook(
+    state: &std::sync::Arc<crate::state::AppState>,
+    hwnd: *mut std::ffi::c_void,
+) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
+
+    let _ = session_end_app_state().set(state.clone());
+
+    if let Ok(m) = SESSION_END_WNDPROCS.lock() {
+        if m.contains_key(&(hwnd as usize)) {
+            return;
+        }
+    }
+
+    let original = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, session_end_wndproc as *const () as isize);
+    if original == 0 {
+        tracing::warn!(
+            "[session-flush] SetWindowLongPtrW returned 0 for HWND {:p} — hook not installed",
+            hwnd
+        );
+        return;
+    }
+    if let Ok(mut m) = SESSION_END_WNDPROCS.lock() {
+        m.insert(hwnd as usize, original);
+    }
+}
