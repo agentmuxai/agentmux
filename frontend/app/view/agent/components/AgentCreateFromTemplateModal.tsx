@@ -236,7 +236,7 @@ export const AgentCreateFromTemplateModalPanel = (
                 /* non-fatal; user can still create without binding */
             }
             try {
-                const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+                const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
                 setMemories(list ?? []);
             } catch {
                 /* non-fatal */

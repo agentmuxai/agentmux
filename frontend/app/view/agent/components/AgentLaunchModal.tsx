@@ -148,7 +148,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // memo below: memos must stay synchronous, so the fetch lives here.
     const [boundBundle] = createResource(
         () => props.agent.memory_id || undefined,
-        (memoryId) => RpcApi.GetMemoryCommand(TabRpcClient, { id: memoryId }).catch(() => undefined),
+        (memoryId) => RpcApi.GetBundleCommand(TabRpcClient, { id: memoryId }).catch(() => undefined),
     );
     // While a BOUND agent's bundle fetch is still in flight, resolve to
     // "" (empty/unknown) rather than falling back to `props.agent.provider`
@@ -248,7 +248,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const loadMemories = async () => {
         flow.dispatch({ type: "MemoriesLoading" });
         try {
-            const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+            const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
             flow.dispatch({ type: "MemoriesLoaded", list: list ?? [] });
         } catch (e: any) {
             flow.dispatch({ type: "MemoriesFailed", error: String(e?.message ?? e) });

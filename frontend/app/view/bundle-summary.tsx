@@ -70,7 +70,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
     // switches, or the list finishes loading and a previously-undefined
     // id resolves to a real one).
     const [boundBundle] = createResource(boundBundleId, (id) =>
-        RpcApi.GetMemoryCommand(TabRpcClient, { id }).catch(() => undefined),
+        RpcApi.GetBundleCommand(TabRpcClient, { id }).catch(() => undefined),
     );
     // Identity items are still called "identity bundles"; the config
     // collections are now branded "Armory Bundle Format (ABF)". `title` is

@@ -17,7 +17,7 @@ const openOrFocusPaneByView = vi.fn();
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListMemoriesCommand: (...args: unknown[]) => listMemories(...args),
+        ListBundlesCommand: (...args: unknown[]) => listMemories(...args),
         GetAgentContentCommand: (...args: unknown[]) => getAgentContent(...args),
         SetAgentContentCommand: (...args: unknown[]) => setAgentContent(...args),
     },

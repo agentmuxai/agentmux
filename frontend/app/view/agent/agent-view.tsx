@@ -2129,7 +2129,7 @@ const AgentPresentationView = ({
             // resolves, e.g. deleted), preserving any seed-manifest content.
             const startupBundleId = startupBundleIdResult?.content?.trim() || null;
             const startupBundle = startupBundleId
-                ? await RpcApi.GetMemoryCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
+                ? await RpcApi.GetBundleCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
                 : null;
             const startupContent = startupBundle?.instructions?.trim()
                 ? startupBundle.instructions

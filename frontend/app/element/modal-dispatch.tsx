@@ -135,7 +135,7 @@ export function renderRequest(
                         onSubmit={async ({ name, description, contextFiles }) => {
                             setSubmitting(true);
                             try {
-                                const memory = await RpcApi.UpsertMemoryCommand(
+                                const memory = await RpcApi.UpsertBundleCommand(
                                     TabRpcClient,
                                     {
                                         // Wire convention from

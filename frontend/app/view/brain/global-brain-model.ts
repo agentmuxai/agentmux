@@ -241,7 +241,7 @@ export class GlobalBrainViewModel {
 
     async refresh(): Promise<void> {
         try {
-            const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+            const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
             this.setAll(list);
             this.setError(null);
         } catch (e) {
@@ -288,7 +288,7 @@ export class GlobalBrainViewModel {
         try {
             const instructions = this.draftInstructionsAtom();
             if (editingId === NEW_SECTION_ID) {
-                const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, {
+                const saved = await RpcApi.UpsertBundleCommand(TabRpcClient, {
                     id: "",
                     name,
                     is_global: true,
@@ -305,7 +305,7 @@ export class GlobalBrainViewModel {
                     this.setError("Section no longer exists.");
                     return;
                 }
-                await RpcApi.UpsertMemoryCommand(TabRpcClient, {
+                await RpcApi.UpsertBundleCommand(TabRpcClient, {
                     ...existing,
                     name,
                     instructions,
@@ -327,7 +327,7 @@ export class GlobalBrainViewModel {
         if (!bundle) return;
         this.setError(null);
         try {
-            await RpcApi.UpsertMemoryCommand(TabRpcClient, { ...bundle, is_global: true });
+            await RpcApi.UpsertBundleCommand(TabRpcClient, { ...bundle, is_global: true });
             // ordinarySectionsAtom, not sectionsAtom — the backend's reorder
             // command silently skips is_system ids (reorderglobalbrain's own
             // AND is_system = 0 guard), so including one here is pointless
@@ -347,7 +347,7 @@ export class GlobalBrainViewModel {
         if (!bundle) return;
         this.setError(null);
         try {
-            await RpcApi.UpsertMemoryCommand(TabRpcClient, { ...bundle, is_global: false });
+            await RpcApi.UpsertBundleCommand(TabRpcClient, { ...bundle, is_global: false });
             if (this.editingIdAtom() === id) this.cancelEdit();
             await this.refresh();
         } catch (e) {
@@ -412,7 +412,7 @@ export class GlobalBrainViewModel {
     }
 
     /** Persist the current system-tier draft via the dedicated
-     *  upsertsystemmemory command — never UpsertMemoryCommand. */
+     *  upsertsystemmemory command — never UpsertBundleCommand. */
     async saveSystemEdit(): Promise<void> {
         const name = this.draftSystemNameAtom().trim();
         if (!name) {
@@ -426,14 +426,14 @@ export class GlobalBrainViewModel {
         try {
             const instructions = this.draftSystemInstructionsAtom();
             if (editingId === NEW_SECTION_ID) {
-                await RpcApi.UpsertSystemMemoryCommand(TabRpcClient, { id: "", name, instructions });
+                await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { id: "", name, instructions });
             } else {
                 const existing = this.systemSectionsAtom().find((m) => m.id === editingId);
                 if (!existing) {
                     this.setError("Section no longer exists.");
                     return;
                 }
-                await RpcApi.UpsertSystemMemoryCommand(TabRpcClient, { ...existing, name, instructions });
+                await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { ...existing, name, instructions });
             }
             await this.refresh();
             this.cancelEditSystem();
@@ -445,13 +445,13 @@ export class GlobalBrainViewModel {
     }
 
     /** Delete a system entry outright via the dedicated
-     *  deletesystemmemory command — never DeleteMemoryCommand. Unlike the
+     *  deletesystemmemory command — never DeleteBundleCommand. Unlike the
      *  ordinary tier's `remove()`, there's no "demote and keep in
      *  Memories" fallback: a system entry has no life outside this tier. */
     async removeSystem(id: string): Promise<void> {
         this.setError(null);
         try {
-            await RpcApi.DeleteSystemMemoryCommand(TabRpcClient, { id });
+            await RpcApi.DeleteSystemBundleCommand(TabRpcClient, { id });
             if (this.editingSystemIdAtom() === id) this.cancelEditSystem();
             await this.refresh();
         } catch (e) {

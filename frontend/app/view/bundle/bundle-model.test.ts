@@ -125,13 +125,13 @@ describe("provider/model round-trip", () => {
 
 // validateDraft() (Armory Bundle Format (ABF) UI-alignment pass) — the
 // Armory bundle editor's "Validate" button. Mocks RpcApi entirely since
-// BundleViewModel's constructor fires an unawaited ListMemoriesCommand
+// BundleViewModel's constructor fires an unawaited ListBundlesCommand
 // refresh(); ValidateBundleCommand is the one under test.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
 const validateBundleMock = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
+        ListBundlesCommand: (...args: unknown[]) => listMemoriesMock(...args),
         ValidateBundleCommand: (...args: unknown[]) => validateBundleMock(...args),
     },
 }));

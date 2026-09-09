@@ -273,7 +273,7 @@ export class BundleViewModel implements ViewModel {
      *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */
     async refresh(): Promise<void> {
         try {
-            const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+            const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
             this.setMemories(list.filter((m) => !m.is_system));
             this.setError(null);
         } catch (e) {
@@ -329,7 +329,7 @@ export class BundleViewModel implements ViewModel {
         this.setSaving(true);
         this.setError(null);
         try {
-            const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, draftToWire(draft));
+            const saved = await RpcApi.UpsertBundleCommand(TabRpcClient, draftToWire(draft));
             // Refresh the list either way — the saved row should appear.
             await this.refresh();
             // Race-condition guard (reagent P1, PR #749 round 6): use
@@ -397,7 +397,7 @@ export class BundleViewModel implements ViewModel {
         }
         this.setError(null);
         try {
-            await RpcApi.DeleteMemoryCommand(TabRpcClient, { id });
+            await RpcApi.DeleteBundleCommand(TabRpcClient, { id });
             if (this.selectedIdAtom() === id) this.setSelectedId(null);
             this.setDraft(null);
             await this.refresh();
