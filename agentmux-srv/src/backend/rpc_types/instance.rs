@@ -96,9 +96,18 @@ pub struct NamedAgentRow {
 /// Request for `hidenamedagent`. Sets `display_hidden = 1` on the
 /// row. Row + working directory remain on disk for audit + recovery
 /// (destructive deletion is a separate, confirm-gated flow).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandHideNamedAgentData {
     pub id: String,
+}
+
+/// Response for `hidenamedagent`. Was an anonymous `json!({"hidden": ..})`
+/// before this type existed to name it for the RPC bindings generator.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct HideNamedAgentResult {
+    pub hidden: bool,
 }
 
 /// Request for `listrecentsessions` — powers the AgentPicker's "Recent
@@ -235,7 +244,16 @@ pub struct CommandUpdateAgentInstanceData {
     pub ended_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandDeleteAgentInstanceData {
     pub id: String,
+}
+
+/// Response for `deleteagentinstance`. Was an anonymous `json!({"deleted": ..})`
+/// before this type existed to name it for the RPC bindings generator.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct DeleteAgentInstanceResult {
+    pub deleted: bool,
 }
