@@ -1380,6 +1380,36 @@ pub(super) async fn handle_reactive_agents(
     Json(serde_json::to_value(&agents).unwrap_or(json!([])))
 }
 
+/// Agent NAMES only, for LAN peers — deliberately NOT
+/// [`handle_reactive_agents`], which serializes full `AgentRegistration`
+/// records (`block_id`, `tab_id`, `registered_at`, `last_seen`,
+/// `registration_nonce`). Those are internal delivery/routing details and
+/// stay behind full auth.
+///
+/// This route is reachable with the broadcast `lan_key`
+/// (`lan_or_full_auth_middleware`), so treat its output as public to anyone
+/// on the local network: `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md`
+/// (LAN P0-1) deliberately shrank what a captured `lan_key` is worth, and
+/// this widens it by exactly one thing — enumerating agent names. That was
+/// an explicit, repo-owner-confirmed decision (2026-09-08): a `lan_key`
+/// holder could already confirm any *specific* name via
+/// `/agentmux/reactive/agent?id=…`, so this makes enumeration cheap rather
+/// than newly possible, and it's what lets a peer show which agents live on
+/// another host instead of the empty `agents: []` every LAN peer reported
+/// before. **Do not extend this response with anything beyond names**
+/// without revisiting that decision.
+pub(super) async fn handle_reactive_agent_names(
+    State(state): State<AppState>,
+) -> Json<serde_json::Value> {
+    let names: Vec<String> = state
+        .reactive_handler
+        .list_agents()
+        .into_iter()
+        .map(|a| a.agent_id)
+        .collect();
+    Json(json!({ "agents": names }))
+}
+
 #[derive(serde::Deserialize)]
 pub(super) struct AgentQuery {
     id: Option<String>,

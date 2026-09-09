@@ -2,9 +2,9 @@
 
 **Date:** 2026-08-13
 **Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`, `shared-infrastructure`)
-**Status:** §3 WAN P1-2 (reagent WAN signing) implemented 2026-08-14 — see
-"Implementation status" below. P0-1, P0-2, P1-1, P2-1 (WAN) and all of LAN
-remain proposed/not implemented. **The still-open WAN P0 findings remain
+**Status:** active — §3 WAN P1-2 (reagent WAN signing) implemented 2026-08-14
+— see "Implementation status" below. P0-1, P0-2, P1-1, P2-1 (WAN) and all of
+LAN remain proposed/not implemented. **The still-open WAN P0 findings remain
 blocker-severity; do not treat this as fully closed.**
 **Trigger:** User directive, after `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` shipped host-tier signing: "we need to get secure lan and wan tier, especially wan tier, it is a blocker." Then, after discovering this AgentMux instance had never completed muxbus login (root cause of "reagent's PR review jekts never arrive"): "lets get this system operational with the proper security for lan/wan, best practices... secure reagent jekt is top priority."
 **Builds on:** `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` (host-tier HMAC signing, shipped), `agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (the still-inert Cognito M2M binding check this spec elevates to P0), `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` (prior roadmap; this spec supersedes its Phase 1/3 sequencing based on what's now confirmed live in code, not just planned).
@@ -167,6 +167,21 @@ Not a code defect, a threat-model one: modern real-world "LAN"s routinely includ
 - Require an explicit **pairing step** (a short code shown in one instance's UI, typed into the other) rather than automatic broadcast trust, for users who want tighter control than "opt into LAN discovery" alone provides.
 - At minimum, gate the credential behind a **challenge-response** rather than handing the raw value to any listener/prober — even a lightweight HMAC challenge keyed on the LAN-scoped credential (once P0-1's scoping lands) meaningfully raises the bar over "broadcast the plaintext secret to anyone who asks."
 
+> **Scope amendment, 2026-09-08 (repo-owner-confirmed).** The scoped LAN
+> credential now also grants a third route: `GET
+> /agentmux/reactive/agent-names`, returning agent **names only** — no
+> `block_id`, `tab_id`, timestamps, or `registration_nonce` (those stay on
+> the full-auth `/agentmux/reactive/agents`, pinned at 401 for a `lan_key` by
+> `lan_key_is_rejected_on_other_reactive_routes`). This widens a captured
+> `lan_key`'s worth by exactly one capability: enumerating agent names.
+> Accepted deliberately because a holder could already confirm any *specific*
+> name via `/agentmux/reactive/agent?id=…`, so this makes enumeration cheap
+> rather than newly possible — and without it every LAN peer reports
+> `agents: []`, leaving no way to discover which agents live on another host.
+> The least-privilege intent of P0-1 above is otherwise unchanged; do not read
+> this as license to widen the LAN surface further without the same explicit
+> call.
+
 **P1-1 — Encrypt/authenticate peer-to-peer LAN forwarding.** Upgrade `http://` peer forwarding to something a passive LAN listener can't read — mTLS between discovered peers (using the pairing/scoped-credential material from P0-1 to bootstrap trust), or at minimum a signed-request scheme analogous to the host-tier HMAC work, so message content and any credential in flight aren't cleartext on the wire.
 
 **P2-1 — Make the "LAN = trusted" trade-off explicit in the opt-in UI copy.** The feature already defaults off, which is right — verify the enabling toggle's copy actually communicates "this instance's access credential will be discoverable by anything else on this network," not just "enable LAN discovery," so an informed user (not the code's own assumption) is the one deciding the trust boundary.
@@ -206,7 +221,7 @@ Confirmed against current AWS documentation (docs.aws.amazon.com/cognito, checke
 
 **Consequence:** the per-agent-Cognito-app-client mechanism, as currently built, cannot be the long-term answer regardless of whether `ENFORCE_AGENT_BINDING` is flipped — it structurally cannot cover most real traffic at any meaningful scale. Flipping the flag today would protect only whichever small fraction of agents happened to provision before hitting the quota (and would start throwing Cognito API errors for new provisioning attempts once it's hit, if it isn't already — `provisionAgentClient` has no specific handling for a Cognito-side quota rejection distinct from its own `agent_provisions` billing-quota check).
 
-**Recommended redesign, not just a scale-up:** move to **one Cognito M2M app client per *account*** (bounded by customer count, not agent count — almost certainly well under 100 for the foreseeable future) with a **pre-token Lambda** injecting the authorized `agent_id` (or set of agent_ids) as a custom claim, based on server-side account state at token-issue time. This codebase already has exact precedent for this shape of mechanism: `SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md`'s `owner` billing tier is derived "exclusively from the Cognito-verified email in the pre-token Lambda, never from anything client-supplied" (`auth.ts`'s own doc comment on `BillingTier`). The same pattern — server-controlled claim injection at token-mint time — sidesteps the 100-client ceiling entirely, since it needs one client per account, not one per agent.
+**Recommended redesign, not just a scale-up:** move to **one Cognito M2M app client per *account*** (bounded by customer count, not agent count — almost certainly well under 100 for the foreseeable future) with a **pre-token Lambda** injecting the authorized `agent_id` (or set of agent_ids) as a custom claim, based on server-side account state at token-issue time. This codebase already has exact precedent for this shape of mechanism: the `owner` billing tier is derived "exclusively from the Cognito-verified email in the pre-token Lambda, never from anything client-supplied" (`auth.ts`'s own doc comment on `BillingTier`). The same pattern — server-controlled claim injection at token-mint time — sidesteps the 100-client ceiling entirely, since it needs one client per account, not one per agent.
 
 ### 5.2 The operational gap worth closing before flipping regardless of §5.1
 
@@ -249,7 +264,7 @@ Following this codebase's own dual-write/backfill/cutover precedent (`SPEC_ARMOR
 - `agentmux-cloud/muxbus/server/src/agent-provisioning.ts` (`provisionAgentClient`, `clientName` — one literal Cognito app client per `(user_id, agent_id)` pair, the mechanism §5.1 finds doesn't scale)
 - `agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md`
 - [Quotas in Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/quotas.html) (AWS documentation, confirms the 100-app-clients-per-user-pool default quota cited in §5.1, checked 2026-08-13)
-- `docs/specs/SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md` (the existing pre-token-Lambda custom-claim precedent §5.1's redesign proposal reuses)
+- `agentmux-cloud`'s `auth.ts` (`BillingTier`'s doc comment — the existing pre-token-Lambda custom-claim precedent §5.1's redesign proposal reuses). This entry previously cited an owner-gate/cost-cap spec by filename that exists in neither this repo nor anywhere in the agentmuxai org; the dead path is removed rather than repointed at a guess, per docs/specs/README.md.
 - `agentmux-cloud/muxbus/packages/muxbus-jekt/src/index.ts` (`wrapJektMessage` — TS-side trust-label derivation, confirmed all 4 live call sites hardcode/default `deliveryTier: 'wan'`, `'host'` is currently unreachable from any cloud-side caller)
 - `agentmux-srv/src/backend/lan_discovery.rs` (full file — mDNS advertisement, UDP broadcast responder, `find_agent` peer forwarding)
 - `agentmux-srv/src/bootstrap.rs:1237-1243` (confirms the LAN-broadcast key is the same instance-wide `auth_key`)

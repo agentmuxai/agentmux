@@ -340,6 +340,7 @@ partial list.
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
+| [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
@@ -786,7 +787,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_HARD_CORNERS_2026_05_26`](SPEC_HARD_CORNERS_2026_05_26.md) | SPEC: Hard corners on buttons and modals |
 | [`SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10`](SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md) | Spec: Identity direct-links, PR-C (Armory read-only view + bundle-free agent creation) |
 | [`SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21`](SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md) | SPEC — Instance Lifecycle Consolidation |
-| [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
 | [`SPEC_LARGE_TIER_MODULARIZATION_INDEX_2026_07_02`](SPEC_LARGE_TIER_MODULARIZATION_INDEX_2026_07_02.md) | Large-Tier Modularization — Index & Sequencing |
 | [`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25`](SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md) | SPEC: Move launch modal from tab-scope to pane-scope lock |
 | [`SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN`](SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md) | SPEC: Layout Healer Misses Rootnode-Is-Orphan Case |

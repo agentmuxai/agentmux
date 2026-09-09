@@ -85,7 +85,7 @@ pub struct HostIpc {
 pub struct AppState {
     pub auth_key: String,
     /// LAN peer-discovery credential — see `Config::lan_key`'s doc comment.
-    /// Accepted only by `lan_or_full_auth_middleware`'s two routes, never
+    /// Accepted only by `lan_or_full_auth_middleware`'s three routes, never
     /// the general `auth_middleware` gating everything else.
     pub lan_key: String,
     /// Random identifier generated once per process boot — NOT the
@@ -337,7 +337,7 @@ pub fn build_router(state: AppState) -> Router {
         // allow_origin comment above).
         .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap()]);
 
-    // The two routes an LAN peer actually calls when forwarding a jekt or
+    // The routes an LAN peer actually calls when forwarding a jekt or
     // looking up which agents this instance hosts
     // (`LanDiscoveryController::find_agent`, `server/reactive.rs`'s Tier-3
     // forward). Kept OUT of `reactive_routes`/`authed_routes` deliberately
@@ -350,6 +350,13 @@ pub fn build_router(state: AppState) -> Router {
     let lan_forward_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         .route("/agentmux/reactive/agent", get(reactive::handle_reactive_agent))
+        // Names only — see `handle_reactive_agent_names`' doc comment for why
+        // this is deliberately not `/agentmux/reactive/agents` (which stays
+        // behind full auth because it serializes internal routing fields).
+        .route(
+            "/agentmux/reactive/agent-names",
+            get(reactive::handle_reactive_agent_names),
+        )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             lan_or_full_auth_middleware,
@@ -1759,7 +1766,7 @@ async fn auth_middleware(
 /// their own `lan_forward_routes` router in `router()`, not in
 /// `reactive_routes`.
 ///
-/// `state.lan_key` grants access to ONLY these two routes — never the rest
+/// `state.lan_key` grants access to ONLY these three routes — never the rest
 /// of `/agentmux/service`, `/agentmux/file`, shell creation, credential/
 /// identity endpoints, etc. See `Config::lan_key`'s doc comment for why
 /// this exists (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1).
