@@ -232,8 +232,9 @@ Release artifacts (macOS DMG, Windows installer, Linux AppImage) are built by CI
 
 ## CEF Fork — read before touching the Chromium layer
 
-AgentMux ships a **fork of CEF** (`agentmuxai/cef`) carrying five AgentMux-specific
-changes. Every Chromium milestone upgrade must carry all five forward, for Windows,
+AgentMux ships a **fork of CEF** (`agentmuxai/cef`) carrying four AgentMux-specific
+changes — 18 CEF source files plus 3 Chromium-side patches. Every Chromium
+milestone upgrade must carry all of them forward, for Windows,
 Linux and macOS together. We have lost pieces twice, both times **silently** — no
 error, no conflict, no failed build. Full practice:
 [docs/cef-build/CEF_FORK_MAINTENANCE.md](./docs/cef-build/CEF_FORK_MAINTENANCE.md).

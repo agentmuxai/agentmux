@@ -6,7 +6,8 @@
 [build-patched-cef-windows.md](./build-patched-cef-windows.md),
 [build-patched-framework-macos.md](./build-patched-framework-macos.md)
 
-We maintain a fork of CEF carrying five AgentMux-specific changes. Every Chromium
+We maintain a fork of CEF carrying **four** AgentMux-specific changes — spanning
+18 CEF source files and 3 Chromium-side patches (§3). Every Chromium
 milestone upgrade has to carry that set forward, for Windows, Linux and macOS
 together. This doc is the standing practice for doing that without losing pieces.
 
@@ -112,8 +113,19 @@ diverge in behaviour.
 
 ## 3. The carry-set (canonical inventory)
 
-**18 hand-written CEF source files** differ between upstream 7778 and the fork,
-plus **3 Chromium-side patches**. Measured, not estimated:
+**Four features.** Two of them are Layer B only, one is Layer A only, and one
+spans both — which is why a feature count and a file count are different
+questions and both get stated here:
+
+| Feature | Layer | Files |
+|---|---|---|
+| Drag (`BeginWindowDrag`) | B | 3 |
+| Transparency | B + A | 15 + 1 patch |
+| Right-click passthrough | A | 1 patch (Linux) |
+| Process requirement | A | 1 patch (macOS 26) |
+
+That totals **18 hand-written CEF source files** differing between upstream 7778
+and the fork, plus **3 Chromium-side patches**. Measured, not estimated:
 
 ```bash
 git diff --name-only <upstream-base> <branch> -- \
@@ -458,9 +470,9 @@ distinguish "patched build" from "pristine Chromium build" on any platform.
 
 | Platform | Check |
 |---|---|
-| **macOS** | Frameless window drags from an HTCLIENT region (#1); window background is actually transparent, not white (#2+#3); renderer does not crash-loop on macOS 26 (#5); H.264/HEVC playback works (codec flags) |
-| **Linux** | Right-click in the caption area passes through (#4); drag (#1); H.264 playback (codec build) |
-| **Windows** | Drag (#1); transparency (#2) |
+| **macOS** | **Drag**: frameless window drags from an HTCLIENT region. **Transparency**: window background is actually transparent, not white — needs *both* layers, see §3. **Process requirement**: renderer does not crash-loop on macOS 26. Plus H.264/HEVC playback (codec flags). |
+| **Linux** | **Right-click passthrough**: right-click in the caption area passes through. **Drag**. Plus H.264 playback (codec build). |
+| **Windows** | **Drag**. **Transparency**. |
 
 ---
 
