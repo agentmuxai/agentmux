@@ -893,16 +893,32 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             }
 
             // Phase 4b — use the ghost pre-captured in onMouseUp (before
-            // clear_floating_redock_hover cleared it). If the resolved target
-            // window differs from the captured window, fall back to empty ghost
-            // (InsertNode path). Clear after consuming so a subsequent drag
-            // can't accidentally reuse stale state.
+            // clear_floating_redock_hover cleared it). Clear after consuming so
+            // a subsequent drag can't accidentally reuse stale state.
             const ghost =
                 capturedGhostForDrop != null && capturedGhostForWindow === target.label
                     ? await capturedGhostForDrop
                     : {};
             capturedGhostForDrop = null;
             capturedGhostForWindow = null;
+
+            // No ghost means the cursor was in the parking area — over the
+            // window, but not aimed at any drop guide — so the user's intent
+            // was to leave the pane floating above it. Bail rather than fall
+            // back to an append, which is what used to make every pixel of the
+            // window a drop zone.
+            //
+            // This is only safe to read as intent because the 500ms dwell has
+            // already elapsed by the time we get here: a guide the user was
+            // actually aiming at has had many hover events in which to record
+            // itself, so an absent ghost is a real answer and not a race.
+            // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.3.
+            if (!ghost.block_id) {
+                console.log(
+                    "[floating-pane] release in the parking area — leaving the pane floating",
+                );
+                return false;
+            }
 
             try {
                 await WorkspaceService.RedockFloatingPane(
