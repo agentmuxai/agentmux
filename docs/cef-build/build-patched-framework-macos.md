@@ -203,13 +203,17 @@ for _c in "${CEF_CLONE:-}" \
   git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
   CEF_CLONE="$_c"; break
 done
-[ -n "${CEF_CLONE:-}" ] || echo "FATAL: no agentmuxai/cef clone found (a .git-less mirror does not count). Set CEF_CLONE." >&2
 echo "fork clone: ${CEF_CLONE:-<none>}"
 
 # FULL sha: `gh release create --target` takes a branch or a full commit SHA.
-CEF_FORK_SHA=$(git -C "$CEF_CLONE" rev-parse HEAD)
-# Refuse to publish a release with no provenance rather than one with an empty
-# field -- an unattributable artifact is exactly what section 8 exists to prevent.
+#
+# The :? on CEF_CLONE is load-bearing, not decoration. `git -C "" rev-parse HEAD`
+# does NOT fail -- git treats an empty -C as "unchanged directory", exits 0, and
+# answers for the CURRENT directory, which by this point is inside the Chromium
+# checkout. An unmatched probe would then yield Chromium's HEAD: a real-looking
+# SHA, so a downstream emptiness check never fires. Failing at expansion time,
+# before git runs at all, is what removes that path.
+CEF_FORK_SHA=$(git -C "${CEF_CLONE:?FATAL: no agentmuxai/cef clone found (a .git-less mirror does not count); set CEF_CLONE}" rev-parse HEAD)
 : "${CEF_FORK_SHA:?refusing to publish without a recorded fork commit}"
 
 gh release create "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}" --repo agentmuxai/cef \
