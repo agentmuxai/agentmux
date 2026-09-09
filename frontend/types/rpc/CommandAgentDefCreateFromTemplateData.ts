@@ -22,13 +22,22 @@ name: string,
  * through to its subsequent `launchAgentDefinition` call. The
  * server returns it back in the response for symmetry +
  * future-proofing.
+ *
+ * `Option<String>`, not `String` — ts-rs's `#[ts(optional)]` (below)
+ * only accepts `Option<T>`, and the field genuinely IS optional on
+ * the wire (`#[serde(default)]`: a missing key deserializes to
+ * `None`, same as the prior `String` default of `""`). Read at the
+ * call site with `.unwrap_or_default()` where the empty-string
+ * convention is still needed (codex P2 on #3107 — the generated type
+ * required these on every call, contradicting the hand-written stub
+ * this replaces).
  */
-identity_id: string, 
+identity_id?: string, 
 /**
  * Memory bundle id to bind (empty string = vanilla CLI).
  * Same semantics as `identity_id` above.
  */
-memory_id: string, 
+memory_id?: string, 
 /**
  * Runtime to persist on the cloned definition: "host" or
  * "container". Empty/absent → keep the template's `agent_type`.
@@ -36,7 +45,7 @@ memory_id: string,
  * template, so the clone records the user's pick rather than
  * inheriting the (now container-defaulted) template value.
  */
-agent_type: string, 
+agent_type?: string, 
 /**
  * Custom model vendor base URL override for the cloned agent.
  * `None` (omitted) → inherit the template's own value (the prior,
@@ -45,5 +54,12 @@ agent_type: string,
  * Validated the same way `agent.define` validates it — rejected
  * unless the template's provider declares `base_url_env_var`. See
  * `agent_define::validate_vendor_base_url`.
+ *
+ * `#[ts(optional)]` on an `Option<T>` field makes ts-rs emit
+ * `field?: T` instead of `field: T | null` — matching the
+ * hand-written stub this type replaces
+ * (`frontend/app/store/rpc-api/agent.ts`'s
+ * `AgentDefCreateFromTemplateCommand`), which never expressed `null`
+ * as a meaningful value here, only omission (codex P2 on #3107).
  */
-model_vendor_base_url: string | null, };
+model_vendor_base_url?: string, };

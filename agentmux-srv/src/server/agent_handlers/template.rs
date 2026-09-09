@@ -154,8 +154,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // template property. When supplied, the clone records it
                 // (and the matching `environment`); empty falls back to
                 // the template's value for back-compat with older callers.
-                let chosen_agent_type = match cmd.agent_type.trim() {
-                    "host" | "container" => cmd.agent_type.trim().to_string(),
+                let chosen_agent_type = match cmd.agent_type.as_deref().unwrap_or("").trim() {
+                    "host" | "container" => cmd.agent_type.as_deref().unwrap_or("").trim().to_string(),
                     _ => template.agent_type.clone(),
                 };
                 let chosen_environment = if chosen_agent_type == "container" {
@@ -252,8 +252,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let resp = AgentDefCreateFromTemplateResult {
                     definition_id: new_def.id.clone(),
-                    identity_id: cmd.identity_id,
-                    memory_id: cmd.memory_id,
+                    identity_id: cmd.identity_id.unwrap_or_default(),
+                    memory_id: cmd.memory_id.unwrap_or_default(),
                 };
                 tracing::info!(
                     template_id = %cmd.template_id,

@@ -306,19 +306,31 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// through to its subsequent `launchAgentDefinition` call. The
     /// server returns it back in the response for symmetry +
     /// future-proofing.
+    ///
+    /// `Option<String>`, not `String` — ts-rs's `#[ts(optional)]` (below)
+    /// only accepts `Option<T>`, and the field genuinely IS optional on
+    /// the wire (`#[serde(default)]`: a missing key deserializes to
+    /// `None`, same as the prior `String` default of `""`). Read at the
+    /// call site with `.unwrap_or_default()` where the empty-string
+    /// convention is still needed (codex P2 on #3107 — the generated type
+    /// required these on every call, contradicting the hand-written stub
+    /// this replaces).
     #[serde(default)]
-    pub identity_id: String,
+    #[ts(optional)]
+    pub identity_id: Option<String>,
     /// Memory bundle id to bind (empty string = vanilla CLI).
     /// Same semantics as `identity_id` above.
     #[serde(default)]
-    pub memory_id: String,
+    #[ts(optional)]
+    pub memory_id: Option<String>,
     /// Runtime to persist on the cloned definition: "host" or
     /// "container". Empty/absent → keep the template's `agent_type`.
     /// Runtime is chosen at instantiation time, not a property of the
     /// template, so the clone records the user's pick rather than
     /// inheriting the (now container-defaulted) template value.
     #[serde(default)]
-    pub agent_type: String,
+    #[ts(optional)]
+    pub agent_type: Option<String>,
     /// Custom model vendor base URL override for the cloned agent.
     /// `None` (omitted) → inherit the template's own value (the prior,
     /// only behavior). `Some(url)` → use `url` instead, including
@@ -326,7 +338,15 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// Validated the same way `agent.define` validates it — rejected
     /// unless the template's provider declares `base_url_env_var`. See
     /// `agent_define::validate_vendor_base_url`.
+    ///
+    /// `#[ts(optional)]` on an `Option<T>` field makes ts-rs emit
+    /// `field?: T` instead of `field: T | null` — matching the
+    /// hand-written stub this type replaces
+    /// (`frontend/app/store/rpc-api/agent.ts`'s
+    /// `AgentDefCreateFromTemplateCommand`), which never expressed `null`
+    /// as a meaningful value here, only omission (codex P2 on #3107).
     #[serde(default)]
+    #[ts(optional)]
     pub model_vendor_base_url: Option<String>,
 }
 
