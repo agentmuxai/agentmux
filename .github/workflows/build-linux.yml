@@ -109,7 +109,30 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update -qq
+          # The runner image ships a google-chrome apt source we install nothing
+          # from; a corrupt index there exits apt 100 and takes the whole Linux
+          # leg down (2026-09-09). The glob covers both the `.list` and deb822
+          # `.sources` spellings.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+
+          # Tolerate a broken THIRD-PARTY index, but never a broken Ubuntu one.
+          # A bare `|| true` would also swallow an archive/signing/network
+          # failure on Ubuntu's own mirrors, and `apt-get install` can still
+          # succeed from stale cached lists -- so a RELEASE could be built
+          # without a successful refresh, silently. Tolerate the exit code, then
+          # re-read the log and abort if Ubuntu itself was the failure.
+          # No -qq: it hides the `Err:` acquisition records this check reads.
+          sudo apt-get update 2>&1 | tee /tmp/apt-update.log || true
+          # Match the error form AND the warning form. `-qq` suppresses the
+          # `Err:<n> <url>` acquisition record and reports the same failure as
+          # `W: Failed to fetch ...`, and apt can still exit 0 while keeping the
+          # old indexes -- so matching only E:/Err: would miss the common
+          # network case in a quiet release build.
+          if grep -qE '^(E|Err):.*(archive\.ubuntu\.com|security\.ubuntu\.com)|^W: Failed to fetch.*(archive\.ubuntu\.com|security\.ubuntu\.com)' \
+               /tmp/apt-update.log; then
+            echo "::error::apt-get update failed against the Ubuntu archive - refusing to build from stale package lists"
+            exit 1
+          fi
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build \
             libwayland-dev libxkbcommon-dev libgtk-3-dev \
