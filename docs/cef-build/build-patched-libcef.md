@@ -18,7 +18,7 @@ Patches live in the AgentMux fork of CEF:
 - **Branch:** `7778` — the **integration** branch for the milestone. Never build
   from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
   it may look newer and still be missing part of the carry-set. Verify with §5 of
-  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **11 `OK`**) first.
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **21 `OK`**) first.
 - **Base:** Chromium 148 (CEF branch 7778)
 - **HEAD:** do not hard-code one here. This previously pinned `c87bca497`, a
   commit on the now-dead feature branch, which contradicts the branch above.
@@ -72,7 +72,7 @@ python3 automate-git.py \
 > `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
 > newer and still be missing part of the carry-set — that is exactly how the
 > 2026-07 transparency gap happened. Run §5 of that doc against this checkout
-> before building; it must report **11 `OK`**. If it does not, the integration
+> before building; it must report **21 `OK`**. If it does not, the integration
 > branch is incomplete and must be fixed first — do not build around it.
 
 ```bash

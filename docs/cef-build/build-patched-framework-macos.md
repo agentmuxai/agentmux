@@ -29,7 +29,7 @@ The patches live in the same fork/branch as Linux:
   from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
   it may look newer and still be missing part of the carry-set, which is exactly
   how the 2026-07 transparency gap happened. Verify with §5 of
-  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **11 `OK`**)
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **21 `OK`**)
   before building; if it fails, fix the integration branch rather than building
   around it.
 - **Base:** Chromium 148 (CEF branch 7778)

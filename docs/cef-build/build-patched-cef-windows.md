@@ -123,7 +123,7 @@ Windows uses this branch despite not needing its patches.
 > `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
 > newer and still be missing part of the carry-set — that is exactly how the
 > 2026-07 transparency gap happened. Run §5 of that doc against this checkout
-> before building; it must report **11 `OK`**. If it does not, the integration
+> before building; it must report **21 `OK`**. If it does not, the integration
 > branch is incomplete and must be fixed first — do not build around it.
 
 ```powershell

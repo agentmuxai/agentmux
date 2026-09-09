@@ -112,27 +112,73 @@ diverge in behaviour.
 
 ## 3. The carry-set (canonical inventory)
 
-Every one of these must survive every upgrade. Verified against
-`rebuild-7778-procreq-plus-transparency` on 2026-09-09.
+**18 hand-written CEF source files** differ between upstream 7778 and the fork,
+plus **3 Chromium-side patches**. Measured, not estimated:
 
-| # | Change | Layer | Files | Platform |
-|---|---|---|---|---|
-| 1 | `BeginWindowDrag` — native drag from an HTCLIENT region | B | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{h,cc}` | All |
-| 2 | Renderer-side transparency (Blink base-bg override) | B | `libcef/renderer/blink_glue.{h,cc}`, `libcef/renderer/browser_config.h`, `libcef/renderer/render_manager.cc`, `libcef/common/mojom/cef.mojom`, `libcef/browser/browser_platform_delegate.cc`, `libcef/browser/browser_info_manager.cc` | All (**macOS-critical**) |
-| 3 | `rwhv_background_opaque_check` | A | `content/browser/renderer_host/render_widget_host_view_base.cc` | **macOS-critical**, no-op elsewhere |
-| 4 | `views_caption_rightclick_passthrough` | A | `ui/views/widget/desktop_aura/window_event_filter_linux.cc` | **Linux only** |
-| 5 | `agentmux_process_requirement` | A | `base/apple/mach_port_rendezvous_mac.cc` | **macOS 26 only** |
+```bash
+git diff --name-only <upstream-base> <branch> -- \
+    'libcef/**' 'include/views/**' 'include/internal/**' \
+  | grep -vE 'capi/|libcef_dll/'      # exclude generated wrappers
+```
+
+The 18 agrees with `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`
+§5b, which reached it independently while scoping the 152 port.
+
+> An earlier revision of this table listed only 10 of the 18, omitting the entire
+> browser-side half of the transparency cascade. The §5 gate probed those 10 and
+> reported a clean bill of health, so a branch missing eight fork-modified files
+> would have passed. Caught by Codex review on PR #3121. The lesson is §2's: for
+> Layer B nothing fails loudly, so an inventory that is *almost* complete reads
+> exactly like one that is complete.
+
+### Layer B — CEF source (18 files, carried by the branch itself)
+
+| Feature | Files | Probe identifier |
+|---|---|---|
+| **Drag** (3) | `include/views/cef_window.h` | `BeginWindowDrag` |
+| | `libcef/browser/views/window_impl.h` | `BeginWindowDrag` |
+| | `libcef/browser/views/window_impl.cc` | `BeginWindowDrag` |
+| **Transparency — renderer** (5) | `libcef/renderer/blink_glue.h` | `SetBaseBackgroundColorOverrideTransparent` |
+| | `libcef/renderer/blink_glue.cc` | `SetBaseBackgroundColorOverrideTransparent` |
+| | `libcef/renderer/browser_config.h` | `background_transparent` |
+| | `libcef/renderer/render_manager.cc` | `background_transparent` |
+| | `libcef/common/mojom/cef.mojom` | `background_transparent` |
+| **Transparency — browser** (10) | `libcef/browser/browser_info_manager.cc` | `background_transparent` |
+| | `libcef/browser/browser_platform_delegate.cc` | `background_transparent` |
+| | `libcef/browser/browser_platform_delegate_create.cc` | `is_views_hosted` |
+| | `libcef/browser/browser_host_base.cc` | `IsWindowless() \|\| is_views_hosted()` |
+| | `libcef/browser/context.cc` | `is_transparent` |
+| | `libcef/browser/context.h` | `transparent_state` |
+| | `libcef/browser/views/browser_view_impl.cc` | `ApplyToCurrentRWHView` |
+| | `libcef/browser/views/browser_view_impl.h` | `LayerTreeHost` |
+| | `libcef/browser/views/window_view.cc` | `CalculateRenderPasses` |
+| | `include/internal/cef_types.h` | `or a frameless window` |
+
+Every probe identifier above is **absent upstream and present in the fork** —
+asserted for all 18, so each one actually discriminates rather than matching
+code that was already there.
+
+### Layer A — Chromium-side patches (3)
+
+| Patch | Patches | Platform |
+|---|---|---|
+| `rwhv_background_opaque_check` | `content/browser/renderer_host/render_widget_host_view_base.cc` | **macOS-critical**, no-op elsewhere |
+| `views_caption_rightclick_passthrough` | `ui/views/widget/desktop_aura/window_event_filter_linux.cc` | **Linux only** |
+| `agentmux_process_requirement` | `base/apple/mach_port_rendezvous_mac.cc` | **macOS 26 only** |
 
 Notes that have already caused confusion:
 
-- **#2 and #3 are one feature in two layers.** Transparency does not work with
-  either half alone. #3 was introduced as `mac_rwhv_transparent_background.patch`
-  in PR #4 and *replaced* by `rwhv_background_opaque_check.patch` in PR #5 — if
-  you find the old name on a branch, that branch predates the codex-review fix.
-- **#4 is Linux-only** despite the generic name. It patches
-  `window_event_filter_linux.cc`.
-- **#5 is not in the drag branch lineage at all**, which is exactly why the two
-  branches had to be merged and why the gap opened.
+- **Transparency is one feature spanning both layers and 16 files** (15 Layer B +
+  `rwhv_background_opaque_check`). It works with none of the halves alone.
+  `SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §3 says these commits "should
+  be ported as a unit"; treat any partial port as broken, not partially working.
+- The Layer A patch was introduced as `mac_rwhv_transparent_background.patch` in
+  PR #4 and *replaced* by `rwhv_background_opaque_check.patch` in PR #5. Finding
+  the old name on a branch means it predates the codex-review fix.
+- **`views_caption_rightclick_passthrough` is Linux-only** despite the generic
+  name — it patches `window_event_filter_linux.cc`.
+- **`agentmux_process_requirement` is not in the drag branch lineage at all**,
+  which is why the two branches had to be merged and how §1.1's gap opened.
 
 ---
 
@@ -188,69 +234,98 @@ Run this against any `agentmuxai/<ms>` before building or releasing from it. It 
 cheap and it is the only thing that catches Layer B gaps.
 
 ```bash
-# Paste into a shell, then run:  cef_verify [milestone] [remote]
+# Paste into a shell, then run:
+#   cef_verify                      # integration branch 7778 on remote 'agentmuxai'
+#   cef_verify 7977 fork            # milestone 7977, remote named 'fork'
+#   cef_verify a1b2c3d4...          # an exact SHA -- see section 8, P3
+#
 # A function, not a bare script: a top-level `exit 1` would close the shell of
 # anyone who pasted this, which is a poor reward for following the doc.
 cef_verify() {
-  local MS="${1:-7778}"                 # milestone == the integration branch name
+  local REF="${1:-7778}"
   local REMOTE="${2:-${REMOTE:-agentmuxai}}"
-  local BR="$REMOTE/$MS"                # remote-tracking ref, e.g. agentmuxai/7778
+  local BR
 
-  # REMOTE is whatever YOU named the agentmuxai/cef remote. The companion
-  # runbooks add it as 'agentmuxai'; some checkouts call it 'fork'. Hard-coding
-  # it either errors out or, worse, silently resolves a same-named ref from an
-  # unrelated remote -- the exact class of failure this gate exists to catch.
-  git remote get-url "$REMOTE" >/dev/null 2>&1 || {
-    echo "No remote '$REMOTE'. Pass it: cef_verify $MS <remote>  (see: git remote -v)" >&2
-    return 1
-  }
+  if [[ "$REF" =~ ^[0-9]+$ ]]; then
+    # A bare milestone number means the integration branch on REMOTE.
+    # REMOTE is whatever YOU named the agentmuxai/cef remote. The companion
+    # runbooks add it as 'agentmuxai'; some checkouts call it 'fork'. Hard-coding
+    # it either errors out or silently resolves a same-named ref from an
+    # unrelated remote -- the class of failure this gate exists to catch.
+    git remote get-url "$REMOTE" >/dev/null 2>&1 || {
+      echo "No remote '$REMOTE'. Pass it: cef_verify $REF <remote>  (git remote -v)" >&2
+      return 1
+    }
+    # MANDATORY. These branches get force-updated mid-port; a stale ref gives a
+    # confident, wrong answer. Section 1.2 -- skipping this put a false claim in
+    # an earlier revision of this very doc.
+    git fetch "$REMOTE" --prune || return 1
+    BR="$REMOTE/$REF"
+  else
+    # Anything else is used verbatim: a tag, a full SHA, a local branch. This is
+    # what section 8's P3 needs -- verifying a RELEASE ARTIFACT means checking
+    # the commit it was built from, not whatever the branch has become since. A
+    # fix landed after the build would otherwise make the gate pass for an
+    # artifact that does not contain it.
+    BR="$REF"
+  fi
 
-  # MANDATORY. These branches get force-updated mid-port; a stale ref produces a
-  # confident, wrong answer. Section 1.2 -- skipping this put a false claim in an
-  # earlier revision of this very doc.
-  git fetch "$REMOTE" --prune || return 1
-  git rev-parse --verify -q "$BR" >/dev/null || {
-    echo "No such branch '$BR'. The integration branch is named for the milestone alone." >&2
+  git rev-parse --verify -q "${BR}^{commit}" >/dev/null || {
+    echo "Cannot resolve '$BR'. The integration branch is named for the milestone alone." >&2
     return 1
   }
 
   local ok=0 miss=0
-  _p() { if [ "$1" = OK ]; then ok=$((ok+1)); else miss=$((miss+1)); fi; printf '%-4s %s\n' "$1" "$2"; }
+  _probe() {  # _probe <path> <identifier-absent-upstream>
+    if git show "${BR}:$1" 2>/dev/null | grep -qF "$2"; then
+      ok=$((ok+1));   printf 'OK   %s\n' "$1"
+    else
+      miss=$((miss+1)); printf 'MISS %s\n' "$1"
+    fi
+  }
 
-  # Layer A -- patch file present AND registered in patch.cfg
+  # ---- Layer A: patch file present AND registered in patch.cfg ----
   local name
   for name in rwhv_background_opaque_check views_caption_rightclick_passthrough \
               agentmux_process_requirement; do
     if git cat-file -e "${BR}:patch/patches/${name}.patch" 2>/dev/null \
        && git show "${BR}:patch/patch.cfg" | grep -q "'name': '${name}'"; then
-      _p OK "$name"; else _p MISS "$name"; fi
+      ok=$((ok+1));   printf 'OK   patch/%s\n' "$name"
+    else
+      miss=$((miss+1)); printf 'MISS patch/%s\n' "$name"
+    fi
   done
 
-  # Layer B -- probe identifiers, not filenames. Every one of these files exists
-  # upstream, so a file-existence check proves nothing.
-  _probe() {
-    if git show "${BR}:$1" 2>/dev/null | grep -q "$2"; then _p OK "$1"; else _p MISS "$1"; fi
-  }
-  _probe include/views/cef_window.h                  BeginWindowDrag
+  # ---- Layer B: all 18 fork-modified CEF sources (section 3) ----
+  # Identifiers, not filenames: every one of these files exists upstream, so a
+  # file-existence check proves nothing. Each identifier is asserted absent
+  # upstream and present in the fork, so it actually discriminates.
+  _probe include/views/cef_window.h                        BeginWindowDrag
+  _probe libcef/browser/views/window_impl.h                BeginWindowDrag
+  _probe libcef/browser/views/window_impl.cc               BeginWindowDrag
+  _probe libcef/renderer/blink_glue.h                      SetBaseBackgroundColorOverrideTransparent
+  _probe libcef/renderer/blink_glue.cc                     SetBaseBackgroundColorOverrideTransparent
+  _probe libcef/renderer/browser_config.h                  background_transparent
+  _probe libcef/renderer/render_manager.cc                 background_transparent
+  _probe libcef/common/mojom/cef.mojom                     background_transparent
+  _probe libcef/browser/browser_info_manager.cc            background_transparent
+  _probe libcef/browser/browser_platform_delegate.cc       background_transparent
+  _probe libcef/browser/browser_platform_delegate_create.cc is_views_hosted
+  _probe libcef/browser/browser_host_base.cc               'IsWindowless() || is_views_hosted()'
+  _probe libcef/browser/context.cc                         is_transparent
+  _probe libcef/browser/context.h                          transparent_state
+  _probe libcef/browser/views/browser_view_impl.cc         ApplyToCurrentRWHView
+  _probe libcef/browser/views/browser_view_impl.h          LayerTreeHost
+  _probe libcef/browser/views/window_view.cc               CalculateRenderPasses
+  _probe include/internal/cef_types.h                      'or a frameless window'
 
-  # Transparency is a SEVEN-file cascade, probed as a unit. Checking only
-  # blink_glue + mojom passes on a partial port while browser-side propagation
-  # or render_manager.cc is still absent -- the gate would then approve the very
-  # regression it exists to catch.
-  _probe libcef/renderer/blink_glue.h                SetBaseBackgroundColorOverrideTransparent
-  _probe libcef/renderer/blink_glue.cc               SetBaseBackgroundColorOverrideTransparent
-  _probe libcef/renderer/browser_config.h            background_transparent
-  _probe libcef/renderer/render_manager.cc           background_transparent
-  _probe libcef/common/mojom/cef.mojom               background_transparent
-  _probe libcef/browser/browser_platform_delegate.cc background_transparent
-  _probe libcef/browser/browser_info_manager.cc      background_transparent
-
-  echo "--- $BR: $ok OK, $miss MISS (expect 11 OK, 0 MISS) ---"
+  unset -f _probe
+  echo "--- $BR: $ok OK, $miss MISS (expect 21 OK, 0 MISS) ---"
   [ "$miss" -eq 0 ]
 }
 ```
 
-Expect **11 `OK`** against a complete `agentmuxai/<ms>`.
+Expect **21 `OK`** against a complete `agentmuxai/<ms>`.
 
 On a *feature* branch, `MISS agentmux_process_requirement` is normal rather than
 a defect -- it lives on `agentmux/<ms>-process-requirement`. That is the R4
@@ -260,11 +335,23 @@ branch.
 Keep the `${BR}:` braces — this is not stylistic, and it is shell-dependent.
 In **zsh** (the macOS default, so what these snippets usually get run in),
 `"$BR:libcef/..."` applies `:l` as a history-style modifier and resolves
-`agentmuxai/7778ibcef/...` — a false MISS on **7 of the 11 probes**: every
-`libcef/`-prefixed one, which is the entire Layer B transparency cascade. The
-other four are safe only by luck of the first letter (`include/` -> `:i` and
-`patch/` -> `:p` are not modifiers), so a silent partial pass is the default
-outcome, not the edge case.
+`agentmuxai/7778ibcef/...` — a false MISS, silently.
+
+**The gate above avoids this structurally**, and that is deliberate: `_probe`
+takes the path as an *argument*, so the expansion is `${BR}:$1`, and zsh applies
+modifiers only to *literal* text after the colon. Verified:
+
+```
+${BR}:$f                                  -> agentmuxai/7778:libcef/renderer/blink_glue.h
+$BR:$f                                    -> agentmuxai/7778:libcef/renderer/blink_glue.h   (also fine)
+$BR:libcef/renderer/blink_glue.h          -> agentmuxai/7778ibcef/renderer/blink_glue.h     (broken)
+```
+
+So the hazard only bites if you **inline a path literally**. Do not — and if you
+do anyway, 16 of the 21 probes break: every `libcef/`-prefixed one. The
+remaining 5 are safe purely by first letter (`include/` -> `:i`, `patch/` ->
+`:p` are not modifiers), so a silent *partial* pass is the default outcome
+rather than an obvious total failure.
 
 **bash expands the braced and unbraced forms identically**, so this reproduces
 for only some readers, which is worse than a consistent break.
@@ -315,7 +402,7 @@ That one command, run in September, would have caught §1.1 in a second.
      changed underneath.
 3. **Merge every feature branch into `agentmuxai/<new-ms>`** (R4). Do not build from
    the feature branches.
-4. **Run §5 against `agentmuxai/<new-ms>`.** All **11** probes must print `OK`.
+4. **Run §5 against `agentmuxai/<new-ms>`.** All **21** probes must print `OK`.
 5. **Build all three platforms from that one commit** — record the commit SHA.
 6. **Verify the built artifacts** (§7), per platform.
 7. **Cut three tags and update the pins together** (§8).
@@ -422,7 +509,7 @@ mechanical instead of a convention.
 **Before building a release framework:**
 - [ ] Building from `agentmuxai/<ms>`, not a feature branch (R3)
 - [ ] All feature branches for this milestone are merged (R4)
-- [ ] All **11** §5 probes print `OK`
+- [ ] All **21** §5 probes print `OK`
 - [ ] `patcher.py` run with no args; Chromium tree shows hundreds of modified files (§7.1)
 
 **Before updating the pins:**
