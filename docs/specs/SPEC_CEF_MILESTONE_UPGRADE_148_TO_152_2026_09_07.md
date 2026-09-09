@@ -11,11 +11,13 @@ genuinely drifted** (`include/internal/cef_types.h`,
 `libcef/renderer/render_manager.cc`). Open: the macOS hermetic Xcode pin
 (Phase D build-time check), and **patch #4 is only partially verified** — it is
 five coupled CEF-side commits, not just the one Chromium-side file that was
-test-applied (Codex, PR #3095). **Phase B's port is PARTIAL — 3 of 18 files
-done, NOT ready for Phase D.** Branches `7977`,
-`agentmux/7977-process-requirement`, `agentmux/7977-drag-rightclick-and-transparency`
-exist. **Phases C–G not started; nothing is built or tested — `agentmuxai/cef`
-has no CI.** The
+test-applied (Codex, PR #3095). **Phase B's port is COMPLETE — all 18 of 18
+files**, done as real per-file 3-way merges (base=upstream 7778, ours=fork,
+theirs=upstream 7977); all merged clean, zero conflicts. Both files that had
+drifted merged cleanly because our changes and upstream's sit in different
+regions. Branches `7977`, `agentmux/7977-process-requirement`,
+`agentmux/7977-drag-rightclick-and-transparency`. **Phases C–G not started;
+nothing is built or tested — `agentmuxai/cef` has no CI.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
@@ -88,10 +90,11 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 > copy rather than a forward-port. Done — see the report's §5b.
 > Patch #3 **has since been test-applied** against real Chromium 152 source and
 > applies cleanly, and patch #2's three target files are `cmp`-identical between
-> 7778 and 7977. **Patch #4 is only partially verified** — its Chromium-side
-> file applies cleanly, but its five-commit CEF-side transparency cascade
-> (`SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §3) is not verified. See the
-> report's §2.4/§2.5/§5b.
+> 7778 and 7977. **Patch #4's CEF-side cascade is now ported** (it was the
+> gap behind the earlier "partially verified" note): the five coupled commits
+> live across `libcef/`, including `render_manager.cc`'s renderer half, and all
+> merged cleanly onto 7977. Ported ≠ built: still unverified by compilation.
+> See the report's §2.4/§2.5/§5b.
 
 ---
 
