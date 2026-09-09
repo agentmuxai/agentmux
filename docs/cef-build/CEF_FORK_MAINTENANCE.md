@@ -141,7 +141,7 @@ Notes that have already caused confusion:
 > **Notation.** The integration branch is named for the milestone alone --
 > `7778`, `7977` (`refs/heads/7778` on `agentmuxai/cef`). Where this doc writes
 > `agentmuxai/7778` that is `<remote>/<branch>`, not a branch called
-> `agentmuxai/7778`. An earlier revision wrote `agentmuxai/7778`, using one checkout's
+> `agentmuxai/7778`. An earlier revision wrote `fork/7778`, using one checkout's
 > local remote name; a reviewer reasonably read that as the branch name and
 > concluded the checkout commands were wrong. If the notation can mislead a
 > careful reader it can mislead an operator, so it is spelled out here.
@@ -156,8 +156,9 @@ It was added by the same PR as this document — it was *not* previously written
 down anywhere in the repo, which is part of why §1.1 happened. It applies to
 `agentmuxai/cef` as much as to this repo.
 
-**R1 — One integration branch per Chromium milestone.** `agentmuxai/<milestone>`
-(`agentmuxai/7778`, `agentmuxai/7977`). This is the *only* branch anyone builds or releases
+**R1 — One integration branch per Chromium milestone**, named for the milestone
+alone: `7778`, `7977` (written `agentmuxai/7778` when referring to the
+remote-tracking ref). This is the *only* branch anyone builds or releases
 from. It is upstream CEF's branch plus our carry-set, nothing else.
 
 **R2 — Feature branches are single-use.** Once `agentmux/<ms>-<topic>` is merged
@@ -296,7 +297,8 @@ That one command, run in September, would have caught §1.1 in a second.
 
 ## 6. Upgrade runbook (per Chromium milestone, all three platforms)
 
-1. **Create `agentmuxai/<new-ms>`** from upstream CEF's branch for that milestone.
+1. **Create the integration branch `<new-ms>`** on `agentmuxai/cef`, from upstream
+   CEF's branch for that milestone.
 2. **Port the carry-set** in §3. One commit per item, message
    `agentmux: port <item> to <ms> (Chromium <N>)` — the 7977 branch already
    follows this convention and it makes §5 auditable.
