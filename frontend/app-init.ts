@@ -133,8 +133,10 @@ function installFloatingRedockHoverListener(): void {
         // Nothing was showing, so there is no stored ghost state to clear —
         // the backend entry is written on the same path that mounts the
         // placeholder. Bailing here matters now that this runs on every
-        // not-yet-armed hover sample: without it, a 500ms dwell would fire an
-        // IPC per heartbeat just to clear state that was never set.
+        // not-yet-armed hover sample: without it, the whole dwell would fire
+        // an IPC per heartbeat just to clear state that was never set.
+        // (Deliberately does not name the threshold — REDOCK_DWELL_MS is the
+        // single source of truth and has already moved twice.)
         if (!hadGhost) return;
         // Phase 4b — clear the stored ghost state for this window so a stale
         // direction cannot bleed into the next drop event.
