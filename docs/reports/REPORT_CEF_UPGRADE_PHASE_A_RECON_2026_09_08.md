@@ -6,15 +6,19 @@
 source-side fix shipped (`agentmuxai/cef` PR #7, merged 2026-09-08), **Patches #1/#2/#3 are verified against real 152
 source** (§2.4/§2.5). **Patch #4's five-commit CEF-side cascade is now ported**
 (§5b) — its Chromium-side file applies cleanly and the cascade merged cleanly
-onto 7977, but **none of it is compile-verified**. Also deferred: the macOS
+onto 7977. **Windows is now compile-verified** (below); macOS/Linux are not.
+Also deferred: the macOS
 hermetic Xcode pin (§4), a Phase D build-time check. **Phase B's port is
-COMPLETE — 18 of 18 files** (§5b). Nothing is built. This is the Phase A output that
+COMPLETE — 18 of 18 files** (§5b), and **compiled successfully on Windows**
+(`libcef.dll` built and boot-verified 2026-09-09, see the toolchain correction
+below) — macOS and Linux remain unbuilt. This is the Phase A output that
 `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` §4 gates on.
 **Verdict:** **Go** on §3's "straight to 152" decision — the *milestone target*
 is sound: nothing found makes 152 harder, and 16 of the 18 fork-modified CEF
 files are byte-identical upstream. **This is not a statement that the port is
-compile-verified** — Phase B is 18/18 ported (§5b), but nothing has been built
-(§2.4, §5b). Also corrects two errors in the spec's patch inventory, and records
+compile-verified on all platforms** — Phase B is 18/18 ported (§5b) and
+**Windows has actually been built and boots** (2026-09-09); macOS and Linux
+have not (§2.4, §5b). Also corrects two errors in the spec's patch inventory, and records
 one shipped-binary gap (§5).
 
 ---
@@ -27,7 +31,7 @@ one shipped-binary gap (§5).
 | Does `cef-rs`/`cef-dll-sys` have a 152-compatible crate? | **Yes** — `cef 152.0.0+152.0.5`, published 2026-09-07. |
 | Is `begin_window_drag` in its generated bindings? | **No** — same as 148, so the binding fork is still required. |
 | Have the build toolchain requirements moved? | **Corrected 2026-09-09** — Windows: *pins* say no, but a real 152 build hit a hard blocker the pins don't show (§4). Linux: no (unverified by an actual build). macOS: unconfirmed. |
-| Go / no-go on targeting 152 directly? | **Go.** #1/#2/#3 verified vs real 152 source; #4's Chromium-side file verified and its CEF-side cascade ported (§5b). 16 of 18 CEF files byte-identical upstream; the 2 drifted merged cleanly. **Phase B 18/18 ported, nothing built.** macOS Xcode pin deferred to Phase D. |
+| Go / no-go on targeting 152 directly? | **Go.** #1/#2/#3 verified vs real 152 source; #4's Chromium-side file verified and its CEF-side cascade ported (§5b). 16 of 18 CEF files byte-identical upstream; the 2 drifted merged cleanly. **Phase B 18/18 ported. Windows built and boot-verified 2026-09-09; macOS/Linux not built.** macOS Xcode pin deferred to Phase D. |
 
 **A separate finding, not about 152:** patch #1 (the macOS -67030 renderer
 crash fix) was never registered in `patch/patch.cfg`, so no build on any
@@ -114,13 +118,17 @@ because it edits CEF's *own* sources rather than Chromium's.
 **Read this table narrowly.** It reports per-*file* apply results, not
 per-*patch* completeness. Patch #3 is fully covered by its one Chromium file.
 **Patch #4 is not** — it also carries a five-commit CEF-side transparency
-cascade that this table does **not** cover and that is **not** verified; see the
-caveat below and §5b. Patch #1 is in §2.5.
+cascade that this table does **not** cover. That cascade **has since compiled
+successfully** as part of the Windows build (2026-09-09, §5b) — but compiling
+is not the same claim as "the transparency effect works correctly at
+runtime," which was never tested (the boot check only confirmed a plain page
+navigates, not a transparent-window use case). See the caveat below and §5b.
+Patch #1 is in §2.5.
 
 | Patch | Target(s) | Method | Result |
 |---|---|---|---|
 | #3 `views_caption_rightclick_passthrough` | `ui/views/widget/desktop_aura/window_event_filter_linux.cc` | real `git apply -p0` vs Chromium 152 | **applies cleanly** |
-| #4 — ⚠️ `rwhv_background_opaque_check` **only** (this is *one part of* patch #4, **not** patch #4) | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **that file applies cleanly** — patch #4 overall is **NOT verified** (§5b) |
+| #4 — ⚠️ `rwhv_background_opaque_check` **only** (this is *one part of* patch #4, **not** patch #4) | `content/browser/renderer_host/render_widget_host_view_base.cc` | real `git apply -p0` vs Chromium 152 | **that file applies cleanly.** The rest of patch #4 (CEF-side cascade) has since **compiled** on Windows (§5b) but its runtime behavior is untested — treat as "compiles," not "works." |
 | #2 `BeginWindowDrag` | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` | `cmp` upstream 7778 vs 7977 | **all three byte-identical** → port is mechanical |
 
 Patch #2's result is the notable one: **upstream CEF did not touch any of its
@@ -134,9 +142,11 @@ contains no `BeginWindowDrag` reference on either side and is **not** part of it
 
 > **Caveat on patch #4 (Codex, PR #3095).** The row above covers only patch #4's
 > single *Chromium-side* file. Patch #4's transparency cascade is five coupled
-> **CEF-side** commits as well; those are part of the 18-file surface in §5b and
-> are ported (§5b) but **not compile-verified**. Treat #1/#2/#3 as
-> apply-verified and #4's cascade as ported-only.
+> **CEF-side** commits as well; those are part of the 18-file surface in §5b
+> and have since **compiled successfully on Windows** (§5b, 2026-09-09) — not
+> yet on macOS/Linux, and never functionally exercised at runtime on any
+> platform. Treat #1/#2/#3 as apply-verified, #4's cascade as
+> Windows-compile-verified but functionally untested.
 
 **Consequence: most of the patch surface costs little to move to 152** — 16 of
 18 fork-modified CEF files are byte-identical upstream, so they copy rather than
@@ -299,59 +309,79 @@ Recorded so the next person doesn't repeat it.
 
 ---
 
-## 5b. Phase B — patch port to 7977 (COMPLETE, 18/18 — not built)
+## 5b. Phase B — patch port to 7977 (COMPLETE, 18/18 — Windows built)
 
-> **Scope correction (2026-09-08, Codex review on PR #3095).** An earlier
-> revision said "all four patches are ported" and §2.4 said all four were
-> "verified." **Both over-claimed patch #4.** Patch #4 is not the single
-> `rwhv_background_opaque_check.patch` file I tested — per
-> `SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md` §3 it is **five tightly
-> coupled CEF-side commits** (WebContents propagation, RWHView update, a
-> `WebContentsObserver` for renderer swaps, keeping it alive across process
-> swaps, deferred top-level transparent background) which that spec says
-> "should be ported as a unit."
->
-> Measured properly: **18 hand-written CEF source files** differ between
-> upstream 7778 and the fork's shipped source. **I ported 3.**
+> **History, in order, each correcting the last:** (1) 2026-09-08, claimed
+> "all four ported" after testing one file of patch #4 — wrong, Codex caught
+> it on PR #3095; corrected to 3/18 measured properly. (2) 2026-09-09,
+> completed the remaining 15 files via real per-file 3-way merges (18/18,
+> below). (3) 2026-09-09, built and boot-verified on Windows (§ below).
+> Kept all three states visible rather than collapsing straight to the
+> current one — this doc's own recurring failure mode has been updating a
+> conclusion and leaving the reasoning behind it stale.
 
-### Actual porting surface
+### Actual porting surface — 18/18 ported
 
 | | Count | Meaning |
 |---|---|---|
 | Fork-modified CEF source files | **18** | `libcef/**` + `include/{views,internal}/**`, excluding generated `capi`/`libcef_dll` |
 | Byte-identical upstream 7778 ↔ 7977 | **16** | mechanical copy — correct by construction |
-| **Drifted, need real forward-porting** | **2** | `include/internal/cef_types.h`, `libcef/renderer/render_manager.cc` |
-| Ported so far | **3** | `include/views/cef_window.h`, `libcef/browser/views/window_impl.{cc,h}` |
+| Drifted, forward-ported via real 3-way merge | **2** | `include/internal/cef_types.h`, `libcef/renderer/render_manager.cc` — merged cleanly, zero conflicts, because our changes and upstream's occupy different regions of each file |
+| **Ported, total** | **18/18** | |
 
-The *shape* of the earlier conclusion survives — most of the port is mechanical
-because upstream barely touched this surface in four milestones — but "done" was
-wrong, and the two drifted files need a checkout to merge and compile-check.
+Most of the port really was mechanical, because upstream barely touched this
+surface across four milestones — but note the two drifted files include
+`render_manager.cc`, which is patch #4's *renderer-side* transparency
+cascade half. Its earlier "not verified" status (§2.4) is now **compiled**,
+not just ported — see the Windows build below.
 
-### Branch layout (mirrors the 7778 lineage)
+### Branch layout — `7977` is now a real integration branch
 
 | Branch | Contents |
 |---|---|
-| `7977` | upstream mirror (CEF 152 / Chromium 152.0.7977.83) |
+| `7977` | **integration branch** (was the bare upstream mirror until 2026-09-09 — see the merge below) |
 | `agentmux/7977-process-requirement` | patch #1, registered in `patch.cfg` |
-| `agentmux/7977-drag-rightclick-and-transparency` | patch #2's three source files; patches #3 and #4 with both registered in `patch.cfg` |
+| `agentmux/7977-drag-rightclick-and-transparency` | patch #2's three source files; patches #3 and #4, both registered in `patch.cfg` |
 
-Note 152's `patch.cfg` tail differs from 148's (it ends with
-`chrome_browser_extensions_background`, not `chrome_browser_task_manager`), so
-insertion points are not copyable between milestones.
+**Gap found and fixed, 2026-09-09.** Unlike `7778` — where patches are merged
+directly into the milestone branch, so checking it out gets everything —
+`7977` was, until this fix, still the bare upstream mirror (`0` ahead/behind
+`chromiumembedded/cef`). The two feature branches above existed but had never
+been merged into it. Checking out bare `7977` per this repo's own "always
+build from the integration branch" convention would have silently built
+**zero of the four patches** — caught while fixing a Codex finding on
+PR #3130 about the build doc's 152 instructions. Fixed by merging both
+feature branches into `7977` directly (one conflict — both branches append to
+`patch.cfg`'s tail at the same anchor; resolved by keeping both entries).
+Verified post-push via the API: all three `patch.cfg` entries present,
+`BeginWindowDrag` present.
 
-**A registration gap was found and deliberately not carried forward.** Patch #4
-(`rwhv_background_opaque_check`) is registered on
+**A registration gap was also found and deliberately not carried forward.**
+Patch #4 (`rwhv_background_opaque_check`) is registered on
 `agentmux/7778-drag-rightclick-and-transparency` — the branch the shipped
-binaries were actually built from — but **not** on the `7778` integration
-branch. So a port done "from `7778`" would have silently dropped it. It is
-registered on the 152 branch. This is the same divergence noted in §5.1: the
-build branch and the integration branch are 4 ahead / 2 behind each other, and
-they do not contain the same patch set.
+148 binaries were actually built from — but **not** on the `7778` integration
+branch. A port done "from `7778`" would have silently dropped it; it's
+registered on the 152 branch instead. Same divergence as §5.1: the 148 build
+branch and its integration branch are 4 ahead / 2 behind each other and do
+not contain the same patch set.
 
-**Complete, but still unbuilt.** All 18 files are ported. Phase B is
-source-only; nothing is compiled or tested, and `agentmuxai/cef` has no CI —
-so "ported" here means "merges cleanly and is registered", **not** "known to
-compile". Phase D is the first thing that will actually exercise it.
+### Windows: built and boot-verified, 2026-09-09
+
+`libcef.dll` compiled from the completed `7977` integration branch —
+305,693,184 bytes, zero compile/link errors (after two build-environment
+fixes unrelated to the port itself: a Windows SDK version gap and an
+unrelated upstream CEF test-suite bug, both in §4/the build doc). Boot-tested
+via `cefsimple.exe`: real top-level window, `MainWindowTitle = "Example
+Domain"` after navigating — genuine render, not just process launch.
+
+**What this does and doesn't establish:** the port *compiles* on Windows,
+including patch #4's CEF-side cascade. It does **not** establish that the
+cascade's actual transparency behavior is correct at runtime — that was
+never exercised (the boot test loads an opaque page). It also says nothing
+about macOS or Linux, which remain unbuilt and may still hit compile issues
+this pass didn't surface — Windows never routes through patches #2/#3/#4
+functionally in the first place (§2.1-§2.3), so a clean Windows compile is
+weaker evidence for those platforms than it looks.
 
 ---
 
