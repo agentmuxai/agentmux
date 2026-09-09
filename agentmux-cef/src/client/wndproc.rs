@@ -940,7 +940,8 @@ fn session_end_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate:
     &S
 }
 
-/// Whether this process has already flushed for session-end.
+/// Whether this process has already flushed for the shutdown attempt
+/// currently in progress.
 ///
 /// Both `WM_QUERYENDSESSION` and `WM_ENDSESSION` arrive, and each arrives once
 /// per top-level window — so with a main window plus Subwindows the flush
@@ -948,6 +949,13 @@ fn session_end_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate:
 /// seconds the OS allows. One flush captures the whole topology (srv reads its
 /// own state rather than taking a window argument), so the rest are pure waste
 /// of a bounded budget.
+///
+/// Reset to `false` on `WM_ENDSESSION` wParam FALSE (the shutdown was
+/// cancelled) — this is per-*attempt*, not per-process. Windows shutdown can
+/// be vetoed and retried later in the same running process; without the
+/// reset, the real final shutdown would silently skip its flush because an
+/// earlier, cancelled attempt already set the flag, losing any state changed
+/// in between.
 #[cfg(target_os = "windows")]
 static SESSION_END_FLUSHED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -1008,8 +1016,9 @@ unsafe extern "system" fn session_end_wndproc(
     // lets CEF/Views see the message and DefWindowProc supply the TRUE.
     //
     // The shutdown may still be cancelled afterwards (another app vetoes, or
-    // the user backs out). Harmless: the snapshot is idempotent and is only
-    // ever read on next launch.
+    // the user backs out) — WM_ENDSESSION wParam FALSE below resets the latch
+    // for exactly that case, so a later retry in this process flushes again
+    // rather than trusting a snapshot that may already be stale.
     if msg == WM_QUERYENDSESSION {
         flush_session_snapshot_once("WM_QUERYENDSESSION");
     }
@@ -1018,8 +1027,20 @@ unsafe extern "system" fn session_end_wndproc(
     // as a second trigger because not every shutdown path is guaranteed to
     // deliver a query round first; once the flag is set this is a no-op, so
     // the redundancy is free.
-    if msg == WM_ENDSESSION && wparam != 0 {
-        flush_session_snapshot_once("WM_ENDSESSION");
+    //
+    // wParam FALSE means the reverse: this shutdown attempt was cancelled
+    // (another app vetoed, or the user backed out) — the "may still be
+    // cancelled afterwards" case the WM_QUERYENDSESSION comment above already
+    // names. Reset the latch here: shutdown can be retried later in the same
+    // process, state can drift between the cancelled attempt and the real
+    // one, and a stale "already flushed" would silently skip the flush that
+    // actually matters, defeating the whole point of this hook.
+    if msg == WM_ENDSESSION {
+        if wparam != 0 {
+            flush_session_snapshot_once("WM_ENDSESSION");
+        } else {
+            SESSION_END_FLUSHED.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     let original = SESSION_END_WNDPROCS

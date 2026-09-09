@@ -619,18 +619,8 @@ pub(crate) fn register_ipc_with_backend(
 pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) {
     use std::io::{Read, Write};
 
-    let addr_str = web_endpoint
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    let addr: std::net::SocketAddr = match addr_str.parse() {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::warn!(
-                "[session-flush] cannot parse endpoint '{}': {}",
-                web_endpoint, e
-            );
-            return;
-        }
+    let Some(addr) = parse_web_endpoint(web_endpoint, "session-flush") else {
+        return;
     };
 
     let body = serde_json::json!({
