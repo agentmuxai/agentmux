@@ -62,11 +62,27 @@ itself worth keeping.
 
 The probe was real, but it ran against a stale local ref.
 `agentmux/7977-drag-rightclick-and-transparency` had been **force-updated**
-(`d6fe3d449` -> `55edc030a`); after `git fetch --prune` all seven transparency
-files probe `OK`. The 152 port is complete. Two existing documents already said
-so -- `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md` and
+(`d6fe3d449` -> `55edc030a`). Two existing documents already said the port was
+done -- `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md` and
 `docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` -- and were not
 consulted.
+
+**Re-verified against the full 21-probe gate** (the first pass used only the
+then-current 7 transparency probes, which could not have spoken for the 8
+browser-side files §3 later added -- the same almost-complete-reads-as-complete
+trap, one level up):
+
+| Branch | Result |
+|---|---|
+| `agentmux/7977-drag-rightclick-and-transparency` | **20 OK, 1 MISS** |
+| `agentmux/7977-process-requirement` | supplies the 1 missing patch |
+| **`7977`** (the integration branch) | **0 OK, 21 MISS** |
+
+So the 152 *port* is genuinely complete across the two feature branches --
+including all 8 browser-side files. But **`7977` itself carries none of it**,
+because neither branch has been merged. Per R3 that is the branch a release
+would be built from, and per R4 both feature branches must land there first.
+This is §1.1 exactly, caught before the fact instead of two months after.
 
 So, as a rule:
 
@@ -80,11 +96,17 @@ So, as a rule:
 - A probe reporting `MISS` proves something is absent **from the ref you
   probed**. That is a weaker claim than "absent from the branch," and the
   difference is exactly the mistake made here.
+- **When the gate changes, re-run every claim the old gate made.** The
+  "complete" verdict above was first reached with 7 transparency probes and
+  survived unchanged when §3 grew to 18 files -- so for a while it asserted
+  something no probe had actually checked. A completeness claim is only ever as
+  strong as the inventory current *at the moment it was made*, and expanding the
+  inventory silently invalidates every earlier verdict.
 
-One genuine asymmetry does remain, and it is the R4 case rather than a defect:
-`agentmux_process_requirement` is absent from the drag branch because it lives on
-`agentmux/7977-process-requirement`. Both must be merged into `agentmuxai/7977`. That
-split is precisely what produced §1.1 on 7778.
+The single `MISS` on the drag branch is the R4 case rather than a defect:
+`agentmux_process_requirement` lives on `agentmux/7977-process-requirement`.
+Both branches must be merged into `7977`. That split is precisely what produced
+§1.1 on 7778, which is why R4 exists.
 
 ---
 
