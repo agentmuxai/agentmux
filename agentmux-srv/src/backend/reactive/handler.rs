@@ -312,6 +312,18 @@ impl Handler {
         if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
             self.log_audit_registration("unregister", agent_id, &block_id, None, None);
+            // See `unregister_block`'s matching cleanup for why (reagent P1 /
+            // codex P2 on this PR): without this, the HTTP `/agentmux/reactive/
+            // unregister` teardown path — the normal graceful agent-close path
+            // — leaves a dangling alias that outlives the block it pointed to.
+            // Safe for the ordinary rename case too: a rename never calls
+            // `unregister_agent` (it re-registers the SAME block_id under a
+            // new primary key via `register_agent_with_nonce`, which does
+            // NOT touch the alias maps — see that method's doc comment), so
+            // this only ever fires on a genuine teardown.
+            if let Some(alias) = self.block_to_alias.remove(&block_id) {
+                self.alias_to_block.remove(&alias);
+            }
         }
         self.agent_info.remove(&agent_key);
     }

@@ -81,3 +81,18 @@ without disturbing the primary (live-name) registration at all:
 Scoped to `PersistentSubprocessController` only (the stream-json/ACP agent path this session runs
 on); `ShellController`'s PTY-based agents are unaffected (`Controller::stable_agent_id()` defaults
 to `None`, same as before this change for any controller type that doesn't override it).
+
+## Known follow-up gap (codex P1 on this PR, not fixed here)
+
+The alias is populated only in `spawn_process`. After an srv restart, a persistent controller can
+be registered in the primary registry (agentName) while its process hasn't spawned yet — it spawns
+lazily on the first message (`install_agent_turn_delivery`'s fallback, addressing
+`REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03`). In that window, a jekt
+addressed to the LIVE name still works (the lazy-spawn fallback starts the turn), but one addressed
+to the STABLE ID does not: the alias hasn't been written yet, so the lookup fails before that
+fallback is ever reached.
+
+Not fixed in this PR: closing it means capturing `AGENTMUX_AGENT_ID` from the block's *persisted*
+config at controller-construction time, not from a live process env — a genuinely different change
+to controller-lifecycle code this investigation didn't reach, and not something to rush into a file
+with this incident history. Scoped out deliberately; tracked here rather than silently dropped.
