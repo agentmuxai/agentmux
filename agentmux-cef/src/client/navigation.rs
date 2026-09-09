@@ -413,8 +413,18 @@ fn takes_pane_path(kind: Option<&crate::state::BrowserKind>, client_is_browser_p
 /// Native-layer visibility for a label's bound HWND. `None` when no HWND is
 /// bound (or off Windows) — callers must treat that as "no extra information",
 /// not as hidden.
+///
+/// Fully-qualified `std::sync::Arc<crate::state::AppState>` rather than the
+/// bare `Arc<AppState>` the Windows arm could get away with — same reason as
+/// `reveal_top_level_window` just below: the top-of-file `use` for both
+/// names is gated `#[cfg(any(target_os = "linux", target_os = "windows"))]`,
+/// so a bare reference resolves on Linux (this arm compiles there too) but
+/// not on macOS. The nightly macOS build is the only CI leg that builds
+/// `agentmux-cef` for macOS at all — `ci-pr.yml`'s matrix is
+/// `[windows-latest, ubuntu-latest]` — so this broke silently on `main` for
+/// two nights running before anyone saw a macOS compile.
 #[cfg(target_os = "windows")]
-fn native_window_visible(state: &Arc<AppState>, label: Option<&str>) -> Option<bool> {
+fn native_window_visible(state: &std::sync::Arc<crate::state::AppState>, label: Option<&str>) -> Option<bool> {
     let label = label?;
     let hwnd = *state.window_hwnds.lock().get(label)?;
     // SAFETY: IsWindowVisible tolerates stale/invalid handles (returns FALSE).
@@ -427,7 +437,7 @@ fn native_window_visible(state: &Arc<AppState>, label: Option<&str>) -> Option<b
 }
 
 #[cfg(not(target_os = "windows"))]
-fn native_window_visible(_state: &Arc<AppState>, _label: Option<&str>) -> Option<bool> {
+fn native_window_visible(_state: &std::sync::Arc<crate::state::AppState>, _label: Option<&str>) -> Option<bool> {
     None
 }
 
