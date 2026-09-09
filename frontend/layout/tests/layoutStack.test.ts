@@ -470,6 +470,14 @@ describe("activeKeyFor", () => {
         expect(activeKeyFor(node)).toBe(`${node.id}:b2`);
     });
 
+    // Still required today (ReAgent/Codex P0/P1 on PR #3132): TabContent/
+    // Block render nodeModel.blockId as a plain frozen field with no
+    // remount boundary of their own, so this key changing on a switch is
+    // CURRENTLY the only mechanism that updates the displayed block. See
+    // this file's own header comment and layoutStack.ts's for the full
+    // rationale, and do not drop activeBlockId from this key until a
+    // narrower inner remount boundary (pane-leaf-chrome.tsx) lands in the
+    // same change.
     it("switching the active member changes the key — this is what drives the remount", () => {
         const node = newLayoutNode(undefined, undefined, undefined, {
             blockId: "b1",
@@ -481,6 +489,47 @@ describe("activeKeyFor", () => {
         node.data!.blockId = "b2";
         const keyAfter = activeKeyFor(node);
         expect(keyBefore).not.toBe(keyAfter);
+    });
+});
+
+describe("NodeModel.activeBlockId", () => {
+    beforeEach(() => {
+        layoutStateSignals.clear();
+        vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    // Additive, currently-inert groundwork (types.ts) for the future
+    // pane-leaf-chrome.tsx inner remount boundary — no production consumer
+    // reads it yet. Proves the memo re-derives from live tree state on every
+    // read rather than freezing at construction time, the same pattern
+    // already proven safe in agent-view.tsx's own activeBlockId memo.
+    // Mutates tree state directly (not via pushBlockOntoStack) so this test
+    // doesn't depend on whether that mutator disposes the NodeModel —
+    // that's a separate, currently-still-true invariant covered by the
+    // describe blocks above.
+    it("tracks the currently active stack member from live tree state", () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        const node = model.treeState.rootNode!;
+
+        const nodeModel = model.getNodeModel(node);
+        expect(nodeModel.activeBlockId!()).toBe("b1");
+
+        node.data!.activeBlockId = "b2";
+        node.data!.blockId = "b2";
+        model.setter(model.localTreeStateAtom, { ...model.treeState });
+
+        expect(nodeModel.activeBlockId!()).toBe("b2");
+    });
+
+    it("a fresh NodeModel for the same node also picks up whatever the current active member is", () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        pushBlockOntoStack(model, nodeId, "b2"); // evicts+disposes today — see describe blocks above
+
+        const nodeModel = model.getNodeModel(model.treeState.rootNode!);
+        expect(nodeModel.activeBlockId!()).toBe("b2");
     });
 });
 
