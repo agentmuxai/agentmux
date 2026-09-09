@@ -263,14 +263,14 @@ In **zsh** (the macOS default, so what these snippets usually get run in),
 **bash expands the braced and unbraced forms identically**, so this reproduces
 for only some readers, which is worse than a consistent break.
 
-The modifier letters that bite include `a e h l q r t u`. Verified in zsh with
-`BR=agentmuxai/7778`:
+The modifier letters that bite include `a e h l q r t u`. Real output, produced
+by running this with `BR=agentmuxai/7778` rather than hand-written:
 
 ```
 $BR:libcef/x    -> agentmuxai/7778ibcef/x     ( :l  lowercase )
-$BR:head/x      -> forkead/x            ( :h  dirname   )
-$BR:tail/x      -> 7778ail/x            ( :t  basename  )
-$BR:upper/x     -> FORK/7778pper/x      ( :u  uppercase )
+$BR:head/x      -> agentmuxaiead/x            ( :h  dirname   )
+$BR:tail/x      -> 7778ail/x                  ( :t  basename  )
+$BR:upper/x     -> AGENTMUXAI/7778pper/x      ( :u  uppercase )
 $BR:include/x   -> agentmuxai/7778:include/x  ( :i  not a modifier - safe )
 $BR:patch/x     -> agentmuxai/7778:patch/x    ( :p  not a modifier - safe )
 ```
