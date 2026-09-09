@@ -393,6 +393,14 @@ History: `docs/retro/retro-release-version-desync-2026-05-22.md` — PR #964 sil
 
 ## Git Workflow
 
+**Never reuse a branch after its PR is merged.** Once merged, that branch is
+dead — cut a new one from the target for follow-up work. Continuing to commit to
+an already-merged branch is how a change that *was* merged quietly stops being in
+the integration branch: the branch keeps moving, nothing merges it forward, and
+no build ever fails. This is not hypothetical — it cost two months and nearly
+shipped a macOS transparency regression in the CEF fork. See
+[docs/cef-build/CEF_FORK_MAINTENANCE.md](./docs/cef-build/CEF_FORK_MAINTENANCE.md) §1.1.
+
 ```bash
 # Create feature branch
 git checkout -b feature-name

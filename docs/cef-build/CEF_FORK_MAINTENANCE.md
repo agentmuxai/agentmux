@@ -53,18 +53,37 @@ version, and it carried the newest commit (Sep 8 vs Jul 1).
 have fixed the renderer crash-loop and simultaneously regressed macOS window
 transparency, with nothing anywhere reporting a problem.
 
-### 1.2 The same gap, already recurring on Chromium 152
+### 1.2 Always re-fetch before you judge a branch
 
-Checked while writing this doc. `fork/agentmux/7977-drag-rightclick-and-transparency`
-ports `BeginWindowDrag`, `rwhv_background_opaque_check` and
-`views_caption_rightclick_passthrough` to 152 — but **not** the renderer-side
-transparency work. Verified by probing for the exact identifiers
-`SetBaseBackgroundColorOverrideTransparent` and `background_transparent`: absent
-from `blink_glue.h`, `browser_config.h`, `cef.mojom` and `render_manager.cc` on
-that branch, present on the 7778 branch (positive control).
+An earlier revision of this doc claimed the Chromium 152 port had dropped the
+renderer-side transparency work. **That was wrong**, and the way it was wrong is
+itself worth keeping.
 
-So the 152 upgrade is currently set up to ship without transparency. It was found
-by inventory, not by any build failing.
+The probe was real, but it ran against a stale local ref.
+`agentmux/7977-drag-rightclick-and-transparency` had been **force-updated**
+(`d6fe3d449` -> `55edc030a`); after `git fetch --prune` all seven transparency
+files probe `OK`. The 152 port is complete. Two existing documents already said
+so -- `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md` and
+`docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md` -- and were not
+consulted.
+
+So, as a rule:
+
+- **`git fetch --prune` immediately before running §5.** These branches get
+  force-updated during a port. A ref fetched yesterday is not evidence about
+  today.
+- **Cross-check against the milestone's own recon/spec docs** before reporting a
+  gap. A disagreement between your probe and a written port record means one of
+  them is stale -- find out which rather than trusting the probe because you ran
+  it yourself.
+- A probe reporting `MISS` proves something is absent **from the ref you
+  probed**. That is a weaker claim than "absent from the branch," and the
+  difference is exactly the mistake made here.
+
+One genuine asymmetry does remain, and it is the R4 case rather than a defect:
+`agentmux_process_requirement` is absent from the drag branch because it lives on
+`agentmux/7977-process-requirement`. Both must be merged into `fork/7977`. That
+split is precisely what produced §1.1 on 7778.
 
 ---
 
@@ -119,12 +138,14 @@ Notes that have already caused confusion:
 
 ## 4. Branch model — the rules
 
-The root cause of §1.1 is a violation of a rule this repo already has, in
-`CLAUDE.md` under Workspace Rules:
+The root cause of §1.1 is branch reuse after merge. The repo-level rule for
+this lives in [`CLAUDE.md`](../../CLAUDE.md) under Git Workflow:
 
-> **Never reuse a branch after its PR is merged; create a new branch.**
+> **Never reuse a branch after its PR is merged.**
 
-That rule exists to prevent precisely this. It applies to `agentmuxai/cef` too.
+It was added by the same PR as this document — it was *not* previously written
+down anywhere in the repo, which is part of why §1.1 happened. It applies to
+`agentmuxai/cef` as much as to this repo.
 
 **R1 — One integration branch per Chromium milestone.** `fork/<milestone>`
 (`fork/7778`, `fork/7977`). This is the *only* branch anyone builds or releases
@@ -160,7 +181,12 @@ cheap and it is the only thing that catches Layer B gaps.
 # From the cef checkout. BR is the branch under test.
 BR=fork/7778
 
-# Layer A — patch files present and registered
+# MANDATORY. These branches get force-updated mid-port; a stale ref produces a
+# confident, wrong answer. See section 1.2 -- this exact step being skipped is
+# what put a false claim in an earlier revision of this doc.
+git fetch fork --prune
+
+# Layer A -- patch files present AND registered in patch.cfg
 for p in rwhv_background_opaque_check views_caption_rightclick_passthrough \
          agentmux_process_requirement; do
   git cat-file -e "${BR}:patch/patches/$p.patch" 2>/dev/null \
@@ -168,14 +194,33 @@ for p in rwhv_background_opaque_check views_caption_rightclick_passthrough \
     && echo "OK   $p" || echo "MISS $p"
 done
 
-# Layer B — probe for the actual identifiers, not just the files
-git show "${BR}:include/views/cef_window.h"     | grep -q BeginWindowDrag \
+# Layer B -- probe identifiers, not filenames.
+git show "${BR}:include/views/cef_window.h" | grep -q BeginWindowDrag \
   && echo "OK   BeginWindowDrag" || echo "MISS BeginWindowDrag"
-git show "${BR}:libcef/renderer/blink_glue.h"   | grep -q SetBaseBackgroundColorOverrideTransparent \
-  && echo "OK   transparency (blink_glue)" || echo "MISS transparency (blink_glue)"
-git show "${BR}:libcef/common/mojom/cef.mojom"  | grep -q background_transparent \
-  && echo "OK   transparency (mojom)" || echo "MISS transparency (mojom)"
+
+# Transparency is a SEVEN-file cascade and must be probed as a unit. Checking
+# only blink_glue + mojom passes on a partial port while browser-side
+# propagation or render_manager.cc is still missing -- the gate would then
+# approve the very regression it exists to catch.
+probe() {  # probe <file> <identifier>
+  git show "${BR}:$1" 2>/dev/null | grep -q "$2" \
+    && echo "OK   $1" || echo "MISS $1"
+}
+probe libcef/renderer/blink_glue.h              SetBaseBackgroundColorOverrideTransparent
+probe libcef/renderer/blink_glue.cc             SetBaseBackgroundColorOverrideTransparent
+probe libcef/renderer/browser_config.h          background_transparent
+probe libcef/renderer/render_manager.cc         background_transparent
+probe libcef/common/mojom/cef.mojom             background_transparent
+probe libcef/browser/browser_platform_delegate.cc  background_transparent
+probe libcef/browser/browser_info_manager.cc    background_transparent
 ```
+
+Expect **11 `OK`** against a complete `fork/<ms>`.
+
+On a *feature* branch, `MISS agentmux_process_requirement` is normal rather than
+a defect -- it lives on `agentmux/<ms>-process-requirement`. That is the R4
+split, and it is why this block is meaningful only against the integration
+branch.
 
 Keep the `${BR}:` braces — this is not stylistic, and it is shell-dependent.
 In **zsh** (the macOS default, so what these snippets usually get run in),

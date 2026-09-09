@@ -253,8 +253,8 @@ Layer B is where both incidents happened. Nothing checks it.
 - **Build and release only from `fork/<milestone>`** (`fork/7778`, `fork/7977`) —
   never from a feature branch, even if the feature branch looks newer.
 - **Never reuse a feature branch after its PR is merged** — start a new one off
-  `fork/<milestone>`. This is the existing workspace rule; it applies to the CEF
-  fork too, and violating it is exactly what caused the 2026-07 gap.
+  `fork/<milestone>`. See the rule under [Git Workflow](./CLAUDE.md#git-workflow);
+  violating it is exactly what caused the 2026-07 gap.
 - **Merge the whole carry-set before cutting a release.** A milestone's work is
   split across several branches; merging one and not the others silently drops
   features.

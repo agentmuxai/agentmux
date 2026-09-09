@@ -62,11 +62,18 @@ python3 automate-git.py \
 
 ### 2. Switch to the AgentMux fork
 
+> **Build from the integration branch, never a feature branch.**
+> `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
+> newer and still be missing part of the carry-set — that is exactly how the
+> 2026-07 transparency gap happened. Run §5 of that doc against this checkout
+> before building; it must report **11 `OK`**. If it does not, the integration
+> branch is incomplete and must be fixed first — do not build around it.
+
 ```bash
 cd ~/cef-build/chromium_git/cef
 git remote add agentmuxai https://github.com/agentmuxai/cef.git
-git fetch agentmuxai agentmux/7778-drag-rightclick-and-transparency
-git checkout agentmuxai/agentmux/7778-drag-rightclick-and-transparency
+git fetch agentmuxai --prune
+git checkout agentmuxai/7778   # integration branch for the milestone
 
 # Mirror to the chromium-side cef checkout
 rsync -a --delete --exclude=.git ~/cef-build/chromium_git/cef/ ~/cef-build/chromium_git/chromium/src/cef/
