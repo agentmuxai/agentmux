@@ -243,8 +243,25 @@ Compress-Archive -Path @(
 
 # Record the exact fork commit this artifact came from -- the only thing tying
 # the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+#
+# This MUST be the CEF fork clone, not the mirrored copy under chromium\src\cef.
+# The mirror is made with `robocopy /XD .git`, so it has no .git of its own --
+# and `git -C` on a directory with no .git silently WALKS UP and answers from the
+# enclosing Chromium checkout, returning CHROMIUM's HEAD. That SHA does not exist
+# in agentmuxai/cef, so --target and the notes would both be wrong, with no
+# error. The two asserts below make that impossible.
+$CefClone = if ($env:CEF_CLONE) { $env:CEF_CLONE } else { "$HOME\cef-build\chromium_git\cef" }
+
+$TopLevel = (git -C "$CefClone" rev-parse --show-toplevel 2>$null)
+if (-not $TopLevel -or (Resolve-Path $TopLevel).Path -ne (Resolve-Path $CefClone).Path) {
+  throw "$CefClone is not a git root; git would answer from the enclosing repo. Set CEF_CLONE."
+}
+if (-not ((git -C "$CefClone" remote -v 2>$null) -match 'agentmuxai/cef')) {
+  throw "$CefClone is not the agentmuxai/cef fork. Set CEF_CLONE."
+}
+
 # FULL sha: `gh release create --target` takes a branch or a full commit SHA.
-$CefForkSha = (git -C "$HOME\cef-build\chromium_git\cef" rev-parse HEAD)
+$CefForkSha = (git -C "$CefClone" rev-parse HEAD)
 # Refuse to publish a release with no provenance rather than one with an empty field.
 if (-not $CefForkSha) { throw "Refusing to publish without a recorded fork commit" }
 
