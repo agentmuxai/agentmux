@@ -7,8 +7,8 @@
  * Internet, Audit, Supervisor).
  */
 
-import { createSignal } from "solid-js";
 import { cleanup, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/view/warden-host/warden-host-manager", () => ({
@@ -53,8 +53,8 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
-import { WardenView } from "./warden-view";
 import { WardenViewModel } from "./warden-model";
+import { WardenView } from "./warden-view";
 
 describe("WardenView rail", () => {
     afterEach(() => {
@@ -94,8 +94,8 @@ describe("WardenView rail", () => {
     it("clicking a rail item switches the active/visible pane without unmounting others", () => {
         renderWarden();
         const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
-        const auditButton = Array.from(rail.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Audit"),
+        const auditButton = Array.from(rail.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("Audit")
         ) as HTMLButtonElement;
         auditButton.click();
 
@@ -146,14 +146,14 @@ describe("WardenView pane title", () => {
     it("clicking a rail item writes warden:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderWarden();
         const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
-        const auditButton = Array.from(rail.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Audit"),
+        const auditButton = Array.from(rail.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("Audit")
         ) as HTMLButtonElement;
         auditButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "warden:section": "audit" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "warden:section": "audit" },
+        });
         expect(model.viewName()).toBe("Audit");
         const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
@@ -162,14 +162,14 @@ describe("WardenView pane title", () => {
     it("clicking a tab-bar item writes warden:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderWarden();
         const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
-        const supervisorButton = Array.from(tabBar.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Supervisor"),
+        const supervisorButton = Array.from(tabBar.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("Supervisor")
         ) as HTMLButtonElement;
         supervisorButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "warden:section": "supervisor" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "warden:section": "supervisor" },
+        });
         expect(model.viewName()).toBe("Supervisor");
     });
 
@@ -224,20 +224,14 @@ describe("WardenView zoom", () => {
         const { container } = renderWarden();
         const view = container.querySelector(".warden-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": 0.9 } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 0.9 } });
     });
 
     it("Ctrl+Wheel up writes an increased term:zoom via SetMetaCommand", () => {
         const { container } = renderWarden();
         const view = container.querySelector(".warden-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": 1.1 } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 1.1 } });
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
@@ -247,17 +241,33 @@ describe("WardenView zoom", () => {
         expect(setMetaMock).not.toHaveBeenCalled();
     });
 
+    // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+    // (app.tsx) — this pane's own handler must let it through rather than
+    // also zooming itself, or the two handlers would double-step this pane
+    // relative to every other pane in the window. See
+    // docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+    it("Ctrl+Shift+Wheel does not trigger this pane's own zoom RPC call", () => {
+        const { container } = renderWarden();
+        const view = container.querySelector(".warden-view") as HTMLElement;
+        view.dispatchEvent(
+            new WheelEvent("wheel", { ctrlKey: true, shiftKey: true, deltaY: 100, bubbles: true, cancelable: true })
+        );
+        expect(setMetaMock).not.toHaveBeenCalled();
+    });
+
     it("returning to 1.0 clears the metadata key (writes null)", () => {
         const model = new WardenViewModel("test-block", null as any);
         (model as any).zoomAtom = () => 0.9;
         const { container } = render(() => (
-            <WardenView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+            <WardenView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
         ));
         const view = container.querySelector(".warden-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": null } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": null } });
     });
 });

@@ -63,7 +63,13 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     };
 
     const handleWheel = (e: WheelEvent) => {
-        if (!e.ctrlKey && !e.metaKey) return;
+        // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+        // (app.tsx) — let it bubble there instead of zooming just this pane.
+        // (Help's own zoom is a separate "help:zoom" meta key, not the
+        // shared "term:zoom" the all-panes batch steps, so this pane's own
+        // zoom is unaffected by that gesture either way — same as browser
+        // panes.) See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+        if ((!e.ctrlKey && !e.metaKey) || e.shiftKey) return;
         e.preventDefault();
         e.stopPropagation();
         adjustZoom(e.deltaY > 0 ? -WHEEL_STEP : WHEEL_STEP);
@@ -86,4 +92,4 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     );
 }
 
-export { HelpViewModel };
+export { HelpView, HelpViewModel };

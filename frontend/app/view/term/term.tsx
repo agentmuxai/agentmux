@@ -369,7 +369,10 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     // preventDefault() suppresses CEF's native Ctrl+Scroll page zoom.
     onMount(() => {
         const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey) return;
+            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+            // (app.tsx) — let it bubble there instead of zooming just this
+            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+            if (!ev.ctrlKey || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const currentZoom = model.termZoomAtom();
