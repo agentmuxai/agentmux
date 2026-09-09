@@ -668,6 +668,46 @@ wrap_task! {
                             // button-state check re-runs on the next iteration.
                             // Other timers fall through to the `_` arm so CEF's
                             // own timers aren't dropped during the drag.
+                            //
+                            // Floater: also emit a redock-hover HEARTBEAT here.
+                            // WM_MOUSEMOVE stops arriving the moment the cursor
+                            // holds still, so a dwell clock fed only from that
+                            // handler cannot advance during the exact condition
+                            // it exists to measure. The renderer used to paper
+                            // over that by inferring dwell from the ABSENCE of
+                            // events, which armed a redock even after the
+                            // velocity gate had rejected the entry. Emitting on
+                            // this tick makes stationary dwell observable, so
+                            // the renderer can measure it honestly.
+                            // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.1.
+                            //
+                            // Shares `last_hover_emit` with the WM_MOUSEMOVE
+                            // path: while the cursor is actually moving that
+                            // handler is already emitting at 50ms and this tick
+                            // mostly no-ops, so the cadence is unchanged for a
+                            // moving drag.
+                            if !cancelled {
+                                if let Some(sl) = self.source_label.as_deref() {
+                                    if sl.starts_with("floating-")
+                                        && last_hover_emit.elapsed()
+                                            >= std::time::Duration::from_millis(50)
+                                    {
+                                        let mut cur = POINT { x: 0, y: 0 };
+                                        GetCursorPos(&mut cur);
+                                        let hover_args = serde_json::json!({
+                                            "source_label": sl,
+                                            "x": cur.x,
+                                            "y": cur.y,
+                                        });
+                                        let _ = crate::commands::window
+                                            ::update_floating_redock_hover(
+                                                &self.state,
+                                                &hover_args,
+                                            );
+                                        last_hover_emit = std::time::Instant::now();
+                                    }
+                                }
+                            }
                         }
                         _ => {
                             // Keep the app alive (paint, DPI changes, sent msgs).

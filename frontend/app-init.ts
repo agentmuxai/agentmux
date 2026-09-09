@@ -56,7 +56,7 @@ import { setProviderModels } from "@/app/view/agent/providers";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
-import { REDOCK_DWELL_MS } from "@/app/workspace/floating-pane-constants";
+import { createRedockArming } from "@/app/workspace/redock-arming";
 import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
@@ -125,10 +125,17 @@ function installFloatingRedockHoverListener(): void {
         return placeholderEl;
     };
     const clearPlaceholder = () => {
+        const hadGhost = placeholderEl !== null;
         if (placeholderEl) {
             placeholderEl.remove();
             placeholderEl = null;
         }
+        // Nothing was showing, so there is no stored ghost state to clear —
+        // the backend entry is written on the same path that mounts the
+        // placeholder. Bailing here matters now that this runs on every
+        // not-yet-armed hover sample: without it, a 500ms dwell would fire an
+        // IPC per heartbeat just to clear state that was never set.
+        if (!hadGhost) return;
         // Phase 4b — clear the stored ghost state for this window so a stale
         // direction cannot bleed into the next drop event.
         fireAndForget(async () => {
@@ -176,17 +183,16 @@ function installFloatingRedockHoverListener(): void {
     };
 
     // Dwell gate for the redock ghost.
-    // On Windows, Win32BeginMoveTask emits floating-redock:hover-state every 50ms
-    // with no dwell awareness — we must gate the ghost ourselves to 180ms.
-    // On non-Windows, the floater's onMouseMove path already waits REDOCK_DWELL_MS
-    // before calling update_floating_redock_hover, so the first event arrives at
-    // ~T=180ms; applying our own 180ms clock on top would delay to ~T=360ms and
-    // would never fire if the cursor is held still (no further mousemoves = no
-    // further events). Set ghostDwellMs=0 on non-Windows so the ghost appears on
-    // the first event (already pre-gated by the floater).
-    const ghostDwellMs = isWindows() ? REDOCK_DWELL_MS : 0;
-    let dwellTarget: string | null = null;
-    let dwellSince = 0;
+    //
+    // Both sides run the SAME arming state machine over the SAME event stream,
+    // so the ghost appears exactly when the floater considers the drag armed —
+    // no per-platform clock to keep in sync, and no window where the ghost is
+    // visible but a release would not dock (or vice versa). Previously this was
+    // a second, independent dwell timer that had to be disabled outright on
+    // non-Windows because the floater pre-gated its own IPC, which meant the
+    // two sides were gating on different rules by construction.
+    // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.1/§5.4.
+    const ghostArming = createRedockArming();
 
     fireAndForget(async () => {
         const { listenEvent, invokeCommand } = await import("@/app/platform/ipc");
@@ -198,36 +204,32 @@ function installFloatingRedockHoverListener(): void {
             cursor_y?: number;
         }>("floating-redock:hover-state", (payload) => {
             const newTarget = payload?.target_label ?? null;
-            if (!payload || newTarget !== myLabel) {
-                // Target changed away from us or cleared — reset dwell and hide ghost.
-                if (dwellTarget !== null) {
-                    dwellTarget = null;
-                    dwellSince = 0;
-                }
-                clearPlaceholder();
-                return;
-            }
-            // Cursor is over our window. Start or continue dwell clock.
-            const now = performance.now();
-            if (dwellTarget !== myLabel) {
-                dwellTarget = myLabel;
-                dwellSince = now;
-            }
-            // Ghost only appears after the dwell has elapsed (0 on non-Windows).
-            if (now - dwellSince < ghostDwellMs) return;
-
-            const cursorX = payload.cursor_x;
-            const cursorY = payload.cursor_y;
-            if (typeof cursorX !== "number" || typeof cursorY !== "number") {
-                clearPlaceholder();
-                return;
-            }
+            const cursorX = payload?.cursor_x;
+            const cursorY = payload?.cursor_y;
             // The broadcast cursor is in the host's coordinate space: physical
             // px on Windows (divide by DPR to get CSS px), DIP on macOS/Linux
             // (already CSS px — no divide). Inverse of the sender's posScale()
             // in floating-pane-workspace.tsx. Without this the drop-zone
-            // highlight lands wrong on a Retina display.
+            // highlight lands wrong on a Retina display, and the velocity gate
+            // would read 2× the real cursor speed.
             const invScale = isWindows() ? window.devicePixelRatio || 1 : 1;
+            // A teardown broadcast (`clear_floating_redock_hover`) carries a
+            // null target and no cursor. Feed it through as a null-target
+            // sample so the module disarms, rather than special-casing it.
+            const { armed } = ghostArming.sample({
+                target: newTarget,
+                x: typeof cursorX === "number" ? cursorX / invScale : undefined,
+                y: typeof cursorY === "number" ? cursorY / invScale : undefined,
+                t: performance.now(),
+            });
+            if (!payload || newTarget !== myLabel || !armed) {
+                clearPlaceholder();
+                return;
+            }
+            if (typeof cursorX !== "number" || typeof cursorY !== "number") {
+                clearPlaceholder();
+                return;
+            }
             const clientX = cursorX / invScale - window.screenX;
             const clientY = cursorY / invScale - window.screenY;
             const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
