@@ -167,6 +167,21 @@ Not a code defect, a threat-model one: modern real-world "LAN"s routinely includ
 - Require an explicit **pairing step** (a short code shown in one instance's UI, typed into the other) rather than automatic broadcast trust, for users who want tighter control than "opt into LAN discovery" alone provides.
 - At minimum, gate the credential behind a **challenge-response** rather than handing the raw value to any listener/prober — even a lightweight HMAC challenge keyed on the LAN-scoped credential (once P0-1's scoping lands) meaningfully raises the bar over "broadcast the plaintext secret to anyone who asks."
 
+> **Scope amendment, 2026-09-08 (repo-owner-confirmed).** The scoped LAN
+> credential now also grants a third route: `GET
+> /agentmux/reactive/agent-names`, returning agent **names only** — no
+> `block_id`, `tab_id`, timestamps, or `registration_nonce` (those stay on
+> the full-auth `/agentmux/reactive/agents`, pinned at 401 for a `lan_key` by
+> `lan_key_is_rejected_on_other_reactive_routes`). This widens a captured
+> `lan_key`'s worth by exactly one capability: enumerating agent names.
+> Accepted deliberately because a holder could already confirm any *specific*
+> name via `/agentmux/reactive/agent?id=…`, so this makes enumeration cheap
+> rather than newly possible — and without it every LAN peer reports
+> `agents: []`, leaving no way to discover which agents live on another host.
+> The least-privilege intent of P0-1 above is otherwise unchanged; do not read
+> this as license to widen the LAN surface further without the same explicit
+> call.
+
 **P1-1 — Encrypt/authenticate peer-to-peer LAN forwarding.** Upgrade `http://` peer forwarding to something a passive LAN listener can't read — mTLS between discovered peers (using the pairing/scoped-credential material from P0-1 to bootstrap trust), or at minimum a signed-request scheme analogous to the host-tier HMAC work, so message content and any credential in flight aren't cleartext on the wire.
 
 **P2-1 — Make the "LAN = trusted" trade-off explicit in the opt-in UI copy.** The feature already defaults off, which is right — verify the enabling toggle's copy actually communicates "this instance's access credential will be discoverable by anything else on this network," not just "enable LAN discovery," so an informed user (not the code's own assumption) is the one deciding the trust boundary.

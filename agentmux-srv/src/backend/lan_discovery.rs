@@ -24,6 +24,12 @@ use super::eventbus::{EventBus, WSEventType};
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
 const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
 const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
+/// How often each known LAN peer is asked for its agent-name list. Peers are
+/// few (one per machine) and the request is a single small GET, so this is
+/// cheap; it's deliberately slower than `LAN_AGENT_CACHE_TTL_SECS` because
+/// this list is for *display* ("who lives on that host"), not for delivery
+/// routing — `find_agent` still does its own authoritative lookup.
+const LAN_AGENT_NAMES_REFRESH_SECS: u64 = 30;
 
 /// UDP broadcast discovery fallback (Layer 2), for LANs where mDNS multicast
 /// is filtered (common on corporate/guest WiFi). Mobile clients broadcast a
@@ -419,6 +425,12 @@ impl LanDiscovery {
             disc_udp.udp_responder_loop(cancel_rx).await;
         });
 
+        // Keeps each peer's `agents` list populated (see
+        // `agent_names_refresh_loop`). Dropped along with the whole
+        // `LanDiscovery` when the setting is toggled off, same as the
+        // loops above.
+        tokio::spawn(discovery.clone().agent_names_refresh_loop());
+
         tracing::info!(
             instance_id = %instance_id,
             port = port,
@@ -426,6 +438,94 @@ impl LanDiscovery {
         );
 
         Ok(discovery)
+    }
+
+    /// Periodically ask every known peer which agents it hosts, so
+    /// `LanInstance::agents` reflects reality instead of staying the empty
+    /// vec it's created with. Without this, a peer shows up with a correct
+    /// hostname/version/address but `agents: []`, so there is no way to
+    /// discover *which* agents live on another machine — you can only
+    /// address one blind by name and hope. See
+    /// `handle_reactive_agent_names`' doc comment for the security scoping
+    /// of the endpoint this calls (names only, `lan_key`-readable).
+    ///
+    /// Failures are deliberately non-destructive: a peer that's briefly
+    /// unreachable keeps its last-known list rather than being blanked, since
+    /// staleness is already tracked by `last_seen` and a flapping list is
+    /// worse than a slightly-old one.
+    async fn agent_names_refresh_loop(self: Arc<Self>) {
+        let http = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "LAN agent-name refresh disabled: HTTP client build failed");
+                return;
+            }
+        };
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(
+                LAN_AGENT_NAMES_REFRESH_SECS,
+            ))
+            .await;
+
+            // Snapshot (key, url, lan_key) so the lock is not held across any
+            // await — the map is read by every inject/discovery call.
+            let targets: Vec<(String, String, String)> = {
+                let instances = self.instances.read();
+                instances
+                    .iter()
+                    .map(|(key, inst)| {
+                        (
+                            key.clone(),
+                            format!("http://{}:{}", inst.address, inst.port),
+                            inst.auth_key.clone(),
+                        )
+                    })
+                    .collect()
+            };
+
+            for (key, base_url, lan_key) in targets {
+                let url = format!("{base_url}/agentmux/reactive/agent-names");
+                let resp = http.get(&url).header("X-AuthKey", &lan_key).send().await;
+                let names = match resp {
+                    Ok(r) if r.status().is_success() => {
+                        match r.json::<serde_json::Value>().await {
+                            Ok(v) => v
+                                .get("agents")
+                                .and_then(|a| a.as_array())
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|n| n.as_str().map(str::to_string))
+                                        .collect::<Vec<String>>()
+                                }),
+                            Err(e) => {
+                                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: bad JSON");
+                                None
+                            }
+                        }
+                    }
+                    Ok(r) => {
+                        // A peer running a build without this route answers
+                        // 404 — expected during a rolling upgrade, not an error.
+                        tracing::debug!(peer = %base_url, status = %r.status(), "LAN agent-name refresh: non-2xx");
+                        None
+                    }
+                    Err(e) => {
+                        tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: unreachable");
+                        None
+                    }
+                };
+
+                if let Some(names) = names {
+                    if let Some(entry) = self.instances.write().get_mut(&key) {
+                        entry.agents = names;
+                    }
+                }
+            }
+        }
     }
 
     /// Build the JSON response payload for this instance's identity — see
@@ -958,7 +1058,7 @@ impl LanDiscoveryController {
     /// peer versions — see `Config::lan_key`'s doc comment) is now a
     /// separate, narrowly-scoped credential, NOT the instance's full-access
     /// `auth_key`. A passive LAN listener who captures it gets standing
-    /// access to only the two LAN-forwarding routes
+    /// access to only the three LAN-forwarding routes
     /// (`lan_or_full_auth_middleware` in `server/mod.rs`) — not the full
     /// `/agentmux/service` surface this used to expose. Broadcasting
     /// *something* in cleartext to the LAN is still an accepted trade-off
