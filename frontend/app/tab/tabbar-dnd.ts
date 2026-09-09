@@ -59,11 +59,12 @@ export const [hoveredDropTabId, setHoveredDropTabId] = createSignal<string | nul
 // spring-loading.
 //
 // This used to note that it was "deliberately longer than REDOCK_DWELL_MS's
-// 180ms". That framing was wrong in both directions: a redock is *less*
-// reversible than a tab switch, not more, and the 180ms it was measuring
-// itself against has since been raised to 500 to match this value. The two
-// are equal now and gate different subsystems — keep them as separate
-// constants. SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §3.1.
+// 180ms" on the grounds that a tab switch is the bigger action. That framing
+// was wrong — a redock is the *less* reversible of the two — so do not read
+// the current ordering as endorsing it. REDOCK_DWELL_MS has since moved
+// independently (180 -> 500 -> 300, the last on how it felt in use); the two
+// gate different subsystems and are deliberately separate constants.
+// SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §3.1.
 export const SPRING_SWITCH_MS = 500;
 
 // Tabs whose LayoutModel.activeDrag was force-set by a mid-drag spring

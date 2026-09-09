@@ -32,8 +32,9 @@ v2 design (implemented; supersedes §4.1–§4.6 below, kept for history):
   (`setActiveTab` via the tab's own `onSelect`). This originally read
   "deliberately longer than the redock ghost's 180ms since switching the
   visible tab is a bigger action" — corrected 2026-09-09: a redock is the
-  *less* reversible of the two, and the redock gate has since been raised to
-  500ms to match this value. See
+  *less* reversible of the two, and the redock gate has since moved
+  independently of this constant (180ms -> 500ms -> 300ms, the last on how it
+  felt in use). Do not treat the two as pinned together. See
   `SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md` §3.1.
 - **Real-layout ghost**: the target tab's own TileLayout overlay handles
   placement using the existing `ComputeMove` → pending-`Move` → placeholder
@@ -165,7 +166,7 @@ queue_source_layout_delete(state, &source_tab_id, &block_id).await
 
 ### 2.5 Ghost/preview precedent for a *live, direction-aware* drop indicator
 
-`app-init.ts:113-273` (`installFloatingRedockHoverListener`) is the closest existing "ghost stitched into a target's layout, updating live while a real drag is in progress": on `floating-redock:hover-state` host events (cursor position during a floating-window OS-level move), it does `elementFromPoint` → nearest `[data-blockid]` leaf → `determineDropDirection` → `rectForDirection` (hardcoded Top/Right/Bottom/Left = half-leaf, Outer* = 1/5 band, Center = full-leaf) → positions a raw `.floating-redock-drop-placeholder` div, gated by a dwell timer keyed on `REDOCK_DWELL_MS` to prevent flicker. (180ms and Windows-only when this spec was written; 500ms since `SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md`, and the Windows-only carve-out is gone — floater and ghost now share one arming module.)
+`app-init.ts:113-273` (`installFloatingRedockHoverListener`) is the closest existing "ghost stitched into a target's layout, updating live while a real drag is in progress": on `floating-redock:hover-state` host events (cursor position during a floating-window OS-level move), it does `elementFromPoint` → nearest `[data-blockid]` leaf → `determineDropDirection` → `rectForDirection` (hardcoded Top/Right/Bottom/Left = half-leaf, Outer* = 1/5 band, Center = full-leaf) → positions a raw `.floating-redock-drop-placeholder` div, gated by a dwell timer keyed on `REDOCK_DWELL_MS` to prevent flicker. (180ms and Windows-only when this spec was written. `SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md` raised it — to 500ms, then 300ms on how it felt in use — and removed the Windows-only carve-out; floater and ghost now share one arming module. Read the constant rather than any figure quoted here.)
 
 **This only works because its target is a visible, active tab's real DOM** (the dragged window is a separate OS process, the target tab is necessarily the one currently on screen in that other window). **Our target tab is usually inactive and `display:none`**, so `elementFromPoint`/`getBoundingClientRect` are not usable directly — see §4.2.
 
@@ -203,7 +204,7 @@ Set only when the dragged payload is `kind: "tile"` and the tile's *own* tab dif
 
 ### 4.2 Tab flash (Goal 2)
 
-A CSS class (e.g. `.tab--drop-flash`) toggled by `hoveredDropTabId`, applied as a restartable keyframe pulse (not a static highlight) so re-entering the same tab after briefly leaving re-triggers the flash — mirrors the existing `bouncingTabId` one-shot-animation pattern (`tabbar.tsx`) rather than inventing a new animation-retrigger mechanism. Dwell-gate this at ~120–180ms (this matched `REDOCK_DWELL_MS`'s precedent, §2.5, when that constant was also 180ms; it is 500ms since 2026-09-09 and this preview gate was deliberately *not* raised alongside it — mounting a preview is cheap and reversible, unlike a redock) before the preview (§4.3) mounts, so a fast pass-through over several tabs doesn't spawn/despawn previews per-frame.
+A CSS class (e.g. `.tab--drop-flash`) toggled by `hoveredDropTabId`, applied as a restartable keyframe pulse (not a static highlight) so re-entering the same tab after briefly leaving re-triggers the flash — mirrors the existing `bouncingTabId` one-shot-animation pattern (`tabbar.tsx`) rather than inventing a new animation-retrigger mechanism. Dwell-gate this at ~120–180ms (this matched `REDOCK_DWELL_MS`'s precedent, §2.5, when that constant was also 180ms; it has since moved independently, to 500ms and then 300ms on 2026-09-09, and this preview gate was deliberately *not* moved alongside it — mounting a preview is cheap and reversible, unlike a redock) before the preview (§4.3) mounts, so a fast pass-through over several tabs doesn't spawn/despawn previews per-frame.
 
 ### 4.3 Schematic tab-layout preview (Goal 3) — the genuinely new piece
 
