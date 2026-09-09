@@ -488,6 +488,45 @@ done
 symbols exist **only** if CEF's Chromium-side patches were applied, so they
 distinguish "patched build" from "pristine Chromium build" on any platform.
 
+### 7.2b Patches that add no symbol — differential compile
+
+Symbol probes only work for patches that introduce a symbol. **Two of the three
+Layer A patches do not**: `agentmux_process_requirement` rewrites the body of an
+existing function, and `rwhv_background_opaque_check` changes one call inside
+one. `nm` cannot see either, so §7.2 alone cannot tell you whether they made it
+into the artifact.
+
+Compile the file twice — from the working tree, and from pristine upstream — and
+compare both against the object that was actually linked:
+
+```bash
+cd out/Release_GN_arm64
+SRC=base/apple/mach_port_rendezvous_mac.cc
+OBJ=obj/base/base/mach_port_rendezvous_mac.o
+
+git -C ../.. show HEAD:$SRC > /tmp/unpatched.cc          # pristine upstream
+CMD=$(ninja -C . -t commands "$OBJ" | tail -1)           # the real compile line
+
+eval "${CMD//$OBJ//tmp/patched.o}"                       # from the working tree
+eval "$(echo "$CMD" | sed "s#$OBJ#/tmp/unpatched.o#; s#\.\./\.\./$SRC#/tmp/unpatched.cc#")"
+
+cmp -s /tmp/unpatched.o "$OBJ" && echo 'FAIL: shipped object is UNPATCHED'
+cmp -s /tmp/patched.o   "$OBJ" && echo 'OK: shipped object matches patched source'
+```
+
+Both comparisons matter. `shipped == patched` alone is weak if the patch happens
+to compile to the same bytes as upstream; `shipped != unpatched` is what proves
+the patch actually changed the output. Confirmed for both patches on the
+2026-09-09 macOS build.
+
+Do not try to read this off a disassembly. Attempting exactly that on
+`GetPeerValidationPolicy` produced a confident *wrong* answer — the patched
+function had been inlined and the symbol at that address was a neighbouring one,
+so the control flow looked unpatched. The byte comparison is unambiguous where
+eyeballing assembly is not.
+
+---
+
 ### 7.3 Platform-specific functional checks
 
 | Platform | Check |
@@ -549,5 +588,7 @@ mechanical instead of a convention.
 **Before updating the pins:**
 - [ ] All three platforms built from one recorded fork commit (P1)
 - [ ] §7.2 symbol probes pass on each artifact, using full `nm`
+- [ ] §7.2b differential compile passes for the two patches `nm` cannot see
+      (`agentmux_process_requirement`, `rwhv_background_opaque_check`)
 - [ ] §7.3 functional checks pass per platform
 - [ ] All three pins bumped together (P2)
