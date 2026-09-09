@@ -241,18 +241,27 @@ tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
 # Record the exact fork commit this artifact came from -- the only thing tying
 # the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
 #
-# This MUST be the CEF fork clone, not the mirrored copy under chromium/src/cef.
-# The mirror is made with `rsync --exclude=.git` / `robocopy /XD .git`, so it has
-# no .git of its own -- and `git -C` on a directory with no .git silently WALKS
-# UP and answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD.
-# That SHA does not exist in agentmuxai/cef, so --target and the notes would both
-# be wrong, with no error. The two asserts below make that impossible.
-CEF_CLONE="${CEF_CLONE:-$HOME/cef-build/chromium_git/cef}"
-
-[ "$(git -C "$CEF_CLONE" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$CEF_CLONE" && pwd -P)" ] \
-  || { echo "FATAL: $CEF_CLONE is not a git root; git would answer from the enclosing repo. Set CEF_CLONE." >&2; false; }
-git -C "$CEF_CLONE" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' \
-  || { echo "FATAL: $CEF_CLONE is not the agentmuxai/cef fork. Set CEF_CLONE." >&2; false; }
+# Locate the fork clone rather than assuming a path. The mirrored copy under
+# chromium/src/cef is created with `rsync --exclude=.git`, so it has no .git of
+# its own -- and `git -C` on such a directory does not fail, it silently WALKS UP
+# and answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. A
+# SHA that does not exist in agentmuxai/cef would end up in --target and in the
+# notes, with no error. Layouts also differ: some trees clone the fork directly
+# at chromium/src/cef, others mirror into it from an outer clone.
+#
+# So: take the first candidate that is BOTH its own git root AND has the
+# agentmuxai/cef remote. Set CEF_CLONE to override.
+for _c in "${CEF_CLONE:-}" \
+          "$HOME/cef-build/chromium/chromium/src/cef" \
+          "$HOME/cef-build/chromium/cef" \
+          "$HOME/cef-build/chromium_git/cef"; do
+  [ -n "$_c" ] || continue
+  [ "$(git -C "$_c" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$_c" 2>/dev/null && pwd -P)" ] || continue
+  git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
+  CEF_CLONE="$_c"; break
+done
+[ -n "${CEF_CLONE:-}" ] || echo "FATAL: no agentmuxai/cef clone found (a .git-less mirror does not count). Set CEF_CLONE." >&2
+echo "fork clone: ${CEF_CLONE:-<none>}"
 
 # FULL sha: `gh release create --target` takes a branch or a full commit SHA.
 CEF_FORK_SHA=$(git -C "$CEF_CLONE" rev-parse HEAD)
