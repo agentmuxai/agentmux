@@ -141,7 +141,20 @@ Set-Location "$HOME\cef-build\chromium_git\chromium\src"
 # Reset to clean state -- patcher is NOT idempotent; double-apply produces .rej files
 git reset --hard HEAD
 Get-ChildItem -Recurse -Filter "*.rej" | Remove-Item
-python3 cef\tools\patcher.py --root-dir=cef
+
+# patcher.py takes NO arguments in its normal mode — it reads
+# cef/patch/patch.cfg itself, and accepts ONLY --patch-file / --patch-dir
+# (verified against tools/patcher.py's own OptionParser). Passing --root-dir
+# makes it fail, and a wrapper script has swallowed exactly that as a
+# non-fatal WARN and continued — applying ZERO of 112 patches and nearly
+# shipping an unpatched framework. Run it from inside cef/ with no args:
+Push-Location cef
+python3 tools\patcher.py
+Pop-Location
+
+# Verify it actually did something. A CLEAN tree here means zero patches
+# applied — that is the silent-failure signature, not success.
+git status --porcelain | Select-Object -First 5
 ```
 
 If you see "class member cannot be redeclared" compile errors later, the
