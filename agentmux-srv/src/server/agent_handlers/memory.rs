@@ -13,7 +13,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
-    CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
+    CommandGetMemoryData, CommandDeleteMemoryData, DeleteMemoryResult, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
 
@@ -101,14 +101,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let wstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DELETE_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandDeleteMemoryData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandDeleteMemoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("deletememory: {e}"))?;
+            async move {
                 let deleted = wstore
                     .bundle_memory_delete(&cmd.id)
                     .map_err(|e| format!("deletememory: {e}"))?;
@@ -121,9 +119,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(Some(json!({ "deleted": deleted })))
-            })
-        }),
+                Ok(DeleteMemoryResult { deleted })
+            }
+        },
     );
 
     let wstore = state.id_store.clone();
@@ -208,14 +206,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let wstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DELETE_SYSTEM_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandDeleteMemoryData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandDeleteMemoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("deletesystemmemory: {e}"))?;
+            async move {
                 let deleted = wstore
                     .bundle_memory_delete_system(&cmd.id)
                     .map_err(|e| format!("deletesystemmemory: {e}"))?;
@@ -228,9 +224,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(Some(json!({ "deleted": deleted })))
-            })
-        }),
+                Ok(DeleteMemoryResult { deleted })
+            }
+        },
     );
 
     // ---- Read-only: the CLAUDE.md at AgentMux's shared Claude provider
@@ -341,5 +337,134 @@ mod claude_global_config_tests {
         let result = read_claude_global_config(dir.path()).unwrap();
         assert!(result.exists);
         assert_eq!(result.content.as_deref(), Some(""));
+    }
+}
+
+#[cfg(test)]
+mod delete_memory_tests {
+    use super::*;
+    use crate::backend::rpc_types::{RpcMessage, COMMAND_DELETE_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY};
+    use crate::server::tests::test_state;
+
+    fn seed_memory(state: &AppState, id: &str, is_system: bool) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        let memory = Memory {
+            id: id.to_string(),
+            name: "Test Memory".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: now,
+            updated_at: now,
+            is_system,
+        };
+        if is_system {
+            state.id_store.bundle_memory_upsert_system(&memory).unwrap();
+        } else {
+            state.id_store.bundle_memory_upsert(&memory).unwrap();
+        }
+    }
+
+    async fn send(engine: &Arc<WshRpcEngine>, output_rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>, command: &str, id: &str) -> RpcMessage {
+        engine.handle_message(RpcMessage {
+            command: command.to_string(),
+            reqid: format!("req-{command}"),
+            data: Some(serde_json::json!({ "id": id })),
+            ..Default::default()
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    /// The wire behaviour a caller depends on is unchanged by the migration:
+    /// deleting a real row answers `{ deleted: true }`, and the schema now
+    /// records the exact type names ts-rs generated bindings from.
+    #[tokio::test]
+    async fn deletememory_deletes_a_real_row_and_reports_it() {
+        let state = test_state();
+        seed_memory(&state, "mem-1", false);
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        let resp = send(&engine, &mut output_rx, COMMAND_DELETE_MEMORY, "mem-1").await;
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert!(result.deleted);
+
+        assert!(state.id_store.bundle_memory_get("mem-1").unwrap().is_none());
+    }
+
+    /// Deleting an id that never existed is not an error — it answers
+    /// `{ deleted: false }`, same as the pre-migration `json!({"deleted": ..})`
+    /// body did.
+    #[tokio::test]
+    async fn deletememory_reports_false_for_an_unknown_id() {
+        let state = test_state();
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        let resp = send(&engine, &mut output_rx, COMMAND_DELETE_MEMORY, "does-not-exist").await;
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert!(!result.deleted);
+    }
+
+    #[tokio::test]
+    async fn deletesystemmemory_deletes_a_real_system_row_and_reports_it() {
+        let state = test_state();
+        seed_memory(&state, "sysmem-1", true);
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        let resp = send(&engine, &mut output_rx, COMMAND_DELETE_SYSTEM_MEMORY, "sysmem-1").await;
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert!(result.deleted);
+    }
+
+    /// Both commands are recorded in the engine's schema with their exact
+    /// type names, and share ONE response type (DeleteMemoryResult) the
+    /// same way they already shared CommandDeleteMemoryData as a request.
+    #[tokio::test]
+    async fn register_typed_records_both_delete_commands_sharing_one_response_type() {
+        let state = test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        for cmd in [COMMAND_DELETE_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY] {
+            let row = rows
+                .iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"));
+            assert_eq!(row["requestName"], "CommandDeleteMemoryData");
+            assert_eq!(row["responseName"], "DeleteMemoryResult");
+        }
+        // listmemories/getmemory/upsertmemory/reorderglobalbrain/
+        // upsertsystemmemory are deliberately NOT migrated (Memory-shaped
+        // responses, or upsert bodies that ARE the storage entity) and must
+        // stay absent from the schema.
+        for cmd in [
+            COMMAND_LIST_MEMORIES,
+            COMMAND_GET_MEMORY,
+            COMMAND_UPSERT_MEMORY,
+            COMMAND_REORDER_GLOBAL_BRAIN,
+            COMMAND_UPSERT_SYSTEM_MEMORY,
+        ] {
+            assert!(
+                rows.iter().all(|r| r["command"] != cmd),
+                "{cmd} is not migrated and must not appear in the schema",
+            );
+        }
     }
 }
