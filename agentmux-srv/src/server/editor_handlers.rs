@@ -8,6 +8,7 @@ use crate::backend::rpc_types::{
     COMMAND_WRITE_AGENT_CONFIG,
     CommandWriteAgentConfigData,
 };
+use crate::backend::agent_config::BUNDLE_SECTION_HEADING;
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::storage::store::Store;
 
@@ -78,7 +79,7 @@ fn list_drives() -> Vec<serde_json::Value> {
 
 /// Prepend global memory bundle content into the `# Bundle` section of a
 /// CLAUDE.md string, mirroring the injection done by `write_agent_config_files`
-/// in the `agent.open` RPC path.  If the file has no `# Bundle` section, a new
+/// in the `agent.open` RPC path.  If the file has no `BUNDLE_SECTION_HEADING` section, a new
 /// one is inserted before `# Available Skills` (or at the end of the file).
 fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
     let bundles = id_store.bundle_list_global().unwrap_or_default();
@@ -87,19 +88,20 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
         return claude_md.to_string();
     }
 
-    // Inject after the `# Bundle\n` heading if it exists.
-    if let Some(pos) = claude_md.find("\n# Bundle\n") {
-        let insert_at = pos + "\n# Bundle\n".len();
+    // Inject after the `BUNDLE_SECTION_HEADING` line if it exists.
+    let heading_line = format!("\n{BUNDLE_SECTION_HEADING}\n");
+    if let Some(pos) = claude_md.find(&heading_line) {
+        let insert_at = pos + heading_line.len();
         let (before, after) = claude_md.split_at(insert_at);
         format!("{}{}\n\n---\n\n{}", before, bundle_block, after)
     } else {
-        // No memory section — insert one before `# Available Skills` or append.
+        // No bundle section — insert one before `# Available Skills` or append.
         let anchor = "\n# Available Skills\n";
         if let Some(pos) = claude_md.find(anchor) {
             let (before, after) = claude_md.split_at(pos);
-            format!("{}\n# Bundle\n{}{}", before, bundle_block, after)
+            format!("{before}{heading_line}{bundle_block}{after}")
         } else {
-            format!("{}\n# Bundle\n{}\n", claude_md, bundle_block)
+            format!("{claude_md}{heading_line}{bundle_block}\n")
         }
     }
 }

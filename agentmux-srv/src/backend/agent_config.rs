@@ -79,7 +79,7 @@ pub fn build_config_files(
     template_vars.insert("DATE".to_string(), Utc::now().format("%Y-%m-%d").to_string());
 
     // ----------------------------------------------------------------
-    // Build the startup instructions file: Soul + AgentMD + Bundle + Skills index
+    // Build the startup instructions file: Soul + AgentMD + Memory + Skills index
     // ----------------------------------------------------------------
     let mut instructions_parts: Vec<String> = Vec::new();
 
@@ -93,7 +93,7 @@ pub fn build_config_files(
         instructions_parts.push(expand_template(agentmd, &template_vars));
     }
     if let Some(memory) = content_map.get("memory") {
-        instructions_parts.push("\n# Bundle\n".to_string());
+        instructions_parts.push(format!("\n{BUNDLE_SECTION_HEADING}\n"));
         instructions_parts.push(memory.clone());
     }
 
@@ -907,6 +907,16 @@ pub const CLAUDE_MD_MANAGED_MARKER: &str = "<!-- agentmux:managed-claude-md -->"
 /// composition when the real `CLAUDE.md` is foreign — always safe to
 /// regenerate in place every launch, unlike `CLAUDE.md` itself in that case.
 pub const AGENTMUX_MEMORY_FILENAME: &str = ".claude/AGENTMUX_MEMORY.md";
+
+/// Heading of the bundle-content section in a generated `CLAUDE.md`.
+///
+/// Persisted format marker, NOT an internal identifier: the frontend builder
+/// (`frontend/app/view/agent/agent-config-builder.ts`) emits the same literal,
+/// and `editor_handlers::inject_global_bundles` searches for it to prepend the
+/// global block ahead of per-agent content. All three must agree, so the string
+/// stays `# Memory` until the frontend heading changes in the same release
+/// (SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md §4 do-not-rename list).
+pub const BUNDLE_SECTION_HEADING: &str = "# Memory";
 
 /// One-time marker recording whether the `@import` line (below) has
 /// already been offered for this working directory. Checked INSTEAD of
@@ -2031,11 +2041,11 @@ mod tests {
     #[test]
     fn claude_md_fresh_working_dir_writes_directly_with_the_marker() {
         let dir = tempfile::tempdir().unwrap();
-        write_claude_md_respecting_ownership(dir.path(), "Soul + AgentMD + Bundle + Skills").unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "Soul + AgentMD + Memory + Skills").unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
         assert!(content.starts_with(CLAUDE_MD_MANAGED_MARKER));
-        assert!(content.contains("Soul + AgentMD + Bundle + Skills"));
+        assert!(content.contains("Soul + AgentMD + Memory + Skills"));
         // No foreign-file side effects on the common (fresh dir) path.
         assert!(!dir.path().join(AGENTMUX_MEMORY_FILENAME).exists());
     }
@@ -2212,5 +2222,19 @@ mod tests {
         // user re-adds the import line themselves later.
         let side_file = std::fs::read_to_string(dir.path().join(AGENTMUX_MEMORY_FILENAME)).unwrap();
         assert_eq!(side_file, "v2");
+    }
+}
+
+#[cfg(test)]
+mod bundle_section_heading_tests {
+    use super::BUNDLE_SECTION_HEADING;
+
+    /// Pins the persisted heading. `frontend/app/view/agent/agent-config-builder.ts`
+    /// pushes the identical literal; if this test fails, change both sides in
+    /// the same release or the global-bundle injector falls back to appending
+    /// a second heading after the per-agent content.
+    #[test]
+    fn heading_matches_frontend_builder_literal() {
+        assert_eq!(BUNDLE_SECTION_HEADING, "# Memory");
     }
 }

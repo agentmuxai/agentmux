@@ -217,7 +217,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(true) {
             return Err(StoreError::Other(
-                "cannot modify a system Global Bundle entry via the generic bundle upsert path"
+                "cannot modify a system Global Memory entry via the generic bundle upsert path"
                     .to_string(),
             ));
         }
@@ -278,7 +278,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(false) {
             return Err(StoreError::Other(
-                "cannot convert an existing non-system Global Bundle entry into a system entry"
+                "cannot convert an existing non-system Global Memory entry into a system entry"
                     .to_string(),
             ));
         }
@@ -326,7 +326,7 @@ impl Store {
     pub fn bundle_delete(&self, id: &str) -> Result<bool, StoreError> {
         if id == "blank" {
             return Err(StoreError::Other(
-                "cannot delete the blank Bundle singleton".to_string(),
+                "cannot delete the blank Memory singleton".to_string(),
             ));
         }
         // Seeded bundles (IDs prefixed "seed-") are workspace defaults that
@@ -334,13 +334,13 @@ impl Store {
         // tombstone table and avoids the re-creation loop.
         if id.starts_with("seed-") {
             return Err(StoreError::Other(
-                "cannot delete a seeded Bundle; toggle is_global or clear its instructions instead".to_string(),
+                "cannot delete a seeded Memory bundle; toggle is_global or clear its instructions instead".to_string(),
             ));
         }
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, id)? == Some(true) {
             return Err(StoreError::Other(
-                "cannot delete a system Global Bundle entry via the generic delete path; use bundle_delete_system".to_string(),
+                "cannot delete a system Global Memory entry via the generic delete path; use bundle_delete_system".to_string(),
             ));
         }
         let rows = conn.execute("DELETE FROM db_bundles WHERE id = ?1", params![id])?;

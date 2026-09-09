@@ -647,7 +647,7 @@ AgentMux: intentionally empty.\n\
 This is an isolated Claude Code config directory (CLAUDE_CONFIG_DIR),\n\
 separate from your personal ~/.claude/CLAUDE.md, so this agent never\n\
 silently inherits your personal global instructions. To give every\n\
-agent shared instructions, use Armory -> Bundle -> Global instead --\n\
+agent shared instructions, use Armory -> Memory -> Global instead --\n\
 those compose into this agent's own project-level CLAUDE.md at launch,\n\
 not this file. See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.\n\
 -->\n";
