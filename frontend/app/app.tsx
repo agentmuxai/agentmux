@@ -194,6 +194,19 @@ const AppKeyHandlers = () => {
     return null;
 };
 
+// Shared by AppZoomHandler and AppAllPanesZoomHandler below — both route a
+// wheel event to chrome-zoom vs. pane-zoom based on the identical hit-test.
+// A single helper means a future change to which elements count as "chrome"
+// only has one call site to update, not two that must be remembered and kept
+// in sync (ReAgent P2, PR #3090).
+function isOverChrome(target: HTMLElement): boolean {
+    return (
+        !!target.closest(".window-header") ||
+        !!target.closest(".status-bar") ||
+        !!target.closest(".block-frame-default-header")
+    );
+}
+
 const AppZoomHandler = () => {
     onMount(() => {
         const handleWheel = (e: WheelEvent) => {
@@ -215,7 +228,7 @@ const AppZoomHandler = () => {
             const zoomOut = e.deltaY > 0;
 
             // Check if hovering over chrome (title bar, status bar, or pane header)
-            if (target.closest(".window-header") || target.closest(".status-bar") || target.closest(".block-frame-default-header")) {
+            if (isOverChrome(target)) {
                 if (zoomOut) chromeZoomOut(WHEEL_STEP);
                 else chromeZoomIn(WHEEL_STEP);
                 return;
@@ -260,7 +273,7 @@ const AppAllPanesZoomHandler = () => {
             const target = e.target as HTMLElement;
             const zoomOut = e.deltaY > 0;
 
-            if (target.closest(".window-header") || target.closest(".status-bar") || target.closest(".block-frame-default-header")) {
+            if (isOverChrome(target)) {
                 if (zoomOut) chromeZoomOut(WHEEL_STEP);
                 else chromeZoomIn(WHEEL_STEP);
                 return;
