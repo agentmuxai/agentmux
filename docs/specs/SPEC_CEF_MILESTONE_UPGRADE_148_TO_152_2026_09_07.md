@@ -160,6 +160,140 @@ Note: `agentmuxai/cef` has **zero CI** (verified: `actions/workflows` → `total
 2. Rebase the `cef-dll-sys` binding patch (`begin_window_drag` slot) onto the 152 binding; publish as `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag`; update the `[patch.crates-io]` rev in root `Cargo.toml`.
 3. Fix compile fallout from CEF API changes across four milestones — **the least predictable item in this spec**; no way to size it before Phase A.
 
+> **Decision (2026-09-08): stage the rollout per platform instead of bumping the
+> workspace-wide `cef` version all at once — Windows moves to 152 first;
+> macOS/Linux stay on 148, in source and runtime both, until their own Phase D
+> builds land.** Repo owner's explicit requirement: all three platforms must
+> keep building and running throughout the upgrade, for end users *and* for
+> anyone developing on macOS/Linux locally — not just "existing releases don't
+> break." A plain workspace-wide bump doesn't satisfy that: the moment
+> `agentmux-cef/Cargo.toml`'s single `cef` version pin changes, `task dev` on a
+> macOS/Linux machine fails immediately (the crate-major/runtime-major
+> assertion in `Taskfile.yml` would reject the still-148 runtime against a
+> 152-linked binary) — loudly, by design, but still broken — until that
+> platform's own 152 runtime exists.
+>
+> **This is now known to be low-risk, not just theoretically appealing.**
+> Item 3 above was "the least predictable item in this spec" before this was
+> checked. It no longer is: every one of the 13 distinct `cef::Impl*` traits
+> `agentmux-cef`'s Rust source actually calls (`ImplWindow`, `ImplWindowDelegate`,
+> `ImplBrowser`, `ImplBrowserHost`, `ImplFrame`, `ImplView`, `ImplViewDelegate`,
+> `ImplPanel`, `ImplPanelDelegate`, `ImplTask`, `ImplAuthCallback`,
+> `ImplEndTracingCallback`, `ImplOverlayController`) maps to a C++ header under
+> upstream `include/`, and **all 12 of those headers are byte-for-byte identical
+> between CEF `7778` and `7977`** — verified by full-text diff against the real
+> files at both tags (`include/cef_auth_callback.h`, `include/cef_browser.h`,
+> `include/cef_trace.h`, `include/cef_frame.h`, `include/cef_task.h`,
+> `include/views/cef_{overlay_controller,panel,panel_delegate,view,
+> view_delegate,window,window_delegate}.h`), not sampled or inferred from a
+> changelog. (An earlier attempt at this check used GitHub's
+> Contents API against `include/capi/...` paths that don't exist in this repo's
+> layout — CEF's C API headers are generated at build time, not checked in —
+> and silently returned empty on both sides, producing a false "no diff"
+> result. The numbers above are from `raw.githubusercontent.com` fetches with
+> real, non-zero byte lengths confirmed on both sides first.)
+>
+> **The 12 trait headers being identical isn't quite the whole surface — all
+> of them transitively include `include/internal/cef_types.h`, which DOES
+> drift** (119,232 → 119,729 bytes). Diffed directly: the entire delta is three
+> `CEF_API_ADDED(...)`-guarded enum insertions — `CEF_CPAIT_*` (content-setting
+> page-action icon type, three new members added across API versions
+> 14900/15000/15200), `CEF_CTBT_TAB_SEARCH_DEPRECATED` (chrome toolbar button
+> type, 15100), and `CEF_PERMISSION_TYPE_LOCAL_NETWORK_ACCESS_DEPRECATED`
+> (permission-request type, 15000, converting an `#if`/`#endif` into an
+> `#if`/`#elif`). These shift enum numbering for those three families between
+> 148 and 152. Confirmed zero references to any of the three
+> (`CPAIT`/`content_setting`, `PermissionType`/`PERMISSION_TYPE`, `CTBT`/
+> `ChromeToolbarButtonType`) in `agentmux-cef/src` today — the two superficial
+> `PERMISSION_TYPE` grep hits (`browser_panes/media_grants.rs`,
+> `client/handlers.rs`) are the unrelated, ABI-stable
+> `cef_media_access_permission_types_t` bitmask, not the drifted
+> `cef_permission_request_types_t`. So "zero cfg-gating needed" still holds —
+> **but the bound is on the current call surface, not a permanent guarantee.**
+> If anyone later adds permission-prompt handling or content-settings UI while
+> Windows is on 152 and macOS/Linux are on 148, these three enum families are
+> exactly where a target split would first need `#[cfg(...)]` branching.
+> (Both the transitive-header gap and its resolution: Agent5, independently,
+> 2026-09-08.)
+>
+> **Correction (2026-09-08) — the mechanism first proposed here doesn't work,
+> confirmed by two independent reviewers (Codex and ReAgent) and reproduced
+> directly.** The original plan put `cef` as the dependency key in both
+> `[target.'cfg(...)'.dependencies]` tables, pointed at two different git
+> revisions. Cargo rejects that at manifest-parse time, before resolving
+> either target: *"Dependency 'cef' has different source paths depending on
+> the build target. Each dependency must have a single canonical source path
+> irrespective of build target."* Reproduced with `cargo metadata` on a
+> minimal two-git-revision repro. **This is not specific to two git
+> revisions of the same repo** — a follow-up simplification below (stock
+> registry `cef` for Windows, git fork for macOS/Linux) hits the identical
+> error, because a registry source and a git source are just as much "two
+> different source paths" as two git revisions are. Any arrangement that
+> reuses one dependency *key* across targets with different sources fails
+> the same way.
+>
+> **Windows-side simplification found in parallel (Agent5, 2026-09-08):**
+> `cef-rs`'s bindings are generated per target-triple
+> (`sys/src/bindings/x86_64_pc_windows_msvc.rs`,
+> `x86_64_unknown_linux_gnu.rs`, etc.). `AgentU-asaf/cef-rs`'s entire delta
+> from upstream is confined to **one file**,
+> `x86_64_unknown_linux_gnu.rs` (appending `begin_window_drag` to
+> `_cef_window_t`, bumping the size assert 888→896) — the Windows binding
+> file is untouched. Separately, `patched-libcef` (the feature gating the
+> only call site, `agentmux-cef/src/ui_tasks/drag.rs`) is never enabled on
+> Windows: Windows drags via its own `post_win32_begin_move` Win32 path, and
+> `args-windows.gn`'s header states the patch "never [was] needed" there. **So
+> Windows needs plain, unpatched, stock `cef = "152"` — no fork, no
+> `[patch.crates-io]` entry, nothing pinned to a git rev at all.** The 152
+> binding fork is only a prerequisite for *Linux's* eventual move to 152, not
+> for this Windows-first stage — deliberately not published yet (an
+> unverified size-assert offset with nothing to build against is exactly the
+> kind of thing that surfaces as a confusing ABI failure months later; better
+> derived alongside the Linux build that can check it).
+>
+> **The verified-correct mechanism, replacing steps 1-2 above** — distinct
+> dependency keys per platform (satisfying Cargo's one-canonical-source-per-key
+> rule) plus a target-gated `extern crate ... as cef;` re-export so every
+> existing `cef::` call site in the codebase needs zero changes. Proved with a
+> real `cargo check` (not just `cargo metadata`) exercising a shared code path
+> through the aliased name before writing this down:
+> 1. Remove `cef` from `agentmux-cef/Cargo.toml`'s plain `[dependencies]` and
+>    remove the root `[patch.crates-io]` block entirely.
+> 2. `[target.'cfg(target_os = "windows")'.dependencies]`:
+>    `cef_win = { package = "cef", version = "152" }` — stock, unpatched, per
+>    the simplification above.
+> 3. `[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]`:
+>    `cef_unix = { package = "cef", git = "https://github.com/AgentU-asaf/cef-rs", rev = "515b3ac53c" }`
+>    — the existing, already-working 148 fork rev, unchanged from today.
+> 4. In `agentmux-cef/src/lib.rs` (crate root):
+>    ```rust
+>    #[cfg(target_os = "windows")]
+>    extern crate cef_win as cef;
+>    #[cfg(any(target_os = "macos", target_os = "linux"))]
+>    extern crate cef_unix as cef;
+>    ```
+>    This makes `cef::Whatever` resolve to the correct per-platform crate
+>    everywhere in the codebase, with no other file touched.
+> 5. Validate with `cargo check --target x86_64-pc-windows-msvc` and
+>    `--target x86_64-unknown-linux-gnu` (or on real macOS/Linux boxes) before
+>    merging.
+> 6. Runtime pinning needs no change beyond what Phase E already does per
+>    platform (`release.yml`'s `cef-runtime-pins` job, #3085/#3086/#3089):
+>    Windows's pin advances to a new 152 tag once Phase D cuts it; macOS/Linux
+>    pins stay exactly as they are.
+>
+> **Exit condition for this staged state:** once Phase D lands working 152
+> builds for macOS and Linux too, collapse back into a single `[dependencies]`
+> entry (`cef = "152"`, no alias, no re-export) — this is meant to be
+> temporary scaffolding for the rollout window, not a permanent architecture.
+>
+> **Ownership, revised 2026-09-08:** the 152 binding fork is no longer a
+> Phase C prerequisite (Windows needs no fork at all, per above) — it becomes
+> a *Linux* Phase D task, to be done alongside a real build that can verify
+> the size-assert offset, owned by whoever takes Linux's Phase D. AgentX owns
+> the Cargo.toml target-gating restructuring (steps 1-5 above), which has no
+> remaining blocker.
+
 ### Phase D — Per-platform builds (three separate machines, unavoidably)
 
 Each platform is a distinct OS/toolchain and cannot be cross-built with the current setup. Documented cost, per platform, from `docs/cef-build/*`:
