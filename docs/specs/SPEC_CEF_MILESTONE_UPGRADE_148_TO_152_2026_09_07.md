@@ -216,42 +216,83 @@ Note: `agentmuxai/cef` has **zero CI** (verified: `actions/workflows` → `total
 > (Both the transitive-header gap and its resolution: Agent5, independently,
 > 2026-09-08.)
 >
-> **What this changes mechanically, replacing steps 1-2 above:**
-> `[patch.crates-io]` is a single global override keyed by crate name — Cargo
-> has no way to hold two different pinned revs of `cef-dll-sys` active for
-> different targets through that mechanism. Instead:
+> **Correction (2026-09-08) — the mechanism first proposed here doesn't work,
+> confirmed by two independent reviewers (Codex and ReAgent) and reproduced
+> directly.** The original plan put `cef` as the dependency key in both
+> `[target.'cfg(...)'.dependencies]` tables, pointed at two different git
+> revisions. Cargo rejects that at manifest-parse time, before resolving
+> either target: *"Dependency 'cef' has different source paths depending on
+> the build target. Each dependency must have a single canonical source path
+> irrespective of build target."* Reproduced with `cargo metadata` on a
+> minimal two-git-revision repro. **This is not specific to two git
+> revisions of the same repo** — a follow-up simplification below (stock
+> registry `cef` for Windows, git fork for macOS/Linux) hits the identical
+> error, because a registry source and a git source are just as much "two
+> different source paths" as two git revisions are. Any arrangement that
+> reuses one dependency *key* across targets with different sources fails
+> the same way.
+>
+> **Windows-side simplification found in parallel (Agent5, 2026-09-08):**
+> `cef-rs`'s bindings are generated per target-triple
+> (`sys/src/bindings/x86_64_pc_windows_msvc.rs`,
+> `x86_64_unknown_linux_gnu.rs`, etc.). `AgentU-asaf/cef-rs`'s entire delta
+> from upstream is confined to **one file**,
+> `x86_64_unknown_linux_gnu.rs` (appending `begin_window_drag` to
+> `_cef_window_t`, bumping the size assert 888→896) — the Windows binding
+> file is untouched. Separately, `patched-libcef` (the feature gating the
+> only call site, `agentmux-cef/src/ui_tasks/drag.rs`) is never enabled on
+> Windows: Windows drags via its own `post_win32_begin_move` Win32 path, and
+> `args-windows.gn`'s header states the patch "never [was] needed" there. **So
+> Windows needs plain, unpatched, stock `cef = "152"` — no fork, no
+> `[patch.crates-io]` entry, nothing pinned to a git rev at all.** The 152
+> binding fork is only a prerequisite for *Linux's* eventual move to 152, not
+> for this Windows-first stage — deliberately not published yet (an
+> unverified size-assert offset with nothing to build against is exactly the
+> kind of thing that surfaces as a confusing ABI failure months later; better
+> derived alongside the Linux build that can check it).
+>
+> **The verified-correct mechanism, replacing steps 1-2 above** — distinct
+> dependency keys per platform (satisfying Cargo's one-canonical-source-per-key
+> rule) plus a target-gated `extern crate ... as cef;` re-export so every
+> existing `cef::` call site in the codebase needs zero changes. Proved with a
+> real `cargo check` (not just `cargo metadata`) exercising a shared code path
+> through the aliased name before writing this down:
 > 1. Remove `cef` from `agentmux-cef/Cargo.toml`'s plain `[dependencies]` and
 >    remove the root `[patch.crates-io]` block entirely.
-> 2. Add `[target.'cfg(target_os = "windows")'.dependencies]` with
->    `cef = "152"`, patched via a target-scoped git dependency on
->    `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` (once published, per
->    step 2 above — still needed, `begin_window_drag` is confirmed absent from
->    the public 152 crate).
-> 3. Add `[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]`
->    with `cef = "148"`, pointed at the existing, already-working
->    `AgentU-asaf/cef-rs@515b3ac53c` rev — unchanged from today.
-> 4. Validate with `cargo check --target x86_64-pc-windows-msvc` and
+> 2. `[target.'cfg(target_os = "windows")'.dependencies]`:
+>    `cef_win = { package = "cef", version = "152" }` — stock, unpatched, per
+>    the simplification above.
+> 3. `[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]`:
+>    `cef_unix = { package = "cef", git = "https://github.com/AgentU-asaf/cef-rs", rev = "515b3ac53c" }`
+>    — the existing, already-working 148 fork rev, unchanged from today.
+> 4. In `agentmux-cef/src/lib.rs` (crate root):
+>    ```rust
+>    #[cfg(target_os = "windows")]
+>    extern crate cef_win as cef;
+>    #[cfg(any(target_os = "macos", target_os = "linux"))]
+>    extern crate cef_unix as cef;
+>    ```
+>    This makes `cef::Whatever` resolve to the correct per-platform crate
+>    everywhere in the codebase, with no other file touched.
+> 5. Validate with `cargo check --target x86_64-pc-windows-msvc` and
 >    `--target x86_64-unknown-linux-gnu` (or on real macOS/Linux boxes) before
->    merging — target-specific same-crate-different-version resolution is a
->    supported Cargo pattern, but this workspace has never used it for `cef`
->    specifically and it should be proven, not assumed.
-> 5. Runtime pinning needs no change beyond what Phase E already does per
+>    merging.
+> 6. Runtime pinning needs no change beyond what Phase E already does per
 >    platform (`release.yml`'s `cef-runtime-pins` job, #3085/#3086/#3089):
 >    Windows's pin advances to a new 152 tag once Phase D cuts it; macOS/Linux
 >    pins stay exactly as they are.
 >
 > **Exit condition for this staged state:** once Phase D lands working 152
-> builds for macOS and Linux too, collapse the target-gated tables back into a
-> single `[dependencies]` entry and delete the two `[target...]` blocks — this
-> is meant to be temporary scaffolding for the rollout window, not a permanent
-> architecture.
+> builds for macOS and Linux too, collapse back into a single `[dependencies]`
+> entry (`cef = "152"`, no alias, no re-export) — this is meant to be
+> temporary scaffolding for the rollout window, not a permanent architecture.
 >
-> **Ownership split, agreed 2026-09-08:** Agent5 owns step 2 above — rebasing
-> the `begin_window_drag` slot onto the 152 binding and publishing
-> `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` (`begin_window_drag`
-> confirmed still absent from upstream `cef-rs` at 152, so this stays a real
-> fork). AgentX owns the Cargo.toml target-gating restructuring (steps 1, 3-4)
-> once that rev exists.
+> **Ownership, revised 2026-09-08:** the 152 binding fork is no longer a
+> Phase C prerequisite (Windows needs no fork at all, per above) — it becomes
+> a *Linux* Phase D task, to be done alongside a real build that can verify
+> the size-assert offset, owned by whoever takes Linux's Phase D. AgentX owns
+> the Cargo.toml target-gating restructuring (steps 1-5 above), which has no
+> remaining blocker.
 
 ### Phase D — Per-platform builds (three separate machines, unavoidably)
 
