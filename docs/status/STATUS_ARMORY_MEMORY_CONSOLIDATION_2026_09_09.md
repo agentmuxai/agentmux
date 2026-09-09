@@ -1,6 +1,6 @@
 # Status: Armory Memory — Consolidated State and Naming Problem
 
-**Status:** open — four unresolved items (§4–§7), three of which need a product decision before more code lands
+**Status:** active — four unresolved items (§4–§7), three of which need a product decision before more code lands
 **Date:** 2026-09-09
 **Verified against:** `b65df28c2` (code, not spec prose)
 **Tracking issue:** #2024 (consolidated there 2026-09-09)
