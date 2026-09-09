@@ -324,7 +324,7 @@ impl LanDiscovery {
 
         // Register this instance. mdns-sd requires the host name passed to
         // `ServiceInfo::new` to end with `.local.` — we always normalize so
-        // a raw OS hostname like "claudius" becomes "claudius.local.".
+        // a raw OS hostname like "narko" becomes "narko.local.".
         // Unique per INSTANCE and dot-free — see `mdns_instance_label`. The
         // version still travels in the TXT record (`instance_id` below), which
         // is where peers actually read it from; it just must not be the
@@ -1267,29 +1267,29 @@ mod tests {
 
     #[test]
     fn appends_local_dot_to_bare_hostname() {
-        assert_eq!(mdns_hostname("claudius"), "claudius.local.");
+        assert_eq!(mdns_hostname("narko"), "narko.local.");
     }
 
     #[test]
     fn preserves_already_fully_qualified_name() {
-        assert_eq!(mdns_hostname("claudius.local."), "claudius.local.");
+        assert_eq!(mdns_hostname("narko.local."), "narko.local.");
     }
 
     #[test]
     fn appends_trailing_dot_to_local_suffix() {
         // mdns-sd needs the trailing dot; we add it without doubling .local.
-        assert_eq!(mdns_hostname("claudius.local"), "claudius.local.");
+        assert_eq!(mdns_hostname("narko.local"), "narko.local.");
     }
 
     #[test]
     fn handles_trailing_dot_on_bare_hostname() {
-        assert_eq!(mdns_hostname("claudius."), "claudius.local.");
+        assert_eq!(mdns_hostname("narko."), "narko.local.");
     }
 
     #[test]
     fn does_not_double_suffix() {
         // Two passes through the normalizer produce the same result.
-        let once = mdns_hostname("claudius");
+        let once = mdns_hostname("narko");
         let twice = mdns_hostname(&once);
         assert_eq!(twice, once);
     }
@@ -1663,17 +1663,17 @@ mod handle_event_tests {
 
         // Same host, two instances -> different labels (differing ports).
         assert_ne!(
-            super::mdns_instance_label("claudius", 59859),
-            super::mdns_instance_label("claudius", 60237),
+            super::mdns_instance_label("narko", 59859),
+            super::mdns_instance_label("narko", 60237),
         );
         // Two hosts on the SAME version -> different labels. This is the
         // property the old version-derived name did not have.
         assert_ne!(
-            super::mdns_instance_label("claudius", 59859),
+            super::mdns_instance_label("narko", 59859),
             super::mdns_instance_label("gamerlove", 59859),
         );
         // No version anywhere in it, deliberately.
-        assert!(!super::mdns_instance_label("claudius", 59859).contains("0.55"));
+        assert!(!super::mdns_instance_label("narko", 59859).contains("0.55"));
     }
 
     #[test]
