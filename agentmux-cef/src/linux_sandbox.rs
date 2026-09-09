@@ -122,9 +122,15 @@ mod imp {
     use super::*;
     use std::process::Command;
 
-    /// Run the actual `unshare(CLONE_NEWUSER)` syscall and exit — called
-    /// from the very top of `lib.rs::run()`, before any other startup work,
-    /// when this process was re-exec'd with `INTERNAL_PROBE_USERNS_FLAG`.
+    /// Run `unshare(CLONE_NEWUSER)` followed by a `uid_map` write, and
+    /// exit reflecting whether both succeeded — called from the very top
+    /// of `lib.rs::run()`, before any other startup work, when this
+    /// process was re-exec'd with `INTERNAL_PROBE_USERNS_FLAG`. The
+    /// `uid_map` write is load-bearing, not defensive: `unshare()` alone
+    /// always succeeds under Ubuntu's AppArmor userns restriction, which
+    /// instead denies CAP_SYS_ADMIN inside the new namespace — the
+    /// capability `uid_map` (and CEF's own sandbox setup) actually needs.
+    /// See the exit-code comment below for the audit-log evidence.
     ///
     /// Safe to call `libc::unshare()` directly in-process here (unlike the
     /// general fork()-in-a-multithreaded-process hazard noted elsewhere in
@@ -132,12 +138,46 @@ mod imp {
     /// — it never spawns the async runtime, CEF, or any additional thread;
     /// this function is the entire lifetime of the process.
     pub fn run_internal_userns_probe_and_exit() -> ! {
+        // Must be read BEFORE unshare(): once inside the new namespace,
+        // getuid() returns the overflow UID (65534, "nobody") until
+        // uid_map is written — the new namespace's mapping starts empty,
+        // so the kernel has no UID to report yet (user_namespaces(7)).
+        // An unprivileged process may only map its own real (parent-ns)
+        // UID into uid_map; writing the overflow UID instead would always
+        // be rejected, permanently flipping this probe from "always false
+        // positive" to "always false negative" — even after the AppArmor
+        // fix is installed, every launch would loop back to the recovery
+        // dialog (codex P1 on this same PR).
+        let real_uid = unsafe { libc::getuid() };
         // SAFETY: unshare() takes a single integer flag argument and
         // touches no Rust-managed memory; this process has no other
         // threads (see doc comment) so there is no concurrent state for
         // the namespace change to race with.
         let rc = unsafe { libc::unshare(libc::CLONE_NEWUSER) };
-        std::process::exit(if rc == 0 { 0 } else { 1 });
+        if rc != 0 {
+            std::process::exit(1);
+        }
+        // A bare unshare(CLONE_NEWUSER) succeeds unconditionally under
+        // Ubuntu's AppArmor userns restriction — confirmed via the audit
+        // log: `apparmor="AUDIT" operation="userns_create" ...
+        // profile="unconfined"` (not a denial). The restriction instead
+        // transitions the process into a synthetic `unprivileged_userns`
+        // profile *inside* the new namespace that denies CAP_SYS_ADMIN
+        // (`apparmor="DENIED" ... capability=21 capname="sys_admin"`),
+        // which is what writing uid_map/gid_map — and CEF's own
+        // subsequent mount/pivot_root calls — needs. Stopping at
+        // unshare() alone is a false positive: it reports "available"
+        // even when policy blocks the sandbox, so the recovery dialog
+        // never fires and CEF's real sandbox init hits Chromium's hard
+        // FATAL check instead (zygote_host_impl_linux.cc "No usable
+        // sandbox!"). Writing uid_map exercises the exact capability the
+        // policy actually gates. gid_map is left untouched: per
+        // user_namespaces(7) it additionally requires
+        // /proc/self/setgroups=deny first, but uid_map alone already
+        // proves whether CAP_SYS_ADMIN is available in the new ns.
+        let mapping = format!("0 {} 1\n", real_uid);
+        let ok = std::fs::write("/proc/self/uid_map", mapping).is_ok();
+        std::process::exit(if ok { 0 } else { 1 });
     }
 
     /// Deterministically test whether unprivileged user-namespace creation
