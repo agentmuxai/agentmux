@@ -391,18 +391,31 @@ pub(crate) async fn handle_save_session_snapshot(
 ///
 /// Walks `windowids` rather than only checking the first: the repo's own
 /// restart/reprojection paths already tolerate a polluted `windowids` list
-/// (a stale id whose `Window` row no longer exists), so that state can and
-/// does occur in real persisted data. Bailing out on `windowids[0]` alone
+/// (a stale id whose `Window` row no longer exists, or whose `Window` row
+/// exists but references a `Workspace` that's gone), so that state can and
+/// does occur in real persisted data. Bailing out on the first entry alone
+/// — whether it's missing outright or just points at a dead workspace —
 /// would skip the flush entirely whenever that specific entry is stale, even
-/// with a perfectly good workspace sitting at `windowids[1]`.
+/// with a perfectly good workspace sitting at a later id (Codex P2 on
+/// #3106's first fix, then again on the fix itself: the first pass only
+/// checked that the `Window` row existed, not that its `workspaceid` still
+/// resolved to a live `Workspace`).
 fn current_workspace_id(store: &Store) -> Option<String> {
     let client = store.get_all::<Client>().ok()?.into_iter().next()?;
     client.windowids.iter().find_map(|window_id| {
-        store
+        let window = store
             .get::<crate::backend::obj::Window>(window_id)
             .ok()
-            .flatten()
-            .map(|window| window.workspaceid)
+            .flatten()?;
+        // A live Window row pointing at a dead Workspace is exactly the
+        // shape `shutdown_flush_survives_a_missing_workspace` exercises for
+        // a single window — here it must not stop the search, only rule out
+        // this one candidate.
+        store
+            .get::<Workspace>(&window.workspaceid)
+            .ok()
+            .flatten()?;
+        Some(window.workspaceid)
     })
 }
 
@@ -1100,14 +1113,20 @@ mod tests {
 
     /// Defensive path: the client's window points at a workspace that is gone.
     /// "Survives" means the handler returns promptly with no panic and no
-    /// partial/corrupt write — NOT that it reports success. Revised for
-    /// reagentx P1 on #3106: this handler previously always returned
-    /// `success_empty()` regardless of what actually happened, which meant
-    /// the cef-side re-arm-on-failure logic (built to fix a *different*
-    /// finding on the same PR) could only ever see success from srv and
-    /// never got a real signal to retry on the OS's second trigger. Nothing
-    /// was captured here, so this must now report failure — that is the
-    /// signal the retry logic exists to act on, not noise to suppress.
+    /// partial/corrupt write. Final reasoning, after two rounds of revision
+    /// on #3106 (see git history if the "why" ever seems arbitrary):
+    ///
+    /// A single window whose workspace is dead is now caught by
+    /// `current_workspace_id` itself (`shutdown_flush_skips_a_window_whose_
+    /// workspace_is_gone`'s fix) — it's no longer "found a workspace id that
+    /// then failed to snapshot," it's "found no live workspace among any
+    /// window," the exact same bucket as
+    /// `shutdown_flush_with_no_window_at_all_is_not_an_error`. Retrying a
+    /// genuinely-deleted workspace can't produce a different outcome, so
+    /// treating this as ordinary (not a failure worth the retry logic
+    /// acting on) is correct, not a gap: the two tests are no longer "two
+    /// sides of a fork," they're two different inputs that correctly
+    /// converge on the same output.
     #[tokio::test]
     async fn shutdown_flush_survives_a_missing_workspace() {
         let state = test_state();
@@ -1117,8 +1136,8 @@ mod tests {
         let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
 
         assert!(
-            ret.error.is_some(),
-            "nothing was captured — the caller needs to know, so it can re-arm and retry"
+            ret.error.is_none(),
+            "no live workspace among any window is ordinary, not a failure"
         );
         assert!(
             load_last_session_snapshot(&state.wstore).is_none(),
@@ -1126,15 +1145,49 @@ mod tests {
         );
     }
 
-    /// The other side of the fork the previous test locks in: a shutdown
-    /// arriving before the first window exists at all (no client, or a
-    /// client with no live window) is ordinary, not a failure — reporting
-    /// error here would just be noise on every fresh launch that happens to
-    /// shut down early. Deliberately distinct from
-    /// `shutdown_flush_survives_a_missing_workspace`, where a window DOES
-    /// exist but points at nothing: that case now correctly reports failure
-    /// so the retry logic can act on it, and this test exists so a future
-    /// change doesn't collapse the two cases back together.
+    /// The failure path `handle_save_session_snapshot` actually exists to
+    /// report (reagentx P1): `current_workspace_id` finds a genuinely live
+    /// window+workspace, but `snapshot_workspace` still can't build anything
+    /// from it — every tab it walked was skipped (here: a tab with zero
+    /// blocks, `snapshot_workspace`'s own `if blocks.is_empty() { continue }`
+    /// followed by `if tabs.is_empty() { return None }`). Unlike the two
+    /// tests above, this is NOT "nothing exists" — a real workspace is
+    /// sitting right there — so this is exactly the "something existed but
+    /// couldn't be captured" case the retry logic is meant to act on, and it
+    /// must report failure.
+    #[tokio::test]
+    async fn shutdown_flush_reports_failure_when_the_workspace_has_no_capturable_tabs() {
+        let state = test_state();
+        let ws_id = bootstrapped_workspace(&state);
+        let workspace = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        for tab_id in workspace.pinnedtabids.iter().chain(workspace.tabids.iter()) {
+            let mut tab = state.wstore.get::<Tab>(tab_id).unwrap().unwrap();
+            for block_id in tab.blockids.drain(..) {
+                let _ = state.wstore.delete::<Block>(&block_id);
+            }
+            state.wstore.update(&mut tab).unwrap();
+        }
+
+        let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        assert!(
+            ret.error.is_some(),
+            "a live workspace with nothing capturable in it must report failure, not silent success"
+        );
+        assert!(
+            load_last_session_snapshot(&state.wstore).is_none(),
+            "nothing capturable means nothing written — not a partial snapshot"
+        );
+    }
+
+    /// A shutdown arriving before the first window exists at all (no
+    /// client, or a client with no live window) is ordinary, not a failure —
+    /// reporting error here would just be noise on every fresh launch that
+    /// happens to shut down early. Same outcome and same reasoning as
+    /// `shutdown_flush_survives_a_missing_workspace` now that
+    /// `current_workspace_id` filters dead-workspace windows itself — kept
+    /// as its own test anyway so a future change to either input shape is
+    /// still checked independently.
     #[tokio::test]
     async fn shutdown_flush_with_no_window_at_all_is_not_an_error() {
         let state = test_state();
@@ -1205,5 +1258,65 @@ mod tests {
             snapshot, expected,
             "must resolve to and capture the real workspace, not silently skip it"
         );
+    }
+
+    /// Codex's follow-up P2 on the fix above: a stale *entry* isn't only "no
+    /// `Window` row at all" — a `Window` row can exist and be perfectly
+    /// readable while its `workspaceid` points at a `Workspace` that's gone
+    /// (exactly the single-window shape
+    /// `shutdown_flush_survives_a_missing_workspace` exercises). The first
+    /// pass at walking `windowids` only checked that the `Window` row
+    /// existed, so it would accept that dead workspace id as the answer and
+    /// stop, even with a live workspace behind a later window.
+    #[tokio::test]
+    async fn shutdown_flush_skips_a_window_whose_workspace_is_gone() {
+        let state = test_state();
+        let live_ws_id = bootstrapped_workspace(&state);
+
+        let mut client = state
+            .wstore
+            .get_all::<Client>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let live_window_id = client
+            .windowids
+            .first()
+            .cloned()
+            .expect("test_state seeds exactly one window");
+
+        // A second Window row, readable and legitimate, pointing at a
+        // workspace id that was never created — indistinguishable from one
+        // that existed and was later deleted, which is the real-world shape
+        // this guards against.
+        let mut dead_window = crate::backend::obj::Window {
+            oid: "dead-window-with-deleted-workspace".to_string(),
+            workspaceid: "workspace-that-was-deleted".to_string(),
+            ..Default::default()
+        };
+        state.wstore.insert(&mut dead_window).unwrap();
+
+        // Leading: the resolver must not stop here.
+        client.windowids.insert(0, dead_window.oid.clone());
+        state.wstore.update(&mut client).unwrap();
+
+        let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        assert!(
+            ret.error.is_none(),
+            "a dead-workspace window must not fail the whole flush when a live one follows"
+        );
+        let snapshot = load_last_session_snapshot(&state.wstore)
+            .expect("the live workspace behind the second window must still be captured");
+        let expected = snapshot_workspace(&state.wstore, &live_ws_id)
+            .expect("the real workspace is independently snapshot-able");
+        assert_eq!(
+            snapshot, expected,
+            "must resolve to and capture the live workspace, not the dead one it's paired with"
+        );
+        // Sanity: prove the two windows really do disagree, so a bug that
+        // silently ignored windowids order couldn't pass by accident.
+        assert_ne!(live_window_id, dead_window.oid);
     }
 }

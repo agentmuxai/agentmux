@@ -940,39 +940,62 @@ fn session_end_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate:
     &S
 }
 
-/// Whether this process has already flushed for the shutdown attempt
-/// currently in progress.
-///
-/// Both `WM_QUERYENDSESSION` and `WM_ENDSESSION` arrive, and each arrives once
-/// per top-level window — so with a main window plus Subwindows the flush
-/// could otherwise run several times against the same store during the few
-/// seconds the OS allows. One flush captures the whole topology (srv reads its
-/// own state rather than taking a window argument), so the rest are pure waste
-/// of a bounded budget.
-///
-/// Reset to `false` whenever the in-flight attempt didn't land — on
-/// `WM_ENDSESSION` wParam FALSE (the shutdown was cancelled), or when the
-/// flush itself failed to actually persist (no AppState, unreachable srv, or
-/// a save that didn't succeed server-side). This is per-*attempt*, not
-/// per-process: Windows shutdown can be vetoed and retried later in the same
-/// running process, and `WM_ENDSESSION(TRUE)` is deliberately kept as a
-/// second, redundant trigger for exactly the case where the first one
-/// failed. Without both resets, the compare_exchange below records only that
-/// an attempt was *made*, not that it *succeeded* — a failed first attempt
-/// would permanently block the real second chance from ever running.
+/// Whether *any* flush attempt for the current shutdown round has already
+/// succeeded. Checked before every attempt in either phase below: once
+/// true, neither phase tries again.
 #[cfg(target_os = "windows")]
-static SESSION_END_FLUSHED: std::sync::atomic::AtomicBool =
+static SESSION_END_SUCCEEDED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// Flush once, inline. Returns immediately if any window already did it.
+/// Whether the query-phase (`WM_QUERYENDSESSION`) attempt has been made for
+/// the shutdown round currently in progress -- regardless of outcome.
+///
+/// `WM_QUERYENDSESSION` arrives once per top-level window, so with a main
+/// window plus Subwindows/pool windows it could otherwise trigger several
+/// concurrent flush attempts for what is still the SAME round. Codex P1 on
+/// #3106's fix-of-a-fix: an earlier version of this hook reset a single
+/// shared latch on any failure, which meant a failed flush on window A's
+/// query message left the latch open for window B's query message to also
+/// attempt one -- with several windows, a slow-or-unreachable srv could burn
+/// N sequential 1.5s timeouts inside the query phase alone, risking Windows
+/// terminating the process before the round even reaches `WM_ENDSESSION`,
+/// the phase that's actually meant to be the retry. Query-phase dedup and
+/// end-session-phase dedup are now tracked separately (see
+/// `SESSION_END_RETRY_ATTEMPTED` below) so the two phases combined make at
+/// most one attempt each -- never one attempt per window.
 #[cfg(target_os = "windows")]
-fn flush_session_snapshot_once(reason: &str) {
+static SESSION_END_QUERY_ATTEMPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the end-session-phase (`WM_ENDSESSION` wParam TRUE) retry has
+/// been made for the current round -- the same per-phase dedup as
+/// `SESSION_END_QUERY_ATTEMPTED` above, kept as a separate flag because the
+/// two phases must each get their own independent one-shot budget.
+#[cfg(target_os = "windows")]
+static SESSION_END_RETRY_ATTEMPTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Make at most one flush attempt for `phase_attempted`, and only if no
+/// attempt in either phase has already succeeded this round.
+/// `phase_attempted` is `SESSION_END_QUERY_ATTEMPTED` or
+/// `SESSION_END_RETRY_ATTEMPTED` depending on which message is calling -- each
+/// phase gets its own one-shot budget, so this never runs more than twice
+/// total per shutdown round (once per phase), regardless of window count.
+#[cfg(target_os = "windows")]
+fn flush_session_snapshot_once(
+    reason: &str,
+    phase_attempted: &'static std::sync::atomic::AtomicBool,
+) {
     use std::sync::atomic::Ordering;
 
+    if SESSION_END_SUCCEEDED.load(Ordering::SeqCst) {
+        return;
+    }
+
     // compare_exchange rather than load-then-store: session-end messages can
-    // reach several top-level windows, and a double flush burns budget we do
-    // not have.
-    if SESSION_END_FLUSHED
+    // reach several top-level windows, and a double attempt within the same
+    // phase burns budget we do not have.
+    if phase_attempted
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
@@ -981,18 +1004,14 @@ fn flush_session_snapshot_once(reason: &str) {
 
     let Some(state) = session_end_app_state().get() else {
         tracing::warn!(
-            "[session-flush] no AppState registered — cannot flush on {}",
+            "[session-flush] no AppState registered -- cannot flush on {}",
             reason
         );
-        // Re-arm: nothing was attempted, so the latch must not read as
-        // "already flushed" for a later trigger in this same shutdown
-        // attempt (see the failure re-arm below for why this matters).
-        SESSION_END_FLUSHED.store(false, Ordering::SeqCst);
         return;
     };
 
     tracing::info!(
-        "[session-flush] OS session ending ({}) — flushing snapshot",
+        "[session-flush] OS session ending ({}) -- flushing snapshot",
         reason
     );
     // Same accessors the close path uses (`lifecycle.rs:1402-1403`): both are
@@ -1002,14 +1021,13 @@ fn flush_session_snapshot_once(reason: &str) {
     let auth_key = state.auth_key.lock().clone();
     let saved = super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key);
 
-    // The compare_exchange above marks the ATTEMPT complete, not the save.
-    // If it didn't actually persist (unreachable srv, write failure, timeout),
-    // re-arm so WM_ENDSESSION(TRUE) — the second, redundant-by-design trigger
-    // — gets a genuine second try instead of short-circuiting on a latch that
-    // only ever recorded that we tried, not that we succeeded.
-    if !saved {
-        SESSION_END_FLUSHED.store(false, Ordering::SeqCst);
+    if saved {
+        SESSION_END_SUCCEEDED.store(true, Ordering::SeqCst);
     }
+    // On failure, deliberately NOT re-armed here: `phase_attempted` staying
+    // true is what caps THIS phase at exactly one attempt across every
+    // window. The retry lives in the other phase (WM_ENDSESSION after a
+    // failed WM_QUERYENDSESSION), not in re-running this same phase again.
 }
 
 #[cfg(target_os = "windows")]
@@ -1025,7 +1043,7 @@ unsafe extern "system" fn session_end_wndproc(
 
     // WM_QUERYENDSESSION: the OS is ASKING whether it may shut down. Flush
     // here and not only on WM_ENDSESSION, because this is the roomier of the
-    // two — WM_ENDSESSION can be followed by termination almost immediately.
+    // two -- WM_ENDSESSION can be followed by termination almost immediately.
     //
     // Never return 0 from this arm: that vetoes the shutdown, which is not
     // ours to decide, and `ShutdownBlockReasonCreate` is the sanctioned way to
@@ -1033,30 +1051,37 @@ unsafe extern "system" fn session_end_wndproc(
     // lets CEF/Views see the message and DefWindowProc supply the TRUE.
     //
     // The shutdown may still be cancelled afterwards (another app vetoes, or
-    // the user backs out) — WM_ENDSESSION wParam FALSE below resets the latch
-    // for exactly that case, so a later retry in this process flushes again
-    // rather than trusting a snapshot that may already be stale.
+    // the user backs out) -- WM_ENDSESSION wParam FALSE below resets all three
+    // flags for exactly that case, so a later retry in this process gets its
+    // own fresh one-attempt-per-phase budget rather than finding both phases
+    // already marked attempted from the cancelled round.
     if msg == WM_QUERYENDSESSION {
-        flush_session_snapshot_once("WM_QUERYENDSESSION");
+        flush_session_snapshot_once("WM_QUERYENDSESSION", &SESSION_END_QUERY_ATTEMPTED);
     }
 
     // WM_ENDSESSION with wParam TRUE means the session really is ending. Kept
-    // as a second trigger because not every shutdown path is guaranteed to
-    // deliver a query round first; once the flag is set this is a no-op, so
-    // the redundancy is free.
+    // as a second, independent-budget trigger because not every shutdown path
+    // is guaranteed to deliver a query round first, and because the query
+    // phase may have failed -- `flush_session_snapshot_once` itself checks
+    // `SESSION_END_SUCCEEDED` first, so this is a genuine no-op (not a wasted
+    // network call) once the query phase already landed.
     //
     // wParam FALSE means the reverse: this shutdown attempt was cancelled
-    // (another app vetoed, or the user backed out) — the "may still be
+    // (another app vetoed, or the user backed out) -- the "may still be
     // cancelled afterwards" case the WM_QUERYENDSESSION comment above already
-    // names. Reset the latch here: shutdown can be retried later in the same
-    // process, state can drift between the cancelled attempt and the real
-    // one, and a stale "already flushed" would silently skip the flush that
-    // actually matters, defeating the whole point of this hook.
+    // names. Reset all three flags here: shutdown can be retried later in the
+    // same process, state can drift between the cancelled attempt and the
+    // real one, and stale "already attempted" markers would silently skip
+    // the flush that actually matters, defeating the whole point of this
+    // hook.
     if msg == WM_ENDSESSION {
         if wparam != 0 {
-            flush_session_snapshot_once("WM_ENDSESSION");
+            flush_session_snapshot_once("WM_ENDSESSION", &SESSION_END_RETRY_ATTEMPTED);
         } else {
-            SESSION_END_FLUSHED.store(false, std::sync::atomic::Ordering::SeqCst);
+            use std::sync::atomic::Ordering;
+            SESSION_END_QUERY_ATTEMPTED.store(false, Ordering::SeqCst);
+            SESSION_END_RETRY_ATTEMPTED.store(false, Ordering::SeqCst);
+            SESSION_END_SUCCEEDED.store(false, Ordering::SeqCst);
         }
     }
 
