@@ -50,7 +50,7 @@ import { atoms, getApi } from "@/store/global";
 import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
-import { REDOCK_DWELL_MS, REDOCK_VELOCITY_PX_PER_S } from "./floating-pane-constants";
+import { createRedockArming } from "./redock-arming";
 import "./floating-pane-workspace.scss";
 
 /**
@@ -190,36 +190,31 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // from a prior drag session arriving during a new drag (or after a cancel).
         let dragSessionId = 0;
         // Dwell + velocity gate: prevents accidental redock when the cursor
-        // transits over another window at speed. Arms hover only after the cursor
-        // stays near the same target window for REDOCK_DWELL_MS ms at
-        // ≤ REDOCK_VELOCITY_PX_PER_S CSS-px/s. All vars hoisted to drag scope so
-        // a second drag never inherits state from the first.
-        let hoverArmed = false;
-        // Preserves arm state across the Windows mouseup/window_drag_ended race:
-        // onMouseUp sets pendingRedockArmed=hoverArmed before clearing hoverArmed,
-        // so window_drag_ended can safely use either flag.
-        let pendingRedockArmed = false;
-        // Velocity sampling state (non-Windows mousemove path).
-        let dwellLastMoveSampleAt = 0;
-        let dwellLastMoveSampleX = 0;
-        let dwellLastMoveSampleY = 0;
-        let dwellSlowSince: number | null = null;
-        // Per-target dwell (non-Windows): reset arming when IPC returns a new target.
-        let dwellLastArmedTarget: string | null = null;
-        // Non-Windows: wall-clock time when IPC first confirmed the current target.
-        // Used as fallback when cursor holds still after first confirmation (no 2nd IPC).
-        let dwellCurrentConfirmedAt: number | null = null;
-        // Non-Windows: true once update_floating_redock_hover returned a non-null target
-        // (indicator is showing on the backend). Separate from hoverArmed so the velocity
-        // gate can clear the indicator even before the full dwell interval has elapsed.
-        let indicatorShowing = false;
-        // Per-target dwell (Windows): driven by floating-redock:hover-state events.
-        let dwellCurrentHoverTarget: string | null = null;
-        let dwellHoverTargetFirstSeenAt: number | null = null;
-        // Velocity sampling for Windows (hover-state events carry cursor_x/y).
-        let dwellWinLastSampleAt = 0;
-        let dwellWinLastSampleX = 0;
-        let dwellWinLastSampleY = 0;
+        // transits over another window at speed, and — since
+        // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md — when the user is
+        // merely repositioning the floater above the main window rather than
+        // asking to dock it. Both platform paths feed the SAME state machine
+        // (redock-arming.ts) so they cannot drift; the fourteen hand-rolled
+        // dwell/velocity variables that used to live here, and the
+        // events-went-quiet fallbacks they supported, are what that module
+        // replaces.
+        const arming = createRedockArming();
+        // Captured by whichever of DOM mouseup / window_drag_ended observes the
+        // release first (their relative order is not guaranteed on Windows —
+        // separate CEF IPC channels). The other reads this instead of
+        // re-deriving, and `consumeArmedAtRelease` nulls it so the second
+        // arrival cannot fire a redock on the already-redocked block.
+        let armedAtRelease: boolean | null = null;
+        const consumeArmedAtRelease = (): boolean => {
+            const armed = armedAtRelease ?? arming.isArmed();
+            armedAtRelease = null;
+            arming.reset();
+            return armed;
+        };
+        // Assigned by the non-Windows branch below (Windows gets its heartbeat
+        // from the host's drag tick instead, so these stay no-ops there).
+        let startHoverHeartbeat: () => void = () => {};
+        let stopHoverHeartbeat: () => void = () => {};
         // redockInProgress is a signal at component scope (above this onMount)
         // so createEffect re-runs when it changes.
         // Sentinel for the listenEvent .then() race: if the component unmounts
@@ -423,20 +418,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 jsDragLatestScreenY = e.screenY;
                 hasMoved = false;
                 pendingRedockCoords = null;
-                hoverArmed = false;
-                pendingRedockArmed = false;
-                dwellLastMoveSampleAt = 0;
-                dwellLastMoveSampleX = 0;
-                dwellLastMoveSampleY = 0;
-                dwellSlowSince = null;
-                dwellLastArmedTarget = null;
-                dwellCurrentConfirmedAt = null;
-                indicatorShowing = false;
-                dwellCurrentHoverTarget = null;
-                dwellHoverTargetFirstSeenAt = null;
-                dwellWinLastSampleAt = 0;
-                dwellWinLastSampleX = 0;
-                dwellWinLastSampleY = 0;
+                arming.reset();
+                armedAtRelease = null;
+                capturedGhostForDrop = null;
+                capturedGhostForWindow = null;
                 invokeCommand<{ x: number; y: number }>("get_window_position", { label })
                     .then((pos) => {
                         if (myId !== jsDragMouseDownId) return;
@@ -457,6 +442,12 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                             );
                         }
                         dragging = true;
+                        // Started here, not in mousedown: a plain header click
+                        // can release before this IPC resolves, and onMouseUp
+                        // returns early while `dragging` is still false — so a
+                        // heartbeat armed up front would never be cleared and
+                        // would outlive the gesture. reagent P1 on #3124.
+                        startHoverHeartbeat();
                     })
                     .catch(() => {});
                 return;
@@ -471,20 +462,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             dragging = true;
             hasMoved = false;
             pendingRedockCoords = null;
-            hoverArmed = false;
-            pendingRedockArmed = false;
-            dwellLastMoveSampleAt = 0;
-            dwellLastMoveSampleX = 0;
-            dwellLastMoveSampleY = 0;
-            dwellSlowSince = null;
-            dwellLastArmedTarget = null;
-            dwellCurrentConfirmedAt = null;
-            indicatorShowing = false;
-            dwellCurrentHoverTarget = null;
-            dwellHoverTargetFirstSeenAt = null;
-            dwellWinLastSampleAt = 0;
-            dwellWinLastSampleX = 0;
-            dwellWinLastSampleY = 0;
+            arming.reset();
+            armedAtRelease = null;
+            capturedGhostForDrop = null;
+            capturedGhostForWindow = null;
             dragSessionId += 1;
         };
 
@@ -492,6 +473,9 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // Invalidate any in-flight JS-driven get_window_position IPC so a race
             // where mouseup fires before the promise resolves doesn't arm dragging.
             if (jsDrivenDrag) jsDragMouseDownId += 1;
+            // Before the !dragging early return: a click that never became a
+            // drag must still tear down anything mousedown started.
+            stopHoverHeartbeat();
             if (!dragging) return;
             dragging = false;
             // On macOS/Linux, paneRect() returns unchanged client coords after a
@@ -509,70 +493,51 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // triggers clearPlaceholder on the target renderer. This avoids the cross-
             // process race where the target's set_floating_redock_target(null) arrives
             // before tryRedockAtCursorInner's delayed call to get_floating_redock_target.
-            const preGhostWindow = dwellCurrentHoverTarget;
-            capturedGhostForWindow = preGhostWindow;
-            capturedGhostForDrop = preGhostWindow
-                ? invokeCommand<{ block_id?: string; dir?: number }>(
-                      "get_floating_redock_target",
-                      { window_label: preGhostWindow },
-                  ).catch(() => ({}))
-                : Promise.resolve({});
+            //
+            // Guarded, and NOT idempotent without the guard: on Windows
+            // window_drag_ended can run first, and it captures the ghost and
+            // then calls consumeArmedAtRelease(), which resets arming. Re-reading
+            // arming.target() here would overwrite that good capture with null
+            // and leave the in-flight redock to fall back to an empty ghost —
+            // docking the pane somewhere other than where the user saw it, with
+            // no error. The pre-PR code got away with an unguarded capture only
+            // because it read dwellCurrentHoverTarget, which nothing reset.
+            // reagent P1 on #3124.
+            if (!capturedGhostForDrop) {
+                capturedGhostForWindow = arming.target();
+                capturedGhostForDrop = capturedGhostForWindow
+                    ? invokeCommand<{ block_id?: string; dir?: number }>(
+                          "get_floating_redock_target",
+                          { window_label: capturedGhostForWindow },
+                      ).catch(() => ({}))
+                    : Promise.resolve({});
+            }
+            const preGhostWindow = capturedGhostForWindow;
             invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
             if (isWindows()) {
-                // On Windows: preserve arm state before clearing — window_drag_ended
-                // may arrive before or after DOM mouseup (separate CEF IPC channels).
-                // If ended arrives first: hoverArmed is still true and wins.
-                // If mouseup arrives first: pendingRedockArmed carries it for ended.
-                // Point-in-time fallback: if user held still over a target until the
-                // dwell threshold elapsed but no further hover-state event fired to set
-                // hoverArmed, check the wall-clock directly at mouseup time.
-                const nowMs = performance.now();
-                pendingRedockArmed = hoverArmed ||
-                    (dwellCurrentHoverTarget !== null &&
-                     dwellHoverTargetFirstSeenAt !== null &&
-                     nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
-                    // Hold-still after fast entry: velocity gate preserved the target
-                    // but cleared the timer; cursor then stopped so no slow event
-                    // restarted it. Check time-since-last-event as dwell proxy.
-                    (dwellCurrentHoverTarget !== null &&
-                     dwellHoverTargetFirstSeenAt === null &&
-                     dwellWinLastSampleAt > 0 &&
-                     nowMs - dwellWinLastSampleAt >= REDOCK_DWELL_MS);
-                hoverArmed = false;
+                // On Windows the redock itself is committed by window_drag_ended
+                // (it carries host cursor coords, so it doesn't have to trust the
+                // DOM's). The two events travel separate CEF IPC channels and
+                // their relative order is not guaranteed, so record the arm
+                // decision here and let whichever handler runs second read it
+                // rather than re-deriving from state the first one may have
+                // already torn down.
+                armedAtRelease = arming.isArmed();
                 pendingRedockCoords = { x: e.screenX, y: e.screenY };
             } else if (hasMoved) {
                 // Non-Windows (macOS + Linux): the JS-driven path keeps the
-                // renderer receiving mousemove+mouseup normally. Only attempt
-                // redock if the dwell gate armed and motion confirmed.
-                // Arm conditions (any one suffices):
-                // 1. hoverArmed: second IPC confirmed same target (full dwell cycle).
-                // 2. dwellSlowSince elapsed: cursor slowed and stopped before
-                //    the IPC could fire (stopped during the slow-motion window);
-                //    tryRedockAtCursorInner handles the no-target case gracefully.
-                // 3. dwellCurrentConfirmedAt elapsed: first IPC confirmed the target;
-                //    user has now held still over it for a full REDOCK_DWELL_MS.
-                //    (indicatorShowing intentionally excluded — arming on first IPC
-                //    confirmation lets slow desktop transits dock without per-target
-                //    dwell; dwellCurrentConfirmedAt is the spec-correct check.)
-                const nowMs = performance.now();
-                const armed = hoverArmed ||
-                    (dwellSlowSince !== null &&
-                     nowMs - dwellSlowSince >= REDOCK_DWELL_MS) ||
-                    (dwellCurrentConfirmedAt !== null &&
-                     nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
-                // Invalidate in-flight IPC .then() so it cannot re-arm hoverArmed
-                // after this mouseup has already consumed and cleared the state
-                // (reagent P1 — stale IPC re-arm → spurious window_drag_ended dock).
+                // renderer receiving mousemove+mouseup normally, so the redock
+                // commits here. Consuming resets the arming state, which is what
+                // stops a late window_drag_ended (the Linux race) from firing a
+                // second tryRedockAtCursor on the already-redocked block.
+                //
+                // Invalidate in-flight IPC .then() as well, so a stale hover
+                // response cannot re-arm after this release has been consumed
+                // (reagent P1 on #1249's follow-up).
                 dragSessionId += 1;
-                hoverArmed = false;
-                indicatorShowing = false;
-                // Clear non-Windows dwell state so window_drag_ended (Linux race)
-                // cannot see stale dwellCurrentConfirmedAt and fire a second
-                // tryRedockAtCursor on the already-redocked block (reagent P1).
-                dwellCurrentConfirmedAt = null;
-                dwellCurrentHoverTarget = null;
-                dwellHoverTargetFirstSeenAt = null;
-                if (armed) void tryRedockAtCursor(e.screenX, e.screenY);
+                if (consumeArmedAtRelease()) {
+                    void tryRedockAtCursor(e.screenX, e.screenY, preGhostWindow);
+                }
             }
         };
 
@@ -601,22 +566,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     if (jsDrivenDrag) jsDragMouseDownId += 1;
                     dragSessionId += 1;
                     dragging = false;
+                    stopHoverHeartbeat();
                     hasMoved = false;
                     pendingRedockCoords = null;
-                    hoverArmed = false;
-                    pendingRedockArmed = false;
-                    dwellSlowSince = null;
-                    dwellLastArmedTarget = null;
-                    dwellCurrentConfirmedAt = null;
-                    indicatorShowing = false;
-                    dwellCurrentHoverTarget = null;
-                    dwellHoverTargetFirstSeenAt = null;
-                    dwellLastMoveSampleAt = 0;
-                    dwellLastMoveSampleX = 0;
-                    dwellLastMoveSampleY = 0;
-                    dwellWinLastSampleAt = 0;
-                    dwellWinLastSampleX = 0;
-                    dwellWinLastSampleY = 0;
+                    arming.reset();
+                    armedAtRelease = null;
+                    capturedGhostForDrop = null;
+                    capturedGhostForWindow = null;
                 }
             },
         );
@@ -637,36 +593,17 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             (ev) => {
                 if (!ev.label || ev.label !== label) return;
                 dragging = false;
-                // Capture arm state before clearing — handles the Windows race where
-                // this event can arrive before or after DOM mouseup (separate CEF IPC
-                // channels). Before mouseup: hoverArmed is still true. After mouseup:
-                // onMouseUp already moved it to pendingRedockArmed.
-                // Point-in-time fallback: if the user held still over a target until
-                // the dwell elapsed but no event fired to set hoverArmed (or mouseup
-                // raced ahead and set pendingRedockArmed via the fallback there), the
-                // wall-clock check here covers the window_drag_ended ordering leg.
-                const nowMs = performance.now();
-                const armedAtEnd = pendingRedockArmed || hoverArmed ||
-                    (dwellCurrentHoverTarget !== null &&
-                     dwellHoverTargetFirstSeenAt !== null &&
-                     nowMs - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS) ||
-                    // Hold-still after fast entry (Windows): same fallback as onMouseUp.
-                    (dwellCurrentHoverTarget !== null &&
-                     dwellHoverTargetFirstSeenAt === null &&
-                     dwellWinLastSampleAt > 0 &&
-                     nowMs - dwellWinLastSampleAt >= REDOCK_DWELL_MS) ||
-                    (dwellCurrentConfirmedAt !== null &&
-                     nowMs - dwellCurrentConfirmedAt >= REDOCK_DWELL_MS);
-                hoverArmed = false;
-                indicatorShowing = false;
-                pendingRedockArmed = false;
+                stopHoverHeartbeat();
                 // Phase 4b — pre-capture ghost if onMouseUp hasn't already done so
                 // (window_drag_ended can arrive before DOM mouseup on Windows — separate
-                // CEF IPC channels, documented above). Guards against double-consume:
+                // CEF IPC channels). Guards against double-consume:
                 // get_floating_redock_target removes the entry atomically, so the
                 // second caller would get {} anyway, but skip the IPC entirely.
+                //
+                // MUST run before consumeArmedAtRelease() below, which resets the
+                // arming state and with it arming.target().
                 if (!capturedGhostForDrop) {
-                    const preGhostWindow = dwellCurrentHoverTarget;
+                    const preGhostWindow = arming.target();
                     capturedGhostForWindow = preGhostWindow;
                     capturedGhostForDrop = preGhostWindow
                         ? invokeCommand<{ block_id?: string; dir?: number }>(
@@ -675,6 +612,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                           ).catch(() => ({}))
                         : Promise.resolve({});
                 }
+                // Whichever of DOM mouseup / this event ran first recorded the
+                // arm decision; this consumes it (and resets arming) so the two
+                // orderings agree and neither can redock twice.
+                const armedAtEnd = consumeArmedAtRelease();
                 // Always clear hover — safety net for non-Windows where onMouseUp
                 // may not have fired (BeginWindowDrag absorbs the release).
                 invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
@@ -691,7 +632,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         return pendingRedockCoords;
                     })();
                     pendingRedockCoords = null;
-                    if (coords) void tryRedockAtCursor(coords.x, coords.y);
+                    if (coords) void tryRedockAtCursor(coords.x, coords.y, capturedGhostForWindow);
                 } else {
                     pendingRedockCoords = null;
                 }
@@ -714,57 +655,24 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 "floating-redock:hover-state",
                 (ev) => {
                     if (!dragging) return;
-                    const newTarget = ev.target_label ?? null;
-                    const now = performance.now();
-                    // Velocity gate: cursor_x/cursor_y are physical px — divide by
-                    // posScale() to get CSS px (1 DIP on non-HiDPI, 0.5 CSS on 2×).
-                    if (typeof ev.cursor_x === "number" && typeof ev.cursor_y === "number") {
-                        const scale = posScale();
-                        const cssCurX = ev.cursor_x / scale;
-                        const cssCurY = ev.cursor_y / scale;
-                        if (dwellWinLastSampleAt > 0) {
-                            const dt = now - dwellWinLastSampleAt;
-                            const dx = cssCurX - dwellWinLastSampleX;
-                            const dy = cssCurY - dwellWinLastSampleY;
-                            const velocity = dt > 0 ? Math.sqrt(dx * dx + dy * dy) / (dt / 1000) : 0;
-                            if (velocity > REDOCK_VELOCITY_PX_PER_S) {
-                                // Moving fast — reset dwell clock and disarm.
-                                // Preserve dwellCurrentHoverTarget (don't null it) so that
-                                // if the cursor slows or stops over the same target the
-                                // dwell timer can restart (codex P2 fix). Only the timer
-                                // is cleared; the target identity is kept.
-                                dwellCurrentHoverTarget = newTarget;
-                                dwellHoverTargetFirstSeenAt = null;
-                                hoverArmed = false;
-                                invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                                dwellWinLastSampleAt = now;
-                                dwellWinLastSampleX = cssCurX;
-                                dwellWinLastSampleY = cssCurY;
-                                return;
-                            }
-                        }
-                        dwellWinLastSampleAt = now;
-                        dwellWinLastSampleX = cssCurX;
-                        dwellWinLastSampleY = cssCurY;
-                    }
-                    // Dwell gate: arm only after seeing the same non-null target for
-                    // REDOCK_DWELL_MS ms. Target change resets the clock.
-                    if (newTarget !== dwellCurrentHoverTarget) {
-                        dwellCurrentHoverTarget = newTarget;
-                        dwellHoverTargetFirstSeenAt = newTarget !== null ? now : null;
-                        const wasArmed = hoverArmed;
-                        hoverArmed = false;
-                        if (wasArmed) invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                    } else if (newTarget !== null && dwellHoverTargetFirstSeenAt === null) {
-                        // Velocity gate preserved the target but cleared the timer.
-                        // Cursor has now slowed on the same target — restart dwell clock.
-                        dwellHoverTargetFirstSeenAt = now;
-                    } else if (
-                        newTarget !== null &&
-                        dwellHoverTargetFirstSeenAt !== null &&
-                        now - dwellHoverTargetFirstSeenAt >= REDOCK_DWELL_MS
-                    ) {
-                        hoverArmed = true;
+                    // cursor_x/cursor_y are physical px on Windows — divide by
+                    // posScale() to get the CSS px the arming module expects
+                    // (1 DIP on non-HiDPI, 0.5 CSS on 2×). The host emits these
+                    // both from WM_MOUSEMOVE and, since the dwell spec, from the
+                    // 100ms drag tick — so samples keep arriving while the
+                    // cursor is stationary and dwell is measured, not inferred.
+                    const scale = posScale();
+                    const { clearIndicator } = arming.sample({
+                        target: ev.target_label ?? null,
+                        // Absent on the target-only teardown broadcast; the
+                        // module reuses its last position rather than reading
+                        // the gap as a jump from the origin.
+                        x: typeof ev.cursor_x === "number" ? ev.cursor_x / scale : undefined,
+                        y: typeof ev.cursor_y === "number" ? ev.cursor_y / scale : undefined,
+                        t: performance.now(),
+                    });
+                    if (clearIndicator) {
+                        invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
                     }
                 },
             );
@@ -779,6 +687,77 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         if (!isWindows()) {
             const HOVER_THROTTLE_MS = 50;
             let lastHoverAt = 0;
+            // Guards against an out-of-order IPC response feeding the arming
+            // module a sample older than one it has already applied, which
+            // would drag the dwell clock backwards.
+            let lastAppliedSampleT = 0;
+
+            // Resolve the target under the cursor and feed the result to the
+            // arming module. The hover IPC is no longer pre-gated on a local
+            // dwell estimate: the module owns the arming decision now, and it
+            // needs a continuous sample stream to make it. The ghost stays
+            // hidden until armed, so emitting early costs nothing visible.
+            const emitHover = (screenX: number, screenY: number) => {
+                const now = performance.now();
+                if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
+                lastHoverAt = now;
+                const sourceLabel = windowLabel();
+                if (!sourceLabel) return;
+                const scale = posScale();
+                const capturedSessionId = dragSessionId;
+                // Sampled at REQUEST time so the velocity the module sees is the
+                // cursor's, not the IPC round-trip's.
+                const sampleX = screenX;
+                const sampleY = screenY;
+                const sampleT = now;
+                invokeCommand<{ target_label?: string | null }>("update_floating_redock_hover", {
+                    source_label: sourceLabel,
+                    x: Math.round(screenX * scale),
+                    y: Math.round(screenY * scale),
+                }).then((res) => {
+                    if (capturedSessionId !== dragSessionId) return;
+                    if (sampleT < lastAppliedSampleT) return;
+                    lastAppliedSampleT = sampleT;
+                    const { clearIndicator } = arming.sample({
+                        target: res?.target_label ?? null,
+                        x: sampleX,
+                        y: sampleY,
+                        t: sampleT,
+                    });
+                    if (clearIndicator) {
+                        invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
+                    }
+                }).catch(() => {});
+            };
+
+            // The renderer stops receiving mousemove the instant the cursor
+            // holds still, so dwell fed from mousemove alone cannot advance
+            // during exactly the gesture it measures. This is the JS
+            // counterpart of the host's DRAG_TICK heartbeat on Windows
+            // (agentmux-cef/src/ui_tasks/drag.rs) — same cadence, same reason.
+            // SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.1.
+            const HOVER_HEARTBEAT_MS = 100;
+            let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+            startHoverHeartbeat = () => {
+                if (heartbeatTimer !== null) return;
+                heartbeatTimer = setInterval(() => {
+                    // hasMoved gates the redock in onMouseUp, so emitting before the
+                    // drag has moved would paint a ghost promising a dock that
+                    // cannot happen — a press-and-hold on the header would arm
+                    // the indicator after the dwell and then do nothing on
+                    // release (codex P2 on #3124). The host heartbeat is gated
+                    // on its own `moves > 0` for the same reason.
+                    if (!dragging || !hasMoved) return;
+                    emitHover(jsDragLatestScreenX, jsDragLatestScreenY);
+                }, HOVER_HEARTBEAT_MS);
+            };
+            stopHoverHeartbeat = () => {
+                if (heartbeatTimer !== null) {
+                    clearInterval(heartbeatTimer);
+                    heartbeatTimer = null;
+                }
+            };
+
             const onMouseMove = (e: MouseEvent) => {
                 if (jsDrivenDrag) {
                     // Track latest coords even before dragging is armed — needed for
@@ -798,95 +777,22 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         jsDragInitWinY + Math.round((e.screenY - jsDragClickScreenY) * scale),
                     );
                 }
-                const now = performance.now();
-                // Velocity gate: measure cursor speed since the last sample.
-                const dt = now - dwellLastMoveSampleAt;
-                const dx = e.screenX - dwellLastMoveSampleX;
-                const dy = e.screenY - dwellLastMoveSampleY;
-                if (dwellLastMoveSampleAt > 0 && dt > 0) {
-                    const velocity = Math.sqrt(dx * dx + dy * dy) / (dt / 1000);
-                    if (velocity > REDOCK_VELOCITY_PX_PER_S) {
-                        dwellSlowSince = null;
-                        dwellLastArmedTarget = null;
-                        dwellCurrentConfirmedAt = null;
-                        if (hoverArmed || indicatorShowing) {
-                            hoverArmed = false;
-                            indicatorShowing = false;
-                            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                        }
-                        dwellLastMoveSampleAt = now;
-                        dwellLastMoveSampleX = e.screenX;
-                        dwellLastMoveSampleY = e.screenY;
-                        return;
-                    }
-                }
-                dwellLastMoveSampleAt = now;
-                dwellLastMoveSampleX = e.screenX;
-                dwellLastMoveSampleY = e.screenY;
-                if (dwellSlowSince === null) dwellSlowSince = now;
-                // Fire the hover IPC HOVER_THROTTLE_MS before the arm threshold so
-                // the round-trip completes and the ghost is visible before onMouseUp
-                // can fire — otherwise the user sees no ghost but the block docks.
-                if (now - dwellSlowSince < REDOCK_DWELL_MS - HOVER_THROTTLE_MS) return;
-                // Cursor has been slow for REDOCK_DWELL_MS - HOVER_THROTTLE_MS — throttle IPC calls.
-                if (now - lastHoverAt < HOVER_THROTTLE_MS) return;
-                lastHoverAt = now;
-                const scale = posScale();
-                const sourceLabel = windowLabel();
-                if (!sourceLabel) return;
-                const capturedSessionId = dragSessionId;
-                invokeCommand<{ target_label?: string | null }>("update_floating_redock_hover", {
-                    source_label: sourceLabel,
-                    x: Math.round(e.screenX * scale),
-                    y: Math.round(e.screenY * scale),
-                }).then((res) => {
-                    if (capturedSessionId !== dragSessionId) return;
-                    const newTarget = res?.target_label ?? null;
-                    if (newTarget !== dwellLastArmedTarget) {
-                        // Target changed — disarm old target and restart both dwell
-                        // clocks. dwellSlowSince reset prevents a slow transit across
-                        // an intermediate window from pre-satisfying the dwell for the
-                        // destination. dwellCurrentConfirmedAt records when this target
-                        // was first confirmed so the mouseup fallback uses "180ms since
-                        // first confirmation" (prevents desktop-transit false arm).
-                        // Exception: null → target is the initial hover confirmation, not
-                        // a transit. Keeping dwellSlowSince lets onMouseUp's condition-2
-                        // arm fire even when the IPC was sent early and the user releases
-                        // immediately after the ghost appears.
-                        const prevTarget = dwellLastArmedTarget;
-                        dwellLastArmedTarget = newTarget;
-                        dwellCurrentHoverTarget = newTarget; // Phase 4b: mirror for ghost capture in onMouseUp (Windows sets this via event; macOS must set it here)
-                        dwellCurrentConfirmedAt = newTarget !== null ? performance.now() : null;
-                        if (prevTarget !== null) dwellSlowSince = null;
-                        if (hoverArmed || indicatorShowing) {
-                            hoverArmed = false;
-                            indicatorShowing = false;
-                            invokeCommand("clear_floating_redock_hover", {}).catch(() => {});
-                        }
-                        // Backend has now broadcast the indicator for the new target.
-                        // Mark it showing so the velocity gate can clear it on fast
-                        // escape. hoverArmed stays false — full dwell still required.
-                        indicatorShowing = newTarget !== null;
-                    } else if (newTarget !== null) {
-                        indicatorShowing = true;
-                        hoverArmed = true;
-                    }
-                }).catch(() => {});
+                emitHover(e.screenX, e.screenY);
             };
             document.addEventListener("mousemove", onMouseMove);
             unlistenMouseMove = () => document.removeEventListener("mousemove", onMouseMove);
         }
 
-        const tryRedockAtCursor = async (screenX: number, screenY: number) => {
+        const tryRedockAtCursor = async (screenX: number, screenY: number, expectedTarget: string | null) => {
             setRedockInProgress(true);
             try {
-                await tryRedockAtCursorInner(screenX, screenY);
+                await tryRedockAtCursorInner(screenX, screenY, expectedTarget);
             } finally {
                 setRedockInProgress(false);
             }
         };
 
-        const tryRedockAtCursorInner = async (screenX: number, screenY: number) => {
+        const tryRedockAtCursorInner = async (screenX: number, screenY: number, expectedTarget: string | null) => {
             const ourLabel = windowLabel();
             if (!ourLabel || cleaned) return;
             // `mouseup.screenX/Y` are CSS px. Host coordinate space: physical px
@@ -917,6 +823,20 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (!target.label || !target.window_id) {
                 // Cursor over desktop, external app, or our own floater
                 // — leave floater at the dropped position.
+                return;
+            }
+            // The arming decision was made about a specific window, but this
+            // resolve runs independently at release time. If the cursor left
+            // that window after the arming sample and before the release —
+            // within one heartbeat, so no sample caught it — the two disagree,
+            // and docking here would drop the pane into a window that never
+            // showed a ghost. Trust the armed target, not the late resolve.
+            // codex P1 on #3124.
+            if (expectedTarget && target.label !== expectedTarget) {
+                console.log(
+                    "[floating-pane] redock aborted: cursor left the armed target",
+                    { expectedTarget, resolved: target.label },
+                );
                 return;
             }
 
@@ -1020,6 +940,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             stopCancelListener();
             stopEndedListener();
             stopHoverStateListener();
+            stopHoverHeartbeat();
             unlistenMouseMove?.();
         });
     });
