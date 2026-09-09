@@ -177,9 +177,27 @@ git show "${BR}:libcef/common/mojom/cef.mojom"  | grep -q background_transparent
   && echo "OK   transparency (mojom)" || echo "MISS transparency (mojom)"
 ```
 
-Keep the `${BR}:` braces. Written as `"$BR:libcef/..."` the shell eats the
-`:l` as a modifier and resolves `fork/7778ibcef/...`, which fails and reports a
-false MISS on exactly the two probes that matter most.
+Keep the `${BR}:` braces — this is not stylistic, and it is shell-dependent.
+In **zsh** (the macOS default, so what these snippets usually get run in),
+`"$BR:libcef/..."` applies `:l` as a history-style modifier and resolves
+`fork/7778ibcef/...` — a false MISS on exactly the two probes that matter most.
+**bash expands the braced and unbraced forms identically**, so this reproduces
+for only some readers, which is worse than a consistent break.
+
+The modifier letters that bite include `a e h l q r t u`. Verified in zsh with
+`BR=fork/7778`:
+
+```
+$BR:libcef/x    -> fork/7778ibcef/x     ( :l  lowercase )
+$BR:head/x      -> forkead/x            ( :h  dirname   )
+$BR:tail/x      -> 7778ail/x            ( :t  basename  )
+$BR:upper/x     -> FORK/7778pper/x      ( :u  uppercase )
+$BR:include/x   -> fork/7778:include/x  ( :i  not a modifier - safe )
+$BR:patch/x     -> fork/7778:patch/x    ( :p  not a modifier - safe )
+```
+
+`:include` and `:patch` being safe is why only the two `libcef` probes broke,
+and why this survived a first reading.
 
 **Probe identifiers, not filenames.** All of these files exist upstream. The 152
 gap in §1.2 is invisible to a file-existence check and obvious to an identifier
