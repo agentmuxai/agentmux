@@ -6,8 +6,11 @@ The app is a **CEF (Chromium Embedded Framework)** desktop app — 100% Rust, no
 `task package:macos` (`scripts/package-macos.sh`) does the full build + sign + (attempted)
 notarize in one command; this doc explains what it does and how to set up credentials.
 
-Credential details (Apple ID, Team ID, certificate name) are also kept in the private
-[agentmux-builder](https://github.com/agentmuxai/agentmux-builder) repo.
+Credential details (Apple ID, Team ID, certificate name) were also kept in the private
+`agentmux-builder` repo — **that repo no longer exists** (confirmed gone from the
+`agentmuxai` org, 2026-09-09). Wherever those credentials are re-documented now, this
+line should point there instead; until it's updated, treat the packager's Keychain
+auto-detection (below) as the only reliable source.
 
 ---
 
@@ -16,8 +19,8 @@ Credential details (Apple ID, Team ID, certificate name) are also kept in the pr
 - A **Developer ID Application** certificate in your login Keychain
   (`security find-identity -v -p codesigning` should list a
   `Developer ID Application: <Your Name> (<TEAMID>)` entry). The packager
-  auto-detects it; the team's actual identity details live in the private
-  `agentmux-builder` repo — never hardcode them here.
+  auto-detects it — never hardcode identity details here (see the note above:
+  their previous home, `agentmux-builder`, no longer exists).
 - An **app-specific password** stored as a `notarytool` Keychain profile (one-time, below).
 - Xcode Command Line Tools (`codesign`, `xcrun notarytool`, `iconutil`, `sips`, `hdiutil`).
 
@@ -152,9 +155,12 @@ gh release upload "v<VERSION>" ~/Desktop/AgentMux_<VERSION>_arm64.dmg --clobber
 
 ## CI / Automated Signing
 
-The [agentmux-builder](https://github.com/agentmuxai/agentmux-builder) repo is intended to host
-the automated signing pipeline; it currently lags the CEF migration (see the build-cleanup
-tracking issue in the main repo).
+`agentmux-builder` was intended to host the automated signing pipeline and lagged the CEF
+migration — moot now, since that repo no longer exists (confirmed gone from the `agentmuxai`
+org, 2026-09-09). No automated macOS signing pipeline currently exists anywhere; whoever
+builds one should start fresh in this repo rather than assume anything survived from there.
+See `docs/windows-code-signing.md` for the equivalent Windows research, recovered from the
+same now-deleted repo.
 
 ## Notes
 
