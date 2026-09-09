@@ -1349,7 +1349,7 @@ pub async fn bind_listeners_and_network(
     // socket on both counts. [reagent #3021 P0]
     //
     // The scoped `lan_key` (X-AuthKey header, broadcast in the mDNS TXT record)
-    // gates only the two LAN-forwarding routes (`lan_or_full_auth_middleware`)
+    // gates only the three LAN-forwarding routes (`lan_or_full_auth_middleware`)
     // — not the full auth_key previously broadcast here, which gated the entire
     // API surface (see Config::lan_key's doc comment).
     let bind_addr = backend::lan_listeners::STARTUP_BIND_ADDR;
