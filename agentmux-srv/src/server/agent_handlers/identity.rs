@@ -16,7 +16,7 @@ use crate::backend::rpc_types::{
     COMMAND_LINK_AGENT_IDENTITY, COMMAND_UNLINK_AGENT_IDENTITY,
     COMMAND_LIST_AGENT_IDENTITIES, COMMAND_LIST_ALL_AGENT_IDENTITIES,
     COMMAND_LIST_NAMED_AGENTS, COMMAND_HIDE_NAMED_AGENT,
-    CommandListNamedAgentsData, CommandHideNamedAgentData,
+    CommandListNamedAgentsData, CommandHideNamedAgentData, HideNamedAgentResult,
     NamedAgentRow,
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
@@ -968,14 +968,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // row disappears from the dropdown. Working dir stays on disk.
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_HIDE_NAMED_AGENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandHideNamedAgentData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandHideNamedAgentData = serde_json::from_value(data)
-                    .map_err(|e| format!("hidenamedagent: {e}"))?;
+            async move {
                 let hidden = wstore
                     .instance_set_hidden(&cmd.id, true)
                     .map_err(|e| format!("hidenamedagent: {e}"))?;
@@ -988,15 +986,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(Some(json!({ "hidden": hidden })))
-            })
-        }),
+                Ok(HideNamedAgentResult { hidden })
+            }
+        },
     );
 }
 
 #[cfg(test)]
 mod ambient_home_dir_binding_tests {
     use super::*;
+    use crate::server::tests::test_state;
 
     fn make_account(provider: &str, secret_ref: SecretRef) -> IdentityAccount {
         IdentityAccount {
@@ -1063,5 +1062,28 @@ mod ambient_home_dir_binding_tests {
             SecretRef::OAuthConfigDir { dir: "/tmp/whatever".to_string() },
         );
         assert!(reject_ambient_home_dir_binding(&account).is_ok());
+    }
+
+    /// `hidenamedagent` is recorded in the engine's schema with its exact
+    /// type names. `HideNamedAgentResult` didn't exist before this
+    /// migration; the handler used to answer with an anonymous
+    /// `json!({"hidden": ..})`.
+    #[tokio::test]
+    async fn register_typed_records_hidenamedagent() {
+        let state = test_state();
+        let (engine, _rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        register(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r["command"] == COMMAND_HIDE_NAMED_AGENT)
+            .expect("hidenamedagent missing from the schema");
+        assert_eq!(row["requestName"], "CommandHideNamedAgentData");
+        assert_eq!(row["responseName"], "HideNamedAgentResult");
+        assert!(
+            rows.iter().all(|r| r["command"] != COMMAND_LIST_NAMED_AGENTS),
+            "listnamedagents is not migrated and must not appear in the schema",
+        );
     }
 }
