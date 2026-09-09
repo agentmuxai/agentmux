@@ -1059,6 +1059,13 @@ pub fn spawn_background_subsystems(
     reactive_handler.set_agent_identity_confirmer(Arc::new(|block_id: &str| {
         backend::blockcontroller::get_controller(block_id).and_then(|c| c.agent_id())
     }));
+    // Stable counterpart to the above (`AGENTMUX_AGENT_ID`, frozen at spawn)
+    // — see `Controller::stable_agent_id`'s and `Handler::alias_to_block`'s
+    // doc comments for why a jekt tagged with the stable ID needs its own,
+    // independently-sourced confirmer instead of reusing the live one.
+    reactive_handler.set_stable_agent_identity_confirmer(Arc::new(|block_id: &str| {
+        backend::blockcontroller::get_controller(block_id).and_then(|c| c.stable_agent_id())
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             muxbus_url: None,

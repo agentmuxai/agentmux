@@ -249,6 +249,25 @@ pub trait Controller: Send + Sync {
     /// override [`agent_id`](Controller::agent_id) either.
     fn set_agent_id(&self, _id: Option<String>) {}
 
+    /// This block's STABLE jekt identity — `AGENTMUX_AGENT_ID` as captured
+    /// once at spawn, never refreshed. Distinct from [`agent_id`](Controller::agent_id),
+    /// which tracks the LIVE, renameable display name and is deliberately
+    /// refreshed every turn (see that method's doc comment on #2697).
+    /// AGENTMUX_AGENT_ID is embedded verbatim in PR-body tags specifically
+    /// because it does NOT change if the agent is later renamed — but
+    /// `ReactiveHandler`'s registry only tracks one key per block, and
+    /// every turn's `agent_id()` refresh evicts whatever this block was
+    /// previously registered under. `ReactiveHandler::inject_message_inner`'s
+    /// recipient-identity check (#2695) uses this alongside `agent_id()` so
+    /// a jekt addressed to the stable ID is validated correctly even after
+    /// the primary registry key has moved on to the live display name. See
+    /// `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`. Default `None`,
+    /// mirroring `agent_id`'s default — only `PersistentSubprocessController`
+    /// currently overrides this.
+    fn stable_agent_id(&self) -> Option<String> {
+        None
+    }
+
     /// Downcast support for concrete controller types.
     fn as_any(&self) -> &dyn Any;
 }
