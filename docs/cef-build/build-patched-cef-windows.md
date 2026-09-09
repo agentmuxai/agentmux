@@ -250,15 +250,27 @@ Compress-Archive -Path @(
 # answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. Take
 # the first candidate that is BOTH its own git root AND has the agentmuxai/cef
 # remote. Set $env:CEF_CLONE to override.
-$CefClone = $null
-foreach ($c in @($env:CEF_CLONE, "$HOME\cef-build\chromium_git\cef", "$HOME\cef-build\chromium\cef")) {
-  if (-not $c -or -not (Test-Path $c)) { continue }
-  $top = (git -C "$c" rev-parse --show-toplevel 2>$null)
-  if (-not $top -or (Resolve-Path $top).Path -ne (Resolve-Path $c).Path) { continue }
-  if (-not ((git -C "$c" remote -v 2>$null) -match 'agentmuxai/cef')) { continue }
-  $CefClone = $c; break
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Folding it into the probe loop would `continue` past a wrong override and
+# silently record a DIFFERENT checkout's HEAD -- the same defect the bash
+# runbooks fix. Matches build-patched-libcef.md / build-patched-framework-macos.md.
+function Test-CefClone($p) {
+  if (-not $p -or -not (Test-Path $p)) { return $false }
+  $top = (git -C "$p" rev-parse --show-toplevel 2>$null)
+  if (-not $top -or (Resolve-Path $top).Path -ne (Resolve-Path $p).Path) { return $false }
+  return [bool]((git -C "$p" remote -v 2>$null) -match 'agentmuxai/cef')
 }
-if (-not $CefClone) { throw "No agentmuxai/cef clone found (a .git-less mirror does not count). Set CEF_CLONE." }
+
+$CefClone = $null
+if ($env:CEF_CLONE) {
+  if (Test-CefClone $env:CEF_CLONE) { $CefClone = $env:CEF_CLONE }
+  else { throw "CEF_CLONE=$($env:CEF_CLONE) is not an agentmuxai/cef git root." }
+} else {
+  foreach ($c in @("$HOME\cef-build\chromium_git\cef", "$HOME\cef-build\chromium\cef")) {
+    if (Test-CefClone $c) { $CefClone = $c; break }
+  }
+  if (-not $CefClone) { throw "No agentmuxai/cef clone found (a .git-less mirror does not count). Set CEF_CLONE." }
+}
 Write-Host "fork clone: $CefClone"
 
 # FULL sha: `gh release create --target` takes a branch or a full commit SHA.

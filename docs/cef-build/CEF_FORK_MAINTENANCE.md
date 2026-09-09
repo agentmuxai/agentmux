@@ -528,30 +528,37 @@ cd out/Release_GN_arm64
 # success while the other is absent -- and the macOS-critical one is the second.
 check_patch() {  # check_patch <source-path> <object-path>
   local SRC="$1" OBJ="$2" ok=1
-  git -C ../.. show "HEAD:$SRC" > /tmp/unpatched.cc          # pristine upstream
-  local CMD; CMD=$(ninja -C . -t commands "$OBJ" | tail -1)  # the real compile line
+  local CMD; CMD=$(ninja -C . -t commands "$OBJ" | tail -1)
 
-  # ${VAR//a/b} and sed's /g are BOTH mandatory here. The object path appears
-  # TWICE in the command -- once as `-MF <obj>.d`, once as `-o <obj>` -- so a
-  # non-global replace redirects only the depfile and leaves `-o` pointing at
-  # the REAL object. That does not fail: it silently OVERWRITES your build
-  # output with an unpatched compile. It happened while writing this section.
-  local PATCHED_CMD="${CMD//$OBJ//tmp/patched.o}"
-  local UNPATCHED_CMD
-  UNPATCHED_CMD=$(echo "$CMD" | sed "s#$OBJ#/tmp/unpatched.o#g; s#\.\./\.\./$SRC#/tmp/unpatched.cc#g")
+  # ${VAR//a/b} and sed's /g are BOTH mandatory. The object path appears TWICE
+  # in the command -- `-MF <obj>.d` and `-o <obj>` -- so a non-global replace
+  # redirects only the depfile and leaves `-o` pointing at the REAL object. It
+  # does not fail: it OVERWRITES your build output. That happened while writing
+  # this section, which is why the guard below exists.
+  local A="${CMD//$OBJ//tmp/A.o}"
+  case "$A" in *"-o $OBJ"*) echo "ABORT $SRC: rewritten command still targets $OBJ"; return 1 ;; esac
 
-  # Refuse to run either command if it can still write to the real object.
-  case "$PATCHED_CMD$UNPATCHED_CMD" in
-    *"-o $OBJ"*) echo "ABORT $SRC: rewritten command still targets $OBJ"; return 1 ;;
-  esac
+  # (A) working-tree source at its ORIGINAL path, vs the shipped object.
+  # The path must not change here: under symbol_level=1 the compiler embeds the
+  # source path in DWARF, so compiling identical content from /tmp yields a
+  # DIFFERENT object. Verified: same content, different path -> objects differ.
+  eval "$A"
 
-  eval "$PATCHED_CMD"
-  eval "$UNPATCHED_CMD"
+  # (B) and (C) patched vs pristine content, both from the SAME synthetic path,
+  # so the only difference between them is content. Comparing the shipped object
+  # against a /tmp-compiled *pristine* build would be meaningless -- it always
+  # differs, on the path alone, whether or not the patch is present. An earlier
+  # revision of this recipe did exactly that, so its "shipped != unpatched" leg
+  # could never fire.
+  cp "../../$SRC" /tmp/probe.cc
+  eval "$(echo "${CMD//$OBJ//tmp/B.o}" | sed "s#\.\./\.\./$SRC#/tmp/probe.cc#g")"
+  git -C ../.. show "HEAD:$SRC" > /tmp/probe.cc
+  eval "$(echo "${CMD//$OBJ//tmp/C.o}" | sed "s#\.\./\.\./$SRC#/tmp/probe.cc#g")"
 
-  cmp -s /tmp/unpatched.o "$OBJ" && { echo "FAIL $SRC: shipped object is UNPATCHED"; ok=0; }
-  cmp -s /tmp/patched.o   "$OBJ" || { echo "FAIL $SRC: shipped object does not match patched source"; ok=0; }
+  cmp -s /tmp/A.o "$OBJ" || { echo "FAIL $SRC: shipped object does not match the working tree"; ok=0; }
+  cmp -s /tmp/B.o /tmp/C.o && { echo "FAIL $SRC: patch is a no-op — nothing distinguishes it from upstream"; ok=0; }
   [ "$ok" = 1 ] && echo "OK   $SRC"
-  rm -f /tmp/patched.o /tmp/unpatched.o /tmp/unpatched.cc
+  rm -f /tmp/A.o /tmp/B.o /tmp/C.o /tmp/probe.cc
   [ "$ok" = 1 ]
 }
 
@@ -564,10 +571,14 @@ check_patch content/browser/renderer_host/render_widget_host_view_base.cc \
 Expect **two** `OK` lines. `views_caption_rightclick_passthrough` is not listed
 because it adds a symbol and §7.2 already covers it.
 
-Both comparisons matter. `shipped == patched` alone is weak if the patch happens
-to compile to the same bytes as upstream; `shipped != unpatched` is what proves
-the patch actually changed the output. Confirmed for both patches on the
-2026-09-09 macOS build.
+Both comparisons matter, but **they must not be the pair you would first reach
+for.** `shipped == tree` (A) proves the artifact was built from what is checked
+out. It is weak alone, because a patch that compiled to the same bytes as
+upstream would also pass — so (B) vs (C) proves the patch materially changes
+codegen. The two are compared *at the same synthetic path*, because the
+alternative (shipped vs a `/tmp`-compiled pristine object) always differs on the
+embedded source path alone and therefore proves nothing. Confirmed for both
+patches on the 2026-09-09 macOS build.
 
 Do not try to read this off a disassembly. Attempting exactly that on
 `GetPeerValidationPolicy` produced a confident *wrong* answer — the patched
