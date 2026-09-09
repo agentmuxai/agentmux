@@ -228,7 +228,7 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
  *  gap between them has no mechanism to update the displayed content at
  *  all. */
 export function activeKeyFor(node: LayoutNode): string {
-    return node.data?.blockStack?.length ? `${node.id}:${node.data.activeBlockId ?? node.data.blockId}` : node.id;
+    return node.data?.activeBlockId ? `${node.id}:${node.data.activeBlockId}` : node.id;
 }
 
 
