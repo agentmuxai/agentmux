@@ -230,6 +230,60 @@ Local build outputs from `task package` on the host platform:
 
 Release artifacts (macOS DMG, Windows installer, Linux AppImage) are built by CI workflows in this repo. See [§Releases](#releases).
 
+## CEF Fork — read before touching the Chromium layer
+
+AgentMux ships a **fork of CEF** (`agentmuxai/cef`) carrying four AgentMux-specific
+changes — 18 CEF source files plus 3 Chromium-side patches. Every Chromium
+milestone upgrade must carry all of them forward, for Windows,
+Linux and macOS together. We have lost pieces twice, both times **silently** — no
+error, no conflict, no failed build. Full practice:
+[docs/cef-build/CEF_FORK_MAINTENANCE.md](./docs/cef-build/CEF_FORK_MAINTENANCE.md).
+
+**Our changes live in two layers, and they fail differently:**
+
+| | Layer A — Chromium-side patches | Layer B — libcef-side commits |
+|---|---|---|
+| What | `cef/patch/patches/*.patch` + `patch.cfg` | edits to `cef/libcef/**`, `cef/include/**` |
+| Applied by | `patcher.py` at build time | nothing — they are just commits on the branch |
+| Fails | loudly (`.rej`, non-zero exit) | **silently** — the tree still compiles |
+
+Layer B is where both incidents happened. Nothing checks it.
+
+**The rules:**
+
+- **Build and release only from the integration branch** — named for the
+  milestone alone (`7778`, `7977`), never from a feature branch, even if the
+  feature branch looks newer.
+- **Never reuse a feature branch after its PR is merged** — start a new one off
+  `<milestone>`. See the rule under [Git Workflow](./CLAUDE.md#git-workflow);
+  violating it is exactly what caused the 2026-07 gap.
+- **Merge the whole carry-set before cutting a release.** A milestone's work is
+  split across several branches; merging one and not the others silently drops
+  features.
+- **Newer-looking is not superset.** Before building, this must print nothing
+  (**same milestone only** — across an upgrade the carry-set is re-ported as new
+  commits, so use the carry-set gate instead):
+  ```bash
+  git log --oneline <last-shipped-commit> --not <remote>/<milestone>
+  ```
+  Anything it prints is in the shipped artifact but not in what you are about to
+  build — a regression you are about to ship.
+
+**Three traps that produce a wrong binary with no error:**
+
+1. `patcher.py` takes **no arguments** in normal mode (only `--patch-file` /
+   `--patch-dir`, and those take a patch *name*, not a path). Passing `--root-dir`
+   fails, and a wrapper has swallowed that as a `WARN` and built anyway — applying
+   **zero of 112 patches**. After running it, `git status --porcelain` in the
+   Chromium tree must show *hundreds* of modified files; a clean tree means zero
+   patches applied.
+2. Verify patch symbols with **full `nm`**. They are local, not exported —
+   `nm -gU` misses every one and reports a false negative.
+3. **All three platform pins live in one place** (`release.yml`'s
+   `cef-runtime-pins`) and must be bumped together, from **one** fork commit.
+   The job only cross-checks the leading milestone, so two tags can agree on
+   `148` and still come from different fork commits with different carry-sets.
+
 ## Version Management (Changesets)
 
 **Feature PRs add a changeset, not a version bump.** RFC #857 Phase 2.
