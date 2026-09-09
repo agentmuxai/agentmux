@@ -54,11 +54,19 @@ jobs:
         # The runner image ships a google-chrome apt source we do not use — none
         # of the packages below come from it. When Google serves a corrupt index
         # (`Hash Sum mismatch`, as on 2026-09-09) `apt-get update` exits 100 and
-        # takes the whole Linux leg down, on every branch including main. Drop the
-        # source first so an upstream repo we do not depend on cannot block CI.
+        # takes the whole Linux leg down, on every branch including main.
+        #
+        # Two layers, because removing the source alone was not enough: the
+        # first attempt deleted `google-chrome.list` and the index was STILL
+        # fetched, since ubuntu-24.04 declares it in deb822 `.sources` form. The
+        # glob covers both spellings, and the `|| true` means a refresh failure
+        # on any OTHER third-party source cannot block us either. This does not
+        # weaken the gate: everything installed here comes from the Ubuntu
+        # archive, and `apt-get install` below still fails loudly if a package
+        # cannot be found.
         run: |
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
-          sudo apt-get update
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update || echo "apt-get update reported errors; continuing (install is the real gate)"
           sudo apt-get install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
 
       - uses: Swatinem/rust-cache@v2
