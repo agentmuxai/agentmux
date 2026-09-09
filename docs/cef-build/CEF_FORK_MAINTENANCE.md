@@ -98,7 +98,7 @@ invisible.
 | **What** | `.patch` files under `cef/patch/patches/` + registration in `cef/patch/patch.cfg` | Ordinary edits to `cef/libcef/**` and `cef/include/**` |
 | **Applied by** | `patcher.py`, at build time, into the surrounding Chromium tree | Nothing. They are just commits on the branch. |
 | **How it breaks** | Patch fails to apply, or `patcher.py` silently applies zero | Branch simply doesn't contain the commit |
-| **Detection** | Loud (`.rej` files, non-zero exit) — *unless* the invocation is wrong, see §6.1 | **Silent.** Nothing checks. |
+| **Detection** | Loud (`.rej` files, non-zero exit) — *unless* the invocation is wrong, see §7.1 | **Silent.** Nothing checks. |
 
 Layer B is where both failures happened. There is no tool that notices a missing
 libcef commit — the tree still compiles, because our additions are additive.
@@ -260,7 +260,12 @@ branch.
 Keep the `${BR}:` braces — this is not stylistic, and it is shell-dependent.
 In **zsh** (the macOS default, so what these snippets usually get run in),
 `"$BR:libcef/..."` applies `:l` as a history-style modifier and resolves
-`agentmuxai/7778ibcef/...` — a false MISS on exactly the two probes that matter most.
+`agentmuxai/7778ibcef/...` — a false MISS on **7 of the 11 probes**: every
+`libcef/`-prefixed one, which is the entire Layer B transparency cascade. The
+other four are safe only by luck of the first letter (`include/` -> `:i` and
+`patch/` -> `:p` are not modifiers), so a silent partial pass is the default
+outcome, not the edge case.
+
 **bash expands the braced and unbraced forms identically**, so this reproduces
 for only some readers, which is worse than a consistent break.
 
@@ -276,8 +281,10 @@ $BR:include/x   -> agentmuxai/7778:include/x  ( :i  not a modifier - safe )
 $BR:patch/x     -> agentmuxai/7778:patch/x    ( :p  not a modifier - safe )
 ```
 
-`:include` and `:patch` being safe is why only the two `libcef` probes broke,
-and why this survived a first reading.
+The safe/unsafe split falls on the first letter of the path, not on anything
+meaningful — which is why this survived a first reading. At the time the bug
+was found the block probed only two `libcef/` paths; expanding the cascade to
+seven widened the blast radius without changing the cause.
 
 **Probe identifiers, not filenames.** All of these files exist upstream. The 152
 gap in §1.2 is invisible to a file-existence check and obvious to an identifier
