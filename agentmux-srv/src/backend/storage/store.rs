@@ -749,7 +749,7 @@ impl<'a> StoreTx<'a> {
 
 // Re-exports so existing `storage::store::*` imports keep working.
 pub use super::agents::{derive_slug, AgentDefinition, AgentInstance, InstanceStatus};
-pub use super::bundles::Memory;
+pub use super::bundles::Bundle;
 pub use super::content::AgentContent;
 pub use super::history::AgentHistory;
 pub use super::skills::AgentSkill;

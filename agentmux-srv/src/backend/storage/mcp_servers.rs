@@ -328,7 +328,7 @@ impl Store {
 #[cfg(test)]
 mod bundle_ref_tests {
     use super::*;
-    use crate::backend::storage::bundles::Memory;
+    use crate::backend::storage::bundles::Bundle;
 
     fn make_store() -> Store {
         Store::open_in_memory().unwrap()
@@ -336,7 +336,7 @@ mod bundle_ref_tests {
 
     fn insert_bundle(store: &Store, id: &str) {
         store
-            .bundle_upsert(&Memory {
+            .bundle_upsert(&Bundle {
                 id: id.to_string(),
                 name: format!("Bundle {id}"),
                 description: String::new(),

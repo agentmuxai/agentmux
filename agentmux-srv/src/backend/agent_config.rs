@@ -79,7 +79,7 @@ pub fn build_config_files(
     template_vars.insert("DATE".to_string(), Utc::now().format("%Y-%m-%d").to_string());
 
     // ----------------------------------------------------------------
-    // Build the startup instructions file: Soul + AgentMD + Memory + Skills index
+    // Build the startup instructions file: Soul + AgentMD + Bundle + Skills index
     // ----------------------------------------------------------------
     let mut instructions_parts: Vec<String> = Vec::new();
 
@@ -93,7 +93,7 @@ pub fn build_config_files(
         instructions_parts.push(expand_template(agentmd, &template_vars));
     }
     if let Some(memory) = content_map.get("memory") {
-        instructions_parts.push("\n# Memory\n".to_string());
+        instructions_parts.push("\n# Bundle\n".to_string());
         instructions_parts.push(memory.clone());
     }
 
@@ -903,7 +903,7 @@ pub fn write_managed_skill_file_manifest(
 /// `docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`.
 pub const CLAUDE_MD_MANAGED_MARKER: &str = "<!-- agentmux:managed-claude-md -->";
 
-/// AgentMux-owned side file carrying the full Soul+AgentMD+Memory+Skills
+/// AgentMux-owned side file carrying the full Soul+AgentMD+Bundle+Skills
 /// composition when the real `CLAUDE.md` is foreign — always safe to
 /// regenerate in place every launch, unlike `CLAUDE.md` itself in that case.
 pub const AGENTMUX_MEMORY_FILENAME: &str = ".claude/AGENTMUX_MEMORY.md";
@@ -958,7 +958,7 @@ fn resolve_claude_md_side_paths(
     Some((memory_path, ownership_marker_path))
 }
 
-/// Materialize `generated_content` (the composed Soul+AgentMD+Memory+Skills
+/// Materialize `generated_content` (the composed Soul+AgentMD+Bundle+Skills
 /// `CLAUDE.md` body `build_config_files` already produced) against whatever
 /// is already on disk at `base_path/CLAUDE.md`, WITHOUT ever overwriting a
 /// foreign file's content:
@@ -1055,7 +1055,7 @@ const STARTUP_INSTRUCTIONS_MANAGED_MARKER: &str = "<!-- agentmux:managed-startup
 /// support an equivalent include directive their own harness actually
 /// honors is unverified per-provider research this spec didn't do (§5/§6
 /// of the spec above). The tradeoff accepted here: if the target file is
-/// foreign, this agent's Soul/AgentMD/Memory content is simply not
+/// foreign, this agent's Soul/AgentMD/Bundle content is simply not
 /// delivered via a file for this launch (logged, not silently dropped) —
 /// a real capability gap, but strictly safer than overwriting a stranger's
 /// file. Revisit once each provider's own include syntax is confirmed.
@@ -1092,7 +1092,7 @@ pub fn write_startup_instructions_respecting_existing(
         path = %path.display(),
         "write_startup_instructions_respecting_existing: pre-existing, \
          non-AgentMux-authored file — leaving it untouched; this agent's \
-         Global Memory/Soul/AgentMD content is not delivered via this file \
+         Global Bundle/Soul/AgentMD content is not delivered via this file \
          for this launch"
     );
     Ok(())
@@ -2031,11 +2031,11 @@ mod tests {
     #[test]
     fn claude_md_fresh_working_dir_writes_directly_with_the_marker() {
         let dir = tempfile::tempdir().unwrap();
-        write_claude_md_respecting_ownership(dir.path(), "Soul + AgentMD + Memory + Skills").unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "Soul + AgentMD + Bundle + Skills").unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
         assert!(content.starts_with(CLAUDE_MD_MANAGED_MARKER));
-        assert!(content.contains("Soul + AgentMD + Memory + Skills"));
+        assert!(content.contains("Soul + AgentMD + Bundle + Skills"));
         // No foreign-file side effects on the common (fresh dir) path.
         assert!(!dir.path().join(AGENTMUX_MEMORY_FILENAME).exists());
     }

@@ -334,7 +334,7 @@ pub(crate) async fn open_agent_impl(
                     .collect::<String>();
                 // Shared with native-memory resolution so the two can never
                 // disagree about where a blank-working_directory agent
-                // actually runs — they did, and Personal Memory broke for the
+                // actually runs — they did, and Personal Bundle broke for the
                 // common case as a result (ReAgent/Codex P1, PR #2901; see
                 // SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md).
                 let work_dir = if agent.working_directory.is_empty() {
@@ -1147,7 +1147,7 @@ mod write_agent_config_files_tests {
         wstore.agent_def_insert(&mut agent).unwrap();
 
         wstore
-            .bundle_upsert(&crate::backend::storage::bundles::Memory {
+            .bundle_upsert(&crate::backend::storage::bundles::Bundle {
                 id: "bundle-1".to_string(),
                 name: "Bundle 1".to_string(),
                 description: String::new(),

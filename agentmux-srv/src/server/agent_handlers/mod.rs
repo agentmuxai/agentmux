@@ -262,7 +262,7 @@ mod recent_sessions_tests {
     // backend correctness gate for the AgentPicker's Recent Sessions
     // surface (cascade follow-up 2026-05-23).
     use crate::backend::storage::store::{
-        AgentDefinition, AgentInstance, IdentityAccount, InstanceStatus, Memory, SecretRef, Store,
+        AgentDefinition, AgentInstance, IdentityAccount, InstanceStatus, Bundle, SecretRef, Store,
     };
     use crate::backend::rpc::engine::WshRpcEngine;
     use crate::server::AppState;
@@ -454,7 +454,7 @@ mod recent_sessions_tests {
         wstore
             .agent_identity_link("def-claude", "acct-work", "github")
             .unwrap();
-        let memory = Memory {
+        let memory = Bundle {
             id: "mem-notes".to_string(),
             name: "Notes".to_string(),
             description: String::new(),

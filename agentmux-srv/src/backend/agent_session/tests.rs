@@ -12,7 +12,7 @@ use super::zone_naming::{agent_archive_zone, validate_and_current};
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 use crate::backend::storage::store::Store;
-use crate::backend::storage::Memory;
+use crate::backend::storage::Bundle;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -724,7 +724,7 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
     let wstore = open_temp_wstore(dir.path());
     let filestore = fresh_filestore();
 
-    let bundle = Memory {
+    let bundle = Bundle {
         id: "bundle-claude".to_string(),
         name: "Bundle".to_string(),
         description: String::new(),

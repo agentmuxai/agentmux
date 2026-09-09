@@ -76,9 +76,9 @@ fn list_drives() -> Vec<serde_json::Value> {
     drives
 }
 
-/// Prepend global memory bundle content into the `# Memory` section of a
+/// Prepend global memory bundle content into the `# Bundle` section of a
 /// CLAUDE.md string, mirroring the injection done by `write_agent_config_files`
-/// in the `agent.open` RPC path.  If the file has no `# Memory` section, a new
+/// in the `agent.open` RPC path.  If the file has no `# Bundle` section, a new
 /// one is inserted before `# Available Skills` (or at the end of the file).
 fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
     let bundles = id_store.bundle_list_global().unwrap_or_default();
@@ -87,9 +87,9 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
         return claude_md.to_string();
     }
 
-    // Inject after the `# Memory\n` heading if it exists.
-    if let Some(pos) = claude_md.find("\n# Memory\n") {
-        let insert_at = pos + "\n# Memory\n".len();
+    // Inject after the `# Bundle\n` heading if it exists.
+    if let Some(pos) = claude_md.find("\n# Bundle\n") {
+        let insert_at = pos + "\n# Bundle\n".len();
         let (before, after) = claude_md.split_at(insert_at);
         format!("{}{}\n\n---\n\n{}", before, bundle_block, after)
     } else {
@@ -97,9 +97,9 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
         let anchor = "\n# Available Skills\n";
         if let Some(pos) = claude_md.find(anchor) {
             let (before, after) = claude_md.split_at(pos);
-            format!("{}\n# Memory\n{}{}", before, bundle_block, after)
+            format!("{}\n# Bundle\n{}{}", before, bundle_block, after)
         } else {
-            format!("{}\n# Memory\n{}\n", claude_md, bundle_block)
+            format!("{}\n# Bundle\n{}\n", claude_md, bundle_block)
         }
     }
 }
@@ -346,7 +346,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // Still gets the same global-memory-bundle injection
                         // CLAUDE.md gets above — otherwise a Codex/Gemini/etc.
                         // agent launched from the picker would silently
-                        // receive no workspace-wide Global Memory content at
+                        // receive no workspace-wide Global Bundle content at
                         // all.
                         let content = inject_global_bundles(&file.content, &id_store);
                         // Never overwrites a pre-existing file (codex P1, PR

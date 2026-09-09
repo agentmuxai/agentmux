@@ -20,7 +20,7 @@ use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
 use crate::backend::storage::store::{Store, AgentContent, AgentDefinition, AgentInstance};
 use crate::backend::storage::identities::IdentityAccount;
-use crate::backend::storage::bundles::Memory;
+use crate::backend::storage::bundles::Bundle;
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -793,7 +793,7 @@ pub(crate) async fn bundle_get_impl(
 /// brand-new bundle with no id yet) rather than only whatever was last
 /// persisted. Read-only: never touches the Store.
 pub(crate) fn bundle_validate_impl(data: serde_json::Value) -> Result<serde_json::Value, String> {
-    let memory: Memory = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
+    let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
     let report = crate::backend::bundle_validate::validate_bundle(&memory);
     serde_json::to_value(&report).map_err(|e| e.to_string())
@@ -2736,7 +2736,7 @@ mod bundle_self_get_registry_fallback_tests {
     async fn falls_back_to_the_registrys_own_bound_bundle_when_no_local_instance_row_exists() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let state = test_state();
-        let bundle: crate::backend::storage::bundles::Memory =
+        let bundle: crate::backend::storage::bundles::Bundle =
             serde_json::from_value(serde_json::json!({
                 "id": "bundle-agenty-test",
                 "name": "AgentY's real bundle",

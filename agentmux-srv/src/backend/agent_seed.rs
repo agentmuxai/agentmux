@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use super::storage::bundles::Memory;
+use super::storage::bundles::Bundle;
 use super::storage::store::{AgentDefinition, AgentContent, AgentSkill, Store};
 use super::storage::StoreError;
 
@@ -40,7 +40,7 @@ struct SeedMemory {
     description: String,
     /// When true this bundle is injected into every agent's CLAUDE.md at
     /// launch (Armory global tier). When false it is available in the
-    /// Memory manager but must be selected per-agent.
+    /// Bundle manager but must be selected per-agent.
     #[serde(default)]
     is_global: bool,
     #[serde(default)]
@@ -262,7 +262,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
         if existing_ids.contains(&mem_def.id) {
             continue;
         }
-        let memory = Memory {
+        let memory = Bundle {
             id: mem_def.id.clone(),
             name: mem_def.name.clone(),
             description: mem_def.description.clone(),

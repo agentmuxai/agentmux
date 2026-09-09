@@ -915,7 +915,7 @@ mod tests {
     use super::*;
     use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{
-        AgentInstance, IdentityAccount, InstanceStatus, Memory, SecretRef,
+        AgentInstance, IdentityAccount, InstanceStatus, Bundle, SecretRef,
     };
 
     fn make_store() -> Arc<Store> {
@@ -2997,7 +2997,7 @@ mod tests {
         };
         wstore.agent_def_insert(&mut def).unwrap();
 
-        let bundle = Memory {
+        let bundle = Bundle {
             id: "bundle-1".to_string(),
             name: "Drift Test Bundle".to_string(),
             description: String::new(),

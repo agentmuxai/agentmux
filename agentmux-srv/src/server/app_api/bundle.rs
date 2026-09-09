@@ -42,7 +42,7 @@ struct FileEntry {
     content: String,
 }
 
-/// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
+/// Normalize a `bundle.upsert` request body into the shape the `Bundle` struct
 /// deserializes from, so the App API accepts the request exactly as documented
 /// in the spec:
 ///   - `id` may be omitted to create (the struct has no serde default), so an
@@ -128,7 +128,7 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
 ///
 /// Pure — no I/O — directly unit-testable without spinning up an
 /// `AppState`, mirroring `agent_open.rs`'s `resolve_vendor_env_override`.
-fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) -> Result<(), String> {
+fn check_provider_model_immutable(existing: Option<&Bundle>, incoming: &Bundle) -> Result<(), String> {
     let Some(existing) = existing else { return Ok(()) };
     if !existing.provider.is_empty() && existing.provider != incoming.provider {
         return Err(format!(
@@ -149,8 +149,8 @@ fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) 
 mod check_provider_model_immutable_tests {
     use super::*;
 
-    fn memory(id: &str, provider: &str, model: &str) -> Memory {
-        Memory {
+    fn memory(id: &str, provider: &str, model: &str) -> Bundle {
+        Bundle {
             id: id.to_string(),
             name: "T".to_string(),
             description: String::new(),
@@ -219,7 +219,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                let mut memory: Memory =
+                let mut memory: Bundle =
                     serde_json::from_value(normalize_bundle_upsert_input(data))
                         .map_err(|e| format!("bundle.upsert: {e}"))?;
 
@@ -550,7 +550,7 @@ async fn build_export_for_agent(
 
     // Refresh the mirror from the live FS, then read every mirrored
     // file's content — this agent's memory, freshest as of right now,
-    // not as of whenever its Stash Memory tab was last opened.
+    // not as of whenever its Stash Bundle tab was last opened.
     let mut memory_files: Vec<(String, String)> = Vec::new();
     if let Some(memory_dir) =
         crate::server::native_memory_handlers::memory_dir_for_agent_by_id(wstore, &agent)
@@ -914,7 +914,7 @@ async fn bundle_import_for_agent_impl(
 
     // reagent P0, PR #2527: the "zero existing memory" guard below only
     // consults db_agent_native_memory (the mirror) — a live file that was
-    // written autonomously but never viewed through the Stash Memory tab
+    // written autonomously but never viewed through the Stash Bundle tab
     // is NOT in the mirror yet, so the check would pass and the write
     // loop further down would silently overwrite it via fs::rename. Same
     // class of bug bundle.export_for_agent already had to guard against
@@ -1027,7 +1027,7 @@ async fn bundle_import_for_agent_impl(
             }
         }
     }
-    let memory = crate::backend::storage::store::Memory {
+    let memory = crate::backend::storage::store::Bundle {
         id: bundle_id.clone(),
         name: parsed.name,
         description: parsed.description,
@@ -1063,7 +1063,7 @@ async fn bundle_import_for_agent_impl(
         return Err(msg);
     }
 
-    // Memory files: write through the SAME dual-write path
+    // Bundle files: write through the SAME dual-write path
     // agent:memory:write_file uses (live FS via memory_dir_for_cwd, then
     // the mirror) — writing only to db_agent_native_memory would leave
     // this content visible in Stash while invisible to the actual
@@ -1415,7 +1415,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                let memory = Memory {
+                let memory = Bundle {
                     id: uuid::Uuid::new_v4().to_string(),
                     name: parsed.name,
                     description: parsed.description,
@@ -1434,7 +1434,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Phase 3 spec §3.0: ImportedContextFile gained a
                     // stable `id` selection key alongside `path`/`content`
                     // -- project it away before persisting, matching
-                    // `Memory.context_files`'s existing documented
+                    // `Bundle.context_files`'s existing documented
                     // `[{path, content}]` shape.
                     context_files: serde_json::to_string(
                         &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
@@ -1445,7 +1445,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // selection key alongside the raw config) — every write
                     // site must project to `.config` before serializing, or
                     // this would persist the wrapper object instead of the
-                    // raw MCP config every consumer of `Memory.mcp_servers`
+                    // raw MCP config every consumer of `Bundle.mcp_servers`
                     // expects.
                     mcp_servers: serde_json::to_string(
                         &parsed.mcp_servers.iter().map(|m| &m.config).collect::<Vec<_>>(),
@@ -2021,7 +2021,7 @@ async fn bundle_import_commit_impl(
                     }
                 }
 
-                let memory = Memory {
+                let memory = Bundle {
                     id: uuid::Uuid::new_v4().to_string(),
                     name: bundle_name,
                     description: parsed.description,
@@ -2231,7 +2231,7 @@ mod import_preview_commit_tests {
     #[tokio::test]
     async fn commit_applies_bundle_name_override_not_parsed_name() {
         // codex P2, PR #2381 round 11: bundle_name must actually be
-        // substituted for Memory.name, never silently ignored.
+        // substituted for Bundle.name, never silently ignored.
         let state = test_state();
         let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
         let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
@@ -2256,7 +2256,7 @@ mod import_preview_commit_tests {
     async fn commit_bounds_an_oversized_bundle_name_override() {
         // reagentx P2, PR #2382 round 3: unlike parsed.name (bounded at
         // parse time), req.bundle_name had no length cap of its own before
-        // being used verbatim as Memory.name.
+        // being used verbatim as Bundle.name.
         let state = test_state();
         let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
         let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
@@ -2707,8 +2707,8 @@ mod export_import_for_agent_tests {
             .unwrap();
     }
 
-    fn make_bundle(state: &AppState, id: &str, instructions: &str) -> crate::backend::storage::store::Memory {
-        let bundle = crate::backend::storage::store::Memory {
+    fn make_bundle(state: &AppState, id: &str, instructions: &str) -> crate::backend::storage::store::Bundle {
+        let bundle = crate::backend::storage::store::Bundle {
             id: id.to_string(),
             name: format!("Bundle {id}"),
             description: String::new(),

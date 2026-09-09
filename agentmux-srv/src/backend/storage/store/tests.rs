@@ -819,7 +819,7 @@
         assert_eq!(None, InstanceStatus::parse("nonsense"));
     }
 
-    // ── v7 — Memory bundle accessors ─────────────────────────────────────
+    // ── v7 — Bundle accessors ─────────────────────────────────────
 
     #[test]
     fn test_bundle_memory_lifecycle() {
@@ -832,7 +832,7 @@
         assert_eq!(initial[0].id, "blank");
 
         // Upsert a user memory.
-        let coder = Memory {
+        let coder = Bundle {
             id: "mem-coder".to_string(),
             name: "Claude-coder".to_string(),
             description: "Pair-programming setup".to_string(),
@@ -873,7 +873,7 @@
     fn test_global_brain_order_and_format() {
         let store = make_store();
 
-        let mk = |id: &str, name: &str, order: i64| Memory {
+        let mk = |id: &str, name: &str, order: i64| Bundle {
             id: id.to_string(),
             name: name.to_string(),
             description: String::new(),
@@ -928,11 +928,11 @@
         assert_eq!(block, expected);
     }
 
-    // ── v27 — system-tier Global Memory ──────────────────────────────────
+    // ── v27 — system-tier Global Bundle ──────────────────────────────────
     // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md
 
-    fn mk_ordinary(id: &str, name: &str, order: i64) -> Memory {
-        Memory {
+    fn mk_ordinary(id: &str, name: &str, order: i64) -> Bundle {
+        Bundle {
             id: id.to_string(),
             name: name.to_string(),
             description: String::new(),
@@ -954,12 +954,12 @@
 
     /// Deliberately "wrong" `is_blank`/`is_global`/`is_system` — used to
     /// verify `bundle_upsert_system` hardcodes all three regardless
-    /// of what the caller's `Memory` struct set them to. Callers that need
+    /// of what the caller's `Bundle` struct set them to. Callers that need
     /// a struct which already correctly *represents* a system entry (e.g.
     /// to feed `format_global_brain_block` directly, bypassing storage)
     /// should override `is_system` via struct-update syntax.
-    fn mk_system(id: &str, name: &str) -> Memory {
-        Memory {
+    fn mk_system(id: &str, name: &str) -> Bundle {
+        Bundle {
             id: id.to_string(),
             name: name.to_string(),
             description: String::new(),
@@ -1068,11 +1068,11 @@
 
     #[test]
     fn format_global_brain_block_puts_system_first_with_override_preamble() {
-        // format_global_brain_block reads each Memory's own is_system field
+        // format_global_brain_block reads each Bundle's own is_system field
         // directly (it doesn't go through storage) — unlike mk_system's
         // deliberately-wrong default (see its own doc comment), this needs
         // a struct that actually represents a system entry.
-        let sys = Memory { is_system: true, ..mk_system("sys-1", "Policy") };
+        let sys = Bundle { is_system: true, ..mk_system("sys-1", "Policy") };
         let ord = mk_ordinary("g-a", "Alpha", 0);
 
         let mixed = super::super::format_global_brain_block(&[sys.clone(), ord.clone()]);

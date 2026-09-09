@@ -15,12 +15,12 @@ use crate::backend::rpc_types::{
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     CommandGetMemoryData, CommandDeleteMemoryData, DeleteMemoryResult, CommandReorderGlobalBrainData,
 };
-use crate::backend::storage::store::Memory;
+use crate::backend::storage::store::Bundle;
 
 use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // ---- Memory bundle CRUD ----
+    // ---- Bundle CRUD ----
 
     let wstore = state.id_store.clone();
     engine.register_handler(
@@ -63,7 +63,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                let mut memory: Memory = serde_json::from_value(data)
+                let mut memory: Bundle = serde_json::from_value(data)
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 // Guard on BOTH client-supplied is_blank AND id == "blank".
                 // Without the id check a caller could send
@@ -149,10 +149,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // ---- System-tier Global Memory — see
+    // ---- System-tier Global Bundle — see
     // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
     // separate commands from the four above (never wired to any MCP tool)
-    // so the ordinary Global Memory editor and every other generic
+    // so the ordinary Global Bundle editor and every other generic
     // bundle-writing surface can never reach an is_system row.
 
     let wstore = state.id_store.clone();
@@ -163,7 +163,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                let mut memory: Memory = serde_json::from_value(data)
+                let mut memory: Bundle = serde_json::from_value(data)
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
@@ -348,9 +348,9 @@ mod delete_memory_tests {
 
     fn seed_memory(state: &AppState, id: &str, is_system: bool) {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
-        let memory = Memory {
+        let memory = Bundle {
             id: id.to_string(),
-            name: "Test Memory".to_string(),
+            name: "Test Bundle".to_string(),
             description: String::new(),
             is_blank: false,
             is_global: false,
@@ -451,7 +451,7 @@ mod delete_memory_tests {
             assert_eq!(row["responseName"], "DeleteMemoryResult");
         }
         // listmemories/getmemory/upsertmemory/reorderglobalbrain/
-        // upsertsystemmemory are deliberately NOT migrated (Memory-shaped
+        // upsertsystemmemory are deliberately NOT migrated (Bundle-shaped
         // responses, or upsert bodies that ARE the storage entity) and must
         // stay absent from the schema.
         for cmd in [

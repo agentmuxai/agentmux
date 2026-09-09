@@ -1,12 +1,12 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Memory bundle command shapes (v7) + native memory RPC payloads
+//! Bundle command shapes (v7) + native memory RPC payloads
 //! (agent:memory:list / read / write).
 
 use serde::{Deserialize, Serialize};
 
-// ---- v7 Memory bundle command shapes ----
+// ---- v7 Bundle command shapes ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandGetMemoryData {

@@ -60,7 +60,7 @@
 
 use std::sync::Arc;
 
-use crate::backend::storage::store::{Memory, Store};
+use crate::backend::storage::store::{Bundle, Store};
 use crate::registry::{resolve_shared_definitions_dir, DefinitionStore};
 
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
@@ -167,7 +167,7 @@ impl Migration for M0021BackfillAgentBundles {
             let name = bundle_store
                 .resolve_unique_bundle_name(&format!("{} — ABF", def.name))
                 .map_err(|e| MigrationError(format!("backfill_agent_bundles: resolve unique bundle name for {}: {}", def.id, e)))?;
-            let bundle = Memory {
+            let bundle = Bundle {
                 id: bundle_id.clone(),
                 name,
                 description: String::new(),

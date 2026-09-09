@@ -194,7 +194,7 @@ pub fn default_conversation_visibility() -> String {
 /// it) and native-memory resolution (which must find the memories written
 /// inside it) share one definition and cannot drift — they previously
 /// disagreed, and the resolver simply gave up on a blank field, breaking
-/// Armory → Memory → Personal for the common case. See
+/// Armory → Bundle → Personal for the common case. See
 /// `docs/specs/SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md`.
 ///
 /// NOTE: deliberately NOT `derive_slug` above. `agent.open`'s own inline
@@ -331,7 +331,7 @@ pub struct AgentInstance {
     pub identity_id: String,
     /// FK to `db_bundles.id`. Empty string means "use the blank
     /// singleton" (= vanilla CLI, no instructions). Set at
-    /// instantiation via the launch modal's Memory dropdown.
+    /// instantiation via the launch modal's Bundle dropdown.
     #[serde(default)]
     pub memory_id: String,
     /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
@@ -1052,7 +1052,7 @@ impl Store {
         let vendor = Self::resolve_effective_vendor(&agent.provider, &agent.model_vendor_base_url);
         let bundle_id = uuid::Uuid::new_v4().to_string();
         let name = self.resolve_unique_bundle_name(&format!("{} — ABF", agent.name))?;
-        let bundle = super::bundles::Memory {
+        let bundle = super::bundles::Bundle {
             id: bundle_id.clone(),
             name,
             description: String::new(),
@@ -2544,7 +2544,7 @@ mod bundle_provisioning_store_separation_tests {
         let store = Store::open_in_memory().unwrap();
         store.bundle_provision_for_new_agent(&base_agent("a1", "Dup", "claude", ""), 0).unwrap();
         // Directly seed the "(2)" slot too, so the resolver must walk to "(3)".
-        let taken = super::super::bundles::Memory {
+        let taken = super::super::bundles::Bundle {
             id: "taken-2".to_string(),
             name: "Dup — ABF (2)".to_string(),
             description: String::new(),
@@ -2637,7 +2637,7 @@ mod bundle_provisioning_store_separation_tests {
         let mut agent = base_agent("a1", "Agent One", "claude", "");
         // provider left empty ("") deliberately, unlike the other tests'
         // bundle_provision_for_new_agent-built bundles.
-        let bundle = super::super::bundles::Memory {
+        let bundle = super::super::bundles::Bundle {
             id: "bundle-empty-provider".to_string(),
             name: "Empty Provider Bundle".to_string(),
             description: String::new(),
