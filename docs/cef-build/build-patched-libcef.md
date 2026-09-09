@@ -15,9 +15,15 @@
 
 Patches live in the AgentMux fork of CEF:
 - **Repo:** https://github.com/agentmuxai/cef (canonical) / https://github.com/a5af/cef (personal fork, kept in sync)
-- **Branch:** `agentmux/7778-drag-rightclick-and-transparency`
+- **Branch:** `7778` — the **integration** branch for the milestone. Never build
+  from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
+  it may look newer and still be missing part of the carry-set. Verify with §5 of
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **21 `OK`**) first.
 - **Base:** Chromium 148 (CEF branch 7778)
-- **HEAD:** `c87bca497` ("views: deferred top-level transparent bg + observer cleanup")
+- **HEAD:** do not hard-code one here. This previously pinned `c87bca497`, a
+  commit on the now-dead feature branch, which contradicts the branch above.
+  Capture the SHA at build time (`git rev-parse --short HEAD`) and record it in
+  the release notes — see CEF_FORK_MAINTENANCE.md §8 (P1).
 - **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` — adds `begin_window_drag` field to `_cef_window_t` in the linux_x86_64 binding
 - **Workspace patch in `Cargo.toml`:** `[patch.crates-io] cef-dll-sys = { git = "…AgentU-asaf/cef-rs", rev = "515b3ac5…" }`
 
@@ -62,11 +68,18 @@ python3 automate-git.py \
 
 ### 2. Switch to the AgentMux fork
 
+> **Build from the integration branch, never a feature branch.**
+> `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
+> newer and still be missing part of the carry-set — that is exactly how the
+> 2026-07 transparency gap happened. Run §5 of that doc against this checkout
+> before building; it must report **21 `OK`**. If it does not, the integration
+> branch is incomplete and must be fixed first — do not build around it.
+
 ```bash
 cd ~/cef-build/chromium_git/cef
 git remote add agentmuxai https://github.com/agentmuxai/cef.git
-git fetch agentmuxai agentmux/7778-drag-rightclick-and-transparency
-git checkout agentmuxai/agentmux/7778-drag-rightclick-and-transparency
+git fetch agentmuxai --prune
+git checkout agentmuxai/7778   # integration branch for the milestone
 
 # Mirror to the chromium-side cef checkout
 rsync -a --delete --exclude=.git ~/cef-build/chromium_git/cef/ ~/cef-build/chromium_git/chromium/src/cef/
@@ -225,9 +238,54 @@ tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
   chrome_100_percent.pak chrome_200_percent.pak resources.pak \
   headless_command_resources.pak locales/
 
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+#
+# Locate the fork clone rather than assuming a path. The mirrored copy under
+# chromium/src/cef is created with `rsync --exclude=.git`, so it has no .git of
+# its own -- and `git -C` on such a directory does not fail, it silently WALKS UP
+# and answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. A
+# SHA that does not exist in agentmuxai/cef would end up in --target and in the
+# notes, with no error. Layouts also differ: some trees clone the fork directly
+# at chromium/src/cef, others mirror into it from an outer clone.
+#
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Falling through to a standard path when the override is wrong would record a
+# DIFFERENT checkout's HEAD -- a valid-looking but unrelated fork SHA -- and
+# look entirely successful.
+if [ -n "${CEF_CLONE:-}" ]; then
+  [ "$(git -C "$CEF_CLONE" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$CEF_CLONE" 2>/dev/null && pwd -P)" ] \
+    && git -C "$CEF_CLONE" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' \
+    || { echo "FATAL: CEF_CLONE=$CEF_CLONE is not an agentmuxai/cef git root." >&2; CEF_CLONE=; }
+else
+  # No override: probe. First candidate that is BOTH its own git root AND has
+  # the agentmuxai/cef remote. A .git-less mirror is not a git root, so this
+  # rejects the case where `git -C` would walk up into the Chromium checkout.
+  for _c in "$HOME/cef-build/chromium/chromium/src/cef" \
+            "$HOME/cef-build/chromium/cef" \
+            "$HOME/cef-build/chromium_git/cef"; do
+    [ "$(git -C "$_c" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$_c" 2>/dev/null && pwd -P)" ] || continue
+    git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
+    CEF_CLONE="$_c"; break
+  done
+fi
+echo "fork clone: ${CEF_CLONE:-<none>}"
+
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+#
+# The :? on CEF_CLONE is load-bearing, not decoration. `git -C "" rev-parse HEAD`
+# does NOT fail -- git treats an empty -C as "unchanged directory", exits 0, and
+# answers for the CURRENT directory, which by this point is inside the Chromium
+# checkout. An unmatched probe would then yield Chromium's HEAD: a real-looking
+# SHA, so a downstream emptiness check never fires. Failing at expansion time,
+# before git runs at all, is what removes that path.
+CEF_FORK_SHA=$(git -C "${CEF_CLONE:?FATAL: no agentmuxai/cef clone found (a .git-less mirror does not count); set CEF_CLONE}" rev-parse HEAD)
+: "${CEF_FORK_SHA:?refusing to publish without a recorded fork commit}"
+
 gh release create "cef-linux-x86_64-${CEF_VERSION}" --repo agentmuxai/cef \
+  --target "${CEF_FORK_SHA}" \
   --title "Patched libcef.so — Linux x86_64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + right-click passthrough. Branch: agentmux/7778-drag-rightclick-and-transparency @ c87bca4" \
+  --notes "BeginWindowDrag + right-click passthrough. Built from agentmuxai/cef ${CEF_FORK_SHA:0:12} (branch 7778)." \
   "cef-linux-x86_64-${CEF_VERSION}.tar.gz"
 ```
 

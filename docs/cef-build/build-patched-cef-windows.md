@@ -119,11 +119,18 @@ python3 automate-git.py `
 Same fork/branch as Linux/macOS — see the header note above on why
 Windows uses this branch despite not needing its patches.
 
+> **Build from the integration branch, never a feature branch.**
+> `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
+> newer and still be missing part of the carry-set — that is exactly how the
+> 2026-07 transparency gap happened. Run §5 of that doc against this checkout
+> before building; it must report **21 `OK`**. If it does not, the integration
+> branch is incomplete and must be fixed first — do not build around it.
+
 ```powershell
 Set-Location "$HOME\cef-build\chromium_git\cef"
 git remote add agentmuxai https://github.com/agentmuxai/cef.git
-git fetch agentmuxai agentmux/7778-drag-rightclick-and-transparency
-git checkout agentmuxai/agentmux/7778-drag-rightclick-and-transparency
+git fetch agentmuxai --prune
+git checkout agentmuxai/7778   # integration branch for the milestone
 
 # Mirror to the chromium-side cef checkout
 robocopy "$HOME\cef-build\chromium_git\cef" "$HOME\cef-build\chromium_git\chromium\src\cef" /MIR /XD .git
@@ -234,9 +241,47 @@ Compress-Archive -Path @(
     "locales"
 ) -DestinationPath "cef-windows-x86_64-$CefVersion.zip"
 
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+#
+# Locate the fork clone rather than assuming a path. The mirrored copy under
+# chromium\src\cef is created with `robocopy /XD .git`, so it has no .git of its
+# own -- and `git -C` on such a directory does not fail, it silently WALKS UP and
+# answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. Take
+# the first candidate that is BOTH its own git root AND has the agentmuxai/cef
+# remote. Set $env:CEF_CLONE to override.
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Folding it into the probe loop would `continue` past a wrong override and
+# silently record a DIFFERENT checkout's HEAD -- the same defect the bash
+# runbooks fix. Matches build-patched-libcef.md / build-patched-framework-macos.md.
+function Test-CefClone($p) {
+  if (-not $p -or -not (Test-Path $p)) { return $false }
+  $top = (git -C "$p" rev-parse --show-toplevel 2>$null)
+  if (-not $top -or (Resolve-Path $top).Path -ne (Resolve-Path $p).Path) { return $false }
+  return [bool]((git -C "$p" remote -v 2>$null) -match 'agentmuxai/cef')
+}
+
+$CefClone = $null
+if ($env:CEF_CLONE) {
+  if (Test-CefClone $env:CEF_CLONE) { $CefClone = $env:CEF_CLONE }
+  else { throw "CEF_CLONE=$($env:CEF_CLONE) is not an agentmuxai/cef git root." }
+} else {
+  foreach ($c in @("$HOME\cef-build\chromium_git\cef", "$HOME\cef-build\chromium\cef")) {
+    if (Test-CefClone $c) { $CefClone = $c; break }
+  }
+  if (-not $CefClone) { throw "No agentmuxai/cef clone found (a .git-less mirror does not count). Set CEF_CLONE." }
+}
+Write-Host "fork clone: $CefClone"
+
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+$CefForkSha = (git -C "$CefClone" rev-parse HEAD)
+# Refuse to publish a release with no provenance rather than one with an empty field.
+if (-not $CefForkSha) { throw "Refusing to publish without a recorded fork commit" }
+
 gh release create "cef-windows-x86_64-$CefVersion" --repo agentmuxai/cef `
+  --target "$CefForkSha" `
   --title "Codec-enabled CEF -- Windows x86_64 CEF $CefVersion" `
-  --notes "proprietary_codecs + HEVC/AC3/EAC3/Dolby Vision. Branch: agentmux/7778-drag-rightclick-and-transparency (inert on Windows -- built for codec flags only)." `
+  --notes "proprietary_codecs + HEVC/AC3/EAC3/Dolby Vision. Built from agentmuxai/cef $($CefForkSha.Substring(0,12)) (branch 7778; patches inert on Windows -- built for codec flags only)." `
   "cef-windows-x86_64-$CefVersion.zip"
 ```
 

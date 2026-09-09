@@ -25,7 +25,13 @@ prerequisite for moving macOS onto the native drag path.
 
 The patches live in the same fork/branch as Linux:
 - **Repo:** https://github.com/agentmuxai/cef
-- **Branch:** `agentmux/7778-drag-rightclick-and-transparency`
+- **Branch:** `7778` — the **integration** branch for the milestone. Never build
+  from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
+  it may look newer and still be missing part of the carry-set, which is exactly
+  how the 2026-07 transparency gap happened. Verify with §5 of
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **21 `OK`**)
+  before building; if it fails, fix the integration branch rather than building
+  around it.
 - **Base:** Chromium 148 (CEF branch 7778)
 - **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` (pinned in
   `Cargo.toml` `[patch]`; the binding's `_cef_window_t` carries `begin_window_drag`
@@ -175,9 +181,54 @@ cd "$CEF_OUT"
 # adjust the CI extract step to `ditto -x -k`.
 tar -czf "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz" "Chromium Embedded Framework.framework"
 
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+#
+# Locate the fork clone rather than assuming a path. The mirrored copy under
+# chromium/src/cef is created with `rsync --exclude=.git`, so it has no .git of
+# its own -- and `git -C` on such a directory does not fail, it silently WALKS UP
+# and answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. A
+# SHA that does not exist in agentmuxai/cef would end up in --target and in the
+# notes, with no error. Layouts also differ: some trees clone the fork directly
+# at chromium/src/cef, others mirror into it from an outer clone.
+#
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Falling through to a standard path when the override is wrong would record a
+# DIFFERENT checkout's HEAD -- a valid-looking but unrelated fork SHA -- and
+# look entirely successful.
+if [ -n "${CEF_CLONE:-}" ]; then
+  [ "$(git -C "$CEF_CLONE" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$CEF_CLONE" 2>/dev/null && pwd -P)" ] \
+    && git -C "$CEF_CLONE" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' \
+    || { echo "FATAL: CEF_CLONE=$CEF_CLONE is not an agentmuxai/cef git root." >&2; CEF_CLONE=; }
+else
+  # No override: probe. First candidate that is BOTH its own git root AND has
+  # the agentmuxai/cef remote. A .git-less mirror is not a git root, so this
+  # rejects the case where `git -C` would walk up into the Chromium checkout.
+  for _c in "$HOME/cef-build/chromium/chromium/src/cef" \
+            "$HOME/cef-build/chromium/cef" \
+            "$HOME/cef-build/chromium_git/cef"; do
+    [ "$(git -C "$_c" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$_c" 2>/dev/null && pwd -P)" ] || continue
+    git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
+    CEF_CLONE="$_c"; break
+  done
+fi
+echo "fork clone: ${CEF_CLONE:-<none>}"
+
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+#
+# The :? on CEF_CLONE is load-bearing, not decoration. `git -C "" rev-parse HEAD`
+# does NOT fail -- git treats an empty -C as "unchanged directory", exits 0, and
+# answers for the CURRENT directory, which by this point is inside the Chromium
+# checkout. An unmatched probe would then yield Chromium's HEAD: a real-looking
+# SHA, so a downstream emptiness check never fires. Failing at expansion time,
+# before git runs at all, is what removes that path.
+CEF_FORK_SHA=$(git -C "${CEF_CLONE:?FATAL: no agentmuxai/cef clone found (a .git-less mirror does not count); set CEF_CLONE}" rev-parse HEAD)
+: "${CEF_FORK_SHA:?refusing to publish without a recorded fork commit}"
+
 gh release create "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}" --repo agentmuxai/cef \
+  --target "${CEF_FORK_SHA}" \
   --title "Patched CEF framework — macOS arm64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + drag-rightclick + transparency. Branch: agentmux/7778-drag-rightclick-and-transparency. Unstripped (~547 MB); packager strips at bundle time." \
+  --notes "BeginWindowDrag + drag-rightclick + transparency. Built from agentmuxai/cef ${CEF_FORK_SHA:0:12} (branch 7778). Unstripped (~547 MB); packager strips at bundle time." \
   "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz"
 ```
 
@@ -192,7 +243,10 @@ release via `gh release list --json tagName --jq '[.[] | select(startswith(...))
 
 > ⚠️ **"Latest" here is not what you'd assume.** `gh release list`'s default
 > order is *not* reliably publish-time-descending on this fork — confirmed
-> 2026-07-28: every release created without an explicit `--target` picks up
+> 2026-07-28. **The release recipe above now passes `--target "${CEF_FORK_SHA}"`,
+> which addresses this at the source**; the verification below stays as a
+> belt-and-braces check, and remains necessary for the tags cut before that
+> change. Historically: every release created without an explicit `--target` picks up
 > `agentmuxai/cef`'s frozen default-branch HEAD commit date as its `created_at`
 > (not the actual `gh release create` call time), and `gh release list`
 > appears to sort by `created_at`. Net effect: a brand-new release can sort
