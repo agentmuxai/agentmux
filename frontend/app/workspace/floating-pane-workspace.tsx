@@ -206,7 +206,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
         // arrival cannot fire a redock on the already-redocked block.
         let armedAtRelease: boolean | null = null;
         const consumeArmedAtRelease = (): boolean => {
-            const armed = armedAtRelease ?? arming.isArmed(performance.now());
+            const armed = armedAtRelease ?? arming.isArmed();
             armedAtRelease = null;
             arming.reset();
             return armed;
@@ -499,7 +499,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // decision here and let whichever handler runs second read it
                 // rather than re-deriving from state the first one may have
                 // already torn down.
-                armedAtRelease = arming.isArmed(performance.now());
+                armedAtRelease = arming.isArmed();
                 pendingRedockCoords = { x: e.screenX, y: e.screenY };
             } else if (hasMoved) {
                 // Non-Windows (macOS + Linux): the JS-driven path keeps the
@@ -513,7 +513,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 // (reagent P1 on #1249's follow-up).
                 dragSessionId += 1;
                 if (consumeArmedAtRelease()) {
-                    void tryRedockAtCursor(e.screenX, e.screenY);
+                    void tryRedockAtCursor(e.screenX, e.screenY, preGhostWindow);
                 }
             }
         };
@@ -607,7 +607,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                         return pendingRedockCoords;
                     })();
                     pendingRedockCoords = null;
-                    if (coords) void tryRedockAtCursor(coords.x, coords.y);
+                    if (coords) void tryRedockAtCursor(coords.x, coords.y, capturedGhostForWindow);
                 } else {
                     pendingRedockCoords = null;
                 }
@@ -716,7 +716,13 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             startHoverHeartbeat = () => {
                 if (heartbeatTimer !== null) return;
                 heartbeatTimer = setInterval(() => {
-                    if (!dragging) return;
+                    // hasMoved gates the redock in onMouseUp, so emitting before the
+                    // drag has moved would paint a ghost promising a dock that
+                    // cannot happen — a press-and-hold on the header would arm
+                    // the indicator after the dwell and then do nothing on
+                    // release (codex P2 on #3124). The host heartbeat is gated
+                    // on its own `moves > 0` for the same reason.
+                    if (!dragging || !hasMoved) return;
                     emitHover(jsDragLatestScreenX, jsDragLatestScreenY);
                 }, HOVER_HEARTBEAT_MS);
             };
@@ -752,16 +758,16 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             unlistenMouseMove = () => document.removeEventListener("mousemove", onMouseMove);
         }
 
-        const tryRedockAtCursor = async (screenX: number, screenY: number) => {
+        const tryRedockAtCursor = async (screenX: number, screenY: number, expectedTarget: string | null) => {
             setRedockInProgress(true);
             try {
-                await tryRedockAtCursorInner(screenX, screenY);
+                await tryRedockAtCursorInner(screenX, screenY, expectedTarget);
             } finally {
                 setRedockInProgress(false);
             }
         };
 
-        const tryRedockAtCursorInner = async (screenX: number, screenY: number) => {
+        const tryRedockAtCursorInner = async (screenX: number, screenY: number, expectedTarget: string | null) => {
             const ourLabel = windowLabel();
             if (!ourLabel || cleaned) return;
             // `mouseup.screenX/Y` are CSS px. Host coordinate space: physical px
@@ -792,6 +798,20 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             if (!target.label || !target.window_id) {
                 // Cursor over desktop, external app, or our own floater
                 // — leave floater at the dropped position.
+                return;
+            }
+            // The arming decision was made about a specific window, but this
+            // resolve runs independently at release time. If the cursor left
+            // that window after the arming sample and before the release —
+            // within one heartbeat, so no sample caught it — the two disagree,
+            // and docking here would drop the pane into a window that never
+            // showed a ghost. Trust the armed target, not the late resolve.
+            // codex P1 on #3124.
+            if (expectedTarget && target.label !== expectedTarget) {
+                console.log(
+                    "[floating-pane] redock aborted: cursor left the armed target",
+                    { expectedTarget, resolved: target.label },
+                );
                 return;
             }
 

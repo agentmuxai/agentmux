@@ -189,13 +189,41 @@ the existing `last_hover_emit` throttle so a moving cursor does not double-emit:
 
 With a genuine heartbeat, the inference fallbacks become dead weight and must be
 **deleted, not retuned**: `:545` and its `window_drag_ended` twin `:659` are
-removed outright, leaving arming to `hoverArmed` plus the wall-clock recheck
-against `dwellHoverTargetFirstSeenAt`. The velocity gate then actually holds —
-a rejected fast entry stays rejected until the cursor genuinely slows and dwells.
+removed outright. The velocity gate then actually holds — a rejected fast entry
+stays rejected until the cursor genuinely slows and dwells.
 
-The macOS/Linux JS-driven path already receives continuous `mousemove` and needs
-no heartbeat; it needs only the same fallback deletion
-(`:560`, `:562` — the `dwellSlowSince` / `dwellCurrentConfirmedAt` proxies).
+This section originally kept one of them: the wall-clock recheck against
+`dwellHoverTargetFirstSeenAt` (`:540`), on the reasoning that re-reading a real
+confirmed-hover timestamp is not the same as inferring from missing samples.
+**That was wrong, and it did not survive review** (codex P1 on #3124). Two
+distinct failures:
+
+- The ghost renderer only paints once it observes an *armed* sample. A release
+  inside the extrapolation window therefore docked with **no ghost ever
+  shown** — the exact inverse of the invariant §5.2 sets out below.
+- `firstSeenAt` describes the target of the *last* sample. Extrapolating past
+  that sample can report armed for a window the cursor has since left, and
+  because the redock re-resolves the window under the cursor independently at
+  release, the pane lands somewhere that never showed a ghost.
+
+Arming therefore requires a confirming sample, full stop — `isArmed()` takes no
+timestamp. The heartbeat is what makes this affordable: the flag is never more
+than one 100ms tick stale, so the cost is ~100ms of latency in exchange for the
+two sides agreeing exactly. As defence in depth, the release path also compares
+the resolved window against the armed target and aborts on a mismatch.
+
+The macOS/Linux JS-driven path receives continuous `mousemove` while the cursor
+moves, but falls equally silent when it stops, so it needs the same heartbeat in
+JS (a 100ms interval re-emitting at the last known position) plus the same
+fallback deletion (`:560`, `:562` — the `dwellSlowSince` /
+`dwellCurrentConfirmedAt` proxies).
+
+**Both heartbeats must be gated on the drag having actually moved** (codex P2 on
+#3124). The redock is refused unless the drag reports movement — `hasMoved` in
+the renderer, `moves > 0` in the host loop — so emitting stationary samples
+during a press-and-hold on the header would arm the indicator after the dwell
+and then dock nothing on release, an indicator promising what the release gate
+will refuse.
 
 ### 5.2 P2 — Raise the threshold
 

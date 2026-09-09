@@ -18,19 +18,19 @@ describe("redock arming — dwell", () => {
     it("arms after the cursor holds the same target for the full dwell", () => {
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
-        expect(a.isArmed(0)).toBe(false);
+        expect(a.isArmed()).toBe(false);
         a.sample({ target: "main", x: 0, y: 0, t: 100 });
-        expect(a.isArmed(100)).toBe(false);
+        expect(a.isArmed()).toBe(false);
         const out = a.sample({ target: "main", x: 0, y: 0, t: 500 });
         expect(out.armed).toBe(true);
-        expect(a.isArmed(500)).toBe(true);
+        expect(a.isArmed()).toBe(true);
     });
 
     it("does not arm on a hold shorter than the dwell", () => {
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 0, y: 0, t: 200 });
-        expect(a.isArmed(200)).toBe(false);
+        expect(a.isArmed()).toBe(false);
     });
 
     it("restarts the clock when the target changes", () => {
@@ -39,20 +39,22 @@ describe("redock arming — dwell", () => {
         a.sample({ target: "main", x: 0, y: 0, t: 400 });
         // Switching windows at t=400 must not inherit the 400ms already served.
         a.sample({ target: "floater-2", x: 0, y: 0, t: 400 });
-        expect(a.isArmed(400)).toBe(false);
-        expect(a.isArmed(800)).toBe(false);
-        expect(a.isArmed(900)).toBe(true);
+        expect(a.isArmed()).toBe(false);
+        a.sample({ target: "floater-2", x: 0, y: 0, t: 800 });
+        expect(a.isArmed()).toBe(false);
+        a.sample({ target: "floater-2", x: 0, y: 0, t: 900 });
+        expect(a.isArmed()).toBe(true);
     });
 
     it("disarms and clears the indicator when the cursor leaves every target", () => {
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 0, y: 0, t: 600 });
-        expect(a.isArmed(600)).toBe(true);
+        expect(a.isArmed()).toBe(true);
         const out = a.sample({ target: null, x: 0, y: 0, t: 650 });
         expect(out.armed).toBe(false);
         expect(out.clearIndicator).toBe(true);
-        expect(a.isArmed(2000)).toBe(false);
+        expect(a.isArmed()).toBe(false);
     });
 
     it("arms from stationary samples alone, with no cursor movement", () => {
@@ -62,7 +64,7 @@ describe("redock arming — dwell", () => {
         for (let t = 0; t <= 600; t += 100) {
             a.sample({ target: "main", x: 42, y: 42, t });
         }
-        expect(a.isArmed(600)).toBe(true);
+        expect(a.isArmed()).toBe(true);
     });
 });
 
@@ -73,14 +75,14 @@ describe("redock arming — velocity", () => {
         for (let t = 0; t <= 1000; t += 50) {
             a.sample({ target: "main", x: t * 1.5, y: 0, t });
         }
-        expect(a.isArmed(1000)).toBe(false);
+        expect(a.isArmed()).toBe(false);
     });
 
     it("disarms and clears the indicator when an armed cursor speeds away", () => {
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 0, y: 0, t: 600 });
-        expect(a.isArmed(600)).toBe(true);
+        expect(a.isArmed()).toBe(true);
         const out = a.sample({ target: "main", x: 300, y: 0, t: 650 });
         expect(out.armed).toBe(false);
         expect(out.clearIndicator).toBe(true);
@@ -94,12 +96,14 @@ describe("redock arming — velocity", () => {
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 900, y: 0, t: 100 }); // 9000 px/s — rejected
-        expect(a.isArmed(100)).toBe(false);
+        expect(a.isArmed()).toBe(false);
         // Cursor now stops dead. Stillness alone must not arm until a full
         // dwell has been served from the moment motion actually settled.
         a.sample({ target: "main", x: 900, y: 0, t: 200 });
-        expect(a.isArmed(600)).toBe(false);
-        expect(a.isArmed(701)).toBe(true);
+        a.sample({ target: "main", x: 900, y: 0, t: 600 });
+        expect(a.isArmed()).toBe(false);
+        a.sample({ target: "main", x: 900, y: 0, t: 701 });
+        expect(a.isArmed()).toBe(true);
     });
 
     it("does not read a cursorless teardown sample as a jump from the origin", () => {
@@ -112,8 +116,10 @@ describe("redock arming — velocity", () => {
         a.sample({ target: null, t: 100 }); // teardown — no cursor
         a.sample({ target: "main", x: 900, y: 500, t: 200 });
         // Position never actually changed, so dwell runs uninterrupted from 200.
-        expect(a.isArmed(699)).toBe(false);
-        expect(a.isArmed(700)).toBe(true);
+        a.sample({ target: "main", x: 900, y: 500, t: 699 });
+        expect(a.isArmed()).toBe(false);
+        a.sample({ target: "main", x: 900, y: 500, t: 700 });
+        expect(a.isArmed()).toBe(true);
     });
 
     it("treats a zero-duration sample as no motion rather than infinite speed", () => {
@@ -121,7 +127,7 @@ describe("redock arming — velocity", () => {
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 50, y: 0, t: 0 });
         // Must not throw or divide by zero, and must not have armed yet.
-        expect(a.isArmed(0)).toBe(false);
+        expect(a.isArmed()).toBe(false);
     });
 });
 
@@ -133,27 +139,53 @@ describe("redock arming — lifecycle", () => {
         expect(a.target()).toBe("main");
     });
 
-    it("arms on the wall clock between samples", () => {
-        // Samples arrive at 100ms; a mouseup landing at t=520 must see the
-        // dwell as served even though no sample has arrived since t=500.
+    it("does not arm until a sample confirms the dwell", () => {
+        // Previously isArmed(now) extrapolated: with the last sample at 400ms
+        // a release at 520ms armed on the wall clock alone. That let a release
+        // dock before the target window had painted any ghost (it only paints
+        // on an armed sample), and firstSeenAt belongs to the target of the
+        // LAST sample, so the extrapolation could arm for a window the cursor
+        // had already left. codex P1 on #3124.
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 0, y: 0, t: 400 });
-        expect(a.isArmed(400)).toBe(false);
-        expect(a.isArmed(520)).toBe(true);
+        // A release at 520ms would once have armed here on the wall clock.
+        expect(a.isArmed()).toBe(false);
+        // The heartbeat delivers the confirming sample, and only now is it armed.
+        a.sample({ target: "main", x: 0, y: 0, t: 500 });
+        expect(a.isArmed()).toBe(true);
+    });
+
+    it("never reports armed for a window the cursor has already left", () => {
+        // The half of codex P1 that survives requiring a confirmed sample:
+        // arming is about a specific target, so a caller must be able to tell
+        // WHICH one. tryRedockAtCursorInner re-resolves the window under the
+        // cursor at release and compares it against target() for exactly this.
+        const a = arming();
+        a.sample({ target: "main", x: 0, y: 0, t: 0 });
+        a.sample({ target: "main", x: 0, y: 0, t: 500 });
+        expect(a.isArmed()).toBe(true);
+        expect(a.target()).toBe("main");
+        // Cursor flicks to another window; the next sample retargets and the
+        // arming is dropped rather than transferred.
+        a.sample({ target: "other", x: 0, y: 0, t: 560 });
+        expect(a.isArmed()).toBe(false);
+        expect(a.target()).toBe("other");
     });
 
     it("forgets everything on reset so a second drag cannot inherit state", () => {
         const a = arming();
         a.sample({ target: "main", x: 0, y: 0, t: 0 });
         a.sample({ target: "main", x: 0, y: 0, t: 600 });
-        expect(a.isArmed(600)).toBe(true);
+        expect(a.isArmed()).toBe(true);
         a.reset();
-        expect(a.isArmed(600)).toBe(false);
+        expect(a.isArmed()).toBe(false);
         expect(a.target()).toBe(null);
         // A fresh drag starting mid-clock must serve its own full dwell.
         a.sample({ target: "main", x: 0, y: 0, t: 700 });
-        expect(a.isArmed(1000)).toBe(false);
-        expect(a.isArmed(1200)).toBe(true);
+        a.sample({ target: "main", x: 0, y: 0, t: 1000 });
+        expect(a.isArmed()).toBe(false);
+        a.sample({ target: "main", x: 0, y: 0, t: 1200 });
+        expect(a.isArmed()).toBe(true);
     });
 });

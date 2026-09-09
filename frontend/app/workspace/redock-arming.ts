@@ -57,12 +57,22 @@ export interface RedockArmingOutcome {
 export interface RedockArming {
     sample(s: RedockHoverSample): RedockArmingOutcome;
     /**
-     * Arming state as of `now`. Re-checks the dwell against the wall clock so a
-     * mouseup landing between two samples still sees a dwell that has in fact
-     * elapsed. This is a recheck of a real confirmed-hover timestamp, not an
-     * inference from missing samples — see the design note above.
+     * Whether a sample has confirmed a full dwell over the current target.
+     *
+     * Deliberately NOT extrapolated against the wall clock. An earlier revision
+     * also returned true once `now - firstSeenAt >= dwellMs` even if no sample
+     * had confirmed it yet, reasoning that the timestamp was real. Two ways
+     * that goes wrong (codex P1 on #3124):
+     *   - The ghost renderer only paints once it sees an armed sample, so a
+     *     release inside that window docked with no ghost ever shown — the
+     *     inverse of the invariant the spec sets out in §5.2.
+     *   - `firstSeenAt` belongs to the target of the LAST sample. Extrapolating
+     *     past it can arm for a window the cursor has since left.
+     * With the §5.1 heartbeat the arming flag is never more than one tick
+     * stale, so requiring a confirmed sample costs ~100ms and buys exact
+     * agreement between the two sides.
      */
-    isArmed(now: number): boolean;
+    isArmed(): boolean;
     /** Current resolved target, for pre-capturing the ghost before teardown. */
     target(): string | null;
     reset(): void;
@@ -83,9 +93,6 @@ export function createRedockArming(opts?: {
     let lastT: number | null = null;
     let lastX = 0;
     let lastY = 0;
-
-    const dwellServed = (now: number): boolean =>
-        target !== null && firstSeenAt !== null && now - firstSeenAt >= dwellMs;
 
     return {
         sample(s: RedockHoverSample): RedockArmingOutcome {
@@ -131,8 +138,8 @@ export function createRedockArming(opts?: {
             return { armed, clearIndicator: wasArmed && !armed };
         },
 
-        isArmed(now: number): boolean {
-            return armed || dwellServed(now);
+        isArmed(): boolean {
+            return armed;
         },
 
         target(): string | null {

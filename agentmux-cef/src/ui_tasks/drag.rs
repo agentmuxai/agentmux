@@ -686,7 +686,15 @@ wrap_task! {
                             // handler is already emitting at 50ms and this tick
                             // mostly no-ops, so the cadence is unchanged for a
                             // moving drag.
-                            if !cancelled {
+                            // `moves > 0` mirrors the `moved` flag this loop
+                            // reports in window_drag_ended, which the renderer
+                            // requires before it will redock. Without it a
+                            // press-and-hold on the header would emit
+                            // stationary samples, arm the ghost after the dwell
+                            // and then dock nothing on release — an indicator
+                            // promising something the release gate refuses.
+                            // codex P2 on #3124.
+                            if !cancelled && moves > 0 {
                                 if let Some(sl) = self.source_label.as_deref() {
                                     if sl.starts_with("floating-")
                                         && last_hover_emit.elapsed()
