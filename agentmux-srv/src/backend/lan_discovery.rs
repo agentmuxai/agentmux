@@ -30,6 +30,22 @@ const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
 /// this list is for *display* ("who lives on that host"), not for delivery
 /// routing — `find_agent` still does its own authoritative lookup.
 const LAN_AGENT_NAMES_REFRESH_SECS: u64 = 30;
+/// Hard cap on a single peer's `/agentmux/reactive/agent-names` response body
+/// (Codex P1 on PR #3102): the `lan_key` a peer advertised authenticates
+/// THIS client TO that peer, not the peer to us — anything that can fake an
+/// mDNS advertisement for `_agentmux._tcp.local` makes it into
+/// `self.instances` and gets polled by this loop. Enforced while reading, not
+/// via `Content-Length` (a malicious peer can omit or lie about that while
+/// still streaming an unbounded chunked body). 64 KiB is generous for a
+/// plain name list — real fleets are agents-per-machine, not per-thousand.
+const LAN_AGENT_NAMES_MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// Defense in depth past the byte cap above: even a response that fits in
+/// 64 KiB could be an adversarially compact array of many short strings.
+const LAN_AGENT_NAMES_MAX_COUNT: usize = 500;
+/// A legitimate agent name is short; anything absurdly long is more likely
+/// an attempt to waste memory than a real name, so it's dropped rather than
+/// truncated (truncating could quietly merge two distinct long names).
+const LAN_AGENT_NAMES_MAX_NAME_LEN: usize = 256;
 
 /// UDP broadcast discovery fallback (Layer 2), for LANs where mDNS multicast
 /// is filtered (common on corporate/guest WiFi). Mobile clients broadcast a
@@ -510,45 +526,130 @@ impl LanDiscovery {
                     .collect()
             };
 
-            for (key, base_url, lan_key) in targets {
-                let url = format!("{base_url}/agentmux/reactive/agent-names");
-                let resp = http.get(&url).header("X-AuthKey", &lan_key).send().await;
-                let names = match resp {
-                    Ok(r) if r.status().is_success() => {
-                        match r.json::<serde_json::Value>().await {
-                            Ok(v) => v
-                                .get("agents")
-                                .and_then(|a| a.as_array())
-                                .map(|a| {
-                                    a.iter()
-                                        .filter_map(|n| n.as_str().map(str::to_string))
-                                        .collect::<Vec<String>>()
-                                }),
-                            Err(e) => {
-                                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: bad JSON");
-                                None
+            // Fan out concurrently, same pattern as `query_peers_concurrently`
+            // — sequential awaits here would let N stale/unreachable peers
+            // each burn their full LAN_PEER_QUERY_TIMEOUT_SECS in turn
+            // (Codex P2 on PR #3102), stretching the nominal 30s refresh
+            // interval by however many peers are currently slow to answer.
+            let outcomes: Vec<(String, Option<Vec<String>>)> = {
+                use futures_util::StreamExt as _;
+                let http_ref = &http;
+                let mut inflight = futures_util::stream::FuturesUnordered::new();
+                for (key, base_url, lan_key) in &targets {
+                    inflight.push(async move {
+                        (
+                            key.clone(),
+                            Self::fetch_peer_agent_names(http_ref, base_url, lan_key).await,
+                        )
+                    });
+                }
+                let mut out = Vec::with_capacity(targets.len());
+                while let Some(item) = inflight.next().await {
+                    out.push(item);
+                }
+                out
+            };
+
+            // Only broadcast `laninstances` when something actually changed
+            // (Codex P2 on PR #3102) — otherwise the display-oriented point
+            // of this loop is defeated: without this, a refresh that DOES
+            // find new names still leaves connected clients showing the
+            // stale `agents: []` from first mDNS resolution until some
+            // unrelated, unsynchronized mDNS event happens to fire.
+            let mut changed = false;
+            {
+                let mut instances = self.instances.write();
+                for (key, names) in outcomes {
+                    if let Some(names) = names {
+                        if let Some(entry) = instances.get_mut(&key) {
+                            if entry.agents != names {
+                                entry.agents = names;
+                                changed = true;
                             }
                         }
                     }
-                    Ok(r) => {
-                        // A peer running a build without this route answers
-                        // 404 — expected during a rolling upgrade, not an error.
-                        tracing::debug!(peer = %base_url, status = %r.status(), "LAN agent-name refresh: non-2xx");
-                        None
-                    }
-                    Err(e) => {
-                        tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: unreachable");
-                        None
-                    }
-                };
-
-                if let Some(names) = names {
-                    if let Some(entry) = self.instances.write().get_mut(&key) {
-                        entry.agents = names;
-                    }
                 }
             }
+            if changed {
+                self.broadcast_instances();
+            }
         }
+    }
+
+    /// One peer's contribution to `agent_names_refresh_loop`. Returns `None`
+    /// on any failure (unreachable, non-2xx, oversized, or malformed body) —
+    /// this list is display-only, so a bad peer response should leave the
+    /// last-known list in place rather than blank it (see the loop's own
+    /// "non-destructive" framing).
+    async fn fetch_peer_agent_names(
+        http: &reqwest::Client,
+        base_url: &str,
+        lan_key: &str,
+    ) -> Option<Vec<String>> {
+        let url = format!("{base_url}/agentmux/reactive/agent-names");
+        let resp = match http.get(&url).header("X-AuthKey", lan_key).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: unreachable");
+                return None;
+            }
+        };
+        if !resp.status().is_success() {
+            // A peer running a build without this route answers 404 —
+            // expected during a rolling upgrade, not an error.
+            tracing::debug!(peer = %base_url, status = %resp.status(), "LAN agent-name refresh: non-2xx");
+            return None;
+        }
+
+        let body = match Self::read_body_capped(resp, LAN_AGENT_NAMES_MAX_RESPONSE_BYTES).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(peer = %base_url, error = %e, "LAN agent-name refresh: response too large, discarded");
+                return None;
+            }
+        };
+
+        let value: serde_json::Value = match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: bad JSON");
+                return None;
+            }
+        };
+
+        let names: Vec<String> = value
+            .get("agents")
+            .and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|n| n.as_str())
+                    .filter(|n| n.len() <= LAN_AGENT_NAMES_MAX_NAME_LEN)
+                    .take(LAN_AGENT_NAMES_MAX_COUNT)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(names)
+    }
+
+    /// Reads an HTTP response body up to `max_bytes`, erroring out as soon as
+    /// the cap is exceeded rather than buffering the full body first —
+    /// `Response::bytes()`/`.json()` have no size limit of their own, so a
+    /// peer that responds successfully but with an enormous body would
+    /// otherwise be read into memory in full before this code ever gets a
+    /// chance to reject it.
+    async fn read_body_capped(
+        mut resp: reqwest::Response,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut buf = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+            buf.extend_from_slice(&chunk);
+            if buf.len() > max_bytes {
+                return Err(format!("response exceeded {max_bytes}-byte cap"));
+            }
+        }
+        Ok(buf)
     }
 
     /// Build the JSON response payload for this instance's identity — see
@@ -2180,5 +2281,138 @@ mod self_resolution_tests {
     #[test]
     fn a_resolution_with_no_addresses_is_not_self() {
         assert!(!is_self_resolution(55019, &[], 55019, &own()));
+    }
+}
+
+/// `agent_names_refresh_loop`'s peer-response handling — real HTTP round
+/// trips against a raw fake server, same style as
+/// `server::tests::spawn_fake_browser_api`, because the behavior under test
+/// (bailing out mid-body, not just rejecting on `Content-Length`) can't be
+/// exercised through an in-process `tower::ServiceExt::oneshot` call.
+#[cfg(test)]
+mod agent_names_refresh_tests {
+    use super::{LanDiscovery, LAN_AGENT_NAMES_MAX_COUNT, LAN_AGENT_NAMES_MAX_NAME_LEN};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Starts a raw TCP server that always answers
+    /// `/agentmux/reactive/agent-names` with `body` verbatim (caller supplies
+    /// correct headers/framing), and returns its `http://127.0.0.1:<port>`
+    /// base URL. One-shot: serves exactly one connection then stops, which is
+    /// all a single `fetch_peer_agent_names` call makes.
+    async fn spawn_fake_agent_names_server(response: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else { return };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// Codex P1 on PR #3102: the `lan_key` a peer advertises authenticates
+    /// THIS client to that peer, not the other way round — anything able to
+    /// fake an mDNS advertisement gets into `self.instances` and is polled.
+    /// A response larger than the cap must be rejected outright, not
+    /// buffered in full and then discarded.
+    #[tokio::test]
+    async fn oversized_response_is_rejected_not_buffered() {
+        // 4x the cap, filled with a repeating byte inside a JSON string so a
+        // parser that ignored the cap would otherwise succeed.
+        let oversized_len = 4 * super::LAN_AGENT_NAMES_MAX_RESPONSE_BYTES;
+        let filler = "a".repeat(oversized_len);
+        let json_body = format!(r#"{{"agents":["{filler}"]}}"#);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            json_body.len(),
+            json_body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let base_url = spawn_fake_agent_names_server(leaked).await;
+        let http = reqwest::Client::new();
+
+        let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant").await;
+        assert!(
+            names.is_none(),
+            "an oversized response must be discarded entirely, not truncated into a result"
+        );
+    }
+
+    /// The happy path, plus defense-in-depth entry capping: a valid response
+    /// with a name that's too long and more names than the count cap allows
+    /// should keep the good names and drop the rest, not fail outright.
+    #[tokio::test]
+    async fn valid_response_is_parsed_and_excess_entries_are_capped() {
+        let too_long_name = "x".repeat(LAN_AGENT_NAMES_MAX_NAME_LEN + 1);
+        let mut names_json: Vec<String> = (0..LAN_AGENT_NAMES_MAX_COUNT + 10)
+            .map(|i| format!("\"agent-{i}\""))
+            .collect();
+        names_json.push(format!("\"{too_long_name}\""));
+        let json_body = format!(r#"{{"agents":[{}]}}"#, names_json.join(","));
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            json_body.len(),
+            json_body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let base_url = spawn_fake_agent_names_server(leaked).await;
+        let http = reqwest::Client::new();
+
+        let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant")
+            .await
+            .expect("a well-formed, appropriately-sized response must parse");
+
+        assert_eq!(names.len(), LAN_AGENT_NAMES_MAX_COUNT, "must truncate to the count cap");
+        assert!(names.contains(&"agent-0".to_string()));
+        assert!(
+            !names.iter().any(|n| n.len() > LAN_AGENT_NAMES_MAX_NAME_LEN),
+            "an over-length name must never survive into the result"
+        );
+    }
+
+    /// Codex P2 on PR #3102: sequential polling lets N stale/unreachable
+    /// peers each burn their full timeout in turn. Two peers that each take
+    /// ~300ms to answer must complete in ~300ms total, not ~600ms — proving
+    /// the fan-out is real concurrency, not just non-blocking syntax that
+    /// still executes one after another.
+    #[tokio::test]
+    async fn peers_are_polled_concurrently_not_sequentially() {
+        async fn spawn_slow_agent_names_server(delay_ms: u64) -> String {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                let body = r#"{"agents":["slow-agent"]}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+            format!("http://127.0.0.1:{port}")
+        }
+
+        let delay_ms = 300;
+        let url_a = spawn_slow_agent_names_server(delay_ms).await;
+        let url_b = spawn_slow_agent_names_server(delay_ms).await;
+        let http = reqwest::Client::new();
+
+        let started = std::time::Instant::now();
+        use futures_util::StreamExt as _;
+        let mut inflight = futures_util::stream::FuturesUnordered::new();
+        inflight.push(LanDiscovery::fetch_peer_agent_names(&http, &url_a, "k"));
+        inflight.push(LanDiscovery::fetch_peer_agent_names(&http, &url_b, "k"));
+        while inflight.next().await.is_some() {}
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(delay_ms * 2 - 100),
+            "two {delay_ms}ms peers took {elapsed:?} — looks sequential, not concurrent"
+        );
     }
 }
