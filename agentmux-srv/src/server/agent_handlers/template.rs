@@ -101,15 +101,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore_act = state.wstore.clone();
     let id_store_act = state.id_store.clone();
     let broker_act = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentDefCreateFromTemplateData, _ctx| {
             let wstore = wstore_act.clone();
             let id_store = id_store_act.clone();
             let broker = broker_act.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentDefCreateFromTemplateData = serde_json::from_value(data)
-                    .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
+            async move {
                 let name = cmd.name.trim().to_string();
                 if name.is_empty() {
                     return Err("agentdefcreatefromtemplate: name must be non-empty".into());
@@ -156,8 +154,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // template property. When supplied, the clone records it
                 // (and the matching `environment`); empty falls back to
                 // the template's value for back-compat with older callers.
-                let chosen_agent_type = match cmd.agent_type.trim() {
-                    "host" | "container" => cmd.agent_type.trim().to_string(),
+                let chosen_agent_type = match cmd.agent_type.as_deref().unwrap_or("").trim() {
+                    "host" | "container" => cmd.agent_type.as_deref().unwrap_or("").trim().to_string(),
                     _ => template.agent_type.clone(),
                 };
                 let chosen_environment = if chosen_agent_type == "container" {
@@ -254,8 +252,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let resp = AgentDefCreateFromTemplateResult {
                     definition_id: new_def.id.clone(),
-                    identity_id: cmd.identity_id,
-                    memory_id: cmd.memory_id,
+                    identity_id: cmd.identity_id.unwrap_or_default(),
+                    memory_id: cmd.memory_id.unwrap_or_default(),
                 };
                 tracing::info!(
                     template_id = %cmd.template_id,
@@ -263,9 +261,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     new_name = %new_def.name,
                     "agentdefcreatefromtemplate: cloned template into user agent"
                 );
-                Ok(Some(serde_json::to_value(&resp).unwrap_or_default()))
-            })
-        }),
+                Ok(resp)
+            }
+        },
     );
 
     // agentdefhide → set user_hidden = 1 on a seeded template, so it
@@ -520,14 +518,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Definition fork suggest (read-only — no mutation) ----
 
     let wstore_sug = state.wstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandForkAgentDefinitionSuggestData, _ctx| {
             let wstore = wstore_sug.clone();
-            Box::pin(async move {
-                let cmd: CommandForkAgentDefinitionSuggestData = serde_json::from_value(data)
-                    .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
-
+            async move {
                 let all = wstore
                     .agent_def_list()
                     .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
@@ -538,10 +533,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 let suggested_label = suggest_fork_name(&all, source);
 
-                let result = ForkAgentDefinitionSuggestResult { suggested_label };
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
+                Ok(ForkAgentDefinitionSuggestResult { suggested_label })
+            }
+        },
     );
 
     // ---- Rename a fork/agent tab's displayed title ----
@@ -674,6 +668,38 @@ mod tests {
             memory_id: bundle_id.to_string(),
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
+    }
+
+    /// Both commands migrated to `register_typed` in this PR are recorded
+    /// in the engine's schema with their exact type names — the property
+    /// the RPC codegen plan depends on (`register_typed_records_each_command_
+    /// request_and_response_type` in agent_handlers/mod.rs covers the first
+    /// two migrated commands; this covers the second batch).
+    #[tokio::test]
+    async fn register_typed_records_the_second_batch_of_migrated_commands() {
+        let state = test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
+        };
+        let a = find(COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE);
+        assert_eq!(a["requestName"], "CommandAgentDefCreateFromTemplateData");
+        assert_eq!(a["responseName"], "AgentDefCreateFromTemplateResult");
+        let f = find(COMMAND_FORK_AGENT_DEFINITION_SUGGEST);
+        assert_eq!(f["requestName"], "CommandForkAgentDefinitionSuggestData");
+        assert_eq!(f["responseName"], "ForkAgentDefinitionSuggestResult");
+        // Renameagentdefinitiontitle is deliberately NOT migrated (its
+        // response is the storage-level AgentDefinition, out of scope here)
+        // and must stay absent from the schema.
+        assert!(
+            rows.iter().all(|r| r["command"] != COMMAND_RENAME_AGENT_DEFINITION_TITLE),
+            "renameagentdefinitiontitle is not migrated and must not appear",
+        );
     }
 
     #[tokio::test]
