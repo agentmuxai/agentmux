@@ -738,6 +738,15 @@ pub struct PersistentSubprocessController {
     /// carefully-ordered spawn/resume/queue state transitions. `None` for a
     /// persistent block with no muxbus identity set (a non-agent process).
     agent_id: Mutex<Option<String>>,
+    /// The STABLE jekt identity (`AGENTMUX_AGENT_ID`), captured once in
+    /// `spawn_process` and never overwritten afterward — unlike `agent_id`
+    /// above, which `input.rs`'s Register-tail deliberately refreshes every
+    /// turn to track the live, renameable display name (#2697). Exists
+    /// specifically so `Controller::stable_agent_id()` can back the jekt
+    /// registry's alias entry and the #2695 recipient-identity check even
+    /// after `agent_id` has moved on to a post-rename value. See
+    /// `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
+    stable_agent_id: Mutex<Option<String>>,
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -850,6 +859,7 @@ impl PersistentSubprocessController {
             stdout_seq: Arc::new(AtomicU64::new(0)),
             self_ref: Mutex::new(None),
             agent_id: Mutex::new(None),
+            stable_agent_id: Mutex::new(None),
         }
     }
 
@@ -2791,6 +2801,15 @@ impl PersistentSubprocessController {
         // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
         let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
         *self.agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
+        // Write-once: unlike `agent_id` above (refreshed every turn by
+        // `input.rs`'s Register-tail), `stable_agent_id` is only ever set
+        // here, at spawn, and never touched again — see its field doc
+        // comment. `spawn_process` can in principle run again for the same
+        // controller on a respawn; re-writing the SAME env-derived value
+        // each time is harmless (idempotent), and a respawn with genuinely
+        // different env (rare, config change) correctly updates the alias
+        // to match, same as the primary registration already does.
+        *self.stable_agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
         // Defaults to this spawn's own nonce; overridden below if
         // registration is skipped (reagent P1 on PR #3084 — see the `Err`
         // arm just below for why `my_registration_nonce` alone is wrong
@@ -2813,7 +2832,21 @@ impl PersistentSubprocessController {
             // `ReactiveHandler::try_register_agent_with_nonce`'s doc comment
             // and `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
             match crate::backend::reactive::get_global_handler()
-                .try_register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
+                .try_register_agent_with_nonce(
+                    agent_id,
+                    &self.block_id,
+                    Some(&self.tab_id),
+                    my_registration_nonce,
+                    // Also park `agent_id` (== AGENTMUX_AGENT_ID here) as a
+                    // permanent alias for this block, independent of the
+                    // primary registration key — `input.rs`'s Register-tail
+                    // will re-key the primary registration to the live
+                    // display name on this agent's very first turn, which
+                    // would otherwise evict this exact string with nothing
+                    // left to answer a jekt tagged with the stable ID. See
+                    // `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
+                    Some(agent_id.as_str()),
+                )
             {
                 Ok(()) => {
                     tracing::info!(
@@ -4345,6 +4378,10 @@ impl Controller for PersistentSubprocessController {
 
     fn set_agent_id(&self, id: Option<String>) {
         *self.agent_id.lock().unwrap() = id;
+    }
+
+    fn stable_agent_id(&self) -> Option<String> {
+        self.stable_agent_id.lock().unwrap().clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
