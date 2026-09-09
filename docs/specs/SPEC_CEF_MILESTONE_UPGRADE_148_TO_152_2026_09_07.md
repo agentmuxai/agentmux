@@ -11,14 +11,19 @@ genuinely drifted** (`include/internal/cef_types.h`,
 `libcef/renderer/render_manager.cc`). Open: the macOS hermetic Xcode pin
 (Phase D build-time check). **Patch #4's five coupled CEF-side commits are now
 ported** (Codex correctly flagged on #3095 that test-applying only its one
-Chromium-side file didn't verify it) — ported via clean 3-way merge, but **not
-compile-verified**. **Phase B's port is COMPLETE — all 18 of 18
-files**, done as real per-file 3-way merges (base=upstream 7778, ours=fork,
-theirs=upstream 7977); all merged clean, zero conflicts. Both files that had
-drifted merged cleanly because our changes and upstream's sit in different
-regions. Branches `7977`, `agentmux/7977-process-requirement`,
-`agentmux/7977-drag-rightclick-and-transparency`. **Phases C–G not started;
-nothing is built or tested — `agentmuxai/cef` has no CI.** The
+Chromium-side file didn't verify it) — ported via clean 3-way merge, and has
+since **compiled on Windows** (2026-09-09; macOS/Linux not built, and no
+platform has functionally exercised the transparency behavior). **Phase B's
+port is COMPLETE — all 18 of 18 files**, done as real per-file 3-way merges
+(base=upstream 7778, ours=fork, theirs=upstream 7977); all merged clean, zero
+conflicts. Both files that had drifted merged cleanly because our changes and
+upstream's sit in different regions. Branch `7977` is now a genuine
+integration branch (was the bare upstream mirror until 2026-09-09 — both
+feature branches, `agentmux/7977-process-requirement` and
+`agentmux/7977-drag-rightclick-and-transparency`, are merged into it).
+**Phases C/E/F/G not started; Windows built (`libcef.dll`, boot-verified);
+macOS/Linux not built — `agentmuxai/cef` has no CI, so this is the only
+compile signal that exists.** The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
@@ -94,7 +99,8 @@ Plus **build flags, not patches** — version-controlled in *this* repo, not the
 > 7778 and 7977. **Patch #4's CEF-side cascade is now ported** (it was the
 > gap behind the earlier "partially verified" note): the five coupled commits
 > live across `libcef/`, including `render_manager.cc`'s renderer half, and all
-> merged cleanly onto 7977. Ported ≠ built: still unverified by compilation.
+> merged cleanly onto 7977, and has since compiled successfully on Windows
+> (2026-09-09) — not yet on macOS/Linux, and never functionally exercised.
 > See the report's §2.4/§2.5/§5b.
 
 ---
@@ -119,18 +125,19 @@ Output: `docs/reports/REPORT_CEF_UPGRADE_PHASE_A_RECON_2026_09_08.md`.
 **Verdict: go on the 152 target** — nothing found makes it harder, and 16 of the
 18 fork-modified CEF files are byte-identical upstream. **Not a readiness
 statement:** patches #1/#2/#3 are verified against real 152 source, **#4 only
-#4's Chromium-side file verified and its CEF-side cascade ported but not
-compile-verified. Phase B is **18/18 files ported**. The
+#4's Chromium-side file verified and its CEF-side cascade compiled on Windows
+(2026-09-09). Phase B is **18/18 files ported, Windows built**. The
 macOS hermetic Xcode pin also remains unconfirmed — a Phase D build-time check.
 See the report's §2.4/§2.5/§5b.
 Answers to the three tasks below:
 (1) patch inventory corrected — see §2's callout; `BeginWindowDrag` confirmed
 still not upstream at 152, so nothing was deleted. **Patches #1/#2/#3 are
 verified against real 152 source** (#1/#3 by real `git apply -p0`; #2's three
-target files `cmp`-identical between 7778 and 7977). **Patch #4 is only
-ported in full** — its Chromium-side file applies cleanly and its CEF-side
-cascade merged cleanly onto 7977, though the cascade is not compile-verified —
-report §2.4/§2.5/§5b. (2) **yes**,
+target files `cmp`-identical between 7778 and 7977). **Patch #4 is fully
+ported and Windows-compiled** — its Chromium-side file applies cleanly and its
+CEF-side cascade, merged cleanly onto 7977, has since compiled successfully as
+part of the 2026-09-09 Windows build (functional/runtime behavior untested on
+any platform) — report §2.4/§2.5/§5b. (2) **yes**,
 `cef 152.0.0+152.0.5` is published; `begin_window_drag` is **not** in it, so
 the binding fork is still needed. (3) Windows and Linux toolchain pins are
 **unchanged** between the two Chromium tags; macOS's Xcode pin is
@@ -144,9 +151,13 @@ byte-identical so they copied rather than ported. The **2 genuinely drifted
 files** (`include/internal/cef_types.h`, `libcef/renderer/render_manager.cc`)
 merged cleanly via 3-way merge — our changes and upstream's sit in different
 regions — and patch #4's five-commit CEF-side cascade is ported with them.
-**None of it is compile-verified.** A registration gap on `7778` (patch #4 registered only on
+**All of it has since compiled on Windows** (2026-09-09); macOS/Linux remain
+unbuilt. A registration gap on `7778` (patch #4 registered only on
 the build branch, not the integration branch) was found and not carried forward.
-**Nothing is built — Phase D is the gate, and Phase B must finish first.**
+`7977` itself had the same class of gap — it was still the bare upstream
+mirror, with both patch branches unmerged into it, until this same pass
+merged them (§5b of the report has the full account). **Windows is built;
+macOS/Linux are the remaining Phase D gate.**
 
 *(original task list, for reference)*
 1. Diff each of the four patches against upstream 7977; determine which are now upstream, which apply cleanly, which need real porting.
