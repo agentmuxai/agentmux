@@ -22,7 +22,7 @@ reports a feature that used to work.
 
 ### 1.1 The forward-merge gap (2026-07-01 → 2026-09-09, found in production path)
 
-`agentmux/7778-drag-rightclick-and-transparency` was merged into `fork/7778` via
+`agentmux/7778-drag-rightclick-and-transparency` was merged into `agentmuxai/7778` via
 PR #3 on Jun 24. Then PRs #4 and #5 added two **more** commits to that same
 branch on Jul 1 — the renderer-side transparency work and the macOS
 white-substitution fix. Nobody merged the branch forward a second time.
@@ -30,9 +30,9 @@ white-substitution fix. Nobody merged the branch forward a second time.
 ```
 2720ba103  (Jun 24)  drag branch
     │
-    ├──► merged into fork/7778 as 2d7833dec   (PR #3, Jun 24 18:57)
+    ├──► merged into agentmuxai/7778 as 2d7833dec   (PR #3, Jun 24 18:57)
     │         │
-    │         └──► 5387e4974  (PR #7, Sep 8)  ── fork/7778 tip
+    │         └──► 5387e4974  (PR #7, Sep 8)  ── agentmuxai/7778 tip
     │                                             has process_requirement
     │                                             MISSING #4 and #5
     │
@@ -44,12 +44,12 @@ white-substitution fix. Nobody merged the branch forward a second time.
 
 For two months this cost nothing, because the July macOS framework was built from
 the drag branch tip directly (`cef HEAD: 6c570e249` in the build log), not from
-`fork/7778`. It only bit when someone went to `fork/7778` to pick up the
+`agentmuxai/7778`. It only bit when someone went to `agentmuxai/7778` to pick up the
 `process_requirement` P0 fix — the reasonable, obvious move. Every signal pointed
-that way: `fork/7778` is the integration branch, it is named for the Chromium
+that way: `agentmuxai/7778` is the integration branch, it is named for the Chromium
 version, and it carried the newest commit (Sep 8 vs Jul 1).
 
-**Newer-looking is not the same as superset.** Building from `fork/7778` would
+**Newer-looking is not the same as superset.** Building from `agentmuxai/7778` would
 have fixed the renderer crash-loop and simultaneously regressed macOS window
 transparency, with nothing anywhere reporting a problem.
 
@@ -82,7 +82,7 @@ So, as a rule:
 
 One genuine asymmetry does remain, and it is the R4 case rather than a defect:
 `agentmux_process_requirement` is absent from the drag branch because it lives on
-`agentmux/7977-process-requirement`. Both must be merged into `fork/7977`. That
+`agentmux/7977-process-requirement`. Both must be merged into `agentmuxai/7977`. That
 split is precisely what produced §1.1 on 7778.
 
 ---
@@ -138,6 +138,15 @@ Notes that have already caused confusion:
 
 ## 4. Branch model — the rules
 
+> **Notation.** The integration branch is named for the milestone alone --
+> `7778`, `7977` (`refs/heads/7778` on `agentmuxai/cef`). Where this doc writes
+> `agentmuxai/7778` that is `<remote>/<branch>`, not a branch called
+> `agentmuxai/7778`. An earlier revision wrote `agentmuxai/7778`, using one checkout's
+> local remote name; a reviewer reasonably read that as the branch name and
+> concluded the checkout commands were wrong. If the notation can mislead a
+> careful reader it can mislead an operator, so it is spelled out here.
+
+
 The root cause of §1.1 is branch reuse after merge. The repo-level rule for
 this lives in [`CLAUDE.md`](../../CLAUDE.md) under Git Workflow:
 
@@ -147,18 +156,18 @@ It was added by the same PR as this document — it was *not* previously written
 down anywhere in the repo, which is part of why §1.1 happened. It applies to
 `agentmuxai/cef` as much as to this repo.
 
-**R1 — One integration branch per Chromium milestone.** `fork/<milestone>`
-(`fork/7778`, `fork/7977`). This is the *only* branch anyone builds or releases
+**R1 — One integration branch per Chromium milestone.** `agentmuxai/<milestone>`
+(`agentmuxai/7778`, `agentmuxai/7977`). This is the *only* branch anyone builds or releases
 from. It is upstream CEF's branch plus our carry-set, nothing else.
 
 **R2 — Feature branches are single-use.** Once `agentmux/<ms>-<topic>` is merged
-into `fork/<ms>`, it is dead. Follow-up work starts a new branch off
-`fork/<ms>`, never off the merged branch. This alone would have prevented §1.1.
+into `agentmuxai/<ms>`, it is dead. Follow-up work starts a new branch off
+`agentmuxai/<ms>`, never off the merged branch. This alone would have prevented §1.1.
 
 **R3 — Never build or release from a feature branch.** The July build used
 `agentmux/7778-drag-rightclick-and-transparency` directly. It produced a correct
 artifact *by luck* — that branch happened to be ahead. Building only from
-`fork/<ms>` makes R1 self-enforcing: if the integration branch is incomplete,
+`agentmuxai/<ms>` makes R1 self-enforcing: if the integration branch is incomplete,
 you find out immediately rather than two months later.
 
 **R4 — Merge the whole carry-set before cutting a release, not piecemeal.** The
@@ -166,7 +175,7 @@ you find out immediately rather than two months later.
 `7977-process-requirement`. Merging one without the other reproduces §1.1
 exactly. Merge both, then verify §5.
 
-**R5 — `fork/<ms>` must never lose a carry-set item.** It is append-only with
+**R5 — `agentmuxai/<ms>` must never lose a carry-set item.** It is append-only with
 respect to §3. If an upgrade legitimately drops one (upstream absorbed it), that
 requires an explicit commit saying so, referencing the upstream change.
 
@@ -174,48 +183,73 @@ requires an explicit commit saying so, referencing the upstream change.
 
 ## 5. Verifying a branch is complete
 
-Run this against any `fork/<ms>` before building or releasing from it. It is
+Run this against any `agentmuxai/<ms>` before building or releasing from it. It is
 cheap and it is the only thing that catches Layer B gaps.
 
 ```bash
-# From the cef checkout. BR is the branch under test.
-BR=fork/7778
+# Paste into a shell, then run:  cef_verify [milestone] [remote]
+# A function, not a bare script: a top-level `exit 1` would close the shell of
+# anyone who pasted this, which is a poor reward for following the doc.
+cef_verify() {
+  local MS="${1:-7778}"                 # milestone == the integration branch name
+  local REMOTE="${2:-${REMOTE:-agentmuxai}}"
+  local BR="$REMOTE/$MS"                # remote-tracking ref, e.g. agentmuxai/7778
 
-# MANDATORY. These branches get force-updated mid-port; a stale ref produces a
-# confident, wrong answer. See section 1.2 -- this exact step being skipped is
-# what put a false claim in an earlier revision of this doc.
-git fetch fork --prune
+  # REMOTE is whatever YOU named the agentmuxai/cef remote. The companion
+  # runbooks add it as 'agentmuxai'; some checkouts call it 'fork'. Hard-coding
+  # it either errors out or, worse, silently resolves a same-named ref from an
+  # unrelated remote -- the exact class of failure this gate exists to catch.
+  git remote get-url "$REMOTE" >/dev/null 2>&1 || {
+    echo "No remote '$REMOTE'. Pass it: cef_verify $MS <remote>  (see: git remote -v)" >&2
+    return 1
+  }
 
-# Layer A -- patch files present AND registered in patch.cfg
-for p in rwhv_background_opaque_check views_caption_rightclick_passthrough \
-         agentmux_process_requirement; do
-  git cat-file -e "${BR}:patch/patches/$p.patch" 2>/dev/null \
-    && git show "${BR}:patch/patch.cfg" | grep -q "'name': '$p'" \
-    && echo "OK   $p" || echo "MISS $p"
-done
+  # MANDATORY. These branches get force-updated mid-port; a stale ref produces a
+  # confident, wrong answer. Section 1.2 -- skipping this put a false claim in an
+  # earlier revision of this very doc.
+  git fetch "$REMOTE" --prune || return 1
+  git rev-parse --verify -q "$BR" >/dev/null || {
+    echo "No such branch '$BR'. The integration branch is named for the milestone alone." >&2
+    return 1
+  }
 
-# Layer B -- probe identifiers, not filenames.
-git show "${BR}:include/views/cef_window.h" | grep -q BeginWindowDrag \
-  && echo "OK   BeginWindowDrag" || echo "MISS BeginWindowDrag"
+  local ok=0 miss=0
+  _p() { if [ "$1" = OK ]; then ok=$((ok+1)); else miss=$((miss+1)); fi; printf '%-4s %s\n' "$1" "$2"; }
 
-# Transparency is a SEVEN-file cascade and must be probed as a unit. Checking
-# only blink_glue + mojom passes on a partial port while browser-side
-# propagation or render_manager.cc is still missing -- the gate would then
-# approve the very regression it exists to catch.
-probe() {  # probe <file> <identifier>
-  git show "${BR}:$1" 2>/dev/null | grep -q "$2" \
-    && echo "OK   $1" || echo "MISS $1"
+  # Layer A -- patch file present AND registered in patch.cfg
+  local name
+  for name in rwhv_background_opaque_check views_caption_rightclick_passthrough \
+              agentmux_process_requirement; do
+    if git cat-file -e "${BR}:patch/patches/${name}.patch" 2>/dev/null \
+       && git show "${BR}:patch/patch.cfg" | grep -q "'name': '${name}'"; then
+      _p OK "$name"; else _p MISS "$name"; fi
+  done
+
+  # Layer B -- probe identifiers, not filenames. Every one of these files exists
+  # upstream, so a file-existence check proves nothing.
+  _probe() {
+    if git show "${BR}:$1" 2>/dev/null | grep -q "$2"; then _p OK "$1"; else _p MISS "$1"; fi
+  }
+  _probe include/views/cef_window.h                  BeginWindowDrag
+
+  # Transparency is a SEVEN-file cascade, probed as a unit. Checking only
+  # blink_glue + mojom passes on a partial port while browser-side propagation
+  # or render_manager.cc is still absent -- the gate would then approve the very
+  # regression it exists to catch.
+  _probe libcef/renderer/blink_glue.h                SetBaseBackgroundColorOverrideTransparent
+  _probe libcef/renderer/blink_glue.cc               SetBaseBackgroundColorOverrideTransparent
+  _probe libcef/renderer/browser_config.h            background_transparent
+  _probe libcef/renderer/render_manager.cc           background_transparent
+  _probe libcef/common/mojom/cef.mojom               background_transparent
+  _probe libcef/browser/browser_platform_delegate.cc background_transparent
+  _probe libcef/browser/browser_info_manager.cc      background_transparent
+
+  echo "--- $BR: $ok OK, $miss MISS (expect 11 OK, 0 MISS) ---"
+  [ "$miss" -eq 0 ]
 }
-probe libcef/renderer/blink_glue.h              SetBaseBackgroundColorOverrideTransparent
-probe libcef/renderer/blink_glue.cc             SetBaseBackgroundColorOverrideTransparent
-probe libcef/renderer/browser_config.h          background_transparent
-probe libcef/renderer/render_manager.cc         background_transparent
-probe libcef/common/mojom/cef.mojom             background_transparent
-probe libcef/browser/browser_platform_delegate.cc  background_transparent
-probe libcef/browser/browser_info_manager.cc    background_transparent
 ```
 
-Expect **11 `OK`** against a complete `fork/<ms>`.
+Expect **11 `OK`** against a complete `agentmuxai/<ms>`.
 
 On a *feature* branch, `MISS agentmux_process_requirement` is normal rather than
 a defect -- it lives on `agentmux/<ms>-process-requirement`. That is the R4
@@ -225,20 +259,20 @@ branch.
 Keep the `${BR}:` braces — this is not stylistic, and it is shell-dependent.
 In **zsh** (the macOS default, so what these snippets usually get run in),
 `"$BR:libcef/..."` applies `:l` as a history-style modifier and resolves
-`fork/7778ibcef/...` — a false MISS on exactly the two probes that matter most.
+`agentmuxai/7778ibcef/...` — a false MISS on exactly the two probes that matter most.
 **bash expands the braced and unbraced forms identically**, so this reproduces
 for only some readers, which is worse than a consistent break.
 
 The modifier letters that bite include `a e h l q r t u`. Verified in zsh with
-`BR=fork/7778`:
+`BR=agentmuxai/7778`:
 
 ```
-$BR:libcef/x    -> fork/7778ibcef/x     ( :l  lowercase )
+$BR:libcef/x    -> agentmuxai/7778ibcef/x     ( :l  lowercase )
 $BR:head/x      -> forkead/x            ( :h  dirname   )
 $BR:tail/x      -> 7778ail/x            ( :t  basename  )
 $BR:upper/x     -> FORK/7778pper/x      ( :u  uppercase )
-$BR:include/x   -> fork/7778:include/x  ( :i  not a modifier - safe )
-$BR:patch/x     -> fork/7778:patch/x    ( :p  not a modifier - safe )
+$BR:include/x   -> agentmuxai/7778:include/x  ( :i  not a modifier - safe )
+$BR:patch/x     -> agentmuxai/7778:patch/x    ( :p  not a modifier - safe )
 ```
 
 `:include` and `:patch` being safe is why only the two `libcef` probes broke,
@@ -253,7 +287,7 @@ check.
 ```bash
 # Must print nothing. Anything printed is in the shipped artifact but not in
 # the branch you are about to build — i.e. a regression you are about to ship.
-git log --oneline "$LAST_SHIPPED_COMMIT" --not "fork/$MS"
+git log --oneline "$LAST_SHIPPED_COMMIT" --not "$REMOTE/$MS"
 ```
 
 That one command, run in September, would have caught §1.1 in a second.
@@ -262,7 +296,7 @@ That one command, run in September, would have caught §1.1 in a second.
 
 ## 6. Upgrade runbook (per Chromium milestone, all three platforms)
 
-1. **Create `fork/<new-ms>`** from upstream CEF's branch for that milestone.
+1. **Create `agentmuxai/<new-ms>`** from upstream CEF's branch for that milestone.
 2. **Port the carry-set** in §3. One commit per item, message
    `agentmux: port <item> to <ms> (Chromium <N>)` — the 7977 branch already
    follows this convention and it makes §5 auditable.
@@ -270,9 +304,9 @@ That one command, run in September, would have caught §1.1 in a second.
      Chromium source. Re-generate rather than force-apply.
    - Layer B: usually clean cherry-picks; re-check API signatures that Chromium
      changed underneath.
-3. **Merge every feature branch into `fork/<new-ms>`** (R4). Do not build from
+3. **Merge every feature branch into `agentmuxai/<new-ms>`** (R4). Do not build from
    the feature branches.
-4. **Run §5 against `fork/<new-ms>`.** All **11** probes must print `OK`.
+4. **Run §5 against `agentmuxai/<new-ms>`.** All **11** probes must print `OK`.
 5. **Build all three platforms from that one commit** — record the commit SHA.
 6. **Verify the built artifacts** (§7), per platform.
 7. **Cut three tags and update the pins together** (§8).
@@ -372,12 +406,12 @@ mechanical instead of a convention.
 
 ## 9. Checklists
 
-**Before merging a PR into `fork/<ms>`:**
-- [ ] Branched off `fork/<ms>`, not off an already-merged feature branch (R2)
-- [ ] `git log --oneline <last-shipped> --not fork/<ms>` prints nothing (§5)
+**Before merging a PR into `agentmuxai/<ms>`:**
+- [ ] Branched off `agentmuxai/<ms>`, not off an already-merged feature branch (R2)
+- [ ] `git log --oneline <last-shipped> --not agentmuxai/<ms>` prints nothing (§5)
 
 **Before building a release framework:**
-- [ ] Building from `fork/<ms>`, not a feature branch (R3)
+- [ ] Building from `agentmuxai/<ms>`, not a feature branch (R3)
 - [ ] All feature branches for this milestone are merged (R4)
 - [ ] All **11** §5 probes print `OK`
 - [ ] `patcher.py` run with no args; Chromium tree shows hundreds of modified files (§7.1)

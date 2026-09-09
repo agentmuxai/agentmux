@@ -250,17 +250,18 @@ Layer B is where both incidents happened. Nothing checks it.
 
 **The rules:**
 
-- **Build and release only from `fork/<milestone>`** (`fork/7778`, `fork/7977`) —
-  never from a feature branch, even if the feature branch looks newer.
+- **Build and release only from the integration branch** — named for the
+  milestone alone (`7778`, `7977`), never from a feature branch, even if the
+  feature branch looks newer.
 - **Never reuse a feature branch after its PR is merged** — start a new one off
-  `fork/<milestone>`. See the rule under [Git Workflow](./CLAUDE.md#git-workflow);
+  `<milestone>`. See the rule under [Git Workflow](./CLAUDE.md#git-workflow);
   violating it is exactly what caused the 2026-07 gap.
 - **Merge the whole carry-set before cutting a release.** A milestone's work is
   split across several branches; merging one and not the others silently drops
   features.
 - **Newer-looking is not superset.** Before building, this must print nothing:
   ```bash
-  git log --oneline <last-shipped-commit> --not fork/<milestone>
+  git log --oneline <last-shipped-commit> --not <remote>/<milestone>
   ```
   Anything it prints is in the shipped artifact but not in what you are about to
   build — a regression you are about to ship.
