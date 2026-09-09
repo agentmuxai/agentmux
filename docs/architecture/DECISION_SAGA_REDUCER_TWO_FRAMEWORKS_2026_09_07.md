@@ -17,7 +17,7 @@ What is actually there (read 2026-09-07):
 
 The srv module's own header already explains why it is not the launcher framework: the Phase E plan assumed sagas would fan out across host, launcher and srv over IPC; the implementation kept that fan-out in the frontend, so every srv saga mutates only srv state, and an in-process oneshot beats an IPC round-trip on every step (`docs/retro/saga-coordinator-location-analysis-2026-04-30.md`). The launcher framework exists for the cross-process case, which never grew past `pool_respawn`.
 
-The two reducers share a *discipline* — pure, total, deterministic, no I/O, mutex held only during dispatch — stated in both headers in nearly the same words. They share no types: different `State`, `Command` and `Event`.
+The two reducers share a *discipline* — pure, total, deterministic, no I/O, mutex held only during dispatch — stated in both headers in nearly the same words, AND the wire types: both import `agentmux_common::ipc::{Command, Event}`. What they do not share is `State` (each crate's own) or which command/event variants each `update` actually handles.
 
 ## Options
 
