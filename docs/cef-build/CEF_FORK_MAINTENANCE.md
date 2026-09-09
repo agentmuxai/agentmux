@@ -407,6 +407,15 @@ meaningful — which is why this survived a first reading. At the time the bug
 was found the block probed only two `libcef/` paths; expanding the cascade to
 seven widened the blast radius without changing the cause.
 
+> **What this gate does not check.** It verifies the carry-set is *present*.
+> It says nothing about whether that code is *correct*, whether the Layer A
+> patches still apply to the milestone's Chromium source, or whether the result
+> builds. A concrete example: agentmuxai/agentmux#3127 — the Views transparency
+> sites are not gated on `is_frameless_`, which is reachable in AgentMux
+> (framed DevTools popups + a transparent global `background_color`). `7778`
+> reports `21 OK, 0 MISS` and carries that bug. **A green gate is not a release
+> sign-off**; §7 and a real build are still required.
+
 **Probe identifiers, not filenames.** All of these files exist upstream. The 152
 gap in §1.2 is invisible to a file-existence check and obvious to an identifier
 check.
