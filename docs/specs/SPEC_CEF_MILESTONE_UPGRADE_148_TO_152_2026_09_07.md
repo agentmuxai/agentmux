@@ -160,6 +160,71 @@ Note: `agentmuxai/cef` has **zero CI** (verified: `actions/workflows` → `total
 2. Rebase the `cef-dll-sys` binding patch (`begin_window_drag` slot) onto the 152 binding; publish as `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag`; update the `[patch.crates-io]` rev in root `Cargo.toml`.
 3. Fix compile fallout from CEF API changes across four milestones — **the least predictable item in this spec**; no way to size it before Phase A.
 
+> **Decision (2026-09-08): stage the rollout per platform instead of bumping the
+> workspace-wide `cef` version all at once — Windows moves to 152 first;
+> macOS/Linux stay on 148, in source and runtime both, until their own Phase D
+> builds land.** Repo owner's explicit requirement: all three platforms must
+> keep building and running throughout the upgrade, for end users *and* for
+> anyone developing on macOS/Linux locally — not just "existing releases don't
+> break." A plain workspace-wide bump doesn't satisfy that: the moment
+> `agentmux-cef/Cargo.toml`'s single `cef` version pin changes, `task dev` on a
+> macOS/Linux machine fails immediately (the crate-major/runtime-major
+> assertion in `Taskfile.yml` would reject the still-148 runtime against a
+> 152-linked binary) — loudly, by design, but still broken — until that
+> platform's own 152 runtime exists.
+>
+> **This is now known to be low-risk, not just theoretically appealing.**
+> Item 3 above was "the least predictable item in this spec" before this was
+> checked. It no longer is: every one of the 13 distinct `cef::Impl*` traits
+> `agentmux-cef`'s Rust source actually calls (`ImplWindow`, `ImplWindowDelegate`,
+> `ImplBrowser`, `ImplBrowserHost`, `ImplFrame`, `ImplView`, `ImplViewDelegate`,
+> `ImplPanel`, `ImplPanelDelegate`, `ImplTask`, `ImplAuthCallback`,
+> `ImplEndTracingCallback`, `ImplOverlayController`) maps to a C++ header under
+> upstream `include/`, and **all 12 of those headers are byte-for-byte identical
+> between CEF `7778` and `7977`** — verified by full-text diff against the real
+> files at both tags (`include/cef_auth_callback.h`, `include/cef_browser.h`,
+> `include/cef_trace.h`, `include/cef_frame.h`, `include/cef_task.h`,
+> `include/views/cef_{overlay_controller,panel,panel_delegate,view,
+> view_delegate,window,window_delegate}.h`), not sampled or inferred from a
+> changelog. There is currently zero `#[cfg(...)]`-branching needed in the
+> Rust source to support two CEF milestones side by side, because nothing this
+> codebase calls has moved. (An earlier attempt at this check used GitHub's
+> Contents API against `include/capi/...` paths that don't exist in this repo's
+> layout — CEF's C API headers are generated at build time, not checked in —
+> and silently returned empty on both sides, producing a false "no diff"
+> result. The numbers above are from `raw.githubusercontent.com` fetches with
+> real, non-zero byte lengths confirmed on both sides first.)
+>
+> **What this changes mechanically, replacing steps 1-2 above:**
+> `[patch.crates-io]` is a single global override keyed by crate name — Cargo
+> has no way to hold two different pinned revs of `cef-dll-sys` active for
+> different targets through that mechanism. Instead:
+> 1. Remove `cef` from `agentmux-cef/Cargo.toml`'s plain `[dependencies]` and
+>    remove the root `[patch.crates-io]` block entirely.
+> 2. Add `[target.'cfg(target_os = "windows")'.dependencies]` with
+>    `cef = "152"`, patched via a target-scoped git dependency on
+>    `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` (once published, per
+>    step 2 above — still needed, `begin_window_drag` is confirmed absent from
+>    the public 152 crate).
+> 3. Add `[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]`
+>    with `cef = "148"`, pointed at the existing, already-working
+>    `AgentU-asaf/cef-rs@515b3ac53c` rev — unchanged from today.
+> 4. Validate with `cargo check --target x86_64-pc-windows-msvc` and
+>    `--target x86_64-unknown-linux-gnu` (or on real macOS/Linux boxes) before
+>    merging — target-specific same-crate-different-version resolution is a
+>    supported Cargo pattern, but this workspace has never used it for `cef`
+>    specifically and it should be proven, not assumed.
+> 5. Runtime pinning needs no change beyond what Phase E already does per
+>    platform (`release.yml`'s `cef-runtime-pins` job, #3085/#3086/#3089):
+>    Windows's pin advances to a new 152 tag once Phase D cuts it; macOS/Linux
+>    pins stay exactly as they are.
+>
+> **Exit condition for this staged state:** once Phase D lands working 152
+> builds for macOS and Linux too, collapse the target-gated tables back into a
+> single `[dependencies]` entry and delete the two `[target...]` blocks — this
+> is meant to be temporary scaffolding for the rollout window, not a permanent
+> architecture.
+
 ### Phase D — Per-platform builds (three separate machines, unavoidably)
 
 Each platform is a distinct OS/toolchain and cannot be cross-built with the current setup. Documented cost, per platform, from `docs/cef-build/*`:
