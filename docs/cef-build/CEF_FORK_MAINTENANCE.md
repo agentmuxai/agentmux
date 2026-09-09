@@ -423,12 +423,25 @@ check.
 **Also confirm the integration branch is a superset of whatever last shipped:**
 
 ```bash
-# Must print nothing. Anything printed is in the shipped artifact but not in
-# the branch you are about to build — i.e. a regression you are about to ship.
+# SAME MILESTONE ONLY. Must print nothing. Anything printed is in the shipped
+# artifact but not in the branch you are about to build — a regression you are
+# about to ship.
 git log --oneline "$LAST_SHIPPED_COMMIT" --not "$REMOTE/$MS"
 ```
 
 That one command, run in September, would have caught §1.1 in a second.
+
+**Do not run this across a milestone upgrade.** `agentmuxai/7977` starts from
+upstream's 152 branch and the carry-set is *re-ported as new commits*, so 148's
+shipped commit is legitimately not an ancestor even when every change was
+carried correctly. The command would print real old fork commits and the
+checklist would read that as a regression — a guaranteed false positive on every
+upgrade, which is how a check gets ignored.
+
+Across milestones the equivalent question is *content*, not ancestry, and §5 is
+what answers it: the carry-set gate compares the same 21 things regardless of
+lineage. That is precisely how the 7977 gap in §1.2 was found, where this
+ancestry test could not have said anything.
 
 ---
 
@@ -614,7 +627,9 @@ mechanical instead of a convention.
 
 **Before merging a PR into `agentmuxai/<ms>`:**
 - [ ] Branched off `agentmuxai/<ms>`, not off an already-merged feature branch (R2)
-- [ ] `git log --oneline <last-shipped> --not agentmuxai/<ms>` prints nothing (§5)
+- [ ] **Same milestone only:** `git log --oneline <last-shipped> --not agentmuxai/<ms>`
+      prints nothing (§5). Across an upgrade this is expected to print — use the
+      §5 carry-set gate instead.
 
 **Before building a release framework:**
 - [ ] Building from `agentmuxai/<ms>`, not a feature branch (R3)

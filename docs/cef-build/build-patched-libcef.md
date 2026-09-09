@@ -249,17 +249,26 @@ tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
 # notes, with no error. Layouts also differ: some trees clone the fork directly
 # at chromium/src/cef, others mirror into it from an outer clone.
 #
-# So: take the first candidate that is BOTH its own git root AND has the
-# agentmuxai/cef remote. Set CEF_CLONE to override.
-for _c in "${CEF_CLONE:-}" \
-          "$HOME/cef-build/chromium/chromium/src/cef" \
-          "$HOME/cef-build/chromium/cef" \
-          "$HOME/cef-build/chromium_git/cef"; do
-  [ -n "$_c" ] || continue
-  [ "$(git -C "$_c" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$_c" 2>/dev/null && pwd -P)" ] || continue
-  git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
-  CEF_CLONE="$_c"; break
-done
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Falling through to a standard path when the override is wrong would record a
+# DIFFERENT checkout's HEAD -- a valid-looking but unrelated fork SHA -- and
+# look entirely successful.
+if [ -n "${CEF_CLONE:-}" ]; then
+  [ "$(git -C "$CEF_CLONE" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$CEF_CLONE" 2>/dev/null && pwd -P)" ] \
+    && git -C "$CEF_CLONE" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' \
+    || { echo "FATAL: CEF_CLONE=$CEF_CLONE is not an agentmuxai/cef git root." >&2; CEF_CLONE=; }
+else
+  # No override: probe. First candidate that is BOTH its own git root AND has
+  # the agentmuxai/cef remote. A .git-less mirror is not a git root, so this
+  # rejects the case where `git -C` would walk up into the Chromium checkout.
+  for _c in "$HOME/cef-build/chromium/chromium/src/cef" \
+            "$HOME/cef-build/chromium/cef" \
+            "$HOME/cef-build/chromium_git/cef"; do
+    [ "$(git -C "$_c" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$_c" 2>/dev/null && pwd -P)" ] || continue
+    git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
+    CEF_CLONE="$_c"; break
+  done
+fi
 echo "fork clone: ${CEF_CLONE:-<none>}"
 
 # FULL sha: `gh release create --target` takes a branch or a full commit SHA.

@@ -260,7 +260,9 @@ Layer B is where both incidents happened. Nothing checks it.
 - **Merge the whole carry-set before cutting a release.** A milestone's work is
   split across several branches; merging one and not the others silently drops
   features.
-- **Newer-looking is not superset.** Before building, this must print nothing:
+- **Newer-looking is not superset.** Before building, this must print nothing
+  (**same milestone only** — across an upgrade the carry-set is re-ported as new
+  commits, so use the carry-set gate instead):
   ```bash
   git log --oneline <last-shipped-commit> --not <remote>/<milestone>
   ```
