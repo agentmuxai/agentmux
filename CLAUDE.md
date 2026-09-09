@@ -428,7 +428,7 @@ EOF
 
 # Shared identity ONLY — gh-agent.sh fell back to GenericAgentX-<host> (see
 # "Which GitHub account am I acting as?" below): ALSO prepend the PR TITLE
-# with "<AgentName>@<host>: " (natural casing, e.g. "Korp@claudius:") — the
+# with "<AgentName>@<host>: " (natural casing, e.g. "Korp@narko:") — the
 # body tag above is machine-read only, so a human scanning the PR list still
 # can't tell shared-identity agents apart without opening each PR. See
 # SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md. Do NOT use this form if you
