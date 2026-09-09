@@ -4,6 +4,15 @@
 // Phase E.1a — saga coordinator infrastructure.
 // Phase F.5 — first concrete saga consumer (`pool_respawn`).
 //
+// NOT the same framework as `agentmux_srv::sagas`, despite the shared name.
+// This one is a `Saga` TRAIT driven by a bus subscription, built for the
+// cross-process case; srv's is plain async functions with in-process
+// dispatch, because every saga it runs mutates only srv state. The two
+// share exactly one method name (`new`) and no types. That split is
+// deliberate, not drift — see docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md
+// and `docs/retro/saga-coordinator-location-analysis-2026-04-30.md`.
+// Do not "unify" them without reading those first.
+//
 // A saga is a state machine that orchestrates a multi-step,
 // multi-reducer flow (e.g. tear-off touches host pool + srv
 // workspace + launcher window registration). Sagas exist where

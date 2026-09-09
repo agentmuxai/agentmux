@@ -3,9 +3,17 @@
 //
 // Phase E.5.5 — srv-side saga coordinator.
 //
+// NOT the same framework as `agentmux_launcher::saga`, despite the shared
+// name — see the "Why srv, not launcher" note directly below for the
+// original reasoning, and
+// docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md
+// for the decision to keep both rather than merge or rename them.
+//
 // **Why srv, not launcher:** the existing E.1a coordinator
-// framework lives in `agentmux-launcher::saga` (which still does
-// nothing — no consumers). The original Phase E spec assumed
+// framework lives in `agentmux-launcher::saga`. At the time this module was
+// written it had no consumers; Phase F.5 later gave it exactly one
+// (`pool_respawn`) — still cross-process-shaped, still not what this crate
+// needs. The original Phase E spec assumed
 // sagas would fan out across host/launcher/srv via cross-process
 // IPC; the actual implementation kept that fan-out in the frontend
 // (`requestTearOff` calls srv-rpc and host-rpc directly), so every
