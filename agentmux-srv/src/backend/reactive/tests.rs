@@ -3034,8 +3034,8 @@ fn reentrant_try_get_agent_by_block_fails_fast_not_hangs() {
              INCIDENT_2026_09_07's permanent srv deadlock one call later \
              than try_register_agent_with_nonce alone would catch",
         );
-    assert_eq!(
-        reentrant_result, None,
+    assert!(
+        reentrant_result.is_none(),
         "a same-thread reentrant lookup must yield None (not hang, and not \
          fabricate a result) — the caller degrades to no-cleanup, which is \
          safe, rather than deadlocking",
