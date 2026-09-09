@@ -510,18 +510,46 @@ compare both against the object that was actually linked:
 
 ```bash
 cd out/Release_GN_arm64
-SRC=base/apple/mach_port_rendezvous_mac.cc
-OBJ=obj/base/base/mach_port_rendezvous_mac.o
 
-git -C ../.. show HEAD:$SRC > /tmp/unpatched.cc          # pristine upstream
-CMD=$(ninja -C . -t commands "$OBJ" | tail -1)           # the real compile line
+# BOTH no-symbol patches, as a pair. Checking only one lets the recipe report
+# success while the other is absent -- and the macOS-critical one is the second.
+check_patch() {  # check_patch <source-path> <object-path>
+  local SRC="$1" OBJ="$2" ok=1
+  git -C ../.. show "HEAD:$SRC" > /tmp/unpatched.cc          # pristine upstream
+  local CMD; CMD=$(ninja -C . -t commands "$OBJ" | tail -1)  # the real compile line
 
-eval "${CMD//$OBJ//tmp/patched.o}"                       # from the working tree
-eval "$(echo "$CMD" | sed "s#$OBJ#/tmp/unpatched.o#; s#\.\./\.\./$SRC#/tmp/unpatched.cc#")"
+  # ${VAR//a/b} and sed's /g are BOTH mandatory here. The object path appears
+  # TWICE in the command -- once as `-MF <obj>.d`, once as `-o <obj>` -- so a
+  # non-global replace redirects only the depfile and leaves `-o` pointing at
+  # the REAL object. That does not fail: it silently OVERWRITES your build
+  # output with an unpatched compile. It happened while writing this section.
+  local PATCHED_CMD="${CMD//$OBJ//tmp/patched.o}"
+  local UNPATCHED_CMD
+  UNPATCHED_CMD=$(echo "$CMD" | sed "s#$OBJ#/tmp/unpatched.o#g; s#\.\./\.\./$SRC#/tmp/unpatched.cc#g")
 
-cmp -s /tmp/unpatched.o "$OBJ" && echo 'FAIL: shipped object is UNPATCHED'
-cmp -s /tmp/patched.o   "$OBJ" && echo 'OK: shipped object matches patched source'
+  # Refuse to run either command if it can still write to the real object.
+  case "$PATCHED_CMD$UNPATCHED_CMD" in
+    *"-o $OBJ"*) echo "ABORT $SRC: rewritten command still targets $OBJ"; return 1 ;;
+  esac
+
+  eval "$PATCHED_CMD"
+  eval "$UNPATCHED_CMD"
+
+  cmp -s /tmp/unpatched.o "$OBJ" && { echo "FAIL $SRC: shipped object is UNPATCHED"; ok=0; }
+  cmp -s /tmp/patched.o   "$OBJ" || { echo "FAIL $SRC: shipped object does not match patched source"; ok=0; }
+  [ "$ok" = 1 ] && echo "OK   $SRC"
+  rm -f /tmp/patched.o /tmp/unpatched.o /tmp/unpatched.cc
+  [ "$ok" = 1 ]
+}
+
+check_patch base/apple/mach_port_rendezvous_mac.cc \
+            obj/base/base/mach_port_rendezvous_mac.o                    # agentmux_process_requirement
+check_patch content/browser/renderer_host/render_widget_host_view_base.cc \
+            obj/content/browser/browser/render_widget_host_view_base.o  # rwhv_background_opaque_check
 ```
+
+Expect **two** `OK` lines. `views_caption_rightclick_passthrough` is not listed
+because it adds a symbol and §7.2 already covers it.
 
 Both comparisons matter. `shipped == patched` alone is weak if the patch happens
 to compile to the same bytes as upstream; `shipped != unpatched` is what proves
@@ -597,7 +625,7 @@ mechanical instead of a convention.
 **Before updating the pins:**
 - [ ] All three platforms built from one recorded fork commit (P1)
 - [ ] §7.2 symbol probes pass on each artifact, using full `nm`
-- [ ] §7.2b differential compile passes for the two patches `nm` cannot see
-      (`agentmux_process_requirement`, `rwhv_background_opaque_check`)
+- [ ] §7.2b differential compile prints **two** `OK` lines — one per no-symbol
+      patch (`agentmux_process_requirement`, `rwhv_background_opaque_check`)
 - [ ] §7.3 functional checks pass per platform
 - [ ] All three pins bumped together (P2)
