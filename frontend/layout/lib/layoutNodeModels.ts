@@ -211,24 +211,24 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
 /** The key `<Key each={leafs()} by={...}>` uses to identify a leaf's
  *  rendered subtree in the tile renderer (`TileLayout.{win32,linux,darwin}.tsx`).
  *
- *  Always `node.id` alone — a leaf's key no longer changes when its active
- *  stack member does. `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`:
- *  keying on `activeBlockId` was what made `<Key>` tear down and rebuild the
- *  WHOLE leaf subtree on every in-pane tab switch — `<Block>`, its pane
- *  header, and any hoisted chrome, not just the view whose blockId actually
- *  changed. `NodeModel.activeBlockId` (types.ts) now exists precisely so a
- *  leaf-level component can track which stack member is active WITHOUT
- *  needing a remount to find out. A per-block remount for the VIEW itself
- *  still happens — it's now driven by a narrower, inner `<Key>` scoped to
- *  just the view (`pane-leaf-chrome.tsx`), not this outer, leaf-wide one.
- *
- *  `layoutStack.ts`'s three mutators no longer call `disposeNodeModel` for
- *  active-member churn (only `cleanupNodeModels`'s real-leaf-deletion path
- *  still does) — this key change and that disposal change are a matched
- *  pair; shipping one without the other leaves a stale-`NodeModel`-behind-a-
- *  never-remounting-leaf bug. */
+ *  STILL includes `activeBlockId` for a stacked leaf, same as before this
+ *  file started adding chrome-stability groundwork — reviewers (ReAgent,
+ *  Codex) on PR #3132 correctly caught that dropping `activeBlockId` from
+ *  this key here, alone, breaks the already-shipped in-pane tab-switch
+ *  feature: `TabContent`/`Block` render `nodeModel.blockId` as a plain,
+ *  frozen field with no remount boundary of their own
+ *  (`frontend/app/tab/tabcontent.tsx`, `frontend/app/block/block.tsx`), so
+ *  this outer, whole-leaf remount is CURRENTLY the only thing that ever
+ *  updates the displayed block after a switch. `NodeModel.activeBlockId`
+ *  (types.ts) exists as inert, additive groundwork — no production consumer
+ *  yet. Do not drop `activeBlockId` from this key until a narrower, inner
+ *  remount boundary scoped to just the view (`pane-leaf-chrome.tsx`,
+ *  `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`) lands in the SAME
+ *  deployable change as that removal — never as two separate PRs, since the
+ *  gap between them has no mechanism to update the displayed content at
+ *  all. */
 export function activeKeyFor(node: LayoutNode): string {
-    return node.id;
+    return node.data?.blockStack?.length ? `${node.id}:${node.data.activeBlockId ?? node.data.blockId}` : node.id;
 }
 
 

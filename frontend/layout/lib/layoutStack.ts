@@ -16,43 +16,30 @@
  * branch already uses (`layoutMagnify.ts`) for payload-only changes that
  * don't need `treeReducer`'s balance/validation machinery.
  *
- * NONE of `pushBlockOntoStack`/`setActiveBlockInStack`/`closeBlockInStack`'s
- * active-member branch dispose the leaf's `NodeModel` anymore
- * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`'s agent-pane
- * implementation). This is a deliberate invariant, not an oversight — read
- * this before "fixing" it back:
+ * Every mutation here still evicts the target node's cached `NodeModel` (via
+ * `disposeNodeModel`, `layoutNodeModels.ts`) on an active-member change —
+ * this is CURRENTLY required, not optional. `activeKeyFor`
+ * (`layoutNodeModels.ts`) still includes `activeBlockId` in a stacked leaf's
+ * key for exactly this reason: `TabContent`/`Block` render
+ * `nodeModel.blockId` as a plain, frozen field with no remount boundary of
+ * their own, so this outer, whole-leaf remount is the ONLY mechanism that
+ * updates the displayed block content after a switch
+ * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md` documents the
+ * narrower replacement — a `pane-leaf-chrome.tsx` inner remount boundary —
+ * but it does not exist yet; PR #3132 tried shipping the key change and this
+ * disposal removal ahead of it and ReAgent/Codex correctly caught the
+ * resulting regression: switching a stack leaves the old block displayed,
+ * and closing the active member can leave the deleted block displayed).
+ * Do not remove these `disposeNodeModel` calls until that inner boundary
+ * lands in the SAME deployable change.
  *
- * The tile renderer's outer `<Key each={leafs()} by={activeKeyFor}>`
- * (`tilelayout-shared.tsx`) now keys on `node.id` alone (`activeKeyFor`,
- * `layoutNodeModels.ts`) — a leaf's subtree, and therefore its `NodeModel`
- * via `useNodeModel`, no longer remounts when the active stack member
- * changes, only when the LEAF itself is created or destroyed. `useNodeModel`
- * is called exactly once, at that mount. So if a mutator here disposed the
- * cached `NodeModel` while the leaf stays mounted, the still-live component
- * holding the old reference would never pick up a replacement — its
- * `isFocused`/`isMagnified`/`innerRect`/etc memos would freeze at whatever
- * they were the instant the dispose fired. That is exactly the regression
- * the old comment on `closeBlockInStack`'s active branch already documented
- * and guarded for the "closing a background tab" case; this generalizes the
- * same reasoning to every mutator, not just close.
- *
- * What still needs `activeBlockId` to be known reactively — a pane header
- * displaying the right title/icon, content resolving the right block, a
- * hoisted tab strip's own bookkeeping — reads `NodeModel.activeBlockId`
- * (types.ts), an ADDITIVE reactive field alongside the existing frozen
- * `blockId`, not a replacement for it. See that field's own doc comment for
- * the full rationale, and `frontend/app/tab/pane-leaf-chrome.tsx` for the
- * narrower, INNER remount boundary that now exists specifically to give the
- * per-block VIEW a fresh `ViewModel` on a switch, without taking the leaf's
- * chrome down with it — replacing the outer full-leaf remount this file's
- * mutators used to drive via disposal.
- *
- * `cleanupNodeModels` (`layoutNodeModels.ts`) — real leaf deletion, not
- * active-member churn — is UNAFFECTED and still disposes normally.
+ * `NodeModel.activeBlockId` (types.ts) exists as additive, currently-inert
+ * groundwork for that future change — no production consumer reads it yet.
  */
 
 import { findNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
+import { disposeNodeModel } from "./layoutNodeModels";
 import { closeNode } from "./layoutMagnify";
 
 /** The node's stack, or `[blockId]` when it has none yet (back-compat: a
@@ -84,6 +71,7 @@ export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: 
     const stack = effectiveStack(node.data);
     const nextStack = stack.includes(blockId) ? stack : [...stack, blockId];
     setActive(node.data, blockId, nextStack);
+    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
@@ -107,6 +95,7 @@ export function setActiveBlockInStack(model: LayoutModel, nodeId: string, blockI
         return; // already active
     }
     setActive(node.data, blockId, stack);
+    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
@@ -146,11 +135,20 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         const nextActive = nextStack[Math.min(idx, nextStack.length - 1)];
         node.data.activeBlockId = nextActive;
         node.data.blockId = nextActive;
-        // No dispose here anymore (see this file's header comment): the
-        // leaf's `NodeModel` survives active-member churn now, closing a
-        // background OR the active member alike. `activeKeyFor` keys on
-        // `node.id` unconditionally, so the leaf never remounts from a
-        // stack mutation regardless of which member was closed.
+        // Dispose ONLY here, inside this branch — this is the ONLY case
+        // where activeKeyFor's key actually changes, so it's the only case
+        // where the leaf genuinely remounts. Closing a BACKGROUND
+        // (non-active) member leaves activeBlockId untouched: the key
+        // doesn't change, the DisplayNode component stays mounted, and it's
+        // STILL holding a reference to this exact NodeModel via whatever
+        // `useNodeModel()` call it made at its last real mount. Disposing
+        // unconditionally would tear down that STILL-IN-USE component's
+        // isFocused/isMagnified/innerRect/etc out from under it — not a
+        // leak, an active regression: focus/magnify/geometry would freeze
+        // at whatever they were the instant a completely unrelated
+        // background tab closed. See this file's header comment for why
+        // this disposal itself can't be removed yet either.
+        disposeNodeModel(model, nodeId);
     }
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
