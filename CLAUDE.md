@@ -199,9 +199,10 @@ CMake and Ninja are required for `cef-dll-sys` (builds CEF's C wrapper). Both mu
 | **Linux** | `apt install cmake` | `apt install ninja-build` |
 
 On this dev machine, Ninja is at `/c/tools/bin/ninja.exe` (copied from VS 2022; previously
-`/c/Systems/bin/`, retired in the 2026-09-08 host cleanup — see the audit's §2.4 for why that
-path was load-bearing rather than clutter). If `cargo build` fails with "CMake was unable to
-find a build program corresponding to Ninja", verify `ninja --version` works.
+`/c/Systems/bin/`, before that whole directory — an unversioned accumulation of stale repo
+clones and a dormant credential set, unrelated to this repo — was retired on 2026-09-08). If
+`cargo build` fails with "CMake was unable to find a build program corresponding to Ninja",
+verify `ninja --version` works.
 
 ### After Code Changes
 
