@@ -64,7 +64,10 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
     onMount(() => {
         if (!viewRef) return;
         const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey) return;
+            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+            // (app.tsx) — let it bubble there instead of zooming just this
+            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+            if (!ev.ctrlKey || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const STEP = 0.1;

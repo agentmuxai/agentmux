@@ -12,7 +12,15 @@ import { showTextInputContextMenu } from "@/store/contextmenu";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { atoms, getApi, getSettingsPrefixAtom, isDev, removeFlashError, flashErrors } from "@/store/global";
 import { appHandleKeyDown, keyboardMouseDownHandler } from "@/store/keymodel";
-import { chromeZoomIn, chromeZoomOut, zoomBlockIn, zoomBlockOut, WHEEL_STEP } from "@/store/zoom";
+import {
+    chromeZoomIn,
+    chromeZoomOut,
+    zoomAllPanesIn,
+    zoomAllPanesOut,
+    zoomBlockIn,
+    zoomBlockOut,
+    WHEEL_STEP,
+} from "@/store/zoom";
 import { getElemAsStr } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -186,11 +194,30 @@ const AppKeyHandlers = () => {
     return null;
 };
 
+// Shared by AppZoomHandler and AppAllPanesZoomHandler below — both route a
+// wheel event to chrome-zoom vs. pane-zoom based on the identical hit-test.
+// A single helper means a future change to which elements count as "chrome"
+// only has one call site to update, not two that must be remembered and kept
+// in sync (ReAgent P2, PR #3090).
+function isOverChrome(target: HTMLElement): boolean {
+    return (
+        !!target.closest(".window-header") ||
+        !!target.closest(".status-bar") ||
+        !!target.closest(".block-frame-default-header")
+    );
+}
+
 const AppZoomHandler = () => {
     onMount(() => {
         const handleWheel = (e: WheelEvent) => {
-            // Only zoom if Ctrl/Cmd is held
-            if (!e.ctrlKey && !e.metaKey) {
+            // Only zoom if Ctrl/Cmd is held, and not Shift — Ctrl+Shift+Scroll
+            // is AppAllPanesZoomHandler's gesture below. Without excluding
+            // Shift here, both handlers are separate window "wheel" listeners
+            // and would BOTH fire on Ctrl+Shift+Scroll, double-stepping
+            // whichever pane happens to be under the cursor relative to every
+            // other pane the all-panes handler also steps once. See
+            // docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+            if ((!e.ctrlKey && !e.metaKey) || e.shiftKey) {
                 return;
             }
 
@@ -201,7 +228,7 @@ const AppZoomHandler = () => {
             const zoomOut = e.deltaY > 0;
 
             // Check if hovering over chrome (title bar, status bar, or pane header)
-            if (target.closest(".window-header") || target.closest(".status-bar") || target.closest(".block-frame-default-header")) {
+            if (isOverChrome(target)) {
                 if (zoomOut) chromeZoomOut(WHEEL_STEP);
                 else chromeZoomIn(WHEEL_STEP);
                 return;
@@ -217,6 +244,45 @@ const AppZoomHandler = () => {
         };
 
         // Add with passive: false to allow preventDefault
+        window.addEventListener("wheel", handleWheel, { passive: false });
+
+        onCleanup(() => {
+            window.removeEventListener("wheel", handleWheel);
+        });
+    });
+    return null;
+};
+
+// Ctrl+Shift+Scroll: zoom every pane in this window together, each relative
+// to its own current level. Over chrome (title bar/status bar/pane header),
+// behaves exactly like plain Ctrl+Scroll there — one chrome-zoom step, not
+// an all-panes zoom. See
+// docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md. Scoped to
+// the CURRENT window only: a second open AgentMux window (or a torn-off
+// pane in one) is a separate renderer process with its own block registry
+// and is unaffected by a gesture here — see the spec's "Scope decisions".
+const AppAllPanesZoomHandler = () => {
+    onMount(() => {
+        const handleWheel = (e: WheelEvent) => {
+            if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) {
+                return;
+            }
+
+            e.preventDefault();
+
+            const target = e.target as HTMLElement;
+            const zoomOut = e.deltaY > 0;
+
+            if (isOverChrome(target)) {
+                if (zoomOut) chromeZoomOut(WHEEL_STEP);
+                else chromeZoomIn(WHEEL_STEP);
+                return;
+            }
+
+            if (zoomOut) zoomAllPanesOut(WHEEL_STEP);
+            else zoomAllPanesIn(WHEEL_STEP);
+        };
+
         window.addEventListener("wheel", handleWheel, { passive: false });
 
         onCleanup(() => {
@@ -353,6 +419,7 @@ const AppInner = () => {
                 <AppBackground />
                 <AppKeyHandlers />
                 <AppZoomHandler />
+                <AppAllPanesZoomHandler />
                 <AppFocusHandler />
                 <AppSettingsUpdater />
                 <BrowserPaneOutsideClickBridge />

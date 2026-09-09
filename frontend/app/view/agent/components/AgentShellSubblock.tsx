@@ -2,17 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentShellSubblock — Phase 0 spike for
- * docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md.
+ * AgentShellSubblock — Phase 0 spike.
  *
  * Mounts a real xterm.js + PTY terminal (Model A: a headless `term`
- * sub-block parented to the agent block, resolved in that spec's §4)
- * inside the composer details drawer. The sub-block id is persisted on
- * the agent block's meta (`term:shellsubblockid`) so it's created once
- * per pane and reused across drawer open/close — only the xterm
- * renderer is mounted/disposed here (drawer close); the PTY itself is
- * only killed when the pane closes (see agent-view.tsx's pane-level
- * onCleanup, which calls DeleteSubBlockCommand).
+ * sub-block parented to the agent block) inside the composer details
+ * drawer. The sub-block id is persisted on the agent block's meta
+ * (`term:shellsubblockid`) so it's created once per pane and reused
+ * across drawer open/close — only the xterm renderer is
+ * mounted/disposed here (drawer close); the PTY itself is only killed
+ * when the pane closes (see agent-view.tsx's pane-level onCleanup,
+ * which calls DeleteSubBlockCommand).
  */
 
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
@@ -217,7 +216,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // whole pane instead of just this shell. Mirrors term.tsx:212-231,
         // writing to the sub-block's OWN meta rather than the agent's.
         const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey) return;
+            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+            // (app.tsx) — let it bubble there instead of zooming just this
+            // sub-block. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+            if (!ev.ctrlKey || ev.shiftKey) return;
             const id = subBlockId();
             if (!id) return;
             ev.preventDefault();

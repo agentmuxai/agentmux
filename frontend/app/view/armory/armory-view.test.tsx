@@ -24,8 +24,8 @@
  * assertion needed for that part).
  */
 
-import { createSignal } from "solid-js";
 import { cleanup, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/view/accounts/accounts-manager", () => ({
@@ -77,8 +77,8 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
-import { ArmoryView } from "./armory-view";
 import { ArmoryViewModel } from "./armory-model";
+import { ArmoryView } from "./armory-view";
 
 describe("ArmoryView rail", () => {
     afterEach(() => {
@@ -164,13 +164,13 @@ describe("ArmoryView Memory sub-nav", () => {
         renderArmory();
         const subnav = screen.getByLabelText("Memory scope");
         const personalButton = Array.from(subnav.querySelectorAll("button")).find(
-            (b) => b.textContent === "Personal",
+            (b) => b.textContent === "Personal"
         ) as HTMLButtonElement;
         personalButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "armory:memory:subsection": "personal" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "armory:memory:subsection": "personal" },
+        });
         const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
         expect(personalPane?.classList.contains("is-hidden")).toBe(false);
     });
@@ -211,14 +211,14 @@ describe("ArmoryView pane title", () => {
     it("clicking a rail item writes armory:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
-        const skillsButton = Array.from(rail.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Skills"),
+        const skillsButton = Array.from(rail.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("Skills")
         ) as HTMLButtonElement;
         skillsButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "armory:section": "skills" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "armory:section": "skills" },
+        });
         expect(model.viewName()).toBe("Skills");
         const skillsPane = screen.getByTestId("skill-manager").closest(".bundle-manager-pane");
         expect(skillsPane?.classList.contains("is-hidden")).toBe(false);
@@ -227,14 +227,14 @@ describe("ArmoryView pane title", () => {
     it("clicking a tab-bar item writes armory:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderArmory();
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
-        const mcpButton = Array.from(tabBar.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("MCP Servers"),
+        const mcpButton = Array.from(tabBar.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("MCP Servers")
         ) as HTMLButtonElement;
         mcpButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "armory:section": "mcp" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "armory:section": "mcp" },
+        });
         expect(model.viewName()).toBe("MCP Servers");
     });
 
@@ -300,26 +300,34 @@ describe("ArmoryView zoom", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": 0.9 } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 0.9 } });
     });
 
     it("Ctrl+Wheel up writes an increased term:zoom via SetMetaCommand", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": 1.1 } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 1.1 } });
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: false, deltaY: 100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).not.toHaveBeenCalled();
+    });
+
+    // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+    // (app.tsx) — this pane's own handler must let it through rather than
+    // also zooming itself, or the two handlers would double-step this pane
+    // relative to every other pane in the window. See
+    // docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+    it("Ctrl+Shift+Wheel does not trigger this pane's own zoom RPC call", () => {
+        const { container } = renderArmory();
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        view.dispatchEvent(
+            new WheelEvent("wheel", { ctrlKey: true, shiftKey: true, deltaY: 100, bubbles: true, cancelable: true })
+        );
         expect(setMetaMock).not.toHaveBeenCalled();
     });
 
@@ -330,14 +338,16 @@ describe("ArmoryView zoom", () => {
         // it's derived from) sidesteps reactive-system timing entirely.
         (model as any).zoomAtom = () => 0.9;
         const { container } = render(() => (
-            <ArmoryView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+            <ArmoryView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
         ));
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": null } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": null } });
     });
 });
 

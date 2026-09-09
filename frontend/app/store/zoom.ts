@@ -30,6 +30,7 @@
 // a single branch on the runtime platform inside `applyChromeZoomCSS` — not
 // three copies of this file.
 
+import { getAllBlockComponentModelEntries } from "@/app/store/block-component-registry";
 import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -78,18 +79,33 @@ function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {
     return Math.max(4, Math.min(64, Math.round(baseFontSize * zoom)));
 }
 
+// "warden" added here per Codex review on PR #3090: warden-view.tsx already
+// reads/writes the identical "term:zoom" meta key and applies it as CSS
+// zoom exactly like armory/swarm (both already listed) — leaving it out
+// was an oversight in this allowlist, not a deliberate exclusion, and it
+// made the all-panes batch below silently skip a pane that individual
+// Ctrl+Scroll already zooms today via the exact same mechanism.
 function getBlockZoom(blockId: string): number | null {
     const bcm = getBlockComponentModel(blockId);
     if (!bcm?.viewModel) return null;
     const vt = bcm.viewModel.viewType;
-    if (vt !== "term" && vt !== "agent" && vt !== "swarm" && vt !== "editor" && vt !== "armory") return null;
+    if (vt !== "term" && vt !== "agent" && vt !== "swarm" && vt !== "editor" && vt !== "armory" && vt !== "warden")
+        return null;
 
     const blockOref = WOS.makeORef("block", blockId);
     const blockData = WOS.getObjectValue<Block>(blockOref);
     return blockData?.meta?.["term:zoom"] ?? 1.0;
 }
 
-function setBlockZoom(blockId: string, factor: number): void {
+// Returns the actual clamped/rounded zoom that was written, so a caller
+// that needs to know the resulting value (the all-panes stepper below)
+// doesn't have to re-read it back — WOS's local cache is NOT updated
+// synchronously by this call. RpcApi.SetMetaCommand is fire-and-forget;
+// the cache only updates later, when the backend pushes a WaveObjUpdate
+// event back (global.ts's initGlobalEventSubs → WOS.updateWaveObject). A
+// getBlockZoom() call immediately after this one would read the STALE
+// pre-write value, not the one just computed here (ReAgent P1, PR #3090).
+function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = true): number {
     const newZoom = clampZoom(roundZoom(factor));
     const metaValue = Math.abs(newZoom - 1.0) < 0.01 ? null : newZoom;
 
@@ -100,10 +116,21 @@ function setBlockZoom(blockId: string, factor: number): void {
         })
     );
 
-    showZoomIndicator(`${Math.round(newZoom * 100)}%`);
+    // Suppressed by the all-panes stepper below, which shows one summary
+    // toast for the whole gesture instead of one per pane.
+    if (showIndicator) {
+        showZoomIndicator(`${Math.round(newZoom * 100)}%`);
+    }
+    return newZoom;
 }
 
-function stepZoom(blockId: string, zoom: number, step: number, direction: 1 | -1): void {
+function stepZoom(
+    blockId: string,
+    zoom: number,
+    step: number,
+    direction: 1 | -1,
+    showIndicator: boolean = true
+): number {
     const baseFontSize = getBaseFontSize(blockId);
     const currentFontSize = computeEffectiveFontSize(baseFontSize, zoom);
     let newZoom = zoom + step * direction;
@@ -114,7 +141,7 @@ function stepZoom(blockId: string, zoom: number, step: number, direction: 1 | -1
     ) {
         newZoom += MICRO_STEP * direction;
     }
-    setBlockZoom(blockId, newZoom);
+    return setBlockZoom(blockId, newZoom, showIndicator);
 }
 
 export function zoomBlockIn(blockId: string, step: number = WHEEL_STEP): void {
@@ -127,6 +154,56 @@ export function zoomBlockOut(blockId: string, step: number = WHEEL_STEP): void {
     const zoom = getBlockZoom(blockId);
     if (zoom == null) return;
     stepZoom(blockId, zoom, step, -1);
+}
+
+// ── All-panes zoom (Ctrl+Shift+Scroll) ──────────────────────────────
+//
+// See docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+// Steps every pane in the CURRENT WINDOW's block registry, each relative
+// to its own current zoom level — this is a batch of independent
+// single-pane zooms, not a new shared value. A pane whose viewType
+// getBlockZoom() doesn't recognize (browser, sysinfo, help, ...)
+// is silently skipped, the same way a single Ctrl+Scroll over one of
+// them already is today — no new filtering logic, this just reuses that
+// existing guard for every block in the window instead of one.
+
+function stepAllPanes(step: number, direction: 1 | -1): void {
+    let minZoom = Infinity;
+    let maxZoom = -Infinity;
+
+    for (const [blockId] of getAllBlockComponentModelEntries()) {
+        const zoom = getBlockZoom(blockId);
+        if (zoom == null) continue; // not a zoomable pane type — leave untouched
+
+        // Suppress the per-pane indicator: N panes stepping in one gesture
+        // would otherwise fire N toasts, each overwriting the last before
+        // the user can read it. One summary toast is shown below instead.
+        //
+        // Uses stepZoom's OWN return value, not a getBlockZoom() re-read —
+        // the write it just fired is an async RpcApi.SetMetaCommand, and
+        // WOS's local cache isn't updated until the backend pushes a
+        // WaveObjUpdate event back. Re-reading here would see the STALE
+        // pre-step value on every call (ReAgent P1, PR #3090).
+        const newZoom = stepZoom(blockId, zoom, step, direction, false);
+        minZoom = Math.min(minZoom, newZoom);
+        maxZoom = Math.max(maxZoom, newZoom);
+    }
+
+    if (minZoom === Infinity) return; // no zoomable pane in this window
+
+    const label =
+        Math.abs(minZoom - maxZoom) < 0.01
+            ? `All panes: ${Math.round(minZoom * 100)}%`
+            : `All panes: ${Math.round(minZoom * 100)}%–${Math.round(maxZoom * 100)}%`;
+    showZoomIndicator(label);
+}
+
+export function zoomAllPanesIn(step: number = WHEEL_STEP): void {
+    stepAllPanes(step, 1);
+}
+
+export function zoomAllPanesOut(step: number = WHEEL_STEP): void {
+    stepAllPanes(step, -1);
 }
 
 export function zoomIn(step: number = KEYBOARD_STEP): void {
