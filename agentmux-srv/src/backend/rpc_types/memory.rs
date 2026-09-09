@@ -13,9 +13,21 @@ pub struct CommandGetMemoryData {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandDeleteMemoryData {
     pub id: String,
+}
+
+/// Response for `deletememory` and `deletesystemmemory` — both take the
+/// same request (`CommandDeleteMemoryData`, above) and answer with the
+/// same shape, so they share this response type too. Was an anonymous
+/// `json!({"deleted": ..})` before this type existed to name it for the
+/// RPC bindings generator.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct DeleteMemoryResult {
+    pub deleted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
