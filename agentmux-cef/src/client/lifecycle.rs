@@ -329,17 +329,6 @@ impl AgentMuxHandler {
                 if is_top_level_window && !is_popup {
                     unsafe { install_top_level_focus_restore_hook(hwnd); }
 
-                    // OS shutdown/restart/logoff flush
-                    // (SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08 Phase 0).
-                    // Windows delivers WM_QUERYENDSESSION/WM_ENDSESSION per
-                    // top-level window to give the app its one chance to
-                    // persist; AgentMux handled neither, so a restart never
-                    // reached CloseWindow and the session snapshot was never
-                    // written. Observer-passthrough, same shape as the
-                    // focus-restore hook above; the flush is deduplicated
-                    // process-wide so installing on every top-level is free.
-                    unsafe { super::wndproc::install_session_end_hook(&self.state, hwnd); }
-
                     // Shift+window-edge resize (spec SPEC_RESIZE_DEFAULT_FLIP_
                     // AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.4): observe the
                     // native size loop (WM_SIZING/WM_EXITSIZEMOVE) and forward
@@ -386,6 +375,35 @@ impl AgentMuxHandler {
                     && !label.starts_with("floating-pool-")
                 {
                     unsafe { install_main_window_floater_cascade_hook(hwnd); }
+                }
+
+                // OS shutdown/restart/logoff flush
+                // (SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08 Phase 0).
+                // Windows delivers WM_QUERYENDSESSION/WM_ENDSESSION per
+                // top-level window to give the app its one chance to
+                // persist; AgentMux handled neither, so a restart never
+                // reached CloseWindow and the session snapshot was never
+                // written. Observer-passthrough, same shape as the
+                // focus-restore hook above; the flush is deduplicated
+                // process-wide so installing on every top-level is free.
+                //
+                // Installed LAST/topmost deliberately (Codex P2 on #3106),
+                // after every other conditional hook above including the
+                // floater-cascade one: that hook prunes its own bookkeeping
+                // on WM_DESTROY rather than WM_NCDESTROY, so if it sat above
+                // this hook in the subclass chain, the subsequent
+                // WM_NCDESTROY would find its saved "original" pointer
+                // already cleared and fall through to DefWindowProcW
+                // directly -- this hook's own WM_NCDESTROY-triggered prune
+                // (see `session_end_wndproc` in wndproc.rs) would never run,
+                // leaving a stale HWND entry in SESSION_END_WNDPROCS that a
+                // later HWND-reuse could then read as "already hooked" and
+                // skip installing on a genuinely new window. Being the
+                // outermost subclass means Windows calls this hook directly
+                // for every message on this HWND regardless of what any
+                // other hook does with its own bookkeeping.
+                if is_top_level_window && !is_popup {
+                    unsafe { super::wndproc::install_session_end_hook(&self.state, hwnd); }
                 }
 
                 // Subwindow? Hide from taskbar. Full instances and browser-pane

@@ -195,21 +195,36 @@ fn resolve_placeholders(node: &mut LayoutNode, new_ids: &[String]) {
 /// didn't win the race — a classic lost-update. `with_tx` holds the
 /// store's connection lock for the whole read+write, so no other caller
 /// can observe or write an intermediate state.
-pub(crate) fn save_last_session_snapshot(store: &Store, snapshot: Value) {
+/// Returns whether the write actually landed. Callers on the clean-close path
+/// (`window_close.rs`) intentionally discard this — that path is documented
+/// best-effort, and must never let a snapshot failure block the close it is
+/// riding along with. The OS-shutdown path (`handle_save_session_snapshot`
+/// below) is different: it has nothing else to do after this call, so it
+/// uses the result to report whether the flush actually succeeded rather
+/// than reporting success unconditionally.
+pub(crate) fn save_last_session_snapshot(store: &Store, snapshot: Value) -> bool {
     let result = store.with_tx(|tx| {
         let clients = tx.get_all::<Client>()?;
         let Some(mut client) = clients.into_iter().next() else {
-            return Ok(());
+            // No client row to attach the snapshot to — nothing was written.
+            // Not a store error, but still not a successful save: surface it
+            // as one via the Ok(false) below rather than Ok(()) reading as
+            // unconditional success regardless of what actually happened.
+            return Ok(false);
         };
         client.meta.insert(SNAPSHOT_META_KEY.to_string(), snapshot);
         tx.update(&mut client)?;
-        Ok(())
+        Ok(true)
     });
-    if let Err(e) = result {
-        tracing::warn!(
-            error = %e,
-            "session_restore: failed to persist last-session snapshot"
-        );
+    match result {
+        Ok(saved) => saved,
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "session_restore: failed to persist last-session snapshot"
+            );
+            false
+        }
     }
 }
 
@@ -307,9 +322,15 @@ async fn apply_and_publish(
 /// reconstructs exactly what a restore after a clean quit would have.
 ///
 /// Idempotent and safe to call repeatedly: it overwrites the same
-/// `Client.meta` key, and `save_last_session_snapshot` is already best-effort
-/// (a failed write warns rather than propagating), so a shutdown flush can
-/// never wedge the shutdown it is trying to protect.
+/// `Client.meta` key, and a single attempt here never retries or blocks on
+/// failure, so a shutdown flush can never wedge the shutdown it is trying to
+/// protect. That is a statement about *this call itself* staying fast and
+/// single-shot, not about what it reports: unlike the clean-close path,
+/// `save_last_session_snapshot`'s result here IS propagated into the
+/// response (`success: false` on either an unbuildable snapshot or a failed
+/// store write), because the caller — the cef-side shutdown hook — relies on
+/// that to decide whether to re-arm for a genuine retry on the OS's own
+/// second trigger.
 pub(crate) async fn handle_save_session_snapshot(
     state: &AppState,
     _call: &WebCallType,
@@ -325,23 +346,39 @@ pub(crate) async fn handle_save_session_snapshot(
         return WebReturnType::success_empty();
     };
 
+    // reagentx P1 on #3106: the cef-side client (helpers.rs) parses this
+    // response's `success` field to decide whether to re-arm its
+    // once-per-attempt flush latch for a genuine retry on
+    // WM_ENDSESSION(TRUE). That only works if this handler actually reports
+    // failure for an application-level failure — `snapshot_workspace`
+    // returning `None`, or the store write inside
+    // `save_last_session_snapshot` failing — not just for the transport-level
+    // failures (connection refused/timeout) the client can already detect on
+    // its own. Both paths below now propagate `success: false` instead of
+    // this handler always claiming success once it started running.
     match snapshot_workspace(store, &ws_id) {
         Some(snapshot) => {
-            save_last_session_snapshot(store, snapshot);
-            tracing::info!(
-                workspace_id = %ws_id,
-                "session_restore: snapshot flushed for OS shutdown"
-            );
+            if save_last_session_snapshot(store, snapshot) {
+                tracing::info!(
+                    workspace_id = %ws_id,
+                    "session_restore: snapshot flushed for OS shutdown"
+                );
+                WebReturnType::success_empty()
+            } else {
+                // save_last_session_snapshot already logged the specific
+                // store error (or the no-client case) at warn level; no need
+                // to duplicate the detail here.
+                WebReturnType::error("shutdown flush: snapshot built but the store write failed")
+            }
         }
         None => {
             tracing::warn!(
                 workspace_id = %ws_id,
                 "session_restore: shutdown flush could not build a snapshot"
             );
+            WebReturnType::error("shutdown flush: could not build a snapshot for the current workspace")
         }
     }
-
-    WebReturnType::success_empty()
 }
 
 /// The workspace backing one of this client's windows, if any.
@@ -1062,9 +1099,15 @@ mod tests {
     }
 
     /// Defensive path: the client's window points at a workspace that is gone.
-    /// A shutdown must still complete quietly rather than erroring — this runs
-    /// while the machine is going down, where noise helps nobody and a failure
-    /// return could only ever be ignored.
+    /// "Survives" means the handler returns promptly with no panic and no
+    /// partial/corrupt write — NOT that it reports success. Revised for
+    /// reagentx P1 on #3106: this handler previously always returned
+    /// `success_empty()` regardless of what actually happened, which meant
+    /// the cef-side re-arm-on-failure logic (built to fix a *different*
+    /// finding on the same PR) could only ever see success from srv and
+    /// never got a real signal to retry on the OS's second trigger. Nothing
+    /// was captured here, so this must now report failure — that is the
+    /// signal the retry logic exists to act on, not noise to suppress.
     #[tokio::test]
     async fn shutdown_flush_survives_a_missing_workspace() {
         let state = test_state();
@@ -1074,12 +1117,53 @@ mod tests {
         let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
 
         assert!(
-            ret.error.is_none(),
-            "a missing workspace must not make the shutdown flush report an error"
+            ret.error.is_some(),
+            "nothing was captured — the caller needs to know, so it can re-arm and retry"
         );
         assert!(
             load_last_session_snapshot(&state.wstore).is_none(),
             "nothing capturable means nothing written — not a partial snapshot"
+        );
+    }
+
+    /// The other side of the fork the previous test locks in: a shutdown
+    /// arriving before the first window exists at all (no client, or a
+    /// client with no live window) is ordinary, not a failure — reporting
+    /// error here would just be noise on every fresh launch that happens to
+    /// shut down early. Deliberately distinct from
+    /// `shutdown_flush_survives_a_missing_workspace`, where a window DOES
+    /// exist but points at nothing: that case now correctly reports failure
+    /// so the retry logic can act on it, and this test exists so a future
+    /// change doesn't collapse the two cases back together.
+    #[tokio::test]
+    async fn shutdown_flush_with_no_window_at_all_is_not_an_error() {
+        let state = test_state();
+        let _ = bootstrapped_workspace(&state);
+        let window_id = state
+            .wstore
+            .get_all::<Client>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .windowids
+            .first()
+            .cloned()
+            .expect("test_state seeds exactly one window");
+        state
+            .wstore
+            .delete::<crate::backend::obj::Window>(&window_id)
+            .unwrap();
+
+        let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        assert!(
+            ret.error.is_none(),
+            "no window to resolve a workspace from is ordinary, not a failure"
+        );
+        assert!(
+            load_last_session_snapshot(&state.wstore).is_none(),
+            "nothing was captured, so nothing should be written"
         );
     }
 
