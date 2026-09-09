@@ -79,8 +79,18 @@ cd ~/cef-build/chromium_git/chromium/src
 # Reset to clean state — patcher is NOT idempotent; double-apply produces .rej files
 git reset --hard HEAD
 find . -name '*.rej' -delete
-# Now apply
-python3 cef/tools/patcher.py --root-dir=cef
+# Now apply.
+# patcher.py takes NO arguments in its normal mode — it reads
+# cef/patch/patch.cfg itself, and accepts ONLY --patch-file / --patch-dir
+# (verified against tools/patcher.py's own OptionParser). Passing --root-dir
+# makes it fail, and a wrapper script swallowed exactly that as a non-fatal
+# WARN and continued with ZERO of 112 patches applied, nearly shipping an
+# unpatched macOS framework. Run from inside cef/ with no args:
+( cd cef && python3 tools/patcher.py )
+
+# Verify it actually did something. A CLEAN tree here means zero patches
+# applied — that is the silent-failure signature, not success.
+git status --porcelain | head -5
 ```
 
 If you see "class member cannot be redeclared" compile errors later, the patcher likely double-applied — repeat the reset and re-run.
