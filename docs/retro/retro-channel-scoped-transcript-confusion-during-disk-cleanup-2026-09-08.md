@@ -1,5 +1,6 @@
 # Retro: a session transcript appearing to "move" between channel dirs turned out to be a working junction, not divergence
 
+**Status:** historical
 **Date:** 2026-09-08
 **Area:** `agentmux-common/src/data_paths.rs` (`identities_dir`, `identity_history_dir`,
 `ensure_history_link`), `agentmux-srv/src/server/identity_auth_dirs.rs` (`link_history_if_isolated`),
