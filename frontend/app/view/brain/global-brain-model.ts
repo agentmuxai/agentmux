@@ -39,7 +39,7 @@ export const NEW_SECTION_ID = "__new__";
  *  are split out and rendered first with the override preamble, exactly
  *  mirroring memory_bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
  *  Exported for direct unit testing against the Rust version's fixtures. */
-export function formatGlobalBrainBlock(sections: Memory[]): string {
+export function formatGlobalBrainBlock(sections: Bundle[]): string {
     const nonEmpty = sections.filter((s) => (s.instructions ?? "").trim().length > 0);
     const system = nonEmpty.filter((s) => s.is_system);
     const ordinary = nonEmpty.filter((s) => !s.is_system);
@@ -91,9 +91,9 @@ export class GlobalBrainViewModel {
     // already use for mcp:changed/skills:changed.
     private unsubChanged: () => void;
 
-    private _all = createSignal<Memory[]>([]);
+    private _all = createSignal<Bundle[]>([]);
     /** Every bundle (global + per-agent), used to derive sections + candidates. */
-    allAtom: Accessor<Memory[]> = this._all[0];
+    allAtom: Accessor<Bundle[]> = this._all[0];
     private setAll = this._all[1];
 
     private _editingId = createSignal<string | null>(null);
@@ -139,13 +139,13 @@ export class GlobalBrainViewModel {
 
     /** Global sections, in injection order (sort_order, then name) —
      *  includes system rows (they're always is_global too). */
-    sectionsAtom: Accessor<Memory[]>;
+    sectionsAtom: Accessor<Bundle[]>;
     /** The AgentMux-controlled, highest-priority subset of sectionsAtom. */
-    systemSectionsAtom: Accessor<Memory[]>;
+    systemSectionsAtom: Accessor<Bundle[]>;
     /** sectionsAtom minus systemSectionsAtom — what the ordinary editor list renders. */
-    ordinarySectionsAtom: Accessor<Memory[]>;
+    ordinarySectionsAtom: Accessor<Bundle[]>;
     /** Non-global, non-blank bundles eligible to promote into the brain. */
-    candidatesAtom: Accessor<Memory[]>;
+    candidatesAtom: Accessor<Bundle[]>;
     /** Combined startup-instructions-file preview block. */
     previewAtom: Accessor<string>;
     /** Providers grouped by resolved startup-instructions filename, e.g.
@@ -250,7 +250,7 @@ export class GlobalBrainViewModel {
     }
 
     /** Open the inline editor for an existing section. */
-    startEdit(section: Memory): void {
+    startEdit(section: Bundle): void {
         this.setError(null);
         this.setEditingId(section.id);
         this.setDraftName(section.name);
@@ -390,7 +390,7 @@ export class GlobalBrainViewModel {
     // FROM (it's created directly), and its position is always first,
     // enforced server-side regardless of what a reorder call would send.
 
-    startEditSystem(section: Memory): void {
+    startEditSystem(section: Bundle): void {
         this.setError(null);
         this.setEditingSystemId(section.id);
         this.setDraftSystemName(section.name);

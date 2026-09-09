@@ -836,7 +836,7 @@ const AgentRefEditor = (p: {
     update: (patch: Record<string, unknown>) => void;
 }): JSX.Element => {
     const [memories] = createResource(() =>
-        RpcApi.ListMemoriesCommand(TabRpcClient, {}).catch(() => [] as Memory[]),
+        RpcApi.ListMemoriesCommand(TabRpcClient, {}).catch(() => [] as Bundle[]),
     );
     const ref = () => readAgentRef(p.node);
     const setRef = (patch: Partial<AgentRefShape>) =>

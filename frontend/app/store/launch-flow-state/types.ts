@@ -96,7 +96,7 @@ export interface LaunchFlowState {
      *  fetch needed (see the removed `bindings`/`bindingsLoading` slices
      *  below). */
     accounts: ResourceList<Account>;
-    memories: ResourceList<Memory>;
+    memories: ResourceList<Bundle>;
     submit: SubmitStatus;
     /** Folded-in OAuth state machine. The `Auth` command wraps an
      *  `AuthCommand` from auth-state.ts; the reducer delegates to
@@ -110,7 +110,7 @@ export interface LaunchFlowState {
 export const initialState = (): LaunchFlowState => ({
     form: initialForm(),
     accounts: initialResourceList<Account>(),
-    memories: initialResourceList<Memory>(),
+    memories: initialResourceList<Bundle>(),
     submit: initialSubmit(),
     auth: initialAuthState(),
     closed: false,
@@ -143,7 +143,7 @@ export type LaunchFlowCommand =
     | { type: "AccountsLoaded"; list: Account[] }
     | { type: "AccountsFailed"; error: string }
     | { type: "MemoriesLoading" }
-    | { type: "MemoriesLoaded"; list: Memory[] }
+    | { type: "MemoriesLoaded"; list: Bundle[] }
     | { type: "MemoriesFailed"; error: string }
     /** Submit lifecycle. */
     | { type: "SubmitClicked" }
@@ -194,7 +194,7 @@ export function accountsForProvider(state: LaunchFlowState, providerId: string):
  *  <option> in that same dropdown, and one bundle_memory_upsert would
  *  permanently refuse to let the launched agent's own bundle editor
  *  modify. reagent P1, PR #2782. */
-export function realMemories(state: LaunchFlowState): Memory[] {
+export function realMemories(state: LaunchFlowState): Bundle[] {
     return state.memories.list.filter((m) => !m.is_blank && !m.is_system);
 }
 

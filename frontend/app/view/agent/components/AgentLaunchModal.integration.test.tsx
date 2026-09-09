@@ -148,7 +148,7 @@ const driftedProviderAgent = {
     memory_id: "mem-bundle-1",
 } as AgentDefinition;
 
-const driftedAgentsBundle: Memory = {
+const driftedAgentsBundle: Bundle = {
     id: "mem-bundle-1",
     name: "Drift Test Bundle",
     is_blank: false,
@@ -168,7 +168,7 @@ const raceDriftAgent = {
     memory_id: "mem-bundle-race",
 } as AgentDefinition;
 
-const raceDriftBundle: Memory = {
+const raceDriftBundle: Bundle = {
     id: "mem-bundle-race",
     name: "Race Test Bundle",
     is_blank: false,
@@ -203,7 +203,7 @@ const geminiAccount = {
     updated_at: "",
 } as unknown as import("@/app/view/identity/identity-model").Account;
 
-const notesMemory: Memory = {
+const notesMemory: Bundle = {
     id: "mem-notes",
     name: "Notes",
     is_blank: false,
@@ -211,7 +211,7 @@ const notesMemory: Memory = {
     updated_at: ts(),
 };
 
-const personalMemory: Memory = {
+const personalMemory: Bundle = {
     id: "mem-personal",
     name: "Personal",
     is_blank: false,
@@ -347,9 +347,9 @@ describe("AgentLaunchModal — provider resolution through the bound bundle", ()
         // actually reproducible instead of both fetches settling in the
         // same microtask batch.
         vi.mocked(refreshAccountCache).mockResolvedValue([workAccount, geminiAccount]);
-        let resolveBundle!: (m: Memory) => void;
+        let resolveBundle!: (m: Bundle) => void;
         vi.mocked(RpcApi.GetMemoryCommand).mockReturnValue(
-            new Promise<Memory>((resolve) => {
+            new Promise<Bundle>((resolve) => {
                 resolveBundle = resolve;
             }),
         );

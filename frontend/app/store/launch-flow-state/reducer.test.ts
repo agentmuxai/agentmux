@@ -33,7 +33,7 @@ const acct = (id: string, name: string, provider = "claude"): Account => ({
     updated_at: "",
 });
 
-const mem = (id: string, name: string, is_blank = false): Memory => ({
+const mem = (id: string, name: string, is_blank = false): Bundle => ({
     id,
     name,
     is_blank,

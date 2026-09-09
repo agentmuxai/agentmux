@@ -27,7 +27,7 @@ describe("instructions_by_provider round-trip", () => {
             instructions_by_provider: '{"claude":"Claude-specific."}',
             created_at: 0,
             updated_at: 0,
-        } as Memory);
+        } as Bundle);
         expect(draft.instructions_by_provider).toBe('{"claude":"Claude-specific."}');
     });
 
@@ -37,7 +37,7 @@ describe("instructions_by_provider round-trip", () => {
             name: "Test",
             created_at: 0,
             updated_at: 0,
-        } as Memory);
+        } as Bundle);
         expect(draft.instructions_by_provider).toBe("{}");
     });
 
@@ -54,7 +54,7 @@ describe("instructions_by_provider round-trip", () => {
             instructions_by_provider: '{"claude":"Keep me."}',
             created_at: 0,
             updated_at: 0,
-        } as Memory;
+        } as Bundle;
         const draft = draftFromBundle(stored);
         draft.name = "Renamed"; // simulates editing an unrelated field
         const wire = draftToWire(draft);
@@ -78,7 +78,7 @@ describe("provider/model round-trip", () => {
             model: "anthropic",
             created_at: 0,
             updated_at: 0,
-        } as Memory);
+        } as Bundle);
         expect(draft.provider).toBe("claude");
         expect(draft.model).toBe("anthropic");
     });
@@ -89,7 +89,7 @@ describe("provider/model round-trip", () => {
             name: "Test",
             created_at: 0,
             updated_at: 0,
-        } as Memory);
+        } as Bundle);
         expect(draft.provider).toBe("");
         expect(draft.model).toBe("");
     });
@@ -114,7 +114,7 @@ describe("provider/model round-trip", () => {
             model: "anthropic",
             created_at: 0,
             updated_at: 0,
-        } as Memory;
+        } as Bundle;
         const draft = draftFromBundle(stored);
         draft.description = "Added a description"; // simulates editing an unrelated field
         const wire = draftToWire(draft);

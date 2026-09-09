@@ -95,7 +95,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
     // (#749) — previously this called startEdit which refused on the
     // blank singleton with an error and left the detail pane showing
     // the previously-selected memory, mismatching the banner.
-    const handleSelect = (memory: Memory) => {
+    const handleSelect = (memory: Bundle) => {
         model.setError(null);
         model.cancelDraft();
         model.setSelectedId(memory.id);

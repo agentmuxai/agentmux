@@ -96,7 +96,7 @@ export function emptyDraft(): BundleDraft {
 /** Hydrate a draft from a stored Memory. JSON fields are parsed; on
  *  parse failure we fall back to safe empties so the UI stays usable
  *  even if the row is malformed. */
-export function draftFromBundle(m: Memory): BundleDraft {
+export function draftFromBundle(m: Bundle): BundleDraft {
     let context_files: Array<{ path: string; content: string }> = [];
     try {
         const parsed = JSON.parse(m.context_files ?? "[]");
@@ -138,7 +138,7 @@ export function draftFromBundle(m: Memory): BundleDraft {
  *  0 for both — the upsert handler server-sets `created_at = now`
  *  when it sees 0 and always overwrites `updated_at` with now. Codex
  *  P1 (PR #749). */
-export function draftToWire(d: BundleDraft): Memory {
+export function draftToWire(d: BundleDraft): Bundle {
     return {
         id: d.id ?? "",
         name: d.name.trim(),
@@ -194,8 +194,8 @@ export class BundleViewModel implements ViewModel {
      *  was opened without agent context. */
     agentId: Accessor<string | undefined>;
 
-    private _memories = createSignal<Memory[]>([]);
-    memoriesAtom: Accessor<Memory[]> = this._memories[0];
+    private _memories = createSignal<Bundle[]>([]);
+    memoriesAtom: Accessor<Bundle[]> = this._memories[0];
     setMemories = this._memories[1];
 
     private _selectedId = createSignal<string | null>(null);
@@ -227,7 +227,7 @@ export class BundleViewModel implements ViewModel {
     setValidation = this._validation[1];
 
     /** Memo: the currently-selected Memory row, or null. */
-    selectedAtom: Accessor<Memory | null>;
+    selectedAtom: Accessor<Bundle | null>;
 
     // `nodeModel` is optional: when this ViewModel backs a `view: "memory"`
     // block pane the BlockRegistry passes the real (blockId, nodeModel)
@@ -297,7 +297,7 @@ export class BundleViewModel implements ViewModel {
      *  previous failed action (e.g. clicking the blank singleton, then
      *  clicking a real memory should not leave the "system-managed"
      *  banner showing alongside the new edit form). Reagent P2 (#747). */
-    startEdit(memory: Memory): void {
+    startEdit(memory: Bundle): void {
         if (memory.is_blank) {
             this.setError("The blank bundle is system-managed and cannot be edited.");
             return;

@@ -40,7 +40,7 @@ export const BundleImportApi = {
     // already persisted.
     ValidateBundleCommand(
         client: RpcClient,
-        data: Partial<Memory>,
+        data: Partial<Bundle>,
         opts?: RpcOpts,
     ): Promise<BundleValidationReport> {
         return client.rpcCall("bundle.validate", data, opts);

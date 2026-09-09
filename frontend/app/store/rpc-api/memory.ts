@@ -11,7 +11,7 @@ export const MemoryApi = {
         client: RpcClient,
         data: Record<string, never> = {},
         opts?: RpcOpts,
-    ): Promise<Memory[]> {
+    ): Promise<Bundle[]> {
         return client.rpcCall("listmemories", data, opts);
     },
 
@@ -19,15 +19,15 @@ export const MemoryApi = {
         client: RpcClient,
         data: { id: string },
         opts?: RpcOpts,
-    ): Promise<Memory> {
+    ): Promise<Bundle> {
         return client.rpcCall("getmemory", data, opts);
     },
 
     UpsertMemoryCommand(
         client: RpcClient,
-        data: Partial<Memory>,
+        data: Partial<Bundle>,
         opts?: RpcOpts,
-    ): Promise<Memory> {
+    ): Promise<Bundle> {
         return client.rpcCall("upsertmemory", data, opts);
     },
 
@@ -54,9 +54,9 @@ export const MemoryApi = {
     // UpsertMemoryCommand/DeleteMemoryCommand.
     UpsertSystemMemoryCommand(
         client: RpcClient,
-        data: Partial<Memory>,
+        data: Partial<Bundle>,
         opts?: RpcOpts,
-    ): Promise<Memory> {
+    ): Promise<Bundle> {
         return client.rpcCall("upsertsystemmemory", data, opts);
     },
 
