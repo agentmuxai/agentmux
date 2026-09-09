@@ -19,15 +19,15 @@ import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuth
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { AgentStashModal } from "@/app/view/agent/components/AgentStashModal";
-import { BundleImportSelectModalPanel } from "@/app/view/memory/components/BundleImportSelectModal";
-import { BundleImportPreviewModalPanel } from "@/app/view/memory/components/BundleImportPreviewModal";
-import { BundleImportConfirmModalPanel } from "@/app/view/memory/components/BundleImportConfirmModal";
+import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
+import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
+import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/agent/components/AgentStashModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
-import "@/app/view/memory/components/BundleImportModal.scss";
+import "@/app/view/bundle/components/BundleImportModal.scss";
 
 import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
 
@@ -139,7 +139,7 @@ export function renderRequest(
                                     TabRpcClient,
                                     {
                                         // Wire convention from
-                                        // memory-model.ts:draftToWire —
+                                        // bundle-model.ts:draftToWire —
                                         // empty id triggers server-side
                                         // uuid; 0 timestamps trigger
                                         // server-side now-stamping.

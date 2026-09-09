@@ -34,7 +34,7 @@ import { createMemo, createSignal, type Accessor } from "solid-js";
  *  shape but with everything optional + JSON-array fields exposed as
  *  parsed arrays for ergonomic editing. The shape is converted back to
  *  Memory on save. */
-export interface MemoryDraft {
+export interface BundleDraft {
     id?: string;
     name: string;
     description: string;
@@ -78,7 +78,7 @@ export interface MemoryDraft {
  *  `db_bundles.skills` column is JSON-encoded; a literal `""` would
  *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
  *  PR #747 (2026-05-08). */
-export function emptyDraft(): MemoryDraft {
+export function emptyDraft(): BundleDraft {
     return {
         id: undefined,
         name: "",
@@ -96,7 +96,7 @@ export function emptyDraft(): MemoryDraft {
 /** Hydrate a draft from a stored Memory. JSON fields are parsed; on
  *  parse failure we fall back to safe empties so the UI stays usable
  *  even if the row is malformed. */
-export function draftFromMemory(m: Memory): MemoryDraft {
+export function draftFromBundle(m: Memory): BundleDraft {
     let context_files: Array<{ path: string; content: string }> = [];
     try {
         const parsed = JSON.parse(m.context_files ?? "[]");
@@ -114,7 +114,7 @@ export function draftFromMemory(m: Memory): MemoryDraft {
         // Preserved, not parsed — this form has no field that edits
         // per-provider variants yet, so the draft only needs to carry
         // the raw JSON through unchanged (see the field's own doc
-        // comment on MemoryDraft for why dropping it would be lossy).
+        // comment on BundleDraft for why dropping it would be lossy).
         instructions_by_provider:
             m.instructions_by_provider && m.instructions_by_provider.trim().length > 0
                 ? m.instructions_by_provider
@@ -138,7 +138,7 @@ export function draftFromMemory(m: Memory): MemoryDraft {
  *  0 for both — the upsert handler server-sets `created_at = now`
  *  when it sees 0 and always overwrites `updated_at` with now. Codex
  *  P1 (PR #749). */
-export function draftToWire(d: MemoryDraft): Memory {
+export function draftToWire(d: BundleDraft): Memory {
     return {
         id: d.id ?? "",
         name: d.name.trim(),
@@ -147,7 +147,7 @@ export function draftToWire(d: MemoryDraft): Memory {
         // silently strip it (the upsert ON CONFLICT overwrites is_global).
         is_global: d.is_global ?? false,
         // Sent through as-is (readonly-once-set is backend-enforced, not
-        // stripped here) — see MemoryDraft.provider's doc comment.
+        // stripped here) — see BundleDraft.provider's doc comment.
         provider: d.provider,
         model: d.model,
         instructions: d.instructions,
@@ -162,7 +162,7 @@ export function draftToWire(d: MemoryDraft): Memory {
     };
 }
 
-export class MemoryViewModel implements ViewModel {
+export class BundleViewModel implements ViewModel {
     viewType = "memory";
     blockId: string;
     nodeModel: BlockNodeModel | null;
@@ -202,8 +202,8 @@ export class MemoryViewModel implements ViewModel {
     selectedIdAtom: Accessor<string | null> = this._selectedId[0];
     setSelectedId = this._selectedId[1];
 
-    private _draft = createSignal<MemoryDraft | null>(null);
-    draftAtom: Accessor<MemoryDraft | null> = this._draft[0];
+    private _draft = createSignal<BundleDraft | null>(null);
+    draftAtom: Accessor<BundleDraft | null> = this._draft[0];
     setDraft = this._draft[1];
 
     private _saving = createSignal<boolean>(false);
@@ -231,7 +231,7 @@ export class MemoryViewModel implements ViewModel {
 
     // `nodeModel` is optional: when this ViewModel backs a `view: "memory"`
     // block pane the BlockRegistry passes the real (blockId, nodeModel)
-    // pair; when it backs the context-free <MemoryManager/> component
+    // pair; when it backs the context-free <BundleManager/> component
     // (window modal / extracted manager) there is no block, so both are
     // absent. The block is used only for the cosmetic header title —
     // every other code path drives off `bundle_*` RPCs and is
@@ -304,7 +304,7 @@ export class MemoryViewModel implements ViewModel {
         }
         this.setError(null);
         this.setValidation(null);
-        this.setDraft(draftFromMemory(memory));
+        this.setDraft(draftFromBundle(memory));
         this.setSelectedId(memory.id);
     }
 

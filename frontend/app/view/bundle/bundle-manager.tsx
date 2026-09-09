@@ -1,20 +1,20 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// MemoryManager — the context-free Armory Bundle Format (ABF) management UI.
+// BundleManager — the context-free Armory Bundle Format (ABF) management UI.
 //
 // This is the full list / create / edit / delete lifecycle for ABF
 // bundles, extracted out of the `view: "memory"` block pane so the exact
 // same UI can render in two places without depending on the Agent-pane
 // block, `nodeModel`, or any ViewModel-from-BlockRegistry context:
 //
-//   1. The existing `view: "memory"` settings pane — `memory-view.tsx`
-//      renders <MemoryManagerBody/> with the pane's BlockRegistry model.
+//   1. The existing `view: "memory"` settings pane — `bundle-view.tsx`
+//      renders <BundleManagerBody/> with the pane's BlockRegistry model.
 //   2. The window-scoped bundle manager modal (a later PR) — renders
-//      <MemoryManager/>, which owns its own block-free model.
+//      <BundleManager/>, which owns its own block-free model.
 //
 // Everything here drives purely off the `bundle_*` RPCs (via
-// MemoryViewModel) plus the `memories:changed` WPS event, so two live
+// BundleViewModel) plus the `memories:changed` WPS event, so two live
 // instances stay consistent for free.
 
 import { For, onCleanup, Show, type JSX } from "solid-js";
@@ -24,15 +24,15 @@ import { Tooltip } from "@/app/element/tooltip";
 import { useModalLayer } from "@/app/element/modal-layer";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
-import { type MemoryDraft, MemoryViewModel } from "./memory-model";
+import { type BundleDraft, BundleViewModel } from "./bundle-model";
 import { BundleMcpSection } from "./BundleMcpSection";
 import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsSection";
 import { BundleSkillsSection } from "./BundleSkillsSection";
 
-import "./memory-view.scss";
+import "./bundle-view.scss";
 
-interface MemoryManagerBodyProps {
-    model: MemoryViewModel;
+interface BundleManagerBodyProps {
+    model: BundleViewModel;
 }
 
 /** Small (i) icon with a hover tooltip — contextual in-line documentation
@@ -40,19 +40,19 @@ interface MemoryManagerBodyProps {
  *  requiring a trip to the docs. */
 const FieldHelp = (props: { text: string }): JSX.Element => (
     <Tooltip content={props.text} placement="right">
-        <i class="fa-sharp fa-solid fa-circle-info memory-view-field-help" aria-hidden="true" />
+        <i class="fa-sharp fa-solid fa-circle-info bundle-view-field-help" aria-hidden="true" />
     </Tooltip>
 );
 
 /**
- * MemoryManagerBody — the rail + detail UI, driven by a MemoryViewModel.
+ * BundleManagerBody — the rail + detail UI, driven by a BundleViewModel.
  *
  * This component is context-free: it reads and writes ONLY through the
  * `model` accessors/methods, none of which require a block. Both the
- * settings-pane wrapper and the standalone <MemoryManager/> render this
+ * settings-pane wrapper and the standalone <BundleManager/> render this
  * with their respective models, so the markup lives in exactly one place.
  */
-const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
+const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
     const { model } = props;
     const modalLayer = useModalLayer();
 
@@ -122,9 +122,9 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
         void model.deleteMemory(id);
     };
 
-    const updateDraft = <K extends keyof MemoryDraft>(
+    const updateDraft = <K extends keyof BundleDraft>(
         key: K,
-        value: MemoryDraft[K],
+        value: BundleDraft[K],
     ) => {
         const current = model.draftAtom();
         if (!current) return;
@@ -152,23 +152,23 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     };
 
     const listView = (
-        <div class="memory-view-rail">
+        <div class="bundle-view-rail">
             <Show when={model.errorAtom()}>
-                <div class="memory-view-error">{model.errorAtom()}</div>
+                <div class="bundle-view-error">{model.errorAtom()}</div>
             </Show>
-            <div class="memory-view-rail-header">
-                <button class="memory-view-new-btn" onClick={handleNew}>
+            <div class="bundle-view-rail-header">
+                <button class="bundle-view-new-btn" onClick={handleNew}>
                     + New Bundle
                 </button>
-                <button class="memory-view-new-btn" onClick={handleImportBundle}>
+                <button class="bundle-view-new-btn" onClick={handleImportBundle}>
                     Import Bundle
                 </button>
             </div>
-            <ul class="memory-view-list">
+            <ul class="bundle-view-list">
                 <For each={model.memoriesAtom()}>
                     {(memory) => (
                         <li
-                            class="memory-view-list-item"
+                            class="bundle-view-list-item"
                             classList={{
                                 "is-selected": model.selectedIdAtom() === memory.id,
                                 "is-blank": !!memory.is_blank,
@@ -176,19 +176,19 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             }}
                             onClick={() => handleSelect(memory)}
                         >
-                            <div class="memory-view-list-item-name">
-                                <span class="memory-view-list-item-name-text">
+                            <div class="bundle-view-list-item-name">
+                                <span class="bundle-view-list-item-name-text">
                                     {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
                                 </span>
                                 <Show when={memory.is_global}>
-                                    <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                    <span class="bundle-view-global-badge" title="Injected into all agents at launch">Global</span>
                                 </Show>
                             </div>
                             {/* Subtitle shows the description now that bundles
                                 are provider-agnostic (§4.1a). Class name kept
                                 to avoid CSS churn. */}
                             <Show when={!memory.is_blank && memory.description}>
-                                <div class="memory-view-list-item-provider">
+                                <div class="bundle-view-list-item-provider">
                                     {memory.description}
                                 </div>
                             </Show>
@@ -200,9 +200,9 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
     );
 
     const detailView = (
-        <div class="memory-view-detail">
+        <div class="bundle-view-detail">
             <Show when={model.errorAtom()}>
-                <div class="memory-view-error">{model.errorAtom()}</div>
+                <div class="bundle-view-error">{model.errorAtom()}</div>
             </Show>
 
             <Show
@@ -210,34 +210,34 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                 fallback={
                     <Show when={model.selectedAtom()}>
                         {(memory) => (
-                            <div class="memory-view-readonly">
-                                <h2 class="memory-view-name">{memory().name}</h2>
+                            <div class="bundle-view-readonly">
+                                <h2 class="bundle-view-name">{memory().name}</h2>
                                 <Show when={memory().description}>
-                                    <p class="memory-view-description">{memory().description}</p>
+                                    <p class="bundle-view-description">{memory().description}</p>
                                 </Show>
-                                <dl class="memory-view-fields">
+                                <dl class="bundle-view-fields">
                                     <Show when={memory().is_global}>
                                         <dt>Scope</dt>
                                         <dd>
-                                            <span class="memory-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                            <span class="bundle-view-global-badge" title="Injected into all agents at launch">Global</span>
                                             {" "}— injected into every agent at launch
                                         </dd>
                                     </Show>
                                     <dt>Instructions</dt>
-                                    <dd class="memory-view-instructions-readonly">
+                                    <dd class="bundle-view-instructions-readonly">
                                         <pre>{memory().instructions || "(none)"}</pre>
                                     </dd>
                                 </dl>
                                 <Show when={!memory().is_blank}>
-                                    <div class="memory-view-actions">
+                                    <div class="bundle-view-actions">
                                         <button
-                                            class="memory-view-edit-btn"
+                                            class="bundle-view-edit-btn"
                                             onClick={() => model.startEdit(memory())}
                                         >
                                             Edit
                                         </button>
                                         <button
-                                            class="memory-view-delete-btn"
+                                            class="bundle-view-delete-btn"
                                             onClick={() => handleDelete(memory().id)}
                                         >
                                             Delete
@@ -260,23 +260,23 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
             >
                 {(draft) => (
                         <form
-                            class="memory-view-form"
+                            class="bundle-view-form"
                             onSubmit={(e) => {
                                 e.preventDefault();
                                 handleSave();
                             }}
                         >
-                            <h2 class="memory-view-form-title">
+                            <h2 class="bundle-view-form-title">
                                 {draft().id ? "Edit Bundle" : "New Bundle"}
                             </h2>
 
-                            <label class="memory-view-field">
-                                <span class="memory-view-field-label">
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
                                     Name *
                                     <FieldHelp text="The bundle's display name — shown in the Armory list and in the agent launch picker. Required." />
                                 </span>
                                 <input
-                                    class="memory-view-input"
+                                    class="bundle-view-input"
                                     type="text"
                                     value={draft().name}
                                     onInput={(e) => updateDraft("name", e.currentTarget.value)}
@@ -286,13 +286,13 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 />
                             </label>
 
-                            <label class="memory-view-field">
-                                <span class="memory-view-field-label">
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
                                     Description
                                     <FieldHelp text="Optional short label shown under the bundle's name in the launch picker. Purely cosmetic — has no effect on what gets injected into the agent." />
                                 </span>
                                 <input
-                                    class="memory-view-input"
+                                    class="bundle-view-input"
                                     type="text"
                                     value={draft().description}
                                     onInput={(e) =>
@@ -315,26 +315,26 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 here is just so the UI doesn't invite an edit the
                                 server will reject. */}
                             <Show when={draft().id && draft().provider}>
-                                <label class="memory-view-field">
-                                    <span class="memory-view-field-label">
+                                <label class="bundle-view-field">
+                                    <span class="bundle-view-field-label">
                                         Provider
                                         <FieldHelp text="Which CLI/harness this ABF runs on. Fixed at creation and cannot be changed afterward — an ABF's portability guarantee depends on it accurately describing what it needs to run." />
                                     </span>
                                     <input
-                                        class="memory-view-input"
+                                        class="bundle-view-input"
                                         type="text"
                                         value={PROVIDERS[draft().provider]?.displayName ?? draft().provider}
                                         disabled
                                         readonly
                                     />
                                 </label>
-                                <label class="memory-view-field">
-                                    <span class="memory-view-field-label">
+                                <label class="bundle-view-field">
+                                    <span class="bundle-view-field-label">
                                         Model vendor
                                         <FieldHelp text="Which backend this ABF's provider talks to. Fixed at creation, same reason as Provider." />
                                     </span>
                                     <input
-                                        class="memory-view-input"
+                                        class="bundle-view-input"
                                         type="text"
                                         value={draft().model}
                                         disabled
@@ -343,13 +343,13 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 </label>
                             </Show>
                             <Show when={!(draft().id && draft().provider)}>
-                                <label class="memory-view-field">
-                                    <span class="memory-view-field-label">
+                                <label class="bundle-view-field">
+                                    <span class="bundle-view-field-label">
                                         Provider *
                                         <FieldHelp text="Which CLI/harness this ABF will run on. Required, and cannot be changed once set — pick carefully." />
                                     </span>
                                     <select
-                                        class="memory-view-input"
+                                        class="bundle-view-input"
                                         value={draft().provider}
                                         onChange={(e) => {
                                             const provider = e.currentTarget.value;
@@ -368,13 +368,13 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                     </select>
                                 </label>
                                 <Show when={(PROVIDERS[draft().provider]?.supportedVendors?.length ?? 0) > 1}>
-                                    <label class="memory-view-field">
-                                        <span class="memory-view-field-label">
+                                    <label class="bundle-view-field">
+                                        <span class="bundle-view-field-label">
                                             Model vendor *
                                             <FieldHelp text="Which backend this provider should talk to. Cannot be changed once set." />
                                         </span>
                                         <select
-                                            class="memory-view-input"
+                                            class="bundle-view-input"
                                             value={draft().model}
                                             onChange={(e) => updateDraft("model", e.currentTarget.value)}
                                             required
@@ -387,13 +387,13 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 </Show>
                             </Show>
 
-                            <label class="memory-view-field">
-                                <span class="memory-view-field-label">
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
                                     Instructions
                                     <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. To override it for one specific harness, add a per-provider variant below; the default still applies to every provider without one." />
                                 </span>
                                 <textarea
-                                    class="memory-view-textarea"
+                                    class="bundle-view-textarea"
                                     rows={8}
                                     value={draft().instructions}
                                     onInput={(e) =>
@@ -404,8 +404,8 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 />
                             </label>
 
-                            <label class="memory-view-field">
-                                <span class="memory-view-field-label">
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
                                     Per-provider instruction overrides
                                     <FieldHelp text="ABF v0.2 §2.2. Each entry replaces the Instructions above when this bundle runs on that provider — it is an override, not an addition, and providers without an entry use the default unchanged. On export each becomes instructions/<provider>/AGENTS.md, so a key that is not a usable directory name is skipped; this form flags those before you save." />
                                 </span>
@@ -417,14 +417,14 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 />
                             </label>
 
-                            <div class="memory-view-form-actions">
+                            <div class="bundle-view-form-actions">
                                 <Tooltip
                                     content="Structurally checks this draft: unknown provider keys, unsafe or colliding context-file paths, and malformed JSON in the fields not yet editable here. Advisory only — never blocks Save."
                                     placement="top"
                                 >
                                     <button
                                         type="button"
-                                        class="memory-view-validate-btn"
+                                        class="bundle-view-validate-btn"
                                         onClick={handleValidate}
                                         disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
                                     >
@@ -433,7 +433,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 </Tooltip>
                                 <button
                                     type="button"
-                                    class="memory-view-cancel-btn"
+                                    class="bundle-view-cancel-btn"
                                     onClick={handleCancel}
                                     disabled={model.savingAtom()}
                                 >
@@ -441,7 +441,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 </button>
                                 <button
                                     type="submit"
-                                    class="memory-view-save-btn"
+                                    class="bundle-view-save-btn"
                                     disabled={
                                         model.savingAtom() ||
                                         !draft().name.trim() ||
@@ -460,24 +460,24 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             <Show when={model.validationAtom()}>
                                 {(report) => (
                                     <div
-                                        class="memory-view-validation"
+                                        class="bundle-view-validation"
                                         classList={{ "is-valid": report().is_valid }}
                                     >
                                         <Show
                                             when={report().issues.length > 0}
-                                            fallback={<p class="memory-view-validation-ok">No structural issues found.</p>}
+                                            fallback={<p class="bundle-view-validation-ok">No structural issues found.</p>}
                                         >
-                                            <ul class="memory-view-validation-list">
+                                            <ul class="bundle-view-validation-list">
                                                 <For each={report().issues}>
                                                     {(issue) => (
                                                         <li
-                                                            class="memory-view-validation-item"
+                                                            class="bundle-view-validation-item"
                                                             classList={{
                                                                 "is-error": issue.severity === "error",
                                                                 "is-warning": issue.severity === "warning",
                                                             }}
                                                         >
-                                                            <span class="memory-view-validation-field">{issue.field}</span>
+                                                            <span class="bundle-view-validation-field">{issue.field}</span>
                                                             {": "}
                                                             {issue.message}
                                                         </li>
@@ -489,7 +489,7 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                 )}
                             </Show>
 
-                            <p class="memory-view-form-hint">
+                            <p class="bundle-view-form-hint">
                                 MCP servers and skills are managed on the bundle's own detail
                                 view (Cancel to get back there), not in this edit form — they
                                 take effect live and don't need a Save. Context files are still
@@ -516,20 +516,20 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
 };
 
 /**
- * MemoryManager — context-free standalone Memory-bundle manager.
+ * BundleManager — context-free standalone Memory-bundle manager.
  *
- * Constructs its OWN block-free MemoryViewModel and renders the shared
+ * Constructs its OWN block-free BundleViewModel and renders the shared
  * body. Use this wherever Memory CRUD is needed outside an Agent-pane
  * block — e.g. the window-scoped bundle manager modal. Takes no props.
  *
  * The model's only block dependency was the cosmetic header title; with
- * the optional-constructor change in memory-model.ts it constructs
+ * the optional-constructor change in bundle-model.ts it constructs
  * cleanly with no block and drives entirely off the `bundle_*` RPCs.
  */
-export const MemoryManager = (): JSX.Element => {
+export const BundleManager = (): JSX.Element => {
     // Component setup runs once; the model lives for this component's
     // lifetime and is disposed on unmount.
-    const model = new MemoryViewModel();
+    const model = new BundleViewModel();
     onCleanup(() => model.dispose());
-    return <MemoryManagerBody model={model} />;
+    return <BundleManagerBody model={model} />;
 };

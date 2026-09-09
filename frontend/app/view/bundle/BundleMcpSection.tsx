@@ -3,7 +3,7 @@
 
 /**
  * BundleMcpSection — the "MCP Servers" section of the Bundle editor's
- * detail view (memory-manager.tsx). Composable model v2,
+ * detail view (bundle-manager.tsx). Composable model v2,
  * docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
  * item 3.
  *
@@ -18,7 +18,7 @@
  *
  * Deliberately a flat inline list, not a nested PrimitiveListDetail — this
  * section already lives inside the bundle's own detail pane (itself one
- * side of MemoryManagerBody's list/detail split), and a second full-height
+ * side of BundleManagerBody's list/detail split), and a second full-height
  * single-pane swap nested inside that would fight for the same space.
  */
 

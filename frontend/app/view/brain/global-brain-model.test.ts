@@ -67,7 +67,7 @@ describe("formatGlobalBrainBlock", () => {
 // GlobalBrainViewModel's section split — mocks RpcApi entirely since the
 // constructor fires an unawaited ListMemoriesCommand refresh() AND an
 // unawaited GetClaudeGlobalConfigCommand fetch, same pattern as
-// frontend/app/view/memory/memory-model.test.ts.
+// frontend/app/view/bundle/bundle-model.test.ts.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
 const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
 vi.mock("@/app/store/rpc-api", () => ({

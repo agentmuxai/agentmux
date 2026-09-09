@@ -3,7 +3,7 @@
 
 import { beforeEach, describe, expect, it, test, vi } from "vitest";
 import {
-    draftFromMemory,
+    draftFromBundle,
     draftToWire,
     duplicateProviderKeys,
     emptyDraft,
@@ -11,7 +11,7 @@ import {
     providerKeyProblem,
     sanitizeProviderKey,
     serializeInstructionsByProvider,
-} from "./memory-model";
+} from "./bundle-model";
 
 // reagent P1, PR #2523: instructions_by_provider (ABF v0.2 §2.2) was
 // previously dropped by the edit round-trip. Since this form has no field
@@ -20,8 +20,8 @@ import {
 // ON CONFLICT UPDATE unconditionally overwrites the column, silently
 // wiping out any variants an import brought in.
 describe("instructions_by_provider round-trip", () => {
-    test("draftFromMemory preserves a populated value", () => {
-        const draft = draftFromMemory({
+    test("draftFromBundle preserves a populated value", () => {
+        const draft = draftFromBundle({
             id: "b1",
             name: "Test",
             instructions_by_provider: '{"claude":"Claude-specific."}',
@@ -31,8 +31,8 @@ describe("instructions_by_provider round-trip", () => {
         expect(draft.instructions_by_provider).toBe('{"claude":"Claude-specific."}');
     });
 
-    test("draftFromMemory falls back to {} for an absent/blank value", () => {
-        const draft = draftFromMemory({
+    test("draftFromBundle falls back to {} for an absent/blank value", () => {
+        const draft = draftFromBundle({
             id: "b1",
             name: "Test",
             created_at: 0,
@@ -55,7 +55,7 @@ describe("instructions_by_provider round-trip", () => {
             created_at: 0,
             updated_at: 0,
         } as Memory;
-        const draft = draftFromMemory(stored);
+        const draft = draftFromBundle(stored);
         draft.name = "Renamed"; // simulates editing an unrelated field
         const wire = draftToWire(draft);
         expect(wire.instructions_by_provider).toBe('{"claude":"Keep me."}');
@@ -70,8 +70,8 @@ describe("instructions_by_provider round-trip", () => {
 // to run. Same class of round-trip concern as instructions_by_provider
 // above — must not be silently dropped on an edit to an unrelated field.
 describe("provider/model round-trip", () => {
-    test("draftFromMemory preserves populated values", () => {
-        const draft = draftFromMemory({
+    test("draftFromBundle preserves populated values", () => {
+        const draft = draftFromBundle({
             id: "b1",
             name: "Test",
             provider: "claude",
@@ -83,8 +83,8 @@ describe("provider/model round-trip", () => {
         expect(draft.model).toBe("anthropic");
     });
 
-    test("draftFromMemory falls back to empty strings for an absent value", () => {
-        const draft = draftFromMemory({
+    test("draftFromBundle falls back to empty strings for an absent value", () => {
+        const draft = draftFromBundle({
             id: "b1",
             name: "Test",
             created_at: 0,
@@ -115,7 +115,7 @@ describe("provider/model round-trip", () => {
             created_at: 0,
             updated_at: 0,
         } as Memory;
-        const draft = draftFromMemory(stored);
+        const draft = draftFromBundle(stored);
         draft.description = "Added a description"; // simulates editing an unrelated field
         const wire = draftToWire(draft);
         expect(wire.provider).toBe("claude");
@@ -125,7 +125,7 @@ describe("provider/model round-trip", () => {
 
 // validateDraft() (Armory Bundle Format (ABF) UI-alignment pass) — the
 // Armory bundle editor's "Validate" button. Mocks RpcApi entirely since
-// MemoryViewModel's constructor fires an unawaited ListMemoriesCommand
+// BundleViewModel's constructor fires an unawaited ListMemoriesCommand
 // refresh(); ValidateBundleCommand is the one under test.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
 const validateBundleMock = vi.fn();
@@ -155,8 +155,8 @@ describe("validateDraft", () => {
 
     // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md
     test("subscribes to memories:changed and refreshes on it; unsubscribes on dispose", async () => {
-        const { MemoryViewModel } = await import("./memory-model");
-        const model = new MemoryViewModel();
+        const { BundleViewModel } = await import("./bundle-model");
+        const model = new BundleViewModel();
         await Promise.resolve();
         listMemoriesMock.mockClear();
 
@@ -169,14 +169,14 @@ describe("validateDraft", () => {
     });
 
     test("populates validationAtom from the RPC response", async () => {
-        const { MemoryViewModel } = await import("./memory-model");
+        const { BundleViewModel } = await import("./bundle-model");
         const report: BundleValidationReport = {
             is_valid: false,
             issues: [{ severity: "error", field: "context_files", message: "bad path" }],
         };
         validateBundleMock.mockResolvedValueOnce(report);
 
-        const model = new MemoryViewModel();
+        const model = new BundleViewModel();
         model.startNew();
         await model.validateDraft();
 
@@ -186,8 +186,8 @@ describe("validateDraft", () => {
     });
 
     test("is a no-op with no active draft", async () => {
-        const { MemoryViewModel } = await import("./memory-model");
-        const model = new MemoryViewModel();
+        const { BundleViewModel } = await import("./bundle-model");
+        const model = new BundleViewModel();
         // No startNew()/startEdit() — draftAtom() is null.
         await model.validateDraft();
         expect(validateBundleMock).not.toHaveBeenCalled();
@@ -200,7 +200,7 @@ describe("validateDraft", () => {
         // for the OLD draft must not land on whatever draft the user has
         // switched to by the time the RPC resolves. Same race class
         // saveDraft's own identity-equality guard already covers.
-        const { MemoryViewModel } = await import("./memory-model");
+        const { BundleViewModel } = await import("./bundle-model");
         let resolveRpc: (report: BundleValidationReport) => void = () => {};
         validateBundleMock.mockReturnValueOnce(
             new Promise<BundleValidationReport>((resolve) => {
@@ -208,7 +208,7 @@ describe("validateDraft", () => {
             }),
         );
 
-        const model = new MemoryViewModel();
+        const model = new BundleViewModel();
         model.startNew();
         const inFlight = model.validateDraft();
 
@@ -223,10 +223,10 @@ describe("validateDraft", () => {
     });
 
     test("a failed RPC call sets errorAtom instead of validationAtom", async () => {
-        const { MemoryViewModel } = await import("./memory-model");
+        const { BundleViewModel } = await import("./bundle-model");
         validateBundleMock.mockRejectedValueOnce(new Error("boom"));
 
-        const model = new MemoryViewModel();
+        const model = new BundleViewModel();
         model.startNew();
         await model.validateDraft();
 
@@ -235,15 +235,15 @@ describe("validateDraft", () => {
     });
 
     test("editing a field after validating clears the stale report", async () => {
-        const { MemoryViewModel } = await import("./memory-model");
+        const { BundleViewModel } = await import("./bundle-model");
         validateBundleMock.mockResolvedValueOnce({ is_valid: true, issues: [] });
 
-        const model = new MemoryViewModel();
+        const model = new BundleViewModel();
         model.startNew();
         await model.validateDraft();
         expect(model.validationAtom()).not.toBeNull();
 
-        // Simulate memory-manager.tsx's updateDraft() clearing the report
+        // Simulate bundle-manager.tsx's updateDraft() clearing the report
         // on any further edit — a stale "looks good" must not survive a
         // change to the content it described.
         model.setValidation(null);

@@ -3,7 +3,7 @@
 
 /**
  * BundleMcpModel — view model for a bundle's MCP Servers section (part of
- * the Bundle editor, memory-manager.tsx). Same shape as AgentMcpModel
+ * the Bundle editor, bundle-manager.tsx). Same shape as AgentMcpModel
  * (agent-mcp-model.ts) — see its doc comment for the is_global /
  * no-check_s1 details, which apply identically here, just keyed by
  * bundle_id instead of agent_id.

@@ -6,7 +6,7 @@
 // docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md, §5 decision 3).
 //
 // Before this PR the `view: "identity"` / `view: "memory"` panes
-// rendered the full-CRUD `IdentityManagerBody` / `MemoryManagerBody`.
+// rendered the full-CRUD `IdentityManagerBody` / `BundleManagerBody`.
 // §4 of the spec consolidated all bundle CRUD into the Armory pane;
 // the per-agent settings tabs are now *consumers*, not editors.
 //
@@ -19,10 +19,10 @@
 // live remaining consumer. `view: "identity"` blocks stopped rendering
 // this panel entirely back in Armory Phase 5
 // (SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md §1.3
-// — see `identity-pane-view.tsx`); `view: "memory"` (`memory-view.tsx`)
+// — see `identity-pane-view.tsx`); `view: "memory"` (`bundle-view.tsx`)
 // was the one spot still stuck on the pointer-only form. Fixed the same
 // way Phase 5 fixed Identity: an optional `agentId` prop, threaded from
-// the block's own `meta.agentId` (`MemoryViewModel.agentId`, mirroring
+// the block's own `meta.agentId` (`BundleViewModel.agentId`, mirroring
 // `IdentityPaneViewModel.agentId`). When present, this resolves the
 // agent's OWN dedicated ABF bundle via `AgentDefinition.memory_id`
 // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1 — the

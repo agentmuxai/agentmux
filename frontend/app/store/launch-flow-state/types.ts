@@ -188,7 +188,7 @@ export function accountsForProvider(state: LaunchFlowState, providerId: string):
 /** Real (non-blank), non-system memory bundles — excludes is_system rows
  *  the same way every sibling bundle-picker filter in the app does
  *  (AgentLaunchModal's own dropdown, AgentStartupModal, drone-view,
- *  MemoryViewModel.refresh). Without this, AgentLaunchModal's default-pick
+ *  BundleViewModel.refresh). Without this, AgentLaunchModal's default-pick
  *  effect (`firstReal = realMemories(flow.state)[0]`) could auto-select a
  *  system Global Memory entry as memoryId — an id with no matching
  *  <option> in that same dropdown, and one bundle_memory_upsert would

@@ -17,9 +17,9 @@
 // mapping). Section order is the sort_order column, mutated via
 // reorderglobalbrain.
 //
-// This model is block-free (same shape as MemoryViewModel) and drives off
+// This model is block-free (same shape as BundleViewModel) and drives off
 // the bundle_* RPCs. Mutations refresh the list afterwards; it does not
-// subscribe to memories:changed (matching MemoryViewModel — the manager is
+// subscribe to memories:changed (matching BundleViewModel — the manager is
 // the only writer in practice).
 //
 // Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.

@@ -15,7 +15,7 @@
  *
  * WHY THIS IS A CONTROLLED/UNCONTROLLED HYBRID, which is the one subtle thing
  * here: the draft stores this field as a RAW JSON STRING, deliberately (see
- * `memory-model.ts`'s seam comment — round-tripping the string verbatim is
+ * `bundle-model.ts`'s seam comment — round-tripping the string verbatim is
  * what fixed reagent P1 on #2523, where editing any field silently wiped an
  * imported bundle's variants). Deriving the rows from that string on every
  * keystroke would make a row vanish the moment its provider key went blank,
@@ -34,7 +34,7 @@ import {
     providerKeyProblem,
     serializeInstructionsByProvider,
     type ProviderInstruction,
-} from "./memory-model";
+} from "./bundle-model";
 
 interface BundleProviderInstructionsSectionProps {
     /** The draft's raw `instructions_by_provider` JSON string. */
@@ -85,7 +85,7 @@ export const BundleProviderInstructionsSection = (
     const knownProviders = createMemo(() => Object.keys(PROVIDERS).sort());
 
     return (
-        <div class="memory-view-provider-instructions">
+        <div class="bundle-view-provider-instructions">
             <Show
                 when={!parsed().malformed}
                 fallback={
@@ -95,7 +95,7 @@ export const BundleProviderInstructionsSection = (
                     // merely failed to parse. The raw string is preserved
                     // untouched, so an export/re-import or a manual fix
                     // recovers it.
-                    <div class="memory-view-provider-instructions-malformed">
+                    <div class="bundle-view-provider-instructions-malformed">
                         This bundle's per-provider instructions are not readable as a JSON
                         object of provider → text, so they cannot be edited here. The stored
                         value is preserved exactly as-is and will survive saving this form —
@@ -115,10 +115,10 @@ export const BundleProviderInstructionsSection = (
                         const problem = () => providerKeyProblem(row().provider);
                         const duped = () => dupes().has(row().provider.trim());  // keyed on the raw trimmed key, which is what duplicateProviderKeys reports
                         return (
-                            <div class="memory-view-provider-instruction-row">
-                                <div class="memory-view-provider-instruction-head">
+                            <div class="bundle-view-provider-instruction-row">
+                                <div class="bundle-view-provider-instruction-head">
                                     <input
-                                        class="memory-view-input"
+                                        class="bundle-view-input"
                                         list="abf-known-providers"
                                         placeholder="Provider (e.g. claude)"
                                         value={row().provider}
@@ -129,7 +129,7 @@ export const BundleProviderInstructionsSection = (
                                     />
                                     <button
                                         type="button"
-                                        class="memory-view-provider-instruction-remove"
+                                        class="bundle-view-provider-instruction-remove"
                                         onClick={() => removeRow(index)}
                                         title="Remove this provider override"
                                     >
@@ -149,7 +149,7 @@ export const BundleProviderInstructionsSection = (
                                         - any other rejected key: saved fine,
                                           but bundle_export.rs skips it with a
                                           warning, so it vanishes from the .abf. */}
-                                    <div class="memory-view-provider-instruction-warn">
+                                    <div class="bundle-view-provider-instruction-warn">
                                         {problem()}{" "}
                                         {row().provider.trim().length === 0
                                             ? "This row will not be saved until you name it."
@@ -157,13 +157,13 @@ export const BundleProviderInstructionsSection = (
                                     </div>
                                 </Show>
                                 <Show when={!problem() && duped()}>
-                                    <div class="memory-view-provider-instruction-warn">
+                                    <div class="bundle-view-provider-instruction-warn">
                                         Two keys resolve to the same export path — only one of
                                         them survives export.
                                     </div>
                                 </Show>
                                 <textarea
-                                    class="memory-view-textarea"
+                                    class="bundle-view-textarea"
                                     rows={5}
                                     value={row().content}
                                     onInput={(e) =>
@@ -181,7 +181,7 @@ export const BundleProviderInstructionsSection = (
                     <For each={knownProviders()}>{(p) => <option value={p} />}</For>
                 </datalist>
 
-                <button type="button" class="memory-view-provider-instruction-add" onClick={addRow}>
+                <button type="button" class="bundle-view-provider-instruction-add" onClick={addRow}>
                     + Add provider override
                 </button>
             </Show>
