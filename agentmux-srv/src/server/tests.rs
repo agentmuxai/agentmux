@@ -48,6 +48,7 @@ pub(crate) fn test_state() -> AppState {
         lan_key: "test-lan-key".to_string(),
         boot_id: std::sync::Arc::from("test-boot"),
         version: "0.28.20".to_string(),
+        hostname: "test-host".to_string(),
         app_path: String::new(),
         wstore: wstore.clone(),
         shared_store: None,
@@ -136,6 +137,28 @@ async fn health_returns_200() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["status"], "ok");
     assert_eq!(json["version"], "0.28.20");
+}
+
+/// `local_url` is always loopback, so `host.hostname` is the only field that
+/// tells a client (e.g. the mobile app's discovery screen) which machine it is
+/// actually talking to. Regression guard for it being dropped from the
+/// response or never plumbed onto `AppState` — the state it was in before.
+#[tokio::test]
+async fn discovery_reports_host_hostname() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/discovery")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["host"]["hostname"], "test-host");
 }
 
 #[tokio::test]

@@ -1303,6 +1303,10 @@ pub struct NetworkBundle {
     pub web_addr: std::net::SocketAddr,
     pub ws_addr: std::net::SocketAddr,
     pub local_web_url: String,
+    /// OS hostname, resolved once here because LAN discovery needs it for its
+    /// mDNS TXT records. Carried on the bundle so `build_app_state` can put it
+    /// on `AppState` too, rather than resolving it a second time.
+    pub hostname: String,
     pub lan_discovery: Arc<backend::lan_discovery::LanDiscoveryController>,
     /// Owns the LAN-facing listeners so `network:lan_discovery` takes effect
     /// live, instead of only at the next startup — see
@@ -1377,7 +1381,7 @@ pub async fn bind_listeners_and_network(
     let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     let lan_discovery = Arc::new(backend::lan_discovery::LanDiscoveryController::new(
         config.instance_id.clone(),
-        hostname,
+        hostname.clone(),
         version.to_string(),
         web_addr.port(),
         event_bus.clone(),
@@ -1499,6 +1503,7 @@ pub async fn bind_listeners_and_network(
         web_addr,
         ws_addr,
         local_web_url,
+        hostname,
         lan_discovery,
         lan_listeners,
         lsp_supervisor,
@@ -1629,6 +1634,7 @@ pub fn build_app_state(
         lan_key: config.lan_key.clone(),
         boot_id: Arc::from(uuid::Uuid::new_v4().to_string()),
         version,
+        hostname: net.hostname.clone(),
         app_path: config.app_path.clone(),
         wstore: stores.wstore,
         shared_store: stores.shared_store,

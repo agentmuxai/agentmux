@@ -97,6 +97,12 @@ pub struct AppState {
     /// See `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
     pub boot_id: Arc<str>,
     pub version: String,
+    /// OS hostname of the machine this instance runs on (e.g. "claudius").
+    /// Already computed at boot for LAN discovery's mDNS TXT records; kept
+    /// here so `/agentmux/discovery` can name its own host too — `local_url`
+    /// is always loopback, so without this a client has no way to say which
+    /// machine it is talking to.
+    pub hostname: String,
     pub app_path: String,
     pub wstore: Arc<Store>,
     /// GLOBAL shared store (`~/.agentmux/shared/store.db`). Holds durable
@@ -803,6 +809,7 @@ async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Val
     Json(json!({
         "host": {
             "version": version,
+            "hostname": state.hostname.clone(),
             "local_url": local_url,
             "addressable": reachable,
             "agents": agents,
