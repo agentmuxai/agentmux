@@ -291,7 +291,8 @@ pub struct CommandListAgentDefinitionsData {
 
 /// Request for `agentdefcreatefromtemplate`. Clones a seeded template
 /// into a new user-owned definition. Phase 1 of the two-tier picker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAgentDefCreateFromTemplateData {
     /// id of a seeded definition (must have `is_seeded = 1`).
     pub template_id: String,
@@ -331,7 +332,8 @@ pub struct CommandAgentDefCreateFromTemplateData {
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses
 /// `definition_id` to launch the freshly-created agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentDefCreateFromTemplateResult {
     pub definition_id: String,
     /// Echoed back so the caller's launch step doesn't need to
@@ -667,12 +669,14 @@ pub struct CommandForkAgentDefinitionData {
     pub branch_label: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandForkAgentDefinitionSuggestData {
     pub source_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct ForkAgentDefinitionSuggestResult {
     pub suggested_label: String,
 }
