@@ -344,17 +344,29 @@ pub(crate) async fn handle_save_session_snapshot(
     WebReturnType::success_empty()
 }
 
-/// The workspace backing this client's first window, if any.
+/// The workspace backing one of this client's windows, if any.
 ///
 /// Mirrors how `window_close.rs` picks the workspace to snapshot, so the
 /// shutdown path and the clean-quit path capture the same thing. With
-/// multiple windows this captures the first — the same single-workspace
-/// limitation restore-on-relaunch already has, not a new one introduced here.
+/// multiple windows this captures the first *live* one — the same
+/// single-workspace limitation restore-on-relaunch already has, not a new
+/// one introduced here.
+///
+/// Walks `windowids` rather than only checking the first: the repo's own
+/// restart/reprojection paths already tolerate a polluted `windowids` list
+/// (a stale id whose `Window` row no longer exists), so that state can and
+/// does occur in real persisted data. Bailing out on `windowids[0]` alone
+/// would skip the flush entirely whenever that specific entry is stale, even
+/// with a perfectly good workspace sitting at `windowids[1]`.
 fn current_workspace_id(store: &Store) -> Option<String> {
     let client = store.get_all::<Client>().ok()?.into_iter().next()?;
-    let window_id = client.windowids.first()?;
-    let window = store.get::<crate::backend::obj::Window>(window_id).ok()??;
-    Some(window.workspaceid)
+    client.windowids.iter().find_map(|window_id| {
+        store
+            .get::<crate::backend::obj::Window>(window_id)
+            .ok()
+            .flatten()
+            .map(|window| window.workspaceid)
+    })
 }
 
 pub(crate) async fn restore_last_session(
@@ -1071,4 +1083,43 @@ mod tests {
         );
     }
 
+    /// reagentx/Codex P2 on #3106: `current_workspace_id` used to check only
+    /// `windowids[0]` and give up entirely if that one row was stale, even
+    /// with a perfectly good workspace behind a later entry. The repo's own
+    /// restart/reprojection paths already tolerate a polluted `windowids`
+    /// list, so this is real reachable state, not a hypothetical.
+    #[tokio::test]
+    async fn shutdown_flush_skips_a_stale_leading_window_id() {
+        let state = test_state();
+        let ws_id = bootstrapped_workspace(&state);
+
+        // Prepend a window id with no backing Window row — the exact
+        // "stale leading entry" shape the finding describes.
+        let mut client = state
+            .wstore
+            .get_all::<Client>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        client
+            .windowids
+            .insert(0, "stale-window-id-no-row".to_string());
+        state.wstore.update(&mut client).unwrap();
+
+        let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        assert!(
+            ret.error.is_none(),
+            "a stale leading window id must not fail the whole flush"
+        );
+        let snapshot = load_last_session_snapshot(&state.wstore)
+            .expect("the live workspace behind the second window id must still be captured");
+        let expected = snapshot_workspace(&state.wstore, &ws_id)
+            .expect("the real workspace is independently snapshot-able");
+        assert_eq!(
+            snapshot, expected,
+            "must resolve to and capture the real workspace, not silently skip it"
+        );
+    }
 }

@@ -950,12 +950,16 @@ fn session_end_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate:
 /// own state rather than taking a window argument), so the rest are pure waste
 /// of a bounded budget.
 ///
-/// Reset to `false` on `WM_ENDSESSION` wParam FALSE (the shutdown was
-/// cancelled) — this is per-*attempt*, not per-process. Windows shutdown can
-/// be vetoed and retried later in the same running process; without the
-/// reset, the real final shutdown would silently skip its flush because an
-/// earlier, cancelled attempt already set the flag, losing any state changed
-/// in between.
+/// Reset to `false` whenever the in-flight attempt didn't land — on
+/// `WM_ENDSESSION` wParam FALSE (the shutdown was cancelled), or when the
+/// flush itself failed to actually persist (no AppState, unreachable srv, or
+/// a save that didn't succeed server-side). This is per-*attempt*, not
+/// per-process: Windows shutdown can be vetoed and retried later in the same
+/// running process, and `WM_ENDSESSION(TRUE)` is deliberately kept as a
+/// second, redundant trigger for exactly the case where the first one
+/// failed. Without both resets, the compare_exchange below records only that
+/// an attempt was *made*, not that it *succeeded* — a failed first attempt
+/// would permanently block the real second chance from ever running.
 #[cfg(target_os = "windows")]
 static SESSION_END_FLUSHED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
@@ -980,6 +984,10 @@ fn flush_session_snapshot_once(reason: &str) {
             "[session-flush] no AppState registered — cannot flush on {}",
             reason
         );
+        // Re-arm: nothing was attempted, so the latch must not read as
+        // "already flushed" for a later trigger in this same shutdown
+        // attempt (see the failure re-arm below for why this matters).
+        SESSION_END_FLUSHED.store(false, Ordering::SeqCst);
         return;
     };
 
@@ -992,7 +1000,16 @@ fn flush_session_snapshot_once(reason: &str) {
     // holding a lock across it during shutdown.
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     let auth_key = state.auth_key.lock().clone();
-    super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key);
+    let saved = super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key);
+
+    // The compare_exchange above marks the ATTEMPT complete, not the save.
+    // If it didn't actually persist (unreachable srv, write failure, timeout),
+    // re-arm so WM_ENDSESSION(TRUE) — the second, redundant-by-design trigger
+    // — gets a genuine second try instead of short-circuiting on a latch that
+    // only ever recorded that we tried, not that we succeeded.
+    if !saved {
+        SESSION_END_FLUSHED.store(false, Ordering::SeqCst);
+    }
 }
 
 #[cfg(target_os = "windows")]

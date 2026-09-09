@@ -616,11 +616,15 @@ pub(crate) fn register_ipc_with_backend(
 /// Best-effort by design: every failure path logs and returns rather than
 /// propagating. A snapshot that cannot be written must never be able to wedge
 /// the shutdown it exists to protect.
-pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) {
+/// Returns whether the snapshot actually persisted. The caller (the
+/// session-end wndproc hook) uses this to decide whether it is safe to leave
+/// the once-per-attempt flush latch set, or whether it must re-arm it so a
+/// later trigger in the same shutdown attempt gets another chance.
+pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) -> bool {
     use std::io::{Read, Write};
 
     let Some(addr) = parse_web_endpoint(web_endpoint, "session-flush") else {
-        return;
+        return false;
     };
 
     let body = serde_json::json!({
@@ -655,30 +659,46 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) 
                     error = %e,
                     "[session-flush] write failed — session snapshot NOT saved"
                 );
-                return;
+                return false;
             }
             // Read the response rather than fire-and-forget: this is the last
             // chance to know whether the session survived, and a silent
             // failure here is exactly the class of bug this whole spec exists
             // to remove (the existing close-path write warns and is swallowed).
+            //
+            // A 200 status line only means the HTTP transaction completed —
+            // `service::handle_service` returns 200 with a JSON `success:
+            // false` body for a request that failed inside the handler (e.g.
+            // `snapshot_workspace` returning `None`, or the store write
+            // failing). Parse the body's own `success` field rather than
+            // trusting the status line, or a transport-level 200 gets
+            // reported as a saved session that was never actually written.
             let mut resp = String::new();
             let _ = stream.read_to_string(&mut resp);
             let first_line = resp.lines().next().unwrap_or("(empty)").to_string();
-            if first_line.contains(" 200 ") {
+            let resp_body = resp.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+            let success = serde_json::from_str::<serde_json::Value>(resp_body)
+                .ok()
+                .and_then(|v| v.get("success").and_then(serde_json::Value::as_bool))
+                .unwrap_or(false);
+            if success {
                 tracing::info!("[session-flush] session snapshot saved before OS shutdown");
             } else {
                 tracing::error!(
                     response = %first_line,
+                    body = %resp_body,
                     "[session-flush] SaveSessionSnapshot did not succeed — \
                      this session will not be restored on next launch"
                 );
             }
+            success
         }
         Err(e) => {
             tracing::error!(
                 error = %e,
                 "[session-flush] could not reach srv — session snapshot NOT saved"
             );
+            false
         }
     }
 }
