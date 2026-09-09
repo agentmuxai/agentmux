@@ -242,6 +242,12 @@ pub struct LanDiscovery {
     /// `shutdown()` is `&self` and called from both an explicit live-toggle
     /// path and `Drop`.
     udp_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancels `agent_names_refresh_loop`. Needed for the same reason
+    /// `udp_cancel` is: that task holds its own `Arc<LanDiscovery>` clone, so
+    /// dropping the controller's Arc on `apply(false)` never reaches refcount
+    /// zero and the loop would otherwise keep issuing authenticated requests
+    /// to peers forever — leaking one orphaned task per disable/enable cycle.
+    agent_names_cancel: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 /// Normalize an OS hostname into a valid mDNS host name by appending the
@@ -406,6 +412,7 @@ impl LanDiscovery {
             version,
             port,
             udp_cancel: Mutex::new(None),
+            agent_names_cancel: Mutex::new(None),
         });
 
         // Spawn event receiver on a blocking thread to avoid starving the tokio runtime
@@ -426,10 +433,16 @@ impl LanDiscovery {
         });
 
         // Keeps each peer's `agents` list populated (see
-        // `agent_names_refresh_loop`). Dropped along with the whole
-        // `LanDiscovery` when the setting is toggled off, same as the
-        // loops above.
-        tokio::spawn(discovery.clone().agent_names_refresh_loop());
+        // `agent_names_refresh_loop`). Cancelled explicitly by `shutdown()`
+        // via its own oneshot — NOT by Arc drop, since this task holds its
+        // own clone and would otherwise outlive `apply(false)` forever.
+        let (names_cancel_tx, names_cancel_rx) = oneshot::channel();
+        *discovery.agent_names_cancel.lock() = Some(names_cancel_tx);
+        tokio::spawn(
+            discovery
+                .clone()
+                .agent_names_refresh_loop(names_cancel_rx),
+        );
 
         tracing::info!(
             instance_id = %instance_id,
@@ -453,7 +466,7 @@ impl LanDiscovery {
     /// unreachable keeps its last-known list rather than being blanked, since
     /// staleness is already tracked by `last_seen` and a flapping list is
     /// worse than a slightly-old one.
-    async fn agent_names_refresh_loop(self: Arc<Self>) {
+    async fn agent_names_refresh_loop(self: Arc<Self>, mut cancel: oneshot::Receiver<()>) {
         let http = match reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
             .build()
@@ -466,10 +479,20 @@ impl LanDiscovery {
         };
 
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(
-                LAN_AGENT_NAMES_REFRESH_SECS,
-            ))
-            .await;
+            // Cancellation is checked at the sleep, not just between
+            // iterations: this task holds its own `Arc<LanDiscovery>`, so
+            // without an explicit signal `apply(false)` cannot stop it and it
+            // would keep hitting peers indefinitely (one leaked task per
+            // toggle cycle).
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(
+                    LAN_AGENT_NAMES_REFRESH_SECS,
+                )) => {}
+                _ = &mut cancel => {
+                    tracing::debug!("LAN agent-name refresh loop cancelled");
+                    return;
+                }
+            }
 
             // Snapshot (key, url, lan_key) so the lock is not held across any
             // await — the map is read by every inject/discovery call.
@@ -884,6 +907,13 @@ impl LanDiscovery {
             // Ignore send errors: an `Err` here just means the responder
             // task already exited on its own (e.g. the bind failed), which
             // is a no-op we're happy with.
+            let _ = tx.send(());
+        }
+        // Same contract as `udp_cancel` above — and load-bearing rather than
+        // tidy-up: the refresh task owns an `Arc<LanDiscovery>` clone, so
+        // without this signal it survives `apply(false)` and keeps issuing
+        // authenticated requests to LAN peers indefinitely.
+        if let Some(tx) = self.agent_names_cancel.lock().take() {
             let _ = tx.send(());
         }
         if let Err(e) = self.daemon.unregister(&self.service_fullname) {
@@ -1622,6 +1652,7 @@ mod handle_event_tests {
     use parking_lot::{Mutex, RwLock};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use tokio::sync::oneshot;
 
     /// Build a `ServiceInfo` for `instance_id`, mirroring the exact
     /// `service_name`/host-name shape `LanDiscovery::start()` registers
@@ -1697,6 +1728,7 @@ mod handle_event_tests {
             version: String::new(),
             port: self_port,
             udp_cancel: Mutex::new(None),
+            agent_names_cancel: Mutex::new(None),
         }
     }
 
@@ -1903,6 +1935,36 @@ mod handle_event_tests {
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].hostname, "");
         assert_eq!(instances[0].instance_id, "");
+    }
+
+    /// The refresh loop holds its own `Arc<LanDiscovery>`, so dropping the
+    /// controller's Arc on `apply(false)` can never stop it — only an explicit
+    /// signal can. Without this, disabling LAN discovery left the task issuing
+    /// authenticated requests to peers forever, leaking one per toggle cycle
+    /// (ReAgent P1 on PR #3102 — the first version of this code shipped a doc
+    /// comment claiming cancellation it did not actually implement, which is
+    /// exactly why this is asserted here rather than described).
+    #[tokio::test]
+    async fn shutdown_cancels_the_agent_names_refresh_loop() {
+        let discovery = Arc::new(test_discovery("cancel-host", 55123));
+
+        let (tx, rx) = oneshot::channel();
+        *discovery.agent_names_cancel.lock() = Some(tx);
+        let handle = tokio::spawn(discovery.clone().agent_names_refresh_loop(rx));
+
+        // Still parked on its sleep — nothing has cancelled it yet.
+        assert!(!handle.is_finished());
+
+        discovery.shutdown();
+
+        // Must return promptly on the signal rather than after the full
+        // LAN_AGENT_NAMES_REFRESH_SECS sleep, which is the whole point of
+        // selecting on the cancel inside the sleep.
+        let stopped = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
+        assert!(
+            stopped.is_ok(),
+            "refresh loop did not exit within 5s of shutdown() - it would outlive apply(false)"
+        );
     }
 }
 
