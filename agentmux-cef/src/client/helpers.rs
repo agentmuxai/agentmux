@@ -589,3 +589,106 @@ pub(crate) fn register_ipc_with_backend(
         ),
     }
 }
+
+/// Flush the session snapshot to srv, synchronously, for an OS shutdown.
+///
+/// `SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md` Phase 0. Windows sends
+/// `WM_QUERYENDSESSION`/`WM_ENDSESSION` to give an application its one chance
+/// to persist before the OS terminates it; AgentMux handled neither, so a
+/// restart never reached `CloseWindow` and the session snapshot was never
+/// taken. This is that missing write.
+///
+/// Deliberately different from `backend_close_window` in three ways:
+///
+/// 1. **Snapshot-only.** Calls `window.SaveSessionSnapshot`, which never runs
+///    `delete_workspace`. Tearing down during an OS shutdown would be both
+///    pointless (the OS reclaims everything) and harmful (that saga's
+///    5s-per-shell grace does not fit the shutdown budget).
+/// 2. **Runs inline on the wndproc thread, not a background thread.** The
+///    caller is inside `WM_ENDSESSION`, and the process may be terminated the
+///    moment that returns — handing the work to another thread would race the
+///    kill and usually lose. Blocking here is the point.
+/// 3. **Shorter timeout.** Windows gives a shutting-down app a bounded window
+///    (historically ~5s) and kills apps that overstay it. 1500ms leaves room
+///    for the rest of teardown while still being ample for one local
+///    loopback write — this is srv on 127.0.0.1, not a network call.
+///
+/// Best-effort by design: every failure path logs and returns rather than
+/// propagating. A snapshot that cannot be written must never be able to wedge
+/// the shutdown it exists to protect.
+pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) {
+    use std::io::{Read, Write};
+
+    let addr_str = web_endpoint
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let addr: std::net::SocketAddr = match addr_str.parse() {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::warn!(
+                "[session-flush] cannot parse endpoint '{}': {}",
+                web_endpoint, e
+            );
+            return;
+        }
+    };
+
+    let body = serde_json::json!({
+        "service": "window",
+        "method": "SaveSessionSnapshot",
+        "args": [],
+        "uicontext": null,
+    })
+    .to_string();
+
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key,
+        body.len(),
+        body
+    );
+
+    let timeout = std::time::Duration::from_millis(1500);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
+            if let Err(e) = stream.write_all(request.as_bytes()) {
+                tracing::error!(
+                    error = %e,
+                    "[session-flush] write failed — session snapshot NOT saved"
+                );
+                return;
+            }
+            // Read the response rather than fire-and-forget: this is the last
+            // chance to know whether the session survived, and a silent
+            // failure here is exactly the class of bug this whole spec exists
+            // to remove (the existing close-path write warns and is swallowed).
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            let first_line = resp.lines().next().unwrap_or("(empty)").to_string();
+            if first_line.contains(" 200 ") {
+                tracing::info!("[session-flush] session snapshot saved before OS shutdown");
+            } else {
+                tracing::error!(
+                    response = %first_line,
+                    "[session-flush] SaveSessionSnapshot did not succeed — \
+                     this session will not be restored on next launch"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "[session-flush] could not reach srv — session snapshot NOT saved"
+            );
+        }
+    }
+}

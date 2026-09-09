@@ -33,6 +33,7 @@ use agentmux_common::LayoutNode;
 use serde_json::{json, Value};
 
 use crate::backend::obj::{Block, Client, LayoutState, Tab, Workspace};
+use crate::backend::service::{WebCallType, WebReturnType};
 use crate::backend::storage::store::Store;
 use crate::server::AppState;
 
@@ -283,6 +284,79 @@ async fn apply_and_publish(
 /// rather than aborting the whole restore, so a partially-stale snapshot
 /// (e.g. one tab's block meta no longer makes sense) still restores
 /// everything else instead of failing shut.
+/// Snapshot the current session WITHOUT tearing anything down.
+///
+/// This is the OS-shutdown flush point (`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md`
+/// Phase 0). It exists because the only existing writer of the session
+/// snapshot is `window_close.rs`, gated on the close that empties
+/// `Client.windowids` — so a Windows restart, which terminates the process
+/// without ever calling `CloseWindow`, has always left no snapshot at all and
+/// lost the workspace. Verified against a real incident: the killed
+/// instance's DB had `session:last_topology` absent, `windowids` still
+/// populated, and 22 orphaned blocks.
+///
+/// Deliberately does NOT run `delete_workspace`. The OS is about to reclaim
+/// every process anyway, and that saga's 5s-per-shell `KILL_GRACE_SECS` does
+/// not fit inside the OS's shutdown budget (historically ~5s total, and
+/// Windows kills apps that overstay it). Save, then let the process die.
+///
+/// Takes no arguments: during shutdown the caller is a native wndproc with no
+/// convenient window-id/label mapping in hand, and srv already knows its own
+/// current topology. Resolves the workspace the same way the close path does —
+/// via the single `Client`'s first window — so a restore after an OS shutdown
+/// reconstructs exactly what a restore after a clean quit would have.
+///
+/// Idempotent and safe to call repeatedly: it overwrites the same
+/// `Client.meta` key, and `save_last_session_snapshot` is already best-effort
+/// (a failed write warns rather than propagating), so a shutdown flush can
+/// never wedge the shutdown it is trying to protect.
+pub(crate) async fn handle_save_session_snapshot(
+    state: &AppState,
+    _call: &WebCallType,
+) -> WebReturnType {
+    let store = &state.wstore;
+
+    let Some(ws_id) = current_workspace_id(store) else {
+        // No client, no window, or no workspace — nothing to capture. Not an
+        // error: a shutdown arriving before the first window exists is
+        // ordinary, and reporting failure would only add noise to a path
+        // that runs while the machine is going down.
+        tracing::debug!("session_restore: shutdown flush found no workspace to snapshot");
+        return WebReturnType::success_empty();
+    };
+
+    match snapshot_workspace(store, &ws_id) {
+        Some(snapshot) => {
+            save_last_session_snapshot(store, snapshot);
+            tracing::info!(
+                workspace_id = %ws_id,
+                "session_restore: snapshot flushed for OS shutdown"
+            );
+        }
+        None => {
+            tracing::warn!(
+                workspace_id = %ws_id,
+                "session_restore: shutdown flush could not build a snapshot"
+            );
+        }
+    }
+
+    WebReturnType::success_empty()
+}
+
+/// The workspace backing this client's first window, if any.
+///
+/// Mirrors how `window_close.rs` picks the workspace to snapshot, so the
+/// shutdown path and the clean-quit path capture the same thing. With
+/// multiple windows this captures the first — the same single-workspace
+/// limitation restore-on-relaunch already has, not a new one introduced here.
+fn current_workspace_id(store: &Store) -> Option<String> {
+    let client = store.get_all::<Client>().ok()?.into_iter().next()?;
+    let window_id = client.windowids.first()?;
+    let window = store.get::<crate::backend::obj::Window>(window_id).ok()??;
+    Some(window.workspaceid)
+}
+
 pub(crate) async fn restore_last_session(
     state: &AppState,
 ) -> Result<Option<(String, Vec<Event>)>, String> {
@@ -871,4 +945,130 @@ mod tests {
         assert!(state.wstore.get::<Workspace>(&first_ws).unwrap().is_some());
         assert!(state.wstore.get::<Workspace>(&second_ws).unwrap().is_some());
     }
+
+
+    // --- Phase 0: OS-shutdown snapshot flush ---------------------------------
+    // SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md
+
+    fn shutdown_call() -> WebCallType {
+        WebCallType {
+            service: "window".to_string(),
+            method: "SaveSessionSnapshot".to_string(),
+            args: vec![],
+            uicontext: None,
+        }
+    }
+
+    /// The workspace the shutdown flush will actually capture: the one behind
+    /// the client's FIRST window. `test_state()` bootstraps a client, window,
+    /// workspace and a default tab via `ensure_initial_data`, so this is the
+    /// bootstrapped session rather than anything the test invents — which is
+    /// the point, since it mirrors what a real running instance looks like.
+    fn bootstrapped_workspace(state: &AppState) -> String {
+        current_workspace_id(&state.wstore).expect("test_state seeds a live session")
+    }
+
+    /// The whole point of Phase 0: an OS shutdown captures the session even
+    /// though `CloseWindow` never runs. Before this, a restart left
+    /// `session:last_topology` absent and the workspace was lost — confirmed
+    /// against a real incident (§1.1 of the spec), where the killed instance's
+    /// DB had the key missing, `windowids` still populated, and 22 orphaned
+    /// blocks.
+    ///
+    /// Asserts against the bootstrapped session rather than a test-built one:
+    /// `ensure_initial_data` seeds the store directly, so the reducer has no
+    /// knowledge of that workspace and reducer-routed `CreateTab` cannot add
+    /// to it. That divergence is a property of the test harness, not of the
+    /// shutdown path — and the bootstrapped session is a faithful stand-in for
+    /// what a real instance has open.
+    #[tokio::test]
+    async fn shutdown_flush_writes_a_snapshot_without_a_close() {
+        let state = test_state();
+        let ws_id = bootstrapped_workspace(&state);
+        let ws = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        // Count BOTH lists: a workspace the reducer has not touched yet
+        // (straight out of `ensure_initial_data`) still has its tab in the
+        // legacy `pinnedtabids` until a `TabsReordered` drains it — which is
+        // exactly why `snapshot_workspace` reads both (see its loop).
+        let open_tabs = ws.pinnedtabids.len() + ws.tabids.len();
+        assert!(open_tabs > 0, "precondition: the session has a tab open");
+        assert!(
+            load_last_session_snapshot(&state.wstore).is_none(),
+            "precondition: nothing saved before the flush"
+        );
+
+        handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        let snap = load_last_session_snapshot(&state.wstore)
+            .expect("shutdown flush must persist a snapshot with no CloseWindow");
+        let tabs = snap["tabs"].as_array().expect("snapshot carries a tabs array");
+        assert_eq!(
+            tabs.len(),
+            open_tabs,
+            "every open tab must be captured, not just the active one"
+        );
+    }
+
+    /// Phase 0 must NOT tear down. The OS is about to reclaim everything, and
+    /// `delete_workspace`'s per-shell grace does not fit the shutdown budget —
+    /// running it would risk being killed mid-cascade for no benefit.
+    #[tokio::test]
+    async fn shutdown_flush_leaves_the_workspace_intact() {
+        let state = test_state();
+        let ws_id = bootstrapped_workspace(&state);
+        let before = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+
+        handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        let after = state
+            .wstore
+            .get::<Workspace>(&ws_id)
+            .unwrap()
+            .expect("shutdown flush must not delete the workspace");
+        assert_eq!(
+            (before.pinnedtabids, before.tabids),
+            (after.pinnedtabids, after.tabids),
+            "tabs must survive the flush untouched"
+        );
+    }
+
+    /// Repeated flushes are safe. The cef-side hook dedupes process-wide, but
+    /// both `WM_QUERYENDSESSION` and `WM_ENDSESSION` can fire, and a
+    /// cancelled-then-real shutdown produces two rounds — so the server side
+    /// must tolerate it rather than rely on the caller being careful.
+    #[tokio::test]
+    async fn shutdown_flush_is_idempotent() {
+        let state = test_state();
+        let _ = bootstrapped_workspace(&state);
+
+        handle_save_session_snapshot(&state, &shutdown_call()).await;
+        let first = load_last_session_snapshot(&state.wstore).unwrap();
+        handle_save_session_snapshot(&state, &shutdown_call()).await;
+        let second = load_last_session_snapshot(&state.wstore).unwrap();
+
+        assert_eq!(first, second, "a second flush must not corrupt the snapshot");
+    }
+
+    /// Defensive path: the client's window points at a workspace that is gone.
+    /// A shutdown must still complete quietly rather than erroring — this runs
+    /// while the machine is going down, where noise helps nobody and a failure
+    /// return could only ever be ignored.
+    #[tokio::test]
+    async fn shutdown_flush_survives_a_missing_workspace() {
+        let state = test_state();
+        let ws_id = bootstrapped_workspace(&state);
+        state.wstore.delete::<Workspace>(&ws_id).unwrap();
+
+        let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
+
+        assert!(
+            ret.error.is_none(),
+            "a missing workspace must not make the shutdown flush report an error"
+        );
+        assert!(
+            load_last_session_snapshot(&state.wstore).is_none(),
+            "nothing capturable means nothing written — not a partial snapshot"
+        );
+    }
+
 }
