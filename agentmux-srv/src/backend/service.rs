@@ -285,6 +285,11 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
             arg_names: vec!["ctx".into(), "windowId".into(), "fromElectron".into()],
             return_desc: None,
         }),
+        ("window", "SaveSessionSnapshot") => Some(MethodMeta {
+            desc: Some("flush the session snapshot without tearing down (OS shutdown)".into()),
+            arg_names: vec![],
+            return_desc: None,
+        }),
 
         // WorkspaceService
         ("workspace", "CreateWorkspace") => Some(MethodMeta {
