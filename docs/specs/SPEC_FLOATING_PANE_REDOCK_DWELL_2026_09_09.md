@@ -2,11 +2,9 @@
 
 **Status:** active
 **Date:** 2026-09-09
-**Implemented:** §5.1 (P1 heartbeat), §5.2 (P2 threshold) and §5.4 (P4
-extraction) shipped together — see §8 for why they could not be split. §5.3
-(P3, the neutral parking zone) is still open and is deliberately a separate
-change; the sections below are written as they were proposed, with §5.4's
-ordering caveat noted in §8.
+**Implemented:** all four phases. §5.1 (heartbeat), §5.2 (500ms threshold) and
+§5.4 (extraction) shipped together in #3124; §5.3 (the neutral parking zone) in
+the follow-up. §8 records how the rollout went versus the plan.
 **Area:** floating panes / drag-and-dock
 **Scope:** The dwell/velocity gate gating floating-pane redock, on all three
 platforms. Tear-off (docked to floating) is out of scope; so is cross-tab pane
@@ -127,11 +125,24 @@ shorter than any deliberate "place it here and let go."
 
 ### 3.3 There is no neutral surface to park over
 
-`frontend/app-init.ts:180-182` maps `DropDirection::Center` (dir `8`) to the
-**full leaf rect**. Combined with Top/Right/Bottom/Left (half-leaf) and the
-`Outer*` bands (1/5 edge), every pixel of every pane in the main window resolves
-to a valid drop zone. There is no region a user can hover over that means
-"nothing — I am just passing through, or parking here."
+`determineDropDirection` (`frontend/layout/lib/utils.ts:15`) partitions the
+**entire leaf**: a centre fifth returns `Center`, the diagonals split the rest
+into four quadrants, and proximity to an edge promotes each to its `Outer*`
+variant. Every pixel resolves to some direction — only the exact diagonals
+return `undefined`. `app-init.ts` runs that helper for the redock ghost, so
+every pixel of every pane in the main window is a valid drop zone, and there is
+no region a user can hover over that means "nothing — I am just passing through,
+or parking here."
+
+That total partition is *correct* for the caller it was written for. An
+in-window tile drag is already a committed move; the only open question is
+where the pane lands, so leaving part of the leaf undefined would just be a dead
+zone. A floating pane is the case the helper was never designed for: "leave it
+floating" is a legitimate outcome, and a total partition cannot express it.
+
+(An earlier revision of this section blamed `rectForDirection` mapping `Center`
+to the full leaf rect. That is a real behaviour but it is the *drawn ghost*, not
+the hit region, and it is not why parking is impossible.)
 
 A dwell-only model cannot express parking intent even in principle: parking is
 communicated by hovering *longer*, which is the same signal that arms the dock.
@@ -244,25 +255,46 @@ armed are the same instant, never ghost-visible-but-not-armed.
 
 ### 5.3 P3 — A neutral parking zone (the compass escalation)
 
-Restrict redock arming to explicit drop-guide regions rather than the whole leaf:
+Resolve the redock direction from explicit drop guides rather than from a total
+partition of the leaf. `determineDropDirection` is left untouched — it is shared
+with the in-window tile drag, where partitioning everything is correct — and the
+redock path gets its own geometry in `frontend/app/workspace/redock-guides.ts`.
 
-- Keep the `Outer*` edge bands (1/5) and the Top/Right/Bottom/Left half-splits.
-- **Remove `Center` = full-leaf as an implicit arming target.** Center-drop
-  (append into the leaf) remains available, but only from an explicit central
-  guide target — a compass hit-rect of bounded size (proposal: 96x96 CSS px
-  centred in the leaf), not the entire remaining surface.
+Per hovered leaf, in fixed CSS px (a guide is a target the user aims at, so it
+should not grow with the pane the way the old fractional bands did — those were
+a third of a large pane each):
 
-The result is a genuinely neutral majority of each pane's area: hovering there
-shows no ghost and arms nothing, so a floating pane can be parked anywhere over
-AgentMux by simply not aiming at a guide. This directly answers the user's
-stated goal ("the user may simply want the floating pane above, not a redock")
-in a way no dwell value can.
+- a **plus-shaped compass** of five 44px cells at the leaf's centre — `Center`
+  plus the four half-splits — with the diagonal corners left neutral;
+- a **24px band** along each of the four leaf edges, giving the `Outer*` narrow
+  splits.
 
-If P3's UI work is deferred, an interim escape hatch is a modifier-key
-suppression (hold <kbd>Alt</kbd> during the drag: never arm, never ghost),
-which is roughly ten lines and requires no new rendering. It is strictly worse
-UX than guides (undiscoverable) and should be treated as a stopgap, not the
-answer.
+Both are clamped on small panes so they cannot meet in the middle, and the
+compass is hit-tested first so a clamped layout can never make the centre of a
+pane mean `OuterLeft`. **All nine `DropDirection` values stay reachable, so this
+removes no capability** — `Outer*` differs from its inner counterpart only by
+split fraction (0.2 vs 0.5, `layout_helpers.rs:124`), not by axis or target.
+
+Everything else is parking area — on a typical pane, comfortably the majority of
+its surface. Hovering there keeps the guides visible (that is how the user sees
+where docking *is* possible) but previews nothing and records no target.
+
+The guides render only once the dwell has armed, so a fast transit never paints
+them. They are the affordance that was missing: with a total partition there was
+nothing to show, because there was nowhere the answer was "no".
+
+**The release path must change too**, or the guides are cosmetic: an absent
+ghost previously fell back to `queue_target_layout_insert` (append), which is
+what made every pixel a drop zone in the first place. It now leaves the pane
+floating. That is only sound *because* of §5.2's dwell — 500ms is many hover
+events, so a guide the user was genuinely aiming at has certainly recorded
+itself, and an absent ghost is a real answer rather than a race. P3 depends on
+P1/P2 having shipped first; it would have been unsafe on its own.
+
+A modifier-key suppression (hold <kbd>Alt</kbd> to never arm) was considered as
+a cheaper stopgap and rejected: undiscoverable, and it answers a different
+question ("suppress this drag") than the one the guides answer ("where, if
+anywhere, does this land").
 
 ### 5.4 P4 — Collapse the duplicated gate (debt paydown)
 
@@ -336,7 +368,20 @@ practice the fallback deletions in P1 *are* the extraction — the arming rules
 that survive are small enough to state as a pure function, and writing them
 into `redock-arming.ts` directly was less work than editing them in place
 twice. The section 7 table is therefore covered by unit tests in this PR
-rather than the next one. P3 remains a separate, unstarted change.
+rather than the next one.
+
+P3 did ship as its own change, as planned, and the ordering turned out to be
+load-bearing rather than merely tidy: it replaces the append fallback with
+"leave the pane floating", which is only a safe reading of an absent ghost
+because P2's 500ms dwell guarantees a genuinely-aimed guide has had many hover
+events in which to record itself. Shipping P3 first — against the old 180ms
+gate, or against the pre-P1 arming that inferred dwell from event absence —
+would have turned races into silent failures to dock.
+
+Step 3 also anticipated design review on P3 because it changes a visible
+affordance. What made that cheap in the end was that the affordance was
+strictly additive: the guides are new UI, but every `DropDirection` they can
+produce already existed and the server-side mapping was untouched.
 
 ## 9. Open questions
 

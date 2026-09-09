@@ -61,6 +61,27 @@ body {
     transition: top 120ms ease-out, left 120ms ease-out, width 120ms ease-out, height 120ms ease-out;
 }
 
+// Redock drop guides — the explicit targets a dragged floater must be aimed
+// at. They appear on the pane under the cursor once the dwell has armed, and
+// exist so that everything *between* them reads as "leave this floating":
+// before they existed the whole pane was a drop zone and a floater could not
+// be parked over AgentMux at all.
+// SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.3.
+.floating-redock-guide {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9998; // under the placeholder, which previews the actual landing
+    border: 1px solid rgba(from var(--accent-color) r g b / 0.5);
+    border-radius: 4px;
+    background-color: rgba(from var(--accent-color) r g b / 0.08);
+    transition: background-color 90ms ease-out, border-color 90ms ease-out;
+
+    &.is-active {
+        border-color: var(--accent-color);
+        background-color: rgba(from var(--accent-color) r g b / 0.3);
+    }
+}
+
 a.plain-link {
     color: var(--secondary-text-color);
 }

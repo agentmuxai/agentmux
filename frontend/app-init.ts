@@ -57,6 +57,8 @@ import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
 import { createRedockArming } from "@/app/workspace/redock-arming";
+import { guideRectsForLeaf, hitTestGuides, type GuideRect } from "@/app/workspace/redock-guides";
+import { DropDirection } from "@/layout/lib/types";
 import {
     seedKnownEntriesFromSnapshot,
     startLauncherEventReducer,
@@ -97,19 +99,21 @@ const RPC_TIMEOUT = 5_000; // 5 seconds for individual RPC calls
  *      `window.screenX/Y`, same pattern as `tabbar.tsx`).
  *   2. `document.elementFromPoint(clientX, clientY)` → walk to the
  *      nearest `[data-blockid]` ancestor.
- *   3. Run `determineDropDirection` (from `@/layout/lib/utils`) on
- *      the cursor's position within the leaf — same helper as
- *      within-window pane drag — to classify the drop as
- *      Center / Top / Right / Bottom / Left (and Outer variants).
- *   4. Render a singleton overlay div positioned over the
- *      half/quadrant/full-leaf that maps to that direction (e.g. Top
- *      → top half of leaf; Center → full leaf; OuterRight → right
- *      fifth of leaf).
+ *   3. Render that leaf's drop guides (`redock-guides.ts`) and hit-test
+ *      the cursor against them — a plus-shaped compass of five cells at
+ *      the leaf's centre plus a thin band along each edge, covering all
+ *      nine `DropDirection` values.
+ *   4. On a hit, render a singleton overlay div over the
+ *      half/strip/full-leaf that maps to that direction, and record the
+ *      direction for the floater to pass to `RedockFloatingPane`.
  *
- * The block STILL lands as a sibling in the target tab's layout for
- * MVP (backend ignores the direction). Phase 4b will wire the
- * direction through `RedockFloatingPane` so the block lands in the
- * exact slot the user previewed.
+ * A cursor between the guides hits nothing: the guides stay visible but
+ * no slot is previewed and no target is recorded, so releasing there
+ * leaves the pane floating. That parking area is the whole point — this
+ * used to run `determineDropDirection`, which partitions the entire leaf
+ * (correct for an in-window tile drag, which is already a committed
+ * move) and therefore made every pixel of the window a drop zone.
+ * SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §5.3.
  */
 function installFloatingRedockHoverListener(): void {
     const myLabel =
@@ -124,6 +128,47 @@ function installFloatingRedockHoverListener(): void {
         }
         return placeholderEl;
     };
+    // Drop guides for the leaf under the cursor. Kept separate from the
+    // placeholder: the guides stay up while the cursor wanders the parking
+    // area (they are how the user sees where docking *is* possible), whereas
+    // the placeholder only previews an actual landing.
+    let guideEls: HTMLDivElement[] = [];
+    let guidesKey = "";
+
+    const clearGuides = () => {
+        if (guideEls.length === 0) return;
+        for (const el of guideEls) el.remove();
+        guideEls = [];
+        guidesKey = "";
+    };
+
+    // `key` identifies the leaf AND its geometry, so the guides are rebuilt
+    // when the cursor moves to a different pane or the layout resizes under
+    // it, but not on every hover event for a stationary cursor.
+    const renderGuides = (guides: GuideRect[], key: string) => {
+        if (guidesKey === key) return;
+        clearGuides();
+        for (const g of guides) {
+            const el = document.createElement("div");
+            el.className = "floating-redock-guide";
+            el.dataset.dir = String(g.dir);
+            el.style.top = `${g.top}px`;
+            el.style.left = `${g.left}px`;
+            el.style.width = `${g.width}px`;
+            el.style.height = `${g.height}px`;
+            document.body.appendChild(el);
+            guideEls.push(el);
+        }
+        guidesKey = key;
+    };
+
+    const highlightGuide = (dir: DropDirection | null) => {
+        const active = dir === null ? null : String(dir);
+        for (const el of guideEls) {
+            el.classList.toggle("is-active", el.dataset.dir === active);
+        }
+    };
+
     const clearPlaceholder = () => {
         const hadGhost = placeholderEl !== null;
         if (placeholderEl) {
@@ -196,7 +241,6 @@ function installFloatingRedockHoverListener(): void {
 
     fireAndForget(async () => {
         const { listenEvent, invokeCommand } = await import("@/app/platform/ipc");
-        const { determineDropDirection } = await import("@/layout/lib/utils");
         await listenEvent<{
             target_label: string | null;
             source_label?: string;
@@ -224,10 +268,12 @@ function installFloatingRedockHoverListener(): void {
             });
             if (!payload || newTarget !== myLabel || !armed) {
                 clearPlaceholder();
+                clearGuides();
                 return;
             }
             if (typeof cursorX !== "number" || typeof cursorY !== "number") {
                 clearPlaceholder();
+                clearGuides();
                 return;
             }
             const clientX = cursorX / invScale - window.screenX;
@@ -236,19 +282,31 @@ function installFloatingRedockHoverListener(): void {
             const leafEl = el?.closest("[data-blockid]") as HTMLElement | null;
             if (!leafEl) {
                 clearPlaceholder();
+                clearGuides();
                 return;
             }
             const leafRect = leafEl.getBoundingClientRect();
-            const dir = determineDropDirection(
-                {
-                    width: leafRect.width,
-                    height: leafRect.height,
-                    left: leafRect.left,
-                    top: leafRect.top,
-                },
-                { x: clientX, y: clientY },
+            // Guides, not `determineDropDirection`: that partitions the entire
+            // leaf, which is right for an in-window tile drag (already a
+            // committed move) but leaves a floater nowhere to express "stay
+            // floating". See redock-guides.ts.
+            const guides = guideRectsForLeaf({
+                top: leafRect.top,
+                left: leafRect.left,
+                width: leafRect.width,
+                height: leafRect.height,
+            });
+            renderGuides(
+                guides,
+                `${leafEl.dataset.blockid}:${Math.round(leafRect.left)}:${Math.round(leafRect.top)}:${Math.round(leafRect.width)}:${Math.round(leafRect.height)}`,
             );
-            if (dir === undefined) {
+            const dir = hitTestGuides(guides, clientX, clientY);
+            highlightGuide(dir);
+            if (dir === null) {
+                // Parking area. Guides stay up so the user can see where
+                // docking is possible; nothing is previewed, and the cleared
+                // target below is what makes the release leave the pane
+                // floating rather than falling back to an append.
                 clearPlaceholder();
                 return;
             }
