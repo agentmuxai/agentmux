@@ -146,7 +146,8 @@ the wrong direction.
 | macOS spring-loaded folders | ~500-750 ms (user-adjustable) |
 | Windows `MenuShowDelay` (submenu open) | 400 ms default |
 | AgentMux spring-loaded tabs (`SPRING_SWITCH_MS`) | 500 ms |
-| AgentMux redock (today) | **180 ms** |
+| AgentMux redock (before this spec) | **180 ms** |
+| AgentMux redock (now) | **300 ms** — see the retune note below |
 
 The consensus band for "hover became intent" is **400-700 ms**. AgentMux's
 redock is the outlier by a factor of roughly 2.5.
@@ -163,6 +164,23 @@ deferred.
 400 ms hover default rather than deliberately below it. Choosing the existing
 in-repo constant rather than a newly invented number also removes the "two
 subsystems, two arbitrary thresholds" divergence noted in 3.1.
+
+> **Retuned to 300 ms (2026-09-09, after use).** 500 ms was noticeably sluggish
+> in the hand. This is a deliberate step below the published band, and the band
+> is the reason to be careful rather than a reason not to: those figures
+> describe *passive* hover, where the user has not declared any intent yet. A
+> floater drag is already a committed gesture — only the destination is open —
+> so the threshold is separating "aiming here" from "passing through", not
+> "meant anything at all" from "meant nothing".
+>
+> 300 ms is not a partial return to the original 180 ms bug. That failure was
+> mechanical rather than numeric: dwell was inferred from the *absence* of hover
+> events, so any pause armed a redock even after the velocity gate had rejected
+> the entry (§3.2). With dwell measured from confirmed samples, 300 ms of
+> genuine stillness is a real signal in a way 180 ms never was.
+>
+> Everything else about the interaction is unchanged — this is a threshold
+> change only.
 
 ## 5. Design
 
@@ -227,7 +245,8 @@ will refuse.
 
 ### 5.2 P2 — Raise the threshold
 
-`REDOCK_DWELL_MS: 180 -> 500` in `floating-pane-constants.ts:12`.
+`REDOCK_DWELL_MS: 180 -> 500` in `floating-pane-constants.ts:12`, retuned to
+300 after use — see the note at the end of section 4.
 
 `REDOCK_VELOCITY_PX_PER_S` stays at 400 — it is a rate, not a duration, and
 #1249's derivation (relaxed aim is about 100 px / 250 ms; transit drags hit
