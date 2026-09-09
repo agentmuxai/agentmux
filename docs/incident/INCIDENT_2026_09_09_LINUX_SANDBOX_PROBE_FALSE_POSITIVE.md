@@ -1,5 +1,6 @@
 # Incident: Linux userns-sandbox probe reports "available" when AppArmor blocks it
 
+**Status:** implemented — fix in PR #3117 (`run_internal_userns_probe_and_exit`, `agentmux-cef/src/linux_sandbox.rs`). Not yet verified end-to-end on the affected VM (blocked on a CI-built artifact).
 **Date:** 2026-09-09
 **Component:** `agentmux-cef/src/linux_sandbox.rs` (landed via PR #2783, 2026-08-24)
 **Symptom:** On an AppArmor-restricted Ubuntu host with no `agentmux-userns` profile

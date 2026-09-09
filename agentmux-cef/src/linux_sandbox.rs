@@ -138,6 +138,17 @@ mod imp {
     /// — it never spawns the async runtime, CEF, or any additional thread;
     /// this function is the entire lifetime of the process.
     pub fn run_internal_userns_probe_and_exit() -> ! {
+        // Must be read BEFORE unshare(): once inside the new namespace,
+        // getuid() returns the overflow UID (65534, "nobody") until
+        // uid_map is written — the new namespace's mapping starts empty,
+        // so the kernel has no UID to report yet (user_namespaces(7)).
+        // An unprivileged process may only map its own real (parent-ns)
+        // UID into uid_map; writing the overflow UID instead would always
+        // be rejected, permanently flipping this probe from "always false
+        // positive" to "always false negative" — even after the AppArmor
+        // fix is installed, every launch would loop back to the recovery
+        // dialog (codex P1 on this same PR).
+        let real_uid = unsafe { libc::getuid() };
         // SAFETY: unshare() takes a single integer flag argument and
         // touches no Rust-managed memory; this process has no other
         // threads (see doc comment) so there is no concurrent state for
@@ -164,7 +175,7 @@ mod imp {
         // user_namespaces(7) it additionally requires
         // /proc/self/setgroups=deny first, but uid_map alone already
         // proves whether CAP_SYS_ADMIN is available in the new ns.
-        let mapping = format!("0 {} 1\n", unsafe { libc::getuid() });
+        let mapping = format!("0 {} 1\n", real_uid);
         let ok = std::fs::write("/proc/self/uid_map", mapping).is_ok();
         std::process::exit(if ok { 0 } else { 1 });
     }
