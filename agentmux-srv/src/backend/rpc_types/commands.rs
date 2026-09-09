@@ -219,7 +219,7 @@ pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// the m0013/m0014 backfill migrations.
 pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
-// Bundle bundles (v7 — agent personality / capability stack)
+// Bundles (v7 — agent personality / capability stack)
 pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
