@@ -186,14 +186,35 @@ Note: `agentmuxai/cef` has **zero CI** (verified: `actions/workflows` → `total
 > `include/cef_trace.h`, `include/cef_frame.h`, `include/cef_task.h`,
 > `include/views/cef_{overlay_controller,panel,panel_delegate,view,
 > view_delegate,window,window_delegate}.h`), not sampled or inferred from a
-> changelog. There is currently zero `#[cfg(...)]`-branching needed in the
-> Rust source to support two CEF milestones side by side, because nothing this
-> codebase calls has moved. (An earlier attempt at this check used GitHub's
+> changelog. (An earlier attempt at this check used GitHub's
 > Contents API against `include/capi/...` paths that don't exist in this repo's
 > layout — CEF's C API headers are generated at build time, not checked in —
 > and silently returned empty on both sides, producing a false "no diff"
 > result. The numbers above are from `raw.githubusercontent.com` fetches with
 > real, non-zero byte lengths confirmed on both sides first.)
+>
+> **The 12 trait headers being identical isn't quite the whole surface — all
+> of them transitively include `include/internal/cef_types.h`, which DOES
+> drift** (119,232 → 119,729 bytes). Diffed directly: the entire delta is three
+> `CEF_API_ADDED(...)`-guarded enum insertions — `CEF_CPAIT_*` (content-setting
+> page-action icon type, three new members added across API versions
+> 14900/15000/15200), `CEF_CTBT_TAB_SEARCH_DEPRECATED` (chrome toolbar button
+> type, 15100), and `CEF_PERMISSION_TYPE_LOCAL_NETWORK_ACCESS_DEPRECATED`
+> (permission-request type, 15000, converting an `#if`/`#endif` into an
+> `#if`/`#elif`). These shift enum numbering for those three families between
+> 148 and 152. Confirmed zero references to any of the three
+> (`CPAIT`/`content_setting`, `PermissionType`/`PERMISSION_TYPE`, `CTBT`/
+> `ChromeToolbarButtonType`) in `agentmux-cef/src` today — the two superficial
+> `PERMISSION_TYPE` grep hits (`browser_panes/media_grants.rs`,
+> `client/handlers.rs`) are the unrelated, ABI-stable
+> `cef_media_access_permission_types_t` bitmask, not the drifted
+> `cef_permission_request_types_t`. So "zero cfg-gating needed" still holds —
+> **but the bound is on the current call surface, not a permanent guarantee.**
+> If anyone later adds permission-prompt handling or content-settings UI while
+> Windows is on 152 and macOS/Linux are on 148, these three enum families are
+> exactly where a target split would first need `#[cfg(...)]` branching.
+> (Both the transitive-header gap and its resolution: Agent5, independently,
+> 2026-09-08.)
 >
 > **What this changes mechanically, replacing steps 1-2 above:**
 > `[patch.crates-io]` is a single global override keyed by crate name — Cargo
@@ -224,6 +245,13 @@ Note: `agentmuxai/cef` has **zero CI** (verified: `actions/workflows` → `total
 > single `[dependencies]` entry and delete the two `[target...]` blocks — this
 > is meant to be temporary scaffolding for the rollout window, not a permanent
 > architecture.
+>
+> **Ownership split, agreed 2026-09-08:** Agent5 owns step 2 above — rebasing
+> the `begin_window_drag` slot onto the 152 binding and publishing
+> `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` (`begin_window_drag`
+> confirmed still absent from upstream `cef-rs` at 152, so this stays a real
+> fork). AgentX owns the Cargo.toml target-gating restructuring (steps 1, 3-4)
+> once that rev exists.
 
 ### Phase D — Per-platform builds (three separate machines, unavoidably)
 
