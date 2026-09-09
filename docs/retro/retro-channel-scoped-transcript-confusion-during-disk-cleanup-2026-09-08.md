@@ -99,16 +99,27 @@ cleanup cannot yet assume away.
 
 Before deleting an old channel's `identities/<uuid>/claude/` directory:
 
-1. **Check whether `projects/` is a junction or a real directory**, don't assume. On Windows:
-   `Get-Item <path> | Select LinkType` (or `Get-Item` reporting `ReparsePoint` in its
-   `Attributes`); on Unix, `readlink`/`ls -la`.
-2. **If it's a junction/symlink** — safe to delete outright. It's an access path, not data;
-   the target under the global `identity_history_dir()` is untouched and still reachable from
-   the current live channel.
-3. **If it's a real directory** (pre-fix data, or a failed best-effort link) — do not assume
-   redundancy. Either diff/merge its contents into the global location manually, or relaunch
-   the app under that channel once so `ensure_history_link`'s own move-don't-clobber migration
-   path performs the merge, *then* delete.
+1. **Check whether `projects/` is a junction or a real directory, AND where the junction
+   actually points**, don't assume either. `ensure_history_link` itself
+   (`agentmux-common/src/data_paths.rs`) only calls a link "correct" when it resolves to
+   exactly `identity_history_dir()`'s current value — checking `LinkType` alone isn't the same
+   check the code uses, and passes for a stale/misdirected link too (Codex P2 on #3123). On
+   Windows: `(Get-Item <path>).Target` (or `junction`'s own `get_target`) compared against the
+   current `identity_history_dir()` path; on Unix, `readlink` compared the same way.
+2. **If it's a junction/symlink resolving to the current target** — safe to delete outright.
+   It's an access path, not data; the target is untouched and still reachable from the current
+   live channel.
+3. **If it's a real directory, or a junction pointing somewhere else** (pre-fix data, a failed
+   best-effort link, or a stale target from before some earlier relocation) — do not assume
+   redundancy, and do not treat "I relaunched the app under that channel" as sufficient proof
+   of safety on its own (Codex P1 on #3123). `link_history_if_isolated` calls `ensure_history_link`
+   best-effort and only **logs** a failure — a name collision at the migration target (`dest.exists()`
+   in `ensure_history_link`) leaves the colliding file un-migrated and the source directory
+   non-empty, so `remove_dir` fails, the directory stays real, and nothing surfaces that to a
+   human watching for it. After relaunching to trigger the migration, **re-check step 1** —
+   confirm `projects/` actually became a correctly-targeted link and that no stray files remain
+   in the old location — before deleting anything. If it didn't migrate cleanly, diff/merge the
+   leftover files into the global location by hand instead.
 4. **The other files directly under `identities/<uuid>/claude/`** (`.claude.json`,
    `.credentials.json`) are genuinely per-channel and not mirrored anywhere. That's fine to
    lose once the channel is confirmed dead (no running instance) — a relaunch under that
