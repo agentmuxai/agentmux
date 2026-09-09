@@ -232,7 +232,7 @@ pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
 /// separate from `upsertmemory`/`deletememory` (never wired to any MCP
 /// tool) so the ordinary Global Memory editor, the per-agent Bundle
 /// editor, and ABF import/export can never touch a system entry even by
-/// accident — `Store::bundle_memory_upsert`/`_delete` refuse outright the
+/// accident — `Store::bundle_upsert`/`_delete` refuse outright the
 /// moment they see an existing `is_system=1` row.
 pub const COMMAND_UPSERT_SYSTEM_MEMORY: &str = "upsertsystemmemory";
 pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";

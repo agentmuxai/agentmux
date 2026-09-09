@@ -735,7 +735,7 @@ mod effective_skills_tests {
 
     fn insert_test_bundle(store: &Store, id: &str) {
         store
-            .bundle_memory_upsert(&crate::backend::storage::bundles::Memory {
+            .bundle_upsert(&crate::backend::storage::bundles::Memory {
                 id: id.to_string(),
                 name: format!("Bundle {id}"),
                 description: String::new(),
@@ -903,7 +903,7 @@ mod bundle_ref_tests {
 
     fn insert_bundle(store: &Store, id: &str) {
         store
-            .bundle_memory_upsert(&Memory {
+            .bundle_upsert(&Memory {
                 id: id.to_string(),
                 name: format!("Bundle {id}"),
                 description: String::new(),

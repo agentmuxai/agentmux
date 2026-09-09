@@ -336,7 +336,7 @@ mod bundle_ref_tests {
 
     fn insert_bundle(store: &Store, id: &str) {
         store
-            .bundle_memory_upsert(&Memory {
+            .bundle_upsert(&Memory {
                 id: id.to_string(),
                 name: format!("Bundle {id}"),
                 description: String::new(),

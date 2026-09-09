@@ -3015,7 +3015,7 @@ mod tests {
             updated_at: 0,
             is_system: false,
         };
-        id_store.bundle_memory_upsert(&bundle).unwrap();
+        id_store.bundle_upsert(&bundle).unwrap();
 
         let claude = make_account(
             "acct-drift",

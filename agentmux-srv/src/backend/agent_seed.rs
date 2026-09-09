@@ -248,7 +248,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
 /// Seed memory bundles from the manifest. Skips any bundle whose ID already
 /// exists — this is a one-time seed, not an upsert on every startup.
 fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
-    let existing = wstore.bundle_memory_list()?;
+    let existing = wstore.bundle_list()?;
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|m| m.id.clone()).collect();
 
@@ -285,7 +285,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
         // Use warn-and-skip rather than ? so a user bundle whose name
         // collides with the seeded name (UNIQUE constraint on name) does
         // not abort the remainder of the seed loop.
-        match wstore.bundle_memory_upsert(&memory) {
+        match wstore.bundle_upsert(&memory) {
             Ok(()) => { created += 1; }
             Err(e) => {
                 tracing::warn!(

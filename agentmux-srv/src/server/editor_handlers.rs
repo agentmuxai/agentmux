@@ -81,7 +81,7 @@ fn list_drives() -> Vec<serde_json::Value> {
 /// in the `agent.open` RPC path.  If the file has no `# Memory` section, a new
 /// one is inserted before `# Available Skills` (or at the end of the file).
 fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
-    let bundles = id_store.bundle_memory_list_global().unwrap_or_default();
+    let bundles = id_store.bundle_list_global().unwrap_or_default();
     let bundle_block = crate::backend::storage::format_global_brain_block(&bundles);
     if bundle_block.is_empty() {
         return claude_md.to_string();

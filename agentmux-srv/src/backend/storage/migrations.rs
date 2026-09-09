@@ -239,10 +239,10 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority
 ///        Global Memory tier (INTEGER, default 0). A system row is always
 ///        also is_global=1 (enforced in code, not a CHECK constraint —
-///        see `bundle_memory_upsert_system`). Writable only through the
+///        see `bundle_upsert_system`). Writable only through the
 ///        dedicated `upsertsystemmemory`/`deletesystemmemory` RPCs and
-///        `Store::bundle_memory_upsert_system`/`_delete_system` — the
-///        generic `bundle_memory_upsert`/`_delete`/`_reorder` all refuse
+///        `Store::bundle_upsert_system`/`_delete_system` — the
+///        generic `bundle_upsert`/`_delete`/`_reorder` all refuse
 ///        to touch an is_system=1 row. Injected first in
 ///        `format_global_brain_block`'s output, wrapped in explicit
 ///        override wording, ahead of every ordinary Global Memory

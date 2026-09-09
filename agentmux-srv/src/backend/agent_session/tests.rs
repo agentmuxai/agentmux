@@ -742,7 +742,7 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
         updated_at: 0,
         is_system: false,
     };
-    wstore.bundle_memory_upsert(&bundle).unwrap();
+    wstore.bundle_upsert(&bundle).unwrap();
 
     let template = insert_template(&wstore, "tpl-drift", "Drifted", "codex");
     // `agent_def_update`'s SET clause deliberately never touches memory_id

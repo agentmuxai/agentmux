@@ -826,7 +826,7 @@
         let store = make_store();
 
         // Blank singleton always present.
-        let initial = store.bundle_memory_list().unwrap();
+        let initial = store.bundle_list().unwrap();
         assert_eq!(initial.len(), 1);
         assert!(initial[0].is_blank);
         assert_eq!(initial[0].id, "blank");
@@ -850,23 +850,23 @@
             updated_at: 100,
             is_system: false,
         };
-        store.bundle_memory_upsert(&coder).unwrap();
+        store.bundle_upsert(&coder).unwrap();
 
-        let listed = store.bundle_memory_list().unwrap();
+        let listed = store.bundle_list().unwrap();
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id, "mem-coder");
         assert_eq!(listed[1].id, "blank");
 
-        let fetched = store.bundle_memory_get("mem-coder").unwrap().unwrap();
+        let fetched = store.bundle_get("mem-coder").unwrap().unwrap();
         assert_eq!(fetched.provider, "claude");
         assert_eq!(fetched.instructions, "You are a careful refactorer.");
 
         // Refuse to delete the blank singleton.
-        assert!(store.bundle_memory_delete("blank").is_err());
+        assert!(store.bundle_delete("blank").is_err());
 
         // Delete the user memory.
-        assert!(store.bundle_memory_delete("mem-coder").unwrap());
-        assert_eq!(store.bundle_memory_list().unwrap().len(), 1);
+        assert!(store.bundle_delete("mem-coder").unwrap());
+        assert_eq!(store.bundle_list().unwrap().len(), 1);
     }
 
     #[test]
@@ -892,11 +892,11 @@
             is_system: false,
         };
         // Insert out of order: B at 0, A at 1.
-        store.bundle_memory_upsert(&mk("g-a", "Alpha", 1)).unwrap();
-        store.bundle_memory_upsert(&mk("g-b", "Beta", 0)).unwrap();
+        store.bundle_upsert(&mk("g-a", "Alpha", 1)).unwrap();
+        store.bundle_upsert(&mk("g-b", "Beta", 0)).unwrap();
 
         // list_global orders by sort_order: Beta (0) then Alpha (1).
-        let g = store.bundle_memory_list_global().unwrap();
+        let g = store.bundle_list_global().unwrap();
         assert_eq!(
             g.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
             vec!["g-b", "g-a"]
@@ -904,10 +904,10 @@
 
         // Reorder to [Alpha, Beta].
         let updated = store
-            .bundle_memory_reorder(&["g-a".to_string(), "g-b".to_string()])
+            .bundle_reorder(&["g-a".to_string(), "g-b".to_string()])
             .unwrap();
         assert_eq!(updated, 2);
-        let g = store.bundle_memory_list_global().unwrap();
+        let g = store.bundle_list_global().unwrap();
         assert_eq!(
             g.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
             vec!["g-a", "g-b"]
@@ -917,8 +917,8 @@
         let mut edited = g[0].clone();
         edited.instructions = "edited".to_string();
         edited.sort_order = 999; // upsert ON CONFLICT ignores this
-        store.bundle_memory_upsert(&edited).unwrap();
-        let g = store.bundle_memory_list_global().unwrap();
+        store.bundle_upsert(&edited).unwrap();
+        let g = store.bundle_list_global().unwrap();
         assert_eq!(g[0].id, "g-a", "edit must keep position");
         assert_eq!(g[0].sort_order, 0, "sort_order owned by reorder, not upsert");
 
@@ -953,7 +953,7 @@
     }
 
     /// Deliberately "wrong" `is_blank`/`is_global`/`is_system` — used to
-    /// verify `bundle_memory_upsert_system` hardcodes all three regardless
+    /// verify `bundle_upsert_system` hardcodes all three regardless
     /// of what the caller's `Memory` struct set them to. Callers that need
     /// a struct which already correctly *represents* a system entry (e.g.
     /// to feed `format_global_brain_block` directly, bypassing storage)
@@ -980,10 +980,10 @@
     }
 
     #[test]
-    fn bundle_memory_upsert_system_hardcodes_global_and_system_flags() {
+    fn bundle_upsert_system_hardcodes_global_and_system_flags() {
         let store = make_store();
-        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
-        let row = store.bundle_memory_get("sys-1").unwrap().unwrap();
+        store.bundle_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        let row = store.bundle_get("sys-1").unwrap().unwrap();
         assert!(row.is_global, "system rows are always global");
         assert!(row.is_system);
         assert!(!row.is_blank, "hardcoded false regardless of input");
@@ -992,15 +992,15 @@
     #[test]
     fn generic_upsert_refuses_to_touch_an_existing_system_row() {
         let store = make_store();
-        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        store.bundle_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
 
         // Content-only edit attempt via the generic path.
         let mut tampered = mk_ordinary("sys-1", "Hijacked", 0);
         tampered.is_system = false;
-        assert!(store.bundle_memory_upsert(&tampered).is_err());
+        assert!(store.bundle_upsert(&tampered).is_err());
 
         // Row is untouched.
-        let row = store.bundle_memory_get("sys-1").unwrap().unwrap();
+        let row = store.bundle_get("sys-1").unwrap().unwrap();
         assert_eq!(row.name, "Policy");
         assert!(row.is_system);
     }
@@ -1008,12 +1008,12 @@
     #[test]
     fn system_upsert_refuses_to_convert_an_existing_non_system_row() {
         let store = make_store();
-        store.bundle_memory_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
+        store.bundle_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
         let mut takeover = mk_system("g-a", "Stolen");
         takeover.id = "g-a".to_string();
-        assert!(store.bundle_memory_upsert_system(&takeover).is_err());
+        assert!(store.bundle_upsert_system(&takeover).is_err());
 
-        let row = store.bundle_memory_get("g-a").unwrap().unwrap();
+        let row = store.bundle_get("g-a").unwrap().unwrap();
         assert_eq!(row.name, "Alpha");
         assert!(!row.is_system);
     }
@@ -1021,33 +1021,33 @@
     #[test]
     fn generic_delete_refuses_a_system_row_dedicated_delete_only_removes_system_rows() {
         let store = make_store();
-        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
-        store.bundle_memory_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
+        store.bundle_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        store.bundle_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
 
-        assert!(store.bundle_memory_delete("sys-1").is_err());
-        assert!(store.bundle_memory_get("sys-1").unwrap().is_some());
+        assert!(store.bundle_delete("sys-1").is_err());
+        assert!(store.bundle_get("sys-1").unwrap().is_some());
 
         // Dedicated delete is structurally incapable of removing a non-system row.
-        assert!(!store.bundle_memory_delete_system("g-a").unwrap());
-        assert!(store.bundle_memory_get("g-a").unwrap().is_some());
+        assert!(!store.bundle_delete_system("g-a").unwrap());
+        assert!(store.bundle_get("g-a").unwrap().is_some());
 
-        assert!(store.bundle_memory_delete_system("sys-1").unwrap());
-        assert!(store.bundle_memory_get("sys-1").unwrap().is_none());
+        assert!(store.bundle_delete_system("sys-1").unwrap());
+        assert!(store.bundle_get("sys-1").unwrap().is_none());
     }
 
     #[test]
     fn reorder_silently_skips_system_rows() {
         let store = make_store();
-        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
-        store.bundle_memory_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
-        store.bundle_memory_upsert(&mk_ordinary("g-b", "Beta", 1)).unwrap();
+        store.bundle_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        store.bundle_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
+        store.bundle_upsert(&mk_ordinary("g-b", "Beta", 1)).unwrap();
 
         let updated = store
-            .bundle_memory_reorder(&["sys-1".to_string(), "g-b".to_string(), "g-a".to_string()])
+            .bundle_reorder(&["sys-1".to_string(), "g-b".to_string(), "g-a".to_string()])
             .unwrap();
         // Only the two ordinary ids actually update.
         assert_eq!(updated, 2);
-        let sys = store.bundle_memory_get("sys-1").unwrap().unwrap();
+        let sys = store.bundle_get("sys-1").unwrap().unwrap();
         assert_eq!(sys.sort_order, 0, "system row's sort_order is untouched");
     }
 
@@ -1056,10 +1056,10 @@
         let store = make_store();
         // Ordinary rows would otherwise sort before "Policy" alphabetically
         // and by a lower sort_order — system-first must win regardless.
-        store.bundle_memory_upsert(&mk_ordinary("g-a", "Aaa", -1)).unwrap();
-        store.bundle_memory_upsert_system(&mk_system("sys-1", "Zzz")).unwrap();
+        store.bundle_upsert(&mk_ordinary("g-a", "Aaa", -1)).unwrap();
+        store.bundle_upsert_system(&mk_system("sys-1", "Zzz")).unwrap();
 
-        let g = store.bundle_memory_list_global().unwrap();
+        let g = store.bundle_list_global().unwrap();
         assert_eq!(
             g.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
             vec!["sys-1", "g-a"]

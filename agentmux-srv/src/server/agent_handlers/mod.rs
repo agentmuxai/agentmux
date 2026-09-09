@@ -472,7 +472,7 @@ mod recent_sessions_tests {
             updated_at: 0,
             is_system: false,
         };
-        wstore.bundle_memory_upsert(&memory).unwrap();
+        wstore.bundle_upsert(&memory).unwrap();
 
         // 3 instances:
         //   - blk-recent: has snapshot, more recent activity
@@ -920,7 +920,7 @@ mod recent_sessions_tests {
         assert!(!new_def.memory_id.is_empty(), "new definition must have a bundle bound");
         let bundle = state
             .wstore
-            .bundle_memory_get(&new_def.memory_id)
+            .bundle_get(&new_def.memory_id)
             .unwrap()
             .expect("bound bundle should exist");
         assert!(!bundle.is_blank, "must be a real bundle, not the shared blank singleton");
@@ -977,7 +977,7 @@ mod recent_sessions_tests {
 
         let stored = state.wstore.agent_def_get(&created.id).unwrap().unwrap();
         assert_eq!(stored.memory_id, created.memory_id);
-        let bundle = state.wstore.bundle_memory_get(&created.memory_id).unwrap().unwrap();
+        let bundle = state.wstore.bundle_get(&created.memory_id).unwrap().unwrap();
         assert_eq!(bundle.provider, "codex");
         assert_eq!(bundle.model, "openai", "vendor defaults from codex's supported_vendors[0]");
     }

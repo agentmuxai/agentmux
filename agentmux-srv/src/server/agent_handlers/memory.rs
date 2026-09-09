@@ -29,7 +29,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let wstore = wstore.clone();
             Box::pin(async move {
                 let memories = wstore
-                    .bundle_memory_list()
+                    .bundle_list()
                     .map_err(|e| format!("listmemories: {e}"))?;
                 Ok(Some(serde_json::to_value(&memories).unwrap_or_default()))
             })
@@ -45,7 +45,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let cmd: CommandGetMemoryData = serde_json::from_value(data)
                     .map_err(|e| format!("getmemory: {e}"))?;
                 match wstore
-                    .bundle_memory_get(&cmd.id)
+                    .bundle_get(&cmd.id)
                     .map_err(|e| format!("getmemory: {e}"))?
                 {
                     Some(m) => Ok(Some(serde_json::to_value(&m).unwrap_or_default())),
@@ -85,7 +85,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 memory.updated_at = now;
                 wstore
-                    .bundle_memory_upsert(&memory)
+                    .bundle_upsert(&memory)
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -108,7 +108,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             async move {
                 let deleted = wstore
-                    .bundle_memory_delete(&cmd.id)
+                    .bundle_delete(&cmd.id)
                     .map_err(|e| format!("deletememory: {e}"))?;
                 if deleted {
                     broker.publish(crate::backend::wps::WaveEvent {
@@ -135,7 +135,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let cmd: CommandReorderGlobalBrainData = serde_json::from_value(data)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
                 let updated = wstore
-                    .bundle_memory_reorder(&cmd.ids)
+                    .bundle_reorder(&cmd.ids)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -177,7 +177,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 memory.updated_at = now;
                 wstore
-                    .bundle_memory_upsert_system(&memory)
+                    .bundle_upsert_system(&memory)
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -187,7 +187,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     data: None,
                 });
                 // Return the row actually persisted, not the client-supplied
-                // struct — bundle_memory_upsert_system hardcodes
+                // struct — bundle_upsert_system hardcodes
                 // is_blank/is_global/is_system server-side regardless of
                 // what `memory` carried (e.g. the frontend's saveSystemEdit
                 // sends only id/name/instructions, so `memory.is_global`/
@@ -196,7 +196,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // that trusts the response instead of refetching. reagent
                 // P2, PR #2782.
                 let saved = wstore
-                    .bundle_memory_get(&memory.id)
+                    .bundle_get(&memory.id)
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?
                     .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
                 Ok(Some(serde_json::to_value(&saved).unwrap_or_default()))
@@ -213,7 +213,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             async move {
                 let deleted = wstore
-                    .bundle_memory_delete_system(&cmd.id)
+                    .bundle_delete_system(&cmd.id)
                     .map_err(|e| format!("deletesystemmemory: {e}"))?;
                 if deleted {
                     broker.publish(crate::backend::wps::WaveEvent {
@@ -367,9 +367,9 @@ mod delete_memory_tests {
             is_system,
         };
         if is_system {
-            state.id_store.bundle_memory_upsert_system(&memory).unwrap();
+            state.id_store.bundle_upsert_system(&memory).unwrap();
         } else {
-            state.id_store.bundle_memory_upsert(&memory).unwrap();
+            state.id_store.bundle_upsert(&memory).unwrap();
         }
     }
 
@@ -401,7 +401,7 @@ mod delete_memory_tests {
         let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
         assert!(result.deleted);
 
-        assert!(state.id_store.bundle_memory_get("mem-1").unwrap().is_none());
+        assert!(state.id_store.bundle_get("mem-1").unwrap().is_none());
     }
 
     /// Deleting an id that never existed is not an error — it answers

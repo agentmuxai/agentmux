@@ -7,7 +7,7 @@
 //! Extracted from `store.rs` in Phase R.3 of the storage
 //! modularization plan
 //! (`docs/specs/SPEC_STORE_MODULARIZATION_2026_05_27.md`). The
-//! method surface is unchanged — `Store::bundle_memory_*` still
+//! method surface is unchanged — `Store::bundle_*` still
 //! lives on `Store` via this `impl` block; callers stay on
 //! `storage::store::Memory` thanks to the re-export.
 
@@ -59,15 +59,15 @@ pub struct Memory {
     /// Explicit ordering within the Armory global brain. Lower sorts
     /// first; this is the order sections inject into CLAUDE.md at launch.
     /// Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
-    /// `reorderglobalbrain` RPC — `bundle_memory_upsert` never overwrites it
+    /// `reorderglobalbrain` RPC — `bundle_upsert` never overwrites it
     /// on conflict, so editing a bundle via the regular form keeps its place.
     #[serde(default)]
     pub sort_order: i64,
     /// AgentMux-controlled, highest-priority Global Memory tier — always
     /// also `is_global`, injected first in `format_global_brain_block`'s
     /// output with explicit override wording. Writable ONLY through
-    /// `bundle_memory_upsert_system`/`bundle_memory_delete_system` — the
-    /// generic `bundle_memory_upsert`/`_delete`/`_reorder` all refuse to
+    /// `bundle_upsert_system`/`bundle_delete_system` — the
+    /// generic `bundle_upsert`/`_delete`/`_reorder` all refuse to
     /// touch a row with this set. See
     /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
     #[serde(default)]
@@ -95,7 +95,7 @@ fn default_json_object_string() -> String {
 /// and rendered FIRST, wrapped in explicit override wording, so they
 /// outrank every ordinary `# [Workspace] <name>` section that follows —
 /// see docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.4. Bundles
-/// arrive already ordered by `bundle_memory_list_global` (is_system DESC,
+/// arrive already ordered by `bundle_list_global` (is_system DESC,
 /// sort_order, name), so this only needs to partition, not re-sort.
 /// Sections are separated by a `---` rule. Returns an empty string when no
 /// section has instructions.
@@ -135,7 +135,7 @@ pub fn format_global_brain_block(bundles: &[Memory]) -> String {
 }
 
 impl Store {
-    pub fn bundle_memory_list(&self) -> Result<Vec<Memory>, StoreError> {
+    pub fn bundle_list(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
@@ -158,7 +158,7 @@ impl Store {
     /// explicit `sort_order` (then name as a stable tiebreak). Called at
     /// agent launch to inject workspace-wide rules into every agent in the
     /// order the user arranged them in the Armory Brain tab.
-    pub fn bundle_memory_list_global(&self) -> Result<Vec<Memory>, StoreError> {
+    pub fn bundle_list_global(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
@@ -176,7 +176,7 @@ impl Store {
         Ok(out)
     }
 
-    pub fn bundle_memory_get(&self, id: &str) -> Result<Option<Memory>, StoreError> {
+    pub fn bundle_get(&self, id: &str) -> Result<Option<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
@@ -212,8 +212,8 @@ impl Store {
     /// Refuses outright to touch an existing `is_system=1` row (content
     /// included, not just the flag) — see
     /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.2. Use
-    /// `bundle_memory_upsert_system` to create/edit a system entry.
-    pub fn bundle_memory_upsert(&self, memory: &Memory) -> Result<(), StoreError> {
+    /// `bundle_upsert_system` to create/edit a system entry.
+    pub fn bundle_upsert(&self, memory: &Memory) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(true) {
             return Err(StoreError::Other(
@@ -223,7 +223,7 @@ impl Store {
         }
         conn.execute(
             // sort_order is deliberately NOT in the ON CONFLICT update set:
-            // it is owned by `bundle_memory_reorder`, so editing a bundle
+            // it is owned by `bundle_reorder`, so editing a bundle
             // through the regular Memory form never disturbs its position in
             // the global brain. is_system is hardcoded to 0 on insert (this
             // path can never CREATE a system row) and omitted from the
@@ -268,13 +268,13 @@ impl Store {
     }
 
     /// The ONLY path that can write `is_system=1`. Refuses the mirror-image
-    /// case of `bundle_memory_upsert`'s guard: converting an EXISTING
+    /// case of `bundle_upsert`'s guard: converting an EXISTING
     /// non-system row into a system one by id collision is not allowed —
     /// `id` must be either brand new or already a system entry.
     /// `is_blank`/`is_global`/`is_system` are hardcoded (not read from
     /// `memory`) so this method can never produce anything other than a
     /// well-formed system row regardless of what the caller passed in.
-    pub fn bundle_memory_upsert_system(&self, memory: &Memory) -> Result<(), StoreError> {
+    pub fn bundle_upsert_system(&self, memory: &Memory) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, &memory.id)? == Some(false) {
             return Err(StoreError::Other(
@@ -322,8 +322,8 @@ impl Store {
 
     /// Delete a Memory bundle. Refuses to delete the blank singleton, a
     /// seeded bundle, or (new) a system entry — use
-    /// `bundle_memory_delete_system` for the last case.
-    pub fn bundle_memory_delete(&self, id: &str) -> Result<bool, StoreError> {
+    /// `bundle_delete_system` for the last case.
+    pub fn bundle_delete(&self, id: &str) -> Result<bool, StoreError> {
         if id == "blank" {
             return Err(StoreError::Other(
                 "cannot delete the blank Memory singleton".to_string(),
@@ -340,7 +340,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         if self.bundle_is_system(&conn, id)? == Some(true) {
             return Err(StoreError::Other(
-                "cannot delete a system Global Memory entry via the generic delete path; use bundle_memory_delete_system".to_string(),
+                "cannot delete a system Global Memory entry via the generic delete path; use bundle_delete_system".to_string(),
             ));
         }
         let rows = conn.execute("DELETE FROM db_bundles WHERE id = ?1", params![id])?;
@@ -349,7 +349,7 @@ impl Store {
 
     /// The ONLY path that can remove an `is_system=1` row — structurally
     /// incapable of deleting anything else, even if misused.
-    pub fn bundle_memory_delete_system(&self, id: &str) -> Result<bool, StoreError> {
+    pub fn bundle_delete_system(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let rows = conn.execute(
             "DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1",
@@ -363,10 +363,10 @@ impl Store {
     /// which in turn controls CLAUDE.md injection order. Ids not present in
     /// the table, OR present but `is_system=1`, are skipped silently — a
     /// system row's position is fixed (always first, see
-    /// `bundle_memory_list_global`) and never disturbed by the generic
+    /// `bundle_list_global`) and never disturbed by the generic
     /// reorder command. Runs in a single transaction so a partial reorder
     /// never lands. Returns the number of rows updated.
-    pub fn bundle_memory_reorder(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
+    pub fn bundle_reorder(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let mut updated = 0usize;

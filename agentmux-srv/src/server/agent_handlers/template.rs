@@ -626,7 +626,7 @@ mod tests {
             updated_at: 0,
             is_system: false,
         };
-        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
     }
 
     // Template's own `.provider` column says "codex" (drifted/stale —
