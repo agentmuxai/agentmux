@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignalAtom, fireAndForget } from "@/util/util";
+import { findNode } from "./layoutNode";
 import type { Properties as CSSProperties } from "csstype";
 import { createMemo, createRoot } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
@@ -88,6 +89,20 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 }),
                 nodeId: nodeid,
                 blockId,
+                // Additive reactive companion to `blockId` above — see that
+                // field's own doc comment in types.ts for the full
+                // rationale. Re-finds this exact node fresh from current
+                // tree state on every read (never closes over the `node`
+                // param's possibly-stale `.data`), gated on
+                // `localTreeStateAtom()` so it recomputes on the same event
+                // `layoutStack.ts`'s mutators already fire for a switch.
+                // Falls back to the frozen `blockId` if the node has somehow
+                // vanished (leaf mid-close) rather than returning undefined.
+                activeBlockId: createMemo(() => {
+                    model.localTreeStateAtom();
+                    const current = findNode(model.treeState.rootNode, nodeid);
+                    return current?.data?.activeBlockId || current?.data?.blockId || blockId;
+                }),
                 blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
                 isFocused: createMemo(() => {
                     const treeState = model.localTreeStateAtom();
@@ -195,16 +210,25 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
 
 /** The key `<Key each={leafs()} by={...}>` uses to identify a leaf's
  *  rendered subtree in the tile renderer (`TileLayout.{win32,linux,darwin}.tsx`).
- *  Ordinary leaves key on `node.id` alone, unchanged from before block
- *  stacks existed. A stacked leaf's key also incorporates `activeBlockId`,
- *  so switching the active member changes the key — which makes `<Key>`
- *  tear down and remount the leaf's subtree, giving the new active block a
- *  freshly-constructed `NodeModel`/`ViewModel` exactly the way every other
- *  blockId transition in this codebase already works (see layoutStack.ts's
- *  header comment for why a remount, not a reactive update, is correct
- *  here). Zero-cost / zero-behavior-change for every non-stacked leaf. */
+ *
+ *  Always `node.id` alone — a leaf's key no longer changes when its active
+ *  stack member does. `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`:
+ *  keying on `activeBlockId` was what made `<Key>` tear down and rebuild the
+ *  WHOLE leaf subtree on every in-pane tab switch — `<Block>`, its pane
+ *  header, and any hoisted chrome, not just the view whose blockId actually
+ *  changed. `NodeModel.activeBlockId` (types.ts) now exists precisely so a
+ *  leaf-level component can track which stack member is active WITHOUT
+ *  needing a remount to find out. A per-block remount for the VIEW itself
+ *  still happens — it's now driven by a narrower, inner `<Key>` scoped to
+ *  just the view (`pane-leaf-chrome.tsx`), not this outer, leaf-wide one.
+ *
+ *  `layoutStack.ts`'s three mutators no longer call `disposeNodeModel` for
+ *  active-member churn (only `cleanupNodeModels`'s real-leaf-deletion path
+ *  still does) — this key change and that disposal change are a matched
+ *  pair; shipping one without the other leaves a stale-`NodeModel`-behind-a-
+ *  never-remounting-leaf bug. */
 export function activeKeyFor(node: LayoutNode): string {
-    return node.data?.activeBlockId ? `${node.id}:${node.data.activeBlockId}` : node.id;
+    return node.id;
 }
 
 

@@ -328,7 +328,41 @@ export interface NodeModel {
     blockNum: Accessor<number>;
     numLeafs: Accessor<number>;
     nodeId: string;
+    /**
+     * Deliberately a PLAIN, non-reactive field — captured once when this
+     * NodeModel is created (see `layoutNodeModels.ts`'s `getNodeModel`), not
+     * re-derived if the leaf's active stack member changes later. Every
+     * existing consumer (`block.tsx`, `blockframe.tsx`, every `ViewModel`)
+     * depends on this staying frozen for the component's mount lifetime —
+     * that IS the "one instance, one immutable blockId" contract
+     * (`frontend/app/block/block.tsx`'s own header comment).
+     *
+     * For a leaf-level component that needs to track the CURRENTLY ACTIVE
+     * stack member across a switch (without itself remounting), use
+     * `activeBlockId` below instead — do not make this field reactive.
+     * `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md` §2.2
+     * explains why converting this field wholesale would touch every pane
+     * type for no benefit; the additive field is the deliberate fix.
+     */
     blockId: string;
+    /**
+     * The leaf's currently active stack member, reactive. `undefined` on a
+     * `NodeModel` predating this field (defensive fallback for any caller
+     * constructing one outside `getNodeModel`, e.g. in a test) — callers
+     * should fall back to the plain `blockId` field above in that case.
+     *
+     * Added by `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`'s
+     * agent-pane implementation so leaf-level chrome (a pane header, a
+     * hoisted tab strip) can stay mounted across an in-pane tab switch and
+     * still know which stack member is active, without requiring `blockId`
+     * itself to become reactive. Backed by the same `localTreeStateAtom()` +
+     * live tree lookup pattern already proven safe in
+     * `agent-view.tsx`'s own (now-superseded-by-this) `activeBlockId` memo —
+     * re-derives from current tree state on every read, never a cached
+     * field, so it stays correct regardless of whether this NodeModel
+     * itself is ever evicted.
+     */
+    activeBlockId?: Accessor<string>;
     addEphemeralNodeToLayout: () => void;
     animationTimeS: Accessor<number>;
     isResizing: Accessor<boolean>;
