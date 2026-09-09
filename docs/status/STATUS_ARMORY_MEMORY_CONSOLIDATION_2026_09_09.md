@@ -96,18 +96,25 @@ A smaller variant, if the full rename is unwanted: keep "Global/Personal" in the
 UI and rename only the Rust `Memory` struct → `Bundle`. That removes the worst of
 the ambiguity for maintainers without touching user-visible language.
 
-## 5. Open item B — ABF cannot round-trip memory
+## 5. Open item B — memory export/import asymmetry (narrower than first stated)
 
-`components.memory` is defined in ABF v0.2 §2.3, and the **import** side honours
-it via `bundle.import_for_agent` (plain `bundle.import` ignores it, emitting the
-`MEMORY_COMPONENT_IGNORED_WARNING` constant).
+**Correction (Codex P2 on #3131):** an earlier draft of this section claimed ABF
+cannot round-trip memory because `bundle_export.rs` never emits
+`components.memory`. That was wrong. The file `bundle_export.rs` doesn't, but the
+**agent-scoped** export path does: `bundle.export_for_agent` reads the agent's
+native-memory files and splices `components.memory` plus the referenced files
+into the manifest (`splice_memory_component`, `app_api/bundle.rs:439-468`,
+tested at `:2761`). `bundle.import_for_agent` consumes it. **Memory round-trips
+correctly via the agent-scoped pair.**
 
-But **`bundle_export.rs` never emits `components.memory`** — there are zero
-references to it in that file; export produces only `instructions` and `skills`.
+What actually remains:
 
-So an agent's memory can be **imported but never exported**. For a format whose
-stated purpose is portability, that is a real gap, and it is not tracked anywhere
-else.
+- The agent-less `bundle.export` omits memory — correct by design (a bundle with
+  no agent has no memory) — but it does so **silently**, whereas the import side
+  emits an explicit `MEMORY_COMPONENT_IGNORED_WARNING` when it drops memory. The
+  export side has no equivalent. That asymmetry is the real open item.
+- Whether the *default* export affordance in the Armory UI uses the agent-scoped
+  or agent-less path, and whether a user would notice the difference.
 
 ## 6. Open item C — curated memory is structurally empty (highest user impact)
 
@@ -118,9 +125,22 @@ Per `SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md`, measured live
 - The composed `.claude/AGENTMUX_MEMORY.md` is **byte-identical across agents**
   (1089 bytes) with **no `# Memory` section at all**.
 
-The curated tier runs correctly and injects nothing. Nothing in the UI surfaces
-that emptiness, so it is indistinguishable from working. That spec calls fixing
-this the highest-value item in the area, and it is unimplemented.
+The curated tier runs correctly and injects nothing.
+
+**Correction (Codex P2 on #3131):** an earlier draft said "nothing in the UI
+surfaces that emptiness." That is wrong for the Armory: `GlobalBrainManager`
+renders `No global sections yet.`, offers `+ New section`, and shows `(empty)`
+in the combined preview (`global-brain-manager.tsx:327-388`). An operator who
+opens Armory → Memory → Global can see there is nothing there.
+
+The gap is narrower and sits on the **agent/launch side**, not the Armory side:
+at `agent.open` the composed startup file is written with no `# Memory` section
+and nothing tells the operator that this particular agent received no curated
+memory. An agent that "looks configured" in its own pane may have been launched
+with an empty curated tier, and the only way to discover that today is to go
+look in Armory. That launch-side visibility, plus a scaffold for new agents, is
+what `SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md` calls the
+highest-value item, and it is unimplemented.
 
 Two related threads from the same spec:
 

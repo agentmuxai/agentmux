@@ -12,8 +12,12 @@
 
 Two architectural questions are currently open and blocked on vocabulary:
 
-- ABF cannot round-trip memory (export never emits `components.memory`).
-- Curated memory is structurally empty for every agent and nothing surfaces it.
+- The agent-less `bundle.export` omits `components.memory` while the agent-scoped
+  `bundle.export_for_agent` includes it — whether that asymmetry is the intended
+  design or a gap is unclear from the code alone.
+- Curated memory is structurally empty for every agent, and while the Armory UI
+  shows the empty state, nothing at launch tells the operator the agent received
+  no `# Memory` section.
 
 Neither can be discussed precisely while one word denotes six different things.
 This spec fixes the vocabulary so those two can be reasoned about; it deliberately
@@ -146,8 +150,15 @@ Zero contract risk. Nothing user-visible, nothing persisted.
 
 **Mandatory file splits** — these hold both concepts and must be split, not renamed:
 - `backend/rpc_types/memory.rs` → `rpc_types/bundle.rs` + `rpc_types/native_memory.rs`
-- `server/agent_handlers/memory.rs` → `agent_handlers/bundle.rs` + `agent_handlers/native_memory.rs`
+  (19 `NativeMemory*` types live alongside the bundle types — verified)
 - `frontend/app/store/rpc-api/memory.ts` → `rpc-api/bundle.ts` (merging into the existing one) + `rpc-api/native-memory.ts`
+
+**Plain rename, NOT a split:**
+- `server/agent_handlers/memory.rs` → `agent_handlers/bundle.rs`. This file
+  registers only the bundle CRUD/system commands (plus the Claude config reader)
+  — zero native-memory references. Native-memory RPCs already live in
+  `server/native_memory_handlers.rs`, which stays untouched. Splitting this file
+  would create an empty or duplicate owner. (Codex P2 on #3131.)
 
 **Frontend** (names only, labels deferred to Phase 4):
 - `MemoryViewModel` → `BundleViewModel`; `MemoryManager` → `BundleManager`; `MemoryDraft`/`draftFromMemory`/`draftToWire` → `Bundle*`
@@ -230,8 +241,13 @@ Resolve §2.5: one table, one tab.
 
 ### Deferred — DB column renames (explicitly out of scope)
 
-`db_agent_definitions.memory_id`, `db_agents.default_memory_id`,
-`db_agent_instances.memory_id` all hold bundle ids (349 `memory_id` tokens).
+At schema v32, `db_agent_definitions` and `db_agent_instances` no longer exist —
+they were folded into `db_agents` (`migrations.rs:550`). The live columns holding
+bundle ids are **`db_agents.memory_id`** (`:578`) and **`db_agents.default_memory_id`**
+(`:639`) — 349 `memory_id` tokens across the crate. The `ALTER TABLE
+db_agent_definitions ADD COLUMN memory_id` at `:999` is a legacy adoption entry
+for the retired table, not a live schema. (An earlier draft named the retired
+tables; corrected per Codex P2 on #3131.)
 
 Deferred deliberately: `migrations.rs` has **no `RENAME COLUMN` precedent** —
 column changes are done by `ADD COLUMN` + backfill (`:991-1057`). Renaming would
@@ -295,10 +311,17 @@ The following are real requirements, agreed 2026-09-09, and deliberately kept
 out of this spec so that naming lands first. They belong together in one
 follow-on spec ("instruction and memory portability"):
 
-- **Export includes Memory.** A bundle export must carry the agent's native
-  memory. `components.memory` already exists as an ABF key and
-  `bundle.import_for_agent` already honours it — only the exporter never emits
-  it. Closes the round-trip gap.
+- **Export includes Memory — already implemented for the agent-scoped path.**
+  `bundle.export_for_agent` reads the agent's native-memory files and splices
+  `components.memory` plus the referenced files into the manifest
+  (`splice_memory_component`, `app_api/bundle.rs:439-468`; tested at `:2761`),
+  and `bundle.import_for_agent` consumes it. Only the agent-less `bundle.export`
+  omits memory, which is correct by design — a bundle detached from any agent has
+  no memory to carry. An earlier draft of this spec claimed export never emits
+  memory; that was wrong (Codex P2 on #3131). The remaining question for the
+  follow-on spec is narrower: whether the agent-less path should *warn* that
+  memory was not included, mirroring the import side's existing
+  `MEMORY_COMPONENT_IGNORED_WARNING`.
 - **Track Project Instructions.** Read, snapshot, version, and export the repo's
   own `CLAUDE.md`/`AGENTS.md`/etc. Read-only — never overwrite (§3).
 - **Memory location invariant.** Native memory must be written to one
