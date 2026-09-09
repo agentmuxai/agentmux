@@ -3,6 +3,13 @@
 //
 // Phase E — srv reducer.
 //
+// The "same discipline as `agentmux-launcher::reducer`" below means exactly
+// that: same purity rules, same `agentmux_common::ipc::{Command, Event}` wire
+// types. Only `State` differs (each crate's own) and which variants this
+// `update` actually handles — workspaces/tabs/blocks, not window/process.
+// Two reducers by design; see
+// docs/architecture/DECISION_SAGA_REDUCER_TWO_FRAMEWORKS_2026_09_07.md.
+//
 // Pure functional core: `update(&mut State, Command, &Ctx) -> Vec<Event>`.
 // Never blocks, never awaits, never does I/O. Same discipline as
 // `agentmux-launcher::reducer`. Mutex held only during dispatch
