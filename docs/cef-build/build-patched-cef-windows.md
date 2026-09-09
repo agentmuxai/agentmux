@@ -49,6 +49,53 @@ again on a future build:
   (`Microsoft.VisualStudio.Component.VC.ATLMFC` via the VS Installer's
   `modify` command, needed for `atldef.h`).
 
+**Update (2026-09-09), building CEF 152 (branch `7977`) from this same doc:**
+the steps above still work, but a **152-specific** blocker appeared that
+didn't exist at 148 — read this before starting a 152 build on any machine:
+
+- `ui/accessibility/platform/uia_client_info_source_win.cc` (new in Chromium
+  152, unconditional in the Windows `BUILD.gn` — no flag skips it) needs
+  `IUIAutomationClientInfo`/`IUIAutomationClientInfoSource` interfaces that
+  are **absent from Windows SDK 10.0.26100.0** — the only SDK version VS
+  Build Tools 2022's installer catalog offers (checked directly: only
+  `22621` and `26100` exist there). Confusingly, `build/vs_toolchain.py`'s
+  `SDK_VERSION` pin is **identical** between Chromium 148 and 152
+  (`10.0.26100.0` both), so the pins say "unchanged" while the actual
+  requirement moved. Root cause: Google's internal
+  `DEPOT_TOOLS_WIN_TOOLCHAIN=1` packaged toolchain bundles a different
+  snapshot of "26100" than the public SDK installer — external builders get
+  the public one and hit this; Google's own CI doesn't.
+  - **Fix:** install a newer public Windows SDK
+    (https://developer.microsoft.com/windows/downloads/windows-sdk/ — the
+    version matching your OS build works; `10.0.28000.0` confirmed to
+    contain the missing interfaces). The VS Installer **cannot** supply
+    this — its catalog doesn't have it.
+  - Then **edit two files**, not one — `SDK_VERSION` is hardcoded
+    separately in both `build/vs_toolchain.py` and
+    `build/toolchain/win/setup_toolchain.py`; `vs_toolchain.py`'s own
+    comment says they must match. The GN arg `windows_sdk_version` alone
+    does **not** propagate — confirmed by checking `out/.../toolchain.ninja`
+    before and after; it still resolved the old SDK path until both Python
+    files were edited and `gn gen` re-run.
+- `cef_installer_unittests` fails to compile in this configuration:
+  `SetInstallerE2EConfigForTesting` is declared under
+  `#if !(defined(OFFICIAL_BUILD) && defined(NDEBUG))` but its own unittest
+  calls it unconditionally — an upstream CEF bug in official+release
+  builds, unrelated to any AgentMux patch or the SDK issue above. **Build
+  `libcef.dll` directly** (`ninja -C out/Release_GN_x64 libcef.dll`) rather
+  than the top-level `cef` target — `ninja -t query libcef.dll` confirms it
+  does not depend on the test binary.
+- **Verifying `BeginWindowDrag` landed:** do NOT `strings`/grep the built
+  DLL for the function name — struct/vtable function-pointer fields are not
+  named exports and never appear as a bare string in a release binary
+  (confirmed: even definitely-present sibling fields like
+  `SetDraggableRegions` return zero hits this way). Check the actual
+  generated wrapper source instead —
+  `cef/libcef_dll/cpptoc/views/window_cpptoc.cc` should have
+  `GetStruct()->begin_window_drag = window_begin_window_drag_<N>` where
+  `<N>` matches the current `/*--cef(added=N)--*/` annotation on
+  `CefWindow::BeginWindowDrag()` in `include/views/cef_window.h`.
+
 ---
 
 ## Prerequisites

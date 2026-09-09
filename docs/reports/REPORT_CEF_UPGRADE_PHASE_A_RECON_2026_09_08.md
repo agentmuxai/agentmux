@@ -26,7 +26,7 @@ one shipped-binary gap (§5).
 | Do the four carried patches still apply / are any now upstream? | Inventory was **wrong in two places** — see §2. `BeginWindowDrag` is still not upstream at 152. |
 | Does `cef-rs`/`cef-dll-sys` have a 152-compatible crate? | **Yes** — `cef 152.0.0+152.0.5`, published 2026-09-07. |
 | Is `begin_window_drag` in its generated bindings? | **No** — same as 148, so the binding fork is still required. |
-| Have the build toolchain requirements moved? | **Windows: no. Linux: no.** macOS: unconfirmed, see §4. |
+| Have the build toolchain requirements moved? | **Corrected 2026-09-09** — Windows: *pins* say no, but a real 152 build hit a hard blocker the pins don't show (§4). Linux: no (unverified by an actual build). macOS: unconfirmed. |
 | Go / no-go on targeting 152 directly? | **Go.** #1/#2/#3 verified vs real 152 source; #4's Chromium-side file verified and its CEF-side cascade ported (§5b). 16 of 18 CEF files byte-identical upstream; the 2 drifted merged cleanly. **Phase B 18/18 ported, nothing built.** macOS Xcode pin deferred to Phase D. |
 
 **A separate finding, not about 152:** patch #1 (the macOS -67030 renderer
@@ -196,6 +196,29 @@ So Windows and Linux need no toolchain change for this upgrade. **macOS is
 unverified**, not verified-as-fine — confirm it at Phase D build time on the
 actual machine rather than trusting this table for that row.
 
+> **Correction (2026-09-09, from an actual Windows 152 build on claudius).**
+> "Windows: unchanged" above is true about the *pins* and was **wrong about
+> buildability**. A real build failed at 22,219/59,112 targets:
+> `ui/accessibility/platform/uia_client_info_source_win.cc` (new in Chromium
+> 152, unconditional in the Windows `BUILD.gn`) needs
+> `IUIAutomationClientInfo{,Source}` interfaces **absent from Windows SDK
+> 10.0.26100.0** — the exact SDK `vs_toolchain.py`'s `TOOLCHAIN_HASH`/
+> `SDK_VERSION` checks above confirmed unchanged, and the only SDK VS Build
+> Tools 2022's installer catalog offers. Google's internal
+> `DEPOT_TOOLS_WIN_TOOLCHAIN=1` toolchain bundles a different snapshot of
+> "26100" than the public installer, so this only bites external builders.
+> **Fixed** by installing a newer public SDK (`10.0.28000.0`) and editing
+> `SDK_VERSION` in *both* `build/vs_toolchain.py` and
+> `build/toolchain/win/setup_toolchain.py` — the GN arg alone doesn't
+> propagate. Full detail: `docs/cef-build/build-patched-cef-windows.md`'s
+> 2026-09-09 update. **Lesson repeated a third time in this same recon
+> effort** (after the API-annotation bug and the invalid `strings`-based
+> symbol check): comparing version pins is not a substitute for actually
+> compiling. Treat every "unchanged" toolchain claim in this table as
+> "unchanged in the numbers checked," not "confirmed buildable," until an
+> actual build says otherwise — which is now true for Windows but still not
+> for Linux.
+
 ---
 
 ## 5. The shipped-binary gap — corrected
@@ -338,7 +361,9 @@ compile". Phase D is the first thing that will actually exercise it.
 recon makes 152 harder than assumed, and the patch work turned out cheaper:
 
 - the binding exists and is current;
-- Windows/Linux toolchains are unchanged;
+- Windows/Linux toolchain *pins* are unchanged, though Windows needed a newer
+  public SDK than those pins implied to actually build (§4 correction) —
+  resolved, not a blocker, but real;
 - the patch set did not grow.
 
 It did not get materially *cheaper* either — the hope in §2 that upstream might
