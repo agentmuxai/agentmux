@@ -1,5 +1,7 @@
 # Windows Code Signing — research, decision & setup (DEFERRED)
 
+**Status:** living
+
 > **Provenance note:** this document was written 2026-06 in the `agentmux-builder`
 > repo, which no longer exists on GitHub (confirmed gone from the `agentmuxai` org
 > under any name, 2026-09-09 — not access-restricted, actually deleted). Recovered

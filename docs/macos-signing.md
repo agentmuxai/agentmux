@@ -8,9 +8,12 @@ notarize in one command; this doc explains what it does and how to set up creden
 
 Credential details (Apple ID, Team ID, certificate name) were also kept in the private
 `agentmux-builder` repo — **that repo no longer exists** (confirmed gone from the
-`agentmuxai` org, 2026-09-09). Wherever those credentials are re-documented now, this
-line should point there instead; until it's updated, treat the packager's Keychain
-auto-detection (below) as the only reliable source.
+`agentmuxai` org, 2026-09-09). Corrected 2026-09-09 (Codex catch on PR #3122): this
+was stale even before the repo vanished — for CI, the credentials actually live as
+this repo's own GitHub Actions secrets (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`, consumed by `.github/workflows/build-macos.yml`),
+not in a separate repo. For local signing (this doc's own manual flow below), the
+packager's Keychain auto-detection is still the source.
 
 ---
 
@@ -19,8 +22,9 @@ auto-detection (below) as the only reliable source.
 - A **Developer ID Application** certificate in your login Keychain
   (`security find-identity -v -p codesigning` should list a
   `Developer ID Application: <Your Name> (<TEAMID>)` entry). The packager
-  auto-detects it — never hardcode identity details here (see the note above:
-  their previous home, `agentmux-builder`, no longer exists).
+  auto-detects it for local builds — never hardcode identity details here.
+  CI's own copy of these credentials is the GitHub Actions secrets listed
+  above, not a separate repo (`agentmux-builder`, which no longer exists).
 - An **app-specific password** stored as a `notarytool` Keychain profile (one-time, below).
 - Xcode Command Line Tools (`codesign`, `xcrun notarytool`, `iconutil`, `sips`, `hdiutil`).
 
@@ -155,12 +159,20 @@ gh release upload "v<VERSION>" ~/Desktop/AgentMux_<VERSION>_arm64.dmg --clobber
 
 ## CI / Automated Signing
 
-`agentmux-builder` was intended to host the automated signing pipeline and lagged the CEF
-migration — moot now, since that repo no longer exists (confirmed gone from the `agentmuxai`
-org, 2026-09-09). No automated macOS signing pipeline currently exists anywhere; whoever
-builds one should start fresh in this repo rather than assume anything survived from there.
-See `docs/windows-code-signing.md` for the equivalent Windows research, recovered from the
-same now-deleted repo.
+**Corrected 2026-09-09 (Codex catch on PR #3122):** this section previously said
+`agentmux-builder` was *intended* to host the automated signing pipeline and that none
+existed yet — both wrong, and wrong independently of that repo having since vanished.
+The pipeline already exists, **in this repo**: `.github/workflows/build-macos.yml`
+imports the Developer ID certificate into a short-lived per-run Keychain and signs +
+notarizes the DMG; `.github/workflows/release.yml` invokes it (`build-macos` job) as
+part of the release flow. Credentials are the GitHub Actions secrets listed at the top
+of this doc — nothing here depends on `agentmux-builder`, which no longer exists
+(confirmed gone from the `agentmuxai` org, 2026-09-09) and, per the above, never actually
+held this pipeline regardless.
+
+See `docs/windows-code-signing.md` for the equivalent *Windows* research — signing
+there genuinely is unautomated and deferred, unlike macOS. That doc was recovered from
+the same now-deleted `agentmux-builder` repo.
 
 ## Notes
 
