@@ -341,6 +341,34 @@ fn test_handler_unregister_block_also_removes_alias() {
     assert_eq!(resp.error.as_deref(), Some("agent not found: agentg"));
 }
 
+/// Sibling of `test_handler_unregister_block_also_removes_alias`, for the
+/// OTHER teardown path (reagent P2 on this PR's `unregister_agent` fix):
+/// the HTTP `/agentmux/reactive/unregister` endpoint calls
+/// `unregister_agent`, not `unregister_block` — both must clear the alias.
+#[test]
+fn test_handler_unregister_agent_also_removes_alias() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("agentg"))
+        .unwrap();
+    handler.unregister_agent("claude");
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agentg".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-alias-cleanup-via-unregister-agent".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert_eq!(resp.error.as_deref(), Some("agent not found: agentg"));
+}
+
 /// The #2695 recipient-identity check must accept a target resolved via
 /// the alias registry when `stable_agent_identity_confirmer` (not the live
 /// `agent_identity_confirmer`) reports a match — this is exactly the
