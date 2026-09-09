@@ -243,11 +243,15 @@ Compress-Archive -Path @(
 
 # Record the exact fork commit this artifact came from -- the only thing tying
 # the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
-$CefForkSha = (git -C "$HOME\cef-build\chromium_git\cef" rev-parse --short HEAD)
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+$CefForkSha = (git -C "$HOME\cef-build\chromium_git\cef" rev-parse HEAD)
+# Refuse to publish a release with no provenance rather than one with an empty field.
+if (-not $CefForkSha) { throw "Refusing to publish without a recorded fork commit" }
 
 gh release create "cef-windows-x86_64-$CefVersion" --repo agentmuxai/cef `
+  --target "$CefForkSha" `
   --title "Codec-enabled CEF -- Windows x86_64 CEF $CefVersion" `
-  --notes "proprietary_codecs + HEVC/AC3/EAC3/Dolby Vision. Built from agentmuxai/cef $CefForkSha (branch 7778; patches inert on Windows -- built for codec flags only)." `
+  --notes "proprietary_codecs + HEVC/AC3/EAC3/Dolby Vision. Built from agentmuxai/cef $($CefForkSha.Substring(0,12)) (branch 7778; patches inert on Windows -- built for codec flags only)." `
   "cef-windows-x86_64-$CefVersion.zip"
 ```
 

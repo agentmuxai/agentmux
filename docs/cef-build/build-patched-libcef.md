@@ -240,11 +240,16 @@ tar -czf "cef-linux-x86_64-${CEF_VERSION}.tar.gz" \
 
 # Record the exact fork commit this artifact came from -- the only thing tying
 # the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
-CEF_FORK_SHA=$(git -C ~/cef-build/chromium_git/cef rev-parse --short HEAD)
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+CEF_FORK_SHA=$(git -C ~/cef-build/chromium_git/cef rev-parse HEAD)
+# Refuse to publish a release with no provenance rather than one with an empty
+# field -- an unattributable artifact is exactly what section 8 exists to prevent.
+: "${CEF_FORK_SHA:?refusing to publish without a recorded fork commit}"
 
 gh release create "cef-linux-x86_64-${CEF_VERSION}" --repo agentmuxai/cef \
+  --target "${CEF_FORK_SHA}" \
   --title "Patched libcef.so — Linux x86_64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + right-click passthrough. Built from agentmuxai/cef ${CEF_FORK_SHA} (branch 7778)." \
+  --notes "BeginWindowDrag + right-click passthrough. Built from agentmuxai/cef ${CEF_FORK_SHA:0:12} (branch 7778)." \
   "cef-linux-x86_64-${CEF_VERSION}.tar.gz"
 ```
 

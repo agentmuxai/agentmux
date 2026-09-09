@@ -181,16 +181,18 @@ cd "$CEF_OUT"
 # adjust the CI extract step to `ditto -x -k`.
 tar -czf "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz" "Chromium Embedded Framework.framework"
 
-# Record the exact fork commit this artifact came from. This is the only thing
-# tying the three platforms' tags together -- the release job cross-checks just
-# the Chromium milestone, so two tags can agree on "148" and still come from
-# different fork commits with different carry-sets. See CEF_FORK_MAINTENANCE.md
-# section 8, practice P1.
-CEF_FORK_SHA=$(git -C ~/cef-build/chromium_git/cef rev-parse --short HEAD)
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+CEF_FORK_SHA=$(git -C ~/cef-build/chromium/chromium/src/cef rev-parse HEAD)
+# Refuse to publish a release with no provenance rather than one with an empty
+# field -- an unattributable artifact is exactly what section 8 exists to prevent.
+: "${CEF_FORK_SHA:?refusing to publish without a recorded fork commit}"
 
 gh release create "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}" --repo agentmuxai/cef \
+  --target "${CEF_FORK_SHA}" \
   --title "Patched CEF framework — macOS arm64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + drag-rightclick + transparency. Built from agentmuxai/cef ${CEF_FORK_SHA} (branch 7778). Unstripped (~547 MB); packager strips at bundle time." \
+  --notes "BeginWindowDrag + drag-rightclick + transparency. Built from agentmuxai/cef ${CEF_FORK_SHA:0:12} (branch 7778). Unstripped (~547 MB); packager strips at bundle time." \
   "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz"
 ```
 
@@ -205,7 +207,10 @@ release via `gh release list --json tagName --jq '[.[] | select(startswith(...))
 
 > ⚠️ **"Latest" here is not what you'd assume.** `gh release list`'s default
 > order is *not* reliably publish-time-descending on this fork — confirmed
-> 2026-07-28: every release created without an explicit `--target` picks up
+> 2026-07-28. **The release recipe above now passes `--target "${CEF_FORK_SHA}"`,
+> which addresses this at the source**; the verification below stays as a
+> belt-and-braces check, and remains necessary for the tags cut before that
+> change. Historically: every release created without an explicit `--target` picks up
 > `agentmuxai/cef`'s frozen default-branch HEAD commit date as its `created_at`
 > (not the actual `gh release create` call time), and `gh release list`
 > appears to sort by `created_at`. Net effect: a brand-new release can sort
