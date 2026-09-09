@@ -1147,7 +1147,7 @@ mod write_agent_config_files_tests {
         wstore.agent_def_insert(&mut agent).unwrap();
 
         wstore
-            .bundle_memory_upsert(&crate::backend::storage::memory_bundles::Memory {
+            .bundle_memory_upsert(&crate::backend::storage::bundles::Memory {
                 id: "bundle-1".to_string(),
                 name: "Bundle 1".to_string(),
                 description: String::new(),

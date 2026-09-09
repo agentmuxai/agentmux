@@ -482,7 +482,7 @@ mod tests {
 
             assert_eq!(first_bundle_id, second_bundle_id, "rerun must not replace the bound bundle");
             // Store::open_shared also seeds the "blank" singleton (see
-            // memory_bundles.rs), so a fresh shared store already has 1
+            // bundles.rs), so a fresh shared store already has 1
             // bundle before this migration ever runs — count non-blank
             // bundles in the store bundles actually land in now.
             let shared = Store::open_shared(shared_tmp.path()).unwrap();

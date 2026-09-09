@@ -20,7 +20,7 @@ use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
 use crate::backend::storage::store::{Store, AgentContent, AgentDefinition, AgentInstance};
 use crate::backend::storage::identities::IdentityAccount;
-use crate::backend::storage::memory_bundles::Memory;
+use crate::backend::storage::bundles::Memory;
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -2736,7 +2736,7 @@ mod bundle_self_get_registry_fallback_tests {
     async fn falls_back_to_the_registrys_own_bound_bundle_when_no_local_instance_row_exists() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let state = test_state();
-        let bundle: crate::backend::storage::memory_bundles::Memory =
+        let bundle: crate::backend::storage::bundles::Memory =
             serde_json::from_value(serde_json::json!({
                 "id": "bundle-agenty-test",
                 "name": "AgentY's real bundle",

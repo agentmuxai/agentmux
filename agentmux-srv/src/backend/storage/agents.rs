@@ -1052,7 +1052,7 @@ impl Store {
         let vendor = Self::resolve_effective_vendor(&agent.provider, &agent.model_vendor_base_url);
         let bundle_id = uuid::Uuid::new_v4().to_string();
         let name = self.resolve_unique_bundle_name(&format!("{} — ABF", agent.name))?;
-        let bundle = super::memory_bundles::Memory {
+        let bundle = super::bundles::Memory {
             id: bundle_id.clone(),
             name,
             description: String::new(),
@@ -2544,7 +2544,7 @@ mod bundle_provisioning_store_separation_tests {
         let store = Store::open_in_memory().unwrap();
         store.bundle_provision_for_new_agent(&base_agent("a1", "Dup", "claude", ""), 0).unwrap();
         // Directly seed the "(2)" slot too, so the resolver must walk to "(3)".
-        let taken = super::super::memory_bundles::Memory {
+        let taken = super::super::bundles::Memory {
             id: "taken-2".to_string(),
             name: "Dup — ABF (2)".to_string(),
             description: String::new(),
@@ -2637,7 +2637,7 @@ mod bundle_provisioning_store_separation_tests {
         let mut agent = base_agent("a1", "Agent One", "claude", "");
         // provider left empty ("") deliberately, unlike the other tests'
         // bundle_provision_for_new_agent-built bundles.
-        let bundle = super::super::memory_bundles::Memory {
+        let bundle = super::super::bundles::Memory {
             id: "bundle-empty-provider".to_string(),
             name: "Empty Provider Bundle".to_string(),
             description: String::new(),

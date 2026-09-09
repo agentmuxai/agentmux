@@ -735,7 +735,7 @@ mod effective_skills_tests {
 
     fn insert_test_bundle(store: &Store, id: &str) {
         store
-            .bundle_memory_upsert(&crate::backend::storage::memory_bundles::Memory {
+            .bundle_memory_upsert(&crate::backend::storage::bundles::Memory {
                 id: id.to_string(),
                 name: format!("Bundle {id}"),
                 description: String::new(),
@@ -895,7 +895,7 @@ mod effective_skills_tests {
 #[cfg(test)]
 mod bundle_ref_tests {
     use super::*;
-    use crate::backend::storage::memory_bundles::Memory;
+    use crate::backend::storage::bundles::Memory;
 
     fn make_store() -> Store {
         Store::open_in_memory().unwrap()

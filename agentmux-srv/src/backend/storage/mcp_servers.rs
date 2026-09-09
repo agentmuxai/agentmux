@@ -328,7 +328,7 @@ impl Store {
 #[cfg(test)]
 mod bundle_ref_tests {
     use super::*;
-    use crate::backend::storage::memory_bundles::Memory;
+    use crate::backend::storage::bundles::Memory;
 
     fn make_store() -> Store {
         Store::open_in_memory().unwrap()

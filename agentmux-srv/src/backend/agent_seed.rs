@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use super::storage::memory_bundles::Memory;
+use super::storage::bundles::Memory;
 use super::storage::store::{AgentDefinition, AgentContent, AgentSkill, Store};
 use super::storage::StoreError;
 
