@@ -8,7 +8,7 @@ mod template;
 mod identity;
 mod instance;
 mod session;
-mod memory;
+mod bundle;
 mod input;
 
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     identity::register(engine, state);
     instance::register(engine, state);
     session::register(engine, state);
-    memory::register(engine, state);
+    bundle::register(engine, state);
 }
 
 /// Read the per-block `output.state.json` snapshot from filestore and
