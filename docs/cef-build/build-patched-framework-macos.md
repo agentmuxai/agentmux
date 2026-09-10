@@ -50,10 +50,10 @@ not the `148.0.9` this table previously claimed):
 |----------|-------|
 | Path | `~/cef-build/chromium/chromium/src/out/Release_GN_arm64/Chromium Embedded Framework.framework` |
 | Arch | Mach-O 64-bit arm64 |
-| Size (unstripped) | 547 MB |
-| Version (`Info.plist` `CFBundleShortVersionString`) | 148.23.23.0 |
-| `CEF_VERSION` (`cef_version.h`) | `148.23.23-rebuild-7778-codecs.3533+g6c570e2+chromium-148.0.7778.180` |
-| Released tag | `cef-macos-arm64-148.23.23-codecs` (adds `proprietary_codecs` etc. — see `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`) |
+| Size (unstripped) | 428 MB binary; 181 MB as the released `.tar.gz` |
+| Version (`Info.plist` `CFBundleShortVersionString`) | 148.23.25.0 |
+| Built from | `agentmuxai/cef` `1bee8b7da` (ancestor of `7778`) — the release's `--target`, so the tag records the build commit |
+| Released tag | `cef-macos-arm64-148.23.25-codecs` (2026-09-09; adds the macOS 26 renderer fix `agentmux_process_requirement` and the renderer-side transparency work over `148.23.23-codecs`) |
 | Patch symbol | `__ZN13CefWindowImpl15BeginWindowDragEv` (local symbol, `nm` type `t`) |
 
 > ⚠️ The patch symbol is **local**, not exported. Verify with full `nm` —
@@ -162,8 +162,11 @@ keys on the local symbol that `strip` removes — upload the **unstripped** fram
 
 ```bash
 CEF_OUT=~/cef-build/chromium/chromium/src/out/Release_GN_arm64
-# CEF version from Info.plist CFBundleShortVersionString (e.g. 148.23.23).
-CEF_VERSION="148.23.23"
+# CEF version from Info.plist CFBundleShortVersionString. READ IT FROM THE
+# BUILD -- do not copy this example, it is a placeholder that has gone stale
+# before. `/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+#   "$CEF_OUT/Chromium Embedded Framework.framework/Versions/A/Resources/Info.plist"`
+CEF_VERSION="148.23.25"
 # Append a suffix (e.g. -codecs) whenever the build adds a distinguishing
 # feature over the last release at the same numeric CEF_VERSION — see
 # docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md and the
