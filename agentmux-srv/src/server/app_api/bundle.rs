@@ -829,7 +829,12 @@ fn bound_agent_has_native_memory(
         .unwrap_or(false)
 }
 
-/// Register `paths` under `components.<key>` in the export's `armory.json`.
+/// Register `entries` under `components.<key>` in the export's `armory.json`.
+///
+/// Takes JSON values rather than paths: most components are a list of archive
+/// paths, but `projectInstructions` carries an object per file, because a bare
+/// path could not express the `owner` discriminator that keeps import from
+/// installing somebody else's instructions.
 ///
 /// The manifest is built as an inline `json!` literal in `bundle_export.rs`
 /// with no struct behind it (`bundle_export.rs:615`), so every agent-aware
@@ -843,9 +848,9 @@ fn bound_agent_has_native_memory(
 fn set_manifest_component(
     export: &mut crate::backend::bundle_export::BundleExport,
     key: &str,
-    paths: Vec<String>,
+    entries: Vec<serde_json::Value>,
 ) -> Result<(), String> {
-    if paths.is_empty() {
+    if entries.is_empty() {
         return Ok(());
     }
     let manifest_idx = export
@@ -855,7 +860,7 @@ fn set_manifest_component(
         .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
     let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
         .map_err(|e| format!("armory.json: {e}"))?;
-    manifest["components"][key] = json!(paths);
+    manifest["components"][key] = json!(entries);
     export.files[manifest_idx].content =
         serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
     Ok(())
@@ -874,7 +879,7 @@ fn splice_history_component(
     export: &mut crate::backend::bundle_export::BundleExport,
     history_paths: Vec<String>,
 ) -> Result<(), String> {
-    set_manifest_component(export, "history", history_paths)
+    set_manifest_component(export, "history", history_paths.into_iter().map(|p| json!(p)).collect())
 }
 
 /// Splice native-memory files into an already-built bundle export's
@@ -889,6 +894,60 @@ fn splice_history_component(
 /// component category. A no-op when `memory_files` is empty — matches the
 /// existing omit-empty-components convention used elsewhere in the
 /// manifest.
+/// Carry the agent's project instructions into the export as
+/// `components.projectInstructions`.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Files
+/// land under `instructions/project/<sanitized-path>`, and each manifest entry
+/// carries its original `path`, a `contentHash`, and an `owner`.
+///
+/// **`owner` is the load-bearing field.** It is what stops this from becoming a
+/// way to install one repository's instructions into another: an importer that
+/// treated a `foreign` entry as content to write would be doing precisely what
+/// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to prevent.
+/// Import surfaces these and never applies them (spec §5.2), so an operator who
+/// wants them acts deliberately.
+///
+/// Only files that exist and were readable are carried — there is nothing to
+/// put in an archive otherwise. Their absence from the manifest is therefore
+/// not a claim that the source agent had none; `agent.project_instructions` is
+/// where the fuller picture, including absent and unreadable files, lives.
+///
+/// Paths go through the same sanitizer the exporter uses for context files, so
+/// a scanned path can never write outside the archive's own tree.
+fn splice_project_instructions_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    files: &[crate::backend::project_instructions::ProjectInstructionFile],
+) -> Result<(), String> {
+    use crate::backend::project_instructions::InstructionOwner;
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for file in files {
+        if !file.exists || file.content.is_empty() {
+            continue;
+        }
+        let Some(safe) = crate::backend::bundle_export::sanitize_context_relative_path(&file.path)
+        else {
+            continue;
+        };
+        let out_path = format!("instructions/project/{safe}");
+        export.files.push(crate::backend::bundle_export::BundleExportFile {
+            path: out_path.clone(),
+            content: file.content.clone(),
+        });
+        entries.push(json!({
+            "path": file.path,
+            "file": out_path,
+            "contentHash": file.content_hash,
+            "owner": match file.owner {
+                InstructionOwner::Agentmux => "agentmux",
+                InstructionOwner::Foreign => "foreign",
+            },
+        }));
+    }
+    set_manifest_component(export, "projectInstructions", entries)
+}
+
 fn splice_memory_component(
     export: &mut crate::backend::bundle_export::BundleExport,
     memory_files: &[(String, String)],
@@ -911,7 +970,7 @@ fn splice_memory_component(
         });
         manifest_memory.push(out_path);
     }
-    set_manifest_component(export, "memory", manifest_memory)
+    set_manifest_component(export, "memory", manifest_memory.into_iter().map(|p| json!(p)).collect())
 }
 
 /// `bundle.export_for_agent` — ABF v0.2 §2.3. The only export path that
@@ -1025,6 +1084,21 @@ async fn build_export_for_agent(
         Err(e) => handler_warnings.push(format!("native memory: failed to list: {e}")),
     }
     splice_memory_component(&mut export, &memory_files).map_err(|e| format!("{err_prefix}: {e}"))?;
+
+    // Project instructions — carried as a record of what the source agent was
+    // reading, not as content to install. The working directory is resolved
+    // the same way launch resolves it, so the export describes the directory
+    // the agent actually runs in.
+    let work_dir = crate::backend::project_instructions::effective_working_dir(
+        &agent.working_directory,
+        &agent.name,
+    );
+    let instructions = crate::backend::project_instructions::resolve_project_instructions(
+        &agent.provider,
+        &work_dir,
+    );
+    splice_project_instructions_component(&mut export, &instructions)
+        .map_err(|e| format!("{err_prefix}: {e}"))?;
 
     let mut all_warnings = export.warnings.clone();
     all_warnings.append(&mut handler_warnings);
@@ -3398,6 +3472,49 @@ mod export_import_for_agent_tests {
                 && i["message"].as_str().unwrap_or("").contains("broken")),
             "the issue must name the server: {issues:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn export_carries_project_instructions_with_their_owner() {
+        // The last piece of Phase 3: an exported bundle records what the
+        // source agent was reading, with enough to tell whose file each was.
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+
+        std::fs::write(work.path().join("CLAUDE.md"), "# House rules\n\nBe careful.\n").unwrap();
+
+        let result = bundle_export_for_agent_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportForAgentReq {
+                bundle_id: "bundle-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                format: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let files = result["files"].as_array().unwrap();
+        let carried = files
+            .iter()
+            .find(|f| f["path"] == "instructions/project/CLAUDE.md")
+            .expect("the repository's own CLAUDE.md must be carried");
+        assert!(carried["content"].as_str().unwrap().contains("House rules"));
+
+        let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
+        let entry = entries.iter().find(|e| e["path"] == "CLAUDE.md").unwrap();
+        assert_eq!(
+            entry["owner"], "foreign",
+            "an unmarked repository file is the repository's — this field is what keeps import from installing it"
+        );
+        assert!(!entry["contentHash"].as_str().unwrap().is_empty());
     }
 
     #[tokio::test]

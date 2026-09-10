@@ -429,6 +429,21 @@ const MAX_INSTRUCTION_PROVIDER_VARIANTS: usize = 32;
 /// so the two can never drift apart: if this message ever changes, the
 /// filter in `bundle.rs` keeps working because it references the same
 /// constant, not a copy of the string.
+/// Warning for an ABF carrying `components.projectInstructions`.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. These
+/// entries record what the *source* agent was reading. They are surfaced and
+/// never installed — the files they describe belong to whatever repository the
+/// bundle is being imported into, and an import that wrote them would be doing
+/// what `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to prevent.
+///
+/// Unlike [`MEMORY_COMPONENT_IGNORED_WARNING`] this has no filter site: memory
+/// warns only on the agent-less path because `bundle.import_for_agent` really
+/// does install it, whereas no import path installs these. The warning is
+/// therefore unconditional and permanent, not a "use the other RPC" pointer.
+pub(crate) const PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING: &str =
+    "components.projectInstructions: recorded for reference, never installed — these files belong to the importing repository, not to the bundle. Inspect them with agent.project_instructions and apply anything you want deliberately";
+
 pub(crate) const MEMORY_COMPONENT_IGNORED_WARNING: &str =
     "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import";
 
@@ -907,6 +922,16 @@ pub fn parse_bundle_import_with_budget(
     // literal, so the push site and the filter site can't drift apart).
     if components.and_then(|c| c.get("memory")).is_some() {
         warnings.push(MEMORY_COMPONENT_IGNORED_WARNING.to_string());
+    }
+
+    // Unlike memory, this warning has no filter site anywhere: NO import path
+    // installs project instructions, agent-scoped or not. Those files belong
+    // to the repository the bundle is being imported INTO, and writing them
+    // would be exactly what SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md
+    // exists to prevent — a portability feature turning into a back door
+    // (SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §5.2).
+    if components.and_then(|c| c.get("projectInstructions")).is_some() {
+        warnings.push(PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING.to_string());
     }
 
     Ok(ParsedBundleImport {
@@ -1506,6 +1531,46 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert!(result.warnings.iter().any(|w| w.contains("provider variants exceeds the limit")));
+    }
+
+    #[test]
+    fn project_instructions_are_surfaced_and_never_installed() {
+        // Phase 3 §5.2. These entries describe what the SOURCE agent read.
+        // The files they name belong to whatever repository this bundle is
+        // being imported into, so no import path may write them — unlike
+        // memory, there is no agent-scoped variant that does.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+                "projectInstructions": [{
+                    "path": "CLAUDE.md",
+                    "file": "instructions/project/CLAUDE.md",
+                    "contentHash": "abc123",
+                    "owner": "foreign",
+                }],
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+            file("instructions/project/CLAUDE.md", "someone else's house rules"),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("components.projectInstructions") && w.contains("never installed")),
+            "the import must say it is not applying them: {:?}",
+            result.warnings
+        );
+        // And nothing about them reaches the bundle that gets written.
+        assert!(
+            !result.instructions.contains("house rules"),
+            "another repository's instructions must not become this bundle's"
+        );
+        assert!(
+            !result.context_files.iter().any(|cf| cf.content.contains("house rules")),
+            "nor arrive as a context file"
+        );
     }
 
     #[test]
