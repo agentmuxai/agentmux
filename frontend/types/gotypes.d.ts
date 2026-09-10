@@ -410,7 +410,7 @@ declare global {
          */
         auto_continue_enabled?: number;
         /**
-         * The agent's own dedicated ABF bundle (`Memory.id`). Set once —
+         * The agent's own dedicated ABF bundle (`Bundle.id`). Set once —
          * readonly after creation, same posture as `slug`/`parent_id`
          * (`updateagent` preserves it from the existing row rather than
          * accepting a client-supplied value). Empty string = not yet
@@ -473,12 +473,12 @@ declare global {
         provider: string;
     };
 
-    // ── v7 — Memory bundles ────────────────────────────────────────────
+    // ── v7 — Bundles ────────────────────────────────────────────
 
-    /** A Memory bundle — the agent's personality and capability stack:
+    /** A Bundle — the agent's personality and capability stack:
      *  provider/CLI choice, model, system instructions, context files,
      *  MCP servers, skills. The blank singleton represents "vanilla CLI". */
-    type Memory = {
+    type Bundle = {
         id: string;
         name: string;
         description?: string;

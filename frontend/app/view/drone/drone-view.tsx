@@ -803,6 +803,9 @@ const VariablesEditor = (p: {
 
 interface AgentRefShape {
     identityId: string;
+    // Persisted key. Mirrors Rust `AgentRef.memory_id` under `#[serde(rename_all = "camelCase")]`
+    // (agentmux-srv/src/agents/types.rs) — the executor deserializes this object, so the
+    // key is wire/persisted, not a local name (spec §4). Do not rename with the locals.
     memoryId: string;
     instanceName: string;
     workingDirectory: string;
@@ -835,8 +838,8 @@ const AgentRefEditor = (p: {
     node: FlowNode;
     update: (patch: Record<string, unknown>) => void;
 }): JSX.Element => {
-    const [memories] = createResource(() =>
-        RpcApi.ListMemoriesCommand(TabRpcClient, {}).catch(() => [] as Memory[]),
+    const [bundles] = createResource(() =>
+        RpcApi.ListBundlesCommand(TabRpcClient, {}).catch(() => [] as Bundle[]),
     );
     const ref = () => readAgentRef(p.node);
     const setRef = (patch: Partial<AgentRefShape>) =>
@@ -853,7 +856,7 @@ const AgentRefEditor = (p: {
                     <option value="">— blank —</option>
                     {/* is_system entries are AgentMux-controlled workspace policy,
                         not a selectable per-agent bundle (reagent P1, PR #2782). */}
-                    <For each={(memories() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
+                    <For each={(bundles() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
                         {(memory) => <option value={memory.id}>{memory.name}</option>}
                     </For>
                 </select>

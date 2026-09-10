@@ -329,7 +329,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 },
             });
         },
-        onRequestNewMemory: (current: LaunchFormStateWire) => {
+        onRequestNewBundle: (current: LaunchFormStateWire) => {
             // Mirror of onRequestAddAccount above — thread the live
             // form snapshot through the new-memory round-trip so the
             // user's other edits (name, runtime, image, account)
@@ -341,7 +341,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     modalLayer.replace(
                         buildLaunchRequest(agent, {
                             ...current,
-                            memoryId: id,
+                            bundleId: id,
                         })
                     );
                 },
@@ -403,7 +403,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     row.identity_id,
                     (await refreshAccountCache()).map((a) => a.id)
                 ),
-                memoryId: row.memory_id,
+                bundleId: row.memory_id,
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
                 // Carry the CLI-emitted session id forward so the new
@@ -435,12 +435,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
                 // #2463 Finding 1 — see handleReattach's comment above.
-                // memoryId intentionally unfiltered — same reasoning.
+                // bundleId intentionally unfiltered — same reasoning.
                 accountId: realAccountIdOrEmpty(
                     row.identity_id,
                     (await refreshAccountCache()).map((a) => a.id)
                 ),
-                memoryId: row.memory_id,
+                bundleId: row.memory_id,
                 // Carry the parent conversation's history forward — without
                 // these two, forking only clones the agent *definition*
                 // (config/instructions/skills) and starts a brand new
@@ -560,7 +560,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // Empty strings are fine: the backend resolver treats them
             // as "use ambient credentials".
             let accountId = "";
-            let memoryId = "";
+            let bundleId = "";
             try {
                 const rows =
                     (await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
@@ -576,13 +576,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     // a UUID-shaped-but-not-a-real-account legacy bundle
                     // id, can't slip through and still fail
                     // linkagentidentity's FOREIGN KEY constraint.
-                    // memoryId is intentionally NOT filtered — see
+                    // bundleId is intentionally NOT filtered — see
                     // handleReattach's comment above.
                     accountId = realAccountIdOrEmpty(
                         mostRecent.identity_id,
                         (await refreshAccountCache()).map((a) => a.id)
                     );
-                    memoryId = mostRecent.memory_id;
+                    bundleId = mostRecent.memory_id;
                 }
             } catch {
                 // best-effort — fall through with empty bundles.
@@ -592,7 +592,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 agentType: (agent.agent_type as "host" | "container") || "host",
                 environment: agent.agent_type === "container" ? "docker" : "local",
                 accountId,
-                memoryId,
+                bundleId,
                 // No `continueOfInstanceId` — the agent's session
                 // zone IS continuous now (E1, PR #1007). The new pane
                 // reads from `agent:<defId>:current` on mount.
@@ -622,7 +622,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             kind: "create-from-template" as const,
             template,
             originBlockId: props.model.blockId,
-            onCreatedAndLaunch: async (newDefId, accountIdSel, memoryIdSel, name, agentType, modelSel) => {
+            onCreatedAndLaunch: async (newDefId, accountIdSel, bundleIdSel, name, agentType, modelSel) => {
                 // The new definition is user-owned and carries the
                 // template's provider + cmd config. Build an
                 // AgentDefinition stub good enough for the launch flow
@@ -660,7 +660,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         agentType,
                         environment: agentType === "container" ? "docker" : "local",
                         accountId: accountIdSel,
-                        memoryId: memoryIdSel,
+                        bundleId: bundleIdSel,
                         // No `continueOfInstanceId` — the new definition
                         // has no prior session; its agent-anchored zone
                         // is empty and the pane will start fresh.

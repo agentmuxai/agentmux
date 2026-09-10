@@ -164,7 +164,7 @@ export function BrowserNavBar(props: {
     // docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md.
     // Deliberately re-fetched on every menu open (not once on mount) rather
     // than kept live via a wave-event subscription — matches this
-    // codebase's existing MemoryViewModel/GlobalBrainViewModel precedent
+    // codebase's existing BundleViewModel/GlobalBrainViewModel precedent
     // ("does not subscribe... the manager is the only writer in
     // practice"). A menu opened before another window's edit lands still
     // shows a stale snapshot until closed and reopened — an accepted v1

@@ -37,8 +37,8 @@ vi.mock("@/app/view/brain/global-brain-manager", () => ({
 vi.mock("@/app/view/native-memory/native-memory-manager", () => ({
     NativeMemoryManager: () => <div data-testid="native-memory-manager" />,
 }));
-vi.mock("@/app/view/memory/memory-manager", () => ({
-    MemoryManager: () => <div data-testid="memory-manager" />,
+vi.mock("@/app/view/bundle/bundle-manager", () => ({
+    BundleManager: () => <div data-testid="bundle-manager" />,
 }));
 vi.mock("@/app/view/mcp/mcp-manager", () => ({
     McpManager: () => <div data-testid="mcp-manager" />,

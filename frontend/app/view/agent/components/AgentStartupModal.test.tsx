@@ -17,7 +17,7 @@ const openOrFocusPaneByView = vi.fn();
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListMemoriesCommand: (...args: unknown[]) => listMemories(...args),
+        ListBundlesCommand: (...args: unknown[]) => listMemories(...args),
         GetAgentContentCommand: (...args: unknown[]) => getAgentContent(...args),
         SetAgentContentCommand: (...args: unknown[]) => setAgentContent(...args),
     },
@@ -29,7 +29,7 @@ vi.mock("@/app/store/global", () => ({
 
 import { AgentStartupModal } from "./AgentStartupModal";
 
-function mkBundle(overrides: Partial<Memory>): Memory {
+function mkBundle(overrides: Partial<Bundle>): Bundle {
     return {
         id: "bundle-1",
         name: "Code Reviewer",
@@ -37,7 +37,7 @@ function mkBundle(overrides: Partial<Memory>): Memory {
         is_global: false,
         instructions: "Review the diff for bugs.",
         ...overrides,
-    } as Memory;
+    } as Bundle;
 }
 
 describe("AgentStartupModal", () => {

@@ -34,7 +34,7 @@ vi.mock("@/app/store/rpc-api", () => {
         // (none of whose agent fixtures set `memory_id`) never even
         // trigger the fetch; the drift-regression tests below set their
         // own `.mockResolvedValue`.
-        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
+        GetBundleCommand: vi.fn().mockResolvedValue(undefined),
         AgentSessionReadCommand: vi.fn().mockResolvedValue({ content: null, modts: null }),
         AgentSessionArchiveCommand: vi.fn().mockResolvedValue({}),
         AgentDefCreateFromTemplateCommand: vi.fn().mockResolvedValue({
@@ -46,7 +46,7 @@ vi.mock("@/app/store/rpc-api", () => {
         AgentDefHideCommand: vi.fn().mockResolvedValue({ ok: true }),
         AgentDefUnhideCommand: vi.fn().mockResolvedValue({ ok: true }),
         AgentDefListHiddenTemplatesCommand: vi.fn().mockResolvedValue([]),
-        ListMemoriesCommand: vi.fn().mockResolvedValue([]),
+        ListBundlesCommand: vi.fn().mockResolvedValue([]),
         // Fork flow (#2721 Phase 1 — continueSessionId/forkSession wiring).
         ForkAgentDefinitionCommand: vi.fn(),
     };
@@ -405,7 +405,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.agentType).toBe("container");
         expect(overrides.environment).toBe("docker");
         expect(overrides.accountId).toBe("id-work");
-        expect(overrides.memoryId).toBe("mem-notes");
+        expect(overrides.bundleId).toBe("mem-notes");
         expect(overrides.instanceName).toBe("Mary");
         expect(overrides.continueOfInstanceId).toBeUndefined();
         expect(overrides.model).toBe("opus");
@@ -492,7 +492,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
 
         beforeEach(() => {
             vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([driftedTemplate]);
-            vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "codex" } as any);
+            vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "codex" } as any);
         });
 
         it("checks install state against the bundle's provider, not the drifted column", async () => {

@@ -23,7 +23,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
     continueLocksIdentity as flowContinueLocksIdentity,
-    continueLocksMemory as flowContinueLocksMemory,
+    continueLocksBundle as flowContinueLocksBundle,
     type LaunchFlowStore,
 } from "@/app/store/launch-flow-state";
 import { realAccountIdOrEmpty } from "@/app/view/agent/identity-carry-over";
@@ -94,7 +94,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
     // Local memos read flow.state.form so they invalidate when the
     // selection or carry-over identity changes.
     const continueLocksIdentity = createMemo(() => flowContinueLocksIdentity(flow.state));
-    const continueLocksMemory = createMemo(() => flowContinueLocksMemory(flow.state));
+    const continueLocksBundle = createMemo(() => flowContinueLocksBundle(flow.state));
 
     // Sequencing guard (reagentx P1 on #2464): handleContinueSelect awaits
     // an RPC round-trip (refreshAccountCache) before dispatching, which it
@@ -129,7 +129,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
         // flagging this call site was still on the shape-only check while
         // AgentPicker.tsx's sibling call sites got the stronger one).
         //
-        // memoryId intentionally does NOT get the same treatment: unlike
+        // bundleId intentionally does NOT get the same treatment: unlike
         // account_id, memory_id has no FK constraint, and legitimate
         // bundle ids are routinely non-UUID ("blank", "seed-*" —
         // memory_bundles.rs/bundle.rs) rather than legacy garbage — a
@@ -140,7 +140,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
             ? {
                   name: row.instance_name,
                   accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
-                  memoryId: row.memory_id,
+                  bundleId: row.memory_id,
               }
             : undefined;
         if (seq !== continueSelectSeq) return; // superseded by a later call — drop this stale dispatch
@@ -195,7 +195,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
         continuedRow,
         isContinue,
         continueLocksIdentity,
-        continueLocksMemory,
+        continueLocksBundle,
         handleContinueSelect,
         viewMode,
         enterNewMode,

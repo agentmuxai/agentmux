@@ -17,9 +17,9 @@
 // mapping). Section order is the sort_order column, mutated via
 // reorderglobalbrain.
 //
-// This model is block-free (same shape as MemoryViewModel) and drives off
+// This model is block-free (same shape as BundleViewModel) and drives off
 // the bundle_* RPCs. Mutations refresh the list afterwards; it does not
-// subscribe to memories:changed (matching MemoryViewModel — the manager is
+// subscribe to memories:changed (matching BundleViewModel — the manager is
 // the only writer in practice).
 //
 // Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
@@ -39,7 +39,7 @@ export const NEW_SECTION_ID = "__new__";
  *  are split out and rendered first with the override preamble, exactly
  *  mirroring memory_bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
  *  Exported for direct unit testing against the Rust version's fixtures. */
-export function formatGlobalBrainBlock(sections: Memory[]): string {
+export function formatGlobalBrainBlock(sections: Bundle[]): string {
     const nonEmpty = sections.filter((s) => (s.instructions ?? "").trim().length > 0);
     const system = nonEmpty.filter((s) => s.is_system);
     const ordinary = nonEmpty.filter((s) => !s.is_system);
@@ -91,9 +91,9 @@ export class GlobalBrainViewModel {
     // already use for mcp:changed/skills:changed.
     private unsubChanged: () => void;
 
-    private _all = createSignal<Memory[]>([]);
+    private _all = createSignal<Bundle[]>([]);
     /** Every bundle (global + per-agent), used to derive sections + candidates. */
-    allAtom: Accessor<Memory[]> = this._all[0];
+    allAtom: Accessor<Bundle[]> = this._all[0];
     private setAll = this._all[1];
 
     private _editingId = createSignal<string | null>(null);
@@ -139,13 +139,13 @@ export class GlobalBrainViewModel {
 
     /** Global sections, in injection order (sort_order, then name) —
      *  includes system rows (they're always is_global too). */
-    sectionsAtom: Accessor<Memory[]>;
+    sectionsAtom: Accessor<Bundle[]>;
     /** The AgentMux-controlled, highest-priority subset of sectionsAtom. */
-    systemSectionsAtom: Accessor<Memory[]>;
+    systemSectionsAtom: Accessor<Bundle[]>;
     /** sectionsAtom minus systemSectionsAtom — what the ordinary editor list renders. */
-    ordinarySectionsAtom: Accessor<Memory[]>;
+    ordinarySectionsAtom: Accessor<Bundle[]>;
     /** Non-global, non-blank bundles eligible to promote into the brain. */
-    candidatesAtom: Accessor<Memory[]>;
+    candidatesAtom: Accessor<Bundle[]>;
     /** Combined startup-instructions-file preview block. */
     previewAtom: Accessor<string>;
     /** Providers grouped by resolved startup-instructions filename, e.g.
@@ -241,7 +241,7 @@ export class GlobalBrainViewModel {
 
     async refresh(): Promise<void> {
         try {
-            const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
+            const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
             this.setAll(list);
             this.setError(null);
         } catch (e) {
@@ -250,7 +250,7 @@ export class GlobalBrainViewModel {
     }
 
     /** Open the inline editor for an existing section. */
-    startEdit(section: Memory): void {
+    startEdit(section: Bundle): void {
         this.setError(null);
         this.setEditingId(section.id);
         this.setDraftName(section.name);
@@ -288,7 +288,7 @@ export class GlobalBrainViewModel {
         try {
             const instructions = this.draftInstructionsAtom();
             if (editingId === NEW_SECTION_ID) {
-                const saved = await RpcApi.UpsertMemoryCommand(TabRpcClient, {
+                const saved = await RpcApi.UpsertBundleCommand(TabRpcClient, {
                     id: "",
                     name,
                     is_global: true,
@@ -305,7 +305,7 @@ export class GlobalBrainViewModel {
                     this.setError("Section no longer exists.");
                     return;
                 }
-                await RpcApi.UpsertMemoryCommand(TabRpcClient, {
+                await RpcApi.UpsertBundleCommand(TabRpcClient, {
                     ...existing,
                     name,
                     instructions,
@@ -327,7 +327,7 @@ export class GlobalBrainViewModel {
         if (!bundle) return;
         this.setError(null);
         try {
-            await RpcApi.UpsertMemoryCommand(TabRpcClient, { ...bundle, is_global: true });
+            await RpcApi.UpsertBundleCommand(TabRpcClient, { ...bundle, is_global: true });
             // ordinarySectionsAtom, not sectionsAtom — the backend's reorder
             // command silently skips is_system ids (reorderglobalbrain's own
             // AND is_system = 0 guard), so including one here is pointless
@@ -347,7 +347,7 @@ export class GlobalBrainViewModel {
         if (!bundle) return;
         this.setError(null);
         try {
-            await RpcApi.UpsertMemoryCommand(TabRpcClient, { ...bundle, is_global: false });
+            await RpcApi.UpsertBundleCommand(TabRpcClient, { ...bundle, is_global: false });
             if (this.editingIdAtom() === id) this.cancelEdit();
             await this.refresh();
         } catch (e) {
@@ -390,7 +390,7 @@ export class GlobalBrainViewModel {
     // FROM (it's created directly), and its position is always first,
     // enforced server-side regardless of what a reorder call would send.
 
-    startEditSystem(section: Memory): void {
+    startEditSystem(section: Bundle): void {
         this.setError(null);
         this.setEditingSystemId(section.id);
         this.setDraftSystemName(section.name);
@@ -412,7 +412,7 @@ export class GlobalBrainViewModel {
     }
 
     /** Persist the current system-tier draft via the dedicated
-     *  upsertsystemmemory command — never UpsertMemoryCommand. */
+     *  upsertsystemmemory command — never UpsertBundleCommand. */
     async saveSystemEdit(): Promise<void> {
         const name = this.draftSystemNameAtom().trim();
         if (!name) {
@@ -426,14 +426,14 @@ export class GlobalBrainViewModel {
         try {
             const instructions = this.draftSystemInstructionsAtom();
             if (editingId === NEW_SECTION_ID) {
-                await RpcApi.UpsertSystemMemoryCommand(TabRpcClient, { id: "", name, instructions });
+                await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { id: "", name, instructions });
             } else {
                 const existing = this.systemSectionsAtom().find((m) => m.id === editingId);
                 if (!existing) {
                     this.setError("Section no longer exists.");
                     return;
                 }
-                await RpcApi.UpsertSystemMemoryCommand(TabRpcClient, { ...existing, name, instructions });
+                await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { ...existing, name, instructions });
             }
             await this.refresh();
             this.cancelEditSystem();
@@ -445,13 +445,13 @@ export class GlobalBrainViewModel {
     }
 
     /** Delete a system entry outright via the dedicated
-     *  deletesystemmemory command — never DeleteMemoryCommand. Unlike the
+     *  deletesystemmemory command — never DeleteBundleCommand. Unlike the
      *  ordinary tier's `remove()`, there's no "demote and keep in
      *  Memories" fallback: a system entry has no life outside this tier. */
     async removeSystem(id: string): Promise<void> {
         this.setError(null);
         try {
-            await RpcApi.DeleteSystemMemoryCommand(TabRpcClient, { id });
+            await RpcApi.DeleteSystemBundleCommand(TabRpcClient, { id });
             if (this.editingSystemIdAtom() === id) this.cancelEditSystem();
             await this.refresh();
         } catch (e) {

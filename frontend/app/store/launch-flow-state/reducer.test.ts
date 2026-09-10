@@ -9,10 +9,10 @@ import {
     accountSuppliesProvider,
     canSubmit,
     continueLocksIdentity,
-    continueLocksMemory,
+    continueLocksBundle,
     initialState,
     isContinue,
-    realMemories,
+    realBundles,
     type LaunchFlowCommand,
     type LaunchFlowState,
 } from "./types";
@@ -33,7 +33,7 @@ const acct = (id: string, name: string, provider = "claude"): Account => ({
     updated_at: "",
 });
 
-const mem = (id: string, name: string, is_blank = false): Memory => ({
+const mem = (id: string, name: string, is_blank = false): Bundle => ({
     id,
     name,
     is_blank,
@@ -47,14 +47,14 @@ const dispatch = (state: LaunchFlowState, cmd: LaunchFlowCommand) => update(stat
 
 describe("launch-flow-state reducer", () => {
     describe("initial state", () => {
-        it("starts with empty form + no accounts/memories + not closed", () => {
+        it("starts with empty form + no accounts/bundles + not closed", () => {
             const s = initialState();
             expect(s.form.name).toBe("");
             expect(s.form.accountId).toBe("");
-            expect(s.form.memoryId).toBe("");
+            expect(s.form.bundleId).toBe("");
             expect(s.form.continueOfId).toBe(null);
             expect(s.accounts.list).toEqual([]);
-            expect(s.memories.list).toEqual([]);
+            expect(s.bundles.list).toEqual([]);
             expect(s.submit.inFlight).toBe(false);
             expect(s.closed).toBe(false);
         });
@@ -137,33 +137,33 @@ describe("launch-flow-state reducer", () => {
             const s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", accountId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", bundleId: "m" },
             }).state;
             expect(s.form.continueOfId).toBe("inst-1");
             expect(s.form.name).toBe("prev");
             expect(s.form.accountId).toBe("a");
-            expect(s.form.memoryId).toBe("m");
+            expect(s.form.bundleId).toBe("m");
             expect(continueLocksIdentity(s)).toBe(true);
-            expect(continueLocksMemory(s)).toBe(true);
+            expect(continueLocksBundle(s)).toBe(true);
         });
 
         it("does NOT lock when continued row carries empty values (legacy)", () => {
             const s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-legacy",
-                carry: { name: "old", accountId: "", memoryId: "" },
+                carry: { name: "old", accountId: "", bundleId: "" },
             }).state;
             expect(isContinue(s)).toBe(true);
             // Legacy continuation — user must pick replacements
             expect(continueLocksIdentity(s)).toBe(false);
-            expect(continueLocksMemory(s)).toBe(false);
+            expect(continueLocksBundle(s)).toBe(false);
         });
 
         it("re-dispatch with same continueOfId is a no-op (preserves edits)", () => {
             let s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", accountId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", bundleId: "m" },
             }).state;
             // User edits name mid-flow
             s = dispatch(s, { type: "NameChanged", name: "edited" }).state;
@@ -171,7 +171,7 @@ describe("launch-flow-state reducer", () => {
             const r = update(s, {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", accountId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", bundleId: "m" },
             });
             expect(r.state).toBe(s);
             expect(r.state.form.name).toBe("edited");
@@ -181,13 +181,13 @@ describe("launch-flow-state reducer", () => {
             let s = dispatch(initialState(), {
                 type: "ContinueOfChanged",
                 continueOfId: "inst-1",
-                carry: { name: "prev", accountId: "a", memoryId: "m" },
+                carry: { name: "prev", accountId: "a", bundleId: "m" },
             }).state;
             s = dispatch(s, { type: "ContinueOfChanged", continueOfId: null }).state;
             expect(s.form.continueOfId).toBe(null);
             expect(s.form.name).toBe("");
             expect(s.form.accountId).toBe("");
-            expect(s.form.memoryId).toBe("");
+            expect(s.form.bundleId).toBe("");
             expect(isContinue(s)).toBe(false);
         });
     });
@@ -222,11 +222,11 @@ describe("launch-flow-state reducer", () => {
             expect(accountsForProvider(s, "codex")).toEqual([b]);
         });
 
-        it("realMemories selector filters is_blank", () => {
+        it("realBundles selector filters is_blank", () => {
             const m = mem("m", "M");
             const b = mem("blank", "Blank", true);
-            const s = dispatch(initialState(), { type: "MemoriesLoaded", list: [b, m] }).state;
-            expect(realMemories(s)).toEqual([m]);
+            const s = dispatch(initialState(), { type: "BundlesLoaded", list: [b, m] }).state;
+            expect(realBundles(s)).toEqual([m]);
         });
     });
 
@@ -369,10 +369,10 @@ describe("launch-flow-state reducer", () => {
             expect(s.auth.kind).toBe("ready");
         });
 
-        it("auth.kind survives MemoryChanged — THE original repro", () => {
+        it("auth.kind survives BundleChanged — THE original repro", () => {
             let s = setupReady();
             const before = s.auth;
-            s = update(s, { type: "MemoryChanged", memoryId: "mem-notes" }).state;
+            s = update(s, { type: "BundleChanged", bundleId: "mem-notes" }).state;
             expect(s.auth).toBe(before);
             expect(s.auth.kind).toBe("ready");
         });
@@ -386,7 +386,7 @@ describe("launch-flow-state reducer", () => {
             expect(s.auth.kind).toBe("ready");
         });
 
-        it("auth.kind survives AccountsLoaded + MemoriesLoaded", () => {
+        it("auth.kind survives AccountsLoaded + BundlesLoaded", () => {
             let s = setupReady();
             const before = s.auth;
             s = update(s, {
@@ -394,7 +394,7 @@ describe("launch-flow-state reducer", () => {
                 list: [acct("acct-work", "Work")],
             }).state;
             s = update(s, {
-                type: "MemoriesLoaded",
+                type: "BundlesLoaded",
                 list: [mem("mem-notes", "Notes")],
             }).state;
             expect(s.auth).toBe(before);
@@ -413,7 +413,7 @@ describe("launch-flow-state reducer", () => {
         it("form state survives Auth Connect (auth path doesn't touch form)", () => {
             let s = update(initialState(), { type: "NameChanged", name: "carry-name" }).state;
             s = update(s, { type: "AccountChanged", accountId: "acct-a" }).state;
-            s = update(s, { type: "MemoryChanged", memoryId: "mem-a" }).state;
+            s = update(s, { type: "BundleChanged", bundleId: "mem-a" }).state;
             const formBefore = s.form;
             // Drive auth machine
             s = update(s, {
@@ -424,7 +424,7 @@ describe("launch-flow-state reducer", () => {
             expect(s.form).toBe(formBefore);
             expect(s.form.name).toBe("carry-name");
             expect(s.form.accountId).toBe("acct-a");
-            expect(s.form.memoryId).toBe("mem-a");
+            expect(s.form.bundleId).toBe("mem-a");
         });
     });
 
@@ -446,20 +446,20 @@ describe("launch-flow-state reducer", () => {
             expect(canSubmit(s, baseAuth)).toBe(false);
         });
 
-        it("blocks when memoryId empty", () => {
+        it("blocks when bundleId empty", () => {
             let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
             expect(canSubmit(s, baseAuth)).toBe(false);
         });
 
         it("blocks when authReady false", () => {
             let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
-            s = dispatch(s, { type: "MemoryChanged", memoryId: "m" }).state;
+            s = dispatch(s, { type: "BundleChanged", bundleId: "m" }).state;
             expect(canSubmit(s, { ...baseAuth, authReady: false })).toBe(false);
         });
 
         it("passes when name + account + memory + auth are all good", () => {
             let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
-            s = dispatch(s, { type: "MemoryChanged", memoryId: "m" }).state;
+            s = dispatch(s, { type: "BundleChanged", bundleId: "m" }).state;
             expect(canSubmit(s, baseAuth)).toBe(true);
         });
     });

@@ -3,10 +3,10 @@
 
 // Shared styles for BundleMcpSection.tsx / BundleSkillsSection.tsx — the
 // inline MCP Servers / Skills sections inside the Bundle editor's detail
-// view (memory-manager.tsx). Composable model v2,
+// view (bundle-manager.tsx). Composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. Deliberately its
 // own compact, flat-list layout rather than reusing AgentPrimitiveModal.scss
-// wholesale — this content sits inside memory-view-detail, not a
+// wholesale — this content sits inside bundle-view-detail, not a
 // full-height PrimitiveListDetail pane.
 
 .bundle-primitive-section {

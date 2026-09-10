@@ -45,7 +45,7 @@ export class AgentViewModel implements ViewModel {
     // Callback wired by AgentPresentationView on mount so the title-bar
     // button can open the pane-scoped Stash modal without holding a
     // SolidJS context in the model. Replaced the former separate
-    // _openIdentityModal / _openMemoryModal pair (Phase 3 slice 1 — one
+    // _openIdentityModal / _openBundleModal pair (Phase 3 slice 1 — one
     // "Stash" icon opens a unified tabbed modal). Named "Stash" (not
     // "Armory") to distinguish it from the global Armory pane — see
     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
@@ -745,7 +745,7 @@ export class AgentViewModel implements ViewModel {
                     // `db_agent_instances` field, not part of the new
                     // direct-link system.
                     identity_id: overrides?.accountId,
-                    memory_id: overrides?.memoryId,
+                    memory_id: overrides?.bundleId,
                     // v8: named-agent continuation. The instance name
                     // is the AGENTMUX_AGENT_ID the user picked in the
                     // modal; finalWorkDir is the path that

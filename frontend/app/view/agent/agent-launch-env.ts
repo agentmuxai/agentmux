@@ -128,7 +128,7 @@ export function resolveCliDir(version: string, providerId: string): string {
 export async function resolveEffectiveLaunchProvider(agent: AgentDefinition): Promise<string> {
     if (!agent.memory_id) return agent.provider;
     try {
-        const bundle = await RpcApi.GetMemoryCommand(TabRpcClient, { id: agent.memory_id });
+        const bundle = await RpcApi.GetBundleCommand(TabRpcClient, { id: agent.memory_id });
         return bundle?.provider || agent.provider;
     } catch (e: any) {
         Logger.warn("agent", "Failed to resolve agent's bound bundle for provider; falling back to agent.provider", {

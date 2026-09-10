@@ -6,7 +6,7 @@ import { For, onCleanup, onMount, type JSX } from "solid-js";
 import { Tooltip } from "@/app/element/tooltip";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MemoryManager } from "@/app/view/memory/memory-manager";
+import { BundleManager } from "@/app/view/bundle/bundle-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
@@ -135,7 +135,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                     {/*
                      * All six manager components stay mounted (AccountsManager,
                      * GlobalBrainManager, NativeMemoryManager, SkillManager,
-                     * McpManager, MemoryManager) — toggling is instant and
+                     * McpManager, BundleManager) — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
@@ -174,7 +174,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                         <McpManager />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "bundles" }}>
-                        <MemoryManager />
+                        <BundleManager />
                     </div>
                 </div>
             </div>

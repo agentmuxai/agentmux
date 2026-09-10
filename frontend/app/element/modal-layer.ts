@@ -59,7 +59,7 @@ export interface LaunchAgentRequest {
      *  Replaces `onRequestNewIdentity`. */
     onRequestAddAccount?: (current: LaunchFormStateWire) => void;
     /** Same for "+ New memory". */
-    onRequestNewMemory?: (current: LaunchFormStateWire) => void;
+    onRequestNewBundle?: (current: LaunchFormStateWire) => void;
 }
 
 /** Snapshot of the editable Launch form. Kept here (not imported from
@@ -70,7 +70,7 @@ export interface LaunchFormStateWire {
     runtime: "host" | "container";
     image: string;
     accountId: string;
-    memoryId: string;
+    bundleId: string;
     /** Continuation context — the `continueOfId` from the Continue
      *  dropdown. `null` = "— New agent —". Threaded through the
      *  `+ New bundle` round-trip so the re-opened launch modal restores
@@ -241,7 +241,7 @@ export interface CreateFromTemplateRequest {
     onCreatedAndLaunch: (
         newDefinitionId: string,
         accountId: string,
-        memoryId: string,
+        bundleId: string,
         name: string,
         /** Runtime the user picked in the modal. The launch override
          *  uses this directly instead of re-reading the (template-

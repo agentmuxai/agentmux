@@ -224,7 +224,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
                     agentType: (forkedDef.agent_type as "host" | "container") || "host",
                     environment: forkedDef.agent_type === "container" ? "docker" : "local",
                     accountId,
-                    memoryId: "",
+                    bundleId: "",
                     continueSessionId: sessionId,
                     forkSession: true,
                 },

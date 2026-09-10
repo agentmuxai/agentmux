@@ -6,7 +6,7 @@
 // fallback that stacked them instead of removing the split; both are
 // gone now that only one of the two ever renders at a time.
 
-.memory-view-rail {
+.bundle-view-rail {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -15,12 +15,12 @@
     color: var(--main-text-color);
 }
 
-.memory-view-rail-header {
+.bundle-view-rail-header {
     padding: 8px;
     border-bottom: 1px solid var(--border-color);
 }
 
-.memory-view-new-btn {
+.bundle-view-new-btn {
     width: 100%;
     padding: 6px 10px;
     background: var(--accent-color);
@@ -35,7 +35,7 @@
     }
 }
 
-.memory-view-list {
+.bundle-view-list {
     flex: 1 1 auto;
     list-style: none;
     margin: 0;
@@ -43,7 +43,7 @@
     overflow-y: auto;
 }
 
-.memory-view-list-item {
+.bundle-view-list-item {
     padding: 10px 12px;
     cursor: default;
     border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.06));
@@ -62,7 +62,7 @@
     }
 }
 
-.memory-view-list-item-name {
+.bundle-view-list-item-name {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -71,7 +71,7 @@
     min-width: 0;
 }
 
-.memory-view-list-item-name-text {
+.bundle-view-list-item-name-text {
     flex: 1 1 0;
     min-width: 0;
     white-space: nowrap;
@@ -79,7 +79,7 @@
     text-overflow: ellipsis;
 }
 
-.memory-view-global-badge {
+.bundle-view-global-badge {
     flex: 0 0 auto;
     font-size: 10px;
     font-weight: 600;
@@ -92,19 +92,19 @@
     opacity: 0.85;
 }
 
-.memory-view-list-item-provider {
+.bundle-view-list-item-provider {
     font-size: 11px;
     color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
     margin-top: 2px;
 }
 
-.memory-view-detail {
+.bundle-view-detail {
     padding: 16px 24px;
     background: var(--main-bg-color);
     color: var(--main-text-color);
 }
 
-.memory-view-error {
+.bundle-view-error {
     padding: 8px 12px;
     margin-bottom: 12px;
     background: var(--error-bg-color, rgba(255, 80, 80, 0.15));
@@ -114,21 +114,21 @@
 }
 
 // ── Read-only detail ────────────────────────────────────────────
-.memory-view-readonly {
+.bundle-view-readonly {
     max-width: 720px;
 }
 
-.memory-view-name {
+.bundle-view-name {
     font-size: 20px;
     margin: 0 0 4px;
 }
 
-.memory-view-description {
+.bundle-view-description {
     margin: 0 0 16px;
     color: var(--secondary-text-color);
 }
 
-.memory-view-fields {
+.bundle-view-fields {
     display: grid;
     grid-template-columns: 140px 1fr;
     column-gap: 16px;
@@ -146,7 +146,7 @@
     }
 }
 
-.memory-view-instructions-readonly pre {
+.bundle-view-instructions-readonly pre {
     margin: 0;
     padding: 8px;
     background: var(--code-bg-color, rgba(0, 0, 0, 0.2));
@@ -158,16 +158,16 @@
     overflow-y: auto;
 }
 
-.memory-view-actions {
+.bundle-view-actions {
     display: flex;
     gap: 8px;
     margin-top: 16px;
 }
 
-.memory-view-edit-btn,
-.memory-view-delete-btn,
-.memory-view-cancel-btn,
-.memory-view-save-btn {
+.bundle-view-edit-btn,
+.bundle-view-delete-btn,
+.bundle-view-cancel-btn,
+.bundle-view-save-btn {
     padding: 6px 14px;
     border: 1px solid var(--border-color);
     border-radius: 0;
@@ -186,37 +186,37 @@
     }
 }
 
-.memory-view-save-btn {
+.bundle-view-save-btn {
     background: var(--accent-color);
     color: var(--accent-text-color, #fff);
     border-color: transparent;
 }
 
-.memory-view-delete-btn {
+.bundle-view-delete-btn {
     color: var(--error-text-color, #ff8080);
     border-color: var(--error-text-color, #ff8080);
 }
 
 // ── Edit form ───────────────────────────────────────────────────
-.memory-view-form {
+.bundle-view-form {
     display: flex;
     flex-direction: column;
     gap: 12px;
     max-width: 720px;
 }
 
-.memory-view-form-title {
+.bundle-view-form-title {
     font-size: 18px;
     margin: 0 0 4px;
 }
 
-.memory-view-field {
+.bundle-view-field {
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.memory-view-field-label {
+.bundle-view-field-label {
     font-size: 12px;
     color: var(--secondary-text-color);
     display: inline-flex;
@@ -224,7 +224,7 @@
     gap: 5px;
 }
 
-.memory-view-field-help {
+.bundle-view-field-help {
     font-size: 11px;
     color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
     cursor: default;
@@ -234,8 +234,8 @@
     }
 }
 
-.memory-view-input,
-.memory-view-textarea {
+.bundle-view-input,
+.bundle-view-textarea {
     padding: 6px 10px;
     background: var(--input-bg-color, rgba(0, 0, 0, 0.2));
     color: var(--main-text-color);
@@ -250,21 +250,21 @@
     }
 }
 
-.memory-view-textarea {
+.bundle-view-textarea {
     font-family: var(--mono-font, "JetBrains Mono", monospace);
     font-size: 12px;
     resize: vertical;
     min-height: 120px;
 }
 
-.memory-view-form-actions {
+.bundle-view-form-actions {
     display: flex;
     gap: 8px;
     justify-content: flex-end;
     margin-top: 8px;
 }
 
-.memory-view-validate-btn {
+.bundle-view-validate-btn {
     padding: 6px 14px;
     border: 1px solid var(--border-color);
     border-radius: 0;
@@ -287,7 +287,7 @@
     }
 }
 
-.memory-view-validation {
+.bundle-view-validation {
     border: 1px solid var(--border-color);
     border-radius: 0;
     padding: 8px 12px;
@@ -298,12 +298,12 @@
     }
 }
 
-.memory-view-validation-ok {
+.bundle-view-validation-ok {
     margin: 0;
     color: var(--success-text-color, #7ec97e);
 }
 
-.memory-view-validation-list {
+.bundle-view-validation-list {
     margin: 0;
     padding-left: 18px;
     display: flex;
@@ -311,7 +311,7 @@
     gap: 4px;
 }
 
-.memory-view-validation-item {
+.bundle-view-validation-item {
     &.is-error {
         color: var(--error-text-color, #ff8080);
     }
@@ -321,13 +321,13 @@
     }
 }
 
-.memory-view-validation-field {
+.bundle-view-validation-field {
     font-family: var(--mono-font, "JetBrains Mono", monospace);
     font-size: 11px;
     opacity: 0.8;
 }
 
-.memory-view-form-hint {
+.bundle-view-form-hint {
     font-size: 11px;
     color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
     margin: 4px 0 0;
@@ -338,13 +338,13 @@
    BundleProviderInstructionsSection.tsx. Deliberately reuses the existing
    field/input/textarea vars rather than introducing a parallel palette, so the
    section reads as part of the same form rather than a bolted-on panel. */
-.memory-view-provider-instructions {
+.bundle-view-provider-instructions {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-.memory-view-provider-instruction-row {
+.bundle-view-provider-instruction-row {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -353,18 +353,18 @@
     border-radius: 0;
 }
 
-.memory-view-provider-instruction-head {
+.bundle-view-provider-instruction-head {
     display: flex;
     gap: 8px;
     align-items: center;
 
-    .memory-view-input {
+    .bundle-view-input {
         flex: 1;
     }
 }
 
-.memory-view-provider-instruction-remove,
-.memory-view-provider-instruction-add {
+.bundle-view-provider-instruction-remove,
+.bundle-view-provider-instruction-add {
     padding: 4px 10px;
     background: transparent;
     color: var(--secondary-text-color);
@@ -380,20 +380,20 @@
     }
 }
 
-.memory-view-provider-instruction-add {
+.bundle-view-provider-instruction-add {
     align-self: flex-start;
 }
 
 /* Advisory, never blocking — matches the Validate button's posture. The user
    can still save; the key simply will not be exported. */
-.memory-view-provider-instruction-warn,
-.memory-view-provider-instructions-malformed {
+.bundle-view-provider-instruction-warn,
+.bundle-view-provider-instructions-malformed {
     font-size: 12px;
     color: var(--warning-color, #d08770);
     line-height: 1.4;
 }
 
-.memory-view-provider-instructions-malformed {
+.bundle-view-provider-instructions-malformed {
     padding: 8px;
     border: 1px solid var(--warning-color, #d08770);
 }

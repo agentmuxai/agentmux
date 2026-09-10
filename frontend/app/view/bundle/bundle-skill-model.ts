@@ -3,7 +3,7 @@
 
 /**
  * BundleSkillModel — view model for a bundle's Skills section (part of the
- * Bundle editor, memory-manager.tsx). Same shape as AgentSkillModel
+ * Bundle editor, bundle-manager.tsx). Same shape as AgentSkillModel
  * (agent-skill-model.ts) and BundleMcpModel (bundle-mcp-model.ts) — see
  * BundleMcpModel's doc comment for why `addPrivate` is the actually-
  * functional path, not bind/unbind of existing globals.

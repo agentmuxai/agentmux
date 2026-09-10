@@ -77,10 +77,10 @@ export function update(
             };
         }
 
-        case "MemoryChanged": {
-            if (state.form.memoryId === command.memoryId) return { state, events: [] };
+        case "BundleChanged": {
+            if (state.form.bundleId === command.bundleId) return { state, events: [] };
             return {
-                state: { ...state, form: { ...state.form, memoryId: command.memoryId } },
+                state: { ...state, form: { ...state.form, bundleId: command.bundleId } },
                 events: [],
             };
         }
@@ -108,7 +108,7 @@ export function update(
                     // bundle id on an old row → "") is a view concern.
                     name: command.carry?.name ?? "",
                     accountId: command.carry?.accountId ?? "",
-                    memoryId: command.carry?.memoryId ?? "",
+                    bundleId: command.carry?.bundleId ?? "",
                 },
             };
             return { state: next, events: [] };
@@ -144,23 +144,23 @@ export function update(
             };
         }
 
-        case "MemoriesLoading": {
+        case "BundlesLoading": {
             return {
-                state: { ...state, memories: { ...state.memories, loading: true, error: null } },
+                state: { ...state, bundles: { ...state.bundles, loading: true, error: null } },
                 events: [],
             };
         }
 
-        case "MemoriesLoaded": {
+        case "BundlesLoaded": {
             return {
-                state: { ...state, memories: { list: command.list, loading: false, error: null } },
+                state: { ...state, bundles: { list: command.list, loading: false, error: null } },
                 events: [],
             };
         }
 
-        case "MemoriesFailed": {
+        case "BundlesFailed": {
             return {
-                state: { ...state, memories: { ...state.memories, loading: false, error: command.error } },
+                state: { ...state, bundles: { ...state.bundles, loading: false, error: command.error } },
                 events: [],
             };
         }

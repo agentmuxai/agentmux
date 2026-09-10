@@ -18,7 +18,7 @@ let agentsList: any[] = [];
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        GetMemoryCommand: (...args: unknown[]) => getMemory(...args),
+        GetBundleCommand: (...args: unknown[]) => getMemory(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
