@@ -355,11 +355,29 @@ mechanism unspecified. Location *ownership* is the successor requirement.
 
 ### 5.4 One source of truth for components
 
-Resolve §3.4 before extending the format. Either the ref tables become
-authoritative and `export_bundle` reads them, or the inline columns stay
-authoritative and the ref tables are documented as a cache with a sync path.
-Adding `projectInstructions` to a format that already silently drops
-ref-table-bound skills would ship a second instance of the same bug.
+Resolve §3.4 before extending the format. Adding `projectInstructions` to a
+format that already silently drops ref-table-bound skills would ship a second
+instance of the same bug.
+
+**Either option has to close both directions of §3.4, not one.** The two losses
+have different shapes and a fix aimed at one leaves the other standing:
+
+- **Ref tables authoritative.** Pointing `export_bundle` at the ref tables fixes
+  bind-then-export. It does nothing for import-then-launch: all three import
+  paths still write only inline `mcp_servers`, and launch still reads refs, so
+  an imported server stays inert. This option is therefore *three* changes, not
+  one — export reads refs, **imports create the managed rows and bind them**,
+  and existing inline-only data is migrated into refs or it silently disappears
+  from every consumer at once. (Codex, PR #3149.)
+- **Inline columns authoritative.** The ref tables become a cache, which means a
+  sync path on every bind/unbind and a backfill for refs that have no inline
+  counterpart today. Launch would have to read through the same resolution, so
+  this is the larger change to the hot path.
+
+Recommendation: ref-authoritative, because launch is already the consumer that
+matters for correctness at runtime and the ref tables are where the UI writes.
+But it is not the cheap option it looks like from the export side alone, and
+the migration of existing inline-only data is the part to size first.
 
 ### 5.5 Format version debt this inherits
 
@@ -400,11 +418,12 @@ path and a two-way divergence (§3.4). What it leaves behind is no longer a
 question but a fix: reconcile the two stores, or the format grows on top of a
 known-lossy base. Still blocks Phase 3.
 
-**Phase 0b — reconcile components (§5.4).** Either the ref tables become
-authoritative and `export_bundle` reads them, or the inline columns stay
-authoritative and something syncs them on bind/unbind. Sizing this is its own
-exercise; `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` §91-95 deferred exactly
-this decision and named the trigger — "once the new ref tables have shipped and
+**Phase 0b — reconcile components (§5.4).** Whichever store wins, the fix has
+to close both directions: the ref-authoritative option is export-reads-refs
+**plus** imports creating and binding managed rows **plus** a migration of
+existing inline-only data, not just the first of those (Codex, PR #3149).
+`SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` §91-95 deferred exactly this
+decision and named the trigger — "once the new ref tables have shipped and
 proven out" — which has now happened.
 
 **Phase 1 — export symmetry (§5.1).** One constant, one branch, one test. No
