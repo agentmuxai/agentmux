@@ -179,10 +179,20 @@ live only in one version's `objects.db` is exactly that dependency inverted.
 
 ### 5.1 Decision: promote the catalogs and the bindings to the identity store
 
-Six tables move from `run_object_schema` to `run_identity_store_schema` and
-become authoritative there: `db_skills`, `db_mcp_servers`,
-`db_bundle_skills_ref`, `db_bundle_mcp_ref`, `db_agent_skills_ref`,
-`db_agent_mcp_ref`.
+Six tables gain a declaration in `run_identity_store_schema` and become
+authoritative there: `db_skills`, `db_mcp_servers`, `db_bundle_skills_ref`,
+`db_bundle_mcp_ref`, `db_agent_skills_ref`, `db_agent_mcp_ref`.
+
+**They keep their `run_object_schema` declarations.** "Promote" means moving
+where the authoritative row lives, not deleting the local table — the same shape
+the nine already-durable tables use, all of which are still declared in all
+three schemas. This is not redundancy for its own sake: `bootstrap.rs`
+deliberately substitutes `wstore` for `identity_store` when the identity store
+cannot be resolved, created, or opened, so that "a resolution/open failure
+degrades to today's per-channel behavior rather than being fatal." Undeclaring
+the tables would convert that documented degraded path into missing-table errors
+on every catalog and binding call (Codex, PR #3173). The local copies stop being
+written as authoritative; they do not stop existing.
 
 Authoritative, **not** the read-through fallback-mirror pattern `db_accounts`
 uses. That pattern exists for one documented reason — Armory's disposable
@@ -225,16 +235,39 @@ survive) — it only stops the bleeding for bundle components specifically.
 Ordering is the whole design, per §3.3: **catalogs first, then refs, then the
 column retirement.**
 
-Deduplication is the interesting part. 168 skill rows across 30 stores collapse
-to 6, and the same shape applies to MCP servers. Rows must be matched on
-something other than id, since §2.3 establishes ids are not comparable across
-stores — name plus `skill_type` for skills, and the config object for MCP
-servers, matching the multiset-consume identity `bundle_mcp_bind_inline_entries`
-already uses (PR #3152). Ref rows must be rewritten to the surviving id as part
-of the same migration, not left to dangle.
+Deduplication is the interesting part, and it is narrower than it first looks.
+Rows must be matched on something other than id, since §2.3 establishes ids are
+not comparable across stores. **Name is not sufficient, and matching on it would
+destroy data** (Codex, PR #3173).
 
-Doing this now is close to free: nothing on this machine is user-created, so the
-dedup is provably lossless here. That will not stay true.
+`managed_upsert_unique` (`storage/managed.rs`) enforces name uniqueness as
+`name = ?1 AND (is_global = 1 OR id IN (<refs for THIS owner>))` — i.e. **within
+an owner**, not globally. There is no `owner_id` column on `db_skills`;
+ownership is expressed by `is_global = 0` plus a ref row. So two bundles may each
+hold a private skill called `Deploy` with entirely different content, and that is
+a valid state today. Collapsing them on name would discard one payload and leave
+both owners editing the survivor.
+
+The rule is therefore:
+
+- **Seeded globals** (`is_global = 1`, matching a known starter) dedup across
+  stores on name plus `skill_type`. This is the 168 → 6 case, and it is the only
+  case where cross-store collapse is safe, because a global skill is by
+  definition not owned by anyone.
+- **Owner-private rows** (`is_global = 0`) are carried over **without
+  deduplication**, keeping one row per (owner, row) pair and minting a fresh id
+  where two stores' ids collide. Identical content under two owners stays two
+  rows: they are two resources that happen to agree, and merging them creates an
+  edit channel between owners that does not exist today.
+
+Ref rows are rewritten to the surviving id as part of the same migration, never
+left to dangle.
+
+Doing this now is cheaper than it will ever be: on the machine this was verified
+against, every row is a seeded global and nothing is owner-private, so only the
+first bullet has any work to do. **That is a statement about one machine, not a
+claim that the migration is lossless in general** — the second bullet exists
+precisely because other installs will not be so tidy.
 
 ## 6. Non-goals
 
@@ -261,17 +294,35 @@ dedup to the user-created case. Does not satisfy §4 alone (§5.2).
 identity store, with the dedup migration of §5.3. The largest single step and
 the one with real data movement.
 
-**Phase 3 — promote the four ref tables.** Only after Phase 2, per §3.3. Ref
-rows rewritten to surviving catalog ids.
+**Phase 3 — promote the two BUNDLE ref tables.** `db_bundle_skills_ref` and
+`db_bundle_mcp_ref`, only after Phase 2 per §3.3. Ref rows rewritten to surviving
+catalog ids. Safe to do now because the validation these bind paths perform —
+"does this bundle exist" — reads `db_bundles`, which the identity store already
+carries.
 
 **Phase 4 — retire the inline bundle columns.** #3168 rebased; its mechanical
 work (schema/SQL/frontend removal, the `m0031` guard shape, the `map_memory_row`
 pin test) is already written and reviewed.
 
-**Phase 5 — `memory_id` into `DefinitionRecordV1`** (§3.5). Independent of 1–4;
-sequenced last only because it is the smallest.
+**Phase 5 — registry-resolvable agent identity.** `memory_id` into
+`DefinitionRecordV1` (§3.5), **and** agent existence resolved through the
+registry rather than through a local `db_agents` row.
 
-**Phase 6 — memory location invariant.** The former portability Phase 4. Shares
+This is a hard prerequisite of Phase 6, not a nice-to-have, and an earlier
+revision of this spec had the two the wrong way round (Codex, PR #3173). The
+agent bind path validates against `db_agents` **on the same connection as the
+ref table** (`managed_bind_agent`, `storage/managed.rs`), and
+`managed_union_bundle_refs` calls `agent_def_get` on that same store to read
+`memory_id`. The identity store has no `db_agents` — agents are durable via the
+registry, not via a store — so promoting the agent ref tables first would make
+every direct skill/MCP bind error out and every bundle-derived component vanish
+from launch, with the fix for it not arriving until a later phase.
+
+**Phase 6 — promote the two AGENT ref tables.** `db_agent_skills_ref` and
+`db_agent_mcp_ref`, once Phase 5 makes agent identity resolvable from the
+registry.
+
+**Phase 7 — memory location invariant.** The former portability Phase 4. Shares
 §4's invariant but moves files rather than rows, so it keeps its own spec.
 
 ## 8. Open decisions
@@ -282,15 +333,18 @@ sequenced last only because it is the smallest.
    channel-isolation defaults applied elsewhere, and the identity store is the
    one explicitly described as permanently global.
 
-2. **Should `db_agents` follow?** Agent definitions are durable via the global
-   registry rather than via a store, so agent→skill refs would live in a
-   different place from the agents they bind. That is already true of
-   bundle→skill refs today and has not caused a problem, but it is worth
-   deciding deliberately rather than by omission.
+2. **Should `db_agents` be promoted, or should agent identity resolve through
+   the registry?** Phase 5 assumes the latter — agents are already durable via
+   `~/.agentmux/shared/agents`, so adding a second durable home for them
+   invites exactly the two-sources-of-truth problem this spec exists to remove.
+   Against: it means changing `managed_bind_agent`'s validation rather than
+   just relocating a table, which is more code and touches the launch path.
+   This is the one open decision that changes the shape of a phase rather than
+   just its destination.
 
-3. **What happens to rows in the 30 existing `objects.db` files after Phase 2?**
-   Dropping them repeats #3168's mistake if any store has not yet migrated.
-   Leaving them risks a future reader picking the stale copy. Suggest: leave
-   them, stop declaring them in `run_object_schema`, and retire them in a later
-   release once the promotion has demonstrably run everywhere — the same
-   two-release shape #3168 needed and did not get.
+3. ~~What happens to rows in the existing `objects.db` files?~~ **Resolved by
+   §5.1.** The local tables keep their declarations and simply stop being
+   authoritative, so there is nothing to drop and no window in which a store
+   lacks them. This also removes the #3168-shaped trap the question was worried
+   about. Noted rather than deleted because the original framing — "promote
+   means move" — is the intuitive one and is wrong here.
