@@ -4,7 +4,7 @@
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import { findNode } from "./layoutNode";
 import type { Properties as CSSProperties } from "csstype";
-import { createEffect, createMemo, createRoot, createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
 

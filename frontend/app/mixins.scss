@@ -114,6 +114,17 @@
         }
 
         @keyframes term-activity-flash {
+            // ONE deliberate deviation from the verbatim block.scss
+            // extraction (ReAgent P2 on the PR that moved this): the
+            // original read `var(--accent-color, #6c9ef8)`. block.scss is
+            // grandfathered in .stylelintignore for its pre-existing raw
+            // hex; mixins.scss is not, so carrying the literal here would
+            // newly fail `color-no-hex`. Dropping it is safe rather than a
+            // silent behavior change: `--accent-color` is defined
+            // unconditionally in theme.scss (and overridden, never unset,
+            // by every file in themes/), so the fallback arm was
+            // unreachable. Restore it only alongside a .stylelintignore
+            // entry if that ever stops being true.
             0%   { opacity: 1; color: var(--accent-color); }
             100% { opacity: 0.6; color: inherit; }
         }

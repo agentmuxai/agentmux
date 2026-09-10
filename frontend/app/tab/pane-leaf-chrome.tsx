@@ -24,14 +24,14 @@ import { createMemo, Show, type JSX } from "solid-js";
  * When the active member's EFFECTIVE view type (`resolveEffectiveViewType`
  * — the same migration/rename redirects `block.tsx`'s own `makeViewModel`
  * applies, so a still-live "forge" block routes through this too) is
- * `"agent"` AND this leaf's stack has ever had 2+ members
- * (`NodeModel.hasEverBeenMultiMember`), wraps that `<Block>` in the
- * currently-active `ViewModel`'s own `renderPaneChrome` — a stable outer
- * shell (tab strip, progress-bar slot) that survives every subsequent
- * switch, instead of `BlockFrame`'s own per-switch-remounting header.
- * Every other case (another view type, or an agent pane that's never gone
- * multi-member) falls through to the bare `content` below — zero behavior
- * change for those, matching what `<Block>` alone already did.
+ * `"agent"`, wraps that `<Block>` in the currently-active `ViewModel`'s own
+ * `renderPaneChrome` — a stable outer shell (header, tab strip,
+ * progress-bar slot) that survives every subsequent switch, instead of
+ * `BlockFrame`'s own per-switch-remounting header. Every agent pane, not
+ * just already-stacked ones; see the `hoisted` memo below for why gating
+ * that on stack size was a catch-22. Any other view type falls through to
+ * the bare `content` below — zero behavior change for those, matching what
+ * `<Block>` alone already did.
  */
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;

@@ -164,15 +164,13 @@ const sanitizeLogTextForTerminal = (text: string): string => {
  * like every other `viewComponent` — the "one instance, one immutable
  * blockId for its lifetime" `ViewModel` contract is unchanged here.
  *
- * The pane-scope `<ModalLayer>` wrap lives HERE, not in `AgentPaneChrome` —
- * `AgentPaneChrome` only mounts once this leaf's stack has ever had 2+
- * members (`NodeModel.hasEverBeenMultiMember`), but the launch picker
- * (`useModalLayer()`, opened before any agentId exists) must work on the
- * ordinary, never-stacked pane too — the overwhelmingly common case. If the
- * layer instead wrapped only chrome, most panes would have no pane-scope
- * modal layer at all and every first-launch/template-launch call site would
- * resolve `useModalLayer()` to the outer tab-scope layer, inerting the
- * whole tab instead of just this pane. Wrapping here covers both the
+ * The pane-scope `<ModalLayer>` wrap lives HERE, not in `AgentPaneChrome`.
+ * Chrome does now mount for every agent pane, so this is no longer
+ * load-bearing the way it was when chrome was stack-size-gated — but it
+ * stays here deliberately: the launch picker (`useModalLayer()`, opened
+ * before any agentId exists) belongs to CONTENT, so wrapping at the content
+ * root keeps the layer's lifetime tied to the thing that opens modals
+ * rather than to chrome. Wrapping here covers both the
  * pre-launch picker AND the post-launch presentation view, and (once
  * `AgentPaneChrome` does mount) sits inside it, so the pane-scope lock
  * still holds across the entire pane lifecycle either way.
@@ -323,27 +321,26 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
 AgentBlockContent.displayName = "AgentBlockContent";
 
 /**
- * Chrome half of the agent pane — the tab strip and progress-bar slot,
- * rendered via `AgentViewModel.renderPaneChrome` once this leaf's stack has
- * ever had 2+ members (`NodeModel.hasEverBeenMultiMember`), wrapping
- * whichever `AgentBlockContent` instance is currently the active stack
- * member's own switch-scoped `<Block>` (`content` prop, supplied by
- * `pane-leaf-chrome.tsx`). Unlike `AgentBlockContent`, this component is
+ * Chrome half of the agent pane — the header, tab strip and progress-bar
+ * slot, rendered via `AgentViewModel.renderPaneChrome` for EVERY agent pane
+ * (see `pane-leaf-chrome.tsx`'s `hoisted` memo for why gating this on stack
+ * size was a catch-22), wrapping whichever `AgentBlockContent` instance is
+ * currently the active stack member's own switch-scoped `<Block>`
+ * (`content` prop, supplied by `pane-leaf-chrome.tsx`). Unlike `AgentBlockContent`, this component is
  * constructed ONCE per leaf and stays mounted across every subsequent
  * switch — that persistence is the entire point of this file's split
  * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`).
  *
  * `anchorBlockId` is the blockId of whichever stack member's `ViewModel`
- * FIRST called `renderPaneChrome` (i.e. the 1→2-member transition) — frozen
- * for this component's entire lifetime, the same "one instance, one
- * immutable blockId" contract every other `ViewModel`/`NodeModel` consumer
- * already follows. It is NOT used to resolve the owning `LayoutNode`,
- * though — ReAgent P0 on this PR: `anchorBlockId` can itself be closed by
- * the user (removed from `blockStack` by `closeBlockInStack`'s `filter`),
- * and `hasEverBeenMultiMember` is monotonic, so `AgentPaneChrome` never
- * unmounts to recover — a `getNodeByBlockId(anchorBlockId)` lookup that
- * outlives that tab's closure would return `null` forever after, breaking
- * the whole tab strip. Node resolution uses `nodeModel.nodeId` instead
+ * FIRST called `renderPaneChrome` — frozen for this component's entire
+ * lifetime, the same "one instance, one immutable blockId" contract every
+ * other `ViewModel`/`NodeModel` consumer already follows. It is NOT used to
+ * resolve the owning `LayoutNode`, though — ReAgent P0 on #3136:
+ * `anchorBlockId` can itself be closed by the user (removed from
+ * `blockStack` by `closeBlockInStack`'s `filter`), and chrome never unmounts
+ * to recover — a `getNodeByBlockId(anchorBlockId)` lookup that outlives that
+ * tab's closure would return `null` forever after, breaking the whole tab
+ * strip. Node resolution uses `nodeModel.nodeId` instead
  * (`getOwnNode`, below) — the leaf's own id, stable regardless of which
  * stack members come and go.
  */
@@ -361,8 +358,8 @@ export const AgentPaneChrome = (props: {
     // originating tab — breaks permanently the moment the user closes THAT
     // specific tab: closeBlockInStack removes a closed member from
     // blockStack via filter, so getNodeByBlockId(anchorBlockId) would
-    // return null forever after (hasEverBeenMultiMember is monotonic, so
-    // AgentPaneChrome never unmounts to recover). The leaf's own nodeId
+    // return null forever after (chrome never unmounts to recover once
+    // mounted). The leaf's own nodeId
     // (NodeModel.nodeId) is stable regardless of which stack members come
     // and go — resolve on that instead, everywhere in this component.
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
@@ -386,7 +383,7 @@ export const AgentPaneChrome = (props: {
     // BlockFrame's own inline header once hoisted, but nothing was
     // rendering a REPLACEMENT — losing the pane's title, Stash, and
     // minimize/magnify/close controls permanently the moment a leaf's
-    // stack first went multi-member. BlockFrame_Header (exported from
+    // pane went agent-typed at all. BlockFrame_Header (exported from
     // blockframe.tsx specifically for this — see PR #3134's own doc
     // comments) is reused directly here rather than reimplemented, reading
     // the reactive `activeBlockId` accessor above instead of a frozen
@@ -554,10 +551,11 @@ export const AgentPaneChrome = (props: {
             // node.data.blockStack.length > 1 (otherwise `stack` above is
             // just [activeBlockId()], and targetBlockId !== activeBlockId()
             // already ruled out targetBlockId matching it) — the
-            // exact same precondition NodeModel.hasEverBeenMultiMember()
-            // latches on. AgentPaneChrome only exists in the DOM at all
-            // once that's true, so by the time a human can click a second
-            // pill, chrome is already hoisted and stable by construction.
+            // precondition for a second pill to exist to click at all.
+            // AgentPaneChrome is mounted for the whole pane's life and
+            // never remounts on a switch, so there is nothing for a gate to
+            // hide: only the inner <Block> rebuilds, and that is already
+            // covered by its own ready-gate cross-fade.
             // See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
             setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         } else {
@@ -638,9 +636,10 @@ export const AgentPaneChrome = (props: {
     // already had >=2 members (closeBlockInStack's own stack.length<=1
     // check delegates to a full closeNode otherwise, a different, already
     // ungated path), which is the same precondition
-    // NodeModel.hasEverBeenMultiMember() latches on — that node's own
-    // AgentPaneChrome (if this is an agent pane) is already hoisted and
-    // stable by construction. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
+    // required for a closable pill to exist at all — and that node's own
+    // AgentPaneChrome (if it's an agent pane) is mounted for the pane's
+    // whole life and never remounts on a switch, so a gate would only hide
+    // content already covered by its own ready-gate cross-fade. See SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
     const handleTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(targetBlockId);
         if (!node) return;
@@ -776,12 +775,11 @@ export const AgentPaneChrome = (props: {
                     underneath the rest of this row — unobstructed except
                     for wherever a real tab or the "+" actually sits. The
                     tab pill itself stays hidden until there's something to
-                    switch BETWEEN (see visibleTabs above); AgentPaneChrome
-                    itself doesn't mount at all until hasEverBeenMultiMember(),
-                    so the "fresh pane, no strip at all" case (picker
-                    showing, no agent launched yet) is simply the passthrough
-                    branch in pane-leaf-chrome.tsx, not a state this
-                    component needs to represent. The "+" comes back the
+                    switch BETWEEN (see visibleTabs above), and the whole
+                    strip — "+" included — is hidden on a fresh pane with no
+                    agent launched yet (shouldShowTabStrip). Chrome itself
+                    mounts for every agent pane regardless; this Show is what
+                    represents the no-strip state. The "+" comes back the
                     moment the pane is a real conversation; see
                     shouldShowTabStrip for why a 2nd blank tab still keeps
                     the strip up. */}
