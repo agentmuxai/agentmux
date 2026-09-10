@@ -870,7 +870,7 @@
     }
 
     #[test]
-    fn test_global_brain_order_and_format() {
+    fn test_global_bundle_order_and_format() {
         let store = make_store();
 
         let mk = |id: &str, name: &str, order: i64| Bundle {
@@ -923,7 +923,7 @@
         assert_eq!(g[0].sort_order, 0, "sort_order owned by reorder, not upsert");
 
         // The injection block carries [Workspace] headings in order.
-        let block = super::super::format_global_brain_block(&g);
+        let block = super::super::format_global_bundle_block(&g);
         let expected = "# [Workspace] Alpha\n\nedited\n\n---\n\n# [Workspace] Beta\n\nrules for Beta";
         assert_eq!(block, expected);
     }
@@ -956,7 +956,7 @@
     /// verify `bundle_upsert_system` hardcodes all three regardless
     /// of what the caller's `Bundle` struct set them to. Callers that need
     /// a struct which already correctly *represents* a system entry (e.g.
-    /// to feed `format_global_brain_block` directly, bypassing storage)
+    /// to feed `format_global_bundle_block` directly, bypassing storage)
     /// should override `is_system` via struct-update syntax.
     fn mk_system(id: &str, name: &str) -> Bundle {
         Bundle {
@@ -1068,14 +1068,14 @@
 
     #[test]
     fn format_global_brain_block_puts_system_first_with_override_preamble() {
-        // format_global_brain_block reads each Bundle's own is_system field
+        // format_global_bundle_block reads each Bundle's own is_system field
         // directly (it doesn't go through storage) — unlike mk_system's
         // deliberately-wrong default (see its own doc comment), this needs
         // a struct that actually represents a system entry.
         let sys = Bundle { is_system: true, ..mk_system("sys-1", "Policy") };
         let ord = mk_ordinary("g-a", "Alpha", 0);
 
-        let mixed = super::super::format_global_brain_block(&[sys.clone(), ord.clone()]);
+        let mixed = super::super::format_global_bundle_block(&[sys.clone(), ord.clone()]);
         assert!(mixed.starts_with("IMPORTANT: The following AgentMux-controlled instructions"));
         assert!(mixed.contains("# [AgentMux System] Policy"));
         assert!(mixed.contains("# [Workspace] Alpha"));
@@ -1084,15 +1084,15 @@
         // Exactly one override preamble even with a single system entry.
         assert_eq!(mixed.matches("HIGHEST PRIORITY").count(), 1);
 
-        let system_only = super::super::format_global_brain_block(&[sys.clone()]);
+        let system_only = super::super::format_global_bundle_block(&[sys.clone()]);
         assert!(system_only.starts_with("IMPORTANT:"));
         assert!(!system_only.contains("[Workspace]"));
 
-        let ordinary_only = super::super::format_global_brain_block(&[ord.clone()]);
+        let ordinary_only = super::super::format_global_bundle_block(&[ord.clone()]);
         assert!(!ordinary_only.contains("IMPORTANT:"));
         assert!(ordinary_only.starts_with("# [Workspace] Alpha"));
 
-        let empty = super::super::format_global_brain_block(&[]);
+        let empty = super::super::format_global_bundle_block(&[]);
         assert_eq!(empty, "");
     }
 

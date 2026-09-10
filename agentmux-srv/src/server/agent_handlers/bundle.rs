@@ -13,7 +13,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
-    CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBrainData,
+    CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
 };
 use crate::backend::storage::store::Bundle;
 
@@ -132,7 +132,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                let cmd: CommandReorderGlobalBrainData = serde_json::from_value(data)
+                let cmd: CommandReorderGlobalBundlesData = serde_json::from_value(data)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
                 let updated = wstore
                     .bundle_reorder(&cmd.ids)

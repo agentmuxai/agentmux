@@ -224,7 +224,7 @@ pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
 pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
-/// v9 — set the global-brain section order. `ids` is the full ordered list
+/// v9 — set the global-bundle section order. `ids` is the full ordered list
 /// of global bundle ids; each row's `sort_order` becomes its index.
 pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
 /// v27 — the ONLY commands that can write `db_bundles.is_system=1`. See
