@@ -55,7 +55,6 @@ import {
     type NodeModel,
 } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createSignalAtom, sleep } from "@/util/util";
@@ -576,11 +575,18 @@ export const AgentPaneChrome = (props: {
     const handleNewAgentTab = async (): Promise<void> => {
         const initialNode = getOwnNode();
         if (!initialNode) return;
-        // Hide this pane while the new tab settles — pane.open's RPC round
-        // trip plus pushBlockOntoStack's forced remount (layoutStack.ts's
-        // own doc comment) is exactly the piecemeal-paint flicker
-        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addresses.
-        const revealGen = holdLeafRevealGate(initialNode.id);
+        // No leaf reveal gate. It used to hide this pane while the new tab
+        // settled, because pushBlockOntoStack forced a WHOLE-LEAF remount
+        // (chrome included) and the piecemeal repaint of that was the
+        // flicker SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addressed.
+        // That remount no longer happens — pane-leaf-chrome.tsx's inner
+        // <Key> rebuilds only the active member's own <Block>, and this
+        // component (header + strip) stays mounted throughout. Keeping the
+        // gate actively CAUSED the remaining flash the repo owner saw on
+        // "+": gatingNodeIds() hides the whole node, so chrome itself
+        // blinked out and back even though nothing about it was rebuilding.
+        // The content area's own settle is already covered by Block's
+        // ready-gate BrainSpinner cross-fade (block.tsx).
         try {
             let paneOpenResult: { block_id: string };
             try {
@@ -611,11 +617,11 @@ export const AgentPaneChrome = (props: {
                 return;
             }
             pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
-        } finally {
-            // Pair with holdLeafRevealGate above — runs on every exit path
-            // (success, RPC failure, pane-closed-mid-flight) so the leaf
-            // never stays hidden forever.
-            scheduleLeafRevealLift(initialNode.id, revealGen);
+        } catch (e: unknown) {
+            // The try/finally this replaced existed only to lift the reveal
+            // gate on every exit path; with no gate to lift, an unexpected
+            // throw would otherwise vanish silently.
+            console.error("handleNewAgentTab failed", e);
         }
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
