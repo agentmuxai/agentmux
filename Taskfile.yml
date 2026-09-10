@@ -19,7 +19,11 @@ vars:
     DATE: '{{if eq OS "windows"}}pwsh -Command Get-Date -UFormat{{else}}date{{end}}'
     ARTIFACTS_BUCKET: agentmux-github-artifacts/staging
     RELEASES_BUCKET: dl.agentmux.ai/releases
-    WINGET_PACKAGE: AgentMux.AgentMux
+    # WinGet PackageIdentifier — distinct from the already-published MSIX/Store
+    # identity (AgentMux.AgentMux, Store ID 9P9QCXNNCRK3). Never submitted to
+    # winget-pkgs yet, so free to pick; see
+    # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md.
+    WINGET_PACKAGE: AgentMux.AI
 
 tasks:
     changeset:
