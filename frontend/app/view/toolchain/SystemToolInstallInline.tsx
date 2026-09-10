@@ -166,7 +166,18 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
         const onToggle = () => {
             if (el.open && stickToBottom && logBodyRef) {
                 requestAnimationFrame(() => {
-                    if (logBodyRef && logBodyRef.isConnected) {
+                    // Re-check `stickToBottom`, not just at schedule time:
+                    // the user can scroll away (onLogScroll flips it false)
+                    // in the gap between this frame being queued and
+                    // executing — codex P2 on PR #3165. Without this recheck,
+                    // an already-queued frame still forces the view back to
+                    // the bottom out from under a scroll that was trying to
+                    // escape it, and the resulting programmatic scrollTop
+                    // write itself re-triggers onLogScroll, which can then
+                    // read as "still at the bottom" and silently re-arm
+                    // stickToBottom — exactly the yank this component exists
+                    // to prevent.
+                    if (stickToBottom && logBodyRef && logBodyRef.isConnected) {
                         logBodyRef.scrollTop = logBodyRef.scrollHeight;
                     }
                 });
@@ -184,7 +195,9 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
             // Wait one frame for the DOM to flush before measuring —
             // mirrors ToolOverlayLog.tsx's own effect.
             requestAnimationFrame(() => {
-                if (logBodyRef && logBodyRef.isConnected) {
+                // Re-check `stickToBottom` at execution time — see the
+                // identical comment in bindDetailsToggle's onToggle above.
+                if (stickToBottom && logBodyRef && logBodyRef.isConnected) {
                     logBodyRef.scrollTop = logBodyRef.scrollHeight;
                 }
             });

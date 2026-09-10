@@ -260,6 +260,53 @@ describe("SystemToolInstallInline — Details auto-scroll (SPEC_SYSTEM_TOOL_INST
         expect(pre.scrollTop).toBe(0);
     });
 
+    it("does not force-scroll if the user scrolls away in the gap between a scheduled frame and its execution (codex P2, PR #3165)", async () => {
+        // A plain `fireEvent.scroll` + waiting for the real rAF to fire
+        // can't reliably land IN that gap — the frame may already have run
+        // by the time the scroll event is dispatched. Stub
+        // requestAnimationFrame to capture (not auto-run) the callback, so
+        // the scroll-away can be forced to land strictly between
+        // scheduling and execution, deterministically.
+        const rafCallbacks: FrameRequestCallback[] = [];
+        const rafSpy = vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
+            rafCallbacks.push(cb);
+            return rafCallbacks.length;
+        });
+        try {
+            stubClientHeight(50);
+            stubScrollHeight(200);
+            const { pre } = await startInstalling();
+            // The log-lines effect also runs once, unconditionally, on its
+            // own initial setup (Solid effects fire at least once
+            // immediately) — so a frame is already queued from mount
+            // before this test's own chunk arrives. Measure the delta,
+            // not an absolute count.
+            const callsBeforeChunk = rafCallbacks.length;
+            pre.scrollTop = 200; // at the bottom
+
+            // Line arrives while at the bottom — schedules (but, per the
+            // stub, does not yet run) another auto-scroll frame.
+            chunkHandler!({ data: { line: "line 1", stream: "stdout" } });
+            expect(rafCallbacks.length).toBe(callsBeforeChunk + 1);
+
+            // User scrolls away BEFORE that frame executes.
+            pre.scrollTop = 0;
+            fireEvent.scroll(pre);
+
+            // Now let the newly-queued frame run.
+            rafCallbacks[rafCallbacks.length - 1](0);
+            expect(pre.scrollTop).toBe(0); // must NOT have been yanked back to the bottom
+        } finally {
+            // A leaked requestAnimationFrame stub — e.g. if an assertion
+            // above throws before reaching an unconditional restore —
+            // silently breaks every later test in this file that depends
+            // on a real rAF actually firing, with no direct link back to
+            // this test in the failure output. Cost real debugging time
+            // once already; `finally` makes that impossible to repeat.
+            rafSpy.mockRestore();
+        }
+    });
+
     it("resumes auto-scroll once the user scrolls back within the forgiving threshold", async () => {
         stubClientHeight(50);
         const scrollStub = stubScrollHeight(200);
