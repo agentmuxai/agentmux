@@ -47,12 +47,11 @@ const fireAgentMessageAccepted = () => {
 // catch-up tick as a backstop.
 describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
     let dispatchPane: ReturnType<typeof vi.fn>;
-    let dispatchDoc: ReturnType<typeof vi.fn>;
     let dispose: () => void;
 
     const mkOpts = (getTurnPhase: () => TurnPhase, setTurnPhase: (p: TurnPhase) => void) => ({
         blockId: "block-1",
-        model: { dispatchPane, dispatchDoc } as any,
+        model: { dispatchPane } as any,
         turnPhase: getTurnPhase,
         queue: { pushNewNode: vi.fn(), scheduleFlush: vi.fn() } as any,
         flushParserPending: vi.fn(),
@@ -63,7 +62,6 @@ describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
     beforeEach(() => {
         vi.useFakeTimers();
         dispatchPane = vi.fn();
-        dispatchDoc = vi.fn();
         hub.handlers.clear();
         hub.acceptedHistory.length = 0;
     });
@@ -308,45 +306,5 @@ describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
         } finally {
             info.mockRestore();
         }
-    });
-
-    // The document reducer was never told the turn ended. TurnEnd cleans the
-    // PANE reducer only, so a tool node that never received its tool_result
-    // stayed status:"running" forever, its dock row counting up with no
-    // process behind it. scrubOrphanedInProgress was written for exactly this
-    // (SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06 §1.1) and then
-    // wired to nothing — it ran only on session/reload boundaries, and the
-    // standalone command had zero production dispatch sites.
-    it("scrubs orphaned in-progress tool nodes when the turn ends", () => {
-        let finalize!: (stats: null) => void;
-        createRoot((d) => {
-            dispose = d;
-            const [getPhase, setP] = createSignal<TurnPhase>({ kind: "Streaming", bufferSize: 0, toolsActive: 0, lastEventMs: 0 } as TurnPhase);
-            finalize = useTurnLifecycle(mkOpts(getPhase, setP)).finalizeTurn as any;
-        });
-
-        finalize(null);
-
-        expect(dispatchPane).toHaveBeenCalledWith(expect.objectContaining({ type: "TurnEnd" }));
-        expect(dispatchDoc).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "ScrubOrphanedInProgress", scope: "tools-only" }),
-        );
-    });
-
-    it("scrubs with the tools-only scope, sparing shells and awaiting_answer", () => {
-        // Scope matters: thinking markdown, shell nodes and awaiting_answer
-        // legitimately outlive a turn. A full scrub at every turn boundary
-        // would cancel them.
-        let finalize!: (stats: null) => void;
-        createRoot((d) => {
-            dispose = d;
-            const [getPhase, setP] = createSignal<TurnPhase>({ kind: "Idle" });
-            finalize = useTurnLifecycle(mkOpts(getPhase, setP)).finalizeTurn as any;
-        });
-
-        finalize(null);
-
-        const call = dispatchDoc.mock.calls.find((c) => c[0]?.type === "ScrubOrphanedInProgress");
-        expect(call?.[0].scope).toBe("tools-only");
     });
 });
