@@ -243,6 +243,33 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// Purge every bundle-level ref for `bundle_id`, for one resource kind.
+    ///
+    /// The mirror of `managed_delete`'s ref purge, from the other side: that
+    /// one runs when a catalog row goes away, this one when a bundle does.
+    /// Neither can rely on the declared foreign keys, which only cascade when
+    /// `PRAGMA foreign_keys` is ON — and it is only ever set in tests. The
+    /// bundle side additionally *cannot* have an enforcing FK at all, since
+    /// `db_bundles` lives in a different physical database from the ref tables
+    /// (`migrations.rs:721-741`).
+    ///
+    /// Returns the number of refs removed.
+    pub(super) fn managed_unbind_all_for_bundle<R: ManagedResource>(
+        &self,
+        bundle_id: &str,
+    ) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            &format!(
+                "DELETE FROM {} WHERE {} = ?1",
+                R::BUNDLE_REF_TABLE,
+                Owner::Bundle.key_col()
+            ),
+            params![bundle_id],
+        )?;
+        Ok(rows)
+    }
+
     /// Insert the agent-level ref (idempotent). Errors if `agent_id` is not
     /// a LOCAL agent: the ref table's FK would otherwise swallow
     /// the `INSERT OR IGNORE` silently for a cross-channel agent, which is

@@ -48,7 +48,7 @@ mod pane;
 mod blockfile;
 pub(crate) mod session;
 mod identity;
-mod bundle;
+pub(crate) mod bundle;
 mod memory;
 mod skill;
 mod mcp;
@@ -791,11 +791,52 @@ pub(crate) async fn bundle_get_impl(
 /// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
 /// Armory editor's "Validate" button can check an unsaved draft (including a
 /// brand-new bundle with no id yet) rather than only whatever was last
-/// persisted. Read-only: never touches the Store.
-pub(crate) fn bundle_validate_impl(data: serde_json::Value) -> Result<serde_json::Value, String> {
+/// persisted.
+///
+/// Reads the bundle's bound MCP servers when the draft names a persisted
+/// bundle. Before Phase 0b this was fully store-free and validated the inline
+/// `mcp_servers` column; the ref tables are authoritative now, so validating
+/// that column would report on data nothing else consumes
+/// (`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4). An unsaved
+/// draft has no bindings, so it is still checked without touching the store.
+pub(crate) fn bundle_validate_impl(
+    wstore: &crate::backend::storage::store::Store,
+    data: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
-    let report = crate::backend::bundle_validate::validate_bundle(&memory);
+    let (mcp_entries, resolve_warnings) = if memory.id.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        // A store failure must NOT read as "this bundle has no components":
+        // that would return a clean, apparently-successful report for a check
+        // that never ran (Codex, PR #3153). The UI is built to show a failed
+        // validate; give it one.
+        let resolved = bundle::resolve_bundle_components(wstore, &memory.id)
+            .map_err(|e| format!("bundle.validate: {e}"))?;
+        (resolved.mcp_entries, resolved.warnings)
+    };
+    let mut report = crate::backend::bundle_validate::validate_bundle(&memory, &mcp_entries);
+
+    // The resolver drops a bound server whose config will not parse, and says
+    // so in a warning. Discarding that left the validator reporting `is_valid`
+    // for exactly the malformed component it exists to catch (Codex, PR
+    // #3153) — the entry is absent from `mcp_entries`, so nothing downstream
+    // could see it. Surface each as an error: unlike a duplicate name, an
+    // unusable config is not a stylistic warning, it is a component that will
+    // not load.
+    for w in resolve_warnings {
+        report.issues.push(crate::backend::bundle_validate::ValidationIssue {
+            severity: crate::backend::bundle_validate::IssueSeverity::Error,
+            field: "mcp_servers".to_string(),
+            message: w,
+        });
+    }
+    report.is_valid = !report
+        .issues
+        .iter()
+        .any(|i| i.severity == crate::backend::bundle_validate::IssueSeverity::Error);
+
     serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 

@@ -107,9 +107,12 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
 }
 
-fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
-    let handler: crate::backend::rpc::engine::CommandHandler =
-        Box::new(move |data, _ctx| Box::pin(async move { Ok(Some(bundle_validate_impl(data)?)) }));
+fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
+        let wstore = wstore.clone();
+        Box::pin(async move { Ok(Some(bundle_validate_impl(&wstore, data)?)) })
+    });
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
@@ -275,9 +278,11 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
+        let wstore = state.wstore.clone();
         let broker = state.broker.clone();
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -292,6 +297,7 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 match id_store.bundle_delete(&req.id) {
                     Ok(deleted) => {
                         if deleted {
+                            purge_bundle_component_refs(&wstore, &req.id);
                             broker.publish(crate::backend::wps::WaveEvent {
                                 event: "memories:changed".to_string(),
                                 scopes: vec![], sender: String::new(), persist: 0, data: None,
@@ -428,6 +434,37 @@ fn bundle_export_impl(
     Ok(result)
 }
 
+/// Drop a deleted bundle's component refs.
+///
+/// Called from **both** delete paths — `bundle.delete` here and `deletememory`
+/// in `agent_handlers/bundle.rs`, which is the one the Armory actually calls.
+/// Fixing only the first left the product path orphaning refs (Codex, PR
+/// #3153), so this exists to make "both" mean one implementation.
+///
+/// `bundle_delete` runs on the store that owns `db_bundles`, which has no ref
+/// tables — they sit beside the catalog tables they key into, in the other
+/// database, which is also why no foreign key reaches across
+/// (`migrations.rs:721-741`). So the purge cannot live inside it and has to be
+/// driven from a handler, where both stores are in scope.
+///
+/// Best-effort by design: the bundle row is already gone by the time this
+/// runs, so a failure here must not turn a successful delete into an error.
+pub(crate) fn purge_bundle_component_refs(
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) {
+    match wstore.bundle_unbind_all_components(bundle_id) {
+        Ok((skills, mcp)) if skills + mcp > 0 => {
+            tracing::info!(bundle_id, skills, mcp, "bundle delete: purged component refs")
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(
+            bundle_id, error = %e,
+            "bundle delete: component refs left behind"
+        ),
+    }
+}
+
 /// Bind an imported bundle's components into the ref tables.
 ///
 /// Phase 0b. The ref tables are authoritative for what a bundle contains, so
@@ -471,12 +508,12 @@ fn bind_imported_components(
 
 /// A bundle's components, resolved from the tables that are authoritative for
 /// them.
-struct ResolvedComponents {
-    skills: Vec<crate::backend::storage::Skill>,
+pub(super) struct ResolvedComponents {
+    pub(super) skills: Vec<crate::backend::storage::Skill>,
     /// Exporter entry shape: each server's config object with its `name`
     /// alongside, which is what `bundle_export::redact_mcp_entry` reads.
-    mcp_entries: Vec<serde_json::Value>,
-    warnings: Vec<String>,
+    pub(super) mcp_entries: Vec<serde_json::Value>,
+    pub(super) warnings: Vec<String>,
 }
 
 /// Resolve what a bundle actually contains, from `db_bundle_skills_ref` /
@@ -503,7 +540,7 @@ struct ResolvedComponents {
 /// `mcp_server_delete` both purge refs (`storage/managed.rs:232`), so that
 /// state is not reachable through the app — but the FK that would enforce it
 /// is inert, since `PRAGMA foreign_keys` is only ever set ON in tests.
-fn resolve_bundle_components(
+pub(super) fn resolve_bundle_components(
     wstore: &crate::backend::storage::store::Store,
     bundle_id: &str,
 ) -> Result<ResolvedComponents, String> {
@@ -3116,6 +3153,69 @@ mod export_import_for_agent_tests {
             .unwrap();
         let content = server_file["content"].as_str().unwrap();
         assert!(!content.contains("tok"), "secret must not survive export: {content}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_bundle_takes_its_component_refs_with_it() {
+        // No FK reaches from the ref tables to db_bundles — they live in
+        // different physical databases — so nothing else removes these, and a
+        // later bundle reusing the id would inherit components nobody chose.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_skill(&state, "bundle-1", "Deploy");
+        bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp"}"#);
+
+        let before = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert_eq!(before.skills.len(), 1);
+        assert_eq!(before.mcp_entries.len(), 1);
+
+        assert!(state.id_store.bundle_delete("bundle-1").unwrap());
+        // Through the shared helper both delete RPCs call — `bundle.delete`
+        // here and `deletememory`, the one the Armory actually uses. Fixing
+        // only one left the product path orphaning refs (Codex, PR #3153).
+        purge_bundle_component_refs(&state.wstore, "bundle-1");
+        let (skills, mcp) = state.wstore.bundle_unbind_all_components("bundle-1").unwrap();
+        assert_eq!(
+            (skills, mcp), (0, 0),
+            "the purge must have already removed both refs"
+        );
+
+        // Re-create a bundle with the same id: it must start empty.
+        make_bundle(&state, "bundle-1", "Reused id.");
+        let after = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(
+            after.skills.is_empty() && after.mcp_entries.is_empty(),
+            "a reused bundle id must not inherit the old bundle's components"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_reports_a_malformed_bound_component_instead_of_passing() {
+        // Codex on #3153: the resolver drops a bound server whose config will
+        // not parse and says so in a warning. Discarding that left validate
+        // reporting is_valid for exactly the component it exists to catch —
+        // the entry is absent from the resolved list, so nothing downstream
+        // could have seen it.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_mcp(&state, "bundle-1", "broken", "not json at all");
+
+        let report = crate::server::app_api::bundle_validate_impl(
+            &state.wstore,
+            json!({ "id": "bundle-1", "name": "Bundle bundle-1" }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report["is_valid"], json!(false),
+            "a bound component that cannot load must not validate clean: {report}"
+        );
+        let issues = report["issues"].as_array().unwrap();
+        assert!(
+            issues.iter().any(|i| i["field"] == "mcp_servers"
+                && i["message"].as_str().unwrap_or("").contains("broken")),
+            "the issue must name the server: {issues:?}"
+        );
     }
 
     #[tokio::test]

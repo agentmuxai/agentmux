@@ -78,6 +78,23 @@ impl McpServer {
 }
 
 impl Store {
+    /// Drop every skill and MCP ref belonging to `bundle_id`.
+    ///
+    /// Call after deleting the bundle itself. `bundle_delete` lives on the
+    /// store that owns `db_bundles`, which does not have the ref tables at all
+    /// — they sit beside the catalog tables they key into — so the cleanup
+    /// cannot happen inside it and has to be driven from the handler, where
+    /// both stores are in scope. Without it a deleted bundle leaves its refs
+    /// behind, and a future bundle reusing that id would inherit them.
+    ///
+    /// Returns `(skill_refs_removed, mcp_refs_removed)`.
+    pub fn bundle_unbind_all_components(&self, bundle_id: &str) -> Result<(usize, usize), StoreError> {
+        let skills = self
+            .managed_unbind_all_for_bundle::<super::skills::Skill>(bundle_id)?;
+        let mcp = self.managed_unbind_all_for_bundle::<McpServer>(bundle_id)?;
+        Ok((skills, mcp))
+    }
+
     /// Create and bind a bundle's inline MCP entries, preserving duplicates.
     ///
     /// The one path from "a list of inline config objects" to "rows bound to
