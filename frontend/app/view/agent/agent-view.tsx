@@ -75,7 +75,7 @@ import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
 import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
 import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentView";
 import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
-import { AgentPicker, useAgentDefinitions, useOpenDefinitionMap } from "./components/AgentPicker";
+import { AgentPicker, useOpenDefinitionMap } from "./components/AgentPicker";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentShellSubblock } from "./components/AgentShellSubblock";
@@ -247,7 +247,13 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
         }
     });
 
-    const [agentDefinitions] = useAgentDefinitions();
+    // ReAgent P2 on SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's
+    // PR: owned by the model (one useAgentDefinitions() subscription per
+    // ViewModel instance) instead of a fresh call here, so AgentPaneChrome
+    // can read the SAME list via nodeModel.activeViewModel() instead of
+    // independently subscribing a second time — see AgentViewModel.agentDefinitions'
+    // own doc comment (agent-model.ts).
+    const agentDefinitions = model.agentDefinitions;
 
     return (
         <ModalLayer scope="pane">
@@ -439,8 +445,13 @@ export const AgentPaneChrome = (props: {
     //    additional pills, deduped against the stack by blockId, so
     //    cross-pane fork-switching keeps working.
     const [openDefinitions] = useOpenDefinitionMap();
+    // ReAgent P2: reads the active ViewModel's OWN agentDefinitions
+    // (agent-model.ts) instead of calling useAgentDefinitions() again here
+    // — that would be a second, independent RPC + agents:changed
+    // subscription for the same pane, on top of the one AgentBlockContent
+    // already owns.
     const forks = useForkSet({
-        definitions: useAgentDefinitions()[0],
+        definitions: () => (nodeModel.activeViewModel?.() as AgentViewModel | null)?.agentDefinitions?.() ?? [],
         openBlockByDef: openDefinitions,
         activeDefinitionId: () => agentId() ?? "",
     });

@@ -12,6 +12,7 @@ import { atoms, getApi, WOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
 import { AgentBlockContent, AgentPaneChrome } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
+import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
@@ -58,6 +59,16 @@ export class AgentViewModel implements ViewModel {
      *  (agent-view.tsx's own comment on that style binding explains why). */
     tabStripVisible: () => boolean;
     setTabStripVisible: (visible: boolean) => void;
+    /** NOT part of the shared `ViewModel` contract. ReAgent P2 on
+     *  SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's PR: owned here
+     *  (one `useAgentDefinitions()` subscription per ViewModel instance,
+     *  matching the granularity content was already reconstructed at) so
+     *  both `AgentBlockContent` (via `model.agentDefinitions`) and
+     *  `AgentPaneChrome` (via `nodeModel.activeViewModel()?.agentDefinitions`)
+     *  read the SAME list instead of each independently calling the hook —
+     *  the exact redundant-RPC-plus-subscription pattern this file's own
+     *  header comment (reagent P2 on PR #2488) already warns against. */
+    agentDefinitions: () => AgentDefinition[];
     endIconButtons: () => IconButtonDecl[];
     nodejsError: string | null = null;
 
@@ -107,6 +118,7 @@ export class AgentViewModel implements ViewModel {
         const [tabStripVisibleSig, setTabStripVisibleSig] = createSignal(false);
         this.tabStripVisible = tabStripVisibleSig;
         this.setTabStripVisible = (visible: boolean) => setTabStripVisibleSig(visible);
+        this.agentDefinitions = useAgentDefinitions()[0];
 
         // Flash signal: set true briefly when the activity summary changes to a
         // new non-empty value. Compare to previous so unrelated meta writes
