@@ -791,11 +791,30 @@ pub(crate) async fn bundle_get_impl(
 /// (reuses its `normalize_bundle_upsert_input`), not just an id, so the
 /// Armory editor's "Validate" button can check an unsaved draft (including a
 /// brand-new bundle with no id yet) rather than only whatever was last
-/// persisted. Read-only: never touches the Store.
-pub(crate) fn bundle_validate_impl(data: serde_json::Value) -> Result<serde_json::Value, String> {
+/// persisted.
+///
+/// Reads the bundle's bound MCP servers when the draft names a persisted
+/// bundle. Before Phase 0b this was fully store-free and validated the inline
+/// `mcp_servers` column; the ref tables are authoritative now, so validating
+/// that column would report on data nothing else consumes
+/// (`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4). An unsaved
+/// draft has no bindings, so it is still checked without touching the store.
+pub(crate) fn bundle_validate_impl(
+    wstore: &crate::backend::storage::store::Store,
+    data: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
-    let report = crate::backend::bundle_validate::validate_bundle(&memory);
+    let mcp_entries = if memory.id.is_empty() {
+        Vec::new()
+    } else {
+        // A draft for a bundle that does not exist yet resolves to nothing,
+        // which is the same as an unsaved draft — not an error.
+        bundle::resolve_bundle_components(wstore, &memory.id)
+            .map(|c| c.mcp_entries)
+            .unwrap_or_default()
+    };
+    let report = crate::backend::bundle_validate::validate_bundle(&memory, &mcp_entries);
     serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 

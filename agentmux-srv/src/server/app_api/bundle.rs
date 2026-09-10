@@ -107,9 +107,12 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
 }
 
-fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
-    let handler: crate::backend::rpc::engine::CommandHandler =
-        Box::new(move |data, _ctx| Box::pin(async move { Ok(Some(bundle_validate_impl(data)?)) }));
+fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
+        let wstore = wstore.clone();
+        Box::pin(async move { Ok(Some(bundle_validate_impl(&wstore, data)?)) })
+    });
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
@@ -275,9 +278,11 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
+        let wstore = state.wstore.clone();
         let broker = state.broker.clone();
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -292,6 +297,23 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 match id_store.bundle_delete(&req.id) {
                     Ok(deleted) => {
                         if deleted {
+                            // The refs live in the other store and no FK
+                            // reaches across, so nothing else would remove
+                            // them — and a later bundle reusing this id would
+                            // inherit components nobody chose. Best-effort:
+                            // the bundle is already gone, so a failure here
+                            // must not turn a successful delete into an error.
+                            match wstore.bundle_unbind_all_components(&req.id) {
+                                Ok((skills, mcp)) if skills + mcp > 0 => tracing::info!(
+                                    bundle_id = %req.id, skills, mcp,
+                                    "bundle.delete: purged component refs"
+                                ),
+                                Ok(_) => {}
+                                Err(e) => tracing::warn!(
+                                    bundle_id = %req.id, error = %e,
+                                    "bundle.delete: component refs left behind"
+                                ),
+                            }
                             broker.publish(crate::backend::wps::WaveEvent {
                                 event: "memories:changed".to_string(),
                                 scopes: vec![], sender: String::new(), persist: 0, data: None,
@@ -471,12 +493,12 @@ fn bind_imported_components(
 
 /// A bundle's components, resolved from the tables that are authoritative for
 /// them.
-struct ResolvedComponents {
-    skills: Vec<crate::backend::storage::Skill>,
+pub(super) struct ResolvedComponents {
+    pub(super) skills: Vec<crate::backend::storage::Skill>,
     /// Exporter entry shape: each server's config object with its `name`
     /// alongside, which is what `bundle_export::redact_mcp_entry` reads.
-    mcp_entries: Vec<serde_json::Value>,
-    warnings: Vec<String>,
+    pub(super) mcp_entries: Vec<serde_json::Value>,
+    pub(super) warnings: Vec<String>,
 }
 
 /// Resolve what a bundle actually contains, from `db_bundle_skills_ref` /
@@ -503,7 +525,7 @@ struct ResolvedComponents {
 /// `mcp_server_delete` both purge refs (`storage/managed.rs:232`), so that
 /// state is not reachable through the app — but the FK that would enforce it
 /// is inert, since `PRAGMA foreign_keys` is only ever set ON in tests.
-fn resolve_bundle_components(
+pub(super) fn resolve_bundle_components(
     wstore: &crate::backend::storage::store::Store,
     bundle_id: &str,
 ) -> Result<ResolvedComponents, String> {
@@ -3116,6 +3138,33 @@ mod export_import_for_agent_tests {
             .unwrap();
         let content = server_file["content"].as_str().unwrap();
         assert!(!content.contains("tok"), "secret must not survive export: {content}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_bundle_takes_its_component_refs_with_it() {
+        // No FK reaches from the ref tables to db_bundles — they live in
+        // different physical databases — so nothing else removes these, and a
+        // later bundle reusing the id would inherit components nobody chose.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_skill(&state, "bundle-1", "Deploy");
+        bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp"}"#);
+
+        let before = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert_eq!(before.skills.len(), 1);
+        assert_eq!(before.mcp_entries.len(), 1);
+
+        assert!(state.id_store.bundle_delete("bundle-1").unwrap());
+        let (skills, mcp) = state.wstore.bundle_unbind_all_components("bundle-1").unwrap();
+        assert_eq!((skills, mcp), (1, 1), "both refs must be purged");
+
+        // Re-create a bundle with the same id: it must start empty.
+        make_bundle(&state, "bundle-1", "Reused id.");
+        let after = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(
+            after.skills.is_empty() && after.mcp_entries.is_empty(),
+            "a reused bundle id must not inherit the old bundle's components"
+        );
     }
 
     #[tokio::test]
