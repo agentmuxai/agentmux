@@ -144,7 +144,7 @@ export class GlobalBundleViewModel {
     systemSectionsAtom: Accessor<Bundle[]>;
     /** sectionsAtom minus systemSectionsAtom — what the ordinary editor list renders. */
     ordinarySectionsAtom: Accessor<Bundle[]>;
-    /** Non-global, non-blank bundles eligible to promote into the brain. */
+    /** Non-global, non-blank bundles eligible to promote into the global bundles. */
     candidatesAtom: Accessor<Bundle[]>;
     /** Combined startup-instructions-file preview block. */
     previewAtom: Accessor<string>;
@@ -321,7 +321,7 @@ export class GlobalBundleViewModel {
         }
     }
 
-    /** Promote an existing non-global bundle into the brain, appended last. */
+    /** Promote an existing non-global bundle into the global bundles, appended last. */
     async promote(id: string): Promise<void> {
         const bundle = this.allAtom().find((m) => m.id === id);
         if (!bundle) return;
@@ -340,7 +340,7 @@ export class GlobalBundleViewModel {
         }
     }
 
-    /** Remove a section from the brain (clears is_global). The bundle itself
+    /** Remove a section from the global bundles (clears is_global). The bundle itself
      *  is kept — it stays available in the Memories tab. */
     async remove(id: string): Promise<void> {
         const bundle = this.allAtom().find((m) => m.id === id);
