@@ -502,7 +502,25 @@ export type AgentPaneCommand =
      * RAF flush observed by useAgentStream — bumps bufferSize +
      * lastEventTime. No state change beyond those counters.
      */
-    | { type: "StreamFlushObserved"; addedCount: number; at: number }
+    | {
+          type: "StreamFlushObserved";
+          addedCount: number;
+          at: number;
+          /**
+           * Did this flush carry anything that is evidence the TURN is alive —
+           * document nodes, node updates, tool chunks, or a new shell node?
+           *
+           * `false` means the flush was shell OUTPUT only. That is a live
+           * BACKGROUND process writing to its dock row; it says nothing about
+           * whether the model is doing anything, so it must not refresh the
+           * turn idle clock or resurrect a finished turn. Omitted is treated as
+           * `true` — only the flush queue knows the difference, and only it
+           * sets this.
+           *
+           * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md.
+           */
+          turnRelevant?: boolean;
+      }
     /**
      * Periodic tick from useAgentStream's watchdog interval. Emits a
      * `stream-stuck` diagnostic past `STUCK_THRESHOLD_MS`, and — past the
@@ -828,7 +846,16 @@ export type AgentPaneEvent =
            */
           type: "stream-stuck";
           idleSinceMs: number;
+          /** The WARNING bar (STUCK_THRESHOLD_MS). Crossing it is cosmetic. */
           thresholdMs: number;
+          /**
+           * The bar that would actually force this turn back to Idle. Always
+           * larger than `thresholdMs`, and larger still under a rate-limit
+           * backoff. Reported because a diagnostic that shows only the warning
+           * bar reads as "past the threshold and still stuck", which is how a
+           * real 5h stall was misread while it was in progress.
+           */
+          recoverThresholdMs: number;
       }
     | {
           /**

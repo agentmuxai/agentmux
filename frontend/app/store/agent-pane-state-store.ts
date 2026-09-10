@@ -351,7 +351,7 @@ export function dispatch(
                 console.info(
                     "[wave-turn]",
                     `pane=${blockId.slice(0, 7)}`,
-                    `watchdog: no recovery — idleSinceMs=${ev.idleSinceMs} thresholdMs=${ev.thresholdMs}`,
+                    `watchdog: no recovery — idleSinceMs=${ev.idleSinceMs} warnAtMs=${ev.thresholdMs} recoverAtMs=${ev.recoverThresholdMs}`,
                     exempt ? `EXEMPT toolsActive=${p.toolsActive} currentTool=${slot.state.currentTool ?? "?"}` : "",
                 );
             }

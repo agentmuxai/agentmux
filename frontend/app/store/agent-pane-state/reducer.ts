@@ -228,6 +228,24 @@ export function update(
             if (state.lastEventMs == null) {
                 return { state, events: [] };
             }
+            // FIX 1 — shell OUTPUT alone is not evidence this turn is alive.
+            // The flush queue batches six independent queues and dispatches one
+            // StreamFlushObserved if ANY of them had content. A live background
+            // shell writing to its dock row therefore refreshed lastEventMs on
+            // every flush, holding idleSinceMs permanently below the recovery
+            // threshold — the pane sat in Streaming for as long as the process
+            // lived (5h observed, and the same shape as the 12h incident in
+            // retro-persistent-agent-working-status-stuck-2026-07-16.md).
+            //
+            // Nothing about that output implies the MODEL is working, so it
+            // neither bumps the idle clock nor promotes the phase. The event is
+            // still emitted: other consumers legitimately track flushes.
+            if (command.turnRelevant === false) {
+                return {
+                    state,
+                    events: [{ type: "stream-flush-observed", addedCount: command.addedCount }],
+                };
+            }
             const newBuf = state.streaming.bufferSize + command.addedCount;
             // Dual-write: while Streaming, mirror bufferSize + lastEventMs.
             // PROMOTE to Streaming from Submitting (the normal hand-off) AND
@@ -268,7 +286,16 @@ export function update(
                     : state.turnPhase.kind === "Submitting"
                         || state.turnPhase.kind === "Idle"
                         || state.turnPhase.kind === "Disconnected"
-                        || (state.turnPhase.kind === "Done" && state.turnPhase.outcome === "completed")
+                        || (state.turnPhase.kind === "Done"
+                            && state.turnPhase.outcome === "completed"
+                            // FIX 2 — resurrect a COMPLETED turn only for a
+                            // flush that actually added document nodes. The
+                            // multi-round continuation this branch exists for
+                            // (#2420) always opens with a new node; a flush
+                            // carrying only chunk appends or shell traffic is
+                            // not a new round, and treating it as one is how a
+                            // finished turn silently went back to "Working…".
+                            && command.addedCount > 0)
                         ? {
                               kind: "Streaming",
                               bufferSize: newBuf,
@@ -389,6 +416,17 @@ export function update(
                         type: "stream-stuck",
                         idleSinceMs,
                         thresholdMs: STUCK_THRESHOLD_MS,
+                        // FIX 3 — the bar this warning is measured against
+                        // (45s) is NOT the bar for recovery (180s, or more
+                        // under a rate-limit backoff). Reporting only the
+                        // former reads as "past the threshold and still not
+                        // recovering", which is exactly how this stall was
+                        // misdiagnosed while it was happening.
+                        recoverThresholdMs:
+                            state.turnPhase.kind === "Streaming"
+                            && state.turnPhase.waitingReason === "rate_limited"
+                                ? (state.turnPhase.retryAfterMs ?? 0) + LIVENESS_RECOVERY_MS
+                                : LIVENESS_RECOVERY_MS,
                     },
                 ],
             };
