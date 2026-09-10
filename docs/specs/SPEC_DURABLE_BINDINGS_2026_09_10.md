@@ -1,11 +1,13 @@
 # Spec: Durable Bindings
 
-**Status:** proposed, Phase 1 landed (#3175). §8 has two open decisions on two
-separate timelines — **not both blocking Phase 2**: the identity-store-vs-
-shared-store choice (§8 item 1) blocks Phase 2 onward; whether `db_agents` is
-promoted or agent identity resolves through the registry (§8 item 2) only
-blocks Phase 5 onward, per §7's own ordering. Phases 2–4 need only item 1
-settled.
+**Status:** active. Phase 1 landed (#3175). Both §8 decisions are now made —
+identity store (item 1); item 2 keeps `db_agents` unpromoted, resolving agent
+identity as local-`db_agents`-OR-registry rather than registry-only (revised
+from an initial registry-only framing that Codex correctly flagged as
+rejecting real, currently-bindable agents — PR #3179), which in turn requires
+Phase 5 to add explicit agent-delete cleanup of identity-store refs (no
+cross-database `ON DELETE CASCADE`) — see §7 Phase 5 and §8 item 2 for the
+full mechanism. Phase 2 in progress.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
@@ -326,41 +328,98 @@ pin test) is already written and reviewed.
 
 **Phase 5 — registry-resolvable agent identity.** `memory_id` into
 `DefinitionRecordV1` (§3.5), **and** agent existence resolved through the
-registry rather than through a local `db_agents` row.
+registry as an ADDITION to the local `db_agents` check, not a replacement for
+it (revised from "resolved through the registry" — see below, Codex P1/P1 x2,
+PR #3179).
 
 This is a hard prerequisite of Phase 6, not a nice-to-have, and an earlier
 revision of this spec had the two the wrong way round (Codex, PR #3173). The
 agent bind path validates against `db_agents` **on the same connection as the
 ref table** (`managed_bind_agent`, `storage/managed.rs`), and
 `managed_union_bundle_refs` calls `agent_def_get` on that same store to read
-`memory_id`. The identity store has no `db_agents` — agents are durable via the
-registry, not via a store — so promoting the agent ref tables first would make
-every direct skill/MCP bind error out and every bundle-derived component vanish
-from launch, with the fix for it not arriving until a later phase.
+`memory_id`. Promoting the agent ref tables before this phase would make every
+direct skill/MCP bind error out and every bundle-derived component vanish from
+launch.
+
+**Registry-ONLY resolution is wrong, not just incomplete — the registry
+deliberately excludes real, bindable agents, and the codebase already
+documents why once:**
+
+- Seeded templates (`def.is_seeded != 0`) and template launches never reach
+  `agent_def_insert`, so `registry_def_upsert` skips both
+  (`def_registry_mirror.rs`). Unnamed instances and continuations
+  (`parent_instance_id` non-empty) are excluded from the instance registry the
+  same way (`registry_mirror.rs::registry_upsert_if_named`).
+- `managed_bind_agent`'s own doc comment already explains why it checks
+  `db_agents` and not a registry-shaped table: *"checking the legacy table
+  here would reject a bind for any agent that exists ONLY as a `db_agents` row
+  (a template launch), even though the FK the INSERT below actually depends on
+  would accept it"* (`storage/managed.rs`, written for Phase 3c / #3088).
+  Registry-only resolution reintroduces exactly the bug that comment was
+  written to prevent — this spec would have reverted a fix already on record
+  for the identical reason.
+
+**Revised design:** existence resolves as local-`db_agents`-OR-registry, not
+registry-only. A launch-only agent's id is still a genuine, globally-unique
+UUID regardless of whether the registry has a JSON file for it, so the bind
+still writes its ref row into the (now-identity-store) ref table either way —
+only the EXISTENCE CHECK gains a fallback, the ref row's location doesn't
+depend on which check passed. This keeps launch-only agents bindable without
+promoting `db_agents` itself, honoring §8 item 2's decision.
+
+**That revision creates a second gap, and Codex caught it too:** once the ref
+tables live in the identity store, `ON DELETE CASCADE`
+(`FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE`,
+`migrations.rs` v30) can no longer fire — it's a SQLite-native constraint
+scoped to one connection, and `db_agents` and the ref tables are now different
+files. `agent_def_delete`/`instance_delete` (`storage/agents.rs`) only ever
+delete the local `db_agents` row; neither calls into the identity store today.
+Without an explicit cleanup call, a deleted agent's skill/MCP refs become
+permanently orphaned — inflating Armory bound counts with rows for agents that
+no longer exist.
+
+**Fix, same shape as existing precedent:** `agent_def_delete` already calls
+`self.project_instructions_forget(id)` explicitly beside its own `db_agents`
+delete, for the identical reason (no FK can express "this table has no
+relationship SQLite can enforce, clean it up by hand"). Phase 5 adds the same
+kind of explicit call — an identity-store ref cleanup for the deleted agent id
+— to both `agent_def_delete` and `instance_delete`.
 
 **Phase 6 — promote the two AGENT ref tables.** `db_agent_skills_ref` and
-`db_agent_mcp_ref`, once Phase 5 makes agent identity resolvable from the
-registry.
+`db_agent_mcp_ref`, once Phase 5's revised existence check and explicit
+delete-cleanup are in place.
 
 **Phase 7 — memory location invariant.** The former portability Phase 4. Shares
 §4's invariant but moves files rather than rows, so it keeps its own spec.
 
-## 8. Open decisions
+## 8. Decisions
 
-1. **Identity store or shared store?** §5.1 argues identity store. The shared
-   store already holds `db_bundles`, so putting a bundle's components beside it
-   has a symmetry argument. Against: the shared store is the one with
-   channel-isolation defaults applied elsewhere, and the identity store is the
-   one explicitly described as permanently global.
+1. **Identity store or shared store? Decided: identity store.** §5.1 already
+   argued this; recorded here as final rather than open. The shared store's
+   symmetry argument (it already holds `db_bundles`) doesn't outweigh the
+   identity store being the one store explicitly documented as permanently
+   global with no channel-isolation exceptions — every other exception in this
+   codebase (`db_accounts`) exists for a specific, named isolation need
+   (disposable test accounts) that skills and MCP servers do not share.
 
 2. **Should `db_agents` be promoted, or should agent identity resolve through
-   the registry?** Phase 5 assumes the latter — agents are already durable via
-   `~/.agentmux/shared/agents`, so adding a second durable home for them
-   invites exactly the two-sources-of-truth problem this spec exists to remove.
-   Against: it means changing `managed_bind_agent`'s validation rather than
-   just relocating a table, which is more code and touches the launch path.
-   This is the one open decision that changes the shape of a phase rather than
-   just its destination.
+   the registry? Decided: registry — as a fallback ADDED to the local
+   `db_agents` check, not a replacement for it.** Agents are already durable
+   via `~/.agentmux/shared/agents` — promoting `db_agents` too would build a
+   second durable home for the exact fact the registry already owns, which is
+   the two-sources-of-truth shape this whole spec exists to close, not one to
+   reintroduce for agents specifically. The cost (§7 Phase 5 has to change
+   `managed_bind_agent`'s validation and `managed_union_bundle_refs`'s
+   `memory_id` lookup, not just relocate a table) is accepted as the correct
+   trade against reopening the same class of bug for a second row type.
+
+   **Registry-only was tried first and is wrong, not just incomplete** (Codex
+   P1/P1, PR #3179): the registry deliberately excludes seeded templates,
+   template launches, unnamed instances, and continuations —
+   `managed_bind_agent`'s own doc comment already explains why the bind path
+   checks `db_agents` rather than a registry-shaped table, for the identical
+   reason, written for Phase 3c (#3088). See §7 Phase 5 for the full
+   mechanism and the matching delete-cleanup gap it also exposed.
 
 3. ~~What happens to rows in the existing `objects.db` files?~~ **Resolved by
    §5.1.** The local tables keep their declarations and simply stop being
