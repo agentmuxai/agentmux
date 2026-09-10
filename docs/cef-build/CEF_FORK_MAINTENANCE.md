@@ -268,96 +268,31 @@ Run this against any `agentmuxai/<ms>` before building or releasing from it. It 
 cheap and it is the only thing that catches Layer B gaps.
 
 ```bash
-# Paste into a shell, then run:
-#   cef_verify                      # integration branch 7778 on remote 'agentmuxai'
-#   cef_verify 7977 fork            # milestone 7977, remote named 'fork'
-#   cef_verify a1b2c3d4...          # an exact SHA -- see section 8, P3
-#
-# A function, not a bare script: a top-level `exit 1` would close the shell of
-# anyone who pasted this, which is a poor reward for following the doc.
-cef_verify() {
-  local REF="${1:-7778}"
-  local REMOTE="${2:-${REMOTE:-agentmuxai}}"
-  local BR
-
-  if [[ "$REF" =~ ^[0-9]+$ ]]; then
-    # A bare milestone number means the integration branch on REMOTE.
-    # REMOTE is whatever YOU named the agentmuxai/cef remote. The companion
-    # runbooks add it as 'agentmuxai'; some checkouts call it 'fork'. Hard-coding
-    # it either errors out or silently resolves a same-named ref from an
-    # unrelated remote -- the class of failure this gate exists to catch.
-    git remote get-url "$REMOTE" >/dev/null 2>&1 || {
-      echo "No remote '$REMOTE'. Pass it: cef_verify $REF <remote>  (git remote -v)" >&2
-      return 1
-    }
-    # MANDATORY. These branches get force-updated mid-port; a stale ref gives a
-    # confident, wrong answer. Section 1.2 -- skipping this put a false claim in
-    # an earlier revision of this very doc.
-    git fetch "$REMOTE" --prune || return 1
-    BR="$REMOTE/$REF"
-  else
-    # Anything else is used verbatim: a tag, a full SHA, a local branch. This is
-    # what section 8's P3 needs -- verifying a RELEASE ARTIFACT means checking
-    # the commit it was built from, not whatever the branch has become since. A
-    # fix landed after the build would otherwise make the gate pass for an
-    # artifact that does not contain it.
-    BR="$REF"
-  fi
-
-  git rev-parse --verify -q "${BR}^{commit}" >/dev/null || {
-    echo "Cannot resolve '$BR'. The integration branch is named for the milestone alone." >&2
-    return 1
-  }
-
-  local ok=0 miss=0
-  _probe() {  # _probe <path> <identifier-absent-upstream>
-    if git show "${BR}:$1" 2>/dev/null | grep -qF "$2"; then
-      ok=$((ok+1));   printf 'OK   %s\n' "$1"
-    else
-      miss=$((miss+1)); printf 'MISS %s\n' "$1"
-    fi
-  }
-
-  # ---- Layer A: patch file present AND registered in patch.cfg ----
-  local name
-  for name in rwhv_background_opaque_check views_caption_rightclick_passthrough \
-              agentmux_process_requirement; do
-    if git cat-file -e "${BR}:patch/patches/${name}.patch" 2>/dev/null \
-       && git show "${BR}:patch/patch.cfg" | grep -q "'name': '${name}'"; then
-      ok=$((ok+1));   printf 'OK   patch/%s\n' "$name"
-    else
-      miss=$((miss+1)); printf 'MISS patch/%s\n' "$name"
-    fi
-  done
-
-  # ---- Layer B: all 18 fork-modified CEF sources (section 3) ----
-  # Identifiers, not filenames: every one of these files exists upstream, so a
-  # file-existence check proves nothing. Each identifier is asserted absent
-  # upstream and present in the fork, so it actually discriminates.
-  _probe include/views/cef_window.h                        BeginWindowDrag
-  _probe libcef/browser/views/window_impl.h                BeginWindowDrag
-  _probe libcef/browser/views/window_impl.cc               BeginWindowDrag
-  _probe libcef/renderer/blink_glue.h                      SetBaseBackgroundColorOverrideTransparent
-  _probe libcef/renderer/blink_glue.cc                     SetBaseBackgroundColorOverrideTransparent
-  _probe libcef/renderer/browser_config.h                  background_transparent
-  _probe libcef/renderer/render_manager.cc                 background_transparent
-  _probe libcef/common/mojom/cef.mojom                     background_transparent
-  _probe libcef/browser/browser_info_manager.cc            background_transparent
-  _probe libcef/browser/browser_platform_delegate.cc       background_transparent
-  _probe libcef/browser/browser_platform_delegate_create.cc is_views_hosted
-  _probe libcef/browser/browser_host_base.cc               'IsWindowless() || is_views_hosted()'
-  _probe libcef/browser/context.cc                         is_transparent
-  _probe libcef/browser/context.h                          transparent_state
-  _probe libcef/browser/views/browser_view_impl.cc         ApplyToCurrentRWHView
-  _probe libcef/browser/views/browser_view_impl.h          LayerTreeHost
-  _probe libcef/browser/views/window_view.cc               CalculateRenderPasses
-  _probe include/internal/cef_types.h                      'or a frameless window'
-
-  unset -f _probe
-  echo "--- $BR: $ok OK, $miss MISS (expect 21 OK, 0 MISS) ---"
-  [ "$miss" -eq 0 ]
-}
+scripts/cef-verify.sh                    # milestone 7778, probes for the clone
+scripts/cef-verify.sh --ref 7977         # a milestone => <remote>/<ref>
+scripts/cef-verify.sh --ref a1b2c3d      # exact ref/tag/SHA, used verbatim (§8 P3)
+scripts/cef-verify.sh --repo ~/src/cef   # explicit clone: validated, never guessed past
+scripts/cef-verify.sh --remote fork      # whatever you named agentmuxai/cef
 ```
+
+Exit 0 = all 21 present. It never modifies the repository it inspects.
+
+**This lives in `scripts/cef-verify.sh`, not in this document, and that is a
+deliberate correction.** These checks were originally markdown code blocks here,
+and four separate bugs shipped in them — each one making the check incapable of
+failing, or worse:
+
+| Bug | Effect |
+|---|---|
+| `sed` without `/g` | left `-o` on the real object — the verification **overwrote the build output** |
+| pristine build compiled from `/tmp` | differed on the embedded DWARF source path alone, so the comparison could never fire |
+| `git -C ""` | does not fail; answers for the current directory, silently returning Chromium's HEAD |
+| `set -o pipefail` + `grep -q` | grep exits on first match, `git show` takes SIGPIPE, pipeline reports failure **despite** the match |
+
+None were visible by reading. All four die to `scripts/cef-verify.test.sh`,
+which CI runs on every PR against synthetic fixtures. Shell embedded in
+markdown is untested by construction; that is the whole lesson, and it cost four
+rounds of review to learn.
 
 Expect **21 `OK`** against a complete `agentmuxai/<ms>`.
 
@@ -522,51 +457,29 @@ Compile the file twice — from the working tree, and from pristine upstream —
 compare both against the object that was actually linked:
 
 ```bash
-cd out/Release_GN_arm64
-
-# BOTH no-symbol patches, as a pair. Checking only one lets the recipe report
-# success while the other is absent -- and the macOS-critical one is the second.
-check_patch() {  # check_patch <source-path> <object-path>
-  local SRC="$1" OBJ="$2" ok=1
-  local CMD; CMD=$(ninja -C . -t commands "$OBJ" | tail -1)
-
-  # ${VAR//a/b} and sed's /g are BOTH mandatory. The object path appears TWICE
-  # in the command -- `-MF <obj>.d` and `-o <obj>` -- so a non-global replace
-  # redirects only the depfile and leaves `-o` pointing at the REAL object. It
-  # does not fail: it OVERWRITES your build output. That happened while writing
-  # this section, which is why the guard below exists.
-  local A="${CMD//$OBJ//tmp/A.o}"
-  case "$A" in *"-o $OBJ"*) echo "ABORT $SRC: rewritten command still targets $OBJ"; return 1 ;; esac
-
-  # (A) working-tree source at its ORIGINAL path, vs the shipped object.
-  # The path must not change here: under symbol_level=1 the compiler embeds the
-  # source path in DWARF, so compiling identical content from /tmp yields a
-  # DIFFERENT object. Verified: same content, different path -> objects differ.
-  eval "$A"
-
-  # (B) and (C) patched vs pristine content, both from the SAME synthetic path,
-  # so the only difference between them is content. Comparing the shipped object
-  # against a /tmp-compiled *pristine* build would be meaningless -- it always
-  # differs, on the path alone, whether or not the patch is present. An earlier
-  # revision of this recipe did exactly that, so its "shipped != unpatched" leg
-  # could never fire.
-  cp "../../$SRC" /tmp/probe.cc
-  eval "$(echo "${CMD//$OBJ//tmp/B.o}" | sed "s#\.\./\.\./$SRC#/tmp/probe.cc#g")"
-  git -C ../.. show "HEAD:$SRC" > /tmp/probe.cc
-  eval "$(echo "${CMD//$OBJ//tmp/C.o}" | sed "s#\.\./\.\./$SRC#/tmp/probe.cc#g")"
-
-  cmp -s /tmp/A.o "$OBJ" || { echo "FAIL $SRC: shipped object does not match the working tree"; ok=0; }
-  cmp -s /tmp/B.o /tmp/C.o && { echo "FAIL $SRC: patch is a no-op — nothing distinguishes it from upstream"; ok=0; }
-  [ "$ok" = 1 ] && echo "OK   $SRC"
-  rm -f /tmp/A.o /tmp/B.o /tmp/C.o /tmp/probe.cc
-  [ "$ok" = 1 ]
-}
-
-check_patch base/apple/mach_port_rendezvous_mac.cc \
-            obj/base/base/mach_port_rendezvous_mac.o                    # agentmux_process_requirement
-check_patch content/browser/renderer_host/render_widget_host_view_base.cc \
-            obj/content/browser/browser/render_widget_host_view_base.o  # rwhv_background_opaque_check
+scripts/cef-verify-patches.sh --build-dir out/Release_GN_arm64
 ```
+
+Expect one `OK` per no-symbol patch (two today). It never writes to the build
+directory — `scripts/cef-verify.test.sh` asserts that with a fake compiler,
+because an earlier inline version of this check *did* write to it (below).
+
+Three compiles, isolating one variable at a time:
+
+| | |
+|---|---|
+| **A** | working-tree source at its **original** path — must equal the shipped object |
+| **B** | working-tree content from a synthetic path |
+| **C** | pristine upstream content from the **same** synthetic path |
+
+`A == shipped` proves the artifact was built from what is checked out. `B != C`
+proves the patch materially changes codegen — which A alone cannot show, since a
+patch compiling to upstream's bytes would also pass.
+
+**B and C must share a path.** Under `symbol_level=1` the compiler embeds the
+source path in DWARF, so comparing the shipped object against a `/tmp`-compiled
+pristine build always differs — on the path alone, patched or not. An earlier
+version did exactly that, and its "shipped != unpatched" leg could never fire.
 
 Expect **two** `OK` lines. `views_caption_rightclick_passthrough` is not listed
 because it adds a symbol and §7.2 already covers it.
