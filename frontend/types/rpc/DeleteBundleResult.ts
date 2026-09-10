@@ -2,9 +2,9 @@
 
 /**
  * Response for `deletememory` and `deletesystemmemory` — both take the
- * same request (`CommandDeleteMemoryData`, above) and answer with the
+ * same request (`CommandDeleteBundleData`, above) and answer with the
  * same shape, so they share this response type too. Was an anonymous
  * `json!({"deleted": ..})` before this type existed to name it for the
  * RPC bindings generator.
  */
-export type DeleteMemoryResult = { deleted: boolean, };
+export type DeleteBundleResult = { deleted: boolean, };

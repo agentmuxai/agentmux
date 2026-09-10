@@ -27,7 +27,7 @@ import { resetCapabilities } from "@/app/store/toolchain-capabilities";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {
-        ListMemoriesCommand: vi.fn(),
+        ListBundlesCommand: vi.fn(),
         ListNamedAgentsCommand: vi.fn(),
         // Backs the shared toolchain-capabilities store's Docker liveness
         // probe — this modal polls it (watchCapability("docker")) for the
@@ -40,7 +40,7 @@ vi.mock("@/app/store/rpc-api", () => {
         // existing tests (none of whose agent fixtures set `memory_id`)
         // never even trigger the fetch; tests that DO exercise the
         // resolution set their own `mockResolvedValue`.
-        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
+        GetBundleCommand: vi.fn().mockResolvedValue(undefined),
     };
     return { RpcApi };
 });
@@ -148,7 +148,7 @@ const driftedProviderAgent = {
     memory_id: "mem-bundle-1",
 } as AgentDefinition;
 
-const driftedAgentsBundle: Memory = {
+const driftedAgentsBundle: Bundle = {
     id: "mem-bundle-1",
     name: "Drift Test Bundle",
     is_blank: false,
@@ -168,7 +168,7 @@ const raceDriftAgent = {
     memory_id: "mem-bundle-race",
 } as AgentDefinition;
 
-const raceDriftBundle: Memory = {
+const raceDriftBundle: Bundle = {
     id: "mem-bundle-race",
     name: "Race Test Bundle",
     is_blank: false,
@@ -203,7 +203,7 @@ const geminiAccount = {
     updated_at: "",
 } as unknown as import("@/app/view/identity/identity-model").Account;
 
-const notesMemory: Memory = {
+const notesMemory: Bundle = {
     id: "mem-notes",
     name: "Notes",
     is_blank: false,
@@ -211,7 +211,7 @@ const notesMemory: Memory = {
     updated_at: ts(),
 };
 
-const personalMemory: Memory = {
+const personalMemory: Bundle = {
     id: "mem-personal",
     name: "Personal",
     is_blank: false,
@@ -229,7 +229,7 @@ beforeEach(async () => {
     ({ RpcApi } = await import("@/app/store/rpc-api"));
     ({ refreshAccountCache } = await import("@/app/view/identity/identity-model"));
     vi.mocked(refreshAccountCache).mockResolvedValue([workAccount]);
-    vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([notesMemory, personalMemory]);
+    vi.mocked(RpcApi.ListBundlesCommand).mockResolvedValue([notesMemory, personalMemory]);
     vi.mocked(RpcApi.ListNamedAgentsCommand).mockResolvedValue([]);
 });
 
@@ -303,7 +303,7 @@ describe("AgentLaunchModal — provider resolution through the bound bundle", ()
     // acct-work — offering the wrong provider's auth flow entirely (or
     // none at all) for a perfectly valid, correctly-configured agent.
     it("resolves the effective provider through the bound bundle, not a drifted agent.provider", async () => {
-        vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue(driftedAgentsBundle);
+        vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue(driftedAgentsBundle);
 
         render(() => (
             <AgentLaunchModalPanel
@@ -315,7 +315,7 @@ describe("AgentLaunchModal — provider resolution through the bound bundle", ()
 
         const identitySelect = await screen.findByLabelText("Account");
         expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
-        expect(RpcApi.GetMemoryCommand).toHaveBeenCalledWith({}, { id: "mem-bundle-1" });
+        expect(RpcApi.GetBundleCommand).toHaveBeenCalledWith({}, { id: "mem-bundle-1" });
     });
 
     it("falls back to agent.provider when the agent has no bound bundle", async () => {
@@ -329,7 +329,7 @@ describe("AgentLaunchModal — provider resolution through the bound bundle", ()
 
         const identitySelect = await screen.findByLabelText("Account");
         expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
-        expect(RpcApi.GetMemoryCommand).not.toHaveBeenCalled();
+        expect(RpcApi.GetBundleCommand).not.toHaveBeenCalled();
     });
 
     // Round-2 review finding on PR #2596: the account auto-pick effect
@@ -347,9 +347,9 @@ describe("AgentLaunchModal — provider resolution through the bound bundle", ()
         // actually reproducible instead of both fetches settling in the
         // same microtask batch.
         vi.mocked(refreshAccountCache).mockResolvedValue([workAccount, geminiAccount]);
-        let resolveBundle!: (m: Memory) => void;
-        vi.mocked(RpcApi.GetMemoryCommand).mockReturnValue(
-            new Promise<Memory>((resolve) => {
+        let resolveBundle!: (m: Bundle) => void;
+        vi.mocked(RpcApi.GetBundleCommand).mockReturnValue(
+            new Promise<Bundle>((resolve) => {
                 resolveBundle = resolve;
             }),
         );

@@ -7,7 +7,7 @@ import { formatGlobalBrainBlock, groupProvidersByStartupFilename } from "./globa
 // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §5 — must mirror
 // memory_bundles.rs's format_global_brain_block fixture-for-fixture.
 
-function ordinary(id: string, name: string, instructions = `rules for ${name}`): Memory {
+function ordinary(id: string, name: string, instructions = `rules for ${name}`): Bundle {
     return {
         id,
         name,
@@ -16,10 +16,10 @@ function ordinary(id: string, name: string, instructions = `rules for ${name}`):
         is_system: false,
         created_at: 0,
         updated_at: 0,
-    } as Memory;
+    } as Bundle;
 }
 
-function system(id: string, name: string, instructions = `system rules for ${name}`): Memory {
+function system(id: string, name: string, instructions = `system rules for ${name}`): Bundle {
     return {
         id,
         name,
@@ -28,7 +28,7 @@ function system(id: string, name: string, instructions = `system rules for ${nam
         is_system: true,
         created_at: 0,
         updated_at: 0,
-    } as Memory;
+    } as Bundle;
 }
 
 describe("formatGlobalBrainBlock", () => {
@@ -65,14 +65,14 @@ describe("formatGlobalBrainBlock", () => {
 });
 
 // GlobalBrainViewModel's section split — mocks RpcApi entirely since the
-// constructor fires an unawaited ListMemoriesCommand refresh() AND an
+// constructor fires an unawaited ListBundlesCommand refresh() AND an
 // unawaited GetClaudeGlobalConfigCommand fetch, same pattern as
-// frontend/app/view/memory/memory-model.test.ts.
+// frontend/app/view/bundle/bundle-model.test.ts.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
 const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
+        ListBundlesCommand: (...args: unknown[]) => listMemoriesMock(...args),
         GetClaudeGlobalConfigCommand: (...args: unknown[]) => getClaudeGlobalConfigMock(...args),
     },
 }));
@@ -141,7 +141,7 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §7:
     // filenameGroupsAtom/noFileProvidersAtom are static (derived from the
     // PROVIDERS catalog, not per-workspace agent data), so an empty
-    // ListMemoriesCommand response (the beforeEach default) is fine here.
+    // ListBundlesCommand response (the beforeEach default) is fine here.
     test("filenameGroupsAtom groups providers by resolved startup-instructions filename", async () => {
         const { GlobalBrainViewModel } = await import("./global-brain-model");
         const model = new GlobalBrainViewModel();

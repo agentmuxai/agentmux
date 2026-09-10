@@ -19,7 +19,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         InstallStartCommand: vi.fn().mockResolvedValue({ sessionId: "sess-1" }),
         InstallCancelCommand: vi.fn().mockResolvedValue({}),
         // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution.
-        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
+        GetBundleCommand: vi.fn().mockResolvedValue(undefined),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -125,7 +125,7 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
         // Drifted `.provider` column says "claude", but the bound
         // bundle's REAL provider is "codex" — a correct install must
         // fetch/run codex's CLI, not claude's.
-        vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "codex" } as any);
+        vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "codex" } as any);
         const agent = baseAgent({ provider: "claude", memory_id: "mem-1" });
 
         render(() => (
@@ -146,7 +146,7 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
     });
 
     it("shows the resolved (bundle) provider's display name in the header, not the drifted column's", async () => {
-        vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "codex" } as any);
+        vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "codex" } as any);
         const agent = baseAgent({ provider: "claude", memory_id: "mem-1", name: "Agent One" });
 
         render(() => (
@@ -172,6 +172,6 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
         const call = vi.mocked(RpcApi.InstallStartCommand).mock.calls[0][1];
         expect(call).toMatchObject({ providerId: "codex", cliCommand: "codex" });
         // Unbound agents never even trigger a bundle fetch.
-        expect(RpcApi.GetMemoryCommand).not.toHaveBeenCalled();
+        expect(RpcApi.GetBundleCommand).not.toHaveBeenCalled();
     });
 });

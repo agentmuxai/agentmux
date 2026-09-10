@@ -26,7 +26,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         // (#2594) — resolves to `undefined` by default so agents without
         // `memory_id` never even trigger a fetch; the drift regression
         // tests below set their own `.mockResolvedValue`.
-        GetMemoryCommand: (c: unknown, data: { id: string }) => getMemoryMock(c, data),
+        GetBundleCommand: (c: unknown, data: { id: string }) => getMemoryMock(c, data),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));

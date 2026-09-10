@@ -20,7 +20,7 @@ const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({
 });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
+        ListBundlesCommand: (...args: unknown[]) => listMemoriesMock(...args),
         GetClaudeGlobalConfigCommand: (...args: unknown[]) => getClaudeGlobalConfigMock(...args),
     },
 }));

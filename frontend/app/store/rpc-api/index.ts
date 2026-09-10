@@ -14,12 +14,12 @@
 import { AgentApi } from "./agent";
 import { BlockApi } from "./block";
 import { BookmarksApi } from "./bookmarks";
-import { BundleImportApi } from "./bundle";
+import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
 import { IdentityApi } from "./identity";
 import { McpApi } from "./mcp";
-import { MemoryApi } from "./memory";
+import { NativeMemoryApi } from "./native-memory";
 import { MiscApi } from "./misc";
 import { ReactiveApi } from "./reactive";
 import { SessionApi } from "./session";
@@ -44,7 +44,8 @@ export const RpcApi = {
     ...WorkspaceApi,
     ...AgentApi,
     ...IdentityApi,
-    ...MemoryApi,
+    ...BundleApi,
+    ...NativeMemoryApi,
     ...SessionApi,
     ...McpApi,
     ...SkillApi,

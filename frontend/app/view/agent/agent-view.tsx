@@ -698,7 +698,7 @@ const AgentPresentationView = ({
     // title-bar "Stash" (backpack) icon can open the unified tabbed
     // modal (Accounts + Memory) without holding a SolidJS context in the
     // model. Mirrors the former _setOverlayTab pattern; supersedes the
-    // separate _openIdentityModal / _openMemoryModal callbacks.
+    // separate _openIdentityModal / _openBundleModal callbacks.
     const modalLayer = useModalLayer();
     onMount(() => {
         model._openAgentStashModal = () => {
@@ -2129,7 +2129,7 @@ const AgentPresentationView = ({
             // resolves, e.g. deleted), preserving any seed-manifest content.
             const startupBundleId = startupBundleIdResult?.content?.trim() || null;
             const startupBundle = startupBundleId
-                ? await RpcApi.GetMemoryCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
+                ? await RpcApi.GetBundleCommand(TabRpcClient, { id: startupBundleId }).catch(() => null)
                 : null;
             const startupContent = startupBundle?.instructions?.trim()
                 ? startupBundle.instructions
