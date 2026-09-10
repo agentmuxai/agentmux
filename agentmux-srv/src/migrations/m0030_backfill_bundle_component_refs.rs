@@ -14,14 +14,22 @@
 //! **Ships in the same release as the read switch.** Export reading refs
 //! before this has run would make every pre-existing bundle export empty.
 //!
-//! Two stores, deliberately. `db_bundles` lives in the shared store
-//! (`run_shared_store_schema`), while `db_skills`, `db_mcp_servers` and both
-//! ref tables live in the channel store (`run_object_schema`,
-//! `migrations.rs:742`/`:749`) — the ref tables must sit next to the catalog
-//! tables they carry foreign keys to, which is also why they have no FK to
-//! `db_bundles` (`migrations.rs:721-741`). So this reads bundles from the
-//! shared store and writes refs into the channel store, resolving the former
-//! exactly the way `m0021` does.
+//! Two stores, deliberately, as of when this migration was written.
+//! `db_bundles` lives in the shared store (`run_shared_store_schema`), while
+//! `db_skills`/`db_mcp_servers` and both ref tables lived in the channel
+//! store alone (`run_object_schema`, `migrations.rs:742`/`:749`) — the ref
+//! tables had to sit next to the catalog tables they carried foreign keys
+//! to, which is also why they never had an FK to `db_bundles`
+//! (`migrations.rs:721-741`). So this reads bundles from the shared store
+//! and writes refs into the channel store, resolving the former exactly the
+//! way `m0021` does. **Now stale in one respect** (Phase 2 of
+//! `SPEC_DURABLE_BINDINGS_2026_09_10.md`, `m0032_drop_catalog_fk_from_ref_tables`):
+//! `db_skills`/`db_mcp_servers` are authoritatively `identity_store` and the
+//! ref tables no longer carry the FK described above at all — this
+//! migration itself is unaffected (it ran, or runs, entirely within the
+//! world this comment describes, since it always operated on `wstore`'s own
+//! local catalog copy) and is left as a historical record of why the two
+//! stores were split, not a claim about the current schema.
 //!
 //! Idempotent three times over: `INSERT OR IGNORE` on the ref tables, name
 //! uniqueness on the MCP catalog rows, and a per-bundle skip when nothing is
@@ -93,7 +101,13 @@ fn backfill_one_bundle(
                 // the ref tables cannot represent it and the export could
                 // never have rendered it either.
                 match wstore.skill_get(&id) {
-                    Ok(Some(_)) => match wstore.bundle_skill_bind(bundle_store, bundle_id, &id) {
+                    // `wstore` also serves as `catalog` here: this migration
+                    // pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's
+                    // catalog redirect, back when `db_skills` genuinely lived
+                    // on the channel store alone — see this module's own doc
+                    // comment on why `db_skills` lives here and `db_bundles`
+                    // lives in `bundle_store`.
+                    Ok(Some(_)) => match wstore.bundle_skill_bind(wstore, bundle_store, bundle_id, &id) {
                         Ok(()) => skills_bound += 1,
                         Err(e) => tracing::warn!(
                             bundle_id, skill_id = %id, error = %e,
@@ -128,7 +142,7 @@ fn backfill_one_bundle(
             // end up identical — including how duplicate names are kept apart
             // and how a re-run decides it has nothing to do.
             let (created, warnings) =
-                wstore.bundle_mcp_bind_inline_entries(bundle_store, bundle_id, &entries, now_ms());
+                wstore.bundle_mcp_bind_inline_entries(wstore, bundle_store, bundle_id, &entries, now_ms());
             mcp_bound += created;
             for w in warnings {
                 tracing::warn!(bundle_id, warning = %w, "backfill_bundle_component_refs");
@@ -287,7 +301,7 @@ mod tests {
         assert_eq!((sk, mc), (1, 1));
 
         let bound_skills: Vec<_> = s
-            .bundle_skill_list("bundle-1")
+            .bundle_skill_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
@@ -295,7 +309,7 @@ mod tests {
         assert_eq!(bound_skills.len(), 1, "skill must be bound to the bundle");
 
         let bound_mcp: Vec<_> = s
-            .bundle_mcp_list("bundle-1")
+            .bundle_mcp_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
@@ -326,7 +340,7 @@ mod tests {
         assert_eq!(second.1, 0, "a second pass must not create a second server");
 
         let bound_mcp = s
-            .bundle_mcp_list("bundle-1")
+            .bundle_mcp_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
@@ -367,7 +381,7 @@ mod tests {
         assert_eq!(mc, 2, "both entries must survive the backfill");
 
         let names: Vec<String> = s
-            .bundle_mcp_list("bundle-1")
+            .bundle_mcp_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
@@ -402,14 +416,14 @@ mod tests {
             created_at: 1,
             updated_at: 1,
         };
-        s.bundle_mcp_upsert_unique(&s, "bundle-1", &armory, true).unwrap();
+        s.bundle_mcp_upsert_unique(&s, &s, "bundle-1", &armory, true).unwrap();
 
         let mcp = r#"[{"name":"github","command":"gh-mcp"}]"#;
         let (_, mc) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
         assert_eq!(mc, 1, "the inline entry must be carried across, not swallowed");
 
         let bound: Vec<_> = s
-            .bundle_mcp_list("bundle-1")
+            .bundle_mcp_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
@@ -440,7 +454,7 @@ mod tests {
         backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
 
         let bound: Vec<_> = s
-            .bundle_mcp_list("bundle-1")
+            .bundle_mcp_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
@@ -456,7 +470,7 @@ mod tests {
         assert_eq!(mc, 2, "two nameless entries must not collide on name");
 
         let names: Vec<String> = s
-            .bundle_mcp_list("bundle-1")
+            .bundle_mcp_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)

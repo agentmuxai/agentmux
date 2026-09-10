@@ -357,7 +357,25 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///
 ///        Purely additive: nothing reads it at launch, and an agent with no
 ///        row simply has no prior observation to compare against.
-pub const OBJECT_SCHEMA_VERSION: i64 = 33;
+///   v34 — `db_agent_skills_ref` / `db_agent_mcp_ref` / `db_bundle_skills_ref`
+///        / `db_bundle_mcp_ref` drop their `skill_id`/`mcp_id` FK to this
+///        store's LOCAL `db_skills`/`db_mcp_servers`. Phase 2 of
+///        `SPEC_DURABLE_BINDINGS_2026_09_10.md` §5.4 (Codex P1, PR #3182):
+///        once catalog writes redirect to `identity_store`, this channel's
+///        local catalog copies stop gaining new rows, so binding a
+///        post-redirect skill/server would otherwise hit a hard `FOREIGN KEY
+///        constraint failed` (`PRAGMA foreign_keys=ON` in production, see
+///        `Store::configure_and_migrate`). The `agent_id → db_agents` FK on
+///        the agent-level pair is kept verbatim — only the catalog-pointing
+///        FK is dropped. Same shape `db_bundle_skills_ref`/`db_bundle_mcp_ref`
+///        already used for `db_bundles` (see those tables' own doc comment
+///        below): existence moves to the application layer
+///        (`managed_bind_agent`/`managed_bind_bundle`'s new `catalog: &Store`
+///        check). SQLite has no `ALTER TABLE ... DROP CONSTRAINT`, so an
+///        existing store's four tables are rebuilt by
+///        `m0032_drop_catalog_fk_from_ref_tables`; a fresh install gets the
+///        trimmed FK directly from the CREATE TABLE statements below.
+pub const OBJECT_SCHEMA_VERSION: i64 = 34;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -714,22 +732,24 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_mcp_servers_is_global ON db_mcp_servers(is_global);
 
+        -- v34: skill_id's FK to this store's LOCAL db_skills is gone — see
+        -- OBJECT_SCHEMA_VERSION's v34 doc comment above. agent_id's FK to
+        -- db_agents (v30) is unchanged.
         CREATE TABLE IF NOT EXISTS db_agent_skills_ref (
             agent_id TEXT NOT NULL,
             skill_id TEXT NOT NULL,
             PRIMARY KEY (agent_id, skill_id),
-            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
-            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE,
-            FOREIGN KEY (skill_id) REFERENCES db_skills(id) ON DELETE CASCADE
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
 
+        -- v34: mcp_id's FK to this store's LOCAL db_mcp_servers is gone —
+        -- see OBJECT_SCHEMA_VERSION's v34 doc comment above. agent_id's FK
+        -- to db_agents (v30) is unchanged.
         CREATE TABLE IF NOT EXISTS db_agent_mcp_ref (
             agent_id TEXT NOT NULL,
             mcp_id   TEXT NOT NULL,
             PRIMARY KEY (agent_id, mcp_id),
-            -- v30: see OBJECT_SCHEMA_VERSION's v30 doc comment above.
-            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE,
-            FOREIGN KEY (mcp_id)   REFERENCES db_mcp_servers(id) ON DELETE CASCADE
+            FOREIGN KEY (agent_id) REFERENCES db_agents(id) ON DELETE CASCADE
         );
 
         -- v23: Bundle-level MCP/skill references (composable model v2,
@@ -747,26 +767,34 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- shared store in a normal production install — see
         -- `bundle.rs::register_bundle_upsert`), not `wstore`/objects.db,
         -- where this table lives (it must live here to FK to
-        -- db_mcp_servers/db_skills, which ARE wstore-local). wstore's own
-        -- copy of db_bundles is a schema-compatible but essentially always-
+        -- db_mcp_servers/db_skills, which used to be wstore-local too (now
+        -- authoritatively identity_store as of Phase 2 — see
+        -- OBJECT_SCHEMA_VERSION's v34 doc comment). wstore's own copy of
+        -- db_bundles is a schema-compatible but essentially always-
         -- empty local mirror in that case — an FK against it would make
         -- every real bind fail. Same no-FK-to-a-table-living-in-the-wrong-
         -- store reasoning as `db_agent_identity_links.account_id`'s
         -- deliberate lack of an account FK (see that table's own doc
         -- comment). Existence is checked at the application layer instead
         -- — see `Store::bundle_mcp_bind`'s `id_store` parameter.
+        --
+        -- v34: skill_id's FK to db_skills is ALSO gone now (it was
+        -- wstore-local before v34; see OBJECT_SCHEMA_VERSION's v34 doc
+        -- comment) — this table has never had a bundle_id FK, so it is now
+        -- FK-free entirely, existence checked purely at the application
+        -- layer for both columns.
         CREATE TABLE IF NOT EXISTS db_bundle_skills_ref (
             bundle_id TEXT NOT NULL,
             skill_id  TEXT NOT NULL,
-            PRIMARY KEY (bundle_id, skill_id),
-            FOREIGN KEY (skill_id) REFERENCES db_skills(id) ON DELETE CASCADE
+            PRIMARY KEY (bundle_id, skill_id)
         );
 
+        -- v34: mcp_id's FK to db_mcp_servers is gone — see the
+        -- db_bundle_skills_ref comment above; same reasoning, MCP side.
         CREATE TABLE IF NOT EXISTS db_bundle_mcp_ref (
             bundle_id TEXT NOT NULL,
             mcp_id    TEXT NOT NULL,
-            PRIMARY KEY (bundle_id, mcp_id),
-            FOREIGN KEY (mcp_id) REFERENCES db_mcp_servers(id) ON DELETE CASCADE
+            PRIMARY KEY (bundle_id, mcp_id)
         );
 
         -- v7: MuxBus cloud connectivity — global singleton PKCE token store.
@@ -1473,7 +1501,22 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        to arbitrate the race (Codex P1, PR #3181). The migration's
 ///        insert now handles the resulting `UNIQUE constraint failed` by
 ///        re-querying for whichever row actually won.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 7;
+///   v8 — `idx_ids_skills_global_name` replaces `idx_ids_skills_global_name_type`:
+///        narrows the skill global-uniqueness index from `(name, skill_type)`
+///        to `name` alone, matching the invariant `skill_upsert_unique_global`'s
+///        own dup-check has always enforced (`WHERE name = ?1 AND id <> ?2
+///        AND is_global = 1` — no `skill_type` filter). Codex P2, PR #3182,
+///        `SPEC_DURABLE_BINDINGS_2026_09_10.md` §5.4: the v7 index was
+///        narrower than the invariant it was meant to back, so a
+///        same-name-different-`skill_type` race between two channels could
+///        insert two rows the application itself considers duplicates. MCP
+///        servers don't have this mismatch — `idx_ids_mcp_servers_global_name`
+///        is already name-only — so this bump is skills-only.
+///        `m0033_narrow_skill_global_uniqueness_index` defensively collapses
+///        any existing same-name/different-type pair `m0031`'s own
+///        `(name, skill_type)`-keyed dedup may already have produced, to the
+///        earlier-`created_at` row, before the new index is created.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 8;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1720,12 +1763,14 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             updated_at  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ids_skills_is_global ON db_skills(is_global);
-        -- v7: see this constant's v7 doc comment — arbitrates the
-        -- concurrent-carry race at the database level, since an
-        -- application-level check-then-insert can't be atomic across two
-        -- separate processes/connections.
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_skills_global_name_type
-            ON db_skills(name, skill_type) WHERE is_global = 1;
+        -- v8: name-only, matching skill_upsert_unique_global's own dup-check
+        -- — see this constant's v8 doc comment. Replaces
+        -- idx_ids_skills_global_name_type (dropped just below for an
+        -- existing store; a fresh store never creates it in the first
+        -- place, since this whole batch runs as one execute_batch).
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_skills_global_name
+            ON db_skills(name) WHERE is_global = 1;
+        DROP INDEX IF EXISTS idx_ids_skills_global_name_type;
 
         CREATE TABLE IF NOT EXISTS db_mcp_servers (
             id          TEXT PRIMARY KEY,

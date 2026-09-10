@@ -110,9 +110,11 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
         let wstore = wstore.clone();
-        Box::pin(async move { Ok(Some(bundle_validate_impl(&wstore, data)?)) })
+        let identity_store = identity_store.clone();
+        Box::pin(async move { Ok(Some(bundle_validate_impl(&wstore, &identity_store, data)?)) })
     });
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
@@ -493,15 +495,17 @@ struct ExportReq {
 fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_BUNDLE_EXPORT,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 let req: ExportReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export: {e}"))?;
-                bundle_export_impl(&id_store, &wstore, req).map(Some)
+                bundle_export_impl(&id_store, &wstore, &identity_store, req).map(Some)
             })
         }),
     );
@@ -515,6 +519,7 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn bundle_export_impl(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     req: ExportReq,
 ) -> Result<serde_json::Value, String> {
     let bundle = id_store
@@ -524,7 +529,7 @@ fn bundle_export_impl(
 
     // Components come from the ref tables, which are authoritative for what a
     // bundle contains -- see resolve_bundle_components.
-    let components = resolve_bundle_components(wstore, &bundle.id)
+    let components = resolve_bundle_components(wstore, identity_store, &bundle.id)
         .map_err(|e| format!("bundle.export: {e}"))?;
     let mut handler_warnings = components.warnings;
 
@@ -620,6 +625,7 @@ pub(crate) fn purge_bundle_component_refs(
 fn bind_imported_components(
     wstore: &crate::backend::storage::store::Store,
     id_store: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     bundle_id: &str,
     imported_skill_ids: &[String],
     mcp_configs: &[serde_json::Value],
@@ -627,7 +633,7 @@ fn bind_imported_components(
     let mut warnings: Vec<String> = Vec::new();
 
     for skill_id in imported_skill_ids {
-        if let Err(e) = wstore.bundle_skill_bind(id_store, bundle_id, skill_id) {
+        if let Err(e) = wstore.bundle_skill_bind(identity_store, id_store, bundle_id, skill_id) {
             warnings.push(format!(
                 "skills: imported skill {skill_id} could not be bound to the bundle ({e}) — it will not be exported or reach the agent"
             ));
@@ -638,7 +644,7 @@ fn bind_imported_components(
     // import and one recovered from an old inline column end up identical,
     // including duplicate-name handling.
     let (_created, mcp_warnings) =
-        wstore.bundle_mcp_bind_inline_entries(id_store, bundle_id, mcp_configs, now_ms());
+        wstore.bundle_mcp_bind_inline_entries(identity_store, id_store, bundle_id, mcp_configs, now_ms());
     warnings.extend(mcp_warnings);
 
     warnings
@@ -680,10 +686,11 @@ pub(super) struct ResolvedComponents {
 /// is inert, since `PRAGMA foreign_keys` is only ever set ON in tests.
 pub(super) fn resolve_bundle_components(
     wstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     bundle_id: &str,
 ) -> Result<ResolvedComponents, String> {
     let skills: Vec<crate::backend::storage::Skill> = wstore
-        .bundle_skill_list(bundle_id)
+        .bundle_skill_list(identity_store, bundle_id)
         .map_err(|e| format!("failed to resolve bundle skills: {e}"))?
         .into_iter()
         .filter(|item| item.bound_to_bundle)
@@ -693,7 +700,7 @@ pub(super) fn resolve_bundle_components(
     let mut warnings: Vec<String> = Vec::new();
     let mut mcp_entries: Vec<serde_json::Value> = Vec::new();
     for item in wstore
-        .bundle_mcp_list(bundle_id)
+        .bundle_mcp_list(identity_store, bundle_id)
         .map_err(|e| format!("failed to resolve bundle MCP servers: {e}"))?
         .into_iter()
         .filter(|item| item.bound_to_bundle)
@@ -1044,6 +1051,7 @@ struct ExportForAgentReq {
 async fn build_export_for_agent(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     bundle_id: &str,
     agent_id: &str,
     err_prefix: &str,
@@ -1064,7 +1072,7 @@ async fn build_export_for_agent(
 
     // Same resolver as the agent-less path, so the two cannot disagree about
     // what the bundle contains.
-    let components = resolve_bundle_components(wstore, &bundle.id)
+    let components = resolve_bundle_components(wstore, identity_store, &bundle.id)
         .map_err(|e| format!("{err_prefix}: {e}"))?;
     let mut handler_warnings = components.warnings;
     // Always empty now — see the note at the agent-less export path.
@@ -1141,10 +1149,11 @@ async fn build_export_for_agent(
 async fn bundle_export_for_agent_impl(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     req: ExportForAgentReq,
 ) -> Result<serde_json::Value, String> {
     let (export, _agent, all_warnings, missing_skill_ids) =
-        build_export_for_agent(id_store, wstore, &req.bundle_id, &req.agent_id, "bundle.export_for_agent").await?;
+        build_export_for_agent(id_store, wstore, identity_store, &req.bundle_id, &req.agent_id, "bundle.export_for_agent").await?;
 
     if req.format == "zip" {
         let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
@@ -1271,6 +1280,7 @@ async fn bundle_export_for_agent_with_history_impl(
     let (export, _agent, all_warnings, missing_skill_ids) = build_export_for_agent(
         &id_store,
         wstore,
+        &identity_store,
         &req.bundle_id,
         &req.agent_id,
         "bundle.export_for_agent_with_history",
@@ -1379,15 +1389,17 @@ async fn bundle_export_for_agent_with_history_impl(
 fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_BUNDLE_EXPORT_FOR_AGENT,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 let req: ExportForAgentReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
-                bundle_export_for_agent_impl(&id_store, &wstore, req).await.map(Some)
+                bundle_export_for_agent_impl(&id_store, &wstore, &identity_store, req).await.map(Some)
             })
         }),
     );
@@ -1442,6 +1454,7 @@ struct ImportForAgentReq {
 /// `bundle_import_preview_impl`'s pattern.
 async fn bundle_import_for_agent_impl(
     id_store: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
     req: ImportForAgentReq,
 ) -> Result<serde_json::Value, String> {
@@ -1545,7 +1558,7 @@ async fn bundle_import_for_agent_impl(
     // the caller to know cleanup may be needed.
     let rollback_skills = |ids: &[String]| -> Vec<String> {
         ids.iter()
-            .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+            .filter_map(|id| wstore.skill_delete(identity_store, id).err().map(|e| format!("{id}: {e}")))
             .collect()
     };
     for skill in &parsed.skills {
@@ -1560,7 +1573,7 @@ async fn bundle_import_for_agent_impl(
             created_at: now,
             updated_at: now,
         };
-        match wstore.skill_upsert_unique_global(&row) {
+        match identity_store.skill_upsert_unique_global(&row) {
             Ok(()) => imported_skill_ids.push(row.id),
             Err(e) if e.to_string().contains("already exists") => {
                 warnings.push(format!("skill \"{}\" already exists; skipped", skill.slug));
@@ -1621,6 +1634,7 @@ async fn bundle_import_for_agent_impl(
     warnings.extend(bind_imported_components(
         wstore,
         id_store,
+        identity_store,
         &bundle_id,
         &imported_skill_ids,
         &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
@@ -1700,16 +1714,18 @@ async fn bundle_import_for_agent_impl(
 
 fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let wstore = state.wstore.clone();
     engine.register_handler(
         COMMAND_BUNDLE_IMPORT_FOR_AGENT,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let wstore = wstore.clone();
             Box::pin(async move {
                 let req: ImportForAgentReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.import_for_agent: {e}"))?;
-                bundle_import_for_agent_impl(&id_store, &wstore, req).await.map(Some)
+                bundle_import_for_agent_impl(&id_store, &identity_store, &wstore, req).await.map(Some)
             })
         }),
     );
@@ -1814,12 +1830,14 @@ fn bounded_display(s: &str) -> String {
 /// placeholders in place).
 fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_BUNDLE_IMPORT,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -1927,7 +1945,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // not have fully succeeded.
                 let rollback_skills = |ids: &[String]| -> Vec<String> {
                     ids.iter()
-                        .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+                        .filter_map(|id| wstore.skill_delete(&identity_store, id).err().map(|e| format!("{id}: {e}")))
                         .collect()
                 };
 
@@ -1946,7 +1964,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         created_at: now,
                         updated_at: now,
                     };
-                    match wstore.skill_upsert_unique_global(&row) {
+                    match identity_store.skill_upsert_unique_global(&row) {
                         Ok(()) => imported_skill_ids.push(row.id),
                         Err(crate::backend::storage::error::StoreError::Other(msg))
                             if msg.contains("already exists") =>
@@ -2043,6 +2061,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 warnings.extend(bind_imported_components(
                     &wstore,
                     &id_store,
+                    &identity_store,
                     &memory.id,
                     &imported_skill_ids,
                     &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
@@ -2250,6 +2269,7 @@ struct PreviewReq {
 /// only deserializes the request and forwards).
 async fn bundle_import_preview_impl(
     id_store: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
     req: PreviewReq,
 ) -> Result<serde_json::Value, String> {
@@ -2266,7 +2286,7 @@ async fn bundle_import_preview_impl(
 
     // Skill collision detection (§3.1, two-pass).
     let global_slugs: std::collections::HashSet<String> = wstore
-        .skill_list_global()
+        .skill_list_global(identity_store)
         .map_err(|e| format!("bundle.import.preview: {e}"))?
         .into_iter()
         .map(|item| item.skill.name)
@@ -2384,16 +2404,18 @@ async fn bundle_import_preview_impl(
 
 fn register_bundle_import_preview(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let wstore = state.wstore.clone();
     engine.register_handler(
         COMMAND_BUNDLE_IMPORT_PREVIEW,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let wstore = wstore.clone();
             Box::pin(async move {
                 let req: PreviewReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.import.preview: {e}"))?;
-                Ok(Some(bundle_import_preview_impl(&id_store, &wstore, req).await?))
+                Ok(Some(bundle_import_preview_impl(&id_store, &identity_store, &wstore, req).await?))
             })
         }),
     );
@@ -2438,6 +2460,7 @@ struct CommitReq {
 /// forwards).
 async fn bundle_import_commit_impl(
     id_store: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
     broker: &crate::backend::wps::Broker,
     req: CommitReq,
@@ -2535,7 +2558,7 @@ async fn bundle_import_commit_impl(
                 // an empty rename, since skill_upsert_unique_global alone
                 // wouldn't reject it until the second attempt.
                 let global_slugs: std::collections::HashSet<String> = wstore
-                    .skill_list_global()
+                    .skill_list_global(identity_store)
                     .map_err(|e| format!("bundle.import.commit: {e}"))?
                     .into_iter()
                     .map(|item| item.skill.name)
@@ -2544,7 +2567,7 @@ async fn bundle_import_commit_impl(
 
                 let rollback_skills = |ids: &[String]| -> Vec<String> {
                     ids.iter()
-                        .filter_map(|id| wstore.skill_delete(id).err().map(|e| format!("{id}: {e}")))
+                        .filter_map(|id| wstore.skill_delete(identity_store, id).err().map(|e| format!("{id}: {e}")))
                         .collect()
                 };
 
@@ -2596,7 +2619,7 @@ async fn bundle_import_commit_impl(
                         created_at: now,
                         updated_at: now,
                     };
-                    match wstore.skill_upsert_unique_global(&row) {
+                    match identity_store.skill_upsert_unique_global(&row) {
                         Ok(()) => imported_skill_ids.push(row.id),
                         Err(crate::backend::storage::error::StoreError::Other(msg))
                             if msg.contains("already exists") =>
@@ -2680,6 +2703,7 @@ async fn bundle_import_commit_impl(
                 warnings.extend(bind_imported_components(
                     &wstore,
                     &id_store,
+                    &identity_store,
                     &memory.id,
                     &imported_skill_ids,
                     &selected_mcp_servers.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
@@ -2713,18 +2737,20 @@ async fn bundle_import_commit_impl(
 
 fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_BUNDLE_IMPORT_COMMIT,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let req: CommitReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.import.commit: {e}"))?;
-                Ok(Some(bundle_import_commit_impl(&id_store, &wstore, &broker, req).await?))
+                Ok(Some(bundle_import_commit_impl(&id_store, &identity_store, &wstore, &broker, req).await?))
             })
         }),
     );
@@ -2769,7 +2795,7 @@ mod import_preview_commit_tests {
             entry("skills/deploy/SKILL.md", &skill_md("deploy", "Runs the checklist", "1. Test\n2. Deploy")),
         ];
         let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
-        let resp = bundle_import_preview_impl(&state.id_store, &state.wstore, req).await.unwrap();
+        let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.wstore, req).await.unwrap();
 
         assert_eq!(resp["name"], "test-bundle");
         assert_eq!(resp["instructions_preview"], "Be concise.");
@@ -2787,7 +2813,7 @@ mod import_preview_commit_tests {
         let state = test_state();
         // Seed an existing global skill named "deploy".
         state
-            .wstore
+            .identity_store
             .skill_upsert_unique_global(&crate::backend::storage::Skill {
                 id: "existing-1".to_string(),
                 name: "deploy".to_string(),
@@ -2806,7 +2832,7 @@ mod import_preview_commit_tests {
             entry("skills/deploy/SKILL.md", &skill_md("deploy", "d", "body")),
         ];
         let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
-        let resp = bundle_import_preview_impl(&state.id_store, &state.wstore, req).await.unwrap();
+        let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.wstore, req).await.unwrap();
         assert_eq!(resp["skills"][0]["collision"], "name_conflict");
     }
 
@@ -2824,7 +2850,7 @@ mod import_preview_commit_tests {
             entry("skills/code-review-old/SKILL.md", &skill_md("code-review", "old", "body-old")),
         ];
         let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
-        let resp = bundle_import_preview_impl(&state.id_store, &state.wstore, req).await.unwrap();
+        let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.wstore, req).await.unwrap();
         let skills = resp["skills"].as_array().unwrap();
         assert_eq!(skills.len(), 2);
         assert!(skills.iter().all(|s| s["collision"] == "duplicate_in_bundle"));
@@ -2845,7 +2871,7 @@ mod import_preview_commit_tests {
             include_skills: vec![],
             include_mcp_servers: vec![],
         };
-        let err = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req)
+        let err = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req)
             .await
             .unwrap_err();
         assert!(err.contains("digest mismatch"));
@@ -2870,7 +2896,7 @@ mod import_preview_commit_tests {
             include_skills: vec![],
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
         let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert_eq!(saved.name, "Renamed Bundle");
@@ -2896,7 +2922,7 @@ mod import_preview_commit_tests {
             include_skills: vec![],
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
         let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert_eq!(saved.name.chars().count(), bi::MAX_BUNDLE_NAME_CHARS);
@@ -2929,10 +2955,10 @@ mod import_preview_commit_tests {
             include_skills,
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         let imported = resp["imported_skill_ids"].as_array().unwrap();
         assert_eq!(imported.len(), 1, "expected only the first occurrence of the repeated source_dir to be written");
-        let saved_skill = state.wstore.skill_get(imported[0].as_str().unwrap()).unwrap().unwrap();
+        let saved_skill = state.identity_store.skill_get(imported[0].as_str().unwrap()).unwrap().unwrap();
         assert_eq!(saved_skill.name, "deploy-0");
     }
 
@@ -2978,7 +3004,7 @@ mod import_preview_commit_tests {
             include_skills,
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         assert!(
             resp["imported_skill_ids"].as_array().unwrap().is_empty(),
             "the three real selections beyond the MAX_IMPORTED_SKILLS boundary must be dropped by the cap, not imported"
@@ -3010,7 +3036,7 @@ mod import_preview_commit_tests {
             include_skills: vec![],
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
         let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert!(saved.context_files.contains("content B"));
@@ -3023,7 +3049,7 @@ mod import_preview_commit_tests {
         // known-conflicting slug.
         let state = test_state();
         state
-            .wstore
+            .identity_store
             .skill_upsert_unique_global(&crate::backend::storage::Skill {
                 id: "existing-1".to_string(),
                 name: "deploy".to_string(),
@@ -3055,7 +3081,7 @@ mod import_preview_commit_tests {
             include_skills: vec![SkillSelection { source_dir: "skills/deploy".to_string(), import_as: None }],
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         assert!(resp["imported_skill_ids"].as_array().unwrap().is_empty());
         assert_eq!(resp["skipped_skills"][0], "deploy");
     }
@@ -3064,7 +3090,7 @@ mod import_preview_commit_tests {
     async fn commit_imports_colliding_skill_under_a_non_empty_rename() {
         let state = test_state();
         state
-            .wstore
+            .identity_store
             .skill_upsert_unique_global(&crate::backend::storage::Skill {
                 id: "existing-1".to_string(),
                 name: "deploy".to_string(),
@@ -3099,10 +3125,10 @@ mod import_preview_commit_tests {
             }],
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         assert_eq!(resp["imported_skill_ids"].as_array().unwrap().len(), 1);
         let imported_id = resp["imported_skill_ids"][0].as_str().unwrap();
-        let saved_skill = state.wstore.skill_get(imported_id).unwrap().unwrap();
+        let saved_skill = state.identity_store.skill_get(imported_id).unwrap().unwrap();
         assert_eq!(saved_skill.name, "deploy-team-x");
     }
 
@@ -3117,7 +3143,7 @@ mod import_preview_commit_tests {
         let state = test_state();
         let oversized_name = "n".repeat(bi::MAX_DISPLAY_FIELD_CHARS + 500);
         state
-            .wstore
+            .identity_store
             .skill_upsert_unique_global(&crate::backend::storage::Skill {
                 id: "existing-1".to_string(),
                 name: "deploy".to_string(),
@@ -3131,7 +3157,7 @@ mod import_preview_commit_tests {
             })
             .unwrap();
         state
-            .wstore
+            .identity_store
             .skill_upsert_unique_global(&crate::backend::storage::Skill {
                 id: "existing-2".to_string(),
                 name: oversized_name.clone(),
@@ -3166,7 +3192,7 @@ mod import_preview_commit_tests {
             }],
             include_mcp_servers: vec![],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         assert!(resp["imported_skill_ids"].as_array().unwrap().is_empty());
         let warnings = resp["warnings"].as_array().unwrap();
         assert!(!warnings.is_empty(), "expected an already-exists warning");
@@ -3205,7 +3231,7 @@ mod import_preview_commit_tests {
             include_skills: vec![],
             include_mcp_servers: vec!["mcp/github.server.json".to_string()],
         };
-        let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
+        let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
         let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         let mcp_servers: serde_json::Value = serde_json::from_str(&saved.mcp_servers).unwrap();
@@ -3368,7 +3394,7 @@ mod export_import_for_agent_tests {
         };
         state
             .wstore
-            .bundle_mcp_upsert_unique(&state.id_store, bundle_id, &server, true)
+            .bundle_mcp_upsert_unique(&state.identity_store, &state.id_store, bundle_id, &server, true)
             .unwrap();
     }
 
@@ -3387,7 +3413,7 @@ mod export_import_for_agent_tests {
         };
         state
             .wstore
-            .bundle_skill_upsert_unique(&state.id_store, bundle_id, &skill, true)
+            .bundle_skill_upsert_unique(&state.identity_store, &state.id_store, bundle_id, &skill, true)
             .unwrap();
     }
 
@@ -3452,6 +3478,7 @@ mod export_import_for_agent_tests {
         let result = bundle_export_impl(
             &state.id_store,
             &state.wstore,
+            &state.identity_store,
             ExportReq { id: "bundle-1".to_string(), format: String::new() },
         )
         .unwrap();
@@ -3493,7 +3520,7 @@ mod export_import_for_agent_tests {
         bind_skill(&state, "bundle-1", "Deploy");
         bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp"}"#);
 
-        let before = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        let before = resolve_bundle_components(&state.wstore, &state.identity_store, "bundle-1").unwrap();
         assert_eq!(before.skills.len(), 1);
         assert_eq!(before.mcp_entries.len(), 1);
 
@@ -3510,7 +3537,7 @@ mod export_import_for_agent_tests {
 
         // Re-create a bundle with the same id: it must start empty.
         make_bundle(&state, "bundle-1", "Reused id.");
-        let after = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        let after = resolve_bundle_components(&state.wstore, &state.identity_store, "bundle-1").unwrap();
         assert!(
             after.skills.is_empty() && after.mcp_entries.is_empty(),
             "a reused bundle id must not inherit the old bundle's components"
@@ -3530,6 +3557,7 @@ mod export_import_for_agent_tests {
 
         let report = crate::server::app_api::bundle_validate_impl(
             &state.wstore,
+            &state.identity_store,
             json!({ "id": "bundle-1", "name": "Bundle bundle-1" }),
         )
         .unwrap();
@@ -3561,6 +3589,7 @@ mod export_import_for_agent_tests {
         let result = bundle_export_for_agent_impl(
             &state.id_store,
             &state.wstore,
+            &state.identity_store,
             ExportForAgentReq {
                 bundle_id: "bundle-1".to_string(),
                 agent_id: "agent-1".to_string(),
@@ -3606,6 +3635,7 @@ mod export_import_for_agent_tests {
         let result = bundle_export_for_agent_impl(
             &state.id_store,
             &state.wstore,
+            &state.identity_store,
             ExportForAgentReq {
                 bundle_id: "bundle-1".to_string(),
                 agent_id: "agent-1".to_string(),
@@ -3839,7 +3869,7 @@ mod export_import_for_agent_tests {
         make_bundle(&state, "bundle-1", "Be helpful.");
         bind_mcp(&state, "bundle-1", "broken", "not json at all");
 
-        let components = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        let components = resolve_bundle_components(&state.wstore, &state.identity_store, "bundle-1").unwrap();
         assert!(components.mcp_entries.is_empty(), "unparseable config must not be exported");
         assert!(
             components.warnings.iter().any(|w| w.contains("broken") && w.contains("invalid config")),
@@ -3857,7 +3887,7 @@ mod export_import_for_agent_tests {
         make_bundle(&state, "bundle-2", "Other.");
         bind_mcp(&state, "bundle-2", "elsewhere", r#"{"command":"x"}"#);
 
-        let components = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        let components = resolve_bundle_components(&state.wstore, &state.identity_store, "bundle-1").unwrap();
         assert!(
             components.mcp_entries.is_empty(),
             "another bundle's server must not leak in: {:?}",
@@ -3880,7 +3910,7 @@ mod export_import_for_agent_tests {
         std::fs::create_dir_all(&memory_dir).unwrap();
         std::fs::write(memory_dir.join("MEMORY.md"), "Learned fact.").unwrap();
 
-        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-1".to_string(),
             agent_id: "agent-1".to_string(),
             format: String::new(),
@@ -3911,7 +3941,7 @@ mod export_import_for_agent_tests {
         make_agent(&state, "agent-1", "/work/proj", config_dir.path());
         make_bundle(&state, "bundle-1", "Be helpful.");
 
-        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-1".to_string(),
             agent_id: "agent-1".to_string(),
             format: String::new(),
@@ -3931,14 +3961,14 @@ mod export_import_for_agent_tests {
         make_agent(&state, "agent-1", "/work/proj", config_dir.path());
         make_bundle(&state, "bundle-1", "Be helpful.");
 
-        let err = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let err = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "no-such-bundle".to_string(),
             agent_id: "agent-1".to_string(),
             format: String::new(),
         }).await.unwrap_err();
         assert!(err.contains("no bundle"));
 
-        let err = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let err = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-1".to_string(),
             agent_id: "no-such-agent".to_string(),
             format: String::new(),
@@ -3985,6 +4015,7 @@ mod export_import_for_agent_tests {
         let result = bundle_export_impl(
             &state.id_store,
             &state.wstore,
+            &state.identity_store,
             ExportReq { id: "bundle-1".to_string(), format: String::new() },
         )
         .unwrap();
@@ -4027,6 +4058,7 @@ mod export_import_for_agent_tests {
         let result = bundle_export_impl(
             &state.id_store,
             &state.wstore,
+            &state.identity_store,
             ExportReq { id: "bundle-2".to_string(), format: String::new() },
         )
         .unwrap();
@@ -4132,6 +4164,7 @@ mod export_import_for_agent_tests {
 
         let result = bundle_import_for_agent_impl(
             &state.id_store,
+            &state.identity_store,
             &state.wstore,
             ImportForAgentReq {
                 agent_id: "agent-1".to_string(),
@@ -4149,7 +4182,7 @@ mod export_import_for_agent_tests {
             .expect("import must report the bundle it created")
             .to_string();
 
-        let components = resolve_bundle_components(&state.wstore, &bundle_id).unwrap();
+        let components = resolve_bundle_components(&state.wstore, &state.identity_store, &bundle_id).unwrap();
         assert_eq!(
             components.skills.len(),
             1,
@@ -4166,6 +4199,7 @@ mod export_import_for_agent_tests {
         let exported = bundle_export_impl(
             &state.id_store,
             &state.wstore,
+            &state.identity_store,
             ExportReq { id: bundle_id, format: String::new() },
         )
         .unwrap();
@@ -4187,7 +4221,7 @@ mod export_import_for_agent_tests {
         state.id_store.agent_native_memory_upsert("agent-1", "MEMORY.md", "already here", None, "/x", 5, 0).unwrap();
 
         let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Imported fact.");
-        let err = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let err = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-1".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4219,7 +4253,7 @@ mod export_import_for_agent_tests {
         assert!(state.id_store.agent_native_memory_list_meta("agent-1").unwrap().is_empty());
 
         let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Would-be overwrite.");
-        let err = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let err = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-1".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4263,7 +4297,7 @@ mod export_import_for_agent_tests {
         state.wstore.agent_def_insert(&mut def).unwrap();
 
         let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Some fact.");
-        let err = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let err = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-no-workdir".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4290,7 +4324,7 @@ mod export_import_for_agent_tests {
         let oversized = "x".repeat(10 * 1024 * 1024 + 1);
         std::fs::write(memory_dir.join("MEMORY.md"), &oversized).unwrap();
 
-        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-1".to_string(),
             agent_id: "agent-1".to_string(),
             format: String::new(),
@@ -4321,7 +4355,7 @@ mod export_import_for_agent_tests {
         std::fs::write(memory_dir.join("MEMORY.md"), &oversized).unwrap();
 
         // First export mirrors it (and warns).
-        let _ = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let _ = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-1".to_string(),
             agent_id: "agent-1".to_string(),
             format: String::new(),
@@ -4330,7 +4364,7 @@ mod export_import_for_agent_tests {
         // Second export: file on disk is byte-for-byte unchanged (same
         // size+mtime), so the mirror-refresh's "unchanged" fast path
         // applies — the warning must still fire.
-        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let result = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-1".to_string(),
             agent_id: "agent-1".to_string(),
             format: String::new(),
@@ -4349,7 +4383,7 @@ mod export_import_for_agent_tests {
         make_agent(&state, "agent-1", "/work/proj", config_dir.path());
 
         let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Imported fact.");
-        let result = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let result = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-1".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4388,7 +4422,7 @@ mod export_import_for_agent_tests {
         make_agent(&state, "agent-1", "/work/proj", config_dir.path());
 
         let files = abf_files_with_memory("Be helpful.", "MEMORY.md", "Imported fact.");
-        let result = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let result = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-1".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4437,10 +4471,10 @@ mod export_import_for_agent_tests {
         let files_b = abf_files_with_memory("B.", "MEMORY.md", "From import B.");
 
         let (result_a, result_b) = tokio::join!(
-            bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
                 agent_id: "agent-1".to_string(), file_path: None, zip_base64: None, files: Some(files_a),
             }),
-            bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
                 agent_id: "agent-1".to_string(), file_path: None, zip_base64: None, files: Some(files_b),
             }),
         );
@@ -4476,7 +4510,7 @@ mod export_import_for_agent_tests {
             FileEntry { path: "armory.json".to_string(), content: manifest.to_string() },
             FileEntry { path: "memory/../escape.md".to_string(), content: "malicious".to_string() },
         ];
-        let result = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let result = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-1".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4513,7 +4547,7 @@ mod export_import_for_agent_tests {
         let files = vec![
             FileEntry { path: "armory.json".to_string(), content: manifest.to_string() },
         ];
-        let result = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let result = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-1".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4540,7 +4574,7 @@ mod export_import_for_agent_tests {
         std::fs::create_dir_all(&memory_dir_a).unwrap();
         std::fs::write(memory_dir_a.join("MEMORY.md"), "Agent A's learned fact.").unwrap();
 
-        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-src".to_string(),
             agent_id: "agent-a".to_string(),
             format: String::new(),
@@ -4553,7 +4587,7 @@ mod export_import_for_agent_tests {
             })
             .collect();
 
-        let imported = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let imported = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-b".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4587,7 +4621,7 @@ mod export_import_for_agent_tests {
         bundle.model = "anthropic".to_string();
         state.id_store.bundle_upsert(&bundle).unwrap();
 
-        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-src".to_string(),
             agent_id: "agent-a".to_string(),
             format: String::new(),
@@ -4606,7 +4640,7 @@ mod export_import_for_agent_tests {
                 content: f["content"].as_str().unwrap().to_string(),
             })
             .collect();
-        let imported = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+        let imported = bundle_import_for_agent_impl(&state.id_store, &state.identity_store, &state.wstore, ImportForAgentReq {
             agent_id: "agent-b".to_string(),
             file_path: None,
             zip_base64: None,
@@ -4625,7 +4659,7 @@ mod export_import_for_agent_tests {
         make_agent(&state, "agent-a", "/work/a", config_a.path());
         make_bundle(&state, "bundle-unbound", "Shared instructions."); // provider/model left empty
 
-        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, &state.identity_store, ExportForAgentReq {
             bundle_id: "bundle-unbound".to_string(),
             agent_id: "agent-a".to_string(),
             format: String::new(),

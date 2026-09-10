@@ -31,14 +31,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // silently hiding every standalone/Armory-catalog skill from the actual
     // launch flow (reagent P0 on PR #2322).
     let wstore_lfs = state.wstore.clone();
+    let identity_store_lfs = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_SKILLS,
         Box::new(move |data, _ctx| {
             let wstore = wstore_lfs.clone();
+            let identity_store = identity_store_lfs.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentSkillsData = serde_json::from_value(data)
                     .map_err(|e| format!("listagentskills: {e}"))?;
-                let skills = wstore.effective_skills(&cmd.agent_id);
+                let skills = wstore.effective_skills(&identity_store, &cmd.agent_id);
                 Ok(Some(serde_json::to_value(&skills).unwrap_or_default()))
             })
         }),
