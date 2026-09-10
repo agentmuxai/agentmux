@@ -142,6 +142,31 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // tool/tokens, and transitions the phase to Done.
         const wasStopping = getTurnPhase().kind === "Interrupting";
         opts.model.dispatchPane({ type: "TurnEnd", stats });
+        // Close out any tool node still marked `running` now that the turn is
+        // over. TurnEnd above only cleans the PANE reducer; the DOCUMENT
+        // reducer's nodes[] were left untouched, so a tool node that never
+        // received its `tool_result` stayed `running` forever — its dock row
+        // counting up with no process behind it.
+        //
+        // The hole this closes: `toolCallToNode` creates nodes optimistically
+        // at status "running" and the only exit is a matching tool_result, but
+        // a harness PRE-EXECUTION rejection arrives as a turn-terminating
+        // top-level `result` frame instead — so the result never comes and the
+        // node never closes. `scrubOrphanedInProgress` was written for exactly
+        // this (SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06 §1.1)
+        // and then never wired to anything: it ran only on session/reload
+        // boundaries, never on a turn boundary, and the standalone command had
+        // zero dispatch sites in production.
+        //
+        // `tools-only` is the documented turn-end scope — thinking markdown,
+        // shells and awaiting_answer nodes legitimately outlive a turn and are
+        // left alone.
+        //
+        // Safe for live background tasks, which is the obvious worry: an
+        // ACCEPTED background launch is terminal `success` within ~a second
+        // (its result text is the acceptance message), so it is never `running`
+        // by the time a turn ends. Only a node with no result at all is swept.
+        opts.model.dispatchDoc({ type: "ScrubOrphanedInProgress", at: Date.now(), scope: "tools-only" });
         if (wasStopping) {
             const interruptedNode: DocumentNode = {
                 type: "markdown",
