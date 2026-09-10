@@ -1,11 +1,9 @@
 # Spec: Durable Bindings
 
-**Status:** proposed, Phase 1 landed (#3175). §8 has two open decisions on two
-separate timelines — **not both blocking Phase 2**: the identity-store-vs-
-shared-store choice (§8 item 1) blocks Phase 2 onward; whether `db_agents` is
-promoted or agent identity resolves through the registry (§8 item 2) only
-blocks Phase 5 onward, per §7's own ordering. Phases 2–4 need only item 1
-settled.
+**Status:** active. Phase 1 landed (#3175). Both §8 decisions are now made —
+identity store (item 1), agent identity resolves through the registry rather
+than a promoted `db_agents` (item 2) — see §8 for the recorded rationale.
+Phase 2 in progress.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
@@ -345,22 +343,25 @@ registry.
 **Phase 7 — memory location invariant.** The former portability Phase 4. Shares
 §4's invariant but moves files rather than rows, so it keeps its own spec.
 
-## 8. Open decisions
+## 8. Decisions
 
-1. **Identity store or shared store?** §5.1 argues identity store. The shared
-   store already holds `db_bundles`, so putting a bundle's components beside it
-   has a symmetry argument. Against: the shared store is the one with
-   channel-isolation defaults applied elsewhere, and the identity store is the
-   one explicitly described as permanently global.
+1. **Identity store or shared store? Decided: identity store.** §5.1 already
+   argued this; recorded here as final rather than open. The shared store's
+   symmetry argument (it already holds `db_bundles`) doesn't outweigh the
+   identity store being the one store explicitly documented as permanently
+   global with no channel-isolation exceptions — every other exception in this
+   codebase (`db_accounts`) exists for a specific, named isolation need
+   (disposable test accounts) that skills and MCP servers do not share.
 
 2. **Should `db_agents` be promoted, or should agent identity resolve through
-   the registry?** Phase 5 assumes the latter — agents are already durable via
-   `~/.agentmux/shared/agents`, so adding a second durable home for them
-   invites exactly the two-sources-of-truth problem this spec exists to remove.
-   Against: it means changing `managed_bind_agent`'s validation rather than
-   just relocating a table, which is more code and touches the launch path.
-   This is the one open decision that changes the shape of a phase rather than
-   just its destination.
+   the registry? Decided: registry.** Agents are already durable via
+   `~/.agentmux/shared/agents` — promoting `db_agents` too would build a
+   second durable home for the exact fact the registry already owns, which is
+   the two-sources-of-truth shape this whole spec exists to close, not one to
+   reintroduce for agents specifically. The cost (§7 Phase 5 has to change
+   `managed_bind_agent`'s validation and `managed_union_bundle_refs`'s
+   `memory_id` lookup, not just relocate a table) is accepted as the correct
+   trade against reopening the same class of bug for a second row type.
 
 3. ~~What happens to rows in the existing `objects.db` files?~~ **Resolved by
    §5.1.** The local tables keep their declarations and simply stop being
