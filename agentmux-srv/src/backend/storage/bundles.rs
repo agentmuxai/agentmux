@@ -56,7 +56,7 @@ pub struct Bundle {
     /// JSON-encoded array of skill IDs.
     #[serde(default = "default_json_array_string")]
     pub skills: String,
-    /// Explicit ordering within the Armory global brain. Lower sorts
+    /// Explicit ordering within the Armory global bundles. Lower sorts
     /// first; this is the order sections inject into CLAUDE.md at launch.
     /// Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
     /// `reorderglobalbrain` RPC — `bundle_upsert` never overwrites it
@@ -64,7 +64,7 @@ pub struct Bundle {
     #[serde(default)]
     pub sort_order: i64,
     /// AgentMux-controlled, highest-priority Global Bundle tier — always
-    /// also `is_global`, injected first in `format_global_brain_block`'s
+    /// also `is_global`, injected first in `format_global_bundle_block`'s
     /// output with explicit override wording. Writable ONLY through
     /// `bundle_upsert_system`/`bundle_delete_system` — the
     /// generic `bundle_upsert`/`_delete`/`_reorder` all refuse to
@@ -90,7 +90,7 @@ fn default_json_object_string() -> String {
     "{}".to_string()
 }
 
-/// Format global brain bundles into the block injected into an agent's
+/// Format global bundles into the block injected into an agent's
 /// CLAUDE.md. `is_system` sections (see `Bundle::is_system`) are split out
 /// and rendered FIRST, wrapped in explicit override wording, so they
 /// outrank every ordinary `# [Workspace] <name>` section that follows —
@@ -99,7 +99,7 @@ fn default_json_object_string() -> String {
 /// sort_order, name), so this only needs to partition, not re-sort.
 /// Sections are separated by a `---` rule. Returns an empty string when no
 /// section has instructions.
-pub fn format_global_brain_block(bundles: &[Bundle]) -> String {
+pub fn format_global_bundle_block(bundles: &[Bundle]) -> String {
     let non_empty: Vec<&Bundle> = bundles
         .iter()
         .filter(|b| !b.instructions.trim().is_empty())
@@ -157,7 +157,7 @@ impl Store {
     /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md), then by
     /// explicit `sort_order` (then name as a stable tiebreak). Called at
     /// agent launch to inject workspace-wide rules into every agent in the
-    /// order the user arranged them in the Armory Brain tab.
+    /// order the user arranged them in the Armory Global section.
     pub fn bundle_list_global(&self) -> Result<Vec<Bundle>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -225,7 +225,7 @@ impl Store {
             // sort_order is deliberately NOT in the ON CONFLICT update set:
             // it is owned by `bundle_reorder`, so editing a bundle
             // through the regular Bundle form never disturbs its position in
-            // the global brain. is_system is hardcoded to 0 on insert (this
+            // the global bundles. is_system is hardcoded to 0 on insert (this
             // path can never CREATE a system row) and omitted from the
             // update set entirely (an existing row's tier — always 0, given
             // the guard above — is never touched here either).
@@ -359,7 +359,7 @@ impl Store {
     }
 
     /// Assign `sort_order` to the given bundle ids in the order supplied
-    /// (position 0, 1, 2, …). Drives the Armory global brain ordering,
+    /// (position 0, 1, 2, …). Drives the Armory global bundles ordering,
     /// which in turn controls CLAUDE.md injection order. Ids not present in
     /// the table, OR present but `is_system=1`, are skipped silently — a
     /// system row's position is fixed (always first, see

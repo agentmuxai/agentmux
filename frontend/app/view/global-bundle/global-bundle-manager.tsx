@@ -1,31 +1,30 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBrainManager — the Armory "Memory" tab (labeled "Brain" prior to the
-// PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming decision — "the
-// brain" is a colloquial nickname, "Memory" is the canonical term). Presents
-// the workspace-wide global brain (is_global Memory bundles) as an ordered
+// GlobalBundleManager — the Global section of the Armory "Memory" tab (moves to
+// the Bundles tab in Phase 4 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md).
+// Presents the workspace-wide global bundles (is_global rows) as an ordered
 // list of editable sections that compose into every agent's startup
 // instructions file (CLAUDE.md, GEMINI.md, or similar, depending on
 // provider) at launch.
 //
-// Context-free: owns its own GlobalBrainViewModel and drives off the
+// Context-free: owns its own GlobalBundleViewModel and drives off the
 // bundle_* RPCs. Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
-import { GlobalBrainViewModel, NEW_SECTION_ID } from "./global-brain-model";
-import "./global-brain.scss";
+import { GlobalBundleViewModel, NEW_SECTION_ID } from "./global-bundle-model";
+import "./global-bundle.scss";
 
 /** Inline editor card shared by the "new section" and "edit section" flows. */
-function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): JSX.Element {
+function SectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX.Element {
     const { model } = props;
     return (
-        <div class="global-brain-editor">
-            <label class="global-brain-field">
-                <span class="global-brain-field-label">Name</span>
+        <div class="global-bundle-editor">
+            <label class="global-bundle-field">
+                <span class="global-bundle-field-label">Name</span>
                 <input
-                    class="global-brain-input"
+                    class="global-bundle-input"
                     type="text"
                     value={model.draftNameAtom()}
                     onInput={(e) => model.setDraftName(e.currentTarget.value)}
@@ -33,10 +32,10 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
                     placeholder="e.g. Coding Standards"
                 />
             </label>
-            <label class="global-brain-field">
-                <span class="global-brain-field-label">Content</span>
+            <label class="global-bundle-field">
+                <span class="global-bundle-field-label">Content</span>
                 <textarea
-                    class="global-brain-textarea"
+                    class="global-bundle-textarea"
                     rows={8}
                     value={model.draftInstructionsAtom()}
                     onInput={(e) => model.setDraftInstructions(e.currentTarget.value)}
@@ -45,16 +44,16 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
                     spellcheck={false}
                 />
             </label>
-            <div class="global-brain-editor-actions">
+            <div class="global-bundle-editor-actions">
                 <button
-                    class="global-brain-btn"
+                    class="global-bundle-btn"
                     disabled={model.savingAtom()}
                     onClick={() => model.cancelEdit()}
                 >
                     Cancel
                 </button>
                 <button
-                    class="global-brain-btn global-brain-btn-primary"
+                    class="global-bundle-btn global-bundle-btn-primary"
                     disabled={model.savingAtom() || !model.draftNameAtom().trim()}
                     onClick={() => void model.saveEdit()}
                 >
@@ -69,14 +68,14 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
  *  parameterized SectionEditor) so its state is never accidentally wired to
  *  the ordinary draft signals. See
  *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5. */
-function SystemSectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): JSX.Element {
+function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX.Element {
     const { model } = props;
     return (
-        <div class="global-brain-editor global-brain-editor-system">
-            <label class="global-brain-field">
-                <span class="global-brain-field-label">Name</span>
+        <div class="global-bundle-editor global-bundle-editor-system">
+            <label class="global-bundle-field">
+                <span class="global-bundle-field-label">Name</span>
                 <input
-                    class="global-brain-input"
+                    class="global-bundle-input"
                     type="text"
                     value={model.draftSystemNameAtom()}
                     onInput={(e) => model.setDraftSystemName(e.currentTarget.value)}
@@ -84,10 +83,10 @@ function SystemSectionEditor(props: { model: GlobalBrainViewModel; isNew: boolea
                     placeholder="e.g. AgentMux Policy"
                 />
             </label>
-            <label class="global-brain-field">
-                <span class="global-brain-field-label">Content</span>
+            <label class="global-bundle-field">
+                <span class="global-bundle-field-label">Content</span>
                 <textarea
-                    class="global-brain-textarea"
+                    class="global-bundle-textarea"
                     rows={8}
                     value={model.draftSystemInstructionsAtom()}
                     onInput={(e) => model.setDraftSystemInstructions(e.currentTarget.value)}
@@ -96,16 +95,16 @@ function SystemSectionEditor(props: { model: GlobalBrainViewModel; isNew: boolea
                     spellcheck={false}
                 />
             </label>
-            <div class="global-brain-editor-actions">
+            <div class="global-bundle-editor-actions">
                 <button
-                    class="global-brain-btn"
+                    class="global-bundle-btn"
                     disabled={model.savingAtom()}
                     onClick={() => model.cancelEditSystem()}
                 >
                     Cancel
                 </button>
                 <button
-                    class="global-brain-btn global-brain-btn-primary"
+                    class="global-bundle-btn global-bundle-btn-primary"
                     disabled={model.savingAtom() || !model.draftSystemNameAtom().trim()}
                     onClick={() => void model.saveSystemEdit()}
                 >
@@ -116,8 +115,8 @@ function SystemSectionEditor(props: { model: GlobalBrainViewModel; isNew: boolea
     );
 }
 
-export const GlobalBrainManager = (): JSX.Element => {
-    const model = new GlobalBrainViewModel();
+export const GlobalBundleManager = (): JSX.Element => {
+    const model = new GlobalBundleViewModel();
     onCleanup(() => model.dispose());
 
     const [promoteValue, setPromoteValue] = createSignal("");
@@ -129,16 +128,16 @@ export const GlobalBrainManager = (): JSX.Element => {
     };
 
     return (
-        <div class="global-brain">
-            <p class="global-brain-intro">
+        <div class="global-bundle">
+            <p class="global-bundle-intro">
                 Inherited by every agent at launch — composed into its startup file (e.g.{" "}
                 <code>CLAUDE.md</code>) in order.
             </p>
 
-            <div class="global-brain-restart-note">Takes effect on next agent restart.</div>
+            <div class="global-bundle-restart-note">Takes effect on next agent restart.</div>
 
             <Show when={model.errorAtom()}>
-                <div class="global-brain-error">{model.errorAtom()}</div>
+                <div class="global-bundle-error">{model.errorAtom()}</div>
             </Show>
 
             {/* Read-only reference display of the CLAUDE.md in the isolated
@@ -164,27 +163,27 @@ export const GlobalBrainManager = (): JSX.Element => {
                 form supplies the non-null accessor the body needs. */}
             <Show when={model.claudeGlobalConfigAtom()}>
                 {(cfg) => (
-                    <div class="global-brain-external-files">
-                        <p class="global-brain-external-files-heading">
+                    <div class="global-bundle-external-files">
+                        <p class="global-bundle-external-files-heading">
                             Claude Code provider config — reference only, not part of Global Memory.
                         </p>
 
-                        <div class="global-brain-machine-config">
-                            <div class="global-brain-machine-config-header">
+                        <div class="global-bundle-machine-config">
+                            <div class="global-bundle-machine-config-header">
                                 <span
-                                    class="global-brain-machine-config-badge"
+                                    class="global-bundle-machine-config-badge"
                                     title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
                                 >
                                     Claude Code — shared provider config
                                 </span>
-                                <code class="global-brain-machine-config-path">{cfg().path}</code>
+                                <code class="global-bundle-machine-config-path">{cfg().path}</code>
                             </div>
-                            <p class="global-brain-machine-config-caption">Used by default spawned agents.</p>
+                            <p class="global-bundle-machine-config-caption">Used by default spawned agents.</p>
                             <Show
                                 when={cfg().exists}
-                                fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                                fallback={<p class="global-bundle-machine-config-empty">No file at this path yet.</p>}
                             >
-                                <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                                <pre class="global-bundle-machine-config-content">{cfg().content}</pre>
                             </Show>
                         </div>
                     </div>
@@ -195,34 +194,34 @@ export const GlobalBrainManager = (): JSX.Element => {
                 first with override wording. No move up/down: position is
                 fixed server-side regardless of what a reorder call sends.
                 See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */}
-            <div class="global-brain-sections global-brain-sections-system">
+            <div class="global-bundle-sections global-bundle-sections-system">
                 <For each={model.systemSectionsAtom()}>
                     {(section) => (
                         <div
-                            class="global-brain-section global-brain-section-system"
+                            class="global-bundle-section global-bundle-section-system"
                             classList={{ "is-editing": model.editingSystemIdAtom() === section.id }}
                         >
                             <Show
                                 when={model.editingSystemIdAtom() === section.id}
                                 fallback={
-                                    <div class="global-brain-section-row">
-                                        <div class="global-brain-section-main">
-                                            <span class="global-brain-system-badge" title="AgentMux-controlled, highest priority">
+                                    <div class="global-bundle-section-row">
+                                        <div class="global-bundle-section-main">
+                                            <span class="global-bundle-system-badge" title="AgentMux-controlled, highest priority">
                                                 AgentMux
                                             </span>
-                                            <span class="global-brain-section-name">
+                                            <span class="global-bundle-section-name">
                                                 {section.name}
                                             </span>
                                         </div>
-                                        <div class="global-brain-section-actions">
+                                        <div class="global-bundle-section-actions">
                                             <button
-                                                class="global-brain-btn"
+                                                class="global-bundle-btn"
                                                 onClick={() => model.startEditSystem(section)}
                                             >
                                                 Edit
                                             </button>
                                             <button
-                                                class="global-brain-btn global-brain-btn-danger"
+                                                class="global-bundle-btn global-bundle-btn-danger"
                                                 title="Delete this system entry"
                                                 onClick={() => void model.removeSystem(section.id)}
                                             >
@@ -239,14 +238,14 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </For>
 
                 <Show when={model.editingSystemIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-brain-section global-brain-section-system is-editing">
+                    <div class="global-bundle-section global-bundle-section-system is-editing">
                         <SystemSectionEditor model={model} isNew={true} />
                     </div>
                 </Show>
 
                 <Show when={model.systemSectionsAtom().length === 0 && model.editingSystemIdAtom() === null}>
                     <button
-                        class="global-brain-btn global-brain-btn-system-add"
+                        class="global-bundle-btn global-bundle-btn-system-add"
                         onClick={() => model.startNewSystem()}
                     >
                         + Add AgentMux system entry
@@ -254,30 +253,30 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </Show>
             </div>
 
-            <div class="global-brain-sections">
+            <div class="global-bundle-sections">
                 <For each={model.ordinarySectionsAtom()}>
                     {(section, i) => (
                         <div
-                            class="global-brain-section"
+                            class="global-bundle-section"
                             classList={{ "is-editing": model.editingIdAtom() === section.id }}
                         >
                             <Show
                                 when={model.editingIdAtom() === section.id}
                                 fallback={
-                                    <div class="global-brain-section-row">
-                                        <div class="global-brain-section-main">
-                                            <span class="global-brain-section-name">
+                                    <div class="global-bundle-section-row">
+                                        <div class="global-bundle-section-main">
+                                            <span class="global-bundle-section-name">
                                                 {section.name}
                                             </span>
                                             <Show when={section.description}>
-                                                <span class="global-brain-section-desc">
+                                                <span class="global-bundle-section-desc">
                                                     {section.description}
                                                 </span>
                                             </Show>
                                         </div>
-                                        <div class="global-brain-section-actions">
+                                        <div class="global-bundle-section-actions">
                                             <button
-                                                class="global-brain-icon-btn"
+                                                class="global-bundle-icon-btn"
                                                 title="Move up"
                                                 disabled={i() === 0}
                                                 onClick={() => void model.move(section.id, -1)}
@@ -285,7 +284,7 @@ export const GlobalBrainManager = (): JSX.Element => {
                                                 ↑
                                             </button>
                                             <button
-                                                class="global-brain-icon-btn"
+                                                class="global-bundle-icon-btn"
                                                 title="Move down"
                                                 disabled={i() === model.ordinarySectionsAtom().length - 1}
                                                 onClick={() => void model.move(section.id, 1)}
@@ -293,14 +292,14 @@ export const GlobalBrainManager = (): JSX.Element => {
                                                 ↓
                                             </button>
                                             <button
-                                                class="global-brain-btn"
+                                                class="global-bundle-btn"
                                                 onClick={() => model.startEdit(section)}
                                             >
                                                 Edit
                                             </button>
                                             <button
-                                                class="global-brain-btn global-brain-btn-danger"
-                                                title="Remove from the global brain (keeps the bundle)"
+                                                class="global-bundle-btn global-bundle-btn-danger"
+                                                title="Remove from the global bundles (keeps the bundle)"
                                                 onClick={() => void model.remove(section.id)}
                                             >
                                                 Remove
@@ -318,19 +317,19 @@ export const GlobalBrainManager = (): JSX.Element => {
                 {/* New-section draft renders at the END — saveEdit appends it
                     to the order, so its draft position matches where it lands. */}
                 <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-brain-section is-editing">
+                    <div class="global-bundle-section is-editing">
                         <SectionEditor model={model} isNew={true} />
                     </div>
                 </Show>
 
                 <Show when={model.ordinarySectionsAtom().length === 0 && model.editingIdAtom() === null}>
-                    <div class="global-brain-empty">No global sections yet.</div>
+                    <div class="global-bundle-empty">No global sections yet.</div>
                 </Show>
             </div>
 
-            <div class="global-brain-add-bar">
+            <div class="global-bundle-add-bar">
                 <button
-                    class="global-brain-btn global-brain-btn-primary"
+                    class="global-bundle-btn global-bundle-btn-primary"
                     disabled={model.editingIdAtom() === NEW_SECTION_ID}
                     onClick={() => model.startNew()}
                 >
@@ -338,7 +337,7 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </button>
                 <Show when={model.candidatesAtom().length > 0}>
                     <select
-                        class="global-brain-promote-select"
+                        class="global-bundle-promote-select"
                         value={promoteValue()}
                         onChange={(e) => handlePromote(e.currentTarget.value)}
                     >
@@ -354,12 +353,12 @@ export const GlobalBrainManager = (): JSX.Element => {
                 diverge per provider) — this is visibility into WHERE it
                 lands, not N separate previews. See
                 docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4. */}
-            <div class="global-brain-applies-to">
-                <span class="global-brain-applies-to-label">Applies to:</span>
+            <div class="global-bundle-applies-to">
+                <span class="global-bundle-applies-to-label">Applies to:</span>
                 <For each={model.filenameGroupsAtom()}>
                     {(group) => (
                         <span
-                            class="global-brain-applies-to-chip"
+                            class="global-bundle-applies-to-chip"
                             title={group.providerNames.join(", ")}
                         >
                             <code>{group.filename}</code>
@@ -368,7 +367,7 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </For>
                 <Show when={model.noFileProvidersAtom().length > 0}>
                     <span
-                        class="global-brain-applies-to-chip global-brain-applies-to-chip-warning"
+                        class="global-bundle-applies-to-chip global-bundle-applies-to-chip-warning"
                         title={`${model.noFileProvidersAtom().join(", ")}: no confirmed startup-instructions file yet — see SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2`}
                     >
                         not yet applied to: {model.noFileProvidersAtom().join(", ")}
@@ -376,15 +375,15 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </Show>
             </div>
 
-            <div class="global-brain-preview">
+            <div class="global-bundle-preview">
                 <button
-                    class="global-brain-preview-toggle"
+                    class="global-bundle-preview-toggle"
                     onClick={() => model.setShowPreview(!model.showPreviewAtom())}
                 >
                     {model.showPreviewAtom() ? "▾" : "▸"} Combined preview
                 </button>
                 <Show when={model.showPreviewAtom()}>
-                    <pre class="global-brain-preview-content">
+                    <pre class="global-bundle-preview-content">
                         {model.previewAtom() || "(empty)"}
                     </pre>
                 </Show>
@@ -393,4 +392,4 @@ export const GlobalBrainManager = (): JSX.Element => {
     );
 };
 
-GlobalBrainManager.displayName = "GlobalBrainManager";
+GlobalBundleManager.displayName = "GlobalBundleManager";

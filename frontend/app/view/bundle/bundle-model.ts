@@ -169,7 +169,7 @@ export class BundleViewModel implements ViewModel {
 
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete made elsewhere refreshes this list without
-    // a manual reopen. Same `memories:changed` event GlobalBrainViewModel
+    // a manual reopen. Same `memories:changed` event GlobalBundleViewModel
     // now also subscribes to; see that model's own comment on why one
     // umbrella event firing a refresh in both tabs is fine, not a bug.
     private unsubChanged: () => void;

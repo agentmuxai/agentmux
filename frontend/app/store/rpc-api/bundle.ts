@@ -45,7 +45,7 @@ export const BundleApi = {
     },
 
     // `ids` is the full ordered list of global bundle ids.
-    ReorderGlobalBrainCommand(
+    ReorderGlobalBundlesCommand(
         client: RpcClient,
         data: { ids: string[] },
         opts?: RpcOpts,

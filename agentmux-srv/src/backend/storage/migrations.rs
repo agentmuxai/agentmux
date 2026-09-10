@@ -92,8 +92,8 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///   v8 — db_memory_bundles.is_global: global-tier flag for Armory
 ///        bundles injected into every agent's CLAUDE.md at launch
 ///   v9 — db_memory_bundles.sort_order: explicit ordering for the Armory
-///        global brain (controls CLAUDE.md injection order). Existing
-///        rows default to 0; the Brain tab assigns positions via reorder.
+///        global bundles (controls CLAUDE.md injection order). Existing
+///        rows default to 0; the Armory Global section assigns positions via reorder.
 ///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
 ///        standalone MCP Server and Skill primitives with per-agent ref tables
 ///        (v1 composable model, SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md).
@@ -244,7 +244,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `Store::bundle_upsert_system`/`_delete_system` — the
 ///        generic `bundle_upsert`/`_delete`/`_reorder` all refuse
 ///        to touch an is_system=1 row. Injected first in
-///        `format_global_brain_block`'s output, wrapped in explicit
+///        `format_global_bundle_block`'s output, wrapped in explicit
 ///        override wording, ahead of every ordinary Global Bundle
 ///        section. See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
 ///   v28 — db_agent_activity_summaries: one-shot, on-demand Haiku-generated

@@ -229,7 +229,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("FORBIDDEN: cannot mutate a protected bundle".to_string());
                 }
                 // Guard existing global bundles: an agent must not be able to demote or
-                // corrupt a shared global brain bundle it doesn't own by supplying its id.
+                // corrupt a shared global bundle it doesn't own by supplying its id.
                 if !memory.id.is_empty() {
                     if let Some(existing) = id_store.bundle_get(&memory.id)
                         .map_err(|e| format!("bundle.upsert: {e}"))?

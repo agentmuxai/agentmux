@@ -346,16 +346,22 @@ This spec changes names and surfaces only. Behaviour is intended to be
 bit-identical, and Phase 1–3 should produce no diff in `AGENTMUX_MEMORY.md` output
 for any existing agent.
 
-## 9. Decisions needed before Phase 1
+## 9. Decisions
 
-1. **Tab label** — is the Bundles tab called **"Bundles"** (honest, matches the
-   noun) or does it keep **"ABF"** (format-as-brand)? §5 assumes "Bundles" with
-   ABF reserved for import/export.
-2. **Phase 3 scope** — retire the `*memory` commands outright, or keep them as
-   deprecated aliases for one release? Outright is cleaner; aliases are safer if
-   anything outside this repo speaks that surface.
-3. **`viewType = "memory"`** — migrate the persisted value, or freeze the wire
-   value and rename only the type?
-4. **Sequencing** — Phases 1+2 are safe and could land immediately. Phase 3 (wire)
-   and Phase 4 (UI) are larger. Land 1+2 first and re-evaluate, or commit to all
-   four up front?
+Decided 2026-09-09 (owner, after Phase 1 landed in #3133 / #3135):
+
+1. **Tab label — "Bundles".** The tab is named after the noun it lists. ABF
+   stays the name of the import/export format and appears on import/export
+   affordances and validator copy only. Landed ahead of Phase 4 as its own PR
+   because it is one label plus its tests.
+2. **Phase 3 scope — decide at Phase 3 time.** Default going in: keep the seven
+   `*memory` commands as deprecated aliases for one release, then remove, because
+   the REST `preset/list` route and the `PresetList`/`PresetGet` MCP tools are
+   agent-facing and must be handled first (§7.2). Revisit if nothing outside this
+   repo speaks the surface by then.
+3. **`viewType = "memory"` — freeze the wire value, rename only the type.**
+   CLAUDE.md already documents the value as deliberately frozen; the same rule as
+   the other persisted keys in §4.
+4. **Sequencing — Phase 2 lands now, then re-evaluate.** Phases 1 and 2 are
+   internal and revertible. Phase 3 (wire) and Phase 4 (UI fold) are scoped
+   separately after Phase 2 is on main.
