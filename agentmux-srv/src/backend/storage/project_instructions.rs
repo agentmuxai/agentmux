@@ -118,9 +118,16 @@ impl Store {
 
     /// Forget everything recorded for `agent_id`.
     ///
-    /// For agent deletion. Nothing else should call it: dropping observations
-    /// resets every file to `FirstSeen`, which silently discards the drift
-    /// this table exists to surface.
+    /// Called by `agent_def_delete`, beside the row these observations belong
+    /// to. There is no foreign key to enforce it — they record files an agent
+    /// *reads*, which is not a relationship SQLite can express — so without
+    /// that call the rows outlive the agent and a future agent reusing the id
+    /// inherits somebody else's baseline, every file reporting `unchanged`
+    /// against observations never made about it (ReAgent, PR #3162).
+    ///
+    /// Nothing else should call it: dropping observations resets every file to
+    /// `FirstSeen`, which silently discards the drift this table exists to
+    /// surface.
     pub fn project_instructions_forget(&self, agent_id: &str) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.execute(
@@ -207,6 +214,40 @@ mod tests {
         assert_eq!(s.project_instructions_forget("a1").unwrap(), 1);
         assert!(s.project_instructions_list("a1").unwrap().is_empty());
         assert_eq!(s.project_instructions_list("a2").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deleting_an_agent_forgets_its_observations() {
+        // Without this the rows outlive the agent, and an agent reusing the id
+        // inherits a baseline that was never about it — every file reporting
+        // `unchanged` against somebody else's observations (ReAgent, #3162).
+        let s = Store::open_in_memory().unwrap();
+        let mut def: crate::backend::storage::AgentDefinition =
+            serde_json::from_value(serde_json::json!({
+                "id": "doomed",
+                "slug": "doomed",
+                "name": "Doomed",
+                "icon": "robot",
+                "provider": "claude",
+                "description": "",
+                "working_directory": "",
+                "created_at": 1,
+            }))
+            .unwrap();
+        s.agent_def_insert(&mut def).unwrap();
+        s.project_instructions_record("doomed", &[obs("CLAUDE.md", "h1", true)]).unwrap();
+        s.project_instructions_record("survivor", &[obs("CLAUDE.md", "h1", true)]).unwrap();
+
+        assert!(s.agent_def_delete("doomed").unwrap());
+        assert!(
+            s.project_instructions_list("doomed").unwrap().is_empty(),
+            "a deleted agent must not leave observations behind"
+        );
+        assert_eq!(
+            s.project_instructions_list("survivor").unwrap().len(),
+            1,
+            "and must not take anyone else's with it"
+        );
     }
 
     #[test]

@@ -414,7 +414,7 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .wstore
                     .project_instructions_list(&agent.id)
                     .unwrap_or_default();
-                let enriched: Vec<serde_json::Value> = files
+                let mut enriched: Vec<serde_json::Value> = files
                     .iter()
                     .map(|f| {
                         let prev = previous.iter().find(|p| p.path == f.path);
@@ -434,6 +434,33 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                         v
                     })
                     .collect();
+
+                // A path the resolver no longer returns at all — a scanned
+                // `.github/instructions/*.instructions.md` deleted since the
+                // last launch — would otherwise just vanish from the response,
+                // never reported as `removed`, and recreating it later would
+                // read as `unchanged` against the stale row (Codex, PR #3162).
+                // The declared paths always come back (absent ones included),
+                // so this only ever fires for dynamically scanned files.
+                for prev in previous.iter().filter(|p| !files.iter().any(|f| f.path == p.path)) {
+                    let change = crate::backend::storage::project_instructions::classify_change(
+                        Some(prev),
+                        false,
+                        "",
+                    );
+                    enriched.push(json!({
+                        "path": prev.path,
+                        "exists": false,
+                        "size_bytes": 0,
+                        "content_hash": "",
+                        "owner": prev.owner,
+                        "content": "",
+                        "truncated": false,
+                        "error": serde_json::Value::Null,
+                        "change": change,
+                        "last_observed_at": prev.observed_at,
+                    }));
+                }
 
                 Ok(Some(json!({
                     "provider": agent.provider,
@@ -3370,6 +3397,58 @@ mod export_import_for_agent_tests {
             issues.iter().any(|i| i["field"] == "mcp_servers"
                 && i["message"].as_str().unwrap_or("").contains("broken")),
             "the issue must name the server: {issues:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scanned_file_deleted_after_launch_is_reported_removed() {
+        // Codex on #3162: the resolver stops returning a scanned path once the
+        // file is gone, so iterating current files only made it vanish from
+        // the response instead of reporting `removed` — and the stale row
+        // meant recreating it would later read as `unchanged`.
+        use crate::backend::storage::project_instructions::{
+            classify_change, InstructionChange, ProjectInstructionObservation,
+        };
+
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+
+        // Recorded at a previous launch, and since deleted from disk.
+        state
+            .wstore
+            .project_instructions_record(
+                "agent-1",
+                &[ProjectInstructionObservation {
+                    path: ".github/instructions/gone.instructions.md".to_string(),
+                    content_hash: "h1".to_string(),
+                    size_bytes: 3,
+                    owner: "foreign".to_string(),
+                    existed: true,
+                    observed_at: 1,
+                }],
+            )
+            .unwrap();
+
+        let current = crate::backend::project_instructions::resolve_project_instructions(
+            "copilot",
+            work.path().to_str().unwrap(),
+        );
+        assert!(
+            !current.iter().any(|f| f.path.ends_with("gone.instructions.md")),
+            "precondition: the resolver no longer returns a deleted scanned file"
+        );
+
+        let previous = state.wstore.project_instructions_list("agent-1").unwrap();
+        let orphan = previous
+            .iter()
+            .find(|p| p.path.ends_with("gone.instructions.md"))
+            .unwrap();
+        assert_eq!(
+            classify_change(Some(orphan), false, ""),
+            InstructionChange::Removed,
+            "a prior observation with no current file is a removal"
         );
     }
 
