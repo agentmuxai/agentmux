@@ -1,0 +1,15 @@
+{
+    // Typecheck-only config for the CI gate. Extends the build config and
+    // widens `include` to everything vitest actually runs.
+    //
+    // tsconfig.json's own `include` is ["frontend/**/*"], but vitest discovers
+    // and executes `test/contract/*` and `test/e2e/*` too — so a type error in
+    // those files would still compile away under vitest's per-file
+    // transpilation and go undetected, which is precisely the hole the gate
+    // exists to close (reagent P2 on #3166).
+    //
+    // Separate file rather than widening tsconfig.json: that one drives the
+    // build and the editor, and test sources have no business in either.
+    "extends": "./tsconfig.json",
+    "include": ["frontend/**/*", "test/**/*"]
+}
