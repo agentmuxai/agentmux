@@ -1,12 +1,16 @@
 # Spec: ABF v0.2 — Provider-Aware Components + Native Memory
 
 **Date:** 2026-08-10
-**Status:** implemented — verified in code 2026-09-09 at `a86cdee50`: §2.1 `credentialProvider`
-(`bundle_export.rs:566`, `bundle_import.rs:232`), §2.2 keyed `components.instructions`
-(`bundle_export.rs:594`) from `instructions_by_provider` (`bundle_export.rs:392`), §2.3
-`components.memory` (`app_api/bundle.rs:468`) with `bundle.export_for_agent`/
-`bundle.import_for_agent`, §2.4 `$schema` v0.2 (`bundle_export.rs:621`). The status line
-said "no implementation yet" until this check. Revised after Codex review on
+**Status:** active — shipped: §2.1 `credentialProvider` (`bundle_export.rs:566`,
+`bundle_import.rs:232`), §2.2 keyed `components.instructions` (`bundle_export.rs:594`)
+from `instructions_by_provider` (`bundle_export.rs:392`), §2.3 `components.memory`
+(`app_api/bundle.rs:468`) with `bundle.export_for_agent`/`bundle.import_for_agent`,
+and §2.4's `$schema` bump to v0.2 (`bundle_export.rs:621`). Remaining: §2.4 also
+requires a `compatibility.agentmux` minimum, and the exported manifest
+(`bundle_export.rs:615-640`) has no `compatibility` field at all (Codex, PR #3144).
+The status line said "proposal — no implementation yet" until this was checked on
+2026-09-09 at `a86cdee50`; that understated it, but "implemented" overstated it.
+Revised after Codex review on
 PR #2517 found four real implementability gaps in the first draft (all
 credited inline below, matching this repo's own `Codex P1, PR #NNNN`
 citation convention) — not disputed, all four were correct and are folded

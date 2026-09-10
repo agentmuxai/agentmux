@@ -244,12 +244,37 @@ portability feature must not become a back door into overwriting one.
 Three parts:
 
 **Read.** A resolver that, for a given agent, returns every file the provider
-will read as instructions from the working directory: the provider's own
-startup-instructions filename (`providers.rs:113` carries the per-provider name)
-plus `.claude/AGENTMUX_MEMORY.md` when the import-line path is in effect. For
-each: path, size, content, a content hash, and whether AgentMux owns it (the
-`CLAUDE_MD_MANAGED_MARKER` prefix test at `agent_config.rs:1131`, reused — not
-reimplemented).
+will read as instructions from the working directory.
+
+**That set is not `startup_instructions_filename`.** That field
+(`providers.rs:113`) names the single file AgentMux *writes* — the one canonical
+target it picked per provider. What a provider *reads* is usually a larger set,
+and the gap is already documented in the registry: GitHub Copilot reads
+`.github/copilot-instructions.md`, `CLAUDE.md` and `GEMINI.md` in addition to
+the `AGENTS.md` that AgentMux chose as its write target
+(`providers.rs:501-507`). Resolving only the write target would leave a Copilot
+project's actual instructions invisible and unportable — precisely the
+round-trip guarantee §4 claims. So the registry needs a second, plural field —
+the provider's *native instruction sources* — and the resolver returns the union
+of that set with the AgentMux-written target and `.claude/AGENTMUX_MEMORY.md`
+where the import-line path is in effect. Populating it per provider is
+evidence-gathering in the same shape as
+`SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md` §2 already did for the
+write targets, and it is a Phase 3 prerequisite. (Codex, PR #3144.)
+
+For each resolved file: path, size, content, a content hash, and whether
+AgentMux owns it.
+
+**Ownership is two markers, not one.** `CLAUDE.md` is marked with
+`CLAUDE_MD_MANAGED_MARKER` (`agent_config.rs:904`, tested at
+`agent_config.rs:1131`); every other startup-instructions file AgentMux writes
+is marked with `STARTUP_INSTRUCTIONS_MANAGED_MARKER` (`agent_config.rs:1040`,
+tested at `agent_config.rs:1089`). A resolver testing only the first would
+report every AgentMux-generated `AGENTS.md`, `GEMINI.md`, `QWEN.md` and
+`.pi/APPEND_SYSTEM.md` as `foreign` — inverting the one field §5.2 exists to get
+right. The ownership test is therefore a shared helper that knows both marker
+classes, reused by the resolver and by both writers rather than reimplemented in
+a third place. (Codex, PR #3144.)
 
 **Track.** Persist the hash and the observed-at timestamp per agent, so a
 foreign file changing under a running agent is detectable. This is the piece
@@ -306,6 +331,13 @@ new readers treat absence as "none" — so §5.2 does not force the issue. But
 ambiguous (not tracked vs. none found), which is the argument for finally
 carrying a real format version. Recommended: bump `$schema` to v0.3 and make the
 importer dispatch on it, as a prerequisite of Phase 3, not a side effect.
+
+There is a third piece of the same debt: ABF v0.2 §2.4 also called for a
+`compatibility.agentmux` minimum, and the manifest has no `compatibility` field
+at all (`bundle_export.rs:615-640`) — found while checking that spec's status
+for this one (Codex, PR #3144). A v0.3 bump that adds dispatch should carry it,
+since "which AgentMux can read this" is the question a version field exists to
+answer and `$schema` alone does not.
 
 ## 6. Non-goals
 
