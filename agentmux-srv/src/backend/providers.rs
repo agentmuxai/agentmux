@@ -144,6 +144,35 @@ pub struct ProviderConfig {
     /// truth, which is recoverable; a guessed one means it shows them
     /// something false, which is not.
     pub native_instruction_sources: &'static [&'static str],
+    /// Directories a provider scans for instruction files, for the providers
+    /// whose convention is a pattern rather than a fixed path.
+    ///
+    /// Copilot's `.github/instructions/**/*.instructions.md` is the reason
+    /// this exists: those are path-scoped instructions that genuinely reach
+    /// the agent, so a resolver reading only `native_instruction_sources`
+    /// above would produce an incomplete answer for any repository using them
+    /// (Codex, PR #3154), verified in
+    /// `docs/archive/research-cli-context-files-2026-04-23-copilot-verification.md`
+    /// claim 3.
+    ///
+    /// Structured rather than a glob string, because there is no glob engine
+    /// in the tree and one dependency for one pattern shape is a poor trade.
+    /// It also forces the two things a glob leaves implicit — whether to
+    /// descend, and what actually qualifies — to be stated.
+    ///
+    /// Same evidence rule as the two fields above.
+    pub native_instruction_dirs: &'static [InstructionDirScan],
+}
+
+/// A directory a provider reads instruction files out of.
+#[derive(Debug, Clone, Copy)]
+pub struct InstructionDirScan {
+    /// Working-directory-relative, e.g. `".github/instructions"`.
+    pub dir: &'static str,
+    /// Only files ending in this qualify, e.g. `".instructions.md"`.
+    pub suffix: &'static str,
+    /// Whether subdirectories are scanned too — Copilot's `**` says yes.
+    pub recursive: bool,
 }
 
 impl ProviderConfig {
@@ -250,6 +279,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // so it is not a native source. Nested/parent CLAUDE.md discovery is
     // real but out of scope here: this field is working-directory-relative.
     native_instruction_sources: &["CLAUDE.md"],
+    native_instruction_dirs: &[],
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -285,6 +315,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     // Read set = the write target, per the same citation above: Codex loads
     // repository AGENTS.md natively.
     native_instruction_sources: &["AGENTS.md"],
+    native_instruction_dirs: &[],
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -315,6 +346,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     // Read set = the write target. AGENTS.md is supported only behind an
     // explicit contextFileName override, so it is not read by default.
     native_instruction_sources: &["GEMINI.md"],
+    native_instruction_dirs: &[],
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -362,6 +394,7 @@ static QWEN: ProviderConfig = ProviderConfig {
     // Read set = the write target, for the same reason as Gemini: AGENTS.md
     // needs explicit config (QwenLM/qwen-code#2006, #504).
     native_instruction_sources: &["QWEN.md"],
+    native_instruction_dirs: &[],
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -405,6 +438,7 @@ static KIMI: ProviderConfig = ProviderConfig {
     startup_instructions_filename: None,
     // No confirmed native file convention at all — hence the None above.
     native_instruction_sources: &[],
+    native_instruction_dirs: &[],
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -452,6 +486,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     // Read set = the write target, with the same UNCONFIRMED-path caveat
     // recorded above.
     native_instruction_sources: &["AGENTS.md"],
+    native_instruction_dirs: &[],
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -487,6 +522,7 @@ static PI: ProviderConfig = ProviderConfig {
     // AgentMux writes. A repo-provided SYSTEM.md is exactly the kind of
     // instruction file Phase 3 exists to surface.
     native_instruction_sources: &[".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"],
+    native_instruction_dirs: &[],
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -525,6 +561,7 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     startup_instructions_filename: Some("CLAUDE.md"),
     // Read set = the write target; claude-compatible by design, per above.
     native_instruction_sources: &["CLAUDE.md"],
+    native_instruction_dirs: &[],
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -568,6 +605,22 @@ static COPILOT: ProviderConfig = ProviderConfig {
         "CLAUDE.md",
         "GEMINI.md",
     ],
+    // Path-scoped instructions: .github/instructions/**/*.instructions.md,
+    // claim 3 of the Copilot verification doc. Recursive, per the `**`.
+    // Not in the list above because it is a pattern, not a path.
+    //
+    // Deliberately NOT represented: $HOME/.copilot/copilot-instructions.md
+    // (claim 4) and $COPILOT_CUSTOM_INSTRUCTIONS_DIRS (claim 6). Both are
+    // real, and both live outside the agent working directory, which is
+    // what these two fields are relative to. Tracking them is a bigger
+    // question — they are machine-global, not project state, so they do
+    // not travel with a bundle — and is out of scope here rather than
+    // forgotten.
+    native_instruction_dirs: &[InstructionDirScan {
+        dir: ".github/instructions",
+        suffix: ".instructions.md",
+        recursive: true,
+    }],
 };
 
 // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the same
@@ -607,6 +660,7 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     startup_instructions_filename: Some("GEMINI.md"),
     // Read set = the write target.
     native_instruction_sources: &["GEMINI.md"],
+    native_instruction_dirs: &[],
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -1328,5 +1382,36 @@ mod native_instruction_sources_tests {
             pi.native_instruction_sources.contains(&".pi/SYSTEM.md"),
             "pi reads .pi/SYSTEM.md as well as the file AgentMux writes"
         );
+    }
+
+    /// Copilot's path-scoped instructions are a pattern, not a path, and a
+    /// resolver reading only the literal list would miss them entirely in any
+    /// repository that uses them (Codex, PR #3154).
+    #[test]
+    fn copilot_declares_its_path_scoped_instructions_directory() {
+        let copilot = get_provider("copilot").expect("copilot is registered");
+        let scan = copilot
+            .native_instruction_dirs
+            .iter()
+            .find(|d| d.dir == ".github/instructions")
+            .expect("copilot scans .github/instructions");
+        assert_eq!(scan.suffix, ".instructions.md");
+        assert!(scan.recursive, "the convention is `**`, so subdirectories count");
+    }
+
+    /// A scan entry that could never match anything is a silent hole.
+    #[test]
+    fn every_declared_scan_is_usable() {
+        for (id, provider) in REGISTRY.iter() {
+            for scan in provider.native_instruction_dirs {
+                assert!(!scan.dir.trim().is_empty(), "{id}: scan with no directory");
+                assert!(!scan.suffix.trim().is_empty(), "{id}: scan with no suffix");
+                assert!(
+                    !scan.dir.starts_with('/') && !scan.dir.contains(".."),
+                    "{id}: scan dir must stay inside the working directory: {}",
+                    scan.dir
+                );
+            }
+        }
     }
 }
