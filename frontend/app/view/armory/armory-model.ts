@@ -13,9 +13,9 @@ import { createMemo, type Accessor } from "solid-js";
 // bundles (GlobalBundleManager, is_global bundles) and the per-agent
 // native memory history (NativeMemoryManager) as sections inside one pane
 // — see docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md. Distinct
-// from a bundle's own "bundles" section (label "ABF"; its backing
-// component, BundleManager, is itself a naming leftover — see
-// docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3).
+// from the "bundles" section (label "Bundles", backed by BundleManager —
+// renamed from MemoryManager in #3135; see
+// docs/specs/SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md §9.1).
 //
 // "native_memory" is a legacy rail-section id: prior to the 08-30 merge it
 // was its own rail tab ("Personal Memory") — see
@@ -38,7 +38,7 @@ export const ARMORY_SECTION_LABELS: Record<ArmorySection, string> = {
     memory: "Memory",
     skills: "Skills",
     mcp: "MCP Servers",
-    bundles: "ABF",
+    bundles: "Bundles",
 };
 
 function isArmorySection(v: unknown): v is ArmorySection {

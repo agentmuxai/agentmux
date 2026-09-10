@@ -18,7 +18,7 @@
  * docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md then merged those
  * two rail tabs into a single "Memory" tab (brain icon), with Global and
  * Personal as a sub-nav inside that one pane instead of two rail entries.
- * Current rail order: Accounts, Memory, Skills, MCP Servers, ABF. These
+ * Current rail order: Accounts, Memory, Skills, MCP Servers, Bundles. These
  * tests guard the rail contents directly; `ArmorySection`'s type-level
  * rejection of `"identities"` is checked at compile time below (no runtime
  * assertion needed for that part).
@@ -123,11 +123,11 @@ describe("ArmoryView rail", () => {
         expect(rail.querySelector(".bundle-manager-rail-item .fa-brain")).toBeInTheDocument();
     });
 
-    it("orders the rail as Accounts, Memory, Skills, MCP Servers, ABF", () => {
+    it("orders the rail as Accounts, Memory, Skills, MCP Servers, Bundles", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "ABF"]);
+        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "Bundles"]);
     });
 });
 
@@ -246,21 +246,21 @@ describe("ArmoryView pane title", () => {
         expect(tabBar.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("highlights only the ABF entry in both the rail and the tab-bar", () => {
+    it("highlights only the Bundles entry in both the rail and the tab-bar", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
         for (const nav of [rail, tabBar]) {
             const highlighted = Array.from(nav.querySelectorAll("button.is-abf-highlight"));
             expect(highlighted).toHaveLength(1);
-            expect(highlighted[0].textContent).toContain("ABF");
+            expect(highlighted[0].textContent).toContain("Bundles");
         }
     });
 
     it("viewName() reflects a pre-seeded armory:section meta value", () => {
         setBlockMeta({ "armory:section": "bundles" });
         const model = new ArmoryViewModel("test-block", null as any);
-        expect(model.viewName()).toBe("ABF");
+        expect(model.viewName()).toBe("Bundles");
     });
 
     it("falls back to 'Accounts' for an invalid armory:section meta value", () => {

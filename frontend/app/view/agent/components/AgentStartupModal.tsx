@@ -106,7 +106,7 @@ export const AgentStartupModal = (props: AgentStartupModalProps): JSX.Element =>
                                 class="agent-primitive-modal-link-btn"
                                 onClick={() => void openOrFocusPaneByView("armory")}
                             >
-                                Armory → ABF
+                                Armory → Bundles
                             </button>
                             . Changing "{bundle().name}" there updates every agent using
                             it, including this one.
