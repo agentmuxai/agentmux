@@ -710,6 +710,12 @@ tasks:
                 # window). Fail loudly here instead of shipping a broken build.
                 # See docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md.
                 bash scripts/verify-cef-version.sh "$cefDir" || exit 1
+                # Guard: a locally-rebuilt CEF tree can silently produce stub
+                # ANGLE libraries that pass a plain existence check but crash
+                # the GPU process at init ("eglGetProcAddress not found"),
+                # leaving GFX permanently "off" with no build-time signal.
+                # See scripts/verify-angle-libs.sh.
+                bash scripts/verify-angle-libs.sh "$cefDir" libEGL.dll libGLESv2.dll || exit 1
                 # Advisory-only, same posture as bundle:darwin's unpatched-
                 # framework warning: don't fail `task dev`/`task package` on
                 # the stock cef-dll-sys fallback (that's still a legitimate,
@@ -833,6 +839,11 @@ tasks:
                     echo "❌ Framework Libraries/ directory missing: $libs_dir" >&2
                     exit 1
                 fi
+                # Guard: a locally-rebuilt CEF tree can silently produce stub
+                # ANGLE libraries that pass a plain existence check but crash
+                # the GPU process at init, leaving GFX permanently "off" with
+                # no build-time signal. See scripts/verify-angle-libs.sh.
+                bash scripts/verify-angle-libs.sh "$libs_dir" libEGL.dylib libGLESv2.dylib || exit 1
                 for lib in "$libs_dir/"*.dylib; do
                     cp -f "$lib" "dist/cef/$(basename "$lib")"
                 done
@@ -855,6 +866,11 @@ tasks:
                 # still works on the upstream cef-dll-sys fallback (no 3-hour CEF
                 # build required). The hard release gate is in build-appimage-linux.sh.
                 bash scripts/verify-cef-patch.sh "$CEF_DIR" || true
+                # Guard: a locally-rebuilt CEF tree can silently produce stub
+                # ANGLE libraries that pass a plain existence check but crash
+                # the GPU process at init, leaving GFX permanently "off" with
+                # no build-time signal. See scripts/verify-angle-libs.sh.
+                bash scripts/verify-angle-libs.sh "$CEF_DIR" libEGL.so libGLESv2.so || exit 1
                 mkdir -p dist/cef/locales
                 cp -f "$CEF_DIR/libcef.so" dist/cef/
                 cp -f "$CEF_DIR/libEGL.so" dist/cef/ 2>/dev/null || true
