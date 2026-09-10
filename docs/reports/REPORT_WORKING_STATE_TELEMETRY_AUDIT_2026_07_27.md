@@ -34,11 +34,19 @@ The telemetry section 3 recommends was also partly built in the interim —
 `[wave-turn]` transition lines (3.2) and the backend `[health] turn_active flip`
 (3.3) both exist now, via `SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18`.
 They are what made the 09-09 diagnosis possible: the stall was read straight off
-the two logs rather than inferred. Section 3.1 (watchdog reasoning) is still not
-built, and its absence cost real time — the `stream-stuck` line reported the 45s
-warning bar where a reader assumes the 180s recovery bar, which sent the first
-diagnosis in the wrong direction entirely. #3158 added `recoverAtMs` alongside it;
-the fuller reasoning 3.1 sketches is still worth building.
+the two logs rather than inferred.
+
+**Section 3.1 is also implemented** — essentially verbatim, in
+`agent-pane-state-store.ts`: the `stream-stuck` branch, the
+`EXEMPT toolsActive=… currentTool=…` suffix, and the `watchdog: FIRED` line for
+`working-recovered`. What #3158 changed was the *threshold that line reports*, not
+its existence: it named only the 45s warning bar where a reader assumes the 180s
+recovery bar, and now carries both as `warnAtMs`/`recoverAtMs`.
+
+(An earlier revision of this section called 3.1 "still not built". That was
+wrong — codex P2 on #3167. It came from the telemetry having *misled* the 09-09
+diagnosis, and sliding from "this told me the wrong thing" to "this does not
+exist" without checking. The whole of section 3 is now built.)
 
 | # | Path | Status |
 |---|---|---|
@@ -50,7 +58,7 @@ the fuller reasoning 3.1 sketches is still worth building.
 | 6 | `ReconcileTurnActive` disagreement window | Open, unverified. Ordering-dependent. |
 | 7 | `StreamFlushObserved` broad re-promotion | **CLOSED** by #3158. `Done{completed}` now re-promotes only for a flush that added document nodes, and a shell-output-only flush no longer bumps `lastEventMs` or promotes at all. Verified in source at `reducer.ts:290-298`. |
 | 8 | Rate-limit UI collapse masking a stalled retry | Open. Depends on 4. |
-| 9 | Composer-perception mismatch | **CLOSED** by #3143, in the opposite direction to the one proposed here. This report treated the banner as misleading because the composer is not locked. The repo owner's definition is that the indicator means precisely *"type now and it queues"* — so the banner is the input gate made visible, and #3143 bound both indicators and the composer to one predicate. The mismatch was real; the resolution was to make them agree, not to soften the banner. |
+| 9 | Composer-perception mismatch | **CLOSED** by #3143, in the opposite direction to the one proposed here. This report treated the banner as misleading because the composer is not locked. The resolution was to make the banner, the bar and the composer share one predicate, rather than to soften the banner. Note the predicate's actual contract is *"a message typed now will not be answered immediately"* — deliberately **broader** than "it queues", because only the turn-in-flight case queues: during launch/relogin the message is rejected by the auth guard, and during a reconnect there is no process to receive it (`working-indicator.ts`). Do not restate this as "it queues" and then narrow the predicate to match — codex P2 on #3167 caught exactly that overstatement in an earlier revision of this row. |
 
 **Scope of this pass, stated plainly:** paths 1, 2, 5, 7 and 9 were checked
 against current source. Paths 3, 4, 6 and 8 depend on runtime conditions and were
