@@ -1,6 +1,9 @@
 # Spec: Durable Bindings
 
-**Status:** proposed — no implementation yet. Decision needed on §5.
+**Status:** proposed, Phase 1 landed (#3175). Decisions still needed on §8
+before Phase 2 (identity store vs. shared store; whether `db_agents` is
+promoted or agent identity resolves through the registry) — everything past
+Phase 1 is blocked on one or both.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
@@ -286,9 +289,12 @@ resources; this makes the storage match what the UI already claims.
 
 ## 7. Phases
 
-**Phase 1 — stable starter ids.** Deterministic UUIDs for seeded skills and MCP
-servers. Independently shippable, independently useful, and it shrinks Phase 2's
-dedup to the user-created case. Does not satisfy §4 alone (§5.2).
+**Phase 1 — stable starter ids. DONE (#3175).** Deterministic UUIDs for
+seeded skills and MCP servers. Independently shippable, independently useful,
+and it shrinks Phase 2's dedup to the user-created case. Does not satisfy §4
+alone (§5.2). A duplicate-trigger/-name manifest entry is now rejected loudly
+at seed time rather than silently merged (reagent P2 x2, PR #3175) — the exact
+safety net random ids removed by accident.
 
 **Phase 2 — promote the catalogs.** `db_skills` and `db_mcp_servers` to the
 identity store, with the dedup migration of §5.3. The largest single step and
