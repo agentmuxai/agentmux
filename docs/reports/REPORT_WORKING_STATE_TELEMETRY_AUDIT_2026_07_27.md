@@ -3,7 +3,7 @@
 **Date:** 2026-07-27
 **Author:** Agent3
 **Verified against:** `main` @ `128633ced`.
-**Status:** Audit + telemetry design — root-cause catalog complete, concrete instrumentation sketched, not yet implemented.
+**Status:** active — audit + telemetry design. Root-cause catalog complete; instrumentation partly built since (see section 0), the rest still sketched only. (Status word added 2026-09-10: the original line predated the check-doc-status vocabulary and failed the gate the moment this file was next touched.)
 **Triggered by:** a live incident this session — my own agent pane appeared to still be "Working…" after I'd finished all requested work. Root cause turned out to be a leftover `task dev` background bash process (heartbeat-wrapped to survive the sandbox's idle-output timeout) — structurally the exact same shape as the Agent1 incident below. I had no quick way to confirm this from logs; I had to reason it out and go check running processes directly.
 
 ## User's request (verbatim, for traceability)
@@ -17,6 +17,52 @@
 - `docs/specs/REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md` — identifies `agentmux-bashwrap`'s own 600s idle-kill as a *seventh*, structurally isolated liveness mechanism that can silently terminate a healthy long-running task with zero dock entry or trace anywhere in the UI.
 
 This report's job is narrower than those: **not** "fix long-running-process visibility" (already scoped in the report above) but **"when a pane says Working and it's not obvious why, what can an agent actually grep to find out right now — and what's missing."**
+
+## 0. Status pass, 2026-09-10 (added after the fact)
+
+Re-validated against `main` after #3143/#3158/#3164. **Two of the nine are
+closed, one is reframed, six stand.** Marked per path in the table below.
+
+Notably, **this report's own triggering incident is now fixed.** Its author hit
+"a leftover `task dev` background bash process" and had to reason it out by
+inspecting running processes. That is the same root cause as the 5h stall of
+2026-09-09, and #3158 fixed it: shell output from a background process was
+refreshing the TURN's idle clock on every flush, so `idleSinceMs` never reached
+the recovery bar for as long as that process lived.
+
+The telemetry section 3 recommends was also partly built in the interim —
+`[wave-turn]` transition lines (3.2) and the backend `[health] turn_active flip`
+(3.3) both exist now, via `SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18`.
+They are what made the 09-09 diagnosis possible: the stall was read straight off
+the two logs rather than inferred.
+
+**Section 3.1 is also implemented** — essentially verbatim, in
+`agent-pane-state-store.ts`: the `stream-stuck` branch, the
+`EXEMPT toolsActive=… currentTool=…` suffix, and the `watchdog: FIRED` line for
+`working-recovered`. What #3158 changed was the *threshold that line reports*, not
+its existence: it named only the 45s warning bar where a reader assumes the 180s
+recovery bar, and now carries both as `warnAtMs`/`recoverAtMs`.
+
+(An earlier revision of this section called 3.1 "still not built". That was
+wrong — codex P2 on #3167. It came from the telemetry having *misled* the 09-09
+diagnosis, and sliding from "this told me the wrong thing" to "this does not
+exist" without checking. The whole of section 3 is now built.)
+
+| # | Path | Status |
+|---|---|---|
+| 1 | Long/background Bash call pins via `toolsActive > 0` | **Reframed.** The watchdog gate is unchanged, but per `SPEC_FLOATING_PANE_REDOCK_DWELL`-era work the indicator now means *"a message typed now will not be answered immediately"*, which a genuinely running tool satisfies. Lit during a real tool call is correct, not a false positive. The *false* half of this path was the background-output case, now closed by #3158. |
+| 2 | The 30s dock-promotion window | Open. Cosmetic — no dock row to point at yet. Unchanged. |
+| 3 | bashwrap idle-kill with zero surfaced signal | Open, unverified. Backend; needs a live 600s zero-stdout kill to reproduce. |
+| 4 | Rate-limit retry loop that itself stalls | Open, unverified. Needs a CLI that emits one `rate_limit_event` then goes silent. |
+| 5 | Orphaned turn that never receives `TurnEnd` | Open by design — this is the watchdog's premise, and it still takes 180s+ to resolve. |
+| 6 | `ReconcileTurnActive` disagreement window | Open, unverified. Ordering-dependent. |
+| 7 | `StreamFlushObserved` broad re-promotion | **CLOSED** by #3158. `Done{completed}` now re-promotes only for a flush that added document nodes, and a shell-output-only flush no longer bumps `lastEventMs` or promotes at all. Verified in source at `reducer.ts:290-298`. |
+| 8 | Rate-limit UI collapse masking a stalled retry | Open. Depends on 4. |
+| 9 | Composer-perception mismatch | **CLOSED** by #3143, in the opposite direction to the one proposed here. This report treated the banner as misleading because the composer is not locked. The resolution was to make the banner, the bar and the composer share one predicate, rather than to soften the banner. Note the predicate's actual contract is *"a message typed now will not be answered immediately"* — deliberately **broader** than "it queues", because only the turn-in-flight case queues: during launch/relogin the message is rejected by the auth guard, and during a reconnect there is no process to receive it (`working-indicator.ts`). Do not restate this as "it queues" and then narrow the predicate to match — codex P2 on #3167 caught exactly that overstatement in an earlier revision of this row. |
+
+**Scope of this pass, stated plainly:** paths 1, 2, 5, 7 and 9 were checked
+against current source. Paths 3, 4, 6 and 8 depend on runtime conditions and were
+NOT reproduced — "open, unverified" means untested here, not confirmed-present.
 
 ## 1. Every distinct way "Working" can be true with nothing actually happening
 
