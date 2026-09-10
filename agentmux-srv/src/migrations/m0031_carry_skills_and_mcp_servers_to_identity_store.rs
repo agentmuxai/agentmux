@@ -268,31 +268,37 @@ fn carry_skills(wstore: &Store, identity_store: &Store) -> Result<(usize, usize)
                 }
             }
         } else {
-            // Private: keep the own id UNLESS something else already
-            // occupies it. "Something else" is content-checked, not just
-            // presence-checked — an identical row already there means THIS
-            // is a re-run finding its own prior work, not a collision.
-            match identity_store
-                .skill_get(&skill.id)
-                .map_err(|e| format!("collision check for private skill {}: {e}", skill.id))?
-            {
-                None => {
-                    let mut to_insert = skill.clone();
-                    let inserted = identity_store
-                        .skill_insert_raw(&to_insert)
-                        .map_err(|e| format!("insert skill {}: {e}", to_insert.name))?;
-                    to_insert.id = skill.id.clone();
-                    (skill.id.clone(), inserted)
-                }
-                Some(existing) if skill_looks_like_the_same_row(&existing, &skill) => (skill.id.clone(), 0),
-                Some(_) => {
-                    let fresh_id = Uuid::new_v4().to_string();
-                    let mut to_insert = skill.clone();
-                    to_insert.id = fresh_id.clone();
-                    let inserted = identity_store
-                        .skill_insert_raw(&to_insert)
-                        .map_err(|e| format!("insert skill {} under fresh id: {e}", to_insert.name))?;
-                    (fresh_id, inserted)
+            // Private: keep the own id, but the same TOCTOU gap the global
+            // path already closed applies here too (ReAgent P1, PR #3181,
+            // round 2) — a prior revision checked `skill_get` FIRST and
+            // trusted `None` as "the id is free," which a concurrent
+            // channel's migration can falsify between the check and this
+            // channel's own insert. Optimistic-insert-first instead: attempt
+            // under the row's own id, and only if THAT insert didn't win
+            // (checked via the returned row count, not a separate read)
+            // look at what's actually there to decide whether it's my own
+            // prior carry (content-identical — a re-run) or a genuine
+            // collision needing a fresh id.
+            let mut to_insert = skill.clone();
+            let inserted = identity_store
+                .skill_insert_raw(&to_insert)
+                .map_err(|e| format!("insert skill {}: {e}", to_insert.name))?;
+            if inserted > 0 {
+                (skill.id.clone(), inserted)
+            } else {
+                match identity_store
+                    .skill_get(&skill.id)
+                    .map_err(|e| format!("collision check for private skill {}: {e}", skill.id))?
+                {
+                    Some(existing) if skill_looks_like_the_same_row(&existing, &skill) => (skill.id.clone(), 0),
+                    _ => {
+                        let fresh_id = Uuid::new_v4().to_string();
+                        to_insert.id = fresh_id.clone();
+                        let inserted = identity_store
+                            .skill_insert_raw(&to_insert)
+                            .map_err(|e| format!("insert skill {} under fresh id: {e}", to_insert.name))?;
+                        (fresh_id, inserted)
+                    }
                 }
             }
         };
@@ -371,26 +377,28 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store) -> Result<(usize, u
                 }
             }
         } else {
-            match identity_store
-                .mcp_server_get(&server.id)
-                .map_err(|e| format!("collision check for private mcp server {}: {e}", server.id))?
-            {
-                None => {
-                    let to_insert = server.clone();
-                    let inserted = identity_store
-                        .mcp_server_insert_raw(&to_insert)
-                        .map_err(|e| format!("insert mcp server {}: {e}", to_insert.name))?;
-                    (server.id.clone(), inserted)
-                }
-                Some(existing) if mcp_server_looks_like_the_same_row(&existing, &server) => (server.id.clone(), 0),
-                Some(_) => {
-                    let fresh_id = Uuid::new_v4().to_string();
-                    let mut to_insert = server.clone();
-                    to_insert.id = fresh_id.clone();
-                    let inserted = identity_store
-                        .mcp_server_insert_raw(&to_insert)
-                        .map_err(|e| format!("insert mcp server {} under fresh id: {e}", to_insert.name))?;
-                    (fresh_id, inserted)
+            // Optimistic-insert-first — see carry_skills's matching branch
+            // for why (ReAgent P1, PR #3181, round 2).
+            let mut to_insert = server.clone();
+            let inserted = identity_store
+                .mcp_server_insert_raw(&to_insert)
+                .map_err(|e| format!("insert mcp server {}: {e}", to_insert.name))?;
+            if inserted > 0 {
+                (server.id.clone(), inserted)
+            } else {
+                match identity_store
+                    .mcp_server_get(&server.id)
+                    .map_err(|e| format!("collision check for private mcp server {}: {e}", server.id))?
+                {
+                    Some(existing) if mcp_server_looks_like_the_same_row(&existing, &server) => (server.id.clone(), 0),
+                    _ => {
+                        let fresh_id = Uuid::new_v4().to_string();
+                        to_insert.id = fresh_id.clone();
+                        let inserted = identity_store
+                            .mcp_server_insert_raw(&to_insert)
+                            .map_err(|e| format!("insert mcp server {} under fresh id: {e}", to_insert.name))?;
+                        (fresh_id, inserted)
+                    }
                 }
             }
         };
@@ -748,7 +756,14 @@ mod tests {
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
         // Pre-seed the identity store with a row under the SAME id channel
-        // B's private skill happens to have — the collision case.
+        // B's private skill happens to have — the collision case. This is
+        // also the state a genuinely concurrent race would produce (another
+        // channel's migration wins the same id between this one's check and
+        // its own insert): the row exists here BEFORE carry_skills runs, so
+        // this exercises the optimistic-insert-first path's failure branch
+        // exactly the same way an interleaved real race would (ReAgent P1,
+        // PR #3181, round 2 — a prior revision checked-then-trusted instead
+        // of inserting first and verifying the result).
         identity_store.skill_insert_raw(&skill("collided-id", "Someone Else's Skill", "", false)).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
@@ -762,7 +777,7 @@ mod tests {
         wstore.skill_bind("agent-1", "collided-id").unwrap();
 
         let (carried, rewritten) = carry_skills(&wstore, &identity_store).unwrap();
-        assert_eq!(carried, 1);
+        assert_eq!(carried, 1, "the fresh-id insert must still succeed even though the first attempt lost the race");
         assert_eq!(rewritten, 1);
 
         // The pre-existing row under "collided-id" must be untouched.
