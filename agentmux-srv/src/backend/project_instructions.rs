@@ -262,43 +262,73 @@ pub const MAX_TOTAL_INSTRUCTION_BYTES: u64 = 8 * 1024 * 1024;
 /// order is not. Symlinked directories are not followed: a link out of the
 /// working directory would silently widen what this reports beyond the
 /// project, and `read_one` still reads a symlinked *file* normally.
+/// Ceiling on directories entered during one scan.
+///
+/// The file cap alone does not bound a deep or wide tree that contains few
+/// matches — the walk still has to enter every directory to find that out.
+const MAX_SCANNED_DIRECTORIES: usize = 500;
+
+/// Collect qualifying files under one declared scan directory.
+///
+/// **Bounded during traversal, not after it.** Collecting everything and then
+/// truncating leaves the advertised ceiling doing nothing about the cost it
+/// exists to bound: a repository-controlled directory with a very large number
+/// of matches still gets fully walked, allocated and sorted first (Codex, PR
+/// #3156). The walk now stops as soon as it has one file more than the cap,
+/// which is exactly enough to know the limit was hit.
+///
+/// Entries are sorted at each level before descending, so stopping early still
+/// yields the same set every time. Without that, an early stop would return
+/// whatever the filesystem happened to hand back first.
+///
+/// Symlinks are skipped outright: `file_type()` does not follow the link,
+/// unlike `metadata()`, which resolves the target and reports
+/// `is_symlink() == false` for every symlink — so an earlier guard written
+/// against `metadata()` never fired at all. A scanned directory is
+/// repository-controlled, and nothing about "follow this link" can be verified
+/// from here; the declared literal paths are still read through links, which
+/// is an ordinary layout.
+///
+/// Returns true when the cap was reached.
 fn scan_dir(
     working_dir: &Path,
     scan: &providers::InstructionDirScan,
     out: &mut Vec<String>,
-) {
+) -> bool {
     fn walk(
         root: &Path,
         dir: &Path,
         suffix: &str,
         recursive: bool,
         found: &mut Vec<String>,
+        dirs_visited: &mut usize,
     ) {
+        if found.len() > MAX_SCANNED_INSTRUCTION_FILES || *dirs_visited >= MAX_SCANNED_DIRECTORIES {
+            return;
+        }
+        *dirs_visited += 1;
+
         let Ok(entries) = std::fs::read_dir(dir) else {
             // An unreadable or absent scan directory is the ordinary case —
             // most repositories have none. Nothing to report.
             return;
         };
-        for entry in entries.flatten() {
+        // Deterministic order, so an early stop is reproducible.
+        let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.file_name());
+
+        for entry in entries {
+            if found.len() > MAX_SCANNED_INSTRUCTION_FILES {
+                return;
+            }
             let path = entry.path();
-            // `file_type()` does NOT follow the link, unlike `metadata()`,
-            // which resolves the target and reports `is_symlink() == false`
-            // for every symlink — so the previous guard never fired at all
-            // (Codex, PR #3156). A repository could have pointed a link out of
-            // the working directory, or built a cycle for the walk to spin in.
-            //
-            // Symlinks are skipped outright inside a scan, files included:
-            // a scanned directory is repository-controlled and unbounded, and
-            // nothing about "follow this link" can be verified from here. The
-            // declared literal paths are still read through links normally,
-            // which is an ordinary and legible repository layout.
             let Ok(file_type) = entry.file_type() else { continue };
             if file_type.is_symlink() {
                 continue;
             }
             if file_type.is_dir() {
                 if recursive {
-                    walk(root, &path, suffix, recursive, found);
+                    walk(root, &path, suffix, recursive, found, dirs_visited);
                 }
                 continue;
             }
@@ -314,15 +344,20 @@ fn scan_dir(
     }
 
     let mut found = Vec::new();
+    let mut dirs_visited = 0usize;
     walk(
         working_dir,
         &working_dir.join(scan.dir),
         scan.suffix,
         scan.recursive,
         &mut found,
+        &mut dirs_visited,
     );
+    let hit_cap = found.len() > MAX_SCANNED_INSTRUCTION_FILES;
+    found.truncate(MAX_SCANNED_INSTRUCTION_FILES);
     found.sort();
     out.extend(found);
+    hit_cap
 }
 
 /// Everything `provider_id` will read as instructions from `working_directory`.
@@ -352,11 +387,11 @@ pub fn resolve_project_instructions(
     };
     for scan in provider.native_instruction_dirs {
         let mut scanned: Vec<String> = Vec::new();
-        scan_dir(&root, scan, &mut scanned);
-
-        let overflowed = scanned.len() > MAX_SCANNED_INSTRUCTION_FILES;
-        let total = scanned.len();
-        scanned.truncate(MAX_SCANNED_INSTRUCTION_FILES);
+        // The walk stops at the cap rather than collecting everything first,
+        // so it reports *that* the limit was hit, not how far past it the
+        // repository goes — counting the rest would mean doing the traversal
+        // the cap exists to avoid.
+        let overflowed = scan_dir(&root, scan, &mut scanned);
 
         for rel in scanned {
             // A declared path could also match a scan; report it once.
@@ -391,7 +426,7 @@ pub fn resolve_project_instructions(
                 content: String::new(),
                 truncated: true,
                 error: Some(format!(
-                    "{total} files match {}/**/*{} — only the first {MAX_SCANNED_INSTRUCTION_FILES} are listed",
+                    "more than {MAX_SCANNED_INSTRUCTION_FILES} files match {}/**/*{} — only the first {MAX_SCANNED_INSTRUCTION_FILES} are listed",
                     scan.dir, scan.suffix
                 )),
             });
@@ -705,6 +740,39 @@ mod review_fix_tests {
             !files.iter().any(|f| f.path.contains("secret")),
             "a symlink must not carry the scan outside the working directory"
         );
+    }
+
+    #[test]
+    fn an_overflowing_scan_stops_early_and_still_returns_the_same_set() {
+        // The cap is now applied during the walk, not after it (Codex, PR
+        // #3156) — collecting everything first left the ceiling doing nothing
+        // about the cost it exists to bound. Stopping early only stays honest
+        // because entries are ordered before descending; without that, two
+        // calls would return different prefixes.
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..(MAX_SCANNED_INSTRUCTION_FILES + 25) {
+            write(
+                dir.path(),
+                &format!(".github/instructions/f{i:04}.instructions.md"),
+                "x",
+            );
+        }
+
+        let first = resolve_project_instructions("copilot", dir.path().to_str().unwrap());
+        let second = resolve_project_instructions("copilot", dir.path().to_str().unwrap());
+        let p1: Vec<&str> = first.iter().map(|f| f.path.as_str()).collect();
+        let p2: Vec<&str> = second.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(p1, p2, "an early stop must still be reproducible");
+
+        assert!(
+            first.iter().any(|f| f.path.ends_with('…')),
+            "hitting the cap must be reported"
+        );
+        let listed = first
+            .iter()
+            .filter(|f| f.path.starts_with(".github/instructions/") && !f.path.ends_with('…'))
+            .count();
+        assert_eq!(listed, MAX_SCANNED_INSTRUCTION_FILES);
     }
 
     #[test]
