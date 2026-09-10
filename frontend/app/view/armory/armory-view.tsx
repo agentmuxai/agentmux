@@ -8,7 +8,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BundleManager } from "@/app/view/bundle/bundle-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
-import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
+import { GlobalBundleManager } from "@/app/view/global-bundle/global-bundle-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { SkillManager } from "@/app/view/skill/skill-manager";
 import { NativeMemoryManager } from "@/app/view/native-memory/native-memory-manager";
@@ -134,7 +134,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                 <div class="bundle-manager-section">
                     {/*
                      * All six manager components stay mounted (AccountsManager,
-                     * GlobalBrainManager, NativeMemoryManager, SkillManager,
+                     * GlobalBundleManager, NativeMemoryManager, SkillManager,
                      * McpManager, BundleManager) — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
@@ -159,7 +159,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                             </nav>
                             <div class="memory-subnav-content">
                                 <div class="bundle-manager-pane" classList={{ "is-hidden": subsection() !== "global" }}>
-                                    <GlobalBrainManager />
+                                    <GlobalBundleManager />
                                 </div>
                                 <div class="bundle-manager-pane" classList={{ "is-hidden": subsection() !== "personal" }}>
                                     <NativeMemoryManager />

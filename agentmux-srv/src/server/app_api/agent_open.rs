@@ -769,13 +769,13 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Inject global memory bundles (Armory global brain) into CLAUDE.md.
+    // Inject global memory bundles (Armory global bundles) into CLAUDE.md.
     // All agents get these regardless of per-agent memory selection. Each
     // section carries a `# [Workspace] <name>` heading (see
-    // format_global_brain_block) so the rules are attributable to the
-    // workspace and ordered per the Brain tab's sort_order.
+    // format_global_bundle_block) so the rules are attributable to the
+    // workspace and ordered per the Armory Global section's sort_order.
     let global_bundles = id_store.bundle_list_global().unwrap_or_default();
-    let global_block = crate::backend::storage::format_global_brain_block(&global_bundles);
+    let global_block = crate::backend::storage::format_global_bundle_block(&global_bundles);
     if !global_block.is_empty() {
         content_map
             .entry("memory".to_string())

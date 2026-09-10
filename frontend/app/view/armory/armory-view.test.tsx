@@ -31,8 +31,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/view/accounts/accounts-manager", () => ({
     AccountsManager: () => <div data-testid="accounts-manager" />,
 }));
-vi.mock("@/app/view/brain/global-brain-manager", () => ({
-    GlobalBrainManager: () => <div data-testid="brain-manager" />,
+vi.mock("@/app/view/global-bundle/global-bundle-manager", () => ({
+    GlobalBundleManager: () => <div data-testid="global-bundle-manager" />,
 }));
 vi.mock("@/app/view/native-memory/native-memory-manager", () => ({
     NativeMemoryManager: () => <div data-testid="native-memory-manager" />,
@@ -150,10 +150,10 @@ describe("ArmoryView Memory sub-nav", () => {
         ));
     }
 
-    it("defaults to the Global section showing GlobalBrainManager", () => {
+    it("defaults to the Global section showing GlobalBundleManager", () => {
         setBlockMeta({ "armory:section": "memory" });
         renderArmory();
-        const globalPane = screen.getByTestId("brain-manager").closest(".bundle-manager-pane");
+        const globalPane = screen.getByTestId("global-bundle-manager").closest(".bundle-manager-pane");
         const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
         expect(globalPane?.classList.contains("is-hidden")).toBe(false);
         expect(personalPane?.classList.contains("is-hidden")).toBe(true);

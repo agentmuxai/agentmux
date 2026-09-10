@@ -275,7 +275,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
             context_files: "[]".to_string(),
             mcp_servers: "[]".to_string(),
             skills: "[]".to_string(),
-            // Seed initial global-brain order by manifest position so seeded
+            // Seed initial global-bundle order by manifest position so seeded
             // sections start in a deterministic order; users reorder later.
             sort_order: idx as i64,
             created_at: now,

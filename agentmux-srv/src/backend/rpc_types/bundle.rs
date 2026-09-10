@@ -35,7 +35,7 @@ pub struct DeleteBundleResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandReorderGlobalBrainData {
+pub struct CommandReorderGlobalBundlesData {
     /// Full ordered list of global bundle ids. Each id's `sort_order`
     /// becomes its position in this list.
     pub ids: Vec<String>,
