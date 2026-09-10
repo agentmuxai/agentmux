@@ -28,11 +28,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agentmux_common::api_types::{
-    InjectRequest, PaneOpenRequest, PaneOpenResponse, ShellCreateRequest, ShellCreateResponse,
-    ShellInputFailure, ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse,
-    ShellStopRequest, ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
-    UiClickRequest, UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse,
-    WindowFocusRequest, WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
+    InjectRequest, PaneOpenRequest, PaneOpenResponse, PtyShellCreateRequest, PtyShellCreateResponse,
+    PtyShellInputRequest, PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse,
+    PtyShellResizeRequest, PtyShellResizeResponse,
+    PtyShellStatusRequest, PtyShellStatusResponse, PtyShellStopRequest, PtyShellStopResponse,
+    ShellCreateRequest, ShellCreateResponse, ShellInputFailure, ShellInputRequest,
+    ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
+    ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest, UiClickRequest,
+    UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse, WindowFocusRequest,
+    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -143,6 +147,17 @@ async fn main() {
                 let shell_stop: Value = serde_json::from_str(SHELL_STOP_TOOL).expect("static json");
                 let shell_input: Value = serde_json::from_str(SHELL_INPUT_TOOL).expect("static json");
                 let shell_status: Value = serde_json::from_str(SHELL_STATUS_TOOL).expect("static json");
+                let pty_shell: Value = serde_json::from_str(PTY_SHELL_TOOL).expect("static json");
+                let pty_shell_input: Value =
+                    serde_json::from_str(PTY_SHELL_INPUT_TOOL).expect("static json");
+                let pty_shell_resize: Value =
+                    serde_json::from_str(PTY_SHELL_RESIZE_TOOL).expect("static json");
+                let pty_shell_read: Value =
+                    serde_json::from_str(PTY_SHELL_READ_TOOL).expect("static json");
+                let pty_shell_status: Value =
+                    serde_json::from_str(PTY_SHELL_STATUS_TOOL).expect("static json");
+                let pty_shell_stop: Value =
+                    serde_json::from_str(PTY_SHELL_STOP_TOOL).expect("static json");
                 let open_editor: Value = serde_json::from_str(OPEN_EDITOR_TOOL).expect("static json");
                 let open_media: Value = serde_json::from_str(OPEN_MEDIA_TOOL).expect("static json");
                 let send_message: Value = serde_json::from_str(SEND_MESSAGE_TOOL).expect("static json");
@@ -206,7 +221,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -686,6 +701,254 @@ async fn call_tool(
             } else {
                 let code = result.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
                 format!("shell {shell_id} has exited — exit_code: {code}, {} lines total", result.line_count)
+            })
+        }
+        "PtyShell" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            if block_id.is_empty() {
+                anyhow::bail!(
+                    "neither AGENTMUX_AGENT_BUS_ID nor AGENTMUX_BLOCKID is set \
+                     — cannot associate the shell with a conversation pane. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let cwd = arguments.get("cwd").and_then(|v| v.as_str()).map(str::to_string);
+            let rows = arguments.get("rows").and_then(|v| v.as_u64()).map(|n| n as u16);
+            let cols = arguments.get("cols").and_then(|v| v.as_u64()).map(|n| n as u16);
+
+            let url = format!("{}/api/v1/ptyshell/create", local_url.trim_end_matches('/'));
+            let req = PtyShellCreateRequest { agent_block_id: block_id.to_string(), cwd, rows, cols };
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&req)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("ptyshell/create failed: HTTP {status} — {text}");
+            }
+
+            let result: PtyShellCreateResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(result.shell_id)
+        }
+        "PtyShellInput" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+            let text = arguments
+                .get("text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: text"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/ptyshell/input", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&PtyShellInputRequest { shell_id: shell_id.to_string(), text: text.to_string() })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("ptyshell/input failed: HTTP {status} — {body}");
+            }
+
+            let result: PtyShellInputResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(if result.written {
+                format!("wrote to shell {shell_id}")
+            } else {
+                format!(
+                    "shell {shell_id}: write failed — {}",
+                    result.error.unwrap_or_else(|| "unknown reason".to_string())
+                )
+            })
+        }
+        "PtyShellResize" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+            let rows = arguments
+                .get("rows")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: rows"))? as u16;
+            let cols = arguments
+                .get("cols")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: cols"))? as u16;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/ptyshell/resize", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&PtyShellResizeRequest { shell_id: shell_id.to_string(), rows, cols })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("ptyshell/resize failed: HTTP {status} — {body}");
+            }
+
+            let result: PtyShellResizeResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(if result.resized {
+                format!("resized shell {shell_id} to {rows}x{cols}")
+            } else {
+                format!(
+                    "shell {shell_id}: resize failed — {}",
+                    result.error.unwrap_or_else(|| "unknown reason".to_string())
+                )
+            })
+        }
+        "PtyShellRead" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+            let tail_lines = arguments.get("tail_lines").and_then(|v| v.as_u64()).map(|n| n as u32);
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/ptyshell/read", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&PtyShellReadRequest { shell_id: shell_id.to_string(), tail_lines })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("ptyshell/read failed: HTTP {status} — {body}");
+            }
+
+            let result: PtyShellReadResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            let prefix = if result.truncated { "[...output truncated...]\n" } else { "" };
+            Ok(format!("{prefix}{}", result.content))
+        }
+        "PtyShellStatus" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/ptyshell/status", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&PtyShellStatusRequest { shell_id: shell_id.to_string() })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("ptyshell/status failed: HTTP {status} — {body}");
+            }
+
+            let result: PtyShellStatusResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(if result.running {
+                format!("shell {shell_id} is running")
+            } else {
+                let code = result.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
+                format!("shell {shell_id} is not running — exit_code: {code}")
+            })
+        }
+        "PtyShellStop" => {
+            let shell_id = arguments
+                .get("shell_id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/ptyshell/stop", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&PtyShellStopRequest { shell_id: shell_id.to_string() })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                anyhow::bail!("ptyshell/stop failed: HTTP {status} — {body}");
+            }
+
+            let result: PtyShellStopResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(if result.stopped {
+                format!("stopped shell {shell_id}")
+            } else {
+                format!("shell {shell_id} was not running (unknown or already stopped)")
             })
         }
         "OpenEditor" => {

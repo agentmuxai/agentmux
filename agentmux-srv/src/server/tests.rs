@@ -3368,3 +3368,309 @@ async fn agent_open_unknown_agent_is_a_400_not_a_500() {
         json["error"]
     );
 }
+
+// ---------------------------------------------------------------------------
+// PTY shell handlers (docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)
+// ---------------------------------------------------------------------------
+
+async fn post_json(app: &Router, uri: &str, body: serde_json::Value) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .uri(uri)
+        .method(Method::POST)
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+    (status, json)
+}
+
+#[tokio::test]
+async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
+    // Built from a kept `AppState` handle (not `test_router()`, which
+    // discards its state) so the block the request created can be read back
+    // afterward through the same store the request went through.
+    let state = test_state();
+    let app = build_router(state.clone());
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().expect("shell_id present").to_string();
+    assert!(!shell_id.is_empty());
+
+    // The block this created is a real `view: "term", controller: "shell"`
+    // sub-block — same shape createsubblock's WS handler builds for
+    // AgentShellSubblock.tsx — not a bespoke record type.
+    let block: crate::backend::obj::Block =
+        state.wstore.must_get(&shell_id).expect("block was inserted");
+    assert_eq!(block.meta.get("view").and_then(|v| v.as_str()), Some("term"));
+    assert_eq!(
+        block.meta.get(blockcontroller::META_KEY_CONTROLLER).and_then(|v| v.as_str()),
+        Some(blockcontroller::BLOCK_CONTROLLER_SHELL)
+    );
+    assert_eq!(block.parentoref, "block:test-agent-block");
+
+    // `create` spawns a REAL, persistent interactive shell process (unlike
+    // every other non-`#[ignore]`d test in this file, which never spawns
+    // one at all) — clean it up directly rather than leaving it running for
+    // the rest of the test binary's life. Confirmed live: an earlier
+    // version of this test (and `ptyshell_create_defaults_cwd_from_the_agent_block`
+    // below) omitted this and left the CI Linux job's `cargo test --workspace`
+    // step hanging for hours (a stuck run had to be cancelled). Calling the
+    // backend function directly, not the HTTP `stop` endpoint, so this
+    // cleanup can't itself be broken by a bug in that handler.
+    blockcontroller::delete_controller(&shell_id);
+}
+
+#[tokio::test]
+async fn ptyshell_rejects_operating_on_a_block_it_did_not_create() {
+    // Codex P1 on PR #3177: `shell_id` lives in the SAME namespace as every
+    // other pane block, and `Layout` exposes block ids for ordinary panes —
+    // without an ownership check, PtyShellInput/PtyShellStop etc. could be
+    // pointed at a completely unrelated pane (another agent's own CLI pane,
+    // a human's terminal). This inserts a real, ordinary "shell"-controller
+    // block through the front door (not one PtyShell created) and asserts
+    // every mutating/reading endpoint refuses to touch it.
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut foreign = crate::backend::obj::Block {
+        oid: "someone-elses-real-pane".to_string(),
+        parentoref: "block:someone-elses-agent".to_string(),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("view".to_string(), serde_json::json!("term"));
+            m.insert(
+                blockcontroller::META_KEY_CONTROLLER.to_string(),
+                serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+            );
+            m
+        },
+        ..Default::default()
+    };
+    state.wstore.insert(&mut foreign).expect("insert foreign block");
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "text": "hi" }),
+    )
+    .await;
+    assert_eq!(json["written"], serde_json::json!(false));
+    assert!(json["error"].as_str().unwrap_or("").contains("not a PtyShell-created shell"));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/resize",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "rows": 30, "cols": 100 }),
+    )
+    .await;
+    assert_eq!(json["resized"], serde_json::json!(false));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/read",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane" }),
+    )
+    .await;
+    assert_eq!(json["content"], serde_json::json!(""));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/stop",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane" }),
+    )
+    .await;
+    assert_eq!(json["stopped"], serde_json::json!(false));
+
+    // The foreign block must still exist — stop() must not have deleted it.
+    let still_there: Result<crate::backend::obj::Block, _> =
+        state.wstore.must_get("someone-elses-real-pane");
+    assert!(still_there.is_ok(), "ptyshell/stop must not delete a block it didn't create");
+}
+
+#[tokio::test]
+async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
+    // Codex P1 on PR #3177: without this fallback, the PTY spawns in
+    // agentmux-srv's own cwd rather than the agent's worktree — mirrors
+    // `handle_shell_create`'s identical fallback.
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "agent-with-a-cwd".to_string(),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("cmd:cwd".to_string(), serde_json::json!(cwd.clone()));
+            m
+        },
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "agent-with-a-cwd" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    let block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    assert_eq!(
+        block.meta.get(blockcontroller::META_KEY_CMD_CWD).and_then(|v| v.as_str()),
+        Some(cwd.as_str())
+    );
+
+    // See the identical cleanup note in
+    // `ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block`.
+    blockcontroller::delete_controller(&shell_id);
+}
+
+#[tokio::test]
+async fn ptyshell_status_on_unknown_id_is_a_plain_not_running_answer() {
+    let app = test_router();
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/status",
+        serde_json::json!({ "shell_id": "no-such-shell" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["running"], serde_json::json!(false));
+    assert!(json["exit_code"].is_null());
+}
+
+#[tokio::test]
+async fn ptyshell_input_on_unknown_id_reports_written_false_with_a_reason() {
+    let app = test_router();
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": "no-such-shell", "text": "hello" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["written"], serde_json::json!(false));
+    // Caught by the ownership check (Codex P1 on PR #3177) before ever
+    // reaching `blockcontroller::send_input` — an unrecognized id is
+    // indistinguishable from "not a PtyShell-created shell" by design, so
+    // this asserts the same message a real cross-pane id would get too.
+    assert!(json["error"].as_str().unwrap_or("").contains("not a PtyShell-created shell"));
+}
+
+#[tokio::test]
+async fn ptyshell_stop_on_unknown_id_reports_not_stopped() {
+    let app = test_router();
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/stop",
+        serde_json::json!({ "shell_id": "no-such-shell" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["stopped"], serde_json::json!(false));
+}
+
+/// Real end-to-end PTY spawn: create a shell, type a command, read the
+/// output back, confirm it actually ran. `#[ignore]` because it spawns a
+/// genuine OS process (matches this codebase's existing convention for
+/// real-process/real-daemon tests, e.g. `backend::container`'s Docker-gated
+/// test) rather than the mocked `ConnInterface` every other PTY test in
+/// `blockcontroller::shell::tests` uses — that mocking happens at the
+/// `ShellController` level, which this test intentionally exercises through
+/// its real HTTP handlers end-to-end instead.
+///
+/// Run manually with: `cargo test -p agentmux-srv --bin agentmux-srv
+/// ptyshell_create_input_read_stop_round_trips_through_a_real_pty --
+/// --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
+    let app = test_router();
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    // Give the PTY a moment to spawn its shell before typing into it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let marker = "ptyshell-live-test-marker-4f9a";
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "text": format!("echo {marker}\r\n") }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["written"], serde_json::json!(true), "input write failed: {json:?}");
+
+    // Poll rather than a single fixed sleep — shell startup + echo latency
+    // varies by machine/OS.
+    let mut content = String::new();
+    for i in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let (_, json) = post_json(
+            &app,
+            "/api/v1/ptyshell/read",
+            serde_json::json!({ "shell_id": shell_id }),
+        )
+        .await;
+        content = json["content"].as_str().unwrap_or("").to_string();
+        let (_, status_json) = post_json(
+            &app,
+            "/api/v1/ptyshell/status",
+            serde_json::json!({ "shell_id": shell_id }),
+        )
+        .await;
+        eprintln!("[poll {i}] status={status_json:?} content={content:?}");
+        if content.contains(marker) {
+            break;
+        }
+    }
+    assert!(
+        content.contains(marker),
+        "expected echoed marker in PTY output, got: {content:?}"
+    );
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/status",
+        serde_json::json!({ "shell_id": shell_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["running"], serde_json::json!(true));
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/stop",
+        serde_json::json!({ "shell_id": shell_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["stopped"], serde_json::json!(true));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/status",
+        serde_json::json!({ "shell_id": shell_id }),
+    )
+    .await;
+    assert_eq!(json["running"], serde_json::json!(false));
+}
