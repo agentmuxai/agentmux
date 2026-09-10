@@ -773,7 +773,7 @@ declare global {
     /** Identifies "which agent" — same shape for launch modal + drone Agent block. */
     type AgentRef = {
         identityId?: string;
-        bundleId?: string;
+        memoryId?: string;
         instanceName?: string;
         workingDirectory?: string;
     };
