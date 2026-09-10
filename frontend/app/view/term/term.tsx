@@ -283,7 +283,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         blockId: blockId,
     }));
 
-    const termBg = createMemo(() => computeBgStyleFromMeta(blockData()?.meta));
 
     const dndEnabledAtom = getSettingsKeyAtom("dnd:enabled");
     const dndConcurrencyAtom = getSettingsKeyAtom("dnd:concurrency");
