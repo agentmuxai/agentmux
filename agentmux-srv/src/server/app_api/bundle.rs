@@ -378,33 +378,25 @@ fn bundle_export_impl(
         .map_err(|e| format!("bundle.export: {e}"))?
         .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
 
-    // Same silent-data-loss pattern already fixed for
-    // context_files/mcp_servers in bundle_export.rs -- a malformed
-    // bundle.skills value must warn, not just vanish, but a genuinely
-    // blank one is not an error (reagent P1, PR #2333). Shares the same
-    // helper so all three fields behave identically.
-    let mut handler_warnings: Vec<String> = Vec::new();
-    let skill_ids: Vec<String> =
-        crate::backend::bundle_export::parse_json_field_or_warn(&bundle.skills, "skills", &mut handler_warnings);
+    // Components come from the ref tables, which are authoritative for what a
+    // bundle contains -- see resolve_bundle_components.
+    let components = resolve_bundle_components(wstore, &bundle.id)
+        .map_err(|e| format!("bundle.export: {e}"))?;
+    let mut handler_warnings = components.warnings;
 
-    // Distinguish a genuine DB error from a legitimately deleted skill id:
-    // `.ok().flatten()` previously collapsed both to "absent", so a
-    // locked/damaged store silently reported a successful export missing
-    // content instead of failing loudly -- unsafe for the advertised backup
-    // use case (Codex P2, PR #2325). A lookup error now fails the whole
-    // export; a missing row (Ok(None), i.e. actually deleted) is skipped and
-    // reported back in `missing_skill_ids`.
-    let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
-    let mut missing_skill_ids: Vec<String> = Vec::new();
-    for id in &skill_ids {
-        match wstore.skill_get(id) {
-            Ok(Some(skill)) => skills.push(skill),
-            Ok(None) => missing_skill_ids.push(id.clone()),
-            Err(e) => return Err(format!("bundle.export: failed to look up skill {id}: {e}")),
-        }
-    }
+    // `missing_skill_ids` predates the ref tables: the inline column stored
+    // bare ids, so an id whose skill row had been deleted had to be resolved
+    // and reported (Codex P2, PR #2325). A ref cannot be dangling the same
+    // way -- `managed_list` joins through the catalog, and `skill_delete`
+    // purges refs -- so this is now always empty. Kept in the response because
+    // it is part of the RPC's shape and callers may still read it.
+    let missing_skill_ids: Vec<String> = Vec::new();
 
-    let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
+    let export = crate::backend::bundle_export::export_bundle(
+        &bundle,
+        &components.skills,
+        &components.mcp_entries,
+    );
 
     let mut all_warnings = export.warnings.clone();
     all_warnings.append(&mut handler_warnings);
@@ -434,6 +426,85 @@ fn bundle_export_impl(
         obj.insert("warnings".to_string(), json!(all_warnings));
     }
     Ok(result)
+}
+
+/// A bundle's components, resolved from the tables that are authoritative for
+/// them.
+struct ResolvedComponents {
+    skills: Vec<crate::backend::storage::Skill>,
+    /// Exporter entry shape: each server's config object with its `name`
+    /// alongside, which is what `bundle_export::redact_mcp_entry` reads.
+    mcp_entries: Vec<serde_json::Value>,
+    warnings: Vec<String>,
+}
+
+/// Resolve what a bundle actually contains, from `db_bundle_skills_ref` /
+/// `db_bundle_mcp_ref`.
+///
+/// Phase 0b of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Before
+/// this, export read the inline `bundle.skills` / `bundle.mcp_servers` columns
+/// while agent launch read the ref tables (`app_api/agent_open.rs:793`, `:812`),
+/// and nothing kept the two in step — so a skill bound in the Armory ran at
+/// launch but exported as an empty `skills/` directory, with no warning. One
+/// resolver, used by every export path, is what stops that recurring.
+///
+/// **Scope note:** this is deliberately narrower than `effective_skills` /
+/// `effective_mcp_servers`, which additionally union an *agent's* own binds,
+/// globals and the legacy blob. Those answer "what does this agent run with";
+/// this answers "what is in this bundle", which is what an ABF describes. The
+/// two are not meant to be equal, only to agree about the bundle's own
+/// contribution.
+///
+/// `managed_list` returns the whole catalog with a `bound_to_bundle` flag
+/// rather than just the bound rows, hence the filter; and because it joins
+/// through the catalog table, a ref whose catalog row has been deleted
+/// resolves to nothing rather than reporting itself. `skill_delete` /
+/// `mcp_server_delete` both purge refs (`storage/managed.rs:232`), so that
+/// state is not reachable through the app — but the FK that would enforce it
+/// is inert, since `PRAGMA foreign_keys` is only ever set ON in tests.
+fn resolve_bundle_components(
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) -> Result<ResolvedComponents, String> {
+    let skills: Vec<crate::backend::storage::Skill> = wstore
+        .bundle_skill_list(bundle_id)
+        .map_err(|e| format!("failed to resolve bundle skills: {e}"))?
+        .into_iter()
+        .filter(|item| item.bound_to_bundle)
+        .map(|item| item.skill)
+        .collect();
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut mcp_entries: Vec<serde_json::Value> = Vec::new();
+    for item in wstore
+        .bundle_mcp_list(bundle_id)
+        .map_err(|e| format!("failed to resolve bundle MCP servers: {e}"))?
+        .into_iter()
+        .filter(|item| item.bound_to_bundle)
+    {
+        let server = item.server;
+        // `config` is the same JSON object the launch path writes into
+        // `.mcp.json` keyed by `server.name` (`agent_config.rs`
+        // build_mcp_config_from_refs). The exporter wants that object with the
+        // name inline, so the row's name is authoritative over any `name` the
+        // config blob happens to carry.
+        match serde_json::from_str::<serde_json::Value>(&server.config) {
+            Ok(serde_json::Value::Object(mut obj)) => {
+                obj.insert("name".to_string(), json!(server.name));
+                mcp_entries.push(serde_json::Value::Object(obj));
+            }
+            Ok(_) => warnings.push(format!(
+                "mcp server {}: config is not a JSON object — skipped",
+                server.name
+            )),
+            Err(e) => warnings.push(format!(
+                "mcp server {}: invalid config JSON ({e}) — skipped",
+                server.name
+            )),
+        }
+    }
+
+    Ok(ResolvedComponents { skills, mcp_entries, warnings })
 }
 
 /// Warning the agent-less `bundle.export` pushes when the bundle it is
@@ -684,25 +755,19 @@ async fn build_export_for_agent(
         .map_err(|e| format!("{err_prefix}: {e}"))?
         .ok_or_else(|| format!("{err_prefix}: no agent with id {agent_id}"))?;
 
-    let mut handler_warnings: Vec<String> = Vec::new();
-    let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
-        &bundle.skills,
-        "skills",
-        &mut handler_warnings,
-    );
-    let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
-    let mut missing_skill_ids: Vec<String> = Vec::new();
-    for id in &skill_ids {
-        match wstore.skill_get(id) {
-            Ok(Some(skill)) => skills.push(skill),
-            Ok(None) => missing_skill_ids.push(id.clone()),
-            Err(e) => {
-                return Err(format!("{err_prefix}: failed to look up skill {id}: {e}"));
-            }
-        }
-    }
+    // Same resolver as the agent-less path, so the two cannot disagree about
+    // what the bundle contains.
+    let components = resolve_bundle_components(wstore, &bundle.id)
+        .map_err(|e| format!("{err_prefix}: {e}"))?;
+    let mut handler_warnings = components.warnings;
+    // Always empty now — see the note at the agent-less export path.
+    let missing_skill_ids: Vec<String> = Vec::new();
 
-    let mut export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
+    let mut export = crate::backend::bundle_export::export_bundle(
+        &bundle,
+        &components.skills,
+        &components.mcp_entries,
+    );
 
     // Refresh the mirror from the live FS, then read every mirrored
     // file's content — this agent's memory, freshest as of right now,
@@ -2893,6 +2958,127 @@ mod export_import_for_agent_tests {
         };
         state.id_store.bundle_upsert(&bundle).unwrap();
         bundle
+    }
+
+    /// Bind an MCP server to a bundle through the ref table, the way the
+    /// Armory does.
+    fn bind_mcp(state: &AppState, bundle_id: &str, name: &str, config: &str) {
+        let server = crate::backend::storage::McpServer {
+            id: format!("srv-{name}"),
+            name: name.to_string(),
+            transport: "stdio".to_string(),
+            config: config.to_string(),
+            is_global: false,
+            created_at: 1,
+            updated_at: 1,
+        };
+        state
+            .wstore
+            .bundle_mcp_upsert_unique(&state.id_store, bundle_id, &server, true)
+            .unwrap();
+    }
+
+    /// Bind a skill to a bundle through the ref table.
+    fn bind_skill(state: &AppState, bundle_id: &str, name: &str) {
+        let skill = crate::backend::storage::Skill {
+            id: format!("skill-{name}"),
+            name: name.to_string(),
+            trigger: name.to_string(),
+            skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+            description: String::new(),
+            content: "body".to_string(),
+            is_global: false,
+            created_at: 1,
+            updated_at: 1,
+        };
+        state
+            .wstore
+            .bundle_skill_upsert_unique(&state.id_store, bundle_id, &skill, true)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
+        // The Phase 0b regression. Before this, binding a skill or server in
+        // the Armory wrote only a ref row while export read only the inline
+        // column, so this bundle exported as empty skills/ and mcp/
+        // directories with no warning — in a format advertised as a backup.
+        let state = test_state();
+        let bundle = make_bundle(&state, "bundle-1", "Be helpful.");
+        assert_eq!(bundle.skills, "[]", "fixture must leave the inline columns empty");
+        assert_eq!(bundle.mcp_servers, "[]");
+
+        bind_skill(&state, "bundle-1", "Deploy");
+        bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp","env":{"GITHUB_TOKEN":"tok"}}"#);
+
+        let result = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: "bundle-1".to_string(), format: String::new() },
+        )
+        .unwrap();
+
+        let paths: Vec<String> = result["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            paths.iter().any(|p| p.starts_with("skills/")),
+            "ref-bound skill must be exported: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p == "mcp/github.server.json"),
+            "ref-bound MCP server must be exported: {paths:?}"
+        );
+
+        // And the secret is still redacted on the way out — resolving from a
+        // different source must not bypass the redaction pass.
+        let server_file = result["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == "mcp/github.server.json")
+            .unwrap();
+        let content = server_file["content"].as_str().unwrap();
+        assert!(!content.contains("tok"), "secret must not survive export: {content}");
+    }
+
+    #[tokio::test]
+    async fn a_bound_mcp_server_with_unparseable_config_warns_instead_of_vanishing() {
+        // The guarantee that moved here from bundle_export.rs when the
+        // renderer stopped parsing MCP JSON: malformed component data warns,
+        // it does not silently disappear.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_mcp(&state, "bundle-1", "broken", "not json at all");
+
+        let components = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(components.mcp_entries.is_empty(), "unparseable config must not be exported");
+        assert!(
+            components.warnings.iter().any(|w| w.contains("broken") && w.contains("invalid config")),
+            "expected a warning naming the server, got: {:?}",
+            components.warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn resolving_ignores_catalog_rows_this_bundle_is_not_bound_to() {
+        // `managed_list` returns globals alongside bound rows; only the bound
+        // ones are this bundle's contents.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        make_bundle(&state, "bundle-2", "Other.");
+        bind_mcp(&state, "bundle-2", "elsewhere", r#"{"command":"x"}"#);
+
+        let components = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(
+            components.mcp_entries.is_empty(),
+            "another bundle's server must not leak in: {:?}",
+            components.mcp_entries
+        );
+        assert!(components.skills.is_empty());
     }
 
     #[tokio::test]

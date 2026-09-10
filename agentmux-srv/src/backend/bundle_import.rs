@@ -2115,7 +2115,7 @@ mod tests {
             updated_at: 0,
             is_system: false,
         };
-        let export = super::super::bundle_export::export_bundle(&bundle, &[]);
+        let export = super::super::bundle_export::export_bundle(&bundle, &[], &[]);
         let zip_bytes = super::super::bundle_export::zip_bundle_export(&export).unwrap();
 
         let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
