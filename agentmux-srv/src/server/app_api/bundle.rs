@@ -32,6 +32,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_export_for_agent_with_history(engine, state);
     register_bundle_import_for_agent(engine, state);
     register_bundle_validate(engine, state);
+    register_agent_project_instructions(engine, state);
 }
 
 /// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
@@ -333,6 +334,83 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
+}
+
+/// Resolve the agent definition behind an S1-authenticated `agent_id`.
+///
+/// **`check_s1` authenticates a SLUG, not a UUID.** `RpcContext.agent_id` is
+/// "slug of the authenticated agent from bus:register"
+/// (`rpc_types/misc.rs:221`), while `agent_def_get` queries `db_agents` by its
+/// UUID primary key — so calling it with the authenticated value returns
+/// `None` for every real caller (ReAgent P0, PR #3156).
+///
+/// Delegates to `resolve_agent_definition_id`, the existing resolver for
+/// exactly this, rather than hand-rolling the lookup: it already carries the
+/// registry-only fallback a previous review round forced in, for a live agent
+/// that never created a local `db_agents` row. A fresh two-tier lookup here
+/// would have that hole again.
+fn resolve_agent_for_s1(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<crate::backend::storage::AgentDefinition, String> {
+    let def_id = resolve_agent_definition_id(state, agent_id)?;
+    state
+        .wstore
+        .agent_def_get(&def_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no agent with slug or id {agent_id}"))
+}
+
+/// `agent.project_instructions` — what this agent will actually read.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Until
+/// now nothing could answer this: AgentMux knew what it wrote and recorded a
+/// single boolean about anything it found already there (§2.4).
+///
+/// Agent-scoped, so `check_s1` applies — an agent's working directory contents
+/// are not window-scoped data the way a bundle is.
+///
+/// **Read-only, and there is no write counterpart on purpose.** A foreign
+/// instruction file belongs to the repository;
+/// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to keep AgentMux
+/// out of it, and this must not become a way around that.
+fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
+        Box::new(move |data, ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    agent_id: String,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.project_instructions: {e}"))?;
+                check_s1(&ctx, &req.agent_id)?;
+
+                let agent = resolve_agent_for_s1(&state, &req.agent_id)
+                    .map_err(|e| format!("agent.project_instructions: {e}"))?;
+
+                // The directory the agent will actually run in: a blank
+                // working_directory means the per-agent default and a `~`
+                // path is expanded at launch, so the stored value alone
+                // describes a directory the agent never uses (Codex, #3156).
+                let work_dir = crate::backend::project_instructions::effective_working_dir(
+                    &agent.working_directory,
+                    &agent.name,
+                );
+                let files = crate::backend::project_instructions::resolve_project_instructions(
+                    &agent.provider,
+                    &work_dir,
+                );
+                Ok(Some(json!({
+                    "provider": agent.provider,
+                    "working_directory": work_dir,
+                    "files": files,
+                })))
+            })
+        })
+    };
+    engine.register_handler(COMMAND_AGENT_PROJECT_INSTRUCTIONS, make(state.clone()));
 }
 
 /// `bundle.export` — Armory Bundle Format (ABF) exporter, Phase 1 of
@@ -3105,6 +3183,50 @@ mod export_import_for_agent_tests {
             .wstore
             .bundle_skill_upsert_unique(&state.id_store, bundle_id, &skill, true)
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn project_instructions_resolves_the_authenticated_slug_not_a_uuid() {
+        // ReAgent P0 on #3156: check_s1 authenticates a SLUG, while
+        // agent_def_get queries by UUID — so looking the agent up directly
+        // returned None for every real caller. The existing test helper sets
+        // id == slug, which could never have caught it, so this one keeps them
+        // deliberately different.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+
+        let mut def: crate::backend::storage::AgentDefinition =
+            serde_json::from_value(serde_json::json!({
+                "id": "11111111-2222-3333-4444-555555555555",
+                "slug": "agent-slug",
+                "name": "Agent Slug",
+                "icon": "robot",
+                "provider": "claude",
+                "description": "",
+                "working_directory": work.path().to_str().unwrap(),
+                "created_at": 1,
+            }))
+            .unwrap();
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config_dir.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+
+        // The slug is what an authenticated agent actually sends.
+        let resolved = resolve_agent_for_s1(&state, "agent-slug")
+            .expect("the authenticated slug must resolve");
+        assert_eq!(resolved.id, def.id, "must find the definition behind the slug");
+
+        // And the UUID still works, for a caller that legitimately holds one.
+        let by_id = resolve_agent_for_s1(&state, &def.id).expect("a definition id must still work");
+        assert_eq!(by_id.slug, "agent-slug");
     }
 
     #[tokio::test]
