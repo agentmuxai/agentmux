@@ -13,13 +13,15 @@
  */
 
 import { createRoot } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+
+type AsyncProbe = Mock<(...args: unknown[]) => Promise<unknown>>;
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
     // Set per-test so each can control the resize RPC + status probe.
-    rpc: undefined as unknown as ReturnType<typeof vi.fn>,
-    getStatus: undefined as unknown as ReturnType<typeof vi.fn>,
+    rpc: undefined as unknown as AsyncProbe,
+    getStatus: undefined as unknown as AsyncProbe,
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({

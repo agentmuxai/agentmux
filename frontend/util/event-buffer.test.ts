@@ -8,22 +8,22 @@
 // pass-through, malformed-event rejection, subscriber error
 // isolation, overflow safeguard.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { PerSourceTracker, type VersionedEvent } from "./event-buffer";
 
 interface TestEvent extends VersionedEvent {}
 
 interface MockSetters {
-    setLatest: ReturnType<typeof vi.fn>;
-    setVersion: ReturnType<typeof vi.fn>;
-    setSawAny: ReturnType<typeof vi.fn>;
+    setLatest: Mock<(evt: TestEvent) => void>;
+    setVersion: Mock<(v: number) => void>;
+    setSawAny: Mock<(b: boolean) => void>;
 }
 
 function mockSetters(): MockSetters {
     return {
-        setLatest: vi.fn(),
-        setVersion: vi.fn(),
-        setSawAny: vi.fn(),
+        setLatest: vi.fn<(evt: TestEvent) => void>(),
+        setVersion: vi.fn<(v: number) => void>(),
+        setSawAny: vi.fn<(b: boolean) => void>(),
     };
 }
 
@@ -34,11 +34,11 @@ function evt(name: string, version: number, extra: Record<string, unknown> = {})
 describe("PerSourceTracker — basic delivery", () => {
     let setters: MockSetters;
     let tracker: PerSourceTracker<TestEvent>;
-    let onGap: ReturnType<typeof vi.fn>;
+    let onGap: Mock<(gap: number, prevVersion: number, newVersion: number) => void>;
 
     beforeEach(() => {
         setters = mockSetters();
-        onGap = vi.fn();
+        onGap = vi.fn<(gap: number, prevVersion: number, newVersion: number) => void>();
         tracker = new PerSourceTracker<TestEvent>(
             { source: "test", onVersionGap: onGap },
             setters,
@@ -81,11 +81,11 @@ describe("PerSourceTracker — basic delivery", () => {
 describe("PerSourceTracker — version checking", () => {
     let setters: MockSetters;
     let tracker: PerSourceTracker<TestEvent>;
-    let onGap: ReturnType<typeof vi.fn>;
+    let onGap: Mock<(gap: number, prevVersion: number, newVersion: number) => void>;
 
     beforeEach(() => {
         setters = mockSetters();
-        onGap = vi.fn();
+        onGap = vi.fn<(gap: number, prevVersion: number, newVersion: number) => void>();
         tracker = new PerSourceTracker<TestEvent>(
             { source: "test", onVersionGap: onGap },
             setters,
@@ -160,11 +160,11 @@ describe("PerSourceTracker — version checking", () => {
 describe("PerSourceTracker — saga buffering", () => {
     let setters: MockSetters;
     let tracker: PerSourceTracker<TestEvent>;
-    let onTerminal: ReturnType<typeof vi.fn>;
+    let onTerminal: Mock<(sagaId: number, outcome: "completed" | "failed") => void>;
 
     beforeEach(() => {
         setters = mockSetters();
-        onTerminal = vi.fn();
+        onTerminal = vi.fn<(sagaId: number, outcome: "completed" | "failed") => void>();
         tracker = new PerSourceTracker<TestEvent>(
             { source: "test", onSagaTerminal: onTerminal },
             setters,
