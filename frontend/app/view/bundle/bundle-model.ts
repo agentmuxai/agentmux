@@ -1,9 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Armory Bundle Format (ABF) bundle manager — first-class management of
-// ABF bundles. User-facing name is "Armory Bundle Format (ABF)" (short
-// form "ABF"); the type/table stay `Memory` / `db_bundles`
+// Bundle manager — first-class management of bundles. User-facing name is
+// "Bundles" (ABF, the Armory Bundle Format, names only the import/export
+// file format); the type is `Bundle`, the table `db_bundles`
 // (SPEC_MEMORY_IDENTITY_ARCH §4.1). See
 // docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
 // for the format itself.
@@ -174,7 +174,7 @@ export class BundleViewModel implements ViewModel {
     // umbrella event firing a refresh in both tabs is fine, not a bug.
     private unsubChanged: () => void;
 
-    // "layer-group" (not "brain") — matches the ABF tab icon in the Armory
+    // "layer-group" (not "brain") — matches the Bundles tab icon in the Armory
     // rail (armory-view.tsx) so the standalone bundle pane and the Armory nav
     // stay visually consistent; the brain icon is reserved for native memory.
     viewIcon: Accessor<string> = () => "layer-group";

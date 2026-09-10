@@ -18,7 +18,7 @@
  * docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md then merged those
  * two rail tabs into a single "Memory" tab (brain icon), with Global and
  * Personal as a sub-nav inside that one pane instead of two rail entries.
- * Current rail order: Accounts, Memory, Skills, MCP Servers, ABF. These
+ * Current rail order: Accounts, Memory, Skills, MCP Servers, Bundles. These
  * tests guard the rail contents directly; `ArmorySection`'s type-level
  * rejection of `"identities"` is checked at compile time below (no runtime
  * assertion needed for that part).
