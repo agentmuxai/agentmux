@@ -71,11 +71,17 @@ Measured 2026-09-06 by `backend::lan_listeners::tests`:
 - ✅ **`127.0.0.1:PORT` + `<lan-ip>:PORT` bind simultaneously.** Confirmed on
   Windows; asserted in CI on Linux too. This is the claim the design rests on,
   and it holds.
-- ❌ **"`0.0.0.0:PORT` conflicts with both" was wrong.** True on Linux/macOS;
-  **false on Windows**, where absent `SO_EXCLUSIVEADDRUSE` the wildcard binds
-  happily alongside an existing loopback listener. The spike was written
-  asserting the conflict and *failed on Windows*, which is how the error was
-  caught before any implementation depended on it.
+- ❌ **"`0.0.0.0:PORT` conflicts with both" was wrong.** True on **Linux
+  only**; **false on Windows and macOS**, where absent `SO_EXCLUSIVEADDRUSE`
+  (Windows) or by measured default (macOS) the wildcard binds happily
+  alongside an existing loopback listener. The spike was written asserting
+  the conflict and *failed on Windows*, which is how that half of the error
+  was caught before any implementation depended on it. **Correction
+  2026-09-09 (issue #3137):** this doc's own "Linux/macOS" grouping was
+  itself wrong — asserted by BSD-socket-family analogy to Linux, never
+  measured. It silently failed on the macOS nightly runner for two nights
+  before anyone looked (masked by `continue-on-error`), then was confirmed on
+  physical macOS hardware. macOS groups with Windows here, not Linux.
 
 The correction does not weaken the design — it strengthens the case for it.
 "Just bind the wildcard on toggle" is now ruled out as a portable shortcut: on
@@ -90,14 +96,21 @@ implementation left `bootstrap.rs`'s *boot-time* conditional in place: still
 That is the persisted, common case for anyone who had ever enabled the feature,
 and it broke the supervisor rather than coexisting with it:
 
-- On Linux/macOS every per-address bind hits `EADDRINUSE` under the wildcard
+- On **Linux** every per-address bind hits `EADDRINUSE` under the wildcard
   (the reverse pairing of the bullet above, and it conflicts in that direction
   too). `active` stays empty → `has_lan_listener()` is false →
   `sync_advertising` calls `discovery.apply(enabled && false)`, **switching off
   the mDNS the user had enabled.** A silent LAN-disable on every restart,
   hitting precisely the opted-in users.
-- On Windows the binds succeed and you get the two-sockets-one-port ambiguity
-  described above instead.
+- On **Windows and macOS** the binds succeed and you get two sockets on one
+  port instead. On Windows that's the accept ambiguity described above. On
+  macOS (confirmed 2026-09-09, issue #3137) the kernel was measured routing
+  an incoming connection to the more-specific-matching socket deterministically
+  — so the per-address bind actually works correctly for traffic, and the
+  practical cost is a leaked, never-closed wildcard listener rather than
+  either the Linux mDNS-disable or the Windows ambiguity. Milder, but not
+  something startup should be racing against either — the loopback-only fix
+  below still applies uniformly.
 
 Startup now binds `lan_listeners::STARTUP_BIND_ADDR` (`127.0.0.1:0`)
 unconditionally, making the supervisor the sole owner of every LAN socket, and
@@ -332,10 +345,15 @@ showing `127.0.0.1`-only binding with LAN discovery enabled.
 **Measured, 2026-09-06** (`backend::lan_listeners::tests`): simultaneous
 `127.0.0.1:PORT` + `<lan-ip>:PORT` binding — **holds** (the load-bearing
 assumption, verified on Windows, asserted in CI on Linux). And the wildcard
-conflict is **platform-dependent**, not universal: true on Linux/macOS, false
-on Windows. The first draft of this report asserted the universal version as
-fact; the spike disproved it. Recorded rather than silently corrected, because
-"standard socket behaviour" reasoning is exactly what produced the wrong claim.
+conflict is **platform-dependent**, not universal: true on Linux only, false
+on Windows **and macOS**. The first draft of this report asserted the
+universal version as fact; the spike disproved it — for Windows. Recorded
+rather than silently corrected, because "standard socket behaviour" reasoning
+is exactly what produced the wrong claim, and the same mistake happened again
+for macOS in the very sentence that recorded the correction: it grouped macOS
+with Linux by analogy, still not measured, and that error shipped in this
+doc and in `backend::lan_listeners`'s tests for three days before a real
+macOS nightly run (then physical hardware) disproved it too — see #3137.
 
 **Still asserted, not tested:** that `if-watch`-style interface-change
 notification is available and adequate on all three targets (§2).
