@@ -1,7 +1,7 @@
 # Working row: stand down on promotion, and sit above the composer
 
 **Date:** 2026-09-01
-**Status:** Implemented
+**Status:** Implemented (§1 corrected 2026-09-09 — stand-down reverted, see the notice below)
 **Supersedes (in part):** `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.2,
 `SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md` (entirely — see §4)
 
@@ -12,6 +12,35 @@ is.
 ---
 
 ## 1. The working row stands down when the dock takes over
+
+> **CORRECTED 2026-09-09 — §1 was reverted. Do not reimplement it.**
+>
+> This section rests on a factual error: it treats `TOOL_PROMOTION_MS` promotion
+> as the moment the call is *backgrounded*. It is not. Promotion is a **display**
+> change that adds a dock row; the call remains in the foreground and the turn
+> stays blocked on it. AgentMux does not decide backgrounding at all — the Claude
+> Code harness does, per call, and AgentMux only detects it afterwards by
+> string-matching the tool result (`tool-adapter.ts:57`).
+>
+> So the sentence below — *"`Working…` says the pane is busy waiting, when
+> backgrounding the task is precisely what made it not busy"* — is wrong on its
+> own terms. Nothing had been backgrounded. The pane **was** still busy waiting,
+> and a message typed at that moment still queued.
+>
+> The visible cost: at exactly 30s into every long Bash call the row vanished
+> while the top progress bar (which never had the term) kept running. The two
+> indicators disagreed, and the row under-reported a gate that was still closed.
+>
+> `workingRowSupersededByDock` and its test are deleted. The row, the bar and the
+> composer strip now share one predicate whose single meaning is *"a message typed
+> now will be queued"* — see `frontend/app/view/agent/working-indicator.ts` and
+> `docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md`
+> §2.3.
+>
+> **§2 (the row sits above the composer) is unaffected and still current.** The
+> `toolPromoted` label suppression this section mentions also survives — not
+> repeating the dock's tool name inside the row is still right; it was hiding the
+> whole row that was wrong.
 
 ### Problem
 
