@@ -9,7 +9,7 @@
 // A "section" is a Memory bundle with is_global=true. The global bundles is
 // the ordered list of those sections; their instructions concatenate into
 // each agent's startup instructions file at launch (backend:
-// format_global_brain_block) — CLAUDE.md, AGENTS.md, GEMINI.md, or similar
+// format_global_bundle_block) — CLAUDE.md, AGENTS.md, GEMINI.md, or similar
 // depending on the agent's provider (agent_config.rs's build_config_files,
 // resolved per-provider since
 // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md; see
@@ -33,7 +33,7 @@ import { PROVIDERS } from "@/app/view/agent/providers";
 /** Sentinel editingId for the unsaved "new section" draft. */
 export const NEW_SECTION_ID = "__new__";
 
-/** Mirror of the backend format_global_brain_block — keep in sync so the
+/** Mirror of the backend format_global_bundle_block — keep in sync so the
  *  preview matches exactly what lands in the agent's startup instructions
  *  file. `is_system` sections
  *  are split out and rendered first with the override preamble, exactly

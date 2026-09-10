@@ -157,7 +157,7 @@ impl Store {
     /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md), then by
     /// explicit `sort_order` (then name as a stable tiebreak). Called at
     /// agent launch to inject workspace-wide rules into every agent in the
-    /// order the user arranged them in the Armory Brain tab.
+    /// order the user arranged them in the Armory Global section.
     pub fn bundle_list_global(&self) -> Result<Vec<Bundle>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

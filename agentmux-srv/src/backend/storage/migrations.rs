@@ -93,7 +93,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        bundles injected into every agent's CLAUDE.md at launch
 ///   v9 — db_memory_bundles.sort_order: explicit ordering for the Armory
 ///        global bundles (controls CLAUDE.md injection order). Existing
-///        rows default to 0; the Brain tab assigns positions via reorder.
+///        rows default to 0; the Armory Global section assigns positions via reorder.
 ///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
 ///        standalone MCP Server and Skill primitives with per-agent ref tables
 ///        (v1 composable model, SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md).

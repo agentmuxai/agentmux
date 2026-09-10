@@ -1067,7 +1067,7 @@
     }
 
     #[test]
-    fn format_global_brain_block_puts_system_first_with_override_preamble() {
+    fn format_global_bundle_block_puts_system_first_with_override_preamble() {
         // format_global_bundle_block reads each Bundle's own is_system field
         // directly (it doesn't go through storage) — unlike mk_system's
         // deliberately-wrong default (see its own doc comment), this needs

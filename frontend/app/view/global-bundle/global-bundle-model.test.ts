@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { formatGlobalBundleBlock, groupProvidersByStartupFilename } from "./global-bundle-model";
 
 // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §5 — must mirror
-// memory_bundles.rs's format_global_brain_block fixture-for-fixture.
+// bundles.rs's format_global_bundle_block fixture-for-fixture.
 
 function ordinary(id: string, name: string, instructions = `rules for ${name}`): Bundle {
     return {

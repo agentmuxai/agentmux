@@ -10,7 +10,7 @@ import { createMemo, type Accessor } from "solid-js";
 // persisted in block.meta["armory:section"] — changing an id would strand
 // a user's previously-selected tab back to "accounts"). "memory" is the
 // combined Memory tab (label "Memory" below), covering both the global
-// brain (GlobalBundleManager, is_global Memory bundles) and the per-agent
+// bundles (GlobalBundleManager, is_global bundles) and the per-agent
 // native memory history (NativeMemoryManager) as sections inside one pane
 // — see docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md. Distinct
 // from a bundle's own "bundles" section (label "ABF"; its backing
