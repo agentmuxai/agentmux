@@ -56,7 +56,15 @@ use super::error::StoreError;
 ///        Global Bundle tier — see OBJECT_SCHEMA_VERSION's v27 doc
 ///        comment (objects.db, above run_object_schema) for the full
 ///        design; this store just needs schema parity.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
+///   v10 — db_bundles.mcp_servers / .skills DROPPED. Schema parity with
+///        OBJECT_SCHEMA_VERSION v34 below, and the store where it actually
+///        matters: `db_bundles` lives HERE, so this is the copy
+///        `m0031_drop_bundle_inline_columns` really has to drop. The bump is
+///        what stops an older binary — whose `bundle_upsert` still names
+///        those columns explicitly — from opening a dropped store and failing
+///        at INSERT time instead of refusing at open time
+///        (`check_schema_compat`). Same reagent P1, PR #2782 reasoning as v9.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 10;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -357,7 +365,22 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///
 ///        Purely additive: nothing reads it at launch, and an agent with no
 ///        row simply has no prior observation to compare against.
-pub const OBJECT_SCHEMA_VERSION: i64 = 33;
+///   v34 — `db_bundles.mcp_servers` / `.skills` DROPPED. The ref tables
+///        `db_bundle_skills_ref` / `db_bundle_mcp_ref` are the single source
+///        of truth for a bundle's components; the inline JSON columns were a
+///        second, unsynced place to write the same fact (Phase 0b,
+///        `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4).
+///        `m0030` carried the inline data across into the refs;
+///        `m0031_drop_bundle_inline_columns` removes the columns, and this
+///        function stops declaring them so a fresh store never grows them
+///        back.
+///
+///        Ships in the SAME release as that migration, for the mirror of the
+///        reason v32 records: `run_object_schema` runs on every
+///        `Store::open()`, so a CREATE TABLE that still declared these would
+///        keep recreating them on every fresh store while every existing one
+///        had them dropped — schema drift by construction.
+pub const OBJECT_SCHEMA_VERSION: i64 = 34;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -541,8 +564,6 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             instructions  TEXT NOT NULL DEFAULT '',
             instructions_by_provider TEXT NOT NULL DEFAULT '{}',
             context_files TEXT NOT NULL DEFAULT '[]',
-            mcp_servers   TEXT NOT NULL DEFAULT '[]',
-            skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0,
@@ -1242,8 +1263,6 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             instructions  TEXT NOT NULL DEFAULT '',
             instructions_by_provider TEXT NOT NULL DEFAULT '{}',
             context_files TEXT NOT NULL DEFAULT '[]',
-            mcp_servers   TEXT NOT NULL DEFAULT '[]',
-            skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0,
@@ -1447,7 +1466,16 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        is its own channel — see the report's §6.2, and
 ///        `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
 ///        for what the per-channel/global seam has already cost once.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 5;
+/// v6: `db_bundles.mcp_servers` / `.skills` DROPPED — schema parity with
+///        OBJECT_SCHEMA_VERSION v34 / SHARED_STORE_SCHEMA_VERSION v10. Real
+///        `ALTER TABLE ... DROP COLUMN` added to `run_identity_store_schema`
+///        in the same change, so this counter MUST bump alongside it —
+///        exactly the v4 situation above, and the same reagent P1, PR #2782
+///        reasoning: an unbumped counter leaves an existing
+///        identity-store.db stamped at the old user_version forever,
+///        silently defeating check_schema_compat/stamp_version's
+///        forward-compat lock for this one store.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 6;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1528,8 +1556,6 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             instructions  TEXT NOT NULL DEFAULT '',
             instructions_by_provider TEXT NOT NULL DEFAULT '{}',
             context_files TEXT NOT NULL DEFAULT '[]',
-            mcp_servers   TEXT NOT NULL DEFAULT '[]',
-            skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
             updated_at    INTEGER NOT NULL DEFAULT 0,
@@ -1696,6 +1722,33 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         let msg = e.to_string();
         if !msg.contains("duplicate column") {
             return Err(e.into());
+        }
+    }
+
+    // v6: retire db_bundles.mcp_servers / .skills — the ref tables are
+    // authoritative (see OBJECT_SCHEMA_VERSION's v34 doc comment and
+    // `m0031_drop_bundle_inline_columns`).
+    //
+    // Done HERE rather than in `m0031`, unlike the shared and channel stores,
+    // for two reasons. This store has no `MigrationContext` path (it carries
+    // only `shared_store_path` / `channel_store_path`), and — the reason it is
+    // safe — this store's `db_bundles` is a schema-parity copy that is never
+    // written (see this constant's v4 doc comment). There is therefore no
+    // inline data here for `m0031` to carry across first, so the ordering
+    // hazard that forces the other two stores into a numbered migration does
+    // not exist. Same v4 precedent that put the matching ADD COLUMN here.
+    //
+    // "no such column" is the already-dropped case; treat it as done, exactly
+    // as the ADD COLUMN above treats "duplicate column".
+    for stmt in &[
+        "ALTER TABLE db_bundles DROP COLUMN mcp_servers",
+        "ALTER TABLE db_bundles DROP COLUMN skills",
+    ] {
+        if let Err(e) = conn.execute_batch(stmt) {
+            let msg = e.to_string();
+            if !msg.contains("no such column") {
+                return Err(e.into());
+            }
         }
     }
 

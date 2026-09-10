@@ -1,6 +1,6 @@
 # Spec: Instruction and Memory Portability
 
-**Status:** active — Phases 1-2 landed (#3147); Phase 0 investigated 2026-09-09 and turned up a two-way divergence (§3.4), which makes Phase 0b its prerequisite. Phases 0b, 3 and 4 remain. Tracking: #3148.
+**Status:** active — Phases 0b, 1, 2 and 3 landed (#3147, #3149, #3152, #3153, #3156, #3162, #3163, and the inline-column retirement that closed 0b out). Phase 0 was investigated 2026-09-09 and turned up a two-way divergence (§3.4); 0b reconciled it and the redundant columns are now gone from the schema. Phase 4 (memory location) remains and gets its own spec. Tracking: #3148.
 **Date:** 2026-09-09
 **Verified against:** `a86cdee50` (code, not spec prose)
 **Follows:** `SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md` §8, which deferred
@@ -426,13 +426,24 @@ path and a two-way divergence (§3.4). What it leaves behind is no longer a
 question but a fix: reconcile the two stores, or the format grows on top of a
 known-lossy base. Still blocks Phase 3.
 
-**Phase 0b — reconcile components (§5.4).** Whichever store wins, the fix has
-to close both directions: the ref-authoritative option is export-reads-refs
-**plus** imports creating and binding managed rows **plus** a migration of
-existing inline-only data, not just the first of those (Codex, PR #3149).
+**Phase 0b — reconcile components (§5.4). DONE.** The ref tables won. All
+three directions Codex named on PR #3149 shipped: export reads refs, imports
+create and bind managed rows, and `m0030` migrated existing inline-only data.
+`m0031` then dropped `db_bundles.mcp_servers` / `.skills` outright, so the
+second place to write a bundle's components no longer exists — which is the
+only end state that actually prevents the divergence from recurring, as
+opposed to leaving a dormant column for some future writer to find.
 `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` §91-95 deferred exactly this
 decision and named the trigger — "once the new ref tables have shipped and
-proven out" — which has now happened.
+proven out" — which had happened by then.
+
+Retiring the columns bumps all three store schema versions
+(`OBJECT_SCHEMA_VERSION` 34, `SHARED_STORE_SCHEMA_VERSION` 10,
+`IDENTITY_STORE_SCHEMA_VERSION` 6). That is deliberate and load-bearing:
+`check_schema_compat` refuses to open a store stamped newer than the running
+binary, so an older AgentMux build on the same machine fails at open with a
+clear message instead of failing later inside an `INSERT` that still names a
+column that is gone.
 
 **Phase 1 — export symmetry (§5.1).** One constant, one branch, one test. No
 format change. Independently shippable and revertible.

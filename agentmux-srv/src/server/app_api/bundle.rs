@@ -49,10 +49,16 @@ struct FileEntry {
 ///   - `id` may be omitted to create (the struct has no serde default), so an
 ///     absent or null `id` is filled with an empty string (the handler then
 ///     mints a UUID).
-///   - `context_files` / `mcp_servers` / `skills` are JSON-encoded array strings
-///     on the struct, but the spec shows them as JSON arrays. Array values are
-///     re-encoded to their JSON string form; values already given as strings
-///     pass through untouched.
+///   - `context_files` is a JSON-encoded array string on the struct, but the
+///     spec shows it as a JSON array. An array value is re-encoded to its JSON
+///     string form; a value already given as a string passes through untouched.
+///
+/// `mcp_servers` / `skills` were normalized here too until `m0031` retired the
+/// columns behind them. They are deliberately NOT re-added to the list: a
+/// bundle's components live in `db_bundle_skills_ref` / `db_bundle_mcp_ref`
+/// and are managed through the `skill.*` / `mcp.*` RPCs. `Bundle` has no
+/// `deny_unknown_fields`, so an older client still sending those keys is
+/// ignored rather than rejected — the keys just no longer mean anything.
 pub(super) fn normalize_bundle_upsert_input(mut data: serde_json::Value) -> serde_json::Value {
     if let serde_json::Value::Object(ref mut map) = data {
         match map.get("id") {
@@ -61,7 +67,7 @@ pub(super) fn normalize_bundle_upsert_input(mut data: serde_json::Value) -> serd
                 map.insert("id".to_string(), serde_json::Value::String(String::new()));
             }
         }
-        for key in ["context_files", "mcp_servers", "skills"] {
+        for key in ["context_files"] {
             if let Some(v) = map.get(key) {
                 if v.is_array() {
                     let encoded =
@@ -165,8 +171,6 @@ mod check_provider_model_immutable_tests {
             instructions: String::new(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
@@ -1593,10 +1597,6 @@ async fn bundle_import_for_agent_impl(
         context_files: serde_json::to_string(
             &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
         ).unwrap_or_else(|_| "[]".to_string()),
-        mcp_servers: serde_json::to_string(
-            &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
-        ).unwrap_or_else(|_| "[]".to_string()),
-        skills: serde_json::to_string(&imported_skill_ids).unwrap_or_else(|_| "[]".to_string()),
         sort_order: 0,
         created_at: now,
         updated_at: now,
@@ -2010,12 +2010,6 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // this would persist the wrapper object instead of the
                     // raw MCP config every consumer of `Bundle.mcp_servers`
                     // expects.
-                    mcp_servers: serde_json::to_string(
-                        &parsed.mcp_servers.iter().map(|m| &m.config).collect::<Vec<_>>(),
-                    )
-                    .unwrap_or_else(|_| "[]".to_string()),
-                    skills: serde_json::to_string(&imported_skill_ids)
-                        .unwrap_or_else(|_| "[]".to_string()),
                     sort_order: 0,
                     created_at: now,
                     updated_at: now,
@@ -2653,10 +2647,6 @@ async fn bundle_import_commit_impl(
                         .unwrap_or_else(|_| "{}".to_string()),
                     context_files: serde_json::to_string(&selected_context_files)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    mcp_servers: serde_json::to_string(&selected_mcp_servers)
-                        .unwrap_or_else(|_| "[]".to_string()),
-                    skills: serde_json::to_string(&imported_skill_ids)
-                        .unwrap_or_else(|_| "[]".to_string()),
                     sort_order: 0,
                     created_at: now,
                     updated_at: now,
@@ -3207,10 +3197,16 @@ mod import_preview_commit_tests {
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
-        let mcp_servers: serde_json::Value = serde_json::from_str(&saved.mcp_servers).unwrap();
-        assert_eq!(mcp_servers[0]["command"], "npx");
-        assert!(mcp_servers[0].get("source_path").is_none(), "must not persist the {{source_path, config}} wrapper");
+        // Read back through the ref tables, which are the only place a
+        // bundle's MCP servers live as of `m0031` — the inline column this
+        // assertion used to read is gone.
+        let resolved = resolve_bundle_components(&state.wstore, bundle_id).unwrap();
+        let entry = &resolved.mcp_entries[0];
+        assert_eq!(entry["command"], "npx");
+        assert!(
+            entry.get("source_path").is_none(),
+            "must not persist the {{source_path, config}} wrapper"
+        );
     }
 
     #[tokio::test]
@@ -3343,8 +3339,6 @@ mod export_import_for_agent_tests {
             instructions: instructions.to_string(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
@@ -3441,10 +3435,13 @@ mod export_import_for_agent_tests {
         // the Armory wrote only a ref row while export read only the inline
         // column, so this bundle exported as empty skills/ and mcp/
         // directories with no warning — in a format advertised as a backup.
+        //
+        // The fixture used to assert the inline columns were empty, to prove
+        // the export below could only have come from the refs. `m0031`
+        // removed the columns outright, so that is now true by construction
+        // and there is nothing left to assert.
         let state = test_state();
-        let bundle = make_bundle(&state, "bundle-1", "Be helpful.");
-        assert_eq!(bundle.skills, "[]", "fixture must leave the inline columns empty");
-        assert_eq!(bundle.mcp_servers, "[]");
+        make_bundle(&state, "bundle-1", "Be helpful.");
 
         bind_skill(&state, "bundle-1", "Deploy");
         bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp","env":{"GITHUB_TOKEN":"tok"}}"#);
