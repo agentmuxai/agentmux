@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
-use super::storage::memory_bundles::Memory;
+use super::storage::bundles::Bundle;
 use super::storage::store::{AgentDefinition, AgentContent, AgentSkill, Store};
 use super::storage::StoreError;
 
@@ -40,7 +40,7 @@ struct SeedMemory {
     description: String,
     /// When true this bundle is injected into every agent's CLAUDE.md at
     /// launch (Armory global tier). When false it is available in the
-    /// Memory manager but must be selected per-agent.
+    /// Bundle manager but must be selected per-agent.
     #[serde(default)]
     is_global: bool,
     #[serde(default)]
@@ -248,7 +248,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
 /// Seed memory bundles from the manifest. Skips any bundle whose ID already
 /// exists — this is a one-time seed, not an upsert on every startup.
 fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
-    let existing = wstore.bundle_memory_list()?;
+    let existing = wstore.bundle_list()?;
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|m| m.id.clone()).collect();
 
@@ -262,7 +262,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
         if existing_ids.contains(&mem_def.id) {
             continue;
         }
-        let memory = Memory {
+        let memory = Bundle {
             id: mem_def.id.clone(),
             name: mem_def.name.clone(),
             description: mem_def.description.clone(),
@@ -285,7 +285,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
         // Use warn-and-skip rather than ? so a user bundle whose name
         // collides with the seeded name (UNIQUE constraint on name) does
         // not abort the remainder of the seed loop.
-        match wstore.bundle_memory_upsert(&memory) {
+        match wstore.bundle_upsert(&memory) {
             Ok(()) => { created += 1; }
             Err(e) => {
                 tracing::warn!(

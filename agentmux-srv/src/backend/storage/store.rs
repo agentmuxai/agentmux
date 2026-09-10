@@ -26,7 +26,7 @@ use super::migrations::{
 
 /// SQLite-backed object store for StoreObj types.
 pub struct Store {
-    /// `pub(super)` so sibling subsystem modules (e.g. `memory_bundles`)
+    /// `pub(super)` so sibling subsystem modules (e.g. `bundles`)
     /// can take the lock. Each per-subsystem file adds methods to `Store`
     /// via `impl Store {}` and needs the connection.
     pub(super) conn: Mutex<Connection>,
@@ -749,7 +749,7 @@ impl<'a> StoreTx<'a> {
 
 // Re-exports so existing `storage::store::*` imports keep working.
 pub use super::agents::{derive_slug, AgentDefinition, AgentInstance, InstanceStatus};
-pub use super::memory_bundles::Memory;
+pub use super::bundles::Bundle;
 pub use super::content::AgentContent;
 pub use super::history::AgentHistory;
 pub use super::skills::AgentSkill;

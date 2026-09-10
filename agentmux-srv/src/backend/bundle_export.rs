@@ -4,7 +4,7 @@
 //! Armory Bundle Format (ABF) exporter — Phase 1 of
 //! `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` /
 //! <https://docs.agentmux.ai/abf/>. Serializes a `db_bundles` row (the
-//! `Memory` struct — table/UI say "Bundles", the type name predates the
+//! `Bundle` struct — table/UI say "Bundles", the type name predates the
 //! rename) plus its referenced skills and inline MCP server configs into
 //! the ABF v0.1 on-disk layout:
 //!
@@ -24,7 +24,7 @@
 //! ```
 //!
 //! Pure functions only — no I/O, no Store access. Callers (the `bundle.export`
-//! RPC handler) own fetching the `Memory` row and resolving its `skills`
+//! RPC handler) own fetching the `Bundle` row and resolving its `skills`
 //! id-array into `Skill` rows before calling [`export_bundle`].
 //!
 //! **`accounts/requirements.json` design note:** the plan this implements
@@ -59,7 +59,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::agent_config::{render_skill_md, unique_skill_slug, SKILL_TYPE_AGENT_SKILL};
-use super::storage::store::{derive_slug, Memory};
+use super::storage::store::{derive_slug, Bundle};
 use super::storage::Skill;
 
 /// One file within an exported bundle, path relative to the bundle root
@@ -367,7 +367,7 @@ pub(crate) fn sanitize_context_relative_path(path: &str) -> Option<String> {
 /// lookups. Callers should skip ids that failed to resolve (deleted skills)
 /// before calling this; it does not distinguish "missing" from "not
 /// passed."
-pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
+pub fn export_bundle(bundle: &Bundle, skills: &[Skill]) -> BundleExport {
     let root_slug = derive_slug(&bundle.name);
     let mut files = Vec::new();
     let mut skipped_skills = Vec::new();
@@ -708,8 +708,8 @@ pub fn zip_bundle_export(export: &BundleExport) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
-    fn make_bundle(instructions: &str, context_files: &str, mcp_servers: &str, skills: &str) -> Memory {
-        Memory {
+    fn make_bundle(instructions: &str, context_files: &str, mcp_servers: &str, skills: &str) -> Bundle {
+        Bundle {
             id: "bundle-1".to_string(),
             name: "Backend Dev Bundle".to_string(),
             description: "Backend dev conventions".to_string(),

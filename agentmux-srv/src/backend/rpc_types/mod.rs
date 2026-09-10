@@ -17,7 +17,8 @@ mod commands;
 mod fleet;
 mod identity;
 mod instance;
-mod memory;
+mod bundle;
+mod native_memory;
 mod misc;
 mod session;
 
@@ -27,7 +28,8 @@ pub use commands::*;
 pub use fleet::*;
 pub use identity::*;
 pub use instance::*;
-pub use memory::*;
+pub use bundle::*;
+pub use native_memory::*;
 pub use misc::*;
 pub use session::*;
 

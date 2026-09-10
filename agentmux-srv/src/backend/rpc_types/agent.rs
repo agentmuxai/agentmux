@@ -318,7 +318,7 @@ pub struct CommandAgentDefCreateFromTemplateData {
     #[serde(default)]
     #[ts(optional)]
     pub identity_id: Option<String>,
-    /// Memory bundle id to bind (empty string = vanilla CLI).
+    /// Bundle id to bind (empty string = vanilla CLI).
     /// Same semantics as `identity_id` above.
     #[serde(default)]
     #[ts(optional)]

@@ -2095,9 +2095,9 @@ mod tests {
 
     #[test]
     fn unzips_a_bundle_exported_as_zip() {
-        use crate::backend::storage::store::Memory;
+        use crate::backend::storage::store::Bundle;
 
-        let bundle = Memory {
+        let bundle = Bundle {
             id: "b1".to_string(),
             name: "Zip Roundtrip".to_string(),
             description: "desc".to_string(),

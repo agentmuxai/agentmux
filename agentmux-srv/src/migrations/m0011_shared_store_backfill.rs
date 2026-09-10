@@ -19,7 +19,7 @@ impl Migration for M0011SharedStoreBackfill {
             .map_err(|e| MigrationError(format!("shared_store_backfill: open shared: {}", e)))?;
 
         let skip_accts       = !shared.identity_list(None).map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
-        let skip_mem_bundles = !shared.bundle_memory_list().map_err(|e| e.to_string()).map_err(MigrationError)?.iter().all(|b| b.id == "blank");
+        let skip_mem_bundles = !shared.bundle_list().map_err(|e| e.to_string()).map_err(MigrationError)?.iter().all(|b| b.id == "blank");
         let skip_drones      = !shared.drone_list().map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
         let skip_links       = !shared.agent_identity_list_all().map_err(|e| e.to_string()).map_err(MigrationError)?.is_empty();
         let skip_muxbus      = shared.muxbus_load().ok().flatten().is_some();
@@ -67,8 +67,8 @@ impl Migration for M0011SharedStoreBackfill {
         // this pass no longer backfills them.)
         if !skip_mem_bundles {
             for src in &sibling_stores {
-                for mem in src.bundle_memory_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
-                    let _ = shared.bundle_memory_upsert(mem);
+                for mem in src.bundle_list().unwrap_or_default().iter().filter(|b| b.id != "blank") {
+                    let _ = shared.bundle_upsert(mem);
                 }
             }
         }

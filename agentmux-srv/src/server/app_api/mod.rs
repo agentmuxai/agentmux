@@ -20,7 +20,7 @@ use crate::backend::rpc_types::*;
 use crate::backend::session_archive;
 use crate::backend::storage::store::{Store, AgentContent, AgentDefinition, AgentInstance};
 use crate::backend::storage::identities::IdentityAccount;
-use crate::backend::storage::memory_bundles::Memory;
+use crate::backend::storage::bundles::Bundle;
 
 use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
@@ -755,7 +755,7 @@ pub(crate) async fn identity_account_validate_stored_impl(
 }
 
 pub(crate) async fn bundle_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
-    let memories = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.list: {e}"))?;
+    let memories = state.id_store.bundle_list().map_err(|e| format!("bundle.list: {e}"))?;
     let bundles: Vec<_> = memories.iter().map(|m| json!({
         "id": m.id, "name": m.name, "description": m.description,
         "provider": m.provider, "model": m.model, "is_blank": m.is_blank, "updated_at": m.updated_at,
@@ -774,10 +774,10 @@ pub(crate) async fn bundle_get_impl(
     name: &str,
 ) -> Result<serde_json::Value, String> {
     let memory = if !id.is_empty() {
-        state.id_store.bundle_memory_get(id).map_err(|e| format!("bundle.get: {e}"))?
+        state.id_store.bundle_get(id).map_err(|e| format!("bundle.get: {e}"))?
             .ok_or_else(|| format!("bundle.get: not found id={id}"))?
     } else if !name.is_empty() {
-        let all = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.get: {e}"))?;
+        let all = state.id_store.bundle_list().map_err(|e| format!("bundle.get: {e}"))?;
         all.into_iter().filter(|m| m.name == name).max_by_key(|m| m.updated_at)
             .ok_or_else(|| format!("bundle.get: not found name={name}"))?
     } else {
@@ -793,7 +793,7 @@ pub(crate) async fn bundle_get_impl(
 /// brand-new bundle with no id yet) rather than only whatever was last
 /// persisted. Read-only: never touches the Store.
 pub(crate) fn bundle_validate_impl(data: serde_json::Value) -> Result<serde_json::Value, String> {
-    let memory: Memory = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
+    let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
     let report = crate::backend::bundle_validate::validate_bundle(&memory);
     serde_json::to_value(&report).map_err(|e| e.to_string())
@@ -821,15 +821,15 @@ pub(crate) async fn bundle_self_get_impl(
                 .and_then(|rec| rec.data.memory_id)
         });
     let memory = if let Some(mid) = memory_id {
-        state.id_store.bundle_memory_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
+        state.id_store.bundle_get(&mid).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| format!("bundle.self.get: memory_id {mid} not found"))?
     } else {
         // No bundle bound: return the blank singleton (two-step — list to find
         // the blank id, then fetch the full object).
-        let all = state.id_store.bundle_memory_list().map_err(|e| format!("bundle.self.get: {e}"))?;
+        let all = state.id_store.bundle_list().map_err(|e| format!("bundle.self.get: {e}"))?;
         let blank_id = all.into_iter().find(|m| m.is_blank).map(|m| m.id)
             .ok_or_else(|| "bundle.self.get: blank singleton not found".to_string())?;
-        state.id_store.bundle_memory_get(&blank_id).map_err(|e| format!("bundle.self.get: {e}"))?
+        state.id_store.bundle_get(&blank_id).map_err(|e| format!("bundle.self.get: {e}"))?
             .ok_or_else(|| "bundle.self.get: blank singleton row missing".to_string())?
     };
     serde_json::to_value(&memory).map_err(|e| e.to_string())
@@ -2736,13 +2736,13 @@ mod bundle_self_get_registry_fallback_tests {
     async fn falls_back_to_the_registrys_own_bound_bundle_when_no_local_instance_row_exists() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let state = test_state();
-        let bundle: crate::backend::storage::memory_bundles::Memory =
+        let bundle: crate::backend::storage::bundles::Bundle =
             serde_json::from_value(serde_json::json!({
                 "id": "bundle-agenty-test",
                 "name": "AgentY's real bundle",
             }))
             .unwrap();
-        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
         let prev = std::env::var_os("AGENTMUX_HOME_OVERRIDE");

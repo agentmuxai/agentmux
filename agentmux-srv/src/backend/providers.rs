@@ -430,7 +430,7 @@ static PI: ProviderConfig = ProviderConfig {
     supported_vendors: &["pi"],
     // Confirmed: npmjs.com/package/@mariozechner/pi-coding-agent docs —
     // .pi/SYSTEM.md REPLACES pi's default system prompt; .pi/APPEND_SYSTEM.md
-    // APPENDS to it. AgentMux's Soul+AgentMD+Memory content is additive
+    // APPENDS to it. AgentMux's Soul+AgentMD+Bundle content is additive
     // background, not a full system-prompt replacement (pi's own default
     // prompt carries pi's own tool-usage instructions) — APPEND_SYSTEM.md
     // is the correct target, not SYSTEM.md. See
@@ -667,7 +667,7 @@ not this file. See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.\n\
 /// Scoped to the `claude` provider only (`auth_dir_name == "claude"`) —
 /// this is a Claude Code CLI-specific fallback behavior; whether any other
 /// provider's CLI has an equivalent gap is unverified. Never overwrites an
-/// existing `CLAUDE.md` — Global Memory (or anything else) may have
+/// existing `CLAUDE.md` — Global Bundle (or anything else) may have
 /// legitimately placed real content at that path. Returns `Ok(true)` only
 /// when it actually wrote the placeholder.
 pub fn seed_claude_md_placeholder_if_missing(

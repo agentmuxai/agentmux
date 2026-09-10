@@ -331,10 +331,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .or_default()
                         .push(link);
                 }
-                let memories = id_store.bundle_memory_list().unwrap_or_else(|e| {
+                let memories = id_store.bundle_list().unwrap_or_else(|e| {
                     tracing::warn!(
                         error = %e,
-                        "listrecentsessions: bundle_memory_list failed — degrading to empty \
+                        "listrecentsessions: bundle_list failed — degrading to empty \
                          (rows will show \"(missing memory)\")"
                     );
                     degraded.push("memories");

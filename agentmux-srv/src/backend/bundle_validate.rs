@@ -21,7 +21,7 @@ use serde_json::Value;
 
 use super::bundle_export::{parse_json_field_or_warn, sanitize_context_relative_path, ContextFileEntry};
 use super::providers;
-use super::storage::store::Memory;
+use super::storage::store::Bundle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -48,7 +48,7 @@ pub struct ValidationReport {
 }
 
 /// Run every structural check against a bundle's JSON-encoded columns.
-pub fn validate_bundle(bundle: &Memory) -> ValidationReport {
+pub fn validate_bundle(bundle: &Bundle) -> ValidationReport {
     let mut issues = Vec::new();
     validate_instructions_by_provider(bundle, &mut issues);
     validate_context_files(bundle, &mut issues);
@@ -81,7 +81,7 @@ fn push_warning(issues: &mut Vec<ValidationIssue>, field: &str, message: String)
 /// against `providers.rs`'s hardcoded registry/alias strings — none of
 /// which contain `/` or `.` — so a path-normalization collision between two
 /// *valid* keys structurally cannot happen here; no collision check needed.
-fn validate_instructions_by_provider(bundle: &Memory, issues: &mut Vec<ValidationIssue>) {
+fn validate_instructions_by_provider(bundle: &Bundle, issues: &mut Vec<ValidationIssue>) {
     const FIELD: &str = "instructions_by_provider";
     if bundle.instructions_by_provider.trim().is_empty() {
         return;
@@ -108,7 +108,7 @@ fn validate_instructions_by_provider(bundle: &Memory, issues: &mut Vec<Validatio
 /// paths, no `..` traversal, no drive letters), and no two entries may
 /// normalize to the same output path case-insensitively (the most common
 /// export/extract targets have case-insensitive filesystems).
-fn validate_context_files(bundle: &Memory, issues: &mut Vec<ValidationIssue>) {
+fn validate_context_files(bundle: &Bundle, issues: &mut Vec<ValidationIssue>) {
     const FIELD: &str = "context_files";
     let mut warnings = Vec::new();
     let entries: Vec<ContextFileEntry> =
@@ -151,7 +151,7 @@ fn validate_context_files(bundle: &Memory, issues: &mut Vec<ValidationIssue>) {
 /// into distinct slugs (`unique_skill_slug`), so a duplicate `name` can't
 /// actually collide on disk — flagged as a warning rather than an error
 /// since it's very likely a copy-paste mistake, not a structural break.
-fn validate_mcp_servers(bundle: &Memory, issues: &mut Vec<ValidationIssue>) {
+fn validate_mcp_servers(bundle: &Bundle, issues: &mut Vec<ValidationIssue>) {
     const FIELD: &str = "mcp_servers";
     let mut warnings = Vec::new();
     let entries: Vec<Value> = parse_json_field_or_warn(&bundle.mcp_servers, FIELD, &mut warnings);
@@ -184,7 +184,7 @@ fn validate_mcp_servers(bundle: &Memory, issues: &mut Vec<ValidationIssue>) {
 /// `skills` is just a JSON array of skill ids — the only structural checks
 /// possible without a Store lookup (which this module deliberately never
 /// does) are malformed JSON and an id listed more than once.
-fn validate_skills(bundle: &Memory, issues: &mut Vec<ValidationIssue>) {
+fn validate_skills(bundle: &Bundle, issues: &mut Vec<ValidationIssue>) {
     const FIELD: &str = "skills";
     let mut warnings = Vec::new();
     let ids: Vec<String> = parse_json_field_or_warn(&bundle.skills, FIELD, &mut warnings);
@@ -209,8 +209,8 @@ mod tests {
         context_files: &str,
         mcp_servers: &str,
         skills: &str,
-    ) -> Memory {
-        Memory {
+    ) -> Bundle {
+        Bundle {
             id: "bundle-1".to_string(),
             name: "Backend Dev Bundle".to_string(),
             description: "Backend dev conventions".to_string(),
