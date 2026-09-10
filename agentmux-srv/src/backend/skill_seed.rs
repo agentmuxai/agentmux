@@ -96,6 +96,42 @@ pub(crate) fn starter_skill_id(trigger: &str) -> Uuid {
     Uuid::new_v5(&namespace, trigger.as_bytes())
 }
 
+/// Guard against a manifest-authoring mistake: two entries sharing a
+/// `trigger`.
+///
+/// Deterministic ids remove a safety net that random ids provided by
+/// accident. Before this change, a duplicate `trigger` with a different
+/// `name` would insert as two independent rows (no id collision, no name
+/// collision — nobody was checking `trigger` for uniqueness either way,
+/// this was already a latent gap). After this change it is worse in a
+/// different way: both entries now mint the SAME id, so the second insert's
+/// `managed_upsert_unique_global` duplicate-name check
+/// (`WHERE name = ?1 AND id <> ?2`) excludes the first entry's own row from
+/// consideration — because its id now equals the second entry's id — and the
+/// `INSERT ... ON CONFLICT(id) DO UPDATE` silently overwrites it instead of
+/// erroring. `seed_starter_skills`'s `created` count would even report six
+/// when only five distinct rows exist (reagent P2, PR #3175).
+///
+/// Unreachable today — `starter-skills.json` has six distinct triggers, see
+/// the test pinning that — but it must fail LOUDLY the moment it stops being
+/// unreachable, the same way the pre-existing name-uniqueness check already
+/// does for other manifest mistakes, rather than silently merging two
+/// authored skills into one.
+fn reject_duplicate_triggers(manifest: &[StarterSkill]) -> Result<(), StoreError> {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for entry in manifest {
+        if !seen.insert(entry.trigger.as_str()) {
+            return Err(StoreError::Other(format!(
+                "skill seed: manifest has more than one entry with trigger '{}' — \
+                 this is an authoring bug in starter-skills.json, not a runtime \
+                 condition to recover from",
+                entry.trigger
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// True if any global skill whose name matches a starter-skill's name
 /// already exists — i.e. this channel already effectively has the starter
 /// set (or a name collision with it), whether from a prior run of this
@@ -136,6 +172,7 @@ pub(crate) fn any_starter_skill_name_exists(wstore: &Arc<Store>) -> Result<bool,
 pub(crate) fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport, StoreError> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
+    reject_duplicate_triggers(&manifest)?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -174,6 +211,39 @@ pub(crate) fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn starter(trigger: &str, name: &str) -> StarterSkill {
+        StarterSkill {
+            name: name.to_string(),
+            trigger: trigger.to_string(),
+            skill_type: "prompt".to_string(),
+            description: "d".to_string(),
+            content: "c".to_string(),
+        }
+    }
+
+    #[test]
+    fn reject_duplicate_triggers_fails_loudly_on_a_colliding_manifest() {
+        // reagent P2, PR #3175: without this guard, two entries sharing a
+        // trigger now mint the SAME deterministic id, and the second insert
+        // silently overwrites the first instead of erroring — see this
+        // function's own doc comment for the full mechanism. Must fail
+        // BEFORE any row is touched, the way the old random-id behavior
+        // failed loudly on a duplicate NAME.
+        let manifest = vec![
+            starter("dup", "First Skill"),
+            starter("dup", "Second Skill, Different Name"),
+        ];
+        let err = reject_duplicate_triggers(&manifest).unwrap_err();
+        assert!(format!("{err}").contains("dup"), "error must name the offending trigger: {err}");
+    }
+
+    #[test]
+    fn reject_duplicate_triggers_accepts_the_real_manifest() {
+        // The guard must never fire on starter-skills.json as it ships.
+        let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON).unwrap();
+        assert!(reject_duplicate_triggers(&manifest).is_ok());
+    }
 
     #[test]
     fn starter_skill_ids_are_identical_across_two_independently_seeded_stores() {

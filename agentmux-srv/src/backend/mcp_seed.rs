@@ -76,6 +76,29 @@ fn starter_mcp_server_id(name: &str) -> Uuid {
     Uuid::new_v5(&namespace, name.as_bytes())
 }
 
+/// Guard against a manifest-authoring mistake: two entries sharing a `name`.
+/// Mirrors `skill_seed::reject_duplicate_triggers` exactly — see its doc
+/// comment for the full failure mode this closes (reagent P2, PR #3175).
+/// `name` here plays the role `trigger` plays for skills: it is both the
+/// stable key `starter_mcp_server_id` derives from AND the field
+/// `mcp_server_upsert_unique_global`'s own duplicate check is keyed on,
+/// which is exactly the combination that turned "id collision" into
+/// "duplicate-check bypass" for skills.
+fn reject_duplicate_names(manifest: &[StarterMcpServer]) -> Result<(), StoreError> {
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for entry in manifest {
+        if !seen.insert(entry.name.as_str()) {
+            return Err(StoreError::Other(format!(
+                "mcp server seed: manifest has more than one entry named '{}' — \
+                 this is an authoring bug in starter-mcp-servers.json, not a \
+                 runtime condition to recover from",
+                entry.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// True if any global MCP server whose name matches a starter entry's name
 /// already exists — i.e. this channel already effectively has the starter
 /// set (or a name collision with it). The caller
@@ -113,6 +136,7 @@ pub(crate) fn any_starter_mcp_server_name_exists(wstore: &Arc<Store>) -> Result<
 pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerSeedReport, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
+    reject_duplicate_names(&manifest)?;
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,6 +175,29 @@ pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn starter(name: &str) -> StarterMcpServer {
+        StarterMcpServer {
+            name: name.to_string(),
+            transport: "stdio".to_string(),
+            config: serde_json::json!({"command": "true"}),
+        }
+    }
+
+    #[test]
+    fn reject_duplicate_names_fails_loudly_on_a_colliding_manifest() {
+        // reagent P2, PR #3175 — mirrors skill_seed's equivalent test. See
+        // reject_duplicate_names's own doc comment for the mechanism.
+        let manifest = vec![starter("dup"), starter("dup")];
+        let err = reject_duplicate_names(&manifest).unwrap_err();
+        assert!(format!("{err}").contains("dup"), "error must name the offending server: {err}");
+    }
+
+    #[test]
+    fn reject_duplicate_names_accepts_the_real_manifest() {
+        let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON).unwrap();
+        assert!(reject_duplicate_names(&manifest).is_ok());
+    }
 
     #[test]
     fn starter_mcp_server_ids_are_identical_across_two_independently_seeded_stores() {
