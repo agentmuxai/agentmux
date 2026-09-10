@@ -803,7 +803,18 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const magnifiedBlockBlur = () => magnifiedBlockBlurAtom();
     const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
     const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
-    let connBtnRef: { current: HTMLDivElement | null } = { current: null };
+    // Shared per-block holder rather than a plain local: when a pane's
+    // header is HOISTED out of this component (pane-leaf-chrome.tsx —
+    // `nodeModel.paneChromeHoisted`), the header, and therefore the
+    // connection button whose element this captures, renders in a different
+    // component tree, but the ChangeConnectionBlockModal it anchors stays
+    // HERE. A local ref would then never be populated and the modal would
+    // lose its anchor. Keyed on blockId through the block-atom cache, so
+    // both sides resolve the same object and it's cleaned up with the block.
+    const connBtnRef = useBlockAtom(nodeModel.blockId, "connBtnRef", () => {
+        const holder: { current: HTMLDivElement | null } = { current: null };
+        return () => holder;
+    })();
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.

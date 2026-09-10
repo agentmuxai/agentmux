@@ -30,7 +30,9 @@ import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
 import { boundNumber, createSignalAtom, sleep, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
-import { createMemo, createSignal } from "solid-js";
+import { createComponent, createMemo, createSignal } from "solid-js";
+import type { JSX } from "solid-js";
+import type { NodeModel } from "@/layout/index";
 
 // Ticks every 60 s so agentRuntimeLabel memos re-evaluate without waiting for a status event.
 // globalThis survives HMR module re-evaluation — prevents duplicate interval leak.
@@ -42,6 +44,19 @@ import { TermWrap } from "./termwrap";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
 
 let _terminalViewComponent: ViewComponent = null;
+
+// Same late-binding trick as _terminalViewComponent above, for the same
+// reason: term.tsx imports this module, so this module can't import it back.
+// `renderPaneChrome` below instantiates whatever term.tsx registers here.
+let _termPaneChromeComponent:
+    | ((props: { anchorBlockId: string; nodeModel: NodeModel; children: JSX.Element }) => JSX.Element)
+    | null = null;
+
+export function setTermPaneChromeComponent(
+    component: (props: { anchorBlockId: string; nodeModel: NodeModel; children: JSX.Element }) => JSX.Element,
+) {
+    _termPaneChromeComponent = component;
+}
 
 export function setTerminalViewComponent(component: ViewComponent) {
     _terminalViewComponent = component;
@@ -328,6 +343,32 @@ class TermViewModel implements ViewModel {
     get viewComponent(): ViewComponent {
         return _terminalViewComponent;
     }
+
+    /** True exactly when `pane-leaf-chrome.tsx` hoisted chrome above this
+     *  Block — that chrome renders the replacement BlockFrame_Header, so
+     *  suppressing the inline one is what stops the two double-rendering.
+     *  Reads the tag on the NodeModel wrapper rather than being
+     *  unconditional, so a drag-preview thumbnail (`renderPreview`'s plain
+     *  `<Block preview>`, no chrome around it) keeps its own header — the
+     *  same bug Codex/ReAgent caught on the agent pane in #3151. */
+    get noHeader(): () => boolean {
+        return () => this.nodeModel.paneChromeHoisted === true;
+    }
+
+    /** Renders `TermPaneChrome` (term.tsx) wrapped around the switch-scoped
+     *  content — see that component's own doc comment.
+     *  `createComponent`, not a bare call: this is a .ts file so it can't
+     *  use JSX syntax, but a plain function call would attach the
+     *  component's own effects/cleanups to whatever reactive scope happened
+     *  to be ambient at THIS call rather than to chrome's real mount. */
+    renderPaneChrome = (leafNodeModel: NodeModel, content: JSX.Element): JSX.Element => {
+        if (_termPaneChromeComponent == null) return content;
+        return createComponent(_termPaneChromeComponent, {
+            anchorBlockId: this.blockId,
+            nodeModel: leafNodeModel,
+            children: content,
+        });
+    };
 
     isBasicTerm(): boolean {
         const blockData = this.blockAtom();
