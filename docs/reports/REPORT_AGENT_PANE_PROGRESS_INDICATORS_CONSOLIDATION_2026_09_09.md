@@ -314,6 +314,61 @@ Implementation, cheapest first:
 
 Cost control is already solved: the gateway has a 15s timeout, cancellation, and concurrency caps. Narration must be **best-effort and non-blocking** — if Haiku is slow or fails, the UI change in P2 must happen anyway. Never gate a UI state transition on a model call.
 
+#### 8.3.1 Concrete landing points (researched 2026-09-10, not yet built)
+
+**The trigger must come from the frontend, not the backend.** The obvious hook —
+`COMMAND_DOCK_NODE_STATUS` (`agentmux-srv/src/server/websocket.rs` ~1257), where
+`publish_background_task_updated` already fires on the background transition —
+turns out to be unusable on its own: `CommandDockNodeStatusData`
+(`agentmux-srv/src/backend/rpc_types/block.rs:145-158`) carries `tool_name` but
+**not the command text**. The backend knows a Bash call went background; it
+cannot say *what* went background, which is the entire content of the message.
+The frontend holds the `ToolNode` params.
+
+So the facility is an RPC the frontend calls with context, not an event the
+backend originates:
+
+1. **`COMMAND_AMBIENT_NARRATE`** — new constant in
+   `agentmux-srv/src/backend/rpc_types/commands.rs` (pattern: `:67`), with
+   `CommandAmbientNarrateData { block_id, kind, context }`. `kind` is what
+   selects the prompt, and is what makes this reusable rather than
+   background-specific.
+2. **Handler** modelled on `generate_pushed_activity_summary`
+   (`agentmux-srv/src/server/app_api/session.rs:295-316`): take an
+   `AmbientCallKey` under a NEW purpose constant (do not share a purpose with an
+   existing caller — see the `_PUSHED` comment at `:270-275` for why two callers
+   sharing one purpose cancel each other), resolve `cmd` from block meta, call
+   `invoke_ambient_haiku_call` (`session.rs:1022`).
+3. **Broadcast** `ambient-narration` scoped `block:<id>`, mirroring
+   `publish_background_task_updated` (`websocket.rs:765-773`) — but carrying the
+   text, since unlike that invalidation ping there is no list query to re-read.
+4. **Frontend** subscribes in `frontend/app/store/wps-events.ts` (pattern at
+   `:69`) and renders a synthetic node via the `injectHistoryLink` mechanism
+   (`inject-history-link.ts:25`) — render-time only, never dispatched into the
+   document reducer.
+
+**Trigger on the acceptance predicate, and do not add a survival floor.**
+An earlier revision of this section claimed `isAcceptedBackgroundLaunch`
+misclassifies fast-finishing calls and therefore needed a survival floor on top.
+**That inverts the fact** (codex P2 on #3161). `isAcceptedBackgroundLaunch` is
+the *fix* for #2518, not a victim of it: the raw `params.run_in_background` flag
+was the unsafe signal — 11 of the 17 rows in that issue's own session were
+fast-finishers wrongly treated as detached — and this predicate exists precisely
+to exclude them by additionally requiring the acceptance prefix in the result
+text (`tool-adapter.ts:84-115`). Narrating once per accepted launch inherits no
+such noise, and a survival floor would only delay or suppress narration for
+genuinely short-lived detached tasks. Dedupe per `node_id` (a node can be
+re-observed) and nothing more.
+
+**A cross-block concurrency cap IS required**, and does not come for free
+(codex P2 on #3161). `AmbientGateway` deduplicates and cancels only within a
+single `(block_id, purpose)` key, so N panes backgrounding at once means N
+concurrent Haiku subprocesses. The pushed-summary caller this plan is modelled
+on is bounded by a semaphore *external* to it
+(`backend/reactive/activity_watcher.rs:129-137`); an RPC-driven caller inherits
+none of that. Acquire a narration-specific semaphore before spawning — the 15s
+timeout bounds each call's duration, not how many run at once.
+
 ### 8.4 P4 — the general facility
 
 P3's node type, provenance marking and injection path *are* the general facility. Backgrounding is its first consumer. Other candidates already exist in-tree: the resume preflight and "Not signed in" rows are hand-rolled versions of the same idea and could migrate to it.
