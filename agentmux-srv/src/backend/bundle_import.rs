@@ -1007,29 +1007,47 @@ pub fn parse_bundle_import_with_budget(
                     let str_field = |k: &str| {
                         obj.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string()
                     };
-                    let file_path = str_field("file");
-                    if file_path.is_empty() {
+                    let raw_file = str_field("file");
+                    if raw_file.is_empty() {
                         warnings.push(
                             "components.projectInstructions: entry has no \"file\"; skipped"
                                 .to_string(),
                         );
                         continue;
                     }
+                    // Normalize the manifest's OWN reference the same way
+                    // `by_path`'s keys are normalized, exactly as every other
+                    // manifest-reference lookup in this file does (codex P2,
+                    // PR #2379 round 4; reagent P2, round 6; reagent P2 again
+                    // on PR #3163 — this is the third component to need it).
+                    // Without it a valid non-canonical spelling
+                    // (`./instructions/project/CLAUDE.md`, backslashes) misses
+                    // the lookup and gets reported as "not found" even though
+                    // the content is right there.
+                    let Some(file_path) = sanitize_context_relative_path(&raw_file) else {
+                        warnings.push(format!(
+                            "components.projectInstructions: \"{raw_file}\" is not a \
+                             safe path; skipped"
+                        ));
+                        continue;
+                    };
                     // The accounts/ allowlist applies here for the same reason
                     // it applies to components.instructions: a manifest is not
                     // a trustworthy inventory of its own bundle, and a
                     // projectInstructions entry must not become a second way to
                     // read accounts/requirements.json back out as content.
+                    // Checked on the NORMALIZED path so a non-canonical
+                    // spelling can't slip past it either.
                     if is_requirements_json(&file_path) {
                         warnings.push(format!(
-                            "components.projectInstructions: \"{file_path}\" is the \
+                            "components.projectInstructions: \"{raw_file}\" is the \
                              accounts/ requirements file; not readable as instructions"
                         ));
                         continue;
                     }
                     let Some(content) = by_path.get(file_path.as_str()) else {
                         warnings.push(format!(
-                            "components.projectInstructions: \"{file_path}\" not found \
+                            "components.projectInstructions: \"{raw_file}\" not found \
                              among the bundle's files; skipped"
                         ));
                         continue;
@@ -1800,6 +1818,53 @@ mod tests {
                 }],
             }))),
             file("accounts/requirements.json", "[{\"id\":\"x\",\"credentialProvider\":\"y\"}]"),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert!(result.project_instructions.is_empty());
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.contains("projectInstructions") && w.contains("requirements file")));
+    }
+
+    #[test]
+    fn a_non_canonical_project_instruction_reference_still_resolves() {
+        // reagent P2, PR #3163 — the third component to need this (codex P2,
+        // PR #2379 round 4 for instructions; reagent P2 round 6 for
+        // accounts/requirements.json). A bundle not produced by this exact
+        // exporter can spell the reference differently; reporting it "not
+        // found" when the content is present defeats the whole point.
+        let files = manifest_with_project_instructions(serde_json::json!([{
+            "path": "CLAUDE.md",
+            "file": ".\\instructions\\project\\.\\CLAUDE.md",
+            "owner": "foreign",
+        }]));
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert_eq!(
+            result.project_instructions.len(),
+            1,
+            "a non-canonical spelling must resolve, got warnings: {:?}",
+            result.warnings
+        );
+        assert_eq!(result.project_instructions[0].file, "instructions/project/CLAUDE.md");
+        assert!(result.project_instructions[0].content.contains("House rules"));
+    }
+
+    #[test]
+    fn a_non_canonical_accounts_reference_is_still_rejected_from_project_instructions() {
+        // The allowlist is checked on the normalized path, so normalizing the
+        // reference above can't become a way around it.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "projectInstructions": [{
+                    "path": "CLAUDE.md",
+                    "file": "./accounts/./requirements.json",
+                    "owner": "foreign",
+                }],
+            }))),
+            file("accounts/requirements.json", "{\"requirements\":[]}"),
         ];
         let result = parse_bundle_import(&files).unwrap();
 
