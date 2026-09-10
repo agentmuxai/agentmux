@@ -118,6 +118,61 @@ pub struct ProviderConfig {
     /// own docs, not guessed — same discipline as `base_url_env_var` above.
     /// See docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
     pub startup_instructions_filename: Option<&'static str>,
+    /// Every path (relative to the agent's working directory) this provider
+    /// **reads** as project instructions — which is not the same question as
+    /// `startup_instructions_filename` above, and is usually a superset of it.
+    ///
+    /// That field names the one file AgentMux *writes*: the canonical target
+    /// it picked per provider. This one names what the provider will pick up
+    /// on its own, whether AgentMux put it there or the repository did.
+    /// Copilot is the clearest case — it reads
+    /// `.github/copilot-instructions.md`, `CLAUDE.md` and `GEMINI.md` besides
+    /// the `AGENTS.md` chosen as the write target — and pi reads
+    /// `.pi/SYSTEM.md` as well as the `.pi/APPEND_SYSTEM.md` written to.
+    ///
+    /// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`
+    /// resolves this set to answer "what will this agent actually read", which
+    /// the write target alone cannot (Codex, PR #3144). Nothing writes these
+    /// paths — tracking is read-only by design, and the ownership protection
+    /// in `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` still governs
+    /// the one file AgentMux does write.
+    ///
+    /// **Same evidence rule as the field above: listed only where verified
+    /// against the provider's own docs, never guessed.** Where the only
+    /// confirmed source is the write target, that is the whole list — an
+    /// under-complete list means Phase 3 shows the operator less than the
+    /// truth, which is recoverable; a guessed one means it shows them
+    /// something false, which is not.
+    pub native_instruction_sources: &'static [&'static str],
+    /// Directories a provider scans for instruction files, for the providers
+    /// whose convention is a pattern rather than a fixed path.
+    ///
+    /// Copilot's `.github/instructions/**/*.instructions.md` is the reason
+    /// this exists: those are path-scoped instructions that genuinely reach
+    /// the agent, so a resolver reading only `native_instruction_sources`
+    /// above would produce an incomplete answer for any repository using them
+    /// (Codex, PR #3154), verified in
+    /// `docs/archive/research-cli-context-files-2026-04-23-copilot-verification.md`
+    /// claim 3.
+    ///
+    /// Structured rather than a glob string, because there is no glob engine
+    /// in the tree and one dependency for one pattern shape is a poor trade.
+    /// It also forces the two things a glob leaves implicit — whether to
+    /// descend, and what actually qualifies — to be stated.
+    ///
+    /// Same evidence rule as the two fields above.
+    pub native_instruction_dirs: &'static [InstructionDirScan],
+}
+
+/// A directory a provider reads instruction files out of.
+#[derive(Debug, Clone, Copy)]
+pub struct InstructionDirScan {
+    /// Working-directory-relative, e.g. `".github/instructions"`.
+    pub dir: &'static str,
+    /// Only files ending in this qualify, e.g. `".instructions.md"`.
+    pub suffix: &'static str,
+    /// Whether subdirectories are scanned too — Copilot's `**` says yes.
+    pub recursive: bool,
 }
 
 impl ProviderConfig {
@@ -218,6 +273,13 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
     supported_vendors: &["anthropic"],
     startup_instructions_filename: Some("CLAUDE.md"),
+    // Read set = the write target. Claude Code auto-discovers CLAUDE.md;
+    // `.claude/AGENTMUX_MEMORY.md` is reached only through an @import line
+    // AgentMux itself adds (SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md),
+    // so it is not a native source. Nested/parent CLAUDE.md discovery is
+    // real but out of scope here: this field is working-directory-relative.
+    native_instruction_sources: &["CLAUDE.md"],
+    native_instruction_dirs: &[],
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -250,6 +312,10 @@ static CODEX: ProviderConfig = ProviderConfig {
     // "Codex's native project instruction discovery continues to load
     // user/repository AGENTS.md files normally."
     startup_instructions_filename: Some("AGENTS.md"),
+    // Read set = the write target, per the same citation above: Codex loads
+    // repository AGENTS.md natively.
+    native_instruction_sources: &["AGENTS.md"],
+    native_instruction_dirs: &[],
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -277,6 +343,10 @@ static GEMINI: ProviderConfig = ProviderConfig {
     // override, so GEMINI.md is the correct default-behavior target. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
     startup_instructions_filename: Some("GEMINI.md"),
+    // Read set = the write target. AGENTS.md is supported only behind an
+    // explicit contextFileName override, so it is not read by default.
+    native_instruction_sources: &["GEMINI.md"],
+    native_instruction_dirs: &[],
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -321,6 +391,10 @@ static QWEN: ProviderConfig = ProviderConfig {
     // confirming it isn't yet). See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
     startup_instructions_filename: Some("QWEN.md"),
+    // Read set = the write target, for the same reason as Gemini: AGENTS.md
+    // needs explicit config (QwenLM/qwen-code#2006, #504).
+    native_instruction_sources: &["QWEN.md"],
+    native_instruction_dirs: &[],
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -362,6 +436,9 @@ static KIMI: ProviderConfig = ProviderConfig {
     // for a provider with None here. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
     startup_instructions_filename: None,
+    // No confirmed native file convention at all — hence the None above.
+    native_instruction_sources: &[],
+    native_instruction_dirs: &[],
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -406,6 +483,10 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     // best-effort root-level AGENTS.md, flagged as a known gap. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
     startup_instructions_filename: Some("AGENTS.md"),
+    // Read set = the write target, with the same UNCONFIRMED-path caveat
+    // recorded above.
+    native_instruction_sources: &["AGENTS.md"],
+    native_instruction_dirs: &[],
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -436,6 +517,12 @@ static PI: ProviderConfig = ProviderConfig {
     // is the correct target, not SYSTEM.md. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
     startup_instructions_filename: Some(".pi/APPEND_SYSTEM.md"),
+    // Two sources, per the citation above: pi reads .pi/SYSTEM.md (which
+    // REPLACES its default system prompt) as well as the APPEND_SYSTEM.md
+    // AgentMux writes. A repo-provided SYSTEM.md is exactly the kind of
+    // instruction file Phase 3 exists to surface.
+    native_instruction_sources: &[".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"],
+    native_instruction_dirs: &[],
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -472,6 +559,9 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     // without modification [by ClaudeTranslator]" — a deliberate
     // compatibility choice by the same team that owns both, not a guess.
     startup_instructions_filename: Some("CLAUDE.md"),
+    // Read set = the write target; claude-compatible by design, per above.
+    native_instruction_sources: &["CLAUDE.md"],
+    native_instruction_dirs: &[],
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -505,6 +595,32 @@ static COPILOT: ProviderConfig = ProviderConfig {
     // privileged default the way Gemini/Qwen do. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
     startup_instructions_filename: Some("AGENTS.md"),
+    // FOUR sources, all four named in the citation above: Copilot reads
+    // .github/copilot-instructions.md, CLAUDE.md and GEMINI.md alongside the
+    // AGENTS.md chosen as the write target. This is the case that proved the
+    // write target alone is the wrong question (Codex, PR #3144).
+    native_instruction_sources: &[
+        "AGENTS.md",
+        ".github/copilot-instructions.md",
+        "CLAUDE.md",
+        "GEMINI.md",
+    ],
+    // Path-scoped instructions: .github/instructions/**/*.instructions.md,
+    // claim 3 of the Copilot verification doc. Recursive, per the `**`.
+    // Not in the list above because it is a pattern, not a path.
+    //
+    // Deliberately NOT represented: $HOME/.copilot/copilot-instructions.md
+    // (claim 4) and $COPILOT_CUSTOM_INSTRUCTIONS_DIRS (claim 6). Both are
+    // real, and both live outside the agent working directory, which is
+    // what these two fields are relative to. Tracking them is a bigger
+    // question — they are machine-global, not project state, so they do
+    // not travel with a bundle — and is out of scope here rather than
+    // forgotten.
+    native_instruction_dirs: &[InstructionDirScan {
+        dir: ".github/instructions",
+        suffix: ".instructions.md",
+        recursive: true,
+    }],
 };
 
 // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the same
@@ -542,6 +658,9 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     // GEMINI.md context-file behavior. Flagged as a known gap. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
     startup_instructions_filename: Some("GEMINI.md"),
+    // Read set = the write target.
+    native_instruction_sources: &["GEMINI.md"],
+    native_instruction_dirs: &[],
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -1201,6 +1320,98 @@ mod tests {
             let claude = get_provider("claude").unwrap();
             let err = prepare_provider_auth_dir(claude, "   ").unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        }
+    }
+}
+
+#[cfg(test)]
+mod native_instruction_sources_tests {
+    use super::*;
+
+    /// The write target must always be one of the paths the provider reads,
+    /// or AgentMux is writing a file nobody opens.
+    #[test]
+    fn every_write_target_is_also_a_read_source() {
+        for (id, provider) in REGISTRY.iter() {
+            let Some(target) = provider.startup_instructions_filename else {
+                assert!(
+                    provider.native_instruction_sources.is_empty(),
+                    "{id}: no write target, so no confirmed native source either"
+                );
+                continue;
+            };
+            assert!(
+                provider.native_instruction_sources.contains(&target),
+                "{id}: writes {target} but does not list it as a native source"
+            );
+        }
+    }
+
+    /// Duplicates would make a resolved instruction set report the same file
+    /// twice.
+    #[test]
+    fn no_provider_lists_a_source_twice() {
+        for (id, provider) in REGISTRY.iter() {
+            let mut seen = std::collections::HashSet::new();
+            for src in provider.native_instruction_sources {
+                assert!(seen.insert(*src), "{id}: {src} listed more than once");
+            }
+        }
+    }
+
+    /// The two cases that motivated the field. Guarding them by name keeps a
+    /// future registry edit from quietly collapsing the set back to the write
+    /// target and re-hiding what those providers read.
+    #[test]
+    fn the_multi_source_providers_keep_their_extra_sources() {
+        let copilot = get_provider("copilot").expect("copilot is registered");
+        for expected in [
+            "AGENTS.md",
+            ".github/copilot-instructions.md",
+            "CLAUDE.md",
+            "GEMINI.md",
+        ] {
+            assert!(
+                copilot.native_instruction_sources.contains(&expected),
+                "copilot must still read {expected}"
+            );
+        }
+
+        let pi = get_provider("pi").expect("pi is registered");
+        assert!(
+            pi.native_instruction_sources.contains(&".pi/SYSTEM.md"),
+            "pi reads .pi/SYSTEM.md as well as the file AgentMux writes"
+        );
+    }
+
+    /// Copilot's path-scoped instructions are a pattern, not a path, and a
+    /// resolver reading only the literal list would miss them entirely in any
+    /// repository that uses them (Codex, PR #3154).
+    #[test]
+    fn copilot_declares_its_path_scoped_instructions_directory() {
+        let copilot = get_provider("copilot").expect("copilot is registered");
+        let scan = copilot
+            .native_instruction_dirs
+            .iter()
+            .find(|d| d.dir == ".github/instructions")
+            .expect("copilot scans .github/instructions");
+        assert_eq!(scan.suffix, ".instructions.md");
+        assert!(scan.recursive, "the convention is `**`, so subdirectories count");
+    }
+
+    /// A scan entry that could never match anything is a silent hole.
+    #[test]
+    fn every_declared_scan_is_usable() {
+        for (id, provider) in REGISTRY.iter() {
+            for scan in provider.native_instruction_dirs {
+                assert!(!scan.dir.trim().is_empty(), "{id}: scan with no directory");
+                assert!(!scan.suffix.trim().is_empty(), "{id}: scan with no suffix");
+                assert!(
+                    !scan.dir.starts_with('/') && !scan.dir.contains(".."),
+                    "{id}: scan dir must stay inside the working directory: {}",
+                    scan.dir
+                );
+            }
         }
     }
 }
