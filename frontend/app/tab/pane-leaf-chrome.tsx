@@ -37,28 +37,6 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
 
-    // Block-scoped NodeModel wrapper for the inner, per-activation <Block>
-    // mount. The LEAF's own NodeModel.blockId is frozen — captured once,
-    // never re-derived (see that field's own doc comment in types.ts) —
-    // and, now that layoutStack.ts no longer disposes this NodeModel on a
-    // switch, would show the SAME member forever if passed straight into
-    // <Block>. Reconstructed (new object identity) exactly when
-    // activeBlockId() changes — i.e. exactly when the <Key> below remounts
-    // anyway — so nothing ever observes a wrapper whose .blockId doesn't
-    // match its own <Block> mount's lifetime, satisfying
-    // NodeModel.blockId's "one instance, one immutable blockId" contract
-    // at this narrower, per-activation granularity. Every other NodeModel
-    // field (focus/magnify/minimize/close/etc.) delegates straight through
-    // to the real, leaf-level nodeModel via the spread — those stay
-    // leaf-scoped, unaffected by which member is active.
-    const scopedNodeModel = createMemo<NodeModel>(() => ({ ...nodeModel, blockId: activeBlockId() }));
-
-    const content = (
-        <Key each={[scopedNodeModel()]} by={(nm) => nm.blockId}>
-            {(nm) => <Block nodeModel={nm()} preview={false} />}
-        </Key>
-    );
-
     // Effective view type of the ACTIVE member, reactive — getWaveObjectAtom
     // inside a memo, not useWaveObjectValue, the same reactive-oref pattern
     // PR #3134 established for BlockFrame_Header (frontend/app/store/wos.ts's
@@ -93,6 +71,44 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         }
         return latchedHoisted;
     });
+
+    // Block-scoped NodeModel wrapper for the inner, per-activation <Block>
+    // mount. The LEAF's own NodeModel.blockId is frozen — captured once,
+    // never re-derived (see that field's own doc comment in types.ts) —
+    // and, now that layoutStack.ts no longer disposes this NodeModel on a
+    // switch, would show the SAME member forever if passed straight into
+    // <Block>. Reconstructed (new object identity) exactly when
+    // activeBlockId() changes — i.e. exactly when the <Key> below remounts
+    // anyway — so nothing ever observes a wrapper whose .blockId doesn't
+    // match its own <Block> mount's lifetime, satisfying
+    // NodeModel.blockId's "one instance, one immutable blockId" contract
+    // at this narrower, per-activation granularity. Every other NodeModel
+    // field (focus/magnify/minimize/close/etc.) delegates straight through
+    // to the real, leaf-level nodeModel via the spread — those stay
+    // leaf-scoped, unaffected by which member is active.
+    // `paneChromeHoisted` tags the wrapper so a ViewModel can tell whether
+    // something is rendering a replacement header ABOVE it (codex P2 on
+    // this PR). AgentViewModel.noHeader reads it: an agent Block reached
+    // through THIS file's hoisted branch suppresses BlockFrame's inline
+    // header (chrome supplies one), but the same ViewModel class rendering
+    // a drag-preview thumbnail — `tabcontent.tsx`'s `renderPreview`, a
+    // plain `<Block preview>` with the raw leaf nodeModel and no chrome
+    // around it — must keep its inline header or the thumbnail loses its
+    // title entirely. A plain field, not a signal, deliberately: it's known
+    // at wrapper-construction time, so there's no window where both headers
+    // could render at once.
+    const scopedNodeModel = createMemo<NodeModel>(() => ({
+        ...nodeModel,
+        blockId: activeBlockId(),
+        paneChromeHoisted: hoisted(),
+    }));
+
+    const content = (
+        <Key each={[scopedNodeModel()]} by={(nm) => nm.blockId}>
+            {(nm) => <Block nodeModel={nm()} preview={false} />}
+        </Key>
+    );
+
 
     // ReAgent P1, confirmed by an empirical repro before trusting it:
     // `NodeModel.activeViewModel()` genuinely blips through `null` on

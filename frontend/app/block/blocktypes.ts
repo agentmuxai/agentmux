@@ -13,6 +13,14 @@ export interface BlockNodeModel {
     innerRect?: Accessor<{ width: string; height: string }>;
     onClose?: () => void;
     focusNode: () => void;
+    /** True when this Block is rendered under `pane-leaf-chrome.tsx`'s
+     *  hoisted-chrome branch, i.e. something ABOVE it already renders a
+     *  replacement pane header. Absent everywhere else — notably on the
+     *  raw leaf nodeModel a drag-preview thumbnail gets
+     *  (`tabcontent.tsx`'s `renderPreview`), which has no chrome around it
+     *  and therefore still needs `BlockFrame`'s own inline header. See
+     *  that wrapper's construction in `pane-leaf-chrome.tsx`. */
+    paneChromeHoisted?: boolean;
 }
 
 export type FullBlockProps = {
