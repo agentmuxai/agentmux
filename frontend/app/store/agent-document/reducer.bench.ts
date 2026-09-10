@@ -51,7 +51,7 @@
  * instead of one-map-insert-per-existing-node.
  */
 
-import { bench, describe } from "vitest";
+import { describe, test } from "vitest";
 import type { DocumentNode } from "../../view/agent/types";
 import { update } from "./reducer";
 import { initialState } from "./types";
@@ -83,13 +83,15 @@ describe("agent-document reducer update(): StreamFlush append (new node)", () =>
         // instead of letting the document grow across the bench run.
         const base = seedState(size);
         let counter = 0;
-        bench(`append 1 new node onto a ${size.toLocaleString()}-node document`, () => {
-            counter++;
-            update(base, {
-                type: "StreamFlush",
-                newNodes: [md(`new-${size}-${counter}`)],
-                updatedNodes: [],
-            });
+        test(`append 1 new node onto a ${size.toLocaleString()}-node document`, async ({ bench }) => {
+            await bench(`append 1 new node onto a ${size.toLocaleString()}-node document`, () => {
+                counter++;
+                update(base, {
+                    type: "StreamFlush",
+                    newNodes: [md(`new-${size}-${counter}`)],
+                    updatedNodes: [],
+                });
+            }).run();
         });
     }
 });
@@ -103,13 +105,15 @@ describe("agent-document reducer update(): StreamFlush update-only (dominant str
         // measuring any content-equality fast path.
         const targetId = `existing-${size - 1}`;
         let counter = 0;
-        bench(`update 1 existing node in a ${size.toLocaleString()}-node document`, () => {
-            counter++;
-            update(base, {
-                type: "StreamFlush",
-                newNodes: [],
-                updatedNodes: [md(targetId, `updated content ${counter}`)],
-            });
+        test(`update 1 existing node in a ${size.toLocaleString()}-node document`, async ({ bench }) => {
+            await bench(`update 1 existing node in a ${size.toLocaleString()}-node document`, () => {
+                counter++;
+                update(base, {
+                    type: "StreamFlush",
+                    newNodes: [],
+                    updatedNodes: [md(targetId, `updated content ${counter}`)],
+                });
+            }).run();
         });
     }
 });

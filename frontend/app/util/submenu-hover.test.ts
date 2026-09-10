@@ -4,7 +4,7 @@
 // Unit tests for the submenu hover-intent core
 // (SPEC_SUBMENU_POSITIONING_AND_HOVER_TIMING_2026_08_10 §5 Phase 1).
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { createSubmenuHover, type SubmenuHoverController } from "./submenu-hover";
 
@@ -30,14 +30,14 @@ function moveTo(x: number, y: number) {
 }
 
 describe("createSubmenuHover", () => {
-    let onOpen: ReturnType<typeof vi.fn>;
-    let onClose: ReturnType<typeof vi.fn>;
+    let onOpen: Mock<() => void>;
+    let onClose: Mock<() => void>;
     let controller: SubmenuHoverController;
 
     beforeEach(() => {
         vi.useFakeTimers();
-        onOpen = vi.fn();
-        onClose = vi.fn();
+        onOpen = vi.fn<() => void>();
+        onClose = vi.fn<() => void>();
         controller = createSubmenuHover({ openDelayMs: 90, closeSafetyTimeoutMs: 300, onOpen, onClose });
     });
 

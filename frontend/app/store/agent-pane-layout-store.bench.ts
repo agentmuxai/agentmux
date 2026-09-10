@@ -10,8 +10,9 @@
  *   npx vitest bench frontend/app/store/agent-pane-layout-store.bench.ts
  *
  * This is the first `.bench.ts` file in this repo — establishing the
- * convention (Vitest's `bench()`/`describe()` from the `vitest` package,
- * one `describe` per scenario, one `bench` per input size, run via
+ * convention (Vitest 5's fixture-based benchmark API: `test('name',
+ * async ({ bench }) => { await bench('name', fn).run(); })` nested inside
+ * `describe`, one `test`/`bench` pair per input size, run via
  * `vitest bench` rather than `vitest run`).
  *
  * What this measures: `dispatch()` cost for a SCROLL-ONLY update
@@ -39,7 +40,7 @@
  * signal (the O(n) rebuild came back).
  */
 
-import { bench, describe } from "vitest";
+import { describe, test } from "vitest";
 import { dispatch, registerPane } from "./agent-pane-layout-store";
 
 const ROW_COUNTS = [100, 1_000, 10_000] as const;
@@ -71,9 +72,11 @@ describe("agent-pane-layout-store dispatch: scroll-only update", () => {
         // branch entirely — cheating the benchmark by measuring the no-op
         // path instead of the real "recompute the window" path.
         let scrollTop = 0;
-        bench(`${rowCount.toLocaleString()} rows`, () => {
-            scrollTop = (scrollTop + 17) % 1_000_000;
-            dispatch(blockId, { type: "Scrolled", scrollTop, viewportPx: 600 });
+        test(`${rowCount.toLocaleString()} rows`, async ({ bench }) => {
+            await bench(`${rowCount.toLocaleString()} rows`, () => {
+                scrollTop = (scrollTop + 17) % 1_000_000;
+                dispatch(blockId, { type: "Scrolled", scrollTop, viewportPx: 600 });
+            }).run();
         });
     }
 });
