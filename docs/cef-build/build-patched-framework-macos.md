@@ -67,17 +67,17 @@ not the `148.0.9` this table previously claimed):
 - macOS arm64 host (Apple Silicon) with Xcode + command-line tools.
 - ≥ 32 GB RAM, ≥ 120 GB free disk.
 - `depot_tools` on PATH; the chromium hooks pull the macOS toolchain automatically.
-- **Chromium 152+ only — the Metal Toolchain component:**
+- **The Metal Toolchain component — required for ANY milestone, not just 152:**
 
   ```bash
   xcodebuild -downloadComponent MetalToolchain     # ~688 MB
   ```
 
   Xcode 26 ships the `metal` *binary* but not the compiler behind it, so
-  `xcrun -f metal` resolves and the tool still refuses to run. Chromium 152 added
-  an ANGLE step that needs it and 148 did not — verified: zero hits for
-  `angle_metal_internal_shaders_to_air` across both 148 build logs. Without the
-  component the build dies ~13% in, at roughly 7,500 of 58,000 targets:
+  `xcrun -f metal` resolves and the tool still refuses to run. Chromium builds
+  ANGLE with `angle_enable_metal=true` by default (neither the 148 nor the 152
+  args.gn overrides it), so any **from-scratch** build needs this. Without it the
+  build dies around 13% in:
 
   ```
   FAILED: gen/angle/mtl_internal_shaders_autogen.air
@@ -85,8 +85,21 @@ not the `148.0.9` this table previously claimed):
          use: xcodebuild -downloadComponent MetalToolchain
   ```
 
-  Confirm it works before starting rather than after — the download itself
-  succeeds silently whether or not the compiler ends up usable:
+  **`docs/cef-patches/README.md` §Metal already documented this for the 148
+  build** — including a second failure mode: `-downloadComponent` can itself be
+  broken by a stale `DVTDownloads.framework`, needing
+  `sudo installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/XcodeSystemResources.pkg -target /`
+  first. Read that section if the download fails.
+
+  An INCREMENTAL rebuild of an existing tree will not hit this — the `.air`
+  shaders are already built and the target does not re-run. The 2026-09-09 macOS
+  148 rebuild never touched it for exactly that reason (its `.air` dates from
+  2026-06-02), which is why it is easy to mistake this for a 152-only
+  requirement. It is not.
+
+  Verify with a real compile rather than a presence check, because
+  `-downloadComponent` reports success regardless of whether the compiler ends
+  up usable:
 
   ```bash
   echo 'kernel void k() {}' > /tmp/t.metal && xcrun metal -c /tmp/t.metal -o /tmp/t.air \

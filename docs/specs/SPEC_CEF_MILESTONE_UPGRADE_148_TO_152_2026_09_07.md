@@ -48,20 +48,23 @@ Phase D build time") is ANSWERED:* no change. `mac_toolchain.py` prints
 "Skipping Mac toolchain installation for mac" on 152 exactly as on 148 — the
 system Xcode is used.
 
-***NEW REQUIREMENT: Chromium 152 needs the Metal Toolchain component on macOS.***
-This is the "confirm the 152 build toolchain requirements haven't moved" item,
-and for macOS they moved:
+*Toolchain check — the Metal Toolchain component is required, but it is an
+Xcode 26 requirement, not a 152 one.* A from-scratch macOS build dies about 13%
+in on `angle_metal_internal_shaders_to_air` without it:
 
     xcodebuild -downloadComponent MetalToolchain     # ~688 MB
 
 Xcode 26 ships the `metal` binary but not the compiler behind it, so
-`xcrun -f metal` resolves and the tool still refuses to run. Without it the build
-dies about 13% in (~7,500 of 58,156 targets) on
-`angle_metal_internal_shaders_to_air`. 148 never compiled that target at all —
-zero hits across both 148 logs — so this is genuinely new in 152, not a local
-misconfiguration. Documented in `docs/cef-build/build-patched-framework-macos.md`
-with a verification command, because the download reports success regardless of
-whether the compiler ends up usable.
+`xcrun -f metal` resolves and the tool still refuses to run — an availability
+check cannot catch it. **I initially recorded this as new in 152; that was
+wrong**, caught by Codex on #3155. `docs/cef-patches/README.md` §Metal already
+documented it for the 148 build, including a second failure mode where
+`-downloadComponent` is itself broken by a stale `DVTDownloads.framework`. My
+evidence — zero hits for that target in the 148 logs — only showed the target
+did not RE-RUN in an incremental rebuild; the 148 tree's `.air` dates from
+2026-06-02. Both milestones default to `angle_enable_metal=true`. Documented in
+`docs/cef-build/build-patched-framework-macos.md` with a compile-based check,
+because the download reports success regardless of whether the compiler works.
 
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
