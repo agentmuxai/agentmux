@@ -328,11 +328,20 @@ function BlockFrame_Header(
     // live data with no leak (frontend/app/store/wos.ts).
     const blockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", props.blockId()))());
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
-    const preIconButton = util.useAtomValueSafe(props.viewModel?.preIconButton);
-    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
+    // Memos, not bare top-level reads (ReAgent P1 on PR #3157). These read
+    // through `props.viewModel`, which for a HOISTED header
+    // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) is the
+    // currently-active stack member's ViewModel and therefore CHANGES on
+    // every tab switch, while this component stays mounted. Read once at
+    // the top level they'd snapshot whichever member was active at first
+    // mount and never update. That was invisible while only AgentViewModel
+    // hoisted (it never sets `manageConnection`), but TermViewModel sets it
+    // to `!isCmdController()`, which genuinely differs between a
+    // cmd-controller terminal and an ordinary one in the SAME stack — so
+    // the connection button would show or hide based on the wrong tab.
+    const preIconButton = createMemo(() => util.useAtomValueSafe(props.viewModel?.preIconButton));
+    const manageConnection = createMemo(() => util.useAtomValueSafe(props.viewModel?.manageConnection));
     const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
-    const connName = blockData()?.meta?.connection;
-    const connStatus = util.useAtomValueSafe(getConnStatusAtom(connName));
 
     // Track previous magnified state for one-time activity report
     let prevMagnifiedState = props.nodeModel.isMagnified();
@@ -450,9 +459,9 @@ function BlockFrame_Header(
         return getViewIconElem(viewIconUnion(), blockData());
     });
 
-    const preIconButtonElem: JSX.Element = preIconButton
-        ? <IconButton decl={preIconButton} className="block-frame-preicon-button" />
-        : null;
+    const preIconButtonElem = createMemo<JSX.Element>(() =>
+        preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null,
+    );
 
     const headerTextElems = createMemo(() => {
         const elems: JSX.Element[] = [];
@@ -506,7 +515,7 @@ function BlockFrame_Header(
             onDblClick={() => props.nodeModel.toggleMagnify()}
             style={headerStyle()}
         >
-            {preIconButtonElem}
+            {preIconButtonElem()}
             <div class="block-frame-default-header-iconview">
                 {viewIconElem()}
                 <Show
@@ -519,7 +528,7 @@ function BlockFrame_Header(
                     <div class="block-frame-blockid">[{props.blockId().substring(0, 8)}]</div>
                 </Show>
             </div>
-            <Show when={manageConnection}>
+            <Show when={manageConnection()}>
                 <ConnectionButton
                     ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}
