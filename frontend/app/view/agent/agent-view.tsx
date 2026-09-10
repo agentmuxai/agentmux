@@ -750,7 +750,22 @@ export const AgentPaneChrome = (props: {
         // persistent root fixes it: `querySelector` returns the FIRST match
         // in document order, and this element precedes the nested one, so
         // it resolves to the wider root that actually contains everything.
-        <div class="agent-pane-stack" data-blockid={activeBlockId()}>
+        <div
+            class="agent-pane-stack"
+            data-blockid={activeBlockId()}
+            // codex P2 on this PR: the hoisted header is a SIBLING above the
+            // nested `.block`, so clicks/focus on it no longer bubble to the
+            // BlockFrame handlers inside BlockFull that call
+            // nodeModel.focusNode() (BlockFrame_Header itself only handles
+            // context menu + double-click magnify). Without this, clicking an
+            // agent pane's own header left a DIFFERENT pane selected and
+            // receiving pane-scoped keyboard actions. Focus from here
+            // instead — leaf-scoped, so it's correct regardless of which
+            // stack member is active. Cheap and idempotent: focusNode()
+            // no-ops when this node is already the focused one.
+            onClick={() => nodeModel.focusNode()}
+            onFocusIn={() => nodeModel.focusNode()}
+        >
             {/* Replacement for BlockFrame's own inline header, suppressed
                 by AgentViewModel.noHeader once hoisted — see that field's
                 own doc comment and headerElem's, above. Same

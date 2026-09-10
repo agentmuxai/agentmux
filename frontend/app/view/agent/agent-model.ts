@@ -187,14 +187,20 @@ export class AgentViewModel implements ViewModel {
             return elems;
         };
         this.noPadding = () => true;
-        // Always true for an agent pane: pane-leaf-chrome.tsx hoists
-        // AgentPaneChrome for EVERY agent pane (see that file's own
-        // `hoisted` comment for why gating it on "has been multi-member"
-        // was a catch-22 — the "+" that creates a 2nd member lives inside
-        // the chrome being gated), and chrome renders the replacement
-        // BlockFrame_Header itself. Suppressing BlockFrame's own inline
-        // header unconditionally is what keeps the two from double-rendering.
-        this.noHeader = () => true;
+        // True exactly when something above this Block is already rendering
+        // a replacement header — i.e. pane-leaf-chrome.tsx's hoisted branch,
+        // which tags the NodeModel wrapper it passes down
+        // (`paneChromeHoisted`). Suppressing BlockFrame's own inline header
+        // there is what keeps chrome's header and Block's from
+        // double-rendering.
+        //
+        // NOT unconditional (codex P2 on this PR): `tabcontent.tsx`'s
+        // `renderPreview` builds a drag-preview thumbnail as a plain
+        // `<Block preview>` with the RAW leaf nodeModel — no chrome around
+        // it — and `BlockFrame_Default_Component` honors `noHeader` in
+        // preview mode too, so a blanket `true` silently stripped the title
+        // off every agent pane's drag thumbnail.
+        this.noHeader = () => this.nodeModel.paneChromeHoisted === true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
             const oref = WOS.makeORef("block", this.blockId);
