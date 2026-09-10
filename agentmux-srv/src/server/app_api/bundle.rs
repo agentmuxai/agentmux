@@ -428,6 +428,47 @@ fn bundle_export_impl(
     Ok(result)
 }
 
+/// Bind an imported bundle's components into the ref tables.
+///
+/// Phase 0b. The ref tables are authoritative for what a bundle contains, so
+/// an import that only wrote the inline columns would produce a bundle that
+/// exports empty and, for MCP servers, never materialises at spawn either —
+/// the `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` "inert at runtime" state
+/// the ref tables exist to end.
+///
+/// **Must run after `bundle_upsert`.** Both bind paths check the bundle exists
+/// in `id_store` first (`storage/managed.rs:291`) and refuse otherwise.
+///
+/// Returns warnings rather than failing: by this point the bundle row is
+/// already committed, so aborting would leave a half-imported bundle behind. A
+/// component that could not be bound is reported and the import continues.
+fn bind_imported_components(
+    wstore: &crate::backend::storage::store::Store,
+    id_store: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+    imported_skill_ids: &[String],
+    mcp_configs: &[serde_json::Value],
+) -> Vec<String> {
+    let mut warnings: Vec<String> = Vec::new();
+
+    for skill_id in imported_skill_ids {
+        if let Err(e) = wstore.bundle_skill_bind(id_store, bundle_id, skill_id) {
+            warnings.push(format!(
+                "skills: imported skill {skill_id} could not be bound to the bundle ({e}) — it will not be exported or reach the agent"
+            ));
+        }
+    }
+
+    // Same shared path the m0030 backfill uses, so a server that arrives by
+    // import and one recovered from an old inline column end up identical,
+    // including duplicate-name handling.
+    let (_created, mcp_warnings) =
+        wstore.bundle_mcp_bind_inline_entries(id_store, bundle_id, mcp_configs, now_ms());
+    warnings.extend(mcp_warnings);
+
+    warnings
+}
+
 /// A bundle's components, resolved from the tables that are authoritative for
 /// them.
 struct ResolvedComponents {
@@ -1293,6 +1334,17 @@ async fn bundle_import_for_agent_impl(
         return Err(msg);
     }
 
+    // The bundle row now exists, so its components can be bound. Ref tables
+    // are authoritative — without this the imported bundle would export empty
+    // and its MCP servers would never reach a spawned agent.
+    warnings.extend(bind_imported_components(
+        wstore,
+        id_store,
+        &bundle_id,
+        &imported_skill_ids,
+        &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
+    ));
+
     // Bundle files: write through the SAME dual-write path
     // agent:memory:write_file uses (live FS via memory_dir_for_cwd, then
     // the mirror) — writing only to db_agent_native_memory would leave
@@ -1703,6 +1755,17 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     return Err(msg);
                 }
+
+                // Ref tables are authoritative — bind after the bundle row
+                // exists, or this import exports empty and its servers never
+                // reach a spawned agent.
+                warnings.extend(bind_imported_components(
+                    &wstore,
+                    &id_store,
+                    &memory.id,
+                    &imported_skill_ids,
+                    &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
+                ));
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -2290,6 +2353,16 @@ async fn bundle_import_commit_impl(
                     }
                     return Err(msg);
                 }
+
+                // Ref tables are authoritative — bind after the bundle row
+                // exists. Only the servers the user actually selected.
+                warnings.extend(bind_imported_components(
+                    &wstore,
+                    &id_store,
+                    &memory.id,
+                    &imported_skill_ids,
+                    &selected_mcp_servers.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
+                ));
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -3303,6 +3376,95 @@ mod export_import_for_agent_tests {
             FileEntry { path: "instructions/AGENTS.md".to_string(), content: instructions.to_string() },
             FileEntry { path: format!("memory/{memory_filename}"), content: memory_content.to_string() },
         ]
+    }
+
+    /// An ABF carrying one skill and one MCP server.
+    fn abf_files_with_components() -> Vec<FileEntry> {
+        let manifest = serde_json::json!({
+            "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
+            "name": "imported-bundle",
+            "version": "0.1.0",
+            "description": "",
+            "components": {
+                "instructions": { "default": ["instructions/AGENTS.md"] },
+                "skills": ["skills/deploy"],
+                "mcpServers": ["mcp/github.server.json"],
+            },
+            "metadata": {},
+        });
+        vec![
+            FileEntry { path: "armory.json".to_string(), content: manifest.to_string() },
+            FileEntry { path: "instructions/AGENTS.md".to_string(), content: "Be helpful.".to_string() },
+            FileEntry {
+                path: "skills/deploy/SKILL.md".to_string(),
+                // Frontmatter values are JSON-quoted — that is what
+                // `render_skill_md` writes and what `parse_skill_md` requires.
+                content: "---\nname: \"deploy\"\ndescription: \"Ship it\"\n---\n\nSteps.".to_string(),
+            },
+            FileEntry {
+                path: "mcp/github.server.json".to_string(),
+                content: r#"{"name":"github","command":"gh-mcp","env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}"#.to_string(),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn an_imported_bundle_exports_the_components_it_arrived_with() {
+        // Codex P1 on #3152: once export reads only the ref tables, an import
+        // that writes only the inline columns produces a bundle that exports
+        // empty — and whose MCP servers never reach a spawned agent, since
+        // launch reads the refs too. The round trip is the contract.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+
+        let result = bundle_import_for_agent_impl(
+            &state.id_store,
+            &state.wstore,
+            ImportForAgentReq {
+                agent_id: "agent-1".to_string(),
+                file_path: None,
+                zip_base64: None,
+                files: Some(abf_files_with_components()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let bundle_id = result["bundle_id"]
+            .as_str()
+            .or_else(|| result["id"].as_str())
+            .expect("import must report the bundle it created")
+            .to_string();
+
+        let components = resolve_bundle_components(&state.wstore, &bundle_id).unwrap();
+        assert_eq!(
+            components.skills.len(),
+            1,
+            "imported skill must be bound to the bundle. import result: {result}"
+        );
+        assert_eq!(
+            components.mcp_entries.len(),
+            1,
+            "imported MCP server must be bound to the bundle: {:?}",
+            components.warnings
+        );
+
+        // And it round-trips out again.
+        let exported = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: bundle_id, format: String::new() },
+        )
+        .unwrap();
+        let paths: Vec<String> = exported["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p.starts_with("skills/")), "got {paths:?}");
+        assert!(paths.iter().any(|p| p == "mcp/github.server.json"), "got {paths:?}");
     }
 
     #[tokio::test]

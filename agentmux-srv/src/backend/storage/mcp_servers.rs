@@ -25,6 +25,173 @@ pub struct McpServer {
     pub updated_at: i64,
 }
 
+impl McpServer {
+    /// Build a bundle-scoped row from an inline MCP config entry.
+    ///
+    /// The inline shape — an ABF `mcp/<slug>.server.json` body, and what
+    /// `db_bundles.mcp_servers` held before the ref tables became
+    /// authoritative — is the server's config object with its `name`
+    /// alongside. This is the one conversion from that shape to a row, shared
+    /// by the `m0030` backfill and the three ABF import paths so a server
+    /// recovered from an old bundle and one that arrives in an import cannot
+    /// end up shaped differently (Phase 0b,
+    /// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`).
+    ///
+    /// `index` disambiguates entries with no usable name; it only has to be
+    /// stable within one bundle, which is where the uniqueness check applies.
+    ///
+    /// `is_global` is false: these belong to their bundle, and
+    /// `bundle_mcp_upsert_unique` forces it to false regardless.
+    pub fn from_inline_config(entry: &serde_json::Value, index: usize, now_ms: i64) -> Self {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            // `build_mcp_config_from_refs` keys `.mcp.json` on the row's name,
+            // so a nameless entry needs a synthetic one rather than being
+            // dropped on the floor.
+            .unwrap_or_else(|| format!("mcp-server-{}", index + 1));
+        // The entry's own `type` is the transport when it has one — an inline
+        // entry can legitimately be http/sse, and hardcoding stdio would
+        // produce a catalog row whose transport column contradicts its own
+        // config JSON (ReAgent, PR #3152). `stdio` is the column default and
+        // the right fallback for an entry that says nothing.
+        let transport = entry
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("stdio")
+            .to_string();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            transport,
+            config: serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_string()),
+            is_global: false,
+            created_at: now_ms,
+            updated_at: now_ms,
+        }
+    }
+}
+
+impl Store {
+    /// Create and bind a bundle's inline MCP entries, preserving duplicates.
+    ///
+    /// The one path from "a list of inline config objects" to "rows bound to
+    /// this bundle", shared by the `m0030` backfill and the three ABF import
+    /// paths (Phase 0b,
+    /// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`).
+    ///
+    /// Two entries may legitimately carry the same `name` — the validator
+    /// permits it and the old exporter kept both by slugging them apart. A
+    /// plain `bundle_mcp_upsert_unique` per entry would reject the second on
+    /// the name-uniqueness check and, now that export reads only bound refs,
+    /// lose it permanently (Codex, PR #3152). So names are disambiguated with
+    /// a numeric suffix, and a name colliding with a *global* server is
+    /// retried the same way rather than dropped.
+    ///
+    /// Idempotence is decided by what is already bound, not by whether an
+    /// upsert errored: an entry whose name is already bound to this bundle is
+    /// skipped, so a re-run creates nothing. That distinction is the whole
+    /// point — "already bound" and "name taken by something else" produce the
+    /// same error text but mean opposite things.
+    ///
+    /// Returns `(created, warnings)`.
+    pub fn bundle_mcp_bind_inline_entries(
+        &self,
+        id_store: &Store,
+        bundle_id: &str,
+        entries: &[serde_json::Value],
+        now_ms: i64,
+    ) -> (usize, Vec<String>) {
+        /// How many suffixed names to try before giving up on one entry.
+        const MAX_NAME_ATTEMPTS: usize = 50;
+
+        let mut warnings: Vec<String> = Vec::new();
+
+        // Names already bound to this bundle, captured BEFORE the loop so a
+        // duplicate inside `entries` is not mistaken for a previous run.
+        let already_bound: std::collections::HashSet<String> = match self.bundle_mcp_list(bundle_id) {
+            Ok(items) => items
+                .into_iter()
+                .filter(|i| i.bound_to_bundle)
+                .map(|i| i.server.name)
+                .collect(),
+            Err(e) => {
+                warnings.push(format!(
+                    "mcpServers: could not read existing bindings for bundle {bundle_id} ({e}) — nothing bound"
+                ));
+                return (0, warnings);
+            }
+        };
+
+        let mut used: std::collections::HashSet<String> = already_bound.clone();
+        let mut created = 0usize;
+
+        for (index, entry) in entries.iter().enumerate() {
+            if !entry.is_object() {
+                warnings.push(format!(
+                    "mcpServers: entry {} is not a JSON object — skipped",
+                    index + 1
+                ));
+                continue;
+            }
+            let mut server = McpServer::from_inline_config(entry, index, now_ms);
+
+            // Already carried across on an earlier run: nothing to do.
+            if already_bound.contains(&server.name) {
+                continue;
+            }
+
+            let base = server.name.clone();
+            let mut bound = false;
+            for attempt in 0..MAX_NAME_ATTEMPTS {
+                let candidate = if attempt == 0 {
+                    base.clone()
+                } else {
+                    format!("{base}-{}", attempt + 1)
+                };
+                if used.contains(&candidate) {
+                    continue;
+                }
+                server.name = candidate.clone();
+                match self.bundle_mcp_upsert_unique(id_store, bundle_id, &server, true) {
+                    Ok(()) => {
+                        used.insert(candidate);
+                        created += 1;
+                        bound = true;
+                        break;
+                    }
+                    // A name that is taken by something visible but not bound
+                    // here — a global server, typically. Try the next suffix
+                    // rather than dropping the entry.
+                    Err(e) if e.to_string().contains("already") => {
+                        used.insert(candidate);
+                        continue;
+                    }
+                    Err(e) => {
+                        warnings.push(format!(
+                            "mcpServers: server '{base}' could not be created ({e}) — it will not be exported or reach the agent"
+                        ));
+                        bound = true; // reported; do not also report exhaustion
+                        break;
+                    }
+                }
+            }
+            if !bound {
+                warnings.push(format!(
+                    "mcpServers: server '{base}' could not be given a free name after {MAX_NAME_ATTEMPTS} attempts — skipped"
+                ));
+            }
+        }
+
+        (created, warnings)
+    }
+}
+
 impl ManagedResource for McpServer {
     const TABLE: &'static str = "db_mcp_servers";
     const REF_COL: &'static str = "mcp_id";

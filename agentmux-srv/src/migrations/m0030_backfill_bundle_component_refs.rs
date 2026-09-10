@@ -71,21 +71,6 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// The display name for an MCP server recovered from an inline entry.
-///
-/// The inline blob is the exporter's own entry shape: a config object with
-/// `name` alongside. `build_mcp_config_from_refs` keys `.mcp.json` on the
-/// row's name, so a nameless entry needs a stable synthetic one rather than
-/// being dropped — `index` makes it unique within the bundle.
-fn mcp_entry_name(entry: &Value, index: usize) -> String {
-    entry
-        .get("name")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("mcp-server-{}", index + 1))
-}
-
 /// Carry one bundle's inline components across into the ref tables.
 ///
 /// Returns `(skills_bound, mcp_bound)`. Never returns `Err` for bad data —
@@ -138,46 +123,15 @@ fn backfill_one_bundle(
     // ---- mcp servers: the inline column holds whole config objects ----
     match serde_json::from_str::<Vec<Value>>(mcp_json) {
         Ok(entries) => {
-            for (index, entry) in entries.iter().enumerate() {
-                if !entry.is_object() {
-                    tracing::warn!(
-                        bundle_id, index,
-                        "backfill_bundle_component_refs: inline mcp entry is not an object — dropped"
-                    );
-                    continue;
-                }
-                let name = mcp_entry_name(entry, index);
-                let server = McpServer {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    name: name.clone(),
-                    // The column default; the inline shape carries no
-                    // transport of its own and every entry these bundles hold
-                    // was written for the stdio launcher.
-                    transport: "stdio".to_string(),
-                    config: serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_string()),
-                    // Bundle-scoped, not global: this server belongs to this
-                    // bundle, and `bundle_mcp_upsert_unique` forces it anyway.
-                    is_global: false,
-                    created_at: now_ms(),
-                    updated_at: now_ms(),
-                };
-                // Creates the catalog row AND binds the ref in one
-                // transaction (`managed_upsert_unique_for_bundle`). A name
-                // that already resolves for this bundle errors, which is the
-                // idempotent re-run path — the row is already there.
-                match wstore.bundle_mcp_upsert_unique(bundle_store, bundle_id, &server, true) {
-                    Ok(()) => mcp_bound += 1,
-                    Err(e) if e.to_string().contains("already") => {
-                        tracing::debug!(
-                            bundle_id, name = %name,
-                            "backfill_bundle_component_refs: mcp server already present — nothing to do"
-                        );
-                    }
-                    Err(e) => tracing::warn!(
-                        bundle_id, name = %name, error = %e,
-                        "backfill_bundle_component_refs: mcp upsert failed"
-                    ),
-                }
+            // One shared path with the ABF import handlers, so a server
+            // recovered from an old bundle and one that arrives in an import
+            // end up identical — including how duplicate names are kept apart
+            // and how a re-run decides it has nothing to do.
+            let (created, warnings) =
+                wstore.bundle_mcp_bind_inline_entries(bundle_store, bundle_id, &entries, now_ms());
+            mcp_bound += created;
+            for w in warnings {
+                tracing::warn!(bundle_id, warning = %w, "backfill_bundle_component_refs");
             }
         }
         Err(e) if !mcp_json.trim().is_empty() && mcp_json.trim() != "[]" => {
@@ -397,6 +351,52 @@ mod tests {
         insert_bundle(&s, "bundle-1", r#"["ghost"]"#, "[]");
         let (sk, mc) = backfill_one_bundle(&s, &s, "bundle-1", r#"["ghost"]"#, "[]");
         assert_eq!((sk, mc), (0, 0));
+    }
+
+    #[test]
+    fn two_entries_sharing_a_name_are_both_kept() {
+        // The validator permits duplicate names and the old exporter kept
+        // both by slugging them apart. Rejecting the second on the catalog's
+        // name-uniqueness check would lose it permanently now that export
+        // reads only bound refs (Codex, PR #3152).
+        let s = store();
+        let mcp = r#"[{"name":"github","command":"a"},{"name":"github","command":"b"}]"#;
+        insert_bundle(&s, "bundle-1", "[]", mcp);
+
+        let (_, mc) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
+        assert_eq!(mc, 2, "both entries must survive the backfill");
+
+        let names: Vec<String> = s
+            .bundle_mcp_list("bundle-1")
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.bound_to_bundle)
+            .map(|i| i.server.name)
+            .collect();
+        assert!(names.contains(&"github".to_string()), "got {names:?}");
+        assert!(names.contains(&"github-2".to_string()), "got {names:?}");
+
+        // ...and a re-run still creates nothing.
+        let (_, again) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
+        assert_eq!(again, 0, "re-run must be a no-op even with duplicate names");
+    }
+
+    #[test]
+    fn an_entrys_own_type_becomes_the_transport() {
+        // Hardcoding stdio would give the row a transport column that
+        // contradicts its own config JSON (ReAgent, PR #3152).
+        let s = store();
+        let mcp = r#"[{"name":"remote","type":"sse","url":"https://example.test"}]"#;
+        insert_bundle(&s, "bundle-1", "[]", mcp);
+        backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
+
+        let bound: Vec<_> = s
+            .bundle_mcp_list("bundle-1")
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.bound_to_bundle)
+            .collect();
+        assert_eq!(bound[0].server.transport, "sse");
     }
 
     #[test]
