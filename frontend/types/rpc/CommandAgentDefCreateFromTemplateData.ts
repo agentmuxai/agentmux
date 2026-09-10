@@ -34,7 +34,7 @@ name: string,
  */
 identity_id?: string, 
 /**
- * Memory bundle id to bind (empty string = vanilla CLI).
+ * Bundle id to bind (empty string = vanilla CLI).
  * Same semantics as `identity_id` above.
  */
 memory_id?: string, 

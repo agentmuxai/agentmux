@@ -219,7 +219,7 @@ pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// the m0013/m0014 backfill migrations.
 pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
-// Memory bundles (v7 — agent personality / capability stack)
+// Bundles (v7 — agent personality / capability stack)
 pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
@@ -230,9 +230,9 @@ pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
 /// v27 — the ONLY commands that can write `db_bundles.is_system=1`. See
 /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
 /// separate from `upsertmemory`/`deletememory` (never wired to any MCP
-/// tool) so the ordinary Global Memory editor, the per-agent Bundle
+/// tool) so the ordinary Global Bundle editor, the per-agent Bundle
 /// editor, and ABF import/export can never touch a system entry even by
-/// accident — `Store::bundle_memory_upsert`/`_delete` refuse outright the
+/// accident — `Store::bundle_upsert`/`_delete` refuse outright the
 /// moment they see an existing `is_system=1` row.
 pub const COMMAND_UPSERT_SYSTEM_MEMORY: &str = "upsertsystemmemory";
 pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
@@ -240,7 +240,7 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// config dir (`DataPaths::provider_auth_dir("claude")` — the
 /// `CLAUDE_CONFIG_DIR` a non-identity-bound spawned Claude agent actually
 /// gets). NOTE: this is Claude Code's own home-relocation path, NOT the
-/// file AgentMux's Global Memory actually composes into — that's
+/// file AgentMux's Global Bundle actually composes into — that's
 /// `<agent working_directory>/CLAUDE.md` (or its `AGENTMUX_MEMORY.md`
 /// companion when foreign), written by `agent_config.rs`'s
 /// `write_claude_md_respecting_ownership`, a per-agent path this command

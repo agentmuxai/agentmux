@@ -86,7 +86,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ended_at: 0,
                     created_at: now,
                     // PR-F.3: launch modal passes through Identity +
-                    // Memory bundle picks. Empty string = blank
+                    // Bundle picks. Empty string = blank
                     // singleton (no override; the resolver returns
                     // immediately on either "" or "blank").
                     identity_id: cmd.identity_id,

@@ -60,7 +60,7 @@
 
 use std::sync::Arc;
 
-use crate::backend::storage::store::{Memory, Store};
+use crate::backend::storage::store::{Bundle, Store};
 use crate::registry::{resolve_shared_definitions_dir, DefinitionStore};
 
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
@@ -167,7 +167,7 @@ impl Migration for M0021BackfillAgentBundles {
             let name = bundle_store
                 .resolve_unique_bundle_name(&format!("{} — ABF", def.name))
                 .map_err(|e| MigrationError(format!("backfill_agent_bundles: resolve unique bundle name for {}: {}", def.id, e)))?;
-            let bundle = Memory {
+            let bundle = Bundle {
                 id: bundle_id.clone(),
                 name,
                 description: String::new(),
@@ -186,7 +186,7 @@ impl Migration for M0021BackfillAgentBundles {
                 is_system: false,
             };
             bundle_store
-                .bundle_memory_upsert(&bundle)
+                .bundle_upsert(&bundle)
                 .map_err(|e| MigrationError(format!("backfill_agent_bundles: create bundle for {}: {}", def.id, e)))?;
 
             let applied = wstore
@@ -340,7 +340,7 @@ mod tests {
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             assert!(!def.memory_id.is_empty(), "expected memory_id to be backfilled");
             let shared = Store::open_shared(shared_tmp.path()).unwrap();
-            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let bundle = shared.bundle_get(&def.memory_id).unwrap().unwrap();
             // insert_def hardcodes provider="claude" — derived, not the
             // fallback path (see resolve_backfill_provider_and_model).
             assert_eq!(bundle.provider, "claude");
@@ -371,12 +371,12 @@ mod tests {
             // Absent from the channel store — Store::open always seeds the
             // "blank" singleton, so a fresh channel store already has 1
             // bundle; the backfilled one must NOT also land here.
-            let channel_bundle_count = wstore.bundle_memory_list().unwrap().iter().filter(|b| !b.is_blank).count();
+            let channel_bundle_count = wstore.bundle_list().unwrap().iter().filter(|b| !b.is_blank).count();
             assert_eq!(channel_bundle_count, 0, "bundle must not be written into the channel store");
 
             // Present in the shared store.
             let shared = Store::open_shared(shared_tmp.path()).unwrap();
-            assert!(shared.bundle_memory_get(&def.memory_id).unwrap().is_some(), "bundle must be reachable via the shared store");
+            assert!(shared.bundle_get(&def.memory_id).unwrap().is_some(), "bundle must be reachable via the shared store");
         });
     }
 
@@ -399,7 +399,7 @@ mod tests {
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             let shared = Store::open_shared(shared_tmp.path()).unwrap();
-            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let bundle = shared.bundle_get(&def.memory_id).unwrap().unwrap();
             assert_eq!(bundle.provider, "codex", "must carry the agent's OWN provider, not claude");
             assert_eq!(bundle.model, "openai", "vendor derived from codex's supported_vendors[0]");
         });
@@ -426,7 +426,7 @@ mod tests {
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             let shared = Store::open_shared(shared_tmp.path()).unwrap();
-            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let bundle = shared.bundle_get(&def.memory_id).unwrap().unwrap();
             assert_eq!(bundle.provider, "claude");
             assert_eq!(bundle.model, "custom", "a vendor override must backfill to \"custom\", not the provider default");
         });
@@ -444,7 +444,7 @@ mod tests {
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             let shared = Store::open_shared(shared_tmp.path()).unwrap();
-            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let bundle = shared.bundle_get(&def.memory_id).unwrap().unwrap();
             assert_eq!(bundle.provider, FALLBACK_PROVIDER);
             assert_eq!(bundle.model, FALLBACK_MODEL);
         });
@@ -482,12 +482,12 @@ mod tests {
 
             assert_eq!(first_bundle_id, second_bundle_id, "rerun must not replace the bound bundle");
             // Store::open_shared also seeds the "blank" singleton (see
-            // memory_bundles.rs), so a fresh shared store already has 1
+            // bundles.rs), so a fresh shared store already has 1
             // bundle before this migration ever runs — count non-blank
             // bundles in the store bundles actually land in now.
             let shared = Store::open_shared(shared_tmp.path()).unwrap();
             let non_blank_count = shared
-                .bundle_memory_list()
+                .bundle_list()
                 .unwrap()
                 .iter()
                 .filter(|b| !b.is_blank)
@@ -600,7 +600,7 @@ mod tests {
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             assert!(!def.memory_id.is_empty(), "must still backfill even when the shared store is unreachable");
-            assert!(wstore.bundle_memory_get(&def.memory_id).unwrap().is_some(), "falls back to writing the bundle in the channel store");
+            assert!(wstore.bundle_get(&def.memory_id).unwrap().is_some(), "falls back to writing the bundle in the channel store");
         });
     }
 }

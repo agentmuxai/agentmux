@@ -731,8 +731,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .agent_def_list()
                     .map_err(|e| format!("listnamedagents: agent_def_list: {e}"))?;
                 let memories = id_store
-                    .bundle_memory_list()
-                    .map_err(|e| format!("listnamedagents: bundle_memory_list: {e}"))?;
+                    .bundle_list()
+                    .map_err(|e| format!("listnamedagents: bundle_list: {e}"))?;
 
                 // Identity display names resolve off the direct
                 // agent<->account links (db_agent_identity_links /

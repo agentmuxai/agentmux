@@ -37,7 +37,7 @@ pub struct CommandCreateAgentInstanceData {
     #[serde(default)]
     pub identity_id: String,
     /// FK to db_bundles. Empty = blank singleton. Set by the launch
-    /// modal's Memory dropdown.
+    /// modal's Bundle dropdown.
     #[serde(default)]
     pub memory_id: String,
     /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the

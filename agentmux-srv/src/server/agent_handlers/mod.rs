@@ -8,7 +8,7 @@ mod template;
 mod identity;
 mod instance;
 mod session;
-mod memory;
+mod bundle;
 mod input;
 
 use std::sync::Arc;
@@ -31,7 +31,7 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     identity::register(engine, state);
     instance::register(engine, state);
     session::register(engine, state);
-    memory::register(engine, state);
+    bundle::register(engine, state);
 }
 
 /// Read the per-block `output.state.json` snapshot from filestore and
@@ -262,7 +262,7 @@ mod recent_sessions_tests {
     // backend correctness gate for the AgentPicker's Recent Sessions
     // surface (cascade follow-up 2026-05-23).
     use crate::backend::storage::store::{
-        AgentDefinition, AgentInstance, IdentityAccount, InstanceStatus, Memory, SecretRef, Store,
+        AgentDefinition, AgentInstance, IdentityAccount, InstanceStatus, Bundle, SecretRef, Store,
     };
     use crate::backend::rpc::engine::WshRpcEngine;
     use crate::server::AppState;
@@ -454,7 +454,7 @@ mod recent_sessions_tests {
         wstore
             .agent_identity_link("def-claude", "acct-work", "github")
             .unwrap();
-        let memory = Memory {
+        let memory = Bundle {
             id: "mem-notes".to_string(),
             name: "Notes".to_string(),
             description: String::new(),
@@ -472,7 +472,7 @@ mod recent_sessions_tests {
             updated_at: 0,
             is_system: false,
         };
-        wstore.bundle_memory_upsert(&memory).unwrap();
+        wstore.bundle_upsert(&memory).unwrap();
 
         // 3 instances:
         //   - blk-recent: has snapshot, more recent activity
@@ -920,7 +920,7 @@ mod recent_sessions_tests {
         assert!(!new_def.memory_id.is_empty(), "new definition must have a bundle bound");
         let bundle = state
             .wstore
-            .bundle_memory_get(&new_def.memory_id)
+            .bundle_get(&new_def.memory_id)
             .unwrap()
             .expect("bound bundle should exist");
         assert!(!bundle.is_blank, "must be a real bundle, not the shared blank singleton");
@@ -977,7 +977,7 @@ mod recent_sessions_tests {
 
         let stored = state.wstore.agent_def_get(&created.id).unwrap().unwrap();
         assert_eq!(stored.memory_id, created.memory_id);
-        let bundle = state.wstore.bundle_memory_get(&created.memory_id).unwrap().unwrap();
+        let bundle = state.wstore.bundle_get(&created.memory_id).unwrap().unwrap();
         assert_eq!(bundle.provider, "codex");
         assert_eq!(bundle.model, "openai", "vendor defaults from codex's supported_vendors[0]");
     }
