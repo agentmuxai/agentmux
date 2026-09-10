@@ -60,7 +60,7 @@ import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
 import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
-import { workingRowSupersededByDock } from "./activity/working-row-supersession";
+import { paneBusyForInput } from "./working-indicator";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
@@ -1612,26 +1612,27 @@ const AgentPresentationView = ({
         onCleanup(() => clearTimeout(timer));
     });
 
-    // True when the ONLY thing keeping this turn busy is a tool call that has
-    // already been promoted into the ActivityDock — i.e. auto-backgrounded, so
-    // the dock is already saying everything this row would. Rationale and the
-    // full list of states that deliberately KEEP the row live in
-    // activity/working-row-supersession.ts, which is separately tested.
-    const supersededByDock = createMemo(() =>
-        workingRowSupersededByDock({
-            hasPromotedTool: hasPromotedTool(),
+    // THE busy predicate — one meaning, three renderings: this row, the top
+    // progress bar, and the composer strip. All three read this memo and
+    // nothing else, so they cannot disagree. Definition and the reasoning for
+    // collapsing them live in working-indicator.ts.
+    //
+    // This used to subtract workingRowSupersededByDock() here, standing the row
+    // down once a tool call was promoted to the ActivityDock. That was wrong:
+    // promotion is a DISPLAY change at TOOL_PROMOTION_MS, not the harness
+    // backgrounding the call, so the turn is still blocked and input still
+    // queues — the row was hiding a gate that was still closed, while the bar
+    // (which never had the term) kept running. See
+    // docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md
+    // §2.3 and §3.1.
+    const paneBusy = createMemo(() =>
+        paneBusyForInput({
             showingLaunchActivity: showingLaunchActivity(),
             turnPhase: paneModel.state.turnPhase,
-            compacting: paneModel.state.compacting,
-            reconnecting: paneModel.state.reconnecting,
         })
     );
 
-    const workingRowLoading = createMemo(
-        () =>
-            !supersededByDock() &&
-            (showingLaunchActivity() || workingFromPhase(paneModel.state.turnPhase))
-    );
+    const workingRowLoading = paneBusy;
     const workingRowVisible = createMemo(
         () =>
             workingRowLoading() ||
@@ -2293,8 +2294,7 @@ const AgentPresentationView = ({
                     <div
                         class="agent-pane-progress-bar"
                         classList={{
-                            "agent-pane-progress-bar--active":
-                                showingLaunchActivity() || workingFromPhase(paneModel.state.turnPhase),
+                            "agent-pane-progress-bar--active": paneBusy(),
                             "agent-pane-progress-bar--stopping":
                                 paneModel.state.turnPhase.kind === "Interrupting",
                         }}
@@ -2577,7 +2577,7 @@ const AgentPresentationView = ({
                 activity ticker and Log button that toggles the log panel.
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
-                loading={showingLaunchActivity() || workingFromPhase(paneModel.state.turnPhase)}
+                loading={paneBusy()}
                 processCount={processCount()}
                 onProcessBadgeClick={() => {
                     createBlock({ meta: { view: "swarm" } });
