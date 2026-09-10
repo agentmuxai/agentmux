@@ -87,7 +87,10 @@ describe("background shell output is not turn liveness", () => {
 describe("a zero-node flush does not resurrect a completed turn", () => {
     const completed = (at: number) => {
         const s = streamingIdle(at);
-        return update(s, { type: "TurnEnd", at: at + 10, outcome: "completed" }).state;
+        // TurnEnd carries only `stats` — the reducer derives the outcome
+        // itself (interrupting -> stopped, otherwise completed), which is the
+        // Done.completed this suite needs.
+        return update(s, { type: "TurnEnd", stats: null }).state;
     };
 
     it("stays Done for a flush that added no document nodes", () => {

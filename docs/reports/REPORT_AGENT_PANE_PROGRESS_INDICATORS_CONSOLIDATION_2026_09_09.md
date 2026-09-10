@@ -168,7 +168,11 @@ Distinct from the desync, and the strongest lead in the codebase.
 
 `finalizeTurn()` (`hooks/useTurnLifecycle.ts:73`) clears "Working…" in the *pane* reducer but never touches the *document* reducer's `nodes[]`, and never calls `scrubOrphanedInProgress`. That scrub (`frontend/app/store/agent-document/reducer.ts:53-148`) runs only on session/reload boundaries — never on a turn boundary.
 
-**`ScrubOrphanedInProgress` has zero live dispatch call sites.** The remediation was built and never wired up. That is a small, high-value fix independent of everything else here.
+~~**`ScrubOrphanedInProgress` has zero live dispatch call sites.**~~ **Wrong — corrected 2026-09-10.** It is dispatched from `agent-view.tsx:1361-1372`, on a `turnJustEnded` effect with a 2s delay and a `workingFromPhase` guard, added for a user report on 2026-08-10 (a ~1s `git status` stuck as a "running 45m" dock row). The spec quoted above predates that fix.
+
+The claim came from a grep truncated by `head -10`, where ten test-file matches crowded out the one production hit — and it survived into an implementation PR (#3164) before codex caught it. The 2s delay absorbs a tail flush still in flight and the guard skips the pass when a new turn has already started; scrubbing directly in `finalizeTurn`, as that PR first did, has neither protection and races the `tool_result` it is supposed to wait for.
+
+What remains true is narrower: the scrub still does not run on `session_end` itself, only on the delayed turn-end effect. Whether that leaves a gap is unestablished — and should be established by reading, not by another truncated grep.
 
 ## 6. Problem 4 — narration: no injection facility, but the model gateway exists
 
