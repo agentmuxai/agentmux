@@ -13,7 +13,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
-    CommandGetMemoryData, CommandDeleteMemoryData, DeleteMemoryResult, CommandReorderGlobalBrainData,
+    CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Bundle;
 
@@ -42,7 +42,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             Box::pin(async move {
-                let cmd: CommandGetMemoryData = serde_json::from_value(data)
+                let cmd: CommandGetBundleData = serde_json::from_value(data)
                     .map_err(|e| format!("getmemory: {e}"))?;
                 match wstore
                     .bundle_get(&cmd.id)
@@ -103,7 +103,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_DELETE_MEMORY,
-        move |cmd: CommandDeleteMemoryData, _ctx| {
+        move |cmd: CommandDeleteBundleData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
             async move {
@@ -119,7 +119,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(DeleteMemoryResult { deleted })
+                Ok(DeleteBundleResult { deleted })
             }
         },
     );
@@ -208,7 +208,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_DELETE_SYSTEM_MEMORY,
-        move |cmd: CommandDeleteMemoryData, _ctx| {
+        move |cmd: CommandDeleteBundleData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
             async move {
@@ -224,7 +224,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(DeleteMemoryResult { deleted })
+                Ok(DeleteBundleResult { deleted })
             }
         },
     );
@@ -398,7 +398,7 @@ mod delete_memory_tests {
 
         let resp = send(&engine, &mut output_rx, COMMAND_DELETE_MEMORY, "mem-1").await;
         assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
-        let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        let result: DeleteBundleResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
         assert!(result.deleted);
 
         assert!(state.id_store.bundle_get("mem-1").unwrap().is_none());
@@ -415,7 +415,7 @@ mod delete_memory_tests {
 
         let resp = send(&engine, &mut output_rx, COMMAND_DELETE_MEMORY, "does-not-exist").await;
         assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
-        let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        let result: DeleteBundleResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
         assert!(!result.deleted);
     }
 
@@ -428,13 +428,13 @@ mod delete_memory_tests {
 
         let resp = send(&engine, &mut output_rx, COMMAND_DELETE_SYSTEM_MEMORY, "sysmem-1").await;
         assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
-        let result: DeleteMemoryResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        let result: DeleteBundleResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
         assert!(result.deleted);
     }
 
     /// Both commands are recorded in the engine's schema with their exact
-    /// type names, and share ONE response type (DeleteMemoryResult) the
-    /// same way they already shared CommandDeleteMemoryData as a request.
+    /// type names, and share ONE response type (DeleteBundleResult) the
+    /// same way they already shared CommandDeleteBundleData as a request.
     #[tokio::test]
     async fn register_typed_records_both_delete_commands_sharing_one_response_type() {
         let state = test_state();
@@ -447,8 +447,8 @@ mod delete_memory_tests {
                 .iter()
                 .find(|r| r["command"] == cmd)
                 .unwrap_or_else(|| panic!("{cmd} missing from the schema"));
-            assert_eq!(row["requestName"], "CommandDeleteMemoryData");
-            assert_eq!(row["responseName"], "DeleteMemoryResult");
+            assert_eq!(row["requestName"], "CommandDeleteBundleData");
+            assert_eq!(row["responseName"], "DeleteBundleResult");
         }
         // listmemories/getmemory/upsertmemory/reorderglobalbrain/
         // upsertsystemmemory are deliberately NOT migrated (Bundle-shaped

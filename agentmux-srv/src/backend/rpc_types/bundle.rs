@@ -13,24 +13,24 @@ use serde::{Deserialize, Serialize};
 // ---- v7 Bundle command shapes ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommandGetMemoryData {
+pub struct CommandGetBundleData {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
-pub struct CommandDeleteMemoryData {
+pub struct CommandDeleteBundleData {
     pub id: String,
 }
 
 /// Response for `deletememory` and `deletesystemmemory` — both take the
-/// same request (`CommandDeleteMemoryData`, above) and answer with the
+/// same request (`CommandDeleteBundleData`, above) and answer with the
 /// same shape, so they share this response type too. Was an anonymous
 /// `json!({"deleted": ..})` before this type existed to name it for the
 /// RPC bindings generator.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
-pub struct DeleteMemoryResult {
+pub struct DeleteBundleResult {
     pub deleted: bool,
 }
 
