@@ -153,6 +153,43 @@ fn frozen_is_starter_mcp_server_name(name: &str) -> bool {
     FROZEN_STARTER_MCP_SERVER_NAMES.contains(&name)
 }
 
+// ── Deterministic collision-fallback ids (ReAgent P1, PR #3181, round 3) ──
+//
+// The genuine-PK-collision fallback (a row's own id already belongs to an
+// unrelated row — private-row collisions, and the near-impossible
+// non-starter-global case where the failed insert wasn't a name/type
+// conflict) used `Uuid::new_v4()` — a fresh random id on every attempt.
+// That is not just non-deterministic across channels (fine, these rows are
+// never meant to converge with each other) — it is non-deterministic
+// across RETRIES of the SAME row on the SAME channel, which matters because
+// the identity-store insert and the local rename (insert-local, rewrite
+// refs, delete-old) are separate writes to two different SQLite files with
+// no cross-database transaction to make them atomic. A crash between them
+// leaves the local row still at its original id with no durable record of
+// which fresh id the crashed attempt already placed in the identity store;
+// re-deriving a NEW random id on retry would orphan that row permanently
+// and repeat on every subsequent crash.
+//
+// Fixed the same way the starter case was already race-safe: derive the
+// "fresh" id deterministically, so a retry recomputes the IDENTICAL id and
+// `INSERT OR IGNORE` naturally converges rather than creating a new row.
+// Salted with the channel's own store path (stable across retries of the
+// same channel, distinct across channels — two different channels' rows
+// that happen to collide on their original local id are NOT the same
+// resource, so their fallback ids must not collide with each other either)
+// and the row's original local id. A NUL-byte separator avoids the
+// (channel_salt, original_id) concatenation ambiguity a plain string-join
+// would have. Distinct namespace per catalog, same reason Phase 1's
+// starter ids use separate namespaces.
+fn deterministic_collision_id(namespace_seed: &[u8], channel_salt: &str, original_local_id: &str) -> Uuid {
+    let namespace = Uuid::new_v5(&Uuid::NAMESPACE_URL, namespace_seed);
+    let key = format!("{channel_salt}\u{0}{original_local_id}");
+    Uuid::new_v5(&namespace, key.as_bytes())
+}
+
+const SKILL_COLLISION_NAMESPACE_SEED: &[u8] = b"https://agentmux.ai/catalog/skills/collision-fallback/v1";
+const MCP_SERVER_COLLISION_NAMESPACE_SEED: &[u8] = b"https://agentmux.ai/catalog/mcp-servers/collision-fallback/v1";
+
 /// Resolve (creating the parent dir if needed) and open the identity store
 /// for writing. Shared by `up()`; factored out so a resolution failure gets
 /// one consistent error message.
@@ -218,7 +255,7 @@ fn finish_carry(
 /// gets a local copy under the new id. `rewritten` counts actual ref ROWS
 /// repointed, not "how many rows had an id change" — a converging row with
 /// no local ref pointing at it yet contributes 0 either way.
-fn carry_skills(wstore: &Store, identity_store: &Store) -> Result<(usize, usize), String> {
+fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
     let mut carried = 0usize;
     let mut rewritten = 0usize;
     for skill in wstore.skill_list_all_raw().map_err(|e| format!("list local skills: {e}"))? {
@@ -255,9 +292,14 @@ fn carry_skills(wstore: &Store, identity_store: &Store) -> Result<(usize, usize)
                             // The insert failed for a reason unrelated to
                             // (name, skill_type) — an astronomically
                             // unlikely PK collision with an unrelated row.
-                            // Same fallback the private-row path uses: mint
-                            // a fresh id and retry once.
-                            let fresh_id = Uuid::new_v4().to_string();
+                            // Deterministic fallback id, same reasoning as
+                            // the private-row branch below.
+                            let fresh_id = deterministic_collision_id(
+                                SKILL_COLLISION_NAMESPACE_SEED,
+                                channel_salt,
+                                &original_id,
+                            )
+                            .to_string();
                             to_insert.id = fresh_id.clone();
                             let inserted = identity_store
                                 .skill_insert_raw(&to_insert)
@@ -292,7 +334,18 @@ fn carry_skills(wstore: &Store, identity_store: &Store) -> Result<(usize, usize)
                 {
                     Some(existing) if skill_looks_like_the_same_row(&existing, &skill) => (skill.id.clone(), 0),
                     _ => {
-                        let fresh_id = Uuid::new_v4().to_string();
+                        // Deterministic, not random (ReAgent P1, PR #3181,
+                        // round 3) — see deterministic_collision_id's own
+                        // doc comment for the crash-window it closes: a
+                        // retry recomputes the SAME id and converges via
+                        // INSERT OR IGNORE instead of orphaning a new row
+                        // every time.
+                        let fresh_id = deterministic_collision_id(
+                            SKILL_COLLISION_NAMESPACE_SEED,
+                            channel_salt,
+                            &original_id,
+                        )
+                        .to_string();
                         to_insert.id = fresh_id.clone();
                         let inserted = identity_store
                             .skill_insert_raw(&to_insert)
@@ -307,7 +360,25 @@ fn carry_skills(wstore: &Store, identity_store: &Store) -> Result<(usize, usize)
             carried += 1;
         }
 
-        let mut to_insert = skill.clone();
+        // Content for the local fallback copy: MINE if my own insert just
+        // won (I am the canonical content now); otherwise fetched from the
+        // identity store, since converging onto a pre-existing row (a
+        // starter another channel already carried, or a first-wins global
+        // match) means THAT row's content is authoritative, which can
+        // differ from this channel's own copy — e.g. an independently
+        // edited starter (ReAgent P1, PR #3181, round 3). Writing this
+        // channel's own content unconditionally would put stale/wrong data
+        // in the local fallback under an id the identity store considers
+        // authoritative for someone else's content.
+        let canonical = if newly_inserted > 0 {
+            skill.clone()
+        } else {
+            identity_store
+                .skill_get(&final_id)
+                .map_err(|e| format!("fetch winning content for skill {final_id}: {e}"))?
+                .unwrap_or_else(|| skill.clone())
+        };
+        let mut to_insert = canonical;
         to_insert.id = final_id.clone();
         rewritten += finish_carry(
             &original_id,
@@ -336,7 +407,7 @@ fn carry_skills(wstore: &Store, identity_store: &Store) -> Result<(usize, usize)
 
 /// Mirrors `carry_skills` exactly, for MCP servers — see that function's
 /// comments for the reasoning behind every decision here.
-fn carry_mcp_servers(wstore: &Store, identity_store: &Store) -> Result<(usize, usize), String> {
+fn carry_mcp_servers(wstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
     let mut carried = 0usize;
     let mut rewritten = 0usize;
     for server in wstore.mcp_server_list_all_raw().map_err(|e| format!("list local mcp servers: {e}"))? {
@@ -365,7 +436,14 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store) -> Result<(usize, u
                     {
                         Some(existing) => (existing.id, 0),
                         None => {
-                            let fresh_id = Uuid::new_v4().to_string();
+                            // Deterministic fallback id — see carry_skills's
+                            // matching branch (ReAgent P1, PR #3181, round 3).
+                            let fresh_id = deterministic_collision_id(
+                                MCP_SERVER_COLLISION_NAMESPACE_SEED,
+                                channel_salt,
+                                &original_id,
+                            )
+                            .to_string();
                             let mut retry = server.clone();
                             retry.id = fresh_id.clone();
                             let inserted = identity_store
@@ -392,7 +470,14 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store) -> Result<(usize, u
                 {
                     Some(existing) if mcp_server_looks_like_the_same_row(&existing, &server) => (server.id.clone(), 0),
                     _ => {
-                        let fresh_id = Uuid::new_v4().to_string();
+                        // Deterministic, not random — see carry_skills's
+                        // matching branch (ReAgent P1, PR #3181, round 3).
+                        let fresh_id = deterministic_collision_id(
+                            MCP_SERVER_COLLISION_NAMESPACE_SEED,
+                            channel_salt,
+                            &original_id,
+                        )
+                        .to_string();
                         to_insert.id = fresh_id.clone();
                         let inserted = identity_store
                             .mcp_server_insert_raw(&to_insert)
@@ -407,7 +492,18 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store) -> Result<(usize, u
             carried += 1;
         }
 
-        let mut to_insert = server.clone();
+        // See carry_skills's matching comment (ReAgent P1, PR #3181, round 3):
+        // use the identity store's actual winning content whenever this
+        // channel's own insert didn't win the slot.
+        let canonical = if newly_inserted > 0 {
+            server.clone()
+        } else {
+            identity_store
+                .mcp_server_get(&final_id)
+                .map_err(|e| format!("fetch winning content for mcp server {final_id}: {e}"))?
+                .unwrap_or_else(|| server.clone())
+        };
+        let mut to_insert = canonical;
         to_insert.id = final_id.clone();
         rewritten += finish_carry(
             &original_id,
@@ -457,10 +553,15 @@ impl Migration for M0031CarrySkillsAndMcpServersToIdentityStore {
         );
         let identity_store = open_identity_store()
             .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: {e}")))?;
+        // Salts the deterministic collision-fallback id derivation so two
+        // different channels' colliding private rows don't converge onto
+        // the same fallback id (they aren't the same row) — see
+        // deterministic_collision_id's doc comment.
+        let channel_salt = ctx.channel_store_path.to_string_lossy().into_owned();
 
-        let (skills_carried, skills_rewritten) = carry_skills(&wstore, &identity_store)
+        let (skills_carried, skills_rewritten) = carry_skills(&wstore, &identity_store, &channel_salt)
             .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: skills: {e}")))?;
-        let (servers_carried, servers_rewritten) = carry_mcp_servers(&wstore, &identity_store)
+        let (servers_carried, servers_rewritten) = carry_mcp_servers(&wstore, &identity_store, &channel_salt)
             .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: mcp servers: {e}")))?;
 
         tracing::info!(
@@ -618,7 +719,7 @@ mod tests {
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
-        let (carried, rewritten) = carry_skills(&wstore, &identity_store).unwrap();
+        let (carried, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(carried, 1);
         assert_eq!(rewritten, 0, "no ref rows existed locally, so nothing to rewrite");
 
@@ -656,7 +757,7 @@ mod tests {
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
-        let (_, rewritten) = carry_skills(&wstore, &identity_store).unwrap();
+        let (_, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(rewritten, 1);
 
         let expected_id = frozen_starter_skill_id("tdd").to_string();
@@ -676,14 +777,14 @@ mod tests {
         let dir_a = tempfile::tempdir().unwrap();
         let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
         wstore_a.skill_insert_raw(&skill("id-from-a", "My Custom Global", "", true)).unwrap();
-        carry_skills(&wstore_a, &identity_store).unwrap();
+        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
 
         // Channel B carries the SAME name+type, under a different id — must
         // converge onto A's id, not create a second row.
         let dir_b = tempfile::tempdir().unwrap();
         let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
         wstore_b.skill_insert_raw(&skill("id-from-b", "My Custom Global", "", true)).unwrap();
-        let (carried, rewritten) = carry_skills(&wstore_b, &identity_store).unwrap();
+        let (carried, rewritten) = carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
         assert_eq!(carried, 0, "id-from-a already occupies the identity store under its own id — B adds nothing new there");
         // `rewritten` counts actual ref ROWS repointed, not "an id changed" —
         // this fixture never binds "id-from-b" to any agent/bundle, so there
@@ -716,7 +817,7 @@ mod tests {
         let dir_b = tempfile::tempdir().unwrap();
         let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
         wstore_b.skill_insert_raw(&skill("id-from-b", "Racing Global", "prompt", true)).unwrap();
-        carry_skills(&wstore_b, &identity_store).unwrap();
+        carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
 
         let matches: Vec<_> = [
             identity_store.skill_get("id-from-a").unwrap(),
@@ -737,12 +838,12 @@ mod tests {
         let dir_a = tempfile::tempdir().unwrap();
         let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
         wstore_a.skill_insert_raw(&skill("private-a", "Deploy", "", false)).unwrap();
-        carry_skills(&wstore_a, &identity_store).unwrap();
+        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
 
         let dir_b = tempfile::tempdir().unwrap();
         let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
         wstore_b.skill_insert_raw(&skill("private-b", "Deploy", "", false)).unwrap();
-        carry_skills(&wstore_b, &identity_store).unwrap();
+        carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
 
         // Both rows survive as distinct resources — merging two different
         // owners' private skills because they share a name would create an
@@ -776,7 +877,7 @@ mod tests {
         ).unwrap();
         wstore.skill_bind("agent-1", "collided-id").unwrap();
 
-        let (carried, rewritten) = carry_skills(&wstore, &identity_store).unwrap();
+        let (carried, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(carried, 1, "the fresh-id insert must still succeed even though the first attempt lost the race");
         assert_eq!(rewritten, 1);
 
@@ -808,10 +909,10 @@ mod tests {
         let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
         wstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
 
-        let (first_carried, _) = carry_skills(&wstore, &identity_store).unwrap();
+        let (first_carried, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(first_carried, 1);
 
-        let (second_carried, _) = carry_skills(&wstore, &identity_store).unwrap();
+        let (second_carried, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(
             second_carried, 0,
             "a retry must converge on the id the first run already chose, not mint another fresh one"
@@ -855,10 +956,10 @@ mod tests {
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
-        let (first_pass, _) = carry_skills(&wstore, &identity_store).unwrap();
+        let (first_pass, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(first_pass, 2);
 
-        let (second_pass, _) = carry_skills(&wstore, &identity_store).unwrap();
+        let (second_pass, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(second_pass, 0, "a full re-run must find nothing left to carry");
     }
 
@@ -870,12 +971,87 @@ mod tests {
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
-        carry_mcp_servers(&wstore, &identity_store).unwrap();
+        carry_mcp_servers(&wstore, &identity_store, "channel").unwrap();
 
         let expected_id = frozen_starter_mcp_server_id("git").to_string();
         assert!(identity_store.mcp_server_get(&expected_id).unwrap().is_some());
         assert!(identity_store.mcp_server_get("legacy-random-id").unwrap().is_none());
         assert!(wstore.mcp_server_get("legacy-random-id").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_converged_global_skill_gets_the_winning_content_not_this_channels_own() {
+        // ReAgent P1, PR #3181, round 3, Finding B: when this channel's
+        // insert doesn't win the identity-store slot — it converges onto a
+        // row another channel already carried — the LOCAL fallback copy
+        // must mirror the WINNING content, not this channel's own. A prior
+        // revision unconditionally wrote `skill.clone()` here regardless of
+        // which channel's content actually won, which could leave a
+        // channel with stale/independently-edited content overwriting the
+        // canonical value's local mirror with the wrong content.
+        let identity_dir = tempfile::tempdir().unwrap();
+        let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
+        let mut skill_a = skill("id-from-a", "My Custom Global", "", true);
+        skill_a.content = "A's content".to_string();
+        wstore_a.skill_insert_raw(&skill_a).unwrap();
+        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
+
+        let dir_b = tempfile::tempdir().unwrap();
+        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        let mut skill_b = skill("id-from-b", "My Custom Global", "", true);
+        skill_b.content = "B's own (different, stale) content".to_string();
+        wstore_b.skill_insert_raw(&skill_b).unwrap();
+        carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+
+        let local_copy = wstore_b.skill_get("id-from-a").unwrap().unwrap();
+        assert_eq!(
+            local_copy.content, "A's content",
+            "the local fallback copy must mirror the identity store's winning content, not this channel's own stale content"
+        );
+    }
+
+    #[test]
+    fn a_partial_carry_crash_is_recoverable_because_the_fallback_id_is_deterministic() {
+        // ReAgent P1, PR #3181, round 3, Finding C: the identity-store
+        // insert and the later local-rename steps are two non-atomic
+        // writes across separate SQLite files. A crash between them must
+        // not orphan a duplicate on retry. Simulated by pre-inserting a row
+        // into the identity store under the EXACT fallback id this
+        // collision would deterministically produce, before the local side
+        // has been touched at all — the state a crash right after the
+        // identity-store insert would leave behind.
+        let identity_dir = tempfile::tempdir().unwrap();
+        let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
+        identity_store.skill_insert_raw(&skill("collided-id", "Someone Else's Skill", "", false)).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        wstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
+
+        let expected_fallback_id =
+            deterministic_collision_id(SKILL_COLLISION_NAMESPACE_SEED, "channel", "collided-id").to_string();
+        let mut pre_crashed = skill("collided-id", "My Private Skill", "", false);
+        pre_crashed.id = expected_fallback_id.clone();
+        identity_store.skill_insert_raw(&pre_crashed).unwrap();
+
+        let (carried, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        assert_eq!(
+            carried, 0,
+            "the fallback id already exists in the identity store from the 'crashed' first attempt — nothing new to carry"
+        );
+
+        // The retry must still finish the LOCAL half of the work: insert
+        // the local copy under the deterministic id, rewrite refs, and
+        // remove the stale local row — recovering fully instead of getting
+        // stuck because the identity-store row already existed.
+        assert!(
+            wstore.skill_get(&expected_fallback_id).unwrap().is_some(),
+            "retry must still complete the local half of the carry even though the identity-store row already existed"
+        );
+        assert!(wstore.skill_get("collided-id").unwrap().is_none());
     }
 
     #[test]
