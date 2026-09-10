@@ -7,6 +7,7 @@
 //! the full server object JSON (command/args/env for stdio; url/headers for
 //! SSE) that gets merged into `.mcp.json` at agent launch.
 
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
@@ -436,6 +437,98 @@ impl Store {
     /// `server.is_global` must already be `true`; caller's job.
     pub fn mcp_server_upsert_unique_global(&self, server: &McpServer) -> Result<(), StoreError> {
         self.managed_upsert_unique_global(server)
+    }
+
+    // ── Migration-only raw access — see skills.rs's identical trio (same
+    // Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md, same reasoning). ──
+
+    pub(crate) fn mcp_server_list_all_raw(&self) -> Result<Vec<McpServer>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, transport, config, is_global, created_at, updated_at FROM db_mcp_servers",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(McpServer {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                transport: row.get(2)?,
+                config: row.get(3)?,
+                is_global: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Returns 1 if a row was actually inserted, 0 if `OR IGNORE` found one
+    /// already there — see `Skill::skill_insert_raw`'s doc comment.
+    pub(crate) fn mcp_server_insert_raw(&self, server: &McpServer) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "INSERT OR IGNORE INTO db_mcp_servers
+                (id, name, transport, config, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                server.id,
+                server.name,
+                server.transport,
+                server.config,
+                server.is_global as i64,
+                server.created_at,
+                server.updated_at,
+            ],
+        )?;
+        Ok(rows)
+    }
+
+    pub(crate) fn mcp_server_find_global_by_name(&self, name: &str) -> Result<Option<McpServer>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, transport, config, is_global, created_at, updated_at
+             FROM db_mcp_servers
+             WHERE is_global = 1 AND name = ?1
+             LIMIT 1",
+        )?;
+        let result = stmt.query_row(params![name], |row| {
+            Ok(McpServer {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                transport: row.get(2)?,
+                config: row.get(3)?,
+                is_global: row.get::<_, i64>(4)? != 0,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        });
+        match result {
+            Ok(s) => Ok(Some(s)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Mirrors `Skill::skill_rewrite_ref_id` exactly, for the MCP ref tables.
+    /// Returns the number of ref rows actually repointed — see
+    /// `Skill::skill_rewrite_ref_id`'s doc comment.
+    pub(crate) fn mcp_server_rewrite_ref_id(&self, old_id: &str, new_id: &str) -> Result<usize, StoreError> {
+        if old_id == new_id {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let agent = conn.execute(
+            "UPDATE OR IGNORE db_agent_mcp_ref SET mcp_id = ?2 WHERE mcp_id = ?1",
+            params![old_id, new_id],
+        )?;
+        let bundle = conn.execute(
+            "UPDATE OR IGNORE db_bundle_mcp_ref SET mcp_id = ?2 WHERE mcp_id = ?1",
+            params![old_id, new_id],
+        )?;
+        Ok(agent + bundle)
     }
 
     /// Return true if the given MCP server is accessible to the agent (global or bound).

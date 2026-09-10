@@ -472,6 +472,138 @@ impl Store {
         self.managed_upsert_unique_global(skill)
     }
 
+    // ── Migration-only raw access (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md) ──
+    // Bypasses the ordinary uniqueness/ownership validation on purpose: the
+    // carry-across migration has already made its own dedup decision (which
+    // survives, which gets a fresh id) before calling these, and re-running
+    // that validation here would both be redundant and, for a private row,
+    // actively wrong — `skill_upsert_unique_global` hardcodes `is_global = 1`,
+    // which a private row must not get. Not for use outside a migration.
+
+    /// Every row in this store's `db_skills`, global and private alike, with
+    /// no accessibility filtering. Ordinary app code never needs this — it is
+    /// always scoped by agent/bundle accessibility — which is exactly why no
+    /// such method existed before the carry-across migration needed one.
+    pub(crate) fn skill_list_all_raw(&self) -> Result<Vec<Skill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
+             FROM db_skills",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Skill {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                trigger: row.get(2)?,
+                skill_type: row.get(3)?,
+                description: row.get(4)?,
+                content: row.get(5)?,
+                is_global: row.get::<_, i64>(6)? != 0,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Insert `skill` verbatim — including its `is_global` flag, which
+    /// `skill_upsert_unique_global` would otherwise force to `true`. `INSERT
+    /// OR IGNORE`: idempotent against a re-run migrating the same row twice
+    /// (by id), never overwrites an existing row.
+    /// Returns 1 if a row was actually inserted, 0 if `OR IGNORE` found one
+    /// already there under this id — the caller's signal for whether this
+    /// was a genuinely new carry or an idempotent re-run no-op.
+    pub(crate) fn skill_insert_raw(&self, skill: &Skill) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "INSERT OR IGNORE INTO db_skills
+                (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                skill.id,
+                skill.name,
+                skill.trigger,
+                skill.skill_type,
+                skill.description,
+                skill.content,
+                skill.is_global as i64,
+                skill.created_at,
+                skill.updated_at,
+            ],
+        )?;
+        Ok(rows)
+    }
+
+    /// The first existing GLOBAL row matching `(name, skill_type)`, for the
+    /// migration's first-wins dedup among global skills that aren't a
+    /// recognized starter (those converge on `starter_skill_id` instead —
+    /// see `skill_seed::starter_skill_trigger_for_name`).
+    pub(crate) fn skill_find_global_by_name_and_type(
+        &self,
+        name: &str,
+        skill_type: &str,
+    ) -> Result<Option<Skill>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
+             FROM db_skills
+             WHERE is_global = 1 AND name = ?1 AND skill_type = ?2
+             LIMIT 1",
+        )?;
+        let result = stmt.query_row(params![name, skill_type], |row| {
+            Ok(Skill {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                trigger: row.get(2)?,
+                skill_type: row.get(3)?,
+                description: row.get(4)?,
+                content: row.get(5)?,
+                is_global: row.get::<_, i64>(6)? != 0,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        });
+        match result {
+            Ok(s) => Ok(Some(s)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Repoint every ref row (agent- and bundle-level) naming `old_id` to
+    /// `new_id` instead, on THIS store only. Called by the carry-across
+    /// migration after it decides a skill's row must live under a different
+    /// id in the identity store than it does locally — without this, the ref
+    /// row would name an id that no longer resolves anywhere once catalog
+    /// reads redirect to the identity store (Phase 2's whole point).
+    ///
+    /// `UPDATE ... WHERE skill_id = old_id`, not delete-then-insert: simpler,
+    /// and the PK `(agent_id, skill_id)`/`(bundle_id, skill_id)` only
+    /// collides if this exact owner already independently held a ref to
+    /// `new_id` too — vanishingly unlikely for real UUIDs, and `OR IGNORE`
+    /// makes that case a no-op (keep the existing ref) rather than an error.
+    /// Returns the number of ref rows actually repointed (0 if none named
+    /// `old_id`, distinct from "the call itself no-oped").
+    pub(crate) fn skill_rewrite_ref_id(&self, old_id: &str, new_id: &str) -> Result<usize, StoreError> {
+        if old_id == new_id {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().unwrap();
+        let agent = conn.execute(
+            "UPDATE OR IGNORE db_agent_skills_ref SET skill_id = ?2 WHERE skill_id = ?1",
+            params![old_id, new_id],
+        )?;
+        let bundle = conn.execute(
+            "UPDATE OR IGNORE db_bundle_skills_ref SET skill_id = ?2 WHERE skill_id = ?1",
+            params![old_id, new_id],
+        )?;
+        Ok(agent + bundle)
+    }
+
     /// Return true if the given skill is accessible to the agent (global or bound).
     /// Used for read and delete access checks.
     pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {

@@ -71,9 +71,21 @@ pub struct McpServerSeedReport {
 /// instead of a skill's trigger, in its own, distinct namespace so a skill
 /// and an MCP server that happened to share a stable-key string could never
 /// collide on id.
-fn starter_mcp_server_id(name: &str) -> Uuid {
+pub(crate) fn starter_mcp_server_id(name: &str) -> Uuid {
     let namespace = Uuid::new_v5(&Uuid::NAMESPACE_URL, b"https://agentmux.ai/catalog/mcp-servers/v1");
     Uuid::new_v5(&namespace, name.as_bytes())
+}
+
+/// True if `name` matches a starter MCP server's `name` in the embedded
+/// manifest. Mirrors `skill_seed::starter_skill_trigger_for_name` — see its
+/// doc comment for why the durable-bindings carry-across migration needs
+/// this distinction (recognized starters converge on
+/// [`starter_mcp_server_id`]; everything else keeps first-wins dedup).
+pub(crate) fn is_starter_mcp_server_name(name: &str) -> bool {
+    let Ok(manifest) = serde_json::from_str::<Vec<StarterMcpServer>>(STARTER_MCP_SERVERS_JSON) else {
+        return false;
+    };
+    manifest.iter().any(|s| s.name == name)
 }
 
 /// Guard against a manifest-authoring mistake: two entries sharing a `name`.
