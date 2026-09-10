@@ -67,6 +67,83 @@ pub(crate) const SHELL_STATUS_TOOL: &str = r#"{
   }
 }"#;
 
+pub(crate) const PTY_SHELL_TOOL: &str = r#"{
+  "name": "PtyShell",
+  "description": "Open a REAL PTY-backed interactive shell — unlike Shell(), which runs on a plain pipe, this behaves like a real terminal, so programs that check for one (password/wizard prompts, sudo, ssh, REPLs) work instead of refusing or misbehaving. Returns a shell_id immediately; use PtyShellInput to type into it, PtyShellRead to see its output, PtyShellStatus to poll, PtyShellStop to end it. Works with no UI involved at all — the window need not be open, focused, or rendering anything for this to work; it's a plain backend call, not simulated keystrokes into a visible terminal.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "cwd":  { "type": "string", "description": "Working directory (defaults to agent workdir)" },
+      "rows": { "type": "integer", "description": "Initial terminal rows (default 25)" },
+      "cols": { "type": "integer", "description": "Initial terminal columns (default 200)" }
+    }
+  }
+}"#;
+
+pub(crate) const PTY_SHELL_INPUT_TOOL: &str = r#"{
+  "name": "PtyShellInput",
+  "description": "Write raw text to a PtyShell()'s PTY, as if typed at a keyboard. Unlike ShellInput, no newline is appended — send exactly what a keypress would produce (e.g. \"y\\n\" to answer a prompt and press Enter, or \"\\u0003\" for Ctrl+C — the OS PTY layer delivers that as a real interrupt to the foreground process, same as a human pressing Ctrl+C, without ending the shell).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior PtyShell() call" },
+      "text":     { "type": "string", "description": "Raw text to write — no newline is added automatically" }
+    },
+    "required": ["shell_id", "text"]
+  }
+}"#;
+
+pub(crate) const PTY_SHELL_RESIZE_TOOL: &str = r#"{
+  "name": "PtyShellResize",
+  "description": "Resize a PtyShell()'s terminal. Some interactive programs render differently or wrap badly at the default geometry (25 rows x 200 cols).",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior PtyShell() call" },
+      "rows":     { "type": "integer", "description": "New row count" },
+      "cols":     { "type": "integer", "description": "New column count" }
+    },
+    "required": ["shell_id", "rows", "cols"]
+  }
+}"#;
+
+pub(crate) const PTY_SHELL_READ_TOOL: &str = r#"{
+  "name": "PtyShellRead",
+  "description": "Read back a PtyShell()'s output tail (default last 200 lines). This is a raw text log, not a rendered screen — a full-screen program that redraws in place (progress bars, cursor-addressed UIs) won't read back exactly as it visually renders, but line-oriented prompts (the common case) read back cleanly.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id":   { "type": "string", "description": "The shell_id returned by a prior PtyShell() call" },
+      "tail_lines": { "type": "integer", "description": "Number of trailing lines to return (default 200)" }
+    },
+    "required": ["shell_id"]
+  }
+}"#;
+
+pub(crate) const PTY_SHELL_STATUS_TOOL: &str = r#"{
+  "name": "PtyShellStatus",
+  "description": "Query whether a PtyShell() is still running, and its exit code once it has ended.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior PtyShell() call" }
+    },
+    "required": ["shell_id"]
+  }
+}"#;
+
+pub(crate) const PTY_SHELL_STOP_TOOL: &str = r#"{
+  "name": "PtyShellStop",
+  "description": "Kill a PtyShell() and clean up its terminal. Prefer this over letting it linger once you're done with an interactive session.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "shell_id": { "type": "string", "description": "The shell_id returned by a prior PtyShell() call" }
+    },
+    "required": ["shell_id"]
+  }
+}"#;
+
 pub(crate) const SEND_MESSAGE_TOOL: &str = r#"{
   "name": "SendMessage",
   "description": "Send a message to another agent by name. The message is injected as input into the target agent's active conversation. Use for agent-to-agent coordination — handoff, task delegation, status notifications. Delivery is best-effort and tries local → same-host → LAN → cloud in order. The first three tiers return only once the message has actually been injected; the cloud tier is store-and-forward, so success there means the relay accepted it and the recipient's AgentMux will pick it up when it next syncs (which never happens if that instance stays offline). Returns once one tier has taken the message or all have failed.",

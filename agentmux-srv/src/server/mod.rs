@@ -59,16 +59,20 @@ use crate::backend::lsp::LspSupervisor;
 use crate::backend::messagebus::MessageBus;
 use crate::backend::reactive::{Poller, ReactiveHandler};
 use crate::backend::storage::filestore::FileStore;
+use crate::backend::blockcontroller;
 use crate::backend::storage::store::Store;
 use crate::backend::history::HistoryService;
 use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
 use crate::backend::wps::Broker;
 use agentmux_common::api_types::{
-    PaneTitleRequest, ShellCreateRequest, ShellCreateResponse, ShellInputFailure,
-    ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
-    TabActivateRequest, TabNameRequest, TabNewRequest, WindowFocusRequest, WindowNameRequest,
-    WorkspaceNameRequest, WpsPublishRequest,
+    PaneTitleRequest, PtyShellCreateRequest, PtyShellCreateResponse, PtyShellInputRequest,
+    PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse, PtyShellResizeRequest,
+    PtyShellResizeResponse, PtyShellStatusRequest,
+    PtyShellStatusResponse, PtyShellStopRequest, PtyShellStopResponse, ShellCreateRequest,
+    ShellCreateResponse, ShellInputFailure, ShellInputRequest, ShellInputResponse,
+    ShellStatusRequest, ShellStatusResponse, ShellStopRequest, TabActivateRequest, TabNameRequest,
+    TabNewRequest, WindowFocusRequest, WindowNameRequest, WorkspaceNameRequest, WpsPublishRequest,
 };
 
 // ---- AppState ----
@@ -449,6 +453,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/shell/input", post(handle_shell_input))
         // Phase 3b — query running state, exit code, and line count.
         .route("/api/v1/shell/status", post(handle_shell_status))
+        // Real PTY-backed shell, for genuinely interactive programs the
+        // piped /api/v1/shell/* family above can't drive (see
+        // docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md).
+        // agentmux-mcp's `PtyShell*` tools POST here.
+        .route("/api/v1/ptyshell/create", post(handle_pty_shell_create))
+        .route("/api/v1/ptyshell/input", post(handle_pty_shell_input))
+        .route("/api/v1/ptyshell/resize", post(handle_pty_shell_resize))
+        .route("/api/v1/ptyshell/read", post(handle_pty_shell_read))
+        .route("/api/v1/ptyshell/status", post(handle_pty_shell_status))
+        .route("/api/v1/ptyshell/stop", post(handle_pty_shell_stop))
         // Open a pane (editor/term/browser/…) from an agent tool call.
         // agentmux-mcp's OpenEditor tool POSTs `{view:"editor", file, …}` here;
         // shares the exact pane.open logic with the WebSocket RPC handler
@@ -1048,6 +1062,435 @@ async fn handle_shell_status(
         exit_code: s.exit_code,
         line_count: s.line_count,
     }))
+}
+
+// Meta marker stamped on every block `handle_pty_shell_create` creates.
+// Every other `ptyshell/*` handler MUST verify this before acting on a
+// caller-supplied `shell_id` (Codex P1 on PR #3177): `shell_id` lives in the
+// SAME block-id namespace as every other pane in the system, and `Layout`
+// exposes block ids for ordinary panes — without this check, an agent could
+// point `PtyShellInput`/`PtyShellStop`/etc. at any controller-backed block
+// (another agent's own CLI pane, a human's terminal pane) and inject input
+// into it or tear it down. Scoped to "was this block created by this API"
+// (matching the existing `Shell`/`ShellStop` family's own scope — no
+// per-caller-agent ownership check either), not full cross-agent isolation.
+const PTYSHELL_META_MARKER: &str = "ptyshell:managed";
+
+fn is_ptyshell_managed(wstore: &crate::backend::storage::store::Store, shell_id: &str) -> bool {
+    wstore
+        .get::<crate::backend::obj::Block>(shell_id)
+        .ok()
+        .flatten()
+        .and_then(|b| b.meta.get(PTYSHELL_META_MARKER).and_then(|v| v.as_bool()))
+        .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// PTY shell handlers (docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)
+//
+// A REAL PTY, unlike the piped `/api/v1/shell/*` family above — for driving
+// genuinely interactive programs (Sharprompt-style wizards, `sudo`, `ssh`,
+// REPLs) that check for a real terminal and refuse or misbehave on a pipe.
+// Reuses `blockcontroller::shell` verbatim (the same controller backing the
+// `term` widget and `AgentShellSubblock.tsx`'s composer-drawer shell) —
+// this is a new agent-facing entry point onto existing PTY plumbing, not a
+// new PTY implementation.
+//
+// Every handler here is a plain HTTP call with no WS/tab dependency, same as
+// `handle_shell_create` above — deliberately NOT wired through the
+// `WshRpcEngine` that `createsubblock`/`controllerresync`/`controllerinput`
+// use (those are instantiated per-WebSocket-connection, so they exist only
+// while a frontend tab is connected). An agent calling these tools gets a
+// live, fully functional PTY regardless of whether any window is open,
+// focused, or rendering the shell's `term` sub-block at all.
+// ---------------------------------------------------------------------------
+
+/// `POST /api/v1/ptyshell/create` — open a real PTY-backed shell.
+///
+/// Creates a headless sub-block (`view: "term", controller: "shell"`,
+/// no tab/layout entry) parented to the calling agent's own block — the
+/// same shape `createsubblock`'s WS handler builds for
+/// `AgentShellSubblock.tsx` — then immediately spawns its controller via
+/// `resync_controller`. Unlike the WS path (which waits for a frontend to
+/// mount a `term` view and call `ControllerResyncCommand`), the PTY is live
+/// the moment this call returns; a UI viewer for it is optional, not a
+/// prerequisite.
+async fn handle_pty_shell_create(
+    State(state): State<AppState>,
+    Json(req): Json<PtyShellCreateRequest>,
+) -> impl IntoResponse {
+    let child_id = uuid::Uuid::new_v4().to_string();
+
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), json!("term"));
+    meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    meta.insert(PTYSHELL_META_MARKER.to_string(), json!(true));
+    // Force cmd.exe directly on Windows rather than the "shell" controller's
+    // default pwsh/powershell auto-detection (`detect_local_shell_path_windows`,
+    // which tries pwsh first). Discovered live, not assumed: PowerShell's
+    // PSReadLine issues a cursor-position query (`ESC[6n`, Device Status
+    // Report) on interactive startup and blocks forever waiting for a
+    // `ESC[row;colR` reply — which only a real terminal emulator answering
+    // on the other end provides (xterm.js does, for the `term` widget /
+    // AgentShellSubblock's human-facing sessions). This facility has no
+    // terminal emulator reading the byte stream, only a raw capture, so
+    // every PtyShell() would otherwise hang before printing even its first
+    // prompt. cmd.exe has no such startup handshake. Non-Windows shells
+    // (bash/zsh via $SHELL) aren't affected — left as the "shell"
+    // controller's own default. This is a known-narrow mitigation, not a
+    // general fix: any OTHER program that queries terminal capabilities via
+    // escape sequences and blocks for a reply would hit the same class of
+    // issue — see docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md §5.
+    #[cfg(windows)]
+    {
+        meta.insert(blockcontroller::META_KEY_CMD.to_string(), json!("cmd.exe"));
+        meta.insert("cmd:interactive".to_string(), json!(true));
+    }
+    // If the caller didn't supply a cwd, fall back to the agent block's own
+    // cmd:cwd — the project directory the agent pane was launched with.
+    // Mirrors `handle_shell_create`'s identical fallback (Codex P1 on PR
+    // #3177): without this, the PTY spawns in agentmux-srv's own cwd
+    // (typically the portable runtime/ dir), not the agent's worktree.
+    let effective_cwd = req.cwd.clone().or_else(|| {
+        state
+            .wstore
+            .get::<crate::backend::obj::Block>(&req.agent_block_id)
+            .ok()
+            .flatten()
+            .and_then(|b| {
+                let cwd = crate::backend::obj::meta_get_string(&b.meta, "cmd:cwd", "");
+                if cwd.is_empty() { None } else { Some(cwd) }
+            })
+    });
+    if let Some(cwd) = &effective_cwd {
+        // Same MSYS→native normalization createsubblock's WS handler applies —
+        // the PTY spawn path reads cmd:cwd raw with no conversion, so a
+        // Git-Bash-style path would otherwise fail with os error 267 on
+        // Windows.
+        match crate::backend::base::normalize_working_dir(cwd)
+            .filter(|p| std::path::Path::new(p).is_absolute())
+        {
+            Some(norm) => {
+                meta.insert(blockcontroller::META_KEY_CMD_CWD.to_string(), json!(norm));
+            }
+            None => {
+                tracing::warn!(
+                    raw_cwd = %cwd,
+                    "ptyshell.create: invalid or non-absolute cwd, dropping (no cwd)"
+                );
+            }
+        }
+    }
+
+    // Initial PTY geometry, if the caller specified one — otherwise
+    // `resync_controller`'s own fallback (25x200) applies. Both `rows`/`cols`
+    // being absent is the common case; either one alone still takes effect
+    // (see `pty_size_from_rt_opts`'s per-field guards).
+    let runtimeopts = if req.rows.is_none() && req.cols.is_none() {
+        None
+    } else {
+        Some(crate::backend::obj::RuntimeOpts {
+            termsize: crate::backend::obj::TermSize {
+                rows: req.rows.unwrap_or(25) as i64,
+                cols: req.cols.unwrap_or(200) as i64,
+            },
+            ..Default::default()
+        })
+    };
+    let rt_opts_json = runtimeopts.as_ref().map(|rt| {
+        json!({ "termsize": { "rows": rt.termsize.rows, "cols": rt.termsize.cols } })
+    });
+
+    let mut block = crate::backend::obj::Block {
+        oid: child_id.clone(),
+        parentoref: format!("block:{}", req.agent_block_id),
+        meta,
+        runtimeopts,
+        ..Default::default()
+    };
+
+    if let Err(e) = state.wstore.insert(&mut block) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("ptyshell.create: insert: {e}") })),
+        )
+            .into_response();
+    }
+
+    // Best-effort link into the parent's subblockids — same posture as
+    // createsubblock's WS handler (not a CAS; an acceptable race for a
+    // single lazily-created shell per agent pane).
+    if let Ok(mut parent) = state
+        .wstore
+        .must_get::<crate::backend::obj::Block>(&req.agent_block_id)
+    {
+        parent
+            .subblockids
+            .get_or_insert_with(Vec::new)
+            .push(child_id.clone());
+        let _ = state.wstore.update(&mut parent);
+    }
+
+    let registry = state.wstore.shared_agent_registry();
+    if let Err(e) = blockcontroller::resync_controller(
+        &block,
+        "ptyshell", // headless — no real tab; only used for tracing/scoping.
+        rt_opts_json,
+        false,
+        Some(Arc::clone(&state.broker)),
+        Some(Arc::clone(&state.event_bus)),
+        Some(Arc::clone(&state.wstore)),
+        Some(Arc::clone(&state.filestore)),
+        registry,
+        state.boot_id.clone(),
+    ) {
+        // Roll back — the block was already inserted and linked into the
+        // parent's subblockids above (Codex P2 on PR #3177): without this,
+        // a failed spawn leaves a stale block + parent link + (possibly)
+        // registered controller behind that the caller has no way to clean
+        // up, since it never received a `shell_id` to call PtyShellStop with.
+        blockcontroller::delete_controller(&child_id);
+        let _ = state.wstore.delete::<crate::backend::obj::Block>(&child_id);
+        if let Ok(mut parent) = state
+            .wstore
+            .must_get::<crate::backend::obj::Block>(&req.agent_block_id)
+        {
+            if let Some(ids) = parent.subblockids.as_mut() {
+                ids.retain(|id| id != &child_id);
+                let _ = state.wstore.update(&mut parent);
+            }
+        }
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("ptyshell.create: spawn: {e}") })),
+        )
+            .into_response();
+    }
+
+    // Answer ConPTY's own startup handshake before returning, on Windows.
+    // Discovered live (not assumed): the moment a Windows ConPTY is created,
+    // it queries the cursor position (`ESC[6n`, Device Status Report) and
+    // blocks its own internal state — and therefore every later write —
+    // until it sees a `ESC[<row>;<col>R` reply. A human-facing `term` pane
+    // gets this for free because xterm.js, running in the browser, answers
+    // real cursor queries as part of being an actual terminal emulator; this
+    // headless facility has nothing playing that role, so without this the
+    // PTY would sit permanently stuck before printing even its first
+    // prompt — confirmed by a live round trip that hung indefinitely until
+    // this was added. `ESC[1;1R` (cursor at row 1, col 1) is a plausible-
+    // enough fixed answer: nothing here has rendered anything yet, so
+    // "top-left" is as true as any other coordinate, and ConPTY only wants
+    // to reconcile its internal buffer, not validate the value against
+    // anything a person would see.
+    #[cfg(windows)]
+    {
+        let mut answered = false;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            let saw_dsr = state
+                .filestore
+                .read_file(&child_id, "term")
+                .ok()
+                .flatten()
+                .map(|bytes| bytes.windows(4).any(|w| w == b"\x1b[6n"))
+                .unwrap_or(false);
+            if saw_dsr {
+                let _ = blockcontroller::send_input(
+                    &child_id,
+                    blockcontroller::BlockInputUnion::data(b"\x1b[1;1R".to_vec()),
+                    None,
+                );
+                answered = true;
+                break;
+            }
+        }
+        tracing::info!(block_id = %child_id, answered_dsr = answered, "ptyshell.create: ConPTY handshake");
+    }
+
+    tracing::info!(block_id = %child_id, parent_id = %req.agent_block_id, "ptyshell.create");
+    (StatusCode::OK, Json(PtyShellCreateResponse { shell_id: child_id })).into_response()
+}
+
+/// `POST /api/v1/ptyshell/input` — write raw text to the PTY, as if typed.
+/// Unlike `/api/v1/shell/input`, no newline is appended: a real terminal
+/// doesn't add one either, and PTY programs (readline, Sharprompt) expect
+/// the caller to send exactly what a keyboard would (e.g. `"y\n"` to answer
+/// a prompt and press Enter, or `"\x03"` for Ctrl+C — the OS PTY layer
+/// translates that raw byte into a real interrupt delivered to the
+/// foreground process, same as a human pressing Ctrl+C in a real terminal,
+/// without ending the shell).
+///
+/// There is deliberately no separate "send a signal" endpoint: an earlier
+/// version of this API had one (`PtyShellSignal`, `BlockInputUnion::signal`),
+/// removed after Codex correctly flagged (PR #3177) that
+/// `ShellController`'s input loop treats ANY signal as "close the PTY" —
+/// `if input.sig_name.is_some() { break; }` in
+/// `blockcontroller/shell/lifecycle.rs` — so it terminated the whole shell
+/// instead of interrupting just the foreground command, the opposite of
+/// what it advertised. Real signal delivery through a PTY is the raw
+/// control byte, handled here, not a separate primitive.
+async fn handle_pty_shell_input(
+    State(state): State<AppState>,
+    Json(req): Json<PtyShellInputRequest>,
+) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (
+            StatusCode::OK,
+            Json(PtyShellInputResponse {
+                written: false,
+                error: Some("not a PtyShell-created shell".to_string()),
+            }),
+        );
+    }
+    match blockcontroller::send_input(
+        &req.shell_id,
+        blockcontroller::BlockInputUnion::data(req.text.into_bytes()),
+        None,
+    ) {
+        Ok(()) => (StatusCode::OK, Json(PtyShellInputResponse { written: true, error: None })),
+        Err(e) => (StatusCode::OK, Json(PtyShellInputResponse { written: false, error: Some(e) })),
+    }
+}
+
+/// `POST /api/v1/ptyshell/resize` — resize the PTY. Some TUIs render
+/// differently or wrap badly at the fallback geometry (25x200).
+async fn handle_pty_shell_resize(
+    State(state): State<AppState>,
+    Json(req): Json<PtyShellResizeRequest>,
+) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (
+            StatusCode::OK,
+            Json(PtyShellResizeResponse {
+                resized: false,
+                error: Some("not a PtyShell-created shell".to_string()),
+            }),
+        );
+    }
+    match blockcontroller::send_input(
+        &req.shell_id,
+        blockcontroller::BlockInputUnion::resize(crate::backend::obj::TermSize {
+            rows: req.rows as i64,
+            cols: req.cols as i64,
+        }),
+        None,
+    ) {
+        Ok(()) => (StatusCode::OK, Json(PtyShellResizeResponse { resized: true, error: None })),
+        Err(e) => (StatusCode::OK, Json(PtyShellResizeResponse { resized: false, error: Some(e) })),
+    }
+}
+
+/// `POST /api/v1/ptyshell/read` — read back the shell's raw output tail.
+///
+/// Reads the block's `term` file straight from `FileStore` — the same file
+/// `blockcontroller::shell::lifecycle`'s real PTY read loop write-throughs
+/// to (`handle_append_block_file(..., "term", ..., filestore, ...)`,
+/// `SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` §2.1). Deliberately
+/// NOT the optimized `blockfile:read_range` path (byte-offset index,
+/// cross-channel global-transcript fallback, and a different filename —
+/// "output" — used for agent CLI transcripts, a different content stream
+/// entirely), which solves problems this endpoint doesn't have: a PTY shell
+/// created through this API is always local and short-lived, so a plain
+/// whole-file read + in-memory tail is simpler and correct. This is a raw
+/// line log, not a rendered-screen snapshot — see the type's own doc
+/// comment in `api_types.rs`.
+async fn handle_pty_shell_read(
+    State(state): State<AppState>,
+    Json(req): Json<PtyShellReadRequest>,
+) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (
+            StatusCode::OK,
+            Json(PtyShellReadResponse { content: String::new(), truncated: false }),
+        )
+            .into_response();
+    }
+    let content = match state.filestore.read_file(&req.shell_id, "term") {
+        Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).to_string(),
+        Ok(None) => String::new(),
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("ptyshell.read: {e}") })),
+            )
+                .into_response();
+        }
+    };
+    let tail_lines = req.tail_lines.unwrap_or(200).max(1) as usize;
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(tail_lines);
+    let truncated = start > 0;
+    let tail = lines[start..].join("\n");
+    (StatusCode::OK, Json(PtyShellReadResponse { content: tail, truncated })).into_response()
+}
+
+/// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
+async fn handle_pty_shell_status(
+    State(state): State<AppState>,
+    Json(req): Json<PtyShellStatusRequest>,
+) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (StatusCode::OK, Json(PtyShellStatusResponse { running: false, exit_code: None }));
+    }
+    match blockcontroller::get_block_controller_status(&req.shell_id) {
+        Some(status) => {
+            let running = status.shellprocstatus == blockcontroller::STATUS_RUNNING;
+            let exit_code = (status.shellprocstatus == blockcontroller::STATUS_DONE)
+                .then_some(status.shellprocexitcode);
+            (StatusCode::OK, Json(PtyShellStatusResponse { running, exit_code }))
+        }
+        // No controller registered — unknown id or already torn down via
+        // ptyshell/stop. Same "plain not-running answer, not an error"
+        // contract ShellStatus already documents.
+        None => (StatusCode::OK, Json(PtyShellStatusResponse { running: false, exit_code: None })),
+    }
+}
+
+/// `POST /api/v1/ptyshell/stop` — kill the PTY and delete its sub-block.
+/// Mirrors `deletesubblock`'s WS handler: kill-first ordering (a lingering
+/// PTY tree is worse than a delayed row delete), best-effort unlink from the
+/// parent's subblockids.
+async fn handle_pty_shell_stop(
+    State(state): State<AppState>,
+    Json(req): Json<PtyShellStopRequest>,
+) -> impl IntoResponse {
+    // Codex P1 on PR #3177: without this, an arbitrary block_id (e.g. a
+    // human's terminal pane or another agent's own CLI pane, discoverable
+    // via `Layout`) could be torn down through this endpoint. Only ever act
+    // on blocks this API itself created.
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (StatusCode::OK, Json(PtyShellStopResponse { stopped: false }));
+    }
+    // Whether a controller actually existed is the meaningful "did this
+    // stop anything" signal — unlike `Store::delete`, which succeeds
+    // (no-ops) even for a row that was never there, so `.is_ok()` alone
+    // can't distinguish "stopped a real shell" from "unknown id".
+    let stopped = blockcontroller::get_block_controller_status(&req.shell_id).is_some();
+    blockcontroller::delete_controller(&req.shell_id);
+
+    let parent_id = state
+        .wstore
+        .get::<crate::backend::obj::Block>(&req.shell_id)
+        .ok()
+        .flatten()
+        .and_then(|b| b.parentoref.strip_prefix("block:").map(str::to_string));
+
+    let _ = state.wstore.delete::<crate::backend::obj::Block>(&req.shell_id);
+
+    if let Some(parent_id) = parent_id {
+        if let Ok(mut parent) = state.wstore.must_get::<crate::backend::obj::Block>(&parent_id) {
+            if let Some(ids) = parent.subblockids.as_mut() {
+                ids.retain(|id| id != &req.shell_id);
+                let _ = state.wstore.update(&mut parent);
+            }
+        }
+    }
+
+    tracing::info!(block_id = %req.shell_id, "ptyshell.stop");
+    (StatusCode::OK, Json(PtyShellStopResponse { stopped }))
 }
 
 /// `POST /api/v1/pane/open` — open a pane (editor/term/browser/…).
