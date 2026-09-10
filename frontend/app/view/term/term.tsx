@@ -414,17 +414,9 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             style={{ position: "relative" }}
         >
             <DragOverlay message={dropMessage()} visible={isDragOver()} />
-            <Show when={termBg()}>
-                <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
-            </Show>
             <TermResyncHandler blockId={blockId} model={model} />
             <TermThemeUpdater blockId={blockId} model={model} termRef={model.termRef} />
             <TermStickers config={stickerConfig()} />
-            <Show when={model.agentRuntimeLabel()}>
-                <div class="agent-runtime-badge" title="Agent running time">
-                    {model.agentRuntimeLabel()}
-                </div>
-            </Show>
             <div class="term-connectelem" ref={connectElemRef!} />
             <Search {...searchProps} />
         </div>
@@ -585,6 +577,12 @@ const TermPaneChrome = (props: {
     // lives inside BlockFrame: the atom opens it, the ref anchors it.
     // Re-derived per active member so switching tabs targets the right
     // block's modal state.
+    // Both read the ACTIVE member, so they follow tab switches: the
+    // background is per-block meta, the runtime label is per-ViewModel
+    // state owned by whichever TermViewModel is currently mounted.
+    const termBg = createMemo(() => computeBgStyleFromMeta(activeBlockData()?.meta, null));
+    const runtimeLabel = () => (nodeModel.activeViewModel?.() as TermViewModel | null)?.agentRuntimeLabel?.() ?? null;
+
     const changeConnModalAtom = createMemo(
         () => useBlockAtom(activeBlockId(), "changeConn", () => createSignalAtom(false)) as SignalAtom<boolean>,
     );
@@ -633,34 +631,53 @@ const TermPaneChrome = (props: {
             onFocusIn={() => nodeModel.focusNode()}
         >
             <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>
-            {/* Normal-flow row, unlike the agent strip's absolute overlay —
-                the terminal strip has always reserved its own band above the
-                xterm surface (term.scss), and keeping that avoids covering
-                the top line of terminal output. */}
-            <PaneTabStrip
-                tabs={visibleTermTabs()}
-                activeId={activeBlockId()}
-                zoomFactor={tabStripZoomFactor}
-                getId={(t) => t.blockId}
-                getLabel={(t) => t.label}
-                onActivate={handleTermTabSwitch}
-                onClose={handleTermTabClose}
-                onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
-                renderLabel={(t) =>
-                    renamingBlockId() === t.blockId ? (
-                        <PaneTabRenameInput
-                            initialValue={t.label}
-                            onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
-                            onCancel={() => setRenamingBlockId(null)}
-                        />
-                    ) : (
-                        <span class="pane-tab-label">{t.label}</span>
-                    )
-                }
-                onAdd={() => void handleTermTabAdd()}
-                addTitle="New terminal tab"
-            />
-            <div class="term-pane-stack-content">{props.children}</div>
+            {/* Spans the strip AND the terminal, and is the positioned
+                ancestor for both overlays below. Both used to live inside
+                `.view-term`, which contained the strip before it was
+                hoisted; leaving them there would have quietly moved them
+                relative to it (codex P2 x2 on PR #3157) — the background
+                image could no longer paint behind the strip, so the strip's
+                backdrop-filter had nothing of the image to blur, and the
+                runtime badge's `top: 6px` landed on the terminal's first
+                output row instead of on the strip band. */}
+            <div class="term-pane-stack-body">
+                <Show when={termBg()}>
+                    <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
+                </Show>
+                {/* Normal-flow row, unlike the agent strip's absolute overlay —
+                    the terminal strip has always reserved its own band above
+                    the xterm surface (term.scss), and keeping that avoids
+                    covering the top line of terminal output. */}
+                <PaneTabStrip
+                    tabs={visibleTermTabs()}
+                    activeId={activeBlockId()}
+                    zoomFactor={tabStripZoomFactor}
+                    getId={(t) => t.blockId}
+                    getLabel={(t) => t.label}
+                    onActivate={handleTermTabSwitch}
+                    onClose={handleTermTabClose}
+                    onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
+                    renderLabel={(t) =>
+                        renamingBlockId() === t.blockId ? (
+                            <PaneTabRenameInput
+                                initialValue={t.label}
+                                onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
+                                onCancel={() => setRenamingBlockId(null)}
+                            />
+                        ) : (
+                            <span class="pane-tab-label">{t.label}</span>
+                        )
+                    }
+                    onAdd={() => void handleTermTabAdd()}
+                    addTitle="New terminal tab"
+                />
+                <Show when={runtimeLabel()}>
+                    <div class="agent-runtime-badge" title="Agent running time">
+                        {runtimeLabel()}
+                    </div>
+                </Show>
+                <div class="term-pane-stack-content">{props.children}</div>
+            </div>
         </div>
     );
 };

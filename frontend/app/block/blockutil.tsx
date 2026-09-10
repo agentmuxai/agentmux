@@ -6,7 +6,7 @@ import { getConnStatusAtom } from "@/app/store/global";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createMemo, createSignal, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
@@ -143,10 +143,29 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
         return cs?.status == "error" || !cs?.connected;
     };
 
+    // Codex P1 on PR #3157: a plain callback ref fires ONCE, when the
+    // element is created. That was fine while `props.ref` was a stable
+    // per-mount object, but a hoisted pane header
+    // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) stays mounted
+    // across a tab switch and re-points `props.ref` at the newly-active
+    // block's holder — this `<Show>` stays true the whole time when both
+    // tabs have connections, so the element is never recreated and the new
+    // holder would keep `current: null`. TypeAheadModal then calls
+    // `anchorRef.current.getBoundingClientRect()` unconditionally and the
+    // connection selector THROWS instead of opening. An effect re-runs
+    // whenever `props.ref` changes identity, so each holder that becomes
+    // current gets populated with the live element.
+    const [btnEl, setBtnEl] = createSignal<HTMLDivElement | null>(null);
+    createEffect(() => {
+        const holder = props.ref;
+        const el = btnEl();
+        if (holder) holder.current = el;
+    });
+
     return (
         <Show when={!isLocal()}>
             <div
-                ref={(el) => { if (props.ref) props.ref.current = el; }}
+                ref={(el) => setBtnEl(el)}
                 class={clsx("connection-button")}
                 onClick={clickHandler}
                 title={getTitleText()}
