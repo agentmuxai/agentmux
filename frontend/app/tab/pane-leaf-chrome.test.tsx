@@ -159,8 +159,10 @@ afterEach(() => {
 });
 
 describe("PaneLeafChrome — passthrough (not hoisted)", () => {
-    it("renders the block directly, with no chrome wrapper, for a non-agent view type", async () => {
-        setBlockView("b1", "term");
+    it("renders the block directly, with no chrome wrapper, for a view type that doesn't hoist its own chrome", async () => {
+        // "editor", not "term" — term hoists too now (it has its own in-pane
+        // tab strip). See HOISTS_OWN_CHROME in pane-leaf-chrome.tsx.
+        setBlockView("b1", "editor");
         const nodeModel = makeFakeNodeModel({
             activeViewModel: () => fakeChromeViewModel("chrome-root"),
         });
@@ -203,6 +205,23 @@ describe("PaneLeafChrome — hoisted", () => {
         expect(screen.getByTestId("chrome-root")).toBeInTheDocument();
         expect(screen.getByTestId("chrome-header")).toBeInTheDocument();
         // Content still renders, now NESTED inside chrome.
+        expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
+    });
+
+    // Terminal panes hoist too, as of the term-pane half of this work —
+    // they have their own in-pane tab strip with the same flash problem.
+    // Guards HOISTS_OWN_CHROME (pane-leaf-chrome.tsx) against silently
+    // losing an entry.
+    it("wraps the block in renderPaneChrome for a terminal pane too, not just agent", async () => {
+        setBlockView("b1", "term");
+        const nodeModel = makeFakeNodeModel({
+            activeViewModel: () => fakeChromeViewModel("chrome-root"),
+        });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        expect(screen.getByTestId("chrome-root")).toBeInTheDocument();
         expect(screen.getByTestId("chrome-root").contains(screen.getByTestId("block-b1"))).toBe(true);
     });
 
