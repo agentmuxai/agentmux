@@ -124,6 +124,11 @@ fn spawn_backend() -> (SrvGuard, String, String, String) {
 
     let child = Command::new(binary)
         .env("AGENTMUX_AUTH_KEY", auth_key)
+        // See bootstrap.rs's cloud_subscriber_disabled_from_env doc comment:
+        // without this, every spawn here fires a real OS-keychain read from
+        // an ad-hoc/dev-signed binary, which macOS gates behind an
+        // interactive consent prompt on whatever account runs this suite.
+        .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
@@ -225,6 +230,7 @@ fn spawn_backend_with_data_dir(data_dir: &std::path::Path) -> (SrvGuard, String,
     let child = Command::new(binary)
         .env("AGENTMUX_AUTH_KEY", auth_key)
         .env("AGENTMUX_DATA_DIR", data_dir)
+        .env("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1")
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .stdout(Stdio::null())
