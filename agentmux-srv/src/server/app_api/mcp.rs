@@ -7,6 +7,11 @@
 //! Plus the Armory-level catalog (mcp.catalog.*): global servers only,
 //! window-scoped — no `agent_id`, no `check_s1` (mirrors bundle.* auth
 //! shape, since the Armory has no agent connection context to gate on).
+//!
+//! `db_mcp_servers` is authoritatively `identity_store` as of Phase 2 of
+//! SPEC_DURABLE_BINDINGS_2026_09_10.md (§5.1/§5.4) — see `skill.rs`'s
+//! module doc comment for the full `catalog`/`wstore` split; this file
+//! mirrors it exactly for MCP servers.
 
 use super::*;
 
@@ -33,17 +38,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_LIST,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.list: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                let servers = wstore.mcp_server_list(&req.agent_id)
+                let servers = wstore.mcp_server_list(&identity_store, &req.agent_id)
                     .map_err(|e| format!("mcp.list: {e}"))?;
                 Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
             })
@@ -53,22 +60,24 @@ fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_GET,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.get: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                if !wstore.mcp_server_is_accessible_to(&req.agent_id, &req.id)
+                if !wstore.mcp_server_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("mcp.get: {e}"))?
                 {
                     return Err("FORBIDDEN: MCP server not accessible to this agent".to_string());
                 }
-                let server = wstore.mcp_server_get(&req.id)
+                let server = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.get: {e}"))?;
                 Ok(Some(serde_json::to_value(&server).map_err(|e| e.to_string())?))
             })
@@ -78,11 +87,13 @@ fn register_mcp_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_UPSERT,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -120,7 +131,7 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     {
                         return Err("FORBIDDEN: MCP server not bound to this agent".to_string());
                     }
-                    let existing = wstore.mcp_server_get(&req.id)
+                    let existing = identity_store.mcp_server_get(&req.id)
                         .map_err(|e| format!("mcp.upsert: {e}"))?;
                     match existing {
                         Some(s) if s.is_global => {
@@ -140,9 +151,11 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                // Atomic: name-uniqueness check + upsert + (bind on create) in one
-                // transaction, so concurrent same-name upserts can't both pass.
-                wstore.mcp_server_upsert_unique(&req.agent_id, &server, req.id.is_empty())
+                // No longer a single transaction across the catalog insert and
+                // the ref-bind (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md
+                // §5.4, accepted interim gap) — see
+                // `Store::managed_upsert_unique`'s doc comment.
+                wstore.mcp_server_upsert_unique(&identity_store, &req.agent_id, &server, req.id.is_empty())
                     .map_err(|e| format!("mcp.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),
@@ -156,11 +169,13 @@ fn register_mcp_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_DELETE,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -173,14 +188,14 @@ fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 {
                     return Err("FORBIDDEN: MCP server not bound to this agent".to_string());
                 }
-                if let Some(existing) = wstore.mcp_server_get(&req.id)
+                if let Some(existing) = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.delete: {e}"))?
                 {
                     if existing.is_global {
                         return Err("FORBIDDEN: cannot delete a global MCP server".to_string());
                     }
                 }
-                let deleted = wstore.mcp_server_delete(&req.id)
+                let deleted = wstore.mcp_server_delete(&identity_store, &req.id)
                     .map_err(|e| format!("mcp.delete: {e}"))?;
                 if deleted {
                     broker.publish(crate::backend::wps::WaveEvent {
@@ -196,11 +211,13 @@ fn register_mcp_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_BIND,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -210,7 +227,7 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 check_s1(&ctx, &req.agent_id)?;
                 // Only global servers (or ones already bound) may be bound, so an
                 // agent can't escalate to read another agent's server config.
-                match wstore.mcp_server_get(&req.mcp_id)
+                match identity_store.mcp_server_get(&req.mcp_id)
                     .map_err(|e| format!("mcp.bind: {e}"))?
                 {
                     None => return Err("mcp.bind: MCP server not found".to_string()),
@@ -223,7 +240,7 @@ fn register_mcp_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                wstore.mcp_server_bind(&req.agent_id, &req.mcp_id)
+                wstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.bind: {e}"))?;
                 // An agent binding a server to itself over its own authenticated
                 // connection should reach an already-open Stash MCP Servers tab
@@ -274,22 +291,24 @@ fn register_mcp_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// valid JSON" check, which tells you nothing about reachability.
 fn register_mcp_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_PROBE,
         Box::new(move |data, ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.probe: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                if !wstore.mcp_server_is_accessible_to(&req.agent_id, &req.id)
+                if !wstore.mcp_server_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("mcp.probe: {e}"))?
                 {
                     return Err("FORBIDDEN: MCP server not accessible to this agent".to_string());
                 }
-                let server = wstore.mcp_server_get(&req.id)
+                let server = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.probe: {e}"))?
                     .ok_or_else(|| "mcp.probe: MCP server not found".to_string())?;
                 let result = crate::backend::mcp_probe::probe(&server.transport, &server.config).await;
@@ -301,12 +320,14 @@ fn register_mcp_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_catalog_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_LIST,
         Box::new(move |_data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
-                let servers = wstore.mcp_server_list_global()
+                let servers = wstore.mcp_server_list_global(&identity_store)
                     .map_err(|e| format!("mcp.catalog.list: {e}"))?;
                 Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
             })
@@ -315,12 +336,12 @@ fn register_mcp_catalog_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_UPSERT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -348,7 +369,7 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let (id, created_at) = if req.id.is_empty() {
                     (uuid::Uuid::new_v4().to_string(), now)
                 } else {
-                    let existing = wstore.mcp_server_get(&req.id)
+                    let existing = identity_store.mcp_server_get(&req.id)
                         .map_err(|e| format!("mcp.catalog.upsert: {e}"))?;
                     match existing {
                         // No agent_id/check_s1 here to verify ownership of a private
@@ -377,7 +398,8 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // JSON object keyed by name, so two same-named global
                 // servers would silently clobber each other's config for
                 // every agent that has either bound. Reagent P1 on #1948.
-                wstore.mcp_server_upsert_unique_global(&server)
+                // Pure single-table op — called directly on identity_store.
+                identity_store.mcp_server_upsert_unique_global(&server)
                     .map_err(|e| format!("mcp.catalog.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),
@@ -401,11 +423,13 @@ fn register_mcp_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
 fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_BIND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -416,7 +440,7 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // the catalog surface can't be used to bootstrap read access
                 // to another agent's private server config — same rule as
                 // mcp.bind.
-                match wstore.mcp_server_get(&req.mcp_id)
+                match identity_store.mcp_server_get(&req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind: {e}"))?
                 {
                     None => return Err("mcp.catalog.bind: MCP server not found".to_string()),
@@ -429,7 +453,7 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                wstore.mcp_server_bind(&req.agent_id, &req.mcp_id)
+                wstore.mcp_server_bind(&identity_store, &req.agent_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind: {e}"))?;
                 // Lets any other open Stash/Armory view for this agent pick up
                 // the new binding without a manual refresh — mcp.bind (the
@@ -458,16 +482,18 @@ fn register_mcp_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_LIST_FOR_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.list_for_agent: {e}"))?;
-                let servers = wstore.mcp_server_list_global_for_agent(&req.agent_id)
+                let servers = wstore.mcp_server_list_global_for_agent(&identity_store, &req.agent_id)
                     .map_err(|e| format!("mcp.catalog.list_for_agent: {e}"))?;
                 Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
             })
@@ -487,18 +513,20 @@ fn register_mcp_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppSt
 /// reagentx P1 on PR #2329 (round 2).
 fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_UNBIND,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, mcp_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.unbind: {e}"))?;
-                match wstore.mcp_server_get(&req.mcp_id)
+                match identity_store.mcp_server_get(&req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.unbind: {e}"))?
                 {
                     None => return Err("mcp.catalog.unbind: MCP server not found".to_string()),
@@ -523,25 +551,27 @@ fn register_mcp_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_DELETE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?;
-                if let Some(existing) = wstore.mcp_server_get(&req.id)
+                if let Some(existing) = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?
                 {
                     if !existing.is_global {
                         return Err("FORBIDDEN: cannot delete a private MCP server via the catalog".to_string());
                     }
                 }
-                let deleted = wstore.mcp_server_delete(&req.id)
+                let deleted = wstore.mcp_server_delete(&identity_store, &req.id)
                     .map_err(|e| format!("mcp.catalog.delete: {e}"))?;
                 if deleted {
                     broker.publish(crate::backend::wps::WaveEvent {
@@ -563,12 +593,14 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_BIND_TO_BUNDLE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -579,12 +611,12 @@ fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // this surface can't be used to bootstrap read access to
                 // another entity's private server config — same rule as
                 // mcp.catalog.bind.
-                match wstore.mcp_server_get(&req.mcp_id)
+                match identity_store.mcp_server_get(&req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?
                 {
                     None => return Err("mcp.catalog.bind_to_bundle: MCP server not found".to_string()),
                     Some(s) if !s.is_global => {
-                        if !wstore.bundle_mcp_is_accessible_to(&req.bundle_id, &req.mcp_id)
+                        if !wstore.bundle_mcp_is_accessible_to(&identity_store, &req.bundle_id, &req.mcp_id)
                             .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?
                         {
                             return Err("FORBIDDEN: can only bind global MCP servers to a bundle".to_string());
@@ -592,7 +624,7 @@ fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppSt
                     }
                     Some(_) => {}
                 }
-                wstore.bundle_mcp_bind(&id_store, &req.bundle_id, &req.mcp_id)
+                wstore.bundle_mcp_bind(&identity_store, &id_store, &req.bundle_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),
@@ -613,16 +645,18 @@ fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppSt
 /// `bundle_mcp_list`'s own implementation.
 fn register_mcp_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { bundle_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.list_for_bundle: {e}"))?;
-                let servers = wstore.bundle_mcp_list(&req.bundle_id)
+                let servers = wstore.bundle_mcp_list(&identity_store, &req.bundle_id)
                     .map_err(|e| format!("mcp.catalog.list_for_bundle: {e}"))?;
                 Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
             })
@@ -641,12 +675,14 @@ fn register_mcp_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppS
 fn register_mcp_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -680,7 +716,7 @@ fn register_mcp_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &Ap
                     {
                         return Err("FORBIDDEN: MCP server not bound to this bundle".to_string());
                     }
-                    let existing = wstore.mcp_server_get(&req.id)
+                    let existing = identity_store.mcp_server_get(&req.id)
                         .map_err(|e| format!("mcp.catalog.upsert_for_bundle: {e}"))?;
                     match existing {
                         Some(s) if s.is_global => {
@@ -700,7 +736,7 @@ fn register_mcp_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &Ap
                     created_at,
                     updated_at: now,
                 };
-                wstore.bundle_mcp_upsert_unique(&id_store, &req.bundle_id, &server, req.id.is_empty())
+                wstore.bundle_mcp_upsert_unique(&identity_store, &id_store, &req.bundle_id, &server, req.id.is_empty())
                     .map_err(|e| format!("mcp.catalog.upsert_for_bundle: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),
@@ -755,17 +791,17 @@ fn register_mcp_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: &A
 /// connected/error status per row before any agent has bound the server.
 /// See SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md §4.4.
 fn register_mcp_catalog_probe(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_PROBE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.probe: {e}"))?;
-                let server = wstore.mcp_server_get(&req.id)
+                let server = identity_store.mcp_server_get(&req.id)
                     .map_err(|e| format!("mcp.catalog.probe: {e}"))?
                     .ok_or_else(|| "mcp.catalog.probe: MCP server not found".to_string())?;
                 if !server.is_global {

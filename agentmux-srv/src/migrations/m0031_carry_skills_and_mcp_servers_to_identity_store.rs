@@ -396,8 +396,18 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
                     .map_err(|e| format!("rewrite refs for skill {}: {e}", to_insert.name))
             },
             |old| {
+                // Compile-only accommodation for Part D of
+                // SPEC_DURABLE_BINDINGS_2026_09_10.md's redirect
+                // (`skill_delete` gained a `catalog` parameter) — no change
+                // to this migration's own frozen logic. This deletes the
+                // STALE LOCAL row under the superseded id from `wstore`'s
+                // own db_skills mirror — it must never touch
+                // `identity_store` (the new local copy under the final id
+                // was already inserted separately above), so `wstore` is
+                // passed as `catalog` too, reproducing the pre-split
+                // single-store behavior exactly.
                 wstore
-                    .skill_delete(old)
+                    .skill_delete(wstore, old)
                     .map_err(|e| format!("delete superseded local skill row {old}: {e}"))
             },
         )?;
@@ -521,8 +531,10 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store, channel_salt: &str)
                     .map_err(|e| format!("rewrite refs for mcp server {}: {e}", to_insert.name))
             },
             |old| {
+                // See the identical compile-only note on the skill_delete
+                // call above (Part D of SPEC_DURABLE_BINDINGS_2026_09_10.md).
                 wstore
-                    .mcp_server_delete(old)
+                    .mcp_server_delete(wstore, old)
                     .map_err(|e| format!("delete superseded local mcp server row {old}: {e}"))
             },
         )?;
@@ -753,7 +765,14 @@ mod tests {
             "INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')",
             [],
         ).unwrap();
-        wstore.skill_bind("agent-1", "legacy-random-id").unwrap();
+        // Compile-only accommodation for Part C of
+        // SPEC_DURABLE_BINDINGS_2026_09_10.md's redirect (`skill_bind` gained
+        // a `catalog` parameter) — no change to this migration's own frozen
+        // logic. `wstore` itself already holds this row locally (inserted
+        // above via `skill_insert_raw`), so passing it as `catalog` too
+        // satisfies the new existence check exactly as it always implicitly
+        // did before the split.
+        wstore.skill_bind(&wstore, "agent-1", "legacy-random-id").unwrap();
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
@@ -875,7 +894,9 @@ mod tests {
             "INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')",
             [],
         ).unwrap();
-        wstore.skill_bind("agent-1", "collided-id").unwrap();
+        // See the identical compile-only note on the earlier skill_bind call
+        // in this file (Part C of SPEC_DURABLE_BINDINGS_2026_09_10.md).
+        wstore.skill_bind(&wstore, "agent-1", "collided-id").unwrap();
 
         let (carried, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
         assert_eq!(carried, 1, "the fresh-id insert must still succeed even though the first attempt lost the race");

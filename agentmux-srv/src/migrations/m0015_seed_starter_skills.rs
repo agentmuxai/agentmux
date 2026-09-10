@@ -79,7 +79,7 @@ mod tests {
         M0015SeedStarterSkills.up(&ctx_for(tmp.path())).unwrap();
 
         let wstore = Store::open(tmp.path()).unwrap();
-        assert_eq!(wstore.skill_list_global().unwrap().len(), 6);
+        assert_eq!(wstore.skill_list_global(&wstore).unwrap().len(), 6);
     }
 
     #[test]
@@ -93,12 +93,12 @@ mod tests {
 
         M0015SeedStarterSkills.up(&ctx).unwrap();
         wstore.migration_mark_applied("0015_seed_starter_skills", "channel", 0).unwrap();
-        assert_eq!(wstore.skill_list_global().unwrap().len(), 6);
+        assert_eq!(wstore.skill_list_global(&wstore).unwrap().len(), 6);
 
-        for item in wstore.skill_list_global().unwrap() {
-            wstore.skill_delete(&item.skill.id).unwrap();
+        for item in wstore.skill_list_global(&wstore).unwrap() {
+            wstore.skill_delete(&wstore, &item.skill.id).unwrap();
         }
-        assert!(wstore.skill_list_global().unwrap().is_empty());
+        assert!(wstore.skill_list_global(&wstore).unwrap().is_empty());
 
         // The real runner (runner.rs) never calls `up()` again once
         // `migration_is_applied` is true — assert that precondition holds,
@@ -139,7 +139,7 @@ mod tests {
 
         M0015SeedStarterSkills.up(&ctx).unwrap();
 
-        let after = wstore.skill_list_global().unwrap();
+        let after = wstore.skill_list_global(&wstore).unwrap();
         assert_eq!(
             after.len(),
             1,
