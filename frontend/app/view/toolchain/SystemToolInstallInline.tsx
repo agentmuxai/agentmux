@@ -22,11 +22,12 @@
  * SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md §3.3-§3.4.
  */
 
-import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { CORE_TOOLS } from "@/app/view/agent/providers/toolchain-catalog";
 import "./SystemToolInstallInline.scss";
 
 type Phase = "checking" | "unavailable" | "idle" | "installing" | "done" | "failed";
@@ -70,6 +71,26 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
     const [resolvedVersion, setResolvedVersion] = createSignal<string | null>(null);
     const [lines, setLines] = createSignal<Array<{ line: string; stream: "stdout" | "stderr" }>>([]);
     const [error, setError] = createSignal<string | null>(null);
+
+    // Brand icon for the tool being installed (SPEC_SYSTEM_TOOL_INSTALL_
+    // DETAILS_AUTOSCROLL_2026_09_10.md §6) — a plain frontend-only lookup,
+    // same as `wingetId`/`brewFormula` elsewhere in this catalog; never
+    // sent to or resolved by the backend.
+    const brandIcon = () => CORE_TOOLS.find((t) => t.id === props.toolId)?.brandIcon;
+
+    // Auto-stick-to-bottom for the streamed log, mirroring ToolOverlayLog.tsx's
+    // proven pattern (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) rather than
+    // inventing a new one — see SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_
+    // 2026_09_10.md §3. `stickToBottom` is a plain `let`, not a signal: it's
+    // read only inside the scroll handler and the log-lines effect below,
+    // neither of which needs Solid to track it reactively.
+    let stickToBottom = true;
+    let logBodyRef: HTMLPreElement | undefined;
+    const onLogScroll = () => {
+        if (!logBodyRef) return;
+        const dist = logBodyRef.scrollHeight - logBodyRef.scrollTop - logBodyRef.clientHeight;
+        stickToBottom = dist < 40; // forgiving threshold — one mousewheel tick must not unstick
+    };
 
     let unsub: (() => void) | null = null;
     // Deliberately NOT auto-cancelled on unmount, unlike
@@ -122,6 +143,54 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
         }
     });
 
+    // Re-sync scroll position when the native <details> panel opens.
+    // A closed <details> doesn't lay out its children, so scrollHeight/
+    // scrollTop writes against logBodyRef while collapsed are no-ops (or
+    // measure a zero-size box) — the same class of problem ToolOverlayLog.tsx
+    // solves with its `panelHidden` (content-visibility) guard, just
+    // triggered by native <details> semantics instead of a CSS class here.
+    // Without this, reopening mid-install (or after it finishes) would land
+    // on whatever stale scrollTop was last set while visible, not the
+    // newest line.
+    //
+    // A REF CALLBACK, not a plain `ref={detailsRef}` + top-level `onMount`:
+    // this <details> element only exists inside the installing/done/failed
+    // `<Show>` branch below, which isn't mounted yet when the component
+    // itself first mounts (phase starts at "checking"/"idle"). A one-time
+    // onMount reading `detailsRef` at that point would always see
+    // `undefined` and silently never attach anything. A ref callback is
+    // invoked by Solid whenever THIS element is actually created — i.e.
+    // when the Show branch renders it — so it fires at the right time
+    // regardless of which phase the component happened to mount in.
+    const bindDetailsToggle = (el: HTMLDetailsElement) => {
+        const onToggle = () => {
+            if (el.open && stickToBottom && logBodyRef) {
+                requestAnimationFrame(() => {
+                    if (logBodyRef && logBodyRef.isConnected) {
+                        logBodyRef.scrollTop = logBodyRef.scrollHeight;
+                    }
+                });
+            }
+        };
+        el.addEventListener("toggle", onToggle);
+        onCleanup(() => el.removeEventListener("toggle", onToggle));
+    };
+
+    // Auto-stick to bottom as new lines stream in, same shape as
+    // ToolOverlayLog.tsx's own log-following effect.
+    createEffect(() => {
+        lines(); // register as a reactive dependency
+        if (stickToBottom && logBodyRef) {
+            // Wait one frame for the DOM to flush before measuring —
+            // mirrors ToolOverlayLog.tsx's own effect.
+            requestAnimationFrame(() => {
+                if (logBodyRef && logBodyRef.isConnected) {
+                    logBodyRef.scrollTop = logBodyRef.scrollHeight;
+                }
+            });
+        }
+    });
+
     const startInstall = async () => {
         // Tear down any prior run (Retry path) — without this, retrying
         // after a failure overwrites `unsub` with the new subscription's
@@ -134,6 +203,10 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
         setPhase("installing");
         setError(null);
         setLines([]);
+        // A retry after scrolling up to inspect a prior failure should
+        // start pinned to the bottom again, not inherit the previous run's
+        // scroll-away state.
+        stickToBottom = true;
         try {
             const r = await RpcApi.ToolchainInstallSystemToolCommand(TabRpcClient, { toolId: props.toolId });
             if (disposed) return;
@@ -168,6 +241,9 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                 <Show when={phase() === "idle"}>
                     <div class="system-tool-install-consent">
                         <p class="system-tool-install-consent-text">
+                            <Show when={brandIcon()}>
+                                <i class={`system-tool-install-brand-icon fa-brands fa-${brandIcon()}`} aria-hidden="true" />
+                            </Show>
                             This will run:
                         </p>
                         <code class="system-tool-install-command">{commandPreview()}</code>
@@ -185,6 +261,9 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                 <Show when={phase() === "installing" || phase() === "done" || phase() === "failed"}>
                     <div class="system-tool-install-log" classList={{ "is-done": phase() === "done", "is-failed": phase() === "failed" }}>
                         <div class="system-tool-install-log-header">
+                            <Show when={brandIcon()}>
+                                <i class={`system-tool-install-brand-icon fa-brands fa-${brandIcon()}`} aria-hidden="true" />
+                            </Show>
                             <Show when={phase() === "installing"}>
                                 <i class="fa-solid fa-spinner fa-spin" aria-hidden="true" /> Installing…
                             </Show>
@@ -196,13 +275,13 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                             </Show>
                         </div>
                         <Show when={phase() === "installing"}>
-                            <div class="system-tool-install-progress" aria-hidden="true">
-                                <div class="system-tool-install-progress-bar" />
+                            <div class="install-progress" aria-hidden="true">
+                                <div class="install-progress-bar" />
                             </div>
                         </Show>
-                        <details class="system-tool-install-details">
+                        <details class="system-tool-install-details" ref={bindDetailsToggle}>
                             <summary>Details</summary>
-                            <pre class="system-tool-install-log-body">
+                            <pre class="system-tool-install-log-body" ref={logBodyRef} onScroll={onLogScroll}>
                                 {lines().map((l) => l.line).join("\n")}
                             </pre>
                         </details>
