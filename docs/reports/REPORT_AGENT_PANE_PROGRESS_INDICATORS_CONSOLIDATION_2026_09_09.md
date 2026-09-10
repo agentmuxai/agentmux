@@ -112,6 +112,21 @@ still closed. The user learns the truth by typing and being told to wait.
 
 Compounding it, the liveness watchdog is suspended entirely while compacting (`frontend/app/store/agent-pane-state/reducer.ts:327-329`), so nothing force-clears the mismatch.
 
+Here the **row is right and the bar is wrong** — the reverse of §3.1.
+`reconnecting` is set ONLY after the underlying process has already crashed or
+exited, so there is nothing alive to answer a message typed then; `compacting`
+means the CLI is busy with the compaction. Both are genuinely "not now".
+
+**Fixed in #3143** (after review — the first revision of that PR closed §3.1 only
+and still claimed the consumers could not disagree). Both fields are now terms in
+the shared predicate, so the bar and composer strip light for them too.
+
+One wording correction that came out of the same review: the predicate promises
+"will **not be answered immediately**", not "will be **queued**". Only the
+turn-in-flight case actually queues — a message sent during launch/relogin is
+rejected by the auth guard, and during a reconnect there is no process to take
+it. The user-facing promise is only the common factor.
+
 ### 3.3 Asymmetric timers
 
 Every timer sits on the text side, none on the bar:

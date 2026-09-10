@@ -24,7 +24,7 @@ describe("working indicator — mirrors the send gate", () => {
     it("agrees with workingFromPhase for every phase when not launching", () => {
         for (const kind of ALL_PHASES) {
             const p = phase(kind);
-            expect(paneBusyForInput({ showingLaunchActivity: false, turnPhase: p })).toBe(
+            expect(paneBusyForInput({ showingLaunchActivity: false, turnPhase: p, compacting: null, reconnecting: null })).toBe(
                 workingFromPhase(p),
             );
         }
@@ -33,16 +33,16 @@ describe("working indicator — mirrors the send gate", () => {
     it("is busy while launching even though no turn is in flight", () => {
         // A message sent mid-launch is not answered immediately either.
         expect(
-            paneBusyForInput({ showingLaunchActivity: true, turnPhase: phase("Idle") }),
+            paneBusyForInput({ showingLaunchActivity: true, turnPhase: phase("Idle"), compacting: null, reconnecting: null }),
         ).toBe(true);
     });
 
     it("is idle only when nothing is launching and no turn is running", () => {
         expect(
-            paneBusyForInput({ showingLaunchActivity: false, turnPhase: phase("Idle") }),
+            paneBusyForInput({ showingLaunchActivity: false, turnPhase: phase("Idle"), compacting: null, reconnecting: null }),
         ).toBe(false);
         expect(
-            paneBusyForInput({ showingLaunchActivity: false, turnPhase: phase("Done") }),
+            paneBusyForInput({ showingLaunchActivity: false, turnPhase: phase("Done"), compacting: null, reconnecting: null }),
         ).toBe(false);
     });
 });
@@ -61,6 +61,8 @@ describe("working indicator — the dock must not silence it", () => {
         expect(
             paneBusyForInput({
                 showingLaunchActivity: false,
+                compacting: null,
+                reconnecting: null,
                 turnPhase: phase("Streaming"),
             }),
         ).toBe(true);
@@ -70,6 +72,8 @@ describe("working indicator — the dock must not silence it", () => {
         expect(
             paneBusyForInput({
                 showingLaunchActivity: false,
+                compacting: null,
+                reconnecting: null,
                 turnPhase: phase("Streaming", { waitingReason: "rate_limit" }),
             }),
         ).toBe(true);
@@ -79,8 +83,43 @@ describe("working indicator — the dock must not silence it", () => {
         expect(
             paneBusyForInput({
                 showingLaunchActivity: false,
+                compacting: null,
+                reconnecting: null,
                 turnPhase: phase("Interrupting"),
             }),
         ).toBe(true);
+    });
+});
+
+describe("working indicator — busy without a turn in flight", () => {
+    // Divergence B from the report (§3.2). These two states can be set while
+    // turnPhase is Idle. The working row read them; the progress bar and the
+    // composer strip did not — so during a reconnect the row said busy and the
+    // bar said idle. Both are in the predicate now, so all three agree.
+    const idle = { showingLaunchActivity: false, turnPhase: phase("Idle") };
+
+    it("is busy while reconnecting, even with no turn running", () => {
+        // The least ambiguous case in the whole predicate: `reconnecting` is
+        // set ONLY after the process has already crashed or exited, so there is
+        // literally nothing alive to answer a message typed now.
+        expect(
+            paneBusyForInput({ ...idle, compacting: null, reconnecting: { attempt: 1 } }),
+        ).toBe(true);
+    });
+
+    it("is busy while compacting, even with no turn running", () => {
+        expect(
+            paneBusyForInput({ ...idle, compacting: { trigger: "auto" }, reconnecting: null }),
+        ).toBe(true);
+    });
+
+    it("treats only null as not-busy, not merely falsy", () => {
+        // These are opaque state objects; a caller passing through a falsy-but-
+        // present value must not read as idle.
+        expect(paneBusyForInput({ ...idle, compacting: 0, reconnecting: null })).toBe(true);
+        expect(paneBusyForInput({ ...idle, compacting: null, reconnecting: "" })).toBe(true);
+        expect(
+            paneBusyForInput({ ...idle, compacting: undefined, reconnecting: undefined }),
+        ).toBe(false);
     });
 });

@@ -1629,6 +1629,8 @@ const AgentPresentationView = ({
         paneBusyForInput({
             showingLaunchActivity: showingLaunchActivity(),
             turnPhase: paneModel.state.turnPhase,
+            compacting: paneModel.state.compacting,
+            reconnecting: paneModel.state.reconnecting,
         })
     );
 
