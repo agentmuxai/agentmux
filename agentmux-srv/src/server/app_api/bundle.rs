@@ -484,11 +484,31 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 /// export has no business mutating per-agent state as a side effect of
 /// producing a warning.
 ///
-/// The cost of that choice is under-warning: an agent whose memory exists on
-/// disk but was never mirrored is missed. That is the same residual gap
+/// **Known limitation — a cross-channel binding is invisible here, and cannot
+/// currently be made visible.** Both lookups resolve the binding from
+/// channel-local SQLite: `instance_list` reads this channel's rows, and
+/// `agent_def_list`'s global overlay only preserves `memory_id` when a local
+/// row exists (`storage/agents.rs:462`). An agent created in another channel
+/// has no local row, so it comes back with an empty `memory_id` — because
+/// `DefinitionRecordV1` does not carry the field at all
+/// (`storage/def_registry_mirror.rs:128-133`). The bundle and the memory mirror
+/// are global; only the binding between them is not. So exporting a shared
+/// bundle from a channel other than the one its agent was created in will not
+/// warn, which is exactly the portability case the warning is for (Codex, PR
+/// #3147).
+///
+/// Closing it means adding `memory_id` to the registry wire format, which is
+/// already a tracked gap for bigger reasons than this warning — the same
+/// missing field makes a cross-channel reopen start unbound and limits m0021's
+/// backfill to local SQLite. Tracked in #3148; deliberately not widened here,
+/// because warning whenever the binding is merely *unknown* would fire on
+/// unrelated bundles and train operators to ignore it.
+///
+/// The other cost is under-warning on a stale mirror: an agent whose memory
+/// exists on disk but was never mirrored is missed. That is the residual gap
 /// `SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` already documents and
-/// accepts for the mirror generally, and this warning is advisory — it changes
-/// no bytes in the archive.
+/// accepts for the mirror generally. Both costs are one-directional and this
+/// warning is advisory — it changes no bytes in the archive.
 fn bound_agent_has_native_memory(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
