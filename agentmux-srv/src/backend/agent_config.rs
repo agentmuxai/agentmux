@@ -1039,6 +1039,33 @@ fn resolve_claude_md_side_paths(
 /// see the doc comment below).
 const STARTUP_INSTRUCTIONS_MANAGED_MARKER: &str = "<!-- agentmux:managed-startup-instructions -->";
 
+/// Does this file's content say AgentMux wrote it?
+///
+/// There are two markers, not one: `CLAUDE.md` carries
+/// [`CLAUDE_MD_MANAGED_MARKER`] and every other startup-instructions file
+/// carries [`STARTUP_INSTRUCTIONS_MANAGED_MARKER`], because the two writers
+/// grew separately. Anything asking "is this ours" has to know both — a check
+/// against only the first reports every AgentMux-generated `AGENTS.md`,
+/// `GEMINI.md`, `QWEN.md` and `.pi/APPEND_SYSTEM.md` as foreign, inverting the
+/// answer for most providers (Codex, PR #3144).
+///
+/// Deliberately content-based rather than path-based: the marker is what makes
+/// the claim, and a file's name says nothing about who wrote it. Phase 3 of
+/// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` reuses this to
+/// label tracked instruction files `agentmux` or `foreign`, which is the one
+/// field that decides whether a file is ours to touch.
+///
+/// **The two writers below deliberately do NOT use this**, and that is not an
+/// oversight. Each asks a narrower question — "did I write this file, in my
+/// own format, such that I may rewrite it" — and each answer must stay pinned
+/// to its own marker. A `CLAUDE.md`-marked file is ours, but it is not
+/// `write_startup_instructions_respecting_existing`'s to rewrite. This helper
+/// answers the broader question, which is the one a read-only tracker asks.
+pub fn is_agentmux_managed_instructions(content: &str) -> bool {
+    content.starts_with(CLAUDE_MD_MANAGED_MARKER)
+        || content.starts_with(STARTUP_INSTRUCTIONS_MANAGED_MARKER)
+}
+
 /// Write a NON-`CLAUDE.md` startup-instructions file (`AGENTS.md`,
 /// `GEMINI.md`, `QWEN.md`, `.pi/APPEND_SYSTEM.md`, ...) WITHOUT ever
 /// overwriting a pre-existing, non-AgentMux-authored file at that path.
@@ -2236,5 +2263,34 @@ mod bundle_section_heading_tests {
     #[test]
     fn heading_matches_frontend_builder_literal() {
         assert_eq!(BUNDLE_SECTION_HEADING, "# Memory");
+    }
+}
+
+#[cfg(test)]
+mod is_agentmux_managed_instructions_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_both_marker_classes() {
+        // The bug this exists to prevent: a check against CLAUDE.md's marker
+        // alone reports every generated AGENTS.md / GEMINI.md / QWEN.md /
+        // .pi/APPEND_SYSTEM.md as foreign (Codex, PR #3144).
+        assert!(is_agentmux_managed_instructions(&format!(
+            "{CLAUDE_MD_MANAGED_MARKER}\n\n# Memory\n"
+        )));
+        assert!(is_agentmux_managed_instructions(&format!(
+            "{STARTUP_INSTRUCTIONS_MANAGED_MARKER}\n\nBe helpful.\n"
+        )));
+    }
+
+    #[test]
+    fn a_foreign_file_is_not_ours_however_it_starts() {
+        assert!(!is_agentmux_managed_instructions("# My project\n\nRules.\n"));
+        assert!(!is_agentmux_managed_instructions(""));
+        // The marker has to be at the START — a file that merely mentions it
+        // further down was not written by us.
+        assert!(!is_agentmux_managed_instructions(&format!(
+            "Someone pasted this below:\n{CLAUDE_MD_MANAGED_MARKER}\n"
+        )));
     }
 }
