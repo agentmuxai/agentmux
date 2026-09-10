@@ -294,7 +294,7 @@ fn scan_dir(
     working_dir: &Path,
     scan: &providers::InstructionDirScan,
     out: &mut Vec<String>,
-) -> bool {
+) -> ScanOutcome {
     fn walk(
         root: &Path,
         dir: &Path,
@@ -343,11 +343,33 @@ fn scan_dir(
         }
     }
 
+    let scan_root = working_dir.join(scan.dir);
+
+    // **Check the scan ROOT, not just what is inside it.** Skipping symlinked
+    // child entries does nothing if `.github/instructions` — or any ancestor
+    // of it — is itself a link: `read_dir` follows it transparently, the
+    // resulting paths still `strip_prefix` cleanly, and the outside file's
+    // content goes out over an authenticated RPC (ReAgent P0, PR #3156).
+    //
+    // Canonicalizing both sides closes the whole class at once — a symlinked
+    // final component, a symlinked ancestor, and `..` traversal — rather than
+    // testing the one shape that was reported.
+    let Ok(root_canon) = working_dir.canonicalize() else {
+        return ScanOutcome { hit_cap: false, escaped: false };
+    };
+    let Ok(scan_canon) = scan_root.canonicalize() else {
+        // Almost always "no such directory", which is the ordinary case.
+        return ScanOutcome { hit_cap: false, escaped: false };
+    };
+    if !scan_canon.starts_with(&root_canon) {
+        return ScanOutcome { hit_cap: false, escaped: true };
+    }
+
     let mut found = Vec::new();
     let mut dirs_visited = 0usize;
     walk(
         working_dir,
-        &working_dir.join(scan.dir),
+        &scan_root,
         scan.suffix,
         scan.recursive,
         &mut found,
@@ -357,7 +379,17 @@ fn scan_dir(
     found.truncate(MAX_SCANNED_INSTRUCTION_FILES);
     found.sort();
     out.extend(found);
-    hit_cap
+    ScanOutcome { hit_cap, escaped: false }
+}
+
+/// What a scan ran into, beyond the files it found.
+struct ScanOutcome {
+    /// The file ceiling was reached and the walk stopped early.
+    hit_cap: bool,
+    /// The scan directory resolves outside the working directory, so it was
+    /// not read at all. Reported rather than silently skipped: a repository
+    /// that has done this is exactly the case an operator should see.
+    escaped: bool,
 }
 
 /// Everything `provider_id` will read as instructions from `working_directory`.
@@ -391,7 +423,7 @@ pub fn resolve_project_instructions(
         // so it reports *that* the limit was hit, not how far past it the
         // repository goes — counting the rest would mean doing the traversal
         // the cap exists to avoid.
-        let overflowed = scan_dir(&root, scan, &mut scanned);
+        let outcome = scan_dir(&root, scan, &mut scanned);
 
         for rel in scanned {
             // A declared path could also match a scan; report it once.
@@ -416,7 +448,22 @@ pub fn resolve_project_instructions(
             }
             files.push(file);
         }
-        if overflowed {
+        if outcome.escaped {
+            files.push(ProjectInstructionFile {
+                path: scan.dir.to_string(),
+                exists: true,
+                size_bytes: 0,
+                content_hash: String::new(),
+                owner: InstructionOwner::Foreign,
+                content: String::new(),
+                truncated: false,
+                error: Some(format!(
+                    "{} resolves outside the working directory — not read",
+                    scan.dir
+                )),
+            });
+        }
+        if outcome.hit_cap {
             files.push(ProjectInstructionFile {
                 path: format!("{}/…", scan.dir),
                 exists: true,
@@ -740,6 +787,44 @@ mod review_fix_tests {
             !files.iter().any(|f| f.path.contains("secret")),
             "a symlink must not carry the scan outside the working directory"
         );
+    }
+
+    #[test]
+    fn a_symlinked_scan_root_is_refused_and_reported() {
+        // ReAgent P0 on #3156: guarding child entries does nothing if the scan
+        // directory ITSELF is a link — `read_dir` follows it transparently,
+        // the paths still strip_prefix cleanly, and the outside file's content
+        // goes out over an authenticated RPC. The nested-symlink test could
+        // never have caught this, because it only ever links a child.
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        write(outside.path(), "secret.instructions.md", "not part of this project");
+
+        std::fs::create_dir_all(dir.path().join(".github")).unwrap();
+        let link = dir.path().join(".github/instructions");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), &link).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), &link).is_ok();
+        if !made {
+            return; // Windows needs privilege to create symlinks.
+        }
+
+        let files = resolve_project_instructions("copilot", dir.path().to_str().unwrap());
+        assert!(
+            !files.iter().any(|f| f.path.contains("secret")),
+            "a symlinked scan root must not be read: {:?}",
+            files.iter().map(|f| &f.path).collect::<Vec<_>>()
+        );
+        let refused = files
+            .iter()
+            .find(|f| f.path == ".github/instructions")
+            .expect("the refusal must be reported, not silent");
+        assert!(refused
+            .error
+            .as_deref()
+            .unwrap_or("")
+            .contains("outside the working directory"));
     }
 
     #[test]
