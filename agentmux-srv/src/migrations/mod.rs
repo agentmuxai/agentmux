@@ -74,6 +74,7 @@ mod m0026_registry_agent_id_rekey;
 mod m0027_agents_workspace_backfill;
 mod m0028_agent_child_tables_repoint_fk;
 mod m0029_drop_legacy_agent_tables;
+mod m0030_backfill_bundle_component_refs;
 mod runner;
 #[cfg(test)]
 mod phase5_tests;
@@ -238,4 +239,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0027_agents_workspace_backfill::M0027AgentsWorkspaceBackfill,
     &m0028_agent_child_tables_repoint_fk::M0028AgentChildTablesRepointFk,
     &m0029_drop_legacy_agent_tables::M0029DropLegacyAgentTables,
+    &m0030_backfill_bundle_component_refs::M0030BackfillBundleComponentRefs,
 ];
