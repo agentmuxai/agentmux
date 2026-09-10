@@ -38,12 +38,6 @@ test-authfile = []
 # the recorded build commit over either branch tip. The old
 # `agentmux/7680-…` branch this used to cite is CEF 146-era; the `a5af` org
 # also redirects to `agentmuxai` now.
-# CEF 152 (2026-09-10): `agentmux/7977-drag-rightclick-and-transparency` and
-# `7977` (the milestone integration branch) both carry the port — see
-# docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md Phase B/C.
-# No 152 runtime has been published/shipped yet, so there's no build-commit
-# provenance to record here the way the 148 note above does — update this
-# once one has.
 # Specifically: `_cef_window_t::begin_window_drag` (used by StartWindowDragTask).
 # Requires a matching patched cef-dll-sys via [patch.crates-io] in the workspace
 # Cargo.toml. Default OFF so unpatched checkouts compile — native left-click
@@ -55,7 +49,7 @@ resources_path = "resources"
 
 [dependencies]
 agentmux-common = { path = "../agentmux-common" }
-cef = { version = "152", default-features = false, features = ["build-util"] }
+cef = { version = "148", default-features = false, features = ["build-util"] }
 # Native "pick a file" dialog for the Media pane (SPEC_MEDIA_PANE_2026_07_26.md).
 # Default features pick the right native backend per platform (Win32
 # IFileDialog / macOS NSOpenPanel / Linux GTK3).
