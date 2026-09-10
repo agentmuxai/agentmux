@@ -72,14 +72,43 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         () => (nodeModel.hasEverBeenMultiMember?.() ?? false) && effectiveViewType() === "agent"
     );
 
+    // ReAgent P1, confirmed by an empirical repro before trusting it:
+    // `NodeModel.activeViewModel()` genuinely blips through `null` on
+    // EVERY switch, not just the first hoist. `block.tsx`'s `onCleanup`
+    // (clearing the OLD member's vm) runs synchronously during the inner
+    // `<Key>`'s reconciliation; the `createEffect` that sets the NEW
+    // member's vm is deferred to the next effects flush. A naive
+    // `<Show when={nodeModel.activeViewModel()}>` callback form looks safe
+    // (`<Show>` only re-runs its child function on a falsy->truthy edge),
+    // but that real null blip IS such an edge every time, so it would
+    // re-invoke `renderPaneChrome` — mounting a BRAND NEW `AgentPaneChrome`
+    // on every switch and reproducing the exact flash this file exists to
+    // eliminate. Fixed by latching the FIRST non-null vm ever observed
+    // into a plain closure variable: once captured, this memo's OWN return
+    // value stops changing (same object reference) regardless of how
+    // `activeViewModel()` fluctuates underneath, so Solid's default `===`
+    // memo comparison means no consumer — including `<Show>` below — ever
+    // observes a falsy value again after the first real capture. Renders
+    // via whichever vm happened to be active at that FIRST hoist and never
+    // re-derives afterward — the same "frozen after first hoist" identity
+    // `anchorBlockId` (agent-model.ts's own `renderPaneChrome` closure)
+    // already assumes.
+    let latchedChromeVm: ViewModel | null = null;
+    const chromeVm = createMemo(() => {
+        if (!latchedChromeVm) {
+            latchedChromeVm = nodeModel.activeViewModel?.() ?? null;
+        }
+        return latchedChromeVm;
+    });
+
     return (
         <Show when={hoisted()} fallback={content}>
-            {/* Guards only the brief same-flush null window between one
-                member's <Block> unmounting and the next one's mounting
-                (NodeModel.activeViewModel's own doc comment, types.ts) —
-                does NOT itself unmount the outer chrome, which is gated
-                only by `hoisted()` above and never flips back to false. */}
-            <Show when={nodeModel.activeViewModel?.()}>
+            {/* Guards only the leaf's own first-hoist window, before any
+                ViewModel has been observed yet — does NOT itself unmount
+                the outer chrome once mounted, since `chromeVm()` (above)
+                never returns to a falsy value after its first real
+                capture. */}
+            <Show when={chromeVm()}>
                 {(vm) => vm().renderPaneChrome!(nodeModel, content)}
             </Show>
         </Show>
