@@ -364,19 +364,6 @@ export interface NodeModel {
      */
     activeBlockId?: Accessor<string>;
     /**
-     * True forever, once this leaf's `blockStack` has ever had 2+ members —
-     * never resets to false even if the stack later shrinks back to 1.
-     * Monotonic (not "is currently a stack") on purpose: it drives whether a
-     * hoisted-chrome-capable `ViewModel` (e.g. `AgentViewModel`) suppresses
-     * `BlockFrame`'s own inline header via `noHeader`, and that header must
-     * come from the hoisted chrome from the moment it FIRST mounts (the
-     * 1→2-member transition) onward — flipping back to inline on a
-     * transient 2→1 dip would tear down and rebuild the header exactly the
-     * way this whole feature exists to prevent.
-     * `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`.
-     */
-    hasEverBeenMultiMember?: Accessor<boolean>;
-    /**
      * The `ViewModel` instance the leaf's currently-mounted `Block` owns, or
      * `null` in the brief window between an old stack member's `Block`
      * unmounting and the new one's mounting. Pushed by `block.tsx` itself

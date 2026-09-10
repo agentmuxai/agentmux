@@ -3,6 +3,7 @@
 
 // Agent widget styling - living document interface for agent monitoring
 
+@use "../../mixins.scss" as mixins;
 @use "styles/document-nodes";
 @use "styles/composer-strip";
 @use "styles/slash";
@@ -57,6 +58,28 @@
     // now position: absolute (out of flex flow) rather than a flex child —
     // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md.
     position: relative;
+
+    // AgentPaneChrome (agent-view.tsx) renders BlockFrame_Header as a
+    // direct child here — reusing the SAME component, but OUTSIDE the
+    // `.block.block-frame-default .block-frame-default-inner` ancestor
+    // chain block.scss's own `.block-frame-default-header` rule requires
+    // to match at all. Without this, the header rendered as unstyled,
+    // vertically-stacked block-level divs instead of a flex row (found
+    // live testing this PR — the header text/icons were "mangled," each
+    // on its own line). Applies the IDENTICAL ruleset via the shared
+    // mixin (frontend/app/mixins.scss) rather than copy-pasting it, so a
+    // future header tweak can't drift between the two call sites. `>` (not
+    // a bare descendant combinator) because this must be a direct child —
+    // ErrorBoundary (block.tsx's wrapping pattern, mirrored in
+    // AgentPaneChrome) renders no DOM element of its own.
+    > .block-frame-default-header {
+        @include mixins.block-frame-default-header-layout();
+        flex-shrink: 0; // a normal-flow row in this flex column now, not
+        // absolutely/flex-positioned by a parent that already constrained
+        // its height the way .block-frame-default-inner did — pin it to
+        // its own content height so it can't be stretched or compressed
+        // by .agent-pane-stack's flex-column sizing.
+    }
 }
 
 .agent-pane-stack-content {

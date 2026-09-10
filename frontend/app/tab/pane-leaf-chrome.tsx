@@ -68,9 +68,31 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
     const effectiveViewType = createMemo(() => resolveEffectiveViewType(activeBlockData()?.meta?.view ?? ""));
 
-    const hoisted = createMemo(
-        () => (nodeModel.hasEverBeenMultiMember?.() ?? false) && effectiveViewType() === "agent"
-    );
+    // Hoist for EVERY agent pane, not just ones whose stack has already
+    // gone multi-member. An earlier version gated this on
+    // `NodeModel.hasEverBeenMultiMember` to keep never-stacked panes on a
+    // byte-for-byte passthrough — but that was a catch-22, found live:
+    // AgentPaneChrome owns the tab strip, the tab strip owns the "+"
+    // button, and "+" is the only way to reach a 2nd stack member. Gated
+    // that way, a single-member pane rendered no strip and therefore no
+    // "+", so `hasEverBeenMultiMember` could never become true and the
+    // whole feature was unreachable. The strip's own visibility rules
+    // (`shouldShowTabStrip` — hidden on a fresh picker pane, "+"-only for
+    // one live conversation, pills once there are 2+) still live inside
+    // chrome and are unchanged; this only decides whether chrome EXISTS.
+    //
+    // Latched for the same reason the ViewModel below is: `effectiveViewType()`
+    // reads the ACTIVE member's block meta, which is briefly undefined
+    // while a newly-activated member's data loads, so an unlatched read
+    // would blip false->true on a switch and remount chrome — the exact
+    // flash this file exists to prevent.
+    let latchedHoisted = false;
+    const hoisted = createMemo(() => {
+        if (!latchedHoisted && effectiveViewType() === "agent") {
+            latchedHoisted = true;
+        }
+        return latchedHoisted;
+    });
 
     // ReAgent P1, confirmed by an empirical repro before trusting it:
     // `NodeModel.activeViewModel()` genuinely blips through `null` on

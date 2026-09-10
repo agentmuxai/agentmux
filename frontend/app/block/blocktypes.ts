@@ -13,10 +13,6 @@ export interface BlockNodeModel {
     innerRect?: Accessor<{ width: string; height: string }>;
     onClose?: () => void;
     focusNode: () => void;
-    /** See the real `NodeModel.hasEverBeenMultiMember`'s doc comment
-     *  (frontend/layout/lib/types.ts) — this is the same field, narrowed to
-     *  this leaner interface for `ViewModel` constructors. */
-    hasEverBeenMultiMember?: Accessor<boolean>;
 }
 
 export type FullBlockProps = {
