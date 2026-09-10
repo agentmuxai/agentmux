@@ -1460,7 +1460,20 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        the MCP equivalents) — those stay channel-scoped until Phase 3/6
 ///        promotes them; adding them here now, unpaired with a live writer,
 ///        would be schema for a phase that hasn't shipped.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 6;
+/// v7: partial UNIQUE indexes on `db_skills(name, skill_type)` and
+///        `db_mcp_servers(name)`, each `WHERE is_global = 1` — global rows
+///        only; two different owners' private rows sharing a name is still
+///        fine. Closes a real race in
+///        `m0031_carry_skills_and_mcp_servers_to_identity_store`: two
+///        channels' migrations can run concurrently (multiple AgentMux
+///        instances is an explicitly supported scenario), both read "no
+///        matching global row yet" before either has inserted, and both
+///        proceed to insert under different ids — the promised first-wins
+///        cross-channel dedup silently fails without a DB-level constraint
+///        to arbitrate the race (Codex P1, PR #3181). The migration's
+///        insert now handles the resulting `UNIQUE constraint failed` by
+///        re-querying for whichever row actually won.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 7;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1707,6 +1720,12 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             updated_at  INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ids_skills_is_global ON db_skills(is_global);
+        -- v7: see this constant's v7 doc comment — arbitrates the
+        -- concurrent-carry race at the database level, since an
+        -- application-level check-then-insert can't be atomic across two
+        -- separate processes/connections.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_skills_global_name_type
+            ON db_skills(name, skill_type) WHERE is_global = 1;
 
         CREATE TABLE IF NOT EXISTS db_mcp_servers (
             id          TEXT PRIMARY KEY,
@@ -1717,7 +1736,9 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at  INTEGER NOT NULL DEFAULT 0,
             updated_at  INTEGER NOT NULL DEFAULT 0
         );
-        CREATE INDEX IF NOT EXISTS idx_ids_mcp_servers_is_global ON db_mcp_servers(is_global);",
+        CREATE INDEX IF NOT EXISTS idx_ids_mcp_servers_is_global ON db_mcp_servers(is_global);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_ids_mcp_servers_global_name
+            ON db_mcp_servers(name) WHERE is_global = 1;",
     )?;
 
     // Seed the blank Bundle singleton — same fixed id as objects.db/store.db
