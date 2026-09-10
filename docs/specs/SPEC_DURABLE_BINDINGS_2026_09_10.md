@@ -1,9 +1,11 @@
 # Spec: Durable Bindings
 
 **Status:** active. Phase 1 landed (#3175). Both §8 decisions are now made —
-identity store (item 1), agent identity resolves through the registry rather
-than a promoted `db_agents` (item 2) — see §8 for the recorded rationale.
-Phase 2 in progress.
+identity store (item 1); item 2 keeps `db_agents` unpromoted, resolving agent
+identity as local-`db_agents`-OR-registry rather than registry-only (revised
+from an initial registry-only framing that Codex correctly flagged as
+rejecting real, currently-bindable agents — PR #3179) — see §8 for the
+recorded rationale. Phase 2 in progress.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
