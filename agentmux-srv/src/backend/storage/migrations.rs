@@ -341,7 +341,23 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `m0029` runs later in the same upgrade pass and correctly drops
 ///        what the rename just produced — no special-casing needed, and no
 ///        data is stranded under the old name.
-pub const OBJECT_SCHEMA_VERSION: i64 = 32;
+///   v33 — `db_agent_project_instructions`: what each agent was last observed
+///        to read as project instructions from its working directory, keyed
+///        `(agent_id, path)`. Phase 3 of
+///        `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`.
+///
+///        Records a content hash and an observation time, never the content:
+///        this is a tracking table, not a mirror. The distinction from
+///        `db_agent_native_memory` above is deliberate — that one stores
+///        content because it is a durable copy of files AgentMux may have to
+///        serve when the originals are unreachable, whereas these files
+///        belong to the repository, are always readable from it, and are
+///        never written by AgentMux. Storing their content would create a
+///        second copy of somebody else's file with no one to keep it honest.
+///
+///        Purely additive: nothing reads it at launch, and an agent with no
+///        row simply has no prior observation to compare against.
+pub const OBJECT_SCHEMA_VERSION: i64 = 33;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -798,6 +814,23 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             last_seen_path     TEXT NOT NULL DEFAULT '',
             last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, filename)
+        );
+
+        -- v33: what each agent was last observed to READ as project
+        -- instructions. Hash and timestamp only, never content — these files
+        -- belong to the repository and are always readable from it, unlike
+        -- db_agent_native_memory above, which mirrors content precisely
+        -- because the originals can become unreachable. See
+        -- SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md Phase 3.
+        CREATE TABLE IF NOT EXISTS db_agent_project_instructions (
+            agent_id      TEXT NOT NULL,
+            path          TEXT NOT NULL,
+            content_hash  TEXT NOT NULL DEFAULT '',
+            size_bytes    INTEGER NOT NULL DEFAULT 0,
+            owner         TEXT NOT NULL DEFAULT 'foreign',
+            existed       INTEGER NOT NULL DEFAULT 0,
+            observed_at   INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, path)
         );
 
         -- v24: append-only version history for native memory content — see
