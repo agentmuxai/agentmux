@@ -402,10 +402,43 @@ fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppSt
                     &agent.provider,
                     &work_dir,
                 );
+
+                // Compare against what was recorded at the last launch, so a
+                // repository file that changed underneath is visible rather
+                // than merely present. Observations are written at
+                // `agent.open` (`observe_project_instructions`) — this RPC
+                // stays a pure read, which is why a file edited since the last
+                // launch reports `modified` every time it is called until the
+                // agent is next opened.
+                let previous = state
+                    .wstore
+                    .project_instructions_list(&agent.id)
+                    .unwrap_or_default();
+                let enriched: Vec<serde_json::Value> = files
+                    .iter()
+                    .map(|f| {
+                        let prev = previous.iter().find(|p| p.path == f.path);
+                        let change = crate::backend::storage::project_instructions::classify_change(
+                            prev,
+                            f.exists,
+                            &f.content_hash,
+                        );
+                        let mut v = serde_json::to_value(f).unwrap_or_default();
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("change".to_string(), json!(change));
+                            obj.insert(
+                                "last_observed_at".to_string(),
+                                json!(prev.map(|p| p.observed_at)),
+                            );
+                        }
+                        v
+                    })
+                    .collect();
+
                 Ok(Some(json!({
                     "provider": agent.provider,
                     "working_directory": work_dir,
-                    "files": files,
+                    "files": enriched,
                 })))
             })
         })
@@ -3337,6 +3370,73 @@ mod export_import_for_agent_tests {
             issues.iter().any(|i| i["field"] == "mcp_servers"
                 && i["message"].as_str().unwrap_or("").contains("broken")),
             "the issue must name the server: {issues:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_foreign_instruction_file_changing_between_launches_is_visible() {
+        // The point of tracking: a repository's own CLAUDE.md can be the
+        // majority of what an agent is told, and until now nothing recorded
+        // enough about one to notice it had changed.
+        use crate::backend::storage::project_instructions::InstructionChange;
+
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+        let agent = state.wstore.agent_def_get("agent-1").unwrap().unwrap();
+
+        std::fs::write(work.path().join("CLAUDE.md"), "original rules").unwrap();
+
+        // First launch: nothing recorded yet.
+        let first = crate::backend::project_instructions::resolve_project_instructions(
+            &agent.provider,
+            work.path().to_str().unwrap(),
+        );
+        let claude = first.iter().find(|f| f.path == "CLAUDE.md").unwrap();
+        assert_eq!(
+            crate::backend::storage::project_instructions::classify_change(
+                None, claude.exists, &claude.content_hash
+            ),
+            InstructionChange::FirstSeen
+        );
+        crate::server::app_api::agent_open::observe_project_instructions(
+            &state.wstore,
+            &agent,
+            work.path().to_str().unwrap(),
+        );
+
+        // The repository changes underneath.
+        std::fs::write(work.path().join("CLAUDE.md"), "somebody edited this").unwrap();
+
+        let second = crate::backend::project_instructions::resolve_project_instructions(
+            &agent.provider,
+            work.path().to_str().unwrap(),
+        );
+        let claude = second.iter().find(|f| f.path == "CLAUDE.md").unwrap();
+        let recorded = state.wstore.project_instructions_list("agent-1").unwrap();
+        let prev = recorded.iter().find(|p| p.path == "CLAUDE.md");
+        assert_eq!(
+            crate::backend::storage::project_instructions::classify_change(
+                prev, claude.exists, &claude.content_hash
+            ),
+            InstructionChange::Modified,
+            "an edit between launches must be detectable"
+        );
+
+        // Observing again settles it.
+        crate::server::app_api::agent_open::observe_project_instructions(
+            &state.wstore,
+            &agent,
+            work.path().to_str().unwrap(),
+        );
+        let recorded = state.wstore.project_instructions_list("agent-1").unwrap();
+        let prev = recorded.iter().find(|p| p.path == "CLAUDE.md");
+        assert_eq!(
+            crate::backend::storage::project_instructions::classify_change(
+                prev, claude.exists, &claude.content_hash
+            ),
+            InstructionChange::Unchanged
         );
     }
 

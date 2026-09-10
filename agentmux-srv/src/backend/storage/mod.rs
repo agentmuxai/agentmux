@@ -24,6 +24,7 @@ pub mod filestore;
 pub mod history;
 pub mod identities;
 pub mod managed;
+pub mod project_instructions;
 pub mod mcp_servers;
 pub mod bundles;
 pub mod migrations;
