@@ -1,0 +1,296 @@
+# Spec: Durable Bindings
+
+**Status:** proposed — no implementation yet. Decision needed on §5.
+**Date:** 2026-09-10
+**Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
+**Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
+found the first instance of this and blocked on it
+**Related:** #3148 (tracking), #3168 (drafted, blocked by this),
+`SPEC_VERSION_ISOLATION_2026_06_01.md` §5 Phase 2 (the scoping this collides
+with), `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` (the store this proposes to
+use), `SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md` (the primitives affected)
+
+---
+
+## 1. The requirement
+
+`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §1 states the goal as
+"tight control over anything the agent uses as instructions and memory,
+including portability" — for every byte reaching an agent, be able to answer
+*where did this come from*, *what is in it now*, and *can I move it to another
+machine*.
+
+That spec's §3.4a found one thing that fails the test: a bundle's skills and MCP
+servers do not survive a version upgrade. Investigating the fix turned up that
+§3.4a is not one bug. **It is one shape, appearing six times**, and fixing only
+the instance §3.4a names would leave the other five and produce a fix that does
+not work end to end — the exact failure reagentx caught on PR #2632 (§3.3).
+
+## 2. What exists today
+
+Verified against `94d9c6c1c` and against live data in `~/.agentmux`. Descriptive
+— no proposals in this section.
+
+### 2.1 Three stores, two scopes
+
+| Store | Path | Scope |
+|---|---|---|
+| Channel store | `<data_dir>/db/objects.db` | **per channel AND per version** |
+| Shared store | `~/.agentmux/shared/store.db` | host-global, one file |
+| Identity store | `~/.agentmux/shared/identity-store.db` | host-global, one file |
+
+The per-version half is easy to miss. `DataPaths::resolve_internal`
+(`agentmux-common/src/data_paths.rs`) puts `data_dir` under
+`channels/<ch>/versions/<v>/` for Installed and Portable runtimes, per
+`SPEC_VERSION_ISOLATION_2026_06_01.md` §5 Phase 2, and **nothing carries the
+previous version's `objects.db` forward**. `config/` and `agents/` are
+deliberately hoisted to channel level so settings and agent definitions survive
+upgrades; `data/` is not.
+
+Confirmed on disk: `channels/stable/versions/*/data/db/objects.db` is a separate
+file per release — five of them on the machine this was written on, plus 25 more
+across `local-*` and dev channels.
+
+### 2.2 What lives where
+
+Nine tables are duplicated into all three stores for durability
+(`db_bundles`, `db_accounts`, `db_agent_credentials`,
+`db_agent_identity_links`, `db_agent_native_memory`,
+`db_agent_native_memory_versions`, `db_cron_jobs`, `db_drone_definitions`,
+`db_muxbus_credentials`). Agent definitions are durable by a different
+mechanism — the global registry under `~/.agentmux/shared/agents`.
+
+These exist **only** in `objects.db`, and so exist only for one channel at one
+version:
+
+| Table | What it holds | Durable? |
+|---|---|---|
+| `db_skills` | the skill catalog | **no** |
+| `db_mcp_servers` | the MCP server catalog | **no** |
+| `db_bundle_skills_ref` | bundle → skill | **no** |
+| `db_bundle_mcp_ref` | bundle → MCP server | **no** |
+| `db_agent_skills_ref` | agent → skill | **no** |
+| `db_agent_mcp_ref` | agent → MCP server | **no** |
+| `db_agent_project_instructions` | observed instruction hashes | no — but see §6 |
+
+Everything those six rows bind is durable. Bundles are host-global. Agents are
+host-global. Only the bindings, and the catalogs they point into, are not.
+
+### 2.3 The identity of a skill is not stable
+
+This is the finding that determines the shape of the fix, and it is stronger
+than "bindings are lost."
+
+`m0015_seed_starter_skills` / `m0016_seed_starter_mcp_servers` seed the starter
+catalog per store, minting fresh UUIDs each time. Two versions of the same
+channel therefore hold the same six skills under six *different* ids:
+
+```
+channels/stable/versions/0.55.10/…/objects.db
+  84fe8721-e509-4f20-927f-8e05971ef197 | Systematic Debugging
+channels/stable/versions/0.55.32/…/objects.db
+  455d8994-9d8c-4e2b-aeb4-d4307afe286d | Systematic Debugging
+```
+
+So a ref row carried forward verbatim from 0.55.10 would dangle in 0.55.32: the
+skill it names does not exist there, and the skill that *is* "Systematic
+Debugging" has an id nothing points at. **Relocating the ref tables alone would
+not work.** A binding is only as durable as the identity it references.
+
+Across all 30 stores on this machine: 168 skill rows, **6 distinct names**, 28
+copies of each — i.e. every row is a re-seeded starter and nothing is
+user-created.
+
+## 3. The gaps
+
+### 3.1 Bindings do not survive an upgrade
+
+`bundle_skill_bind` writes one row into the channel store (`managed_bind_bundle`,
+`storage/managed.rs`), consulting the shared store only to confirm the bundle
+exists. It never writes back to `db_bundles`' inline columns. The same holds for
+`bundle_mcp_bind`, `agent_skill_bind` and `agent_mcp_bind`.
+
+So a skill bound under one channel-and-version is invisible to every other,
+including the next release on the same channel. Since #3152/#3153 made ABF
+export read the ref tables, this now affects export as well as launch.
+
+### 3.2 A user-created skill or MCP server does not survive at all
+
+Weaker-sounding than §3.1 and worse in practice. The binding at least has a
+row somewhere; a skill created in 0.55.10 has no representation in 0.55.32's
+catalog. There is no copy, no mirror, and no migration that looks backward.
+
+Latent today: zero user-created skills exist on this machine (§2.3). It stops
+being latent the first time anyone uses the feature the Armory advertises.
+
+### 3.3 Fixing one layer does not fix the bug — precedent
+
+This exact mistake has already been made once and caught in review.
+`SHARED_STORE_SCHEMA_VERSION` v2's own doc comment records it:
+
+> the link resolves via this store now, but the account row it points to could
+> still only exist in the per-channel-isolatable `id_store`, which is empty on a
+> fresh channel — the reported bug wasn't actually fixed end to end without this
+> (reagentx P0 review on PR #2632)
+
+Agent→account links had been promoted without promoting `db_accounts`. Skills
+and MCP servers are the same shape with the same trap, which is why §5 orders
+catalogs before refs rather than treating them as independent.
+
+### 3.4 The bundle→component case additionally blocks #3168
+
+`m0030` seeds a store's ref tables from `db_bundles`' inline `skills` /
+`mcp_servers` columns at that store's first boot, and nothing else ever does.
+Those columns are therefore **the durable representation** of a bundle's
+components, and the per-store ref tables are a projection of them — the reverse
+of what Phase 0b assumed. Dropping the columns (#3168) removes the seeding
+source for every future release for every user.
+
+Once §5 lands, the columns genuinely become redundant and #3168 can proceed.
+
+### 3.5 The agent→bundle binding has the same problem, one layer up
+
+`DefinitionRecordV1` does not carry `memory_id`
+(`storage/def_registry_mirror.rs`). The bundle row is global and the agent
+record is global, but the binding between them is channel-local: a cross-channel
+reopen starts unbound, and #3147's export warning cannot fire for a bundle
+exported from a channel other than the one its agent was created in — precisely
+the portability case. Already tracked on #3148; named here because it is the
+same shape and should be fixed by the same principle.
+
+## 4. The invariant
+
+Generalizing `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §5.3, which
+states the same idea for one agent's native memory:
+
+> **A binding, and everything it points at, has exactly one durable home,
+> resolvable from a stable id alone, and unaffected by the channel or the
+> version under which the binding was made.**
+
+Two clauses, both load-bearing. "And everything it points at" is §3.3's lesson.
+"Resolvable from a stable id alone" is what §2.3 currently violates.
+
+Corollary, worth stating because it is the rule that would have prevented this:
+**a table in `objects.db` may reference a global row, but no global row may
+depend on a table in `objects.db` to be meaningful.** A bundle whose components
+live only in one version's `objects.db` is exactly that dependency inverted.
+
+## 5. Design
+
+### 5.1 Decision: promote the catalogs and the bindings to the identity store
+
+Six tables move from `run_object_schema` to `run_identity_store_schema` and
+become authoritative there: `db_skills`, `db_mcp_servers`,
+`db_bundle_skills_ref`, `db_bundle_mcp_ref`, `db_agent_skills_ref`,
+`db_agent_mcp_ref`.
+
+Authoritative, **not** the read-through fallback-mirror pattern `db_accounts`
+uses. That pattern exists for one documented reason — Armory's disposable
+delete-account testing flow needs genuine per-channel isolation
+(`SHARED_STORE_SCHEMA_VERSION` v2). Skills and MCP servers have no such need and
+the opposite intent: `ARCHITECTURE_ARMORY_2026_07_20.md` scopes the Armory to
+"shared/reusable resources only," and
+`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md` removed the
+per-agent Identities rail for that reason. A skill that is invisible from the
+next release is not a reusable resource.
+
+The identity store rather than the shared store because it is the one described
+as "permanently global" (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`) and is not
+subject to the channel-isolation defaults that
+`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` applies elsewhere.
+
+### 5.2 Options rejected
+
+**Stable ids for seeded skills.** Derive the starter UUIDs deterministically so
+§2.3's divergence disappears. Cheap, and worth doing anyway as a complement —
+but it fixes only the six starters. A user-created skill still vanishes on
+upgrade, so it does not satisfy §4. Not a solution on its own.
+
+**Carry `objects.db` forward on upgrade.** Directly contradicts
+`SPEC_VERSION_ISOLATION_2026_06_01.md` §5 Phase 2, which introduced per-version
+data dirs so two concurrent releases could not share SQLite DBs. It would also
+carry forward everything, including rows that are legitimately per-version
+(`db_background_tasks`, `db_drone_runs`, `db_agent_history`). Rejected: it
+un-fixes a shipped fix to work around a scoping error in six tables.
+
+**Leave the inline columns as the durable representation.** i.e. accept §3.4,
+close #3168, and keep writing both. This is the status quo and it is what Phase
+0b already rejected on its own terms: two places to write one fact, with nothing
+keeping them in sync, is the §3.4 divergence that started all of this. It also
+does not help §3.1 (binds still do not propagate) or §3.2 (catalogs still do not
+survive) — it only stops the bleeding for bundle components specifically.
+
+### 5.3 Migration
+
+Ordering is the whole design, per §3.3: **catalogs first, then refs, then the
+column retirement.**
+
+Deduplication is the interesting part. 168 skill rows across 30 stores collapse
+to 6, and the same shape applies to MCP servers. Rows must be matched on
+something other than id, since §2.3 establishes ids are not comparable across
+stores — name plus `skill_type` for skills, and the config object for MCP
+servers, matching the multiset-consume identity `bundle_mcp_bind_inline_entries`
+already uses (PR #3152). Ref rows must be rewritten to the surviving id as part
+of the same migration, not left to dangle.
+
+Doing this now is close to free: nothing on this machine is user-created, so the
+dedup is provably lossless here. That will not stay true.
+
+## 6. Non-goals
+
+**`db_agent_project_instructions` stays per-store.** It is an observation cache
+— a content hash and a timestamp, deliberately never content
+(`OBJECT_SCHEMA_VERSION` v33). Losing it on upgrade costs one re-observation at
+the next launch and nothing else. It fails §4's letter and not its intent: it
+does not *point at* anything, so there is nothing to dangle.
+
+**Genuinely per-version tables stay put.** `db_background_tasks`,
+`db_drone_runs`, `db_agent_history`, `db_agent_content`, and the LAN/jekt key
+tables are either runtime state or keyed to a running instance.
+
+**No UI change.** The Armory already presents skills and MCP servers as shared
+resources; this makes the storage match what the UI already claims.
+
+## 7. Phases
+
+**Phase 1 — stable starter ids.** Deterministic UUIDs for seeded skills and MCP
+servers. Independently shippable, independently useful, and it shrinks Phase 2's
+dedup to the user-created case. Does not satisfy §4 alone (§5.2).
+
+**Phase 2 — promote the catalogs.** `db_skills` and `db_mcp_servers` to the
+identity store, with the dedup migration of §5.3. The largest single step and
+the one with real data movement.
+
+**Phase 3 — promote the four ref tables.** Only after Phase 2, per §3.3. Ref
+rows rewritten to surviving catalog ids.
+
+**Phase 4 — retire the inline bundle columns.** #3168 rebased; its mechanical
+work (schema/SQL/frontend removal, the `m0031` guard shape, the `map_memory_row`
+pin test) is already written and reviewed.
+
+**Phase 5 — `memory_id` into `DefinitionRecordV1`** (§3.5). Independent of 1–4;
+sequenced last only because it is the smallest.
+
+**Phase 6 — memory location invariant.** The former portability Phase 4. Shares
+§4's invariant but moves files rather than rows, so it keeps its own spec.
+
+## 8. Open decisions
+
+1. **Identity store or shared store?** §5.1 argues identity store. The shared
+   store already holds `db_bundles`, so putting a bundle's components beside it
+   has a symmetry argument. Against: the shared store is the one with
+   channel-isolation defaults applied elsewhere, and the identity store is the
+   one explicitly described as permanently global.
+
+2. **Should `db_agents` follow?** Agent definitions are durable via the global
+   registry rather than via a store, so agent→skill refs would live in a
+   different place from the agents they bind. That is already true of
+   bundle→skill refs today and has not caused a problem, but it is worth
+   deciding deliberately rather than by omission.
+
+3. **What happens to rows in the 30 existing `objects.db` files after Phase 2?**
+   Dropping them repeats #3168's mistake if any store has not yet migrated.
+   Leaving them risks a future reader picking the stale copy. Suggest: leave
+   them, stop declaring them in `run_object_schema`, and retire them in a later
+   release once the promotion has demonstrably run everywhere — the same
+   two-release shape #3168 needed and did not get.

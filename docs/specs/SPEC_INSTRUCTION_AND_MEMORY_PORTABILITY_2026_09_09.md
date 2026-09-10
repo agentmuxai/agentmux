@@ -288,6 +288,12 @@ and a version. That is not a table move — the ref tables carry foreign keys to
 §5.3's memory-location invariant, and it deserves the same treatment: its own
 spec. #3168 is drafted pending that decision.
 
+That spec is `SPEC_DURABLE_BINDINGS_2026_09_10.md`. Investigating it found this
+is not one bug but one shape appearing six times — the two catalogs
+(`db_skills`, `db_mcp_servers`) are scoped the same way as the four binding
+tables, and starter ids are re-minted per store, so relocating the ref tables
+alone would leave them pointing at ids that do not exist.
+
 ### 3.5 History files are in the archive but not in the manifest
 
 `export_for_agent_with_history` pushes transcripts into `export.files`
