@@ -45,6 +45,8 @@ import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
+import { ErrorBoundary } from "@/element/errorboundary";
+import { BlockFrame_Header } from "@/app/block/blockframe";
 import {
     closeBlockInStack,
     getLayoutModelForStaticTab,
@@ -56,7 +58,7 @@ import { findNode } from "@/layout/lib/layoutNode";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { sleep } from "@/util/util";
+import { createSignalAtom, sleep } from "@/util/util";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
@@ -375,6 +377,42 @@ export const AgentPaneChrome = (props: {
     const agentId = () => activeBlockData()?.meta?.["agentId"];
     const isHistoryTab = () => !!activeBlockData()?.meta?.[HISTORY_TAB_FOR_META_KEY];
 
+    // Codex P1 on this PR: noHeader (agent-model.ts) suppresses
+    // BlockFrame's own inline header once hoisted, but nothing was
+    // rendering a REPLACEMENT — losing the pane's title, Stash, and
+    // minimize/magnify/close controls permanently the moment a leaf's
+    // stack first went multi-member. BlockFrame_Header (exported from
+    // blockframe.tsx specifically for this — see PR #3134's own doc
+    // comments) is reused directly here rather than reimplemented, reading
+    // the reactive `activeBlockId` accessor above instead of a frozen
+    // `nodeModel.blockId`. `changeConnModalAtom`/`connBtnRef` are inert
+    // stand-ins, not wired to any real modal state: AgentViewModel never
+    // sets `manageConnection`, so BlockFrame_Header's own connection-button
+    // branch never renders for an agent pane regardless.
+    const changeConnModalAtom = createSignalAtom(false);
+    const connBtnRef: { current: HTMLDivElement | null } = { current: null };
+    const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
+    const headerElem = (
+        <BlockFrame_Header
+            nodeModel={nodeModel}
+            viewModel={activeViewModelOrUndefined()}
+            preview={false}
+            blockId={activeBlockId}
+            connBtnRef={connBtnRef}
+            changeConnModalAtom={changeConnModalAtom}
+        />
+    );
+    const headerElemNoView = (
+        <BlockFrame_Header
+            nodeModel={nodeModel}
+            viewModel={null}
+            preview={false}
+            blockId={activeBlockId}
+            connBtnRef={connBtnRef}
+            changeConnModalAtom={changeConnModalAtom}
+        />
+    );
+
     // In-pane tabs — rendered here (not inside AgentBlockContent) so the
     // strip stays visible whether the active member is a launched
     // conversation OR a blank/picker tab (AgentPicker, no agentId yet).
@@ -675,7 +713,28 @@ export const AgentPaneChrome = (props: {
         // to float over the right box. See agent-view.scss's own comments
         // on `.agent-pane-stack`/`.agent-pane-stack-content` for the full
         // positioning chain this depends on.
-        <div class="agent-pane-stack">
+        //
+        // data-blockid={activeBlockId()} — codex P1 on this PR: the CEF
+        // browser API (agentmux-cef/src/browser_api/routes.rs) resolves an
+        // agent's own pane for UIQuery/UIClick/screenshot-clip via a plain
+        // `document.querySelector('[data-blockid="<id>"]')`, then scopes to
+        // THAT element's subtree. Only the nested, switch-scoped <Block>
+        // (content, below) carries this attribute otherwise — chrome
+        // (tab strip, header) lives outside that subtree once hoisted, so
+        // an agent's own self-targeting UIQuery/UIClick could no longer
+        // find its own tab strip or header. Duplicating the same attribute
+        // (same value, when this pane IS the active member) on this outer,
+        // persistent root fixes it: `querySelector` returns the FIRST match
+        // in document order, and this element precedes the nested one, so
+        // it resolves to the wider root that actually contains everything.
+        <div class="agent-pane-stack" data-blockid={activeBlockId()}>
+            {/* Replacement for BlockFrame's own inline header, suppressed
+                by AgentViewModel.noHeader once hoisted — see that field's
+                own doc comment and headerElem's, above. Same
+                ErrorBoundary-isolation pattern BlockFrame_Default_Component
+                itself uses (blockframe.tsx) so a broken header computation
+                blanks only the header, not the whole pane. */}
+            <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>
             {/* Progress bar's own overlay strip — floats above the tab
                 strip, never reserving layout space (SPEC_AGENT_PANE_
                 PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md). Empty div; its
