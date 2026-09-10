@@ -511,6 +511,11 @@ impl Store {
     }
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
+    ///
+    /// No project-instruction cleanup here, unlike `agent_def_delete`: this
+    /// removes template rows, and a template is never launched — observations
+    /// are recorded by `agent.open`, so a template has none to forget (Codex,
+    /// PR #3162).
     pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
         // Consolidation Phase 3b (PR 2): only the template rows go. Every
         // `is_template = 0` row — a user clone OR an agent launched from a
@@ -1256,6 +1261,20 @@ impl Store {
             conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?
         };
         if rows > 0 {
+            // Project-instruction observations are keyed by agent id with no
+            // foreign key (they record files this agent READS, which is not a
+            // relationship SQLite can enforce), so nothing else would remove
+            // them and a future agent reusing this id would inherit somebody
+            // else's baseline — every file reporting `unchanged` against
+            // observations that were never made about it. Cleaned up here,
+            // beside the row it belongs to, rather than left to each caller
+            // (ReAgent, PR #3162).
+            if let Err(e) = self.project_instructions_forget(id) {
+                tracing::warn!(
+                    agent_def_id = %id, error = %e,
+                    "agent_def_delete: project-instruction observations left behind"
+                );
+            }
             if let Some(reg) = self.registry() {
                 if let Err(e) = reg.hard_delete(id) {
                     tracing::warn!(
