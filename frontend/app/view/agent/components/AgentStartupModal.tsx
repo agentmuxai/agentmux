@@ -32,7 +32,7 @@ interface AgentStartupModalProps {
 }
 
 export const AgentStartupModal = (props: AgentStartupModalProps): JSX.Element => {
-    const [bundles] = createResource(() => RpcApi.ListMemoriesCommand(TabRpcClient, {}));
+    const [bundles] = createResource(() => RpcApi.ListBundlesCommand(TabRpcClient, {}));
     const [selectedId, setSelectedId] = createSignal<string | null>(null);
     const [loaded, setLoaded] = createSignal(false);
     const [saving, setSaving] = createSignal(false);
@@ -106,7 +106,7 @@ export const AgentStartupModal = (props: AgentStartupModalProps): JSX.Element =>
                                 class="agent-primitive-modal-link-btn"
                                 onClick={() => void openOrFocusPaneByView("armory")}
                             >
-                                Armory → ABF
+                                Armory → Bundles
                             </button>
                             . Changing "{bundle().name}" there updates every agent using
                             it, including this one.

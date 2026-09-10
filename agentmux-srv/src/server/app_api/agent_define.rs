@@ -304,7 +304,7 @@ mod agent_define_core_bundle_provisioning_tests {
 
         let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
         assert!(!def.memory_id.is_empty(), "fresh agent.define insert must bind a bundle");
-        let bundle = state.wstore.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+        let bundle = state.wstore.bundle_get(&def.memory_id).unwrap().unwrap();
         assert!(!bundle.is_blank);
         assert_eq!(bundle.provider, "gemini");
         assert_eq!(bundle.model, "google", "vendor defaults from gemini's supported_vendors[0]");
@@ -320,7 +320,7 @@ mod agent_define_core_bundle_provisioning_tests {
             "if_exists": "skip",
         }))).await.unwrap();
         assert_eq!(first.action, "created");
-        let bundles_after_first = state.wstore.bundle_memory_list().unwrap().len();
+        let bundles_after_first = state.wstore.bundle_list().unwrap().len();
 
         // Same name again, if_exists=skip — must resolve to the SAME
         // definition without creating (and leaking) a second bundle. The
@@ -335,7 +335,7 @@ mod agent_define_core_bundle_provisioning_tests {
         }))).await.unwrap();
         assert_eq!(second.action, "skipped");
         assert_eq!(second.definition_id, first.definition_id);
-        let bundles_after_second = state.wstore.bundle_memory_list().unwrap().len();
+        let bundles_after_second = state.wstore.bundle_list().unwrap().len();
         assert_eq!(bundles_after_first, bundles_after_second, "skip path must not leak an extra bundle");
     }
 }

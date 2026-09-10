@@ -163,7 +163,7 @@ jobs:
         run: |
           WIN_TAG="cef-windows-x86_64-148.0.7778.180"
           LINUX_TAG="cef-linux-x86_64-148.0.7778.180-codecs"
-          MACOS_TAG="cef-macos-arm64-148.23.23-codecs"
+          MACOS_TAG="cef-macos-arm64-148.23.25-codecs"
 
           # Chromium milestone = the leading dot-separated numeric segment
           # after the cef-<platform>-<arch>- prefix. Works across both
@@ -379,6 +379,12 @@ jobs:
   # ── Phase 4: Distribution channels — DISABLED 2026-08-12 ──────────────────
   # MS Store is uploaded manually; WinGet automation never worked (see header
   # comment above). Both job bodies kept for reference, fully commented out.
+  # WinGet identifier corrected to AgentMux.AI 2026-09-10 (distinct from the
+  # already-published MSIX/Store identity AgentMux.AgentMux — see
+  # docs/specs/SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) so this job is
+  # ready to uncomment once that spec's bootstrap PR merges into
+  # microsoft/winget-pkgs. Still commented out here: `wingetcreate update`
+  # requires the manifest to already exist, which it doesn't yet.
   # winget:
   #   name: Submit WinGet update
   #   needs: [verify, publish]
@@ -412,7 +418,7 @@ jobs:
   #           exit 1
   #         fi
   #         echo "WinGet installer URL: $INSTALLER_URL"
-  #         ./wingetcreate.exe update AgentMux.AgentMux \
+  #         ./wingetcreate.exe update AgentMux.AI \
   #           --version "${VERSION}" \
   #           --urls "$INSTALLER_URL" \
   #           --submit \

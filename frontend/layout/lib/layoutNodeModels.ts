@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignalAtom, fireAndForget } from "@/util/util";
+import { findNode } from "./layoutNode";
 import type { Properties as CSSProperties } from "csstype";
-import { createMemo, createRoot } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
@@ -65,6 +66,21 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     if (addlProps.hasOwnProperty(nodeid)) return addlProps[nodeid];
                     return undefined;
                 });
+                // Owner-checked the same way unregisterBlockComponentModel
+                // is (block-component-registry.ts) — see
+                // NodeModel.setActiveViewModel's own doc comment (types.ts).
+                let activeViewModelOwner: object | null = null;
+                const [activeViewModelSig, setActiveViewModelSig] = createSignal<ViewModel | null>(null);
+                const setActiveViewModel = (vm: ViewModel | null, owner: object) => {
+                    if (vm === null) {
+                        if (activeViewModelOwner !== owner) return; // stale cleanup — a newer mount already owns this
+                        activeViewModelOwner = null;
+                        setActiveViewModelSig(null);
+                        return;
+                    }
+                    activeViewModelOwner = owner;
+                    setActiveViewModelSig(() => vm);
+                };
                 model.nodeModelDisposers.set(nodeid, disposeThisNodeModel);
                 model.nodeModels.set(nodeid, {
                 additionalProps: addlPropsAtom,
@@ -88,6 +104,22 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                 }),
                 nodeId: nodeid,
                 blockId,
+                // Additive reactive companion to `blockId` above — see that
+                // field's own doc comment in types.ts for the full
+                // rationale. Re-finds this exact node fresh from current
+                // tree state on every read (never closes over the `node`
+                // param's possibly-stale `.data`), gated on
+                // `localTreeStateAtom()` so it recomputes on the same event
+                // `layoutStack.ts`'s mutators already fire for a switch.
+                // Falls back to the frozen `blockId` if the node has somehow
+                // vanished (leaf mid-close) rather than returning undefined.
+                activeBlockId: createMemo(() => {
+                    model.localTreeStateAtom();
+                    const current = findNode(model.treeState.rootNode, nodeid);
+                    return current?.data?.activeBlockId || current?.data?.blockId || blockId;
+                }),
+                activeViewModel: activeViewModelSig,
+                setActiveViewModel,
                 blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
                 isFocused: createMemo(() => {
                     const treeState = model.localTreeStateAtom();
@@ -195,14 +227,23 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
 
 /** The key `<Key each={leafs()} by={...}>` uses to identify a leaf's
  *  rendered subtree in the tile renderer (`TileLayout.{win32,linux,darwin}.tsx`).
- *  Ordinary leaves key on `node.id` alone, unchanged from before block
- *  stacks existed. A stacked leaf's key also incorporates `activeBlockId`,
- *  so switching the active member changes the key — which makes `<Key>`
- *  tear down and remount the leaf's subtree, giving the new active block a
- *  freshly-constructed `NodeModel`/`ViewModel` exactly the way every other
- *  blockId transition in this codebase already works (see layoutStack.ts's
- *  header comment for why a remount, not a reactive update, is correct
- *  here). Zero-cost / zero-behavior-change for every non-stacked leaf. */
+ *
+ *  STILL includes `activeBlockId` for a stacked leaf, same as before this
+ *  file started adding chrome-stability groundwork — reviewers (ReAgent,
+ *  Codex) on PR #3132 correctly caught that dropping `activeBlockId` from
+ *  this key here, alone, breaks the already-shipped in-pane tab-switch
+ *  feature: `TabContent`/`Block` render `nodeModel.blockId` as a plain,
+ *  frozen field with no remount boundary of their own
+ *  (`frontend/app/tab/tabcontent.tsx`, `frontend/app/block/block.tsx`), so
+ *  this outer, whole-leaf remount is CURRENTLY the only thing that ever
+ *  updates the displayed block after a switch. `NodeModel.activeBlockId`
+ *  (types.ts) exists as inert, additive groundwork — no production consumer
+ *  yet. Do not drop `activeBlockId` from this key until a narrower, inner
+ *  remount boundary scoped to just the view (`pane-leaf-chrome.tsx`,
+ *  `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`) lands in the SAME
+ *  deployable change as that removal — never as two separate PRs, since the
+ *  gap between them has no mechanism to update the displayed content at
+ *  all. */
 export function activeKeyFor(node: LayoutNode): string {
     return node.data?.activeBlockId ? `${node.id}:${node.data.activeBlockId}` : node.id;
 }

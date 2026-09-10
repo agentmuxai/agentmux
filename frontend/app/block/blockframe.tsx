@@ -27,7 +27,7 @@ import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
 import clsx from "clsx";
-import type { JSX } from "solid-js";
+import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { CopyButton } from "../element/copybutton";
 import { detectAgentColor, detectAgentFromEnv, detectAgentTextColor, getEffectiveTitle, isUsableFocusRingColor } from "./autotitle";
@@ -223,6 +223,13 @@ function EndIcons(props: {
     /** View key from `blockData.meta.view`, used to render a context-aware
      *  tooltip on the per-pane mic button (e.g. "Speak into this terminal"). */
     blockView?: string;
+    /** The currently active blockId, reactive — NOT `nodeModel.blockId`
+     *  (frozen for this component's mount lifetime, see NodeModel.blockId's
+     *  own doc comment). Every existing caller passes
+     *  `() => nodeModel.blockId`, a behavior-preserving trivial wrapper; a
+     *  hoisted pane-chrome caller can instead pass `nodeModel.activeBlockId`
+     *  to track a switch without remounting this component. */
+    blockId: Accessor<string>;
 }): JSX.Element {
     // createMemo so blockAtom reads inside endIconButtons() are tracked and
     // the button array re-evaluates when the agent loads/unloads.
@@ -262,7 +269,7 @@ function EndIcons(props: {
                 Terminal keeps the header mic unchanged. */}
             <Show when={props.viewModel?.voiceHandle && props.blockView !== "agent"}>
                 <MicButton
-                    blockId={props.nodeModel.blockId}
+                    blockId={props.blockId()}
                     handle={props.viewModel.voiceHandle!()}
                     paneTitle={
                         props.blockView === "term"
@@ -294,7 +301,7 @@ function EndIcons(props: {
                         disabled={magnifyDisabled()}
                     />
                 }>
-                    <FloatingMaximizeButton label={floatingLabel()!} blockId={props.nodeModel.blockId} />
+                    <FloatingMaximizeButton label={floatingLabel()!} blockId={props.blockId()} />
                 </Show>
             }>
                 <IconButton decl={{
@@ -309,8 +316,17 @@ function EndIcons(props: {
     );
 }
 
-function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error }): JSX.Element {
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", props.nodeModel.blockId));
+function BlockFrame_Header(
+    props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error; blockId: Accessor<string> }
+): JSX.Element {
+    // `getWaveObjectAtom`-in-a-memo, not `useWaveObjectValue`: the latter
+    // ref-counts through onCleanup tied to THIS component's mount, and never
+    // re-subscribes if `props.blockId()` later points at a different oref —
+    // exactly the leak a hoisted, switch-surviving chrome caller would hit.
+    // `getWaveObjectAtom` has no such lifecycle coupling; calling it fresh
+    // inside a memo that re-runs when blockId changes correctly re-points at
+    // live data with no leak (frontend/app/store/wos.ts).
+    const blockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", props.blockId()))());
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
     const preIconButton = util.useAtomValueSafe(props.viewModel?.preIconButton);
     const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
@@ -500,7 +516,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     <ViewNameEditor name={viewName()} onSave={(v) => void props.viewModel.setViewName(v)} />
                 </Show>
                 <Show when={showBlockIds}>
-                    <div class="block-frame-blockid">[{props.nodeModel.blockId.substring(0, 8)}]</div>
+                    <div class="block-frame-blockid">[{props.blockId().substring(0, 8)}]</div>
                 </Show>
             </div>
             <Show when={manageConnection}>
@@ -530,6 +546,7 @@ function BlockFrame_Header(props: BlockFrameProps & { changeConnModalAtom: util.
                     nodeModel={props.nodeModel}
                     onContextMenu={onContextMenu}
                     blockView={blockData()?.meta?.view}
+                    blockId={props.blockId}
                 />
             </div>
         </div>
@@ -855,11 +872,21 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         innerStyle = computeBgStyleFromMeta(customBg);
     }
     const previewElem = <div class="block-frame-preview">{viewIconElem}</div>;
+    // Trivial wrapper — behavior-preserving today. A hoisted pane-chrome
+    // caller (PR 3) will pass nodeModel.activeBlockId instead, to track a
+    // switch without this header remounting.
+    const headerBlockId: Accessor<string> = () => nodeModel.blockId;
     const headerElem = (
-        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} />
+        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} blockId={headerBlockId} />
     );
     const headerElemNoView = (
-        <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} viewModel={null} />
+        <BlockFrame_Header
+            {...props}
+            connBtnRef={connBtnRef}
+            changeConnModalAtom={changeConnModalAtom}
+            viewModel={null}
+            blockId={headerBlockId}
+        />
     );
 
     // Body right-click handler. `browserCtx` is only ever passed by the
@@ -1029,4 +1056,4 @@ function BlockFrame(props: BlockFrameProps): JSX.Element {
     );
 }
 
-export { BlockFrame, NumActiveConnColors };
+export { BlockFrame, BlockFrame_Header, NumActiveConnColors };

@@ -1,0 +1,535 @@
+// Copyright 2025-2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// BundleManager — the context-free Armory Bundle Format (ABF) management UI.
+//
+// This is the full list / create / edit / delete lifecycle for ABF
+// bundles, extracted out of the `view: "memory"` block pane so the exact
+// same UI can render in two places without depending on the Agent-pane
+// block, `nodeModel`, or any ViewModel-from-BlockRegistry context:
+//
+//   1. The existing `view: "memory"` settings pane — `bundle-view.tsx`
+//      renders <BundleManagerBody/> with the pane's BlockRegistry model.
+//   2. The window-scoped bundle manager modal (a later PR) — renders
+//      <BundleManager/>, which owns its own block-free model.
+//
+// Everything here drives purely off the `bundle_*` RPCs (via
+// BundleViewModel) plus the `memories:changed` WPS event, so two live
+// instances stay consistent for free.
+
+import { For, onCleanup, Show, type JSX } from "solid-js";
+
+import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
+import { Tooltip } from "@/app/element/tooltip";
+import { useModalLayer } from "@/app/element/modal-layer";
+import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { PROVIDERS } from "@/app/view/agent/providers/catalog";
+import { type BundleDraft, BundleViewModel } from "./bundle-model";
+import { BundleMcpSection } from "./BundleMcpSection";
+import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsSection";
+import { BundleSkillsSection } from "./BundleSkillsSection";
+
+import "./bundle-view.scss";
+
+interface BundleManagerBodyProps {
+    model: BundleViewModel;
+}
+
+/** Small (i) icon with a hover tooltip — contextual in-line documentation
+ *  next to a field label, explaining what it does in ABF terms without
+ *  requiring a trip to the docs. */
+const FieldHelp = (props: { text: string }): JSX.Element => (
+    <Tooltip content={props.text} placement="right">
+        <i class="fa-sharp fa-solid fa-circle-info bundle-view-field-help" aria-hidden="true" />
+    </Tooltip>
+);
+
+/**
+ * BundleManagerBody — the rail + detail UI, driven by a BundleViewModel.
+ *
+ * This component is context-free: it reads and writes ONLY through the
+ * `model` accessors/methods, none of which require a block. Both the
+ * settings-pane wrapper and the standalone <BundleManager/> render this
+ * with their respective models, so the markup lives in exactly one place.
+ */
+const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
+    const { model } = props;
+    const modalLayer = useModalLayer();
+
+    // Starts the 3-step ABF import chain (SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md
+    // §4) -- each step's request builds the next via modalLayer.replace(),
+    // mirroring the install→launch chain precedent. The commit RPC
+    // publishes `memories:changed`, which this model already subscribes
+    // to, so the newly-imported bundle appears in the list with no extra
+    // glue here.
+    const handleImportBundle = () => {
+        modalLayer.open({
+            kind: "bundle-import-select",
+            onPreviewed: (filePath, preview) => {
+                modalLayer.replace({
+                    kind: "bundle-import-preview",
+                    filePath,
+                    preview,
+                    onNext: (selection) => {
+                        modalLayer.replace({
+                            kind: "bundle-import-confirm",
+                            filePath,
+                            contentDigest: preview.content_digest,
+                            bundleDisplayName: selection.bundleName,
+                            selection,
+                            onImported: () => modalLayer.close(),
+                            onCancel: modalLayer.close,
+                        });
+                    },
+                    onCancel: modalLayer.close,
+                });
+            },
+            onCancel: modalLayer.close,
+        });
+    };
+
+    // Clicking a list item SELECTS the memory so the read-only detail
+    // view appears (including for the blank singleton, which can't be
+    // edited but should still be inspectable). The edit form opens via
+    // the explicit "Edit" button on the read-only view. Reagent P2
+    // (#749) — previously this called startEdit which refused on the
+    // blank singleton with an error and left the detail pane showing
+    // the previously-selected memory, mismatching the banner.
+    const handleSelect = (memory: Bundle) => {
+        model.setError(null);
+        model.cancelDraft();
+        model.setSelectedId(memory.id);
+    };
+
+    const handleNew = () => model.startNew();
+
+    const handleSave = () => {
+        void model.saveDraft();
+    };
+
+    const handleCancel = () => model.cancelDraft();
+
+    const handleValidate = () => {
+        void model.validateDraft();
+    };
+
+    const handleDelete = (id: string) => {
+        // Confirm via the most boring possible dialog. Bundles can be
+        // referenced by running instances; deletion is an explicit user
+        // intent we don't want to fast-path.
+        const ok = window.confirm("Delete this bundle? Running instances continue with their snapshot, but new launches won't see it.");
+        if (!ok) return;
+        void model.deleteMemory(id);
+    };
+
+    const updateDraft = <K extends keyof BundleDraft>(
+        key: K,
+        value: BundleDraft[K],
+    ) => {
+        const current = model.draftAtom();
+        if (!current) return;
+        model.setDraft({ ...current, [key]: value });
+        // A validation report reflects the draft AS OF the click; any edit
+        // after that invalidates it — clear rather than leave a stale
+        // "looks good" (or stale error) hanging off text the user changed.
+        model.setValidation(null);
+    };
+
+    // Single-pane: the detail view (read-only or edit form) shows instead of
+    // the list, never alongside it — see
+    // docs/specs/SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md.
+    // "In detail" whenever something is selected OR a draft (new or
+    // editing-existing) is open; otherwise the list shows. The old
+    // no-selection empty-state message ("Select a bundle...") is gone — with
+    // nothing selected you're just looking at the list, there's no third
+    // empty detail state to explain.
+    const inDetail = () => model.selectedIdAtom() !== null || model.draftAtom() !== null;
+
+    const handleBack = () => {
+        model.setError(null);
+        model.setSelectedId(null);
+        model.setDraft(null);
+    };
+
+    const listView = (
+        <div class="bundle-view-rail">
+            <Show when={model.errorAtom()}>
+                <div class="bundle-view-error">{model.errorAtom()}</div>
+            </Show>
+            <div class="bundle-view-rail-header">
+                <button class="bundle-view-new-btn" onClick={handleNew}>
+                    + New Bundle
+                </button>
+                <button class="bundle-view-new-btn" onClick={handleImportBundle}>
+                    Import Bundle
+                </button>
+            </div>
+            <ul class="bundle-view-list">
+                <For each={model.bundlesAtom()}>
+                    {(memory) => (
+                        <li
+                            class="bundle-view-list-item"
+                            classList={{
+                                "is-selected": model.selectedIdAtom() === memory.id,
+                                "is-blank": !!memory.is_blank,
+                                "is-global": !!memory.is_global,
+                            }}
+                            onClick={() => handleSelect(memory)}
+                        >
+                            <div class="bundle-view-list-item-name">
+                                <span class="bundle-view-list-item-name-text">
+                                    {memory.is_blank ? "— Blank (vanilla CLI) —" : memory.name}
+                                </span>
+                                <Show when={memory.is_global}>
+                                    <span class="bundle-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                </Show>
+                            </div>
+                            {/* Subtitle shows the description now that bundles
+                                are provider-agnostic (§4.1a). Class name kept
+                                to avoid CSS churn. */}
+                            <Show when={!memory.is_blank && memory.description}>
+                                <div class="bundle-view-list-item-provider">
+                                    {memory.description}
+                                </div>
+                            </Show>
+                        </li>
+                    )}
+                </For>
+            </ul>
+        </div>
+    );
+
+    const detailView = (
+        <div class="bundle-view-detail">
+            <Show when={model.errorAtom()}>
+                <div class="bundle-view-error">{model.errorAtom()}</div>
+            </Show>
+
+            <Show
+                when={model.draftAtom()}
+                fallback={
+                    <Show when={model.selectedAtom()}>
+                        {(memory) => (
+                            <div class="bundle-view-readonly">
+                                <h2 class="bundle-view-name">{memory().name}</h2>
+                                <Show when={memory().description}>
+                                    <p class="bundle-view-description">{memory().description}</p>
+                                </Show>
+                                <dl class="bundle-view-fields">
+                                    <Show when={memory().is_global}>
+                                        <dt>Scope</dt>
+                                        <dd>
+                                            <span class="bundle-view-global-badge" title="Injected into all agents at launch">Global</span>
+                                            {" "}— injected into every agent at launch
+                                        </dd>
+                                    </Show>
+                                    <dt>Instructions</dt>
+                                    <dd class="bundle-view-instructions-readonly">
+                                        <pre>{memory().instructions || "(none)"}</pre>
+                                    </dd>
+                                </dl>
+                                <Show when={!memory().is_blank}>
+                                    <div class="bundle-view-actions">
+                                        <button
+                                            class="bundle-view-edit-btn"
+                                            onClick={() => model.startEdit(memory())}
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            class="bundle-view-delete-btn"
+                                            onClick={() => handleDelete(memory().id)}
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                    {/* MCP servers / skills are managed live via
+                                        their own bind/unbind + upsert-for-bundle
+                                        RPCs, independent of the edit-draft flow
+                                        above — same reason AgentMcpModal/
+                                        AgentSkillsModal sit outside the agent's
+                                        own edit form. Composable model v2,
+                                        docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. */}
+                                    <BundleMcpSection bundleId={memory().id} />
+                                    <BundleSkillsSection bundleId={memory().id} />
+                                </Show>
+                            </div>
+                        )}
+                    </Show>
+                }
+            >
+                {(draft) => (
+                        <form
+                            class="bundle-view-form"
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                handleSave();
+                            }}
+                        >
+                            <h2 class="bundle-view-form-title">
+                                {draft().id ? "Edit Bundle" : "New Bundle"}
+                            </h2>
+
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
+                                    Name *
+                                    <FieldHelp text="The bundle's display name — shown in the Armory list and in the agent launch picker. Required." />
+                                </span>
+                                <input
+                                    class="bundle-view-input"
+                                    type="text"
+                                    value={draft().name}
+                                    onInput={(e) => updateDraft("name", e.currentTarget.value)}
+                                    onContextMenu={showTextInputContextMenu}
+                                    placeholder="e.g. Claude-coder"
+                                    required
+                                />
+                            </label>
+
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
+                                    Description
+                                    <FieldHelp text="Optional short label shown under the bundle's name in the launch picker. Purely cosmetic — has no effect on what gets injected into the agent." />
+                                </span>
+                                <input
+                                    class="bundle-view-input"
+                                    type="text"
+                                    value={draft().description}
+                                    onInput={(e) =>
+                                        updateDraft("description", e.currentTarget.value)
+                                    }
+                                    onContextMenu={showTextInputContextMenu}
+                                    placeholder="Short label shown in the launch picker"
+                                />
+                            </label>
+
+                            {/* Provider + model — readonly once set (has an id AND
+                                a non-empty provider, i.e. an already-provisioned
+                                bundle, not a legacy row awaiting backfill or a
+                                brand-new draft). See
+                                ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7:
+                                this reverses SPEC_MEMORY_IDENTITY_ARCH §4.1a on
+                                purpose — an ABF now carries its own provider/model
+                                so it stays self-describing when exported. Backend
+                                (bundle.upsert) is the real enforcement; disabling
+                                here is just so the UI doesn't invite an edit the
+                                server will reject. */}
+                            <Show when={draft().id && draft().provider}>
+                                <label class="bundle-view-field">
+                                    <span class="bundle-view-field-label">
+                                        Provider
+                                        <FieldHelp text="Which CLI/harness this ABF runs on. Fixed at creation and cannot be changed afterward — an ABF's portability guarantee depends on it accurately describing what it needs to run." />
+                                    </span>
+                                    <input
+                                        class="bundle-view-input"
+                                        type="text"
+                                        value={PROVIDERS[draft().provider]?.displayName ?? draft().provider}
+                                        disabled
+                                        readonly
+                                    />
+                                </label>
+                                <label class="bundle-view-field">
+                                    <span class="bundle-view-field-label">
+                                        Model vendor
+                                        <FieldHelp text="Which backend this ABF's provider talks to. Fixed at creation, same reason as Provider." />
+                                    </span>
+                                    <input
+                                        class="bundle-view-input"
+                                        type="text"
+                                        value={draft().model}
+                                        disabled
+                                        readonly
+                                    />
+                                </label>
+                            </Show>
+                            <Show when={!(draft().id && draft().provider)}>
+                                <label class="bundle-view-field">
+                                    <span class="bundle-view-field-label">
+                                        Provider *
+                                        <FieldHelp text="Which CLI/harness this ABF will run on. Required, and cannot be changed once set — pick carefully." />
+                                    </span>
+                                    <select
+                                        class="bundle-view-input"
+                                        value={draft().provider}
+                                        onChange={(e) => {
+                                            const provider = e.currentTarget.value;
+                                            const vendor = PROVIDERS[provider]?.supportedVendors?.[0] ?? "";
+                                            updateDraft("provider", provider);
+                                            updateDraft("model", vendor);
+                                        }}
+                                        required
+                                    >
+                                        <option value="" disabled>
+                                            Select a provider…
+                                        </option>
+                                        <For each={Object.values(PROVIDERS)}>
+                                            {(p) => <option value={p.id}>{p.displayName}</option>}
+                                        </For>
+                                    </select>
+                                </label>
+                                <Show when={(PROVIDERS[draft().provider]?.supportedVendors?.length ?? 0) > 1}>
+                                    <label class="bundle-view-field">
+                                        <span class="bundle-view-field-label">
+                                            Model vendor *
+                                            <FieldHelp text="Which backend this provider should talk to. Cannot be changed once set." />
+                                        </span>
+                                        <select
+                                            class="bundle-view-input"
+                                            value={draft().model}
+                                            onChange={(e) => updateDraft("model", e.currentTarget.value)}
+                                            required
+                                        >
+                                            <For each={PROVIDERS[draft().provider]?.supportedVendors ?? []}>
+                                                {(v) => <option value={v}>{v}</option>}
+                                            </For>
+                                        </select>
+                                    </label>
+                                </Show>
+                            </Show>
+
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
+                                    Instructions
+                                    <FieldHelp text="The default system prompt injected into the agent's context at launch — provider-agnostic, applies regardless of which CLI/harness the agent uses. To override it for one specific harness, add a per-provider variant below; the default still applies to every provider without one." />
+                                </span>
+                                <textarea
+                                    class="bundle-view-textarea"
+                                    rows={8}
+                                    value={draft().instructions}
+                                    onInput={(e) =>
+                                        updateDraft("instructions", e.currentTarget.value)
+                                    }
+                                    onContextMenu={showTextInputContextMenu}
+                                    placeholder="System prompt. The agent's soul."
+                                />
+                            </label>
+
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
+                                    Per-provider instruction overrides
+                                    <FieldHelp text="ABF v0.2 §2.2. Each entry replaces the Instructions above when this bundle runs on that provider — it is an override, not an addition, and providers without an entry use the default unchanged. On export each becomes instructions/<provider>/AGENTS.md, so a key that is not a usable directory name is skipped; this form flags those before you save." />
+                                </span>
+                                <BundleProviderInstructionsSection
+                                    value={draft().instructions_by_provider}
+                                    onChange={(next) =>
+                                        updateDraft("instructions_by_provider", next)
+                                    }
+                                />
+                            </label>
+
+                            <div class="bundle-view-form-actions">
+                                <Tooltip
+                                    content="Structurally checks this draft: unknown provider keys, unsafe or colliding context-file paths, and malformed JSON in the fields not yet editable here. Advisory only — never blocks Save."
+                                    placement="top"
+                                >
+                                    <button
+                                        type="button"
+                                        class="bundle-view-validate-btn"
+                                        onClick={handleValidate}
+                                        disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
+                                    >
+                                        {model.validatingAtom() ? "Validating…" : "Validate"}
+                                    </button>
+                                </Tooltip>
+                                <button
+                                    type="button"
+                                    class="bundle-view-cancel-btn"
+                                    onClick={handleCancel}
+                                    disabled={model.savingAtom()}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    class="bundle-view-save-btn"
+                                    disabled={
+                                        model.savingAtom() ||
+                                        !draft().name.trim() ||
+                                        !draft().provider ||
+                                        !draft().model
+                                    }
+                                >
+                                    {model.savingAtom() ? "Saving…" : "Save"}
+                                </button>
+                            </div>
+
+                            {/* Structural ABF validation results (bundle.validate) —
+                                advisory only, never blocks Save. Cleared on any
+                                further edit (updateDraft) or draft replacement so a
+                                stale report never lingers onto different content. */}
+                            <Show when={model.validationAtom()}>
+                                {(report) => (
+                                    <div
+                                        class="bundle-view-validation"
+                                        classList={{ "is-valid": report().is_valid }}
+                                    >
+                                        <Show
+                                            when={report().issues.length > 0}
+                                            fallback={<p class="bundle-view-validation-ok">No structural issues found.</p>}
+                                        >
+                                            <ul class="bundle-view-validation-list">
+                                                <For each={report().issues}>
+                                                    {(issue) => (
+                                                        <li
+                                                            class="bundle-view-validation-item"
+                                                            classList={{
+                                                                "is-error": issue.severity === "error",
+                                                                "is-warning": issue.severity === "warning",
+                                                            }}
+                                                        >
+                                                            <span class="bundle-view-validation-field">{issue.field}</span>
+                                                            {": "}
+                                                            {issue.message}
+                                                        </li>
+                                                    )}
+                                                </For>
+                                            </ul>
+                                        </Show>
+                                    </div>
+                                )}
+                            </Show>
+
+                            <p class="bundle-view-form-hint">
+                                MCP servers and skills are managed on the bundle's own detail
+                                view (Cancel to get back there), not in this edit form — they
+                                take effect live and don't need a Save. Context files are still
+                                persisted as JSON and round-trip cleanly through this form; use{" "}
+                                <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
+                                them. To bring in an existing <code>.abf</code> archive's components directly,
+                                use <strong>Import Bundle</strong> from the bundle list.
+                            </p>
+                        </form>
+                    )}
+            </Show>
+        </div>
+    );
+
+    return (
+        <PrimitiveListDetail
+            showDetail={inDetail()}
+            backLabel="Bundles"
+            onBack={handleBack}
+            list={listView}
+            detail={detailView}
+        />
+    );
+};
+
+/**
+ * BundleManager — context-free standalone Memory-bundle manager.
+ *
+ * Constructs its OWN block-free BundleViewModel and renders the shared
+ * body. Use this wherever Memory CRUD is needed outside an Agent-pane
+ * block — e.g. the window-scoped bundle manager modal. Takes no props.
+ *
+ * The model's only block dependency was the cosmetic header title; with
+ * the optional-constructor change in bundle-model.ts it constructs
+ * cleanly with no block and drives entirely off the `bundle_*` RPCs.
+ */
+export const BundleManager = (): JSX.Element => {
+    // Component setup runs once; the model lives for this component's
+    // lifetime and is disposed on unmount.
+    const model = new BundleViewModel();
+    onCleanup(() => model.dispose());
+    return <BundleManagerBody model={model} />;
+};

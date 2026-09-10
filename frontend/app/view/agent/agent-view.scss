@@ -3,6 +3,7 @@
 
 // Agent widget styling - living document interface for agent monitoring
 
+@use "../../mixins.scss" as mixins;
 @use "styles/document-nodes";
 @use "styles/composer-strip";
 @use "styles/slash";
@@ -33,10 +34,21 @@
 @use "styles/loading-overlay";
 @use "styles/picker-fade";
 
-// Wrapper stack for the pane-level tab strip (AgentViewWrapper): strip on
-// top, content region filling the remainder. ModalLayer's mount is a plain
-// 100%-height box, so without this the strip's height ADDS to
-// .agent-view's height:100% and the composer gets clipped off the bottom.
+// Wrapper stack for the pane-level tab strip (AgentPaneChrome, agent-view.tsx):
+// strip on top, content region filling the remainder. Owned by chrome, not
+// content — AgentPaneChrome renders this OUTSIDE the switch-scoped <Block>
+// it wraps (content is `props.children`, rendered inside
+// .agent-pane-stack-content below, as `.block`/BlockFrame's own wrapper),
+// so this box's height:100%/width:100% must fill whatever container the
+// tile layout positions AgentPaneChrome's own root into — previously that
+// was `.block-content` (this box lived INSIDE the leaf's single BlockFrame
+// wrapper); now it's the tile's own leaf slot directly, one level higher,
+// since AgentPaneChrome only mounts once this leaf's stack has ever had 2+
+// members (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) — for
+// every other case `.block`/BlockFrame is still the outermost element,
+// unaffected. Regardless of which container it fills, without this
+// wrapper the strip's height ADDS to `.agent-view`'s height:100% and the
+// composer gets clipped off the bottom.
 .agent-pane-stack {
     display: flex;
     flex-direction: column;
@@ -46,6 +58,28 @@
     // now position: absolute (out of flex flow) rather than a flex child —
     // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md.
     position: relative;
+
+    // AgentPaneChrome (agent-view.tsx) renders BlockFrame_Header as a
+    // direct child here — reusing the SAME component, but OUTSIDE the
+    // `.block.block-frame-default .block-frame-default-inner` ancestor
+    // chain block.scss's own `.block-frame-default-header` rule requires
+    // to match at all. Without this, the header rendered as unstyled,
+    // vertically-stacked block-level divs instead of a flex row (found
+    // live testing this PR — the header text/icons were "mangled," each
+    // on its own line). Applies the IDENTICAL ruleset via the shared
+    // mixin (frontend/app/mixins.scss) rather than copy-pasting it, so a
+    // future header tweak can't drift between the two call sites. `>` (not
+    // a bare descendant combinator) because this must be a direct child —
+    // ErrorBoundary (block.tsx's wrapping pattern, mirrored in
+    // AgentPaneChrome) renders no DOM element of its own.
+    > .block-frame-default-header {
+        @include mixins.block-frame-default-header-layout();
+        flex-shrink: 0; // a normal-flow row in this flex column now, not
+        // absolutely/flex-positioned by a parent that already constrained
+        // its height the way .block-frame-default-inner did — pin it to
+        // its own content height so it can't be stretched or compressed
+        // by .agent-pane-stack's flex-column sizing.
+    }
 }
 
 .agent-pane-stack-content {
@@ -217,9 +251,12 @@
 // now starts flush at the very top of the pane, with no reserved gap
 // between it and the pane header above.
 //
-// AgentPresentationView (deep inside .agent-pane-stack-content, itself
-// BELOW the tab strip in DOM order) portals .agent-pane-progress-bar into
-// this slot — see AgentViewWrapper's progressBarSlot signal and
+// AgentPresentationView (nested inside the switch-scoped <Block> chrome
+// wraps, itself BELOW the tab strip in DOM order) portals
+// .agent-pane-progress-bar into this slot — bridged through the active
+// AgentViewModel's progressBarMount/setProgressBarMount (agent-model.ts),
+// since chrome (which owns this slot) and content are separate component
+// trees as of SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md. See
 // SPEC_AGENT_PANE_PROGRESS_BAR_ABOVE_TAB_STRIP_2026_08_10.md. No CSS-only
 // fix reaches across that boundary: every ancestor between
 // .agent-pane-stack-content and here clips overflow before an
@@ -243,7 +280,7 @@
 // === Marching-ants Progress Bar ===
 // Fills its slot above — no zoom-compensation math needed here (unlike
 // its previous home nested inside .agent-view), since this slot lives in
-// AgentViewWrapper's tree, outside .agent-view's per-pane `zoom` CSS
+// AgentPaneChrome's tree, outside .agent-view's per-pane `zoom` CSS
 // property entirely, alongside the tab strip and other unzoomed pane
 // chrome. Colors via color-mix() so every theme inherits without
 // hardcoded hex.

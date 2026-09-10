@@ -1,0 +1,44 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Ambient narration rows — see AmbientNarrationRow.tsx for why these are
+// attributed rather than rendered as plain model output.
+//
+// Visually quieter than a real message: secondary text colour, no avatar, no
+// bubble. They are asides about AgentMux's own behaviour, not part of the
+// conversation's argument, and should not compete with it for attention.
+.ambient-narration-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 2px 0;
+}
+
+.ambient-narration-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font: var(--base-font);
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    line-height: 1.5;
+}
+
+.ambient-narration-row-tag {
+    flex: 0 0 auto;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color);
+    border: 1px solid rgba(from var(--secondary-text-color) r g b / 0.35);
+    border-radius: 3px;
+    padding: 0 4px;
+    // Not accent-coloured: this marks provenance, it does not ask to be
+    // clicked or read first.
+    opacity: 0.8;
+}
+
+.ambient-narration-row-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}

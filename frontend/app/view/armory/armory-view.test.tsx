@@ -18,27 +18,27 @@
  * docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md then merged those
  * two rail tabs into a single "Memory" tab (brain icon), with Global and
  * Personal as a sub-nav inside that one pane instead of two rail entries.
- * Current rail order: Accounts, Memory, Skills, MCP Servers, ABF. These
+ * Current rail order: Accounts, Memory, Skills, MCP Servers, Bundles. These
  * tests guard the rail contents directly; `ArmorySection`'s type-level
  * rejection of `"identities"` is checked at compile time below (no runtime
  * assertion needed for that part).
  */
 
-import { createSignal } from "solid-js";
 import { cleanup, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/view/accounts/accounts-manager", () => ({
     AccountsManager: () => <div data-testid="accounts-manager" />,
 }));
-vi.mock("@/app/view/brain/global-brain-manager", () => ({
-    GlobalBrainManager: () => <div data-testid="brain-manager" />,
+vi.mock("@/app/view/global-bundle/global-bundle-manager", () => ({
+    GlobalBundleManager: () => <div data-testid="global-bundle-manager" />,
 }));
 vi.mock("@/app/view/native-memory/native-memory-manager", () => ({
     NativeMemoryManager: () => <div data-testid="native-memory-manager" />,
 }));
-vi.mock("@/app/view/memory/memory-manager", () => ({
-    MemoryManager: () => <div data-testid="memory-manager" />,
+vi.mock("@/app/view/bundle/bundle-manager", () => ({
+    BundleManager: () => <div data-testid="bundle-manager" />,
 }));
 vi.mock("@/app/view/mcp/mcp-manager", () => ({
     McpManager: () => <div data-testid="mcp-manager" />,
@@ -77,8 +77,8 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
-import { ArmoryView } from "./armory-view";
 import { ArmoryViewModel } from "./armory-model";
+import { ArmoryView } from "./armory-view";
 
 describe("ArmoryView rail", () => {
     afterEach(() => {
@@ -123,11 +123,11 @@ describe("ArmoryView rail", () => {
         expect(rail.querySelector(".bundle-manager-rail-item .fa-brain")).toBeInTheDocument();
     });
 
-    it("orders the rail as Accounts, Memory, Skills, MCP Servers, ABF", () => {
+    it("orders the rail as Accounts, Memory, Skills, MCP Servers, Bundles", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "ABF"]);
+        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "Bundles"]);
     });
 });
 
@@ -150,10 +150,10 @@ describe("ArmoryView Memory sub-nav", () => {
         ));
     }
 
-    it("defaults to the Global section showing GlobalBrainManager", () => {
+    it("defaults to the Global section showing GlobalBundleManager", () => {
         setBlockMeta({ "armory:section": "memory" });
         renderArmory();
-        const globalPane = screen.getByTestId("brain-manager").closest(".bundle-manager-pane");
+        const globalPane = screen.getByTestId("global-bundle-manager").closest(".bundle-manager-pane");
         const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
         expect(globalPane?.classList.contains("is-hidden")).toBe(false);
         expect(personalPane?.classList.contains("is-hidden")).toBe(true);
@@ -164,13 +164,13 @@ describe("ArmoryView Memory sub-nav", () => {
         renderArmory();
         const subnav = screen.getByLabelText("Memory scope");
         const personalButton = Array.from(subnav.querySelectorAll("button")).find(
-            (b) => b.textContent === "Personal",
+            (b) => b.textContent === "Personal"
         ) as HTMLButtonElement;
         personalButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "armory:memory:subsection": "personal" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "armory:memory:subsection": "personal" },
+        });
         const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
         expect(personalPane?.classList.contains("is-hidden")).toBe(false);
     });
@@ -211,14 +211,14 @@ describe("ArmoryView pane title", () => {
     it("clicking a rail item writes armory:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
-        const skillsButton = Array.from(rail.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Skills"),
+        const skillsButton = Array.from(rail.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("Skills")
         ) as HTMLButtonElement;
         skillsButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "armory:section": "skills" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "armory:section": "skills" },
+        });
         expect(model.viewName()).toBe("Skills");
         const skillsPane = screen.getByTestId("skill-manager").closest(".bundle-manager-pane");
         expect(skillsPane?.classList.contains("is-hidden")).toBe(false);
@@ -227,14 +227,14 @@ describe("ArmoryView pane title", () => {
     it("clicking a tab-bar item writes armory:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderArmory();
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
-        const mcpButton = Array.from(tabBar.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("MCP Servers"),
+        const mcpButton = Array.from(tabBar.querySelectorAll("button")).find((b) =>
+            b.textContent?.includes("MCP Servers")
         ) as HTMLButtonElement;
         mcpButton.click();
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "armory:section": "mcp" } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, {
+            oref: "block:test-block",
+            meta: { "armory:section": "mcp" },
+        });
         expect(model.viewName()).toBe("MCP Servers");
     });
 
@@ -246,21 +246,21 @@ describe("ArmoryView pane title", () => {
         expect(tabBar.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("highlights only the ABF entry in both the rail and the tab-bar", () => {
+    it("highlights only the Bundles entry in both the rail and the tab-bar", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
         for (const nav of [rail, tabBar]) {
             const highlighted = Array.from(nav.querySelectorAll("button.is-abf-highlight"));
             expect(highlighted).toHaveLength(1);
-            expect(highlighted[0].textContent).toContain("ABF");
+            expect(highlighted[0].textContent).toContain("Bundles");
         }
     });
 
     it("viewName() reflects a pre-seeded armory:section meta value", () => {
         setBlockMeta({ "armory:section": "bundles" });
         const model = new ArmoryViewModel("test-block", null as any);
-        expect(model.viewName()).toBe("ABF");
+        expect(model.viewName()).toBe("Bundles");
     });
 
     it("falls back to 'Accounts' for an invalid armory:section meta value", () => {
@@ -300,26 +300,34 @@ describe("ArmoryView zoom", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: 100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": 0.9 } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 0.9 } });
     });
 
     it("Ctrl+Wheel up writes an increased term:zoom via SetMetaCommand", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": 1.1 } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": 1.1 } });
     });
 
     it("plain wheel (no Ctrl) does not trigger a zoom RPC call", () => {
         const { container } = renderArmory();
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: false, deltaY: 100, bubbles: true, cancelable: true }));
+        expect(setMetaMock).not.toHaveBeenCalled();
+    });
+
+    // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+    // (app.tsx) — this pane's own handler must let it through rather than
+    // also zooming itself, or the two handlers would double-step this pane
+    // relative to every other pane in the window. See
+    // docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+    it("Ctrl+Shift+Wheel does not trigger this pane's own zoom RPC call", () => {
+        const { container } = renderArmory();
+        const view = container.querySelector(".armory-view") as HTMLElement;
+        view.dispatchEvent(
+            new WheelEvent("wheel", { ctrlKey: true, shiftKey: true, deltaY: 100, bubbles: true, cancelable: true })
+        );
         expect(setMetaMock).not.toHaveBeenCalled();
     });
 
@@ -330,14 +338,16 @@ describe("ArmoryView zoom", () => {
         // it's derived from) sidesteps reactive-system timing entirely.
         (model as any).zoomAtom = () => 0.9;
         const { container } = render(() => (
-            <ArmoryView blockId="test-block" model={model} blockRef={{ current: null }} contentRef={{ current: null }} />
+            <ArmoryView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
         ));
         const view = container.querySelector(".armory-view") as HTMLElement;
         view.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, bubbles: true, cancelable: true }));
-        expect(setMetaMock).toHaveBeenCalledWith(
-            undefined,
-            { oref: "block:test-block", meta: { "term:zoom": null } },
-        );
+        expect(setMetaMock).toHaveBeenCalledWith(undefined, { oref: "block:test-block", meta: { "term:zoom": null } });
     });
 });
 

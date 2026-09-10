@@ -122,7 +122,7 @@ pub(crate) fn memory_dir_for_agent(
         // real directory. The registry fallback below is what knows that
         // real directory (`source_agents_base` + `working_dir`).
         //
-        // Returning Err here instead made Armory → Memory → Personal and the
+        // Returning Err here instead made Armory → Bundle → Personal and the
         // MemoryList MCP tool fail with "agent <x> has no working directory"
         // for every such agent, while its memory files sat on disk perfectly
         // intact — the common case, since `working_directory` is blank by
@@ -507,7 +507,7 @@ const MAX_MEMORY_FILE_BYTES: u64 = 10 * 1024 * 1024;
 /// keep this PR's diff scoped to what ABF v0.2 §2.3 actually needs.
 ///
 /// ABF v0.2 §2.3 (`bundle.export_for_agent`) needs this: `list`/`read_file`
-/// only sync the mirror on a Stash Memory tab open, so exporting straight
+/// only sync the mirror on a Stash Bundle tab open, so exporting straight
 /// from `db_agent_native_memory` without refreshing first would silently
 /// omit anything Claude wrote autonomously since the tab was last opened
 /// (or if it was never opened at all) — see
@@ -807,7 +807,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // read+upsert for a file that hasn't changed since it was last
                 // mirrored, instead of doing it unconditionally on every list
                 // call (reagent P1 on PR #2459: `list` fires on every Stash
-                // Memory tab open/refresh, so an unconditional full read + SQLite
+                // Bundle tab open/refresh, so an unconditional full read + SQLite
                 // write per file would mean synchronous, potentially many-MB
                 // disk I/O on a call meant to be a lightweight metadata listing).
                 //
@@ -1971,7 +1971,7 @@ mod tests {
         assert_eq!(history.versions[0].parent_version_id, None);
     }
 
-    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: the Armory Personal Memory
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: the Armory Personal Bundle
     // grid can only refresh a card the instant its agent's memory changes if
     // this handler actually publishes when it succeeds.
     #[tokio::test]
@@ -2039,7 +2039,7 @@ mod tests {
     /// their OWN separate, un-synced `agent.working_directory.is_empty()` check
     /// that never called either resolver — so the fix never actually reached
     /// `agent:memory:write_file`, the handler live traffic (the Armory Personal
-    /// Memory grid, and the `MemoryWrite` MCP tool going through a *different*
+    /// Bundle grid, and the `MemoryWrite` MCP tool going through a *different*
     /// path that DOES use the fixed resolver) hits. Live-tested against a running
     /// v0.55.31 build: a `MemoryWrite` MCP call succeeded (App API path, already
     /// fixed) while `agent:memory:write_file` for the exact same blank-workdir
@@ -2627,7 +2627,7 @@ mod tests {
     /// A blank `working_directory` — the DEFAULT for a newly defined agent —
     /// must resolve to the same path `agent.open` itself substitutes, not
     /// fail. Before the fix `memory_dir_for_agent` returned
-    /// "agent <x> has no working directory" and Armory → Memory → Personal
+    /// "agent <x> has no working directory" and Armory → Bundle → Personal
     /// (and the MemoryList MCP tool) were broken for the common case, while
     /// the agent's memory files sat on disk intact. Reproduced live:
     ///   memory/list failed: HTTP 500 — "memory: agent manoz has no working directory"
@@ -2660,7 +2660,7 @@ mod tests {
 
     /// The shared helper must stay byte-identical to `agent.open`'s own
     /// substitution — they are the same path by contract, and drift between
-    /// them is precisely what broke Personal Memory.
+    /// them is precisely what broke Personal Bundle.
     #[test]
     fn default_agent_working_dir_matches_agent_opens_inline_derivation() {
         for name in ["Manoz", "Blank WD Agent", "Wei_Zhang-2", "Zurich Nome"] {

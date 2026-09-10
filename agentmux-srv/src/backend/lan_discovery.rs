@@ -24,6 +24,28 @@ use super::eventbus::{EventBus, WSEventType};
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
 const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
 const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
+/// How often each known LAN peer is asked for its agent-name list. Peers are
+/// few (one per machine) and the request is a single small GET, so this is
+/// cheap; it's deliberately slower than `LAN_AGENT_CACHE_TTL_SECS` because
+/// this list is for *display* ("who lives on that host"), not for delivery
+/// routing — `find_agent` still does its own authoritative lookup.
+const LAN_AGENT_NAMES_REFRESH_SECS: u64 = 30;
+/// Hard cap on a single peer's `/agentmux/reactive/agent-names` response body
+/// (Codex P1 on PR #3102): the `lan_key` a peer advertised authenticates
+/// THIS client TO that peer, not the peer to us — anything that can fake an
+/// mDNS advertisement for `_agentmux._tcp.local` makes it into
+/// `self.instances` and gets polled by this loop. Enforced while reading, not
+/// via `Content-Length` (a malicious peer can omit or lie about that while
+/// still streaming an unbounded chunked body). 64 KiB is generous for a
+/// plain name list — real fleets are agents-per-machine, not per-thousand.
+const LAN_AGENT_NAMES_MAX_RESPONSE_BYTES: usize = 64 * 1024;
+/// Defense in depth past the byte cap above: even a response that fits in
+/// 64 KiB could be an adversarially compact array of many short strings.
+const LAN_AGENT_NAMES_MAX_COUNT: usize = 500;
+/// A legitimate agent name is short; anything absurdly long is more likely
+/// an attempt to waste memory than a real name, so it's dropped rather than
+/// truncated (truncating could quietly merge two distinct long names).
+const LAN_AGENT_NAMES_MAX_NAME_LEN: usize = 256;
 
 /// UDP broadcast discovery fallback (Layer 2), for LANs where mDNS multicast
 /// is filtered (common on corporate/guest WiFi). Mobile clients broadcast a
@@ -236,6 +258,12 @@ pub struct LanDiscovery {
     /// `shutdown()` is `&self` and called from both an explicit live-toggle
     /// path and `Drop`.
     udp_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancels `agent_names_refresh_loop`. Needed for the same reason
+    /// `udp_cancel` is: that task holds its own `Arc<LanDiscovery>` clone, so
+    /// dropping the controller's Arc on `apply(false)` never reaches refcount
+    /// zero and the loop would otherwise keep issuing authenticated requests
+    /// to peers forever — leaking one orphaned task per disable/enable cycle.
+    agent_names_cancel: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 /// Normalize an OS hostname into a valid mDNS host name by appending the
@@ -324,7 +352,7 @@ impl LanDiscovery {
 
         // Register this instance. mdns-sd requires the host name passed to
         // `ServiceInfo::new` to end with `.local.` — we always normalize so
-        // a raw OS hostname like "claudius" becomes "claudius.local.".
+        // a raw OS hostname like "narko" becomes "narko.local.".
         // Unique per INSTANCE and dot-free — see `mdns_instance_label`. The
         // version still travels in the TXT record (`instance_id` below), which
         // is where peers actually read it from; it just must not be the
@@ -400,6 +428,7 @@ impl LanDiscovery {
             version,
             port,
             udp_cancel: Mutex::new(None),
+            agent_names_cancel: Mutex::new(None),
         });
 
         // Spawn event receiver on a blocking thread to avoid starving the tokio runtime
@@ -419,6 +448,18 @@ impl LanDiscovery {
             disc_udp.udp_responder_loop(cancel_rx).await;
         });
 
+        // Keeps each peer's `agents` list populated (see
+        // `agent_names_refresh_loop`). Cancelled explicitly by `shutdown()`
+        // via its own oneshot — NOT by Arc drop, since this task holds its
+        // own clone and would otherwise outlive `apply(false)` forever.
+        let (names_cancel_tx, names_cancel_rx) = oneshot::channel();
+        *discovery.agent_names_cancel.lock() = Some(names_cancel_tx);
+        tokio::spawn(
+            discovery
+                .clone()
+                .agent_names_refresh_loop(names_cancel_rx),
+        );
+
         tracing::info!(
             instance_id = %instance_id,
             port = port,
@@ -426,6 +467,189 @@ impl LanDiscovery {
         );
 
         Ok(discovery)
+    }
+
+    /// Periodically ask every known peer which agents it hosts, so
+    /// `LanInstance::agents` reflects reality instead of staying the empty
+    /// vec it's created with. Without this, a peer shows up with a correct
+    /// hostname/version/address but `agents: []`, so there is no way to
+    /// discover *which* agents live on another machine — you can only
+    /// address one blind by name and hope. See
+    /// `handle_reactive_agent_names`' doc comment for the security scoping
+    /// of the endpoint this calls (names only, `lan_key`-readable).
+    ///
+    /// Failures are deliberately non-destructive: a peer that's briefly
+    /// unreachable keeps its last-known list rather than being blanked, since
+    /// staleness is already tracked by `last_seen` and a flapping list is
+    /// worse than a slightly-old one.
+    async fn agent_names_refresh_loop(self: Arc<Self>, mut cancel: oneshot::Receiver<()>) {
+        let http = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+            .build()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "LAN agent-name refresh disabled: HTTP client build failed");
+                return;
+            }
+        };
+
+        loop {
+            // Cancellation is checked at the sleep, not just between
+            // iterations: this task holds its own `Arc<LanDiscovery>`, so
+            // without an explicit signal `apply(false)` cannot stop it and it
+            // would keep hitting peers indefinitely (one leaked task per
+            // toggle cycle).
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(
+                    LAN_AGENT_NAMES_REFRESH_SECS,
+                )) => {}
+                _ = &mut cancel => {
+                    tracing::debug!("LAN agent-name refresh loop cancelled");
+                    return;
+                }
+            }
+
+            // Snapshot (key, url, lan_key) so the lock is not held across any
+            // await — the map is read by every inject/discovery call.
+            let targets: Vec<(String, String, String)> = {
+                let instances = self.instances.read();
+                instances
+                    .iter()
+                    .map(|(key, inst)| {
+                        (
+                            key.clone(),
+                            format!("http://{}:{}", inst.address, inst.port),
+                            inst.auth_key.clone(),
+                        )
+                    })
+                    .collect()
+            };
+
+            // Fan out concurrently, same pattern as `query_peers_concurrently`
+            // — sequential awaits here would let N stale/unreachable peers
+            // each burn their full LAN_PEER_QUERY_TIMEOUT_SECS in turn
+            // (Codex P2 on PR #3102), stretching the nominal 30s refresh
+            // interval by however many peers are currently slow to answer.
+            let outcomes: Vec<(String, Option<Vec<String>>)> = {
+                use futures_util::StreamExt as _;
+                let http_ref = &http;
+                let mut inflight = futures_util::stream::FuturesUnordered::new();
+                for (key, base_url, lan_key) in &targets {
+                    inflight.push(async move {
+                        (
+                            key.clone(),
+                            Self::fetch_peer_agent_names(http_ref, base_url, lan_key).await,
+                        )
+                    });
+                }
+                let mut out = Vec::with_capacity(targets.len());
+                while let Some(item) = inflight.next().await {
+                    out.push(item);
+                }
+                out
+            };
+
+            // Only broadcast `laninstances` when something actually changed
+            // (Codex P2 on PR #3102) — otherwise the display-oriented point
+            // of this loop is defeated: without this, a refresh that DOES
+            // find new names still leaves connected clients showing the
+            // stale `agents: []` from first mDNS resolution until some
+            // unrelated, unsynchronized mDNS event happens to fire.
+            let mut changed = false;
+            {
+                let mut instances = self.instances.write();
+                for (key, names) in outcomes {
+                    if let Some(names) = names {
+                        if let Some(entry) = instances.get_mut(&key) {
+                            if entry.agents != names {
+                                entry.agents = names;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if changed {
+                self.broadcast_instances();
+            }
+        }
+    }
+
+    /// One peer's contribution to `agent_names_refresh_loop`. Returns `None`
+    /// on any failure (unreachable, non-2xx, oversized, or malformed body) —
+    /// this list is display-only, so a bad peer response should leave the
+    /// last-known list in place rather than blank it (see the loop's own
+    /// "non-destructive" framing).
+    async fn fetch_peer_agent_names(
+        http: &reqwest::Client,
+        base_url: &str,
+        lan_key: &str,
+    ) -> Option<Vec<String>> {
+        let url = format!("{base_url}/agentmux/reactive/agent-names");
+        let resp = match http.get(&url).header("X-AuthKey", lan_key).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: unreachable");
+                return None;
+            }
+        };
+        if !resp.status().is_success() {
+            // A peer running a build without this route answers 404 —
+            // expected during a rolling upgrade, not an error.
+            tracing::debug!(peer = %base_url, status = %resp.status(), "LAN agent-name refresh: non-2xx");
+            return None;
+        }
+
+        let body = match Self::read_body_capped(resp, LAN_AGENT_NAMES_MAX_RESPONSE_BYTES).await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(peer = %base_url, error = %e, "LAN agent-name refresh: response too large, discarded");
+                return None;
+            }
+        };
+
+        let value: serde_json::Value = match serde_json::from_slice(&body) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::debug!(peer = %base_url, error = %e, "LAN agent-name refresh: bad JSON");
+                return None;
+            }
+        };
+
+        let names: Vec<String> = value
+            .get("agents")
+            .and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|n| n.as_str())
+                    .filter(|n| n.len() <= LAN_AGENT_NAMES_MAX_NAME_LEN)
+                    .take(LAN_AGENT_NAMES_MAX_COUNT)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(names)
+    }
+
+    /// Reads an HTTP response body up to `max_bytes`, erroring out as soon as
+    /// the cap is exceeded rather than buffering the full body first —
+    /// `Response::bytes()`/`.json()` have no size limit of their own, so a
+    /// peer that responds successfully but with an enormous body would
+    /// otherwise be read into memory in full before this code ever gets a
+    /// chance to reject it.
+    async fn read_body_capped(
+        mut resp: reqwest::Response,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, String> {
+        let mut buf = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
+            buf.extend_from_slice(&chunk);
+            if buf.len() > max_bytes {
+                return Err(format!("response exceeded {max_bytes}-byte cap"));
+            }
+        }
+        Ok(buf)
     }
 
     /// Build the JSON response payload for this instance's identity — see
@@ -786,6 +1010,13 @@ impl LanDiscovery {
             // is a no-op we're happy with.
             let _ = tx.send(());
         }
+        // Same contract as `udp_cancel` above — and load-bearing rather than
+        // tidy-up: the refresh task owns an `Arc<LanDiscovery>` clone, so
+        // without this signal it survives `apply(false)` and keeps issuing
+        // authenticated requests to LAN peers indefinitely.
+        if let Some(tx) = self.agent_names_cancel.lock().take() {
+            let _ = tx.send(());
+        }
         if let Err(e) = self.daemon.unregister(&self.service_fullname) {
             // Likely already unregistered; do not warn loudly.
             tracing::debug!("mDNS unregister returned: {e}");
@@ -958,7 +1189,7 @@ impl LanDiscoveryController {
     /// peer versions — see `Config::lan_key`'s doc comment) is now a
     /// separate, narrowly-scoped credential, NOT the instance's full-access
     /// `auth_key`. A passive LAN listener who captures it gets standing
-    /// access to only the two LAN-forwarding routes
+    /// access to only the three LAN-forwarding routes
     /// (`lan_or_full_auth_middleware` in `server/mod.rs`) — not the full
     /// `/agentmux/service` surface this used to expose. Broadcasting
     /// *something* in cleartext to the LAN is still an accepted trade-off
@@ -1267,29 +1498,29 @@ mod tests {
 
     #[test]
     fn appends_local_dot_to_bare_hostname() {
-        assert_eq!(mdns_hostname("claudius"), "claudius.local.");
+        assert_eq!(mdns_hostname("narko"), "narko.local.");
     }
 
     #[test]
     fn preserves_already_fully_qualified_name() {
-        assert_eq!(mdns_hostname("claudius.local."), "claudius.local.");
+        assert_eq!(mdns_hostname("narko.local."), "narko.local.");
     }
 
     #[test]
     fn appends_trailing_dot_to_local_suffix() {
         // mdns-sd needs the trailing dot; we add it without doubling .local.
-        assert_eq!(mdns_hostname("claudius.local"), "claudius.local.");
+        assert_eq!(mdns_hostname("narko.local"), "narko.local.");
     }
 
     #[test]
     fn handles_trailing_dot_on_bare_hostname() {
-        assert_eq!(mdns_hostname("claudius."), "claudius.local.");
+        assert_eq!(mdns_hostname("narko."), "narko.local.");
     }
 
     #[test]
     fn does_not_double_suffix() {
         // Two passes through the normalizer produce the same result.
-        let once = mdns_hostname("claudius");
+        let once = mdns_hostname("narko");
         let twice = mdns_hostname(&once);
         assert_eq!(twice, once);
     }
@@ -1522,6 +1753,7 @@ mod handle_event_tests {
     use parking_lot::{Mutex, RwLock};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use tokio::sync::oneshot;
 
     /// Build a `ServiceInfo` for `instance_id`, mirroring the exact
     /// `service_name`/host-name shape `LanDiscovery::start()` registers
@@ -1597,6 +1829,7 @@ mod handle_event_tests {
             version: String::new(),
             port: self_port,
             udp_cancel: Mutex::new(None),
+            agent_names_cancel: Mutex::new(None),
         }
     }
 
@@ -1663,17 +1896,17 @@ mod handle_event_tests {
 
         // Same host, two instances -> different labels (differing ports).
         assert_ne!(
-            super::mdns_instance_label("claudius", 59859),
-            super::mdns_instance_label("claudius", 60237),
+            super::mdns_instance_label("narko", 59859),
+            super::mdns_instance_label("narko", 60237),
         );
         // Two hosts on the SAME version -> different labels. This is the
         // property the old version-derived name did not have.
         assert_ne!(
-            super::mdns_instance_label("claudius", 59859),
+            super::mdns_instance_label("narko", 59859),
             super::mdns_instance_label("gamerlove", 59859),
         );
         // No version anywhere in it, deliberately.
-        assert!(!super::mdns_instance_label("claudius", 59859).contains("0.55"));
+        assert!(!super::mdns_instance_label("narko", 59859).contains("0.55"));
     }
 
     #[test]
@@ -1803,6 +2036,36 @@ mod handle_event_tests {
         assert_eq!(instances.len(), 1);
         assert_eq!(instances[0].hostname, "");
         assert_eq!(instances[0].instance_id, "");
+    }
+
+    /// The refresh loop holds its own `Arc<LanDiscovery>`, so dropping the
+    /// controller's Arc on `apply(false)` can never stop it — only an explicit
+    /// signal can. Without this, disabling LAN discovery left the task issuing
+    /// authenticated requests to peers forever, leaking one per toggle cycle
+    /// (ReAgent P1 on PR #3102 — the first version of this code shipped a doc
+    /// comment claiming cancellation it did not actually implement, which is
+    /// exactly why this is asserted here rather than described).
+    #[tokio::test]
+    async fn shutdown_cancels_the_agent_names_refresh_loop() {
+        let discovery = Arc::new(test_discovery("cancel-host", 55123));
+
+        let (tx, rx) = oneshot::channel();
+        *discovery.agent_names_cancel.lock() = Some(tx);
+        let handle = tokio::spawn(discovery.clone().agent_names_refresh_loop(rx));
+
+        // Still parked on its sleep — nothing has cancelled it yet.
+        assert!(!handle.is_finished());
+
+        discovery.shutdown();
+
+        // Must return promptly on the signal rather than after the full
+        // LAN_AGENT_NAMES_REFRESH_SECS sleep, which is the whole point of
+        // selecting on the cancel inside the sleep.
+        let stopped = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
+        assert!(
+            stopped.is_ok(),
+            "refresh loop did not exit within 5s of shutdown() - it would outlive apply(false)"
+        );
     }
 }
 
@@ -2018,5 +2281,138 @@ mod self_resolution_tests {
     #[test]
     fn a_resolution_with_no_addresses_is_not_self() {
         assert!(!is_self_resolution(55019, &[], 55019, &own()));
+    }
+}
+
+/// `agent_names_refresh_loop`'s peer-response handling — real HTTP round
+/// trips against a raw fake server, same style as
+/// `server::tests::spawn_fake_browser_api`, because the behavior under test
+/// (bailing out mid-body, not just rejecting on `Content-Length`) can't be
+/// exercised through an in-process `tower::ServiceExt::oneshot` call.
+#[cfg(test)]
+mod agent_names_refresh_tests {
+    use super::{LanDiscovery, LAN_AGENT_NAMES_MAX_COUNT, LAN_AGENT_NAMES_MAX_NAME_LEN};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Starts a raw TCP server that always answers
+    /// `/agentmux/reactive/agent-names` with `body` verbatim (caller supplies
+    /// correct headers/framing), and returns its `http://127.0.0.1:<port>`
+    /// base URL. One-shot: serves exactly one connection then stops, which is
+    /// all a single `fetch_peer_agent_names` call makes.
+    async fn spawn_fake_agent_names_server(response: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else { return };
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf).await;
+            let _ = stream.write_all(response.as_bytes()).await;
+        });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    /// Codex P1 on PR #3102: the `lan_key` a peer advertises authenticates
+    /// THIS client to that peer, not the other way round — anything able to
+    /// fake an mDNS advertisement gets into `self.instances` and is polled.
+    /// A response larger than the cap must be rejected outright, not
+    /// buffered in full and then discarded.
+    #[tokio::test]
+    async fn oversized_response_is_rejected_not_buffered() {
+        // 4x the cap, filled with a repeating byte inside a JSON string so a
+        // parser that ignored the cap would otherwise succeed.
+        let oversized_len = 4 * super::LAN_AGENT_NAMES_MAX_RESPONSE_BYTES;
+        let filler = "a".repeat(oversized_len);
+        let json_body = format!(r#"{{"agents":["{filler}"]}}"#);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            json_body.len(),
+            json_body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let base_url = spawn_fake_agent_names_server(leaked).await;
+        let http = reqwest::Client::new();
+
+        let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant").await;
+        assert!(
+            names.is_none(),
+            "an oversized response must be discarded entirely, not truncated into a result"
+        );
+    }
+
+    /// The happy path, plus defense-in-depth entry capping: a valid response
+    /// with a name that's too long and more names than the count cap allows
+    /// should keep the good names and drop the rest, not fail outright.
+    #[tokio::test]
+    async fn valid_response_is_parsed_and_excess_entries_are_capped() {
+        let too_long_name = "x".repeat(LAN_AGENT_NAMES_MAX_NAME_LEN + 1);
+        let mut names_json: Vec<String> = (0..LAN_AGENT_NAMES_MAX_COUNT + 10)
+            .map(|i| format!("\"agent-{i}\""))
+            .collect();
+        names_json.push(format!("\"{too_long_name}\""));
+        let json_body = format!(r#"{{"agents":[{}]}}"#, names_json.join(","));
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            json_body.len(),
+            json_body
+        );
+        let leaked: &'static str = Box::leak(response.into_boxed_str());
+        let base_url = spawn_fake_agent_names_server(leaked).await;
+        let http = reqwest::Client::new();
+
+        let names = LanDiscovery::fetch_peer_agent_names(&http, &base_url, "irrelevant")
+            .await
+            .expect("a well-formed, appropriately-sized response must parse");
+
+        assert_eq!(names.len(), LAN_AGENT_NAMES_MAX_COUNT, "must truncate to the count cap");
+        assert!(names.contains(&"agent-0".to_string()));
+        assert!(
+            !names.iter().any(|n| n.len() > LAN_AGENT_NAMES_MAX_NAME_LEN),
+            "an over-length name must never survive into the result"
+        );
+    }
+
+    /// Codex P2 on PR #3102: sequential polling lets N stale/unreachable
+    /// peers each burn their full timeout in turn. Two peers that each take
+    /// ~300ms to answer must complete in ~300ms total, not ~600ms — proving
+    /// the fan-out is real concurrency, not just non-blocking syntax that
+    /// still executes one after another.
+    #[tokio::test]
+    async fn peers_are_polled_concurrently_not_sequentially() {
+        async fn spawn_slow_agent_names_server(delay_ms: u64) -> String {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf).await;
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                let body = r#"{"agents":["slow-agent"]}"#;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+            format!("http://127.0.0.1:{port}")
+        }
+
+        let delay_ms = 300;
+        let url_a = spawn_slow_agent_names_server(delay_ms).await;
+        let url_b = spawn_slow_agent_names_server(delay_ms).await;
+        let http = reqwest::Client::new();
+
+        let started = std::time::Instant::now();
+        use futures_util::StreamExt as _;
+        let mut inflight = futures_util::stream::FuturesUnordered::new();
+        inflight.push(LanDiscovery::fetch_peer_agent_names(&http, &url_a, "k"));
+        inflight.push(LanDiscovery::fetch_peer_agent_names(&http, &url_b, "k"));
+        while inflight.next().await.is_some() {}
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(delay_ms * 2 - 100),
+            "two {delay_ms}ms peers took {elapsed:?} — looks sequential, not concurrent"
+        );
     }
 }

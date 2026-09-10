@@ -194,11 +194,15 @@ CMake and Ninja are required for `cef-dll-sys` (builds CEF's C wrapper). Both mu
 
 | Platform | CMake | Ninja |
 |----------|-------|-------|
-| **Windows** | Ships with Visual Studio | Copy from VS: `cp "/c/Program Files/Microsoft Visual Studio/*/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" /c/Systems/bin/` |
+| **Windows** | Ships with Visual Studio | Copy from VS: `cp "/c/Program Files/Microsoft Visual Studio/*/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" /c/tools/bin/` |
 | **macOS** | `brew install cmake` | `brew install ninja` |
 | **Linux** | `apt install cmake` | `apt install ninja-build` |
 
-On this dev machine, Ninja is at `/c/Systems/bin/ninja.exe` (copied from VS 2022). If `cargo build` fails with "CMake was unable to find a build program corresponding to Ninja", verify `ninja --version` works.
+On this dev machine, Ninja is at `/c/tools/bin/ninja.exe` (copied from VS 2022; previously
+`/c/Systems/bin/`, before that whole directory — an unversioned accumulation of stale repo
+clones and a dormant credential set, unrelated to this repo — was retired on 2026-09-08). If
+`cargo build` fails with "CMake was unable to find a build program corresponding to Ninja",
+verify `ninja --version` works.
 
 ### After Code Changes
 
@@ -288,7 +292,7 @@ These views exist in the codebase but are **not** widget-bar entries — do not 
 |---|---|
 | **Identity** | Tab inside an Agent pane (cog → settings panel → Identity tab). The `view: "identity"` registration and `IdentityPaneViewModel` exist for `pane.open` RPC and right-click menu paths; no widget-bar entry. Read-only (`<BundleSummaryPanel/>`) since docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md PR 5. |
 | **Identities** | Agent pane's own **Identity** tab (cog → settings panel → Identity), not an Armory tab — Armory's separate "Identities" rail entry was removed in Phase 5 (`docs/specs/SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md`) to keep Armory scoped to shared/reusable resources only. Read-only, per-agent view of direct `db_agent_identity_links` rows (`AgentIdentityLinksPanel`, `frontend/app/view/identity/agent-identity-links-panel.tsx`) — shows which accounts this agent actually launches with. No create/edit/delete/bind/unbind; new agent identities are created from the launch flow directly. Issue #1624 PR-C; see `docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md` and `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`. |
-| **ABF (Armory Bundle Format)** | Armory tab (hamburger → Armory → ABF) + the `view: "memory"` pane (registered for programmatic access only; the `viewType` string stays `"memory"` as a persisted key). A "bundle" (renamed from "preset" — PR #1918) is the agent's provider-agnostic config collection — instructions + context files (NOT provider/model; those belong to the agent). Backend table is `db_bundles` (renamed from `db_memory_bundles` in Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md); method names stay `bundle_memory_*`. Distinct from the brain (native memory). The `block.tsx` shim still redirects `view: "forge"` → `view: "agent"`. UI branding is "Armory Bundle Format (ABF)" as of the ABF v0.2 UI-alignment pass — see `docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`. |
+| **Bundles** | Armory tab (hamburger → Armory → Bundles) + the `view: "memory"` pane (registered for programmatic access only; the `viewType` string stays `"memory"` as a persisted key). A "bundle" (renamed from "preset" — PR #1918) is the agent's provider-agnostic config collection — instructions + context files (NOT provider/model; those belong to the agent). Backend table is `db_bundles` (renamed from `db_memory_bundles` in Phase 4a of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md); Store methods are `bundle_*` (renamed from `bundle_memory_*` in Phase 1 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md). Distinct from Memory (`db_agent_native_memory`, `NativeMemory*`; agent-written). The `block.tsx` shim still redirects `view: "forge"` → `view: "agent"`. The Armory tab is labelled "Bundles" as of #3138 (§9.1 of the naming spec); "Armory Bundle Format (ABF)" now names only the import/export file format — see `docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`. |
 | **MCP Servers / Skills** | Armory tabs ("MCP Servers", "Skills" — hamburger → Armory) driving the standalone `mcp.*`/`skill.*` primitives (`McpManager`/`SkillManager`, `frontend/app/view/mcp/`, `frontend/app/view/skill/`), plus the matching per-agent tabs in the Agent setup modal (`AgentMcpModal`/`AgentSkillsModal`) for binding/creating agent-private entries. Introduced in #1943/#1946/#1948; see `docs/specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md` and tracking issue #1960 for remaining scope. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens the Settings pane (Appearance, Window & Panes, Terminal, Sounds, Network, Advanced); a footer button in the pane opens the raw `settings.json` in the user's default editor as an escape hatch. |
 | **DevTools** | View ▸ Toggle DevTools (macOS native menu bar) or the hamburger menu on other platforms; also the `dev:devtools` command. Toggles Chromium DevTools — does not open a pane. It is **not** a widget (no `defwidget@devtools`). |
@@ -389,6 +393,14 @@ History: `docs/retro/retro-release-version-desync-2026-05-22.md` — PR #964 sil
 
 ## Git Workflow
 
+**Never reuse a branch after its PR is merged.** Once merged, that branch is
+dead — cut a new one from the target for follow-up work. Continuing to commit to
+an already-merged branch is how a change that *was* merged quietly stops being in
+the integration branch: the branch keeps moving, nothing merges it forward, and
+no build ever fails. This is not hypothetical — it cost two months and nearly
+shipped a macOS transparency regression in the CEF fork. See
+[docs/cef-build/CEF_FORK_MAINTENANCE.md](./docs/cef-build/CEF_FORK_MAINTENANCE.md) §1.1.
+
 ```bash
 # Create feature branch
 git checkout -b feature-name
@@ -424,7 +436,7 @@ EOF
 
 # Shared identity ONLY — gh-agent.sh fell back to GenericAgentX-<host> (see
 # "Which GitHub account am I acting as?" below): ALSO prepend the PR TITLE
-# with "<AgentName>@<host>: " (natural casing, e.g. "Korp@claudius:") — the
+# with "<AgentName>@<host>: " (natural casing, e.g. "Korp@narko:") — the
 # body tag above is machine-read only, so a human scanning the PR list still
 # can't tell shared-identity agents apart without opening each PR. See
 # SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md. Do NOT use this form if you

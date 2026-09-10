@@ -222,6 +222,242 @@ fn test_handler_unregister_block() {
     assert!(handler.get_agent("agent1").is_none());
 }
 
+// -- Alias registration tests (INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md) --
+
+/// The alias registered alongside a primary registration resolves via
+/// `inject_message`'s lookup exactly like the primary key does.
+#[tokio::test]
+async fn test_handler_alias_resolves_to_same_block() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("agentg"))
+        .unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agentg".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-alias".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert!(resp.success, "{:?}", resp.error);
+    assert_eq!(resp.block_id.as_deref(), Some("block1"));
+    assert!(!sent.lock().unwrap().is_empty());
+}
+
+/// The whole point of the alias: it must survive the primary key being
+/// re-registered to a different value for the SAME block (simulating
+/// `input.rs`'s Register-tail re-keying the primary registration to the
+/// live display name after a rename, on every turn).
+#[test]
+fn test_handler_alias_survives_primary_key_change() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent_with_nonce("agentg", "block1", None, 0, Some("agentg"))
+        .unwrap();
+
+    // Simulate input.rs's every-turn Register-tail re-keying the primary
+    // registration to a post-rename live display name, with no alias
+    // passed (mirrors the real call site, which only ever supplies an
+    // alias from `spawn_process`, not from the per-turn Register-tail).
+    handler
+        .register_agent("claude", "block1", None)
+        .unwrap();
+
+    assert_eq!(
+        handler.get_agent("claude").unwrap().block_id,
+        "block1",
+        "the live-name primary registration should have taken over"
+    );
+    assert!(
+        handler.get_agent("agentg").is_none(),
+        "the OLD primary registration is correctly evicted"
+    );
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agentg".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-alias-survives".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    // No input sender configured — this only asserts resolution, not
+    // delivery, so the meaningful failure mode ("agent not found") is
+    // distinguishable from the uninteresting one ("input sender not
+    // configured").
+    assert!(
+        resp.error.as_deref() != Some("agent not found: agentg"),
+        "the alias must still resolve to block1 after the primary key moved on: {:?}",
+        resp.error
+    );
+}
+
+/// `unregister_block` must clean up the alias too — otherwise a dead
+/// block's stable-ID alias keeps resolving after the block itself, and a
+/// LATER, unrelated spawn reusing that block_id would silently inherit it.
+#[test]
+fn test_handler_unregister_block_also_removes_alias() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("agentg"))
+        .unwrap();
+    handler.unregister_block("block1");
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agentg".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-alias-cleanup".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert_eq!(resp.error.as_deref(), Some("agent not found: agentg"));
+}
+
+/// Sibling of `test_handler_unregister_block_also_removes_alias`, for the
+/// OTHER teardown path (reagent P2 on this PR's `unregister_agent` fix):
+/// the HTTP `/agentmux/reactive/unregister` endpoint calls
+/// `unregister_agent`, not `unregister_block` — both must clear the alias.
+#[test]
+fn test_handler_unregister_agent_also_removes_alias() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("agentg"))
+        .unwrap();
+    handler.unregister_agent("claude");
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agentg".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-alias-cleanup-via-unregister-agent".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert_eq!(resp.error.as_deref(), Some("agent not found: agentg"));
+}
+
+/// The #2695 recipient-identity check must accept a target resolved via
+/// the alias registry when `stable_agent_identity_confirmer` (not the live
+/// `agent_identity_confirmer`) reports a match — this is exactly the
+/// post-rename jekt-delivery case the alias mechanism exists for.
+#[tokio::test]
+async fn test_handler_inject_proceeds_when_stable_confirmer_matches_alias_target() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("agentg"))
+        .unwrap();
+    // Live identity is "claude" (post-rename); stable identity is "agentg"
+    // (frozen at spawn) — mirrors `Controller::agent_id()` vs
+    // `Controller::stable_agent_id()` on a renamed agent.
+    handler.set_agent_identity_confirmer(Arc::new(|_block_id: &str| {
+        Some("claude".to_string())
+    }));
+    handler.set_stable_agent_identity_confirmer(Arc::new(|_block_id: &str| {
+        Some("agentg".to_string())
+    }));
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agentg".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-stable-confirm".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert!(resp.success, "{:?}", resp.error);
+    assert!(!sent.lock().unwrap().is_empty());
+}
+
+/// A target matching NEITHER the live nor the stable confirmed identity is
+/// still rejected — the dual-confirmer check must not degrade into an
+/// always-allow.
+#[tokio::test]
+async fn test_handler_inject_rejects_when_neither_confirmer_matches() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("agentg"))
+        .unwrap();
+    handler.set_agent_identity_confirmer(Arc::new(|_block_id: &str| {
+        Some("claude".to_string())
+    }));
+    handler.set_stable_agent_identity_confirmer(Arc::new(|_block_id: &str| {
+        Some("agentg".to_string())
+    }));
+
+    // Force resolution through the alias entry so the check runs, but
+    // address a THIRD identity neither confirmer will vouch for. Re-registering
+    // the same primary key with a different alias just swaps the alias
+    // (see `register_alias`'s eviction behavior).
+    handler
+        .register_agent_with_nonce("claude", "block1", None, 0, Some("intruder"))
+        .unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "intruder".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-neither-match".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert!(!resp.success);
+    assert!(resp.error.as_deref().unwrap().contains("identity mismatch"));
+}
+
 #[test]
 fn test_handler_register_audits_registration_event() {
     let mut handler = Handler::new();
@@ -299,13 +535,13 @@ fn test_handler_unregister_block_audits_unregistration() {
 fn test_handler_unregister_block_if_nonce_spares_a_newer_registration() {
     let mut handler = Handler::new();
     handler
-        .register_agent_with_nonce("agent1", "block1", None, 5)
+        .register_agent_with_nonce("agent1", "block1", None, 5, None)
         .unwrap();
     // A fallback respawn (or a resync_controller replacement) re-registers
     // the same agent/block under its own nonce before the dying spawn's
     // exit-handler reaches cleanup.
     handler
-        .register_agent_with_nonce("agent1", "block1", None, 6)
+        .register_agent_with_nonce("agent1", "block1", None, 6, None)
         .unwrap();
 
     assert!(
@@ -1873,7 +2109,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
     let mut handler = Handler::new();
     handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
     handler
-        .register_agent_with_nonce("agent1", "block1", None, 1)
+        .register_agent_with_nonce("agent1", "block1", None, 1, None)
         .unwrap();
 
     for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
@@ -1902,7 +2138,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
 
     // Respawn: same agent name, new nonce.
     handler
-        .register_agent_with_nonce("agent1", "block1", None, 2)
+        .register_agent_with_nonce("agent1", "block1", None, 2, None)
         .unwrap();
 
     let resp = handler
@@ -2879,4 +3115,186 @@ fn the_handler_lock_is_held_across_the_message_sender() {
         .recv_timeout(Duration::from_secs(60))
         .expect("probe must complete once the injection releases the lock");
     let _ = probe.join();
+}
+
+// ── INCIDENT_2026_09_07: the second re-lock `TurnRegistration::Skip` did NOT
+// guard ────────────────────────────────────────────────────────────────────
+//
+// The test above pins that the handler lock IS held across the message
+// sender, and that `TurnRegistration::Skip` is therefore mandatory for the
+// re-lock `run_agent_turn`'s own tail would otherwise attempt. But that is
+// only ONE of the two re-locks on this path: `run_agent_turn` calls
+// `PersistentSubprocessController::send_message`, whose spawn path
+// (`persistent.rs`, `spawn_process`) does its OWN auto-registration via
+// `get_global_handler().register_agent_with_nonce(...)` — two modules away
+// from anything `TurnRegistration::Skip` touches. On 2026-09-07 this second
+// re-lock deadlocked a production srv permanently: every reactive endpoint
+// hung, the WebSocket delivery task for the next UI submit got stranded
+// behind it, and only a process restart cleared it. See
+// `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
+//
+// The fix is `ReactiveHandler::try_register_agent_with_nonce`: a `try_lock`
+// variant `persistent.rs` now calls instead, which returns an error instead
+// of blocking when the calling thread already holds the lock. These two
+// tests pin both directions: the reentrant call must fail fast (not hang),
+// and an ordinary non-reentrant call must still succeed normally.
+
+/// The exact reentrant shape from the incident: a message sender — running
+/// under `inject_message`'s lock, on this same thread — calls
+/// `try_register_agent_with_nonce` for the SAME handler. This must return an
+/// error immediately. If this regresses to calling the plain
+/// `register_agent_with_nonce`, this test hangs instead of failing — that is
+/// the correct failure mode for a real deadlock, so a bounded timeout below
+/// turns it into a clean CI failure rather than a stuck runner.
+#[test]
+fn reentrant_registration_from_the_message_sender_fails_fast_not_hangs() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let handler = std::sync::Arc::new(super::handler::ReactiveHandler::new());
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let handler_for_sender = handler.clone();
+    let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Result<(), String>>();
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+        // Simulates `PersistentSubprocessController::spawn_process`'s
+        // auto-registration, invoked synchronously on the injecting thread
+        // (as it is in production via `block_in_place`) while
+        // `inject_message`'s lock is held.
+        let result = handler_for_sender.try_register_agent_with_nonce(
+            "agent1", "block1", None, 999, None,
+        );
+        reentrant_result_tx.send(result).unwrap();
+        Ok(true)
+    }));
+
+    let injector = handler.clone();
+    let (done_tx, done_rx) = mpsc::channel::<bool>();
+    std::thread::spawn(move || {
+        let resp = injector.inject_message(InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: "hello".to_string(),
+            source_agent: None,
+            request_id: None,
+            priority: None,
+            wait_for_idle: false,
+            ..Default::default()
+        });
+        let _ = done_tx.send(resp.success);
+    });
+
+    let reentrant_result = reentrant_result_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect(
+            "the reentrant call must return within 5s — a hang here means \
+             try_register_agent_with_nonce regressed to blocking, which \
+             reproduces INCIDENT_2026_09_07's permanent srv deadlock",
+        );
+    assert!(
+        reentrant_result.is_err(),
+        "a same-thread reentrant registration must be rejected (WouldBlock), \
+         not silently treated as success — a caller that thinks it \
+         registered when it didn't would misreport its own state",
+    );
+
+    let succeeded = done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("inject_message itself must also complete promptly");
+    assert!(succeeded, "the injection should still succeed overall — only the redundant re-registration is skipped");
+}
+
+/// Guards the other direction: an ordinary, non-reentrant call to
+/// `try_register_agent_with_nonce` (no one else holding the lock) must
+/// still succeed exactly like `register_agent_with_nonce` — the fix must not
+/// degrade to always skipping registration.
+#[test]
+fn non_reentrant_try_register_agent_with_nonce_still_registers() {
+    let handler = super::handler::ReactiveHandler::new();
+
+    let result = handler.try_register_agent_with_nonce("agent1", "block1", None, 1, None);
+    assert!(result.is_ok(), "an uncontended call must succeed: {result:?}");
+
+    let agent = handler.get_agent("agent1").expect("agent must now be registered");
+    assert_eq!(agent.block_id, "block1");
+}
+
+/// reagent P0 on PR #3084 (caught twice — the fix for the nonce-leak P1
+/// finding introduced this exact regression on its first attempt): the
+/// skip arm's nonce-recovery lookup must ALSO be non-blocking. The first
+/// cut called the plain `get_agent_by_block` — which blocking-locks — from
+/// inside the same reentrant scenario `try_register_agent_with_nonce`
+/// exists to escape, reproducing INCIDENT_2026_09_07's exact permanent
+/// deadlock one call later. This test exercises `try_get_agent_by_block`
+/// itself under the identical reentrant shape as the sibling test above:
+/// called from within a message sender that is running under
+/// `inject_message`'s lock, on the same thread.
+#[test]
+fn reentrant_try_get_agent_by_block_fails_fast_not_hangs() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let handler = std::sync::Arc::new(super::handler::ReactiveHandler::new());
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let handler_for_sender = handler.clone();
+    let (reentrant_result_tx, reentrant_result_rx) = mpsc::channel::<Option<super::types::AgentRegistration>>();
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+        // Simulates spawn_process's skip-arm nonce lookup, running
+        // synchronously on the injecting thread while inject_message's
+        // lock is held — exactly where the real regression lived.
+        let result = handler_for_sender.try_get_agent_by_block("block1");
+        reentrant_result_tx.send(result).unwrap();
+        Ok(true)
+    }));
+
+    let injector = handler.clone();
+    let (done_tx, done_rx) = mpsc::channel::<bool>();
+    std::thread::spawn(move || {
+        let resp = injector.inject_message(InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: "hello".to_string(),
+            source_agent: None,
+            request_id: None,
+            priority: None,
+            wait_for_idle: false,
+            ..Default::default()
+        });
+        let _ = done_tx.send(resp.success);
+    });
+
+    let reentrant_result = reentrant_result_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect(
+            "the reentrant lookup must return within 5s — a hang here means \
+             try_get_agent_by_block regressed to blocking, reproducing \
+             INCIDENT_2026_09_07's permanent srv deadlock one call later \
+             than try_register_agent_with_nonce alone would catch",
+        );
+    assert!(
+        reentrant_result.is_none(),
+        "a same-thread reentrant lookup must yield None (not hang, and not \
+         fabricate a result) — the caller degrades to no-cleanup, which is \
+         safe, rather than deadlocking",
+    );
+
+    let succeeded = done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("inject_message itself must also complete promptly");
+    assert!(succeeded);
+}
+
+/// Guards the other direction for the read path, mirroring the register
+/// path's own non-reentrant test: an uncontended call must actually find
+/// the registration, not just fail to hang.
+#[test]
+fn non_reentrant_try_get_agent_by_block_finds_the_registration() {
+    let handler = super::handler::ReactiveHandler::new();
+    handler
+        .register_agent_with_nonce("agent1", "block1", None, 42, None)
+        .unwrap();
+
+    let found = handler
+        .try_get_agent_by_block("block1")
+        .expect("an uncontended call must find the registration");
+    assert_eq!(found.registration_nonce, 42);
 }

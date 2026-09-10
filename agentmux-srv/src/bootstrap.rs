@@ -1059,6 +1059,13 @@ pub fn spawn_background_subsystems(
     reactive_handler.set_agent_identity_confirmer(Arc::new(|block_id: &str| {
         backend::blockcontroller::get_controller(block_id).and_then(|c| c.agent_id())
     }));
+    // Stable counterpart to the above (`AGENTMUX_AGENT_ID`, frozen at spawn)
+    // — see `Controller::stable_agent_id`'s and `Handler::alias_to_block`'s
+    // doc comments for why a jekt tagged with the stable ID needs its own,
+    // independently-sourced confirmer instead of reusing the live one.
+    reactive_handler.set_stable_agent_identity_confirmer(Arc::new(|block_id: &str| {
+        backend::blockcontroller::get_controller(block_id).and_then(|c| c.stable_agent_id())
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             muxbus_url: None,
@@ -1069,9 +1076,30 @@ pub fn spawn_background_subsystems(
     ));
 
     // Cloud push subscriber — single WS connection per sidecar that the cloud
-    // uses to push reactive injections instead of polling.
-    // No-op until the user connects via muxbus.login.
-    crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
+    // uses to push reactive injections instead of polling. The WS connection
+    // itself is a no-op until the user connects via muxbus.login, but
+    // `init_global` registers the muxbus credential with the broker
+    // scheduler unconditionally, which calls `Store::muxbus_is_fresh()` —
+    // a real, synchronous OS-keychain read — almost immediately. That read
+    // is the automatic (non-user-triggered) keychain touch
+    // docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md
+    // investigates; skipping `init_global` entirely is not a no-op the way
+    // the comment above might suggest.
+    //
+    // `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER` exists so `agentmux-srv/tests/
+    // integration_test.rs` can spawn the real binary without that read
+    // firing. Those tests spawn an ad-hoc/dev-signed `target/debug`
+    // binary, which is never on the Keychain ACL's trusted-signature list
+    // (only specific notarized, Developer-ID-signed installs are) — so
+    // every spawned test process gets its own interactive consent prompt
+    // for the SAME real credential, on whatever macOS account happens to
+    // be running the test. Confirmed live: a `cargo test -p agentmux-srv`
+    // run produced 4 near-simultaneous prompts, one per spawned subprocess,
+    // on a shared dev machine. Off by default — the shipped app and `task
+    // dev` must keep muxbus reconnect-on-launch working exactly as before.
+    if !cloud_subscriber_disabled_from_env() {
+        crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
+    }
 
     // Discord messaging bridge — connects to Discord Gateway if configured.
     // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.
@@ -1303,6 +1331,10 @@ pub struct NetworkBundle {
     pub web_addr: std::net::SocketAddr,
     pub ws_addr: std::net::SocketAddr,
     pub local_web_url: String,
+    /// OS hostname, resolved once here because LAN discovery needs it for its
+    /// mDNS TXT records. Carried on the bundle so `build_app_state` can put it
+    /// on `AppState` too, rather than resolving it a second time.
+    pub hostname: String,
     pub lan_discovery: Arc<backend::lan_discovery::LanDiscoveryController>,
     /// Owns the LAN-facing listeners so `network:lan_discovery` takes effect
     /// live, instead of only at the next startup — see
@@ -1345,7 +1377,7 @@ pub async fn bind_listeners_and_network(
     // socket on both counts. [reagent #3021 P0]
     //
     // The scoped `lan_key` (X-AuthKey header, broadcast in the mDNS TXT record)
-    // gates only the two LAN-forwarding routes (`lan_or_full_auth_middleware`)
+    // gates only the three LAN-forwarding routes (`lan_or_full_auth_middleware`)
     // — not the full auth_key previously broadcast here, which gated the entire
     // API surface (see Config::lan_key's doc comment).
     let bind_addr = backend::lan_listeners::STARTUP_BIND_ADDR;
@@ -1377,7 +1409,7 @@ pub async fn bind_listeners_and_network(
     let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     let lan_discovery = Arc::new(backend::lan_discovery::LanDiscoveryController::new(
         config.instance_id.clone(),
-        hostname,
+        hostname.clone(),
         version.to_string(),
         web_addr.port(),
         event_bus.clone(),
@@ -1499,6 +1531,7 @@ pub async fn bind_listeners_and_network(
         web_addr,
         ws_addr,
         local_web_url,
+        hostname,
         lan_discovery,
         lan_listeners,
         lsp_supervisor,
@@ -1629,6 +1662,7 @@ pub fn build_app_state(
         lan_key: config.lan_key.clone(),
         boot_id: Arc::from(uuid::Uuid::new_v4().to_string()),
         version,
+        hostname: net.hostname.clone(),
         app_path: config.app_path.clone(),
         wstore: stores.wstore,
         shared_store: stores.shared_store,
@@ -1668,6 +1702,7 @@ pub fn build_app_state(
         process_broker: net.process_broker.clone(),
         dock_snapshots: std::sync::Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
         pending_background_pids: std::sync::Arc::new(crate::backend::pending_background_pids::PendingBackgroundPids::new()),
+        narrated_events: Arc::new(crate::backend::narrated_events::NarratedEvents::new()),
         // Phase E.2c.2 — reducer state + event bus exposed to HTTP/WS
         // dispatch handlers. Workspace handlers route through the
         // reducer and publish events to `srv_events_tx`; the persist
@@ -2032,4 +2067,56 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 }
             }
         }));
+}
+
+/// Should `CloudSubscriber::init_global` be skipped this run?
+///
+/// Presence-based, matching the `AGENTMUX_DEV`/`AGENTMUX_TRAY` idiom
+/// elsewhere in this codebase. See the call site's doc comment for why
+/// skipping this matters: `init_global` triggers a real, synchronous
+/// OS-keychain read almost immediately, which macOS gates behind an
+/// interactive consent prompt for any process whose code signature isn't
+/// on the target credential's trusted-signer ACL — exactly the case for an
+/// ad-hoc/dev-signed `target/debug` binary spawned by an integration test.
+fn cloud_subscriber_disabled_from_env() -> bool {
+    std::env::var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_ok()
+}
+
+#[cfg(test)]
+mod cloud_subscriber_gate_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialize: both tests mutate the same process-global env var, and
+    // `cargo test` runs tests in parallel by default within one binary.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn defaults_to_enabled_so_shipped_and_dev_behavior_is_unchanged() {
+        let _guard = lock();
+        std::env::remove_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER");
+        assert!(
+            !cloud_subscriber_disabled_from_env(),
+            "must default to false — the shipped app and `task dev` need the \
+             real muxbus reconnect-on-launch behavior with no opt-out set"
+        );
+    }
+
+    #[test]
+    fn is_disabled_when_the_var_is_present_regardless_of_value() {
+        let _guard = lock();
+        // Presence-based, not value-based — matches AGENTMUX_DEV/AGENTMUX_TRAY.
+        // An empty value must still disable it; a caller setting the var to
+        // "" to mean "off" would otherwise silently get the opposite of
+        // what every other flag in this idiom does.
+        std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "");
+        assert!(cloud_subscriber_disabled_from_env());
+        std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
+        assert!(cloud_subscriber_disabled_from_env());
+        std::env::remove_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER");
+    }
 }

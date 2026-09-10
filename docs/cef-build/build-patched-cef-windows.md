@@ -49,6 +49,72 @@ again on a future build:
   (`Microsoft.VisualStudio.Component.VC.ATLMFC` via the VS Installer's
   `modify` command, needed for `atldef.h`).
 
+**Update (2026-09-09), building CEF 152 (branch `7977`) from this same doc:**
+the steps below now use `$CefBranch` (Codex review on PR #3130: an earlier
+revision left every numbered step hardcoded to `7778`, so following the doc
+for "152" silently built 148 instead). Set `$CefBranch = "7977"` in step 1.
+
+**Branch-topology gap this also caught and fixed:** unlike `7778` — where
+patches are merged directly into the milestone branch itself, so checking it
+out gets you everything — `7977` was, until this fix, still the bare
+upstream mirror. The 152 patch work existed only on two separate feature
+branches (`agentmux/7977-process-requirement`,
+`agentmux/7977-drag-rightclick-and-transparency`) that had never been merged
+together. Checking out bare `7977` per this doc's own "integration branch,
+never a feature branch" guidance would have built **zero patches** —
+silently, since none of them are load-bearing for compilation (they only
+change behavior, not build success). Fixed by merging both feature branches
+into `7977` directly (one `patch.cfg` conflict — both branches append at the
+same anchor; resolved by keeping both entries). `7977` is now a genuine
+integration branch, same model as `7778`. Verified via the API post-push:
+all three `patch.cfg`-registered patches present, `BeginWindowDrag` present.
+
+A **152-specific** build blocker also appeared that didn't exist at 148 —
+read this before starting a 152 build on any machine:
+
+- `ui/accessibility/platform/uia_client_info_source_win.cc` (new in Chromium
+  152, unconditional in the Windows `BUILD.gn` — no flag skips it) needs
+  `IUIAutomationClientInfo`/`IUIAutomationClientInfoSource` interfaces that
+  are **absent from Windows SDK 10.0.26100.0** — the only SDK version VS
+  Build Tools 2022's installer catalog offers (checked directly: only
+  `22621` and `26100` exist there). Confusingly, `build/vs_toolchain.py`'s
+  `SDK_VERSION` pin is **identical** between Chromium 148 and 152
+  (`10.0.26100.0` both), so the pins say "unchanged" while the actual
+  requirement moved. Root cause: Google's internal
+  `DEPOT_TOOLS_WIN_TOOLCHAIN=1` packaged toolchain bundles a different
+  snapshot of "26100" than the public SDK installer — external builders get
+  the public one and hit this; Google's own CI doesn't.
+  - **Fix:** install a newer public Windows SDK
+    (https://developer.microsoft.com/windows/downloads/windows-sdk/ — the
+    version matching your OS build works; `10.0.28000.0` confirmed to
+    contain the missing interfaces). The VS Installer **cannot** supply
+    this — its catalog doesn't have it.
+  - Then **edit two files**, not one — `SDK_VERSION` is hardcoded
+    separately in both `build/vs_toolchain.py` and
+    `build/toolchain/win/setup_toolchain.py`; `vs_toolchain.py`'s own
+    comment says they must match. The GN arg `windows_sdk_version` alone
+    does **not** propagate — confirmed by checking `out/.../toolchain.ninja`
+    before and after; it still resolved the old SDK path until both Python
+    files were edited and `gn gen` re-run.
+- `cef_installer_unittests` fails to compile in this configuration:
+  `SetInstallerE2EConfigForTesting` is declared under
+  `#if !(defined(OFFICIAL_BUILD) && defined(NDEBUG))` but its own unittest
+  calls it unconditionally — an upstream CEF bug in official+release
+  builds, unrelated to any AgentMux patch or the SDK issue above. **Build
+  `libcef.dll` directly** (`ninja -C out/Release_GN_x64 libcef.dll`) rather
+  than the top-level `cef` target — `ninja -t query libcef.dll` confirms it
+  does not depend on the test binary.
+- **Verifying `BeginWindowDrag` landed:** do NOT `strings`/grep the built
+  DLL for the function name — struct/vtable function-pointer fields are not
+  named exports and never appear as a bare string in a release binary
+  (confirmed: even definitely-present sibling fields like
+  `SetDraggableRegions` return zero hits this way). Check the actual
+  generated wrapper source instead —
+  `cef/libcef_dll/cpptoc/views/window_cpptoc.cc` should have
+  `GetStruct()->begin_window_drag = window_begin_window_drag_<N>` where
+  `<N>` matches the current `/*--cef(added=N)--*/` annotation on
+  `CefWindow::BeginWindowDrag()` in `include/views/cef_window.h`.
+
 ---
 
 ## Prerequisites
@@ -99,6 +165,14 @@ again on a future build:
 $env:DEPOT_TOOLS_WIN_TOOLCHAIN = "0"
 $env:PATH = "C:\depot_tools;$env:PATH"
 
+# The ONE place the target CEF branch is set. 7778 = Chromium 148 (current
+# canonical). Set to 7977 for a Chromium 152 build (Codex review on PR #3130:
+# an earlier revision of this doc's 152 addendum left every step below
+# hardcoded to 7778, so following the doc literally still built 148). Every
+# subsequent step in this doc reads $CefBranch -- do not hardcode 7778/7977
+# again below this line.
+$CefBranch = "7778"
+
 New-Item -ItemType Directory -Force -Path "$HOME\cef-build" | Out-Null
 Set-Location "$HOME\cef-build"
 
@@ -109,7 +183,7 @@ Invoke-WebRequest -Uri "https://bitbucket.org/chromiumembedded/cef/raw/master/to
 # First sync (downloads chromium ~99 GB, takes hours)
 python3 automate-git.py `
   --download-dir="$(Get-Location)" `
-  --branch=7778 `
+  --branch=$CefBranch `
   --no-distrib `
   --no-build
 ```
@@ -119,11 +193,18 @@ python3 automate-git.py `
 Same fork/branch as Linux/macOS — see the header note above on why
 Windows uses this branch despite not needing its patches.
 
+> **Build from the integration branch, never a feature branch.**
+> `docs/cef-build/CEF_FORK_MAINTENANCE.md` §4 (R3). A feature branch may look
+> newer and still be missing part of the carry-set — that is exactly how the
+> 2026-07 transparency gap happened. Run §5 of that doc against this checkout
+> before building; it must report **21 `OK`**. If it does not, the integration
+> branch is incomplete and must be fixed first — do not build around it.
+
 ```powershell
 Set-Location "$HOME\cef-build\chromium_git\cef"
 git remote add agentmuxai https://github.com/agentmuxai/cef.git
-git fetch agentmuxai agentmux/7778-drag-rightclick-and-transparency
-git checkout agentmuxai/agentmux/7778-drag-rightclick-and-transparency
+git fetch agentmuxai --prune
+git checkout agentmuxai/$CefBranch   # integration branch for the milestone
 
 # Mirror to the chromium-side cef checkout
 robocopy "$HOME\cef-build\chromium_git\cef" "$HOME\cef-build\chromium_git\chromium\src\cef" /MIR /XD .git
@@ -141,7 +222,20 @@ Set-Location "$HOME\cef-build\chromium_git\chromium\src"
 # Reset to clean state -- patcher is NOT idempotent; double-apply produces .rej files
 git reset --hard HEAD
 Get-ChildItem -Recurse -Filter "*.rej" | Remove-Item
-python3 cef\tools\patcher.py --root-dir=cef
+
+# patcher.py takes NO arguments in its normal mode — it reads
+# cef/patch/patch.cfg itself, and accepts ONLY --patch-file / --patch-dir
+# (verified against tools/patcher.py's own OptionParser). Passing --root-dir
+# makes it fail, and a wrapper script has swallowed exactly that as a
+# non-fatal WARN and continued — applying ZERO of 112 patches and nearly
+# shipping an unpatched framework. Run it from inside cef/ with no args:
+Push-Location cef
+python3 tools\patcher.py
+Pop-Location
+
+# Verify it actually did something. A CLEAN tree here means zero patches
+# applied — that is the silent-failure signature, not success.
+git status --porcelain | Select-Object -First 5
 ```
 
 If you see "class member cannot be redeclared" compile errors later, the
@@ -178,7 +272,21 @@ pressure on the first run:
 
 ```powershell
 Set-Location "$HOME\cef-build\chromium_git\chromium\src"
-ninja -j 20 -l 28 -C out\Release_GN_x64 cef
+# NOT the top-level "cef" target — that also builds cef_installer_unittests,
+# which fails to compile in this configuration (Codex review on PR #3130:
+# an earlier revision of this doc only mentioned the workaround in the intro
+# note above, while this actual step still said "cef" — so a reader would
+# still hit the failure after hours of compilation). SetInstallerE2EConfigForTesting
+# is declared under #if !(OFFICIAL_BUILD && NDEBUG) but its own unittest calls
+# it unconditionally -- an upstream CEF bug in official+release builds,
+# unrelated to any AgentMux patch. libcef.dll does not depend on that test
+# binary (confirmed: `ninja -t query libcef.dll` does not list it).
+ninja -j 20 -l 28 -C out\Release_GN_x64 libcef.dll
+
+# cefsimple is NOT pulled in by the libcef.dll target above (it depends on
+# the library, not the reverse -- Codex P2 on PR #3130). Build it separately
+# before step 6, or that verification step fails with "file not found":
+ninja -j 20 -l 28 -C out\Release_GN_x64 cefsimple
 ```
 
 Expect ~3-6 hours on first build with a cold build cache. If ninja OOMs
@@ -190,8 +298,8 @@ walking away entirely on an unverified job count.
 ### 6. Verify it boots
 
 ```powershell
-Set-Location "$HOME\cef-build\chromium_git\cef\tests"
-out\Release_GN_x64\cefsimple.exe --url=https://example.com
+Set-Location "$HOME\cef-build\chromium_git\chromium\src\out\Release_GN_x64"
+.\cefsimple.exe --url=https://example.com
 ```
 
 A window with example.com proves the libcef.dll is functional.
@@ -221,9 +329,47 @@ Compress-Archive -Path @(
     "locales"
 ) -DestinationPath "cef-windows-x86_64-$CefVersion.zip"
 
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+#
+# Locate the fork clone rather than assuming a path. The mirrored copy under
+# chromium\src\cef is created with `robocopy /XD .git`, so it has no .git of its
+# own -- and `git -C` on such a directory does not fail, it silently WALKS UP and
+# answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. Take
+# the first candidate that is BOTH its own git root AND has the agentmuxai/cef
+# remote. Set $env:CEF_CLONE to override.
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Folding it into the probe loop would `continue` past a wrong override and
+# silently record a DIFFERENT checkout's HEAD -- the same defect the bash
+# runbooks fix. Matches build-patched-libcef.md / build-patched-framework-macos.md.
+function Test-CefClone($p) {
+  if (-not $p -or -not (Test-Path $p)) { return $false }
+  $top = (git -C "$p" rev-parse --show-toplevel 2>$null)
+  if (-not $top -or (Resolve-Path $top).Path -ne (Resolve-Path $p).Path) { return $false }
+  return [bool]((git -C "$p" remote -v 2>$null) -match 'agentmuxai/cef')
+}
+
+$CefClone = $null
+if ($env:CEF_CLONE) {
+  if (Test-CefClone $env:CEF_CLONE) { $CefClone = $env:CEF_CLONE }
+  else { throw "CEF_CLONE=$($env:CEF_CLONE) is not an agentmuxai/cef git root." }
+} else {
+  foreach ($c in @("$HOME\cef-build\chromium_git\cef", "$HOME\cef-build\chromium\cef")) {
+    if (Test-CefClone $c) { $CefClone = $c; break }
+  }
+  if (-not $CefClone) { throw "No agentmuxai/cef clone found (a .git-less mirror does not count). Set CEF_CLONE." }
+}
+Write-Host "fork clone: $CefClone"
+
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+$CefForkSha = (git -C "$CefClone" rev-parse HEAD)
+# Refuse to publish a release with no provenance rather than one with an empty field.
+if (-not $CefForkSha) { throw "Refusing to publish without a recorded fork commit" }
+
 gh release create "cef-windows-x86_64-$CefVersion" --repo agentmuxai/cef `
+  --target "$CefForkSha" `
   --title "Codec-enabled CEF -- Windows x86_64 CEF $CefVersion" `
-  --notes "proprietary_codecs + HEVC/AC3/EAC3/Dolby Vision. Branch: agentmux/7778-drag-rightclick-and-transparency (inert on Windows -- built for codec flags only)." `
+  --notes "proprietary_codecs + HEVC/AC3/EAC3/Dolby Vision. Built from agentmuxai/cef $($CefForkSha.Substring(0,12)) (branch $CefBranch; patches inert on Windows -- built for codec flags only)." `
   "cef-windows-x86_64-$CefVersion.zip"
 ```
 

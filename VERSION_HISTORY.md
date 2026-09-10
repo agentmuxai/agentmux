@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.55.40 — 2026-09-08
+
+- fix(window): reveal a cold-path window even when CEF Views misreports it visible
+- docs: internationalization scoping and resource-cost analysis
+- ci(srv): generate the frontend RPC types from the Rust ones with ts-rs and gate their freshness — the audit's 'keep in sync' comments become a build failure for migrated commands
+- fix(reactive): stop a same-host inject to an unspawned persistent agent from deadlocking the reactive handler
+- feat(term): frosted-glass band for the terminal pane tab strip
+- refactor(storage): the instance API reads and writes db_agents only; registry re-keyed to agent ids (agent consolidation Phase 3b, PR 2)
+- docs(layout): spec the pane tab-switch chrome repaint, fix the stale key-function pointer
+- docs(cef): spec the 148→152 milestone upgrade across all three platforms
+- docs(saga): cross-reference the launcher and srv saga/reducer frameworks in their module headers — Phase 5 of the DRY audit decided: keep both, document the split
+- fix(ci): pin cef-runtime-tag explicitly in release.yml instead of floating to latest
+- refactor(storage): re-point six agent-child tables' FK from db_agent_definitions to db_agents (agent consolidation Phase 3c, PR 3 of 4)
+- fix(ci): require an emergency release rebuild to dispatch from the tag it is rebuilding
+- fix(layout): dispose evicted NodeModels' reactive roots instead of leaking them on every tab switch
+- refactor(storage): every agent_def_* method reads and writes db_agents only (agent consolidation Phase 3d, PR 4 of 5)
+- feat(discovery): expose host hostname in /agentmux/discovery
+- refactor(storage): drop db_agent_definitions and db_agent_instances — agent consolidation complete (PR 5 of 5)
+- fix(agent-launch): stop autofilling the agent name from the model — empty field, ghost-text placeholder only
+- docs: spec continuous session persistence + trustworthy shutdown
+
 ## 0.55.39 — 2026-09-07
 
 - feat(tray): macOS menu-bar backend + headless AppKit pump for background-service mode (issue #2977 WS1)

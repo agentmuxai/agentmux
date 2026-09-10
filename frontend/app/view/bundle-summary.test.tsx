@@ -18,7 +18,7 @@ let agentsList: any[] = [];
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        GetMemoryCommand: (...args: unknown[]) => getMemory(...args),
+        GetBundleCommand: (...args: unknown[]) => getMemory(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -44,7 +44,7 @@ describe("BundleSummaryPanel", () => {
     it("renders the generic pointer-only form when agentId is absent", () => {
         render(() => <BundleSummaryPanel kind="Bundle" />);
         expect(screen.getByText(/Manage in Identity & Memory/)).toBeInTheDocument();
-        expect(screen.queryByText("This agent's own ABF")).not.toBeInTheDocument();
+        expect(screen.queryByText("This agent's own bundle")).not.toBeInTheDocument();
     });
 
     it("shows the bound bundle's name and provider when the agent has one", async () => {
@@ -73,7 +73,7 @@ describe("BundleSummaryPanel", () => {
         render(() => <BundleSummaryPanel kind="Bundle" agentId="agent-1" />);
 
         await waitFor(() => {
-            expect(screen.getByText(/has no ABF bundle of its own yet/)).toBeInTheDocument();
+            expect(screen.getByText(/has no bundle of its own yet/)).toBeInTheDocument();
         });
         expect(getMemory).not.toHaveBeenCalled();
     });
@@ -94,7 +94,7 @@ describe("BundleSummaryPanel", () => {
 
         render(() => <BundleSummaryPanel kind="Bundle" agentId="agent-1" />);
 
-        expect(screen.queryByText("This agent's own ABF")).not.toBeInTheDocument();
+        expect(screen.queryByText("This agent's own bundle")).not.toBeInTheDocument();
         expect(getMemory).not.toHaveBeenCalled();
     });
 });

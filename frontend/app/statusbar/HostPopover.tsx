@@ -70,14 +70,35 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     let qrCanvasRef: HTMLCanvasElement | undefined;
 
     // Builds the `agentmux://connect` deep link the mobile app scans to pair.
-    // `token` is this instance's auth_key — the SAME value the backend already
-    // broadcasts in plaintext in its mDNS TXT record whenever LAN discovery is
-    // on (agentmux-srv/src/backend/lan_discovery.rs), and the same value this
-    // frontend process already holds via the existing `get_auth_key` IPC
-    // bootstrap call (getApi().getAuthKey(), used for every local RPC/WS call).
-    // This helper only reads that already-cached value to build a string handed
-    // straight to the QR renderer below — it is never logged and never sent
-    // anywhere else.
+    // `token` is this instance's FULL `auth_key` — the same one that gates
+    // every local RPC/WS call (getApi().getAuthKey()), not just LAN
+    // forwarding. This helper only reads that already-cached value to build
+    // a string handed straight to the QR renderer below — it is never
+    // logged and never sent anywhere else.
+    //
+    // CORRECTED 2026-09-09 (found while researching the remote-terminals/
+    // conversation-history spec in the SEPARATE agentmux-mobile repo — that
+    // spec is not in this repo, so no docs/specs path here to cite):
+    // this comment used to justify handing out the full key by saying it's
+    // "the SAME value the backend already broadcasts in plaintext in its
+    // mDNS TXT record" — true when this shipped (PR #2243, 2026-07-20), and
+    // false since PR #2572 (2026-08-14, SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md
+    // LAN P0-1) narrowed the mDNS/UDP-broadcast credential to a separate,
+    // scoped `lan_key` (`Config::lan_key`, `agentmux-srv/src/config.rs`) —
+    // see that field's own doc comment for what it's now limited to. QR
+    // pairing was never updated to match, so it grants strictly more than
+    // its own original rationale claimed it did.
+    //
+    // Left as the full key for now, not narrowed to `lan_key`, because
+    // `lan_key` cannot reach `GET /agentmux/discovery`
+    // (`lan_or_full_auth_middleware` in `agentmux-srv/src/server/mod.rs`
+    // grants exactly three routes, none of them that one) — swapping it in
+    // here would silently break the one thing QR pairing exists for (the
+    // mobile app's Agents list actually populating). Fixing this properly
+    // needs a real scoped read credential wider than `lan_key` but narrower
+    // than `auth_key`, which doesn't exist yet — see that mobile-repo spec's
+    // §4.4 Option A. This comment fix is deliberately scoped to correcting
+    // the now-false claim, not to that larger, separate change.
     const connectUri = (): string | null => {
         const info = props.hostInfo();
         if (!info || !info.localIp || info.localIp === "127.0.0.1") return null;

@@ -241,3 +241,33 @@ a {
         }
     }
 }
+
+// Pane-header activity flash, referenced by
+// `mixins.block-frame-default-header-layout()`'s `.block-frame-text.term-activity--flash`.
+// Lives HERE, in the one globally-imported stylesheet, rather than in that
+// mixin's body (ReAgent P2 on PR #3151): a @keyframes inside a mixin is
+// emitted once per @include, so it appeared twice once both block.scss and
+// agent-view.scss included the mixin. Moving it to mixins.scss's top level
+// was worse still — every one of that module's 10 consumers then emitted a
+// copy, including unrelated ones like button.scss. app.scss is imported
+// exactly once (bootstrap.ts / app.tsx), so this compiles to a single
+// definition; @keyframes names are global in CSS, so the mixin's
+// `animation:` reference resolves regardless of where it's declared.
+//
+// One deliberate deviation from the block.scss original this was extracted
+// from: it read `var(--accent-color, #6c9ef8)`. block.scss is grandfathered
+// in .stylelintignore for its pre-existing raw hex; this file is not, so
+// carrying the literal would newly fail `color-no-hex`. Dropping it is safe
+// rather than a silent behavior change — `--accent-color` is defined
+// unconditionally in theme.scss and only ever overridden, never unset, by
+// the files in themes/, so the fallback arm was unreachable.
+@keyframes term-activity-flash {
+    0% {
+        opacity: 1;
+        color: var(--accent-color);
+    }
+    100% {
+        opacity: 0.6;
+        color: inherit;
+    }
+}

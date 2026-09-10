@@ -59,6 +59,18 @@ pub const COMMAND_DELETE_SUB_BLOCK: &str = "deletesubblock";
 /// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
 pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 
+/// Fire-and-forget request to narrate an autonomous AgentMux action back to
+/// the user, in the pane's own conversation. The renderer supplies the
+/// context because only it has it — `COMMAND_DOCK_NODE_STATUS` below carries
+/// `tool_name` but not the command text, so the backend knows *a Bash call*
+/// went background and cannot say *what* did, which is the whole content of
+/// the message.
+///
+/// `kind` selects the prompt, which is what makes this general rather than
+/// background-task-specific. No reply expected: the narration arrives later as
+/// an `ambient-narration` broadcast, or not at all.
+pub const COMMAND_AMBIENT_NARRATE: &str = "ambientnarrate";
+
 /// Fire-and-forget push from the renderer whenever a `ToolNode`'s status
 /// changes (created, or transitions running→success/failed/canceled/etc).
 /// Backs `muxspect dock`'s diagnostic snapshot — see
@@ -219,20 +231,20 @@ pub const COMMAND_LIST_AGENT_IDENTITIES: &str = "listagentidentities";
 /// the m0013/m0014 backfill migrations.
 pub const COMMAND_LIST_ALL_AGENT_IDENTITIES: &str = "listallagentidentities";
 
-// Memory bundles (v7 — agent personality / capability stack)
+// Bundles (v7 — agent personality / capability stack)
 pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
 pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
-/// v9 — set the global-brain section order. `ids` is the full ordered list
+/// v9 — set the global-bundle section order. `ids` is the full ordered list
 /// of global bundle ids; each row's `sort_order` becomes its index.
 pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
 /// v27 — the ONLY commands that can write `db_bundles.is_system=1`. See
 /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
 /// separate from `upsertmemory`/`deletememory` (never wired to any MCP
-/// tool) so the ordinary Global Memory editor, the per-agent Bundle
+/// tool) so the ordinary Global Bundle editor, the per-agent Bundle
 /// editor, and ABF import/export can never touch a system entry even by
-/// accident — `Store::bundle_memory_upsert`/`_delete` refuse outright the
+/// accident — `Store::bundle_upsert`/`_delete` refuse outright the
 /// moment they see an existing `is_system=1` row.
 pub const COMMAND_UPSERT_SYSTEM_MEMORY: &str = "upsertsystemmemory";
 pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
@@ -240,7 +252,7 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// config dir (`DataPaths::provider_auth_dir("claude")` — the
 /// `CLAUDE_CONFIG_DIR` a non-identity-bound spawned Claude agent actually
 /// gets). NOTE: this is Claude Code's own home-relocation path, NOT the
-/// file AgentMux's Global Memory actually composes into — that's
+/// file AgentMux's Global Bundle actually composes into — that's
 /// `<agent working_directory>/CLAUDE.md` (or its `AGENTMUX_MEMORY.md`
 /// companion when foreign), written by `agent_config.rs`'s
 /// `write_claude_md_respecting_ownership`, a per-agent path this command
@@ -390,6 +402,13 @@ pub const COMMAND_BUNDLE_GET: &str = "bundle.get";
 pub const COMMAND_BUNDLE_UPSERT: &str = "bundle.upsert";
 pub const COMMAND_BUNDLE_DELETE: &str = "bundle.delete";
 pub const COMMAND_BUNDLE_SELF_GET: &str = "bundle.self.get";
+/// Read-only: every file this agent will read as project instructions from its
+/// working directory, with a content hash and an `agentmux`/`foreign` owner
+/// for each. Phase 3 of
+/// docs/specs/SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md. There is
+/// deliberately no write counterpart — a foreign instruction file is the
+/// repository's, not AgentMux's.
+pub const COMMAND_AGENT_PROJECT_INSTRUCTIONS: &str = "agent.project_instructions";
 // Armory Bundle Format (ABF) exporter — Phase 1 of
 // docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md /
 // https://docs.agentmux.ai/abf/. Serializes a bundle + its referenced

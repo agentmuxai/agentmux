@@ -1,15 +1,18 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, createEffect, onCleanup } from "solid-js";
+import { createComponent, createSignal, createEffect, onCleanup } from "solid-js";
+import type { JSX } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import type { NodeModel } from "@/layout/index";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, WOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
-import { AgentViewWrapper } from "./agent-view";
+import { AgentBlockContent, AgentPaneChrome } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
+import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { resolveVendorEnvOverride } from "./providers/vendor-env";
 import { Logger } from "@/util/logger";
@@ -39,13 +42,40 @@ export class AgentViewModel implements ViewModel {
     viewText: () => string | HeaderElem[];
     viewComponent: ViewComponent;
     noPadding: () => boolean;
+    noHeader: () => boolean;
+    renderPaneChrome: (nodeModel: NodeModel, content: JSX.Element) => JSX.Element;
+    setProgressBarMount: (el: HTMLDivElement | null) => void;
+    /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
+     *  reads this directly off its own concrete `AgentViewModel` instance
+     *  to know where to portal the marching-ants progress bar. Populated
+     *  externally by whichever `AgentPaneChrome` instance is currently
+     *  hoisted (via `setProgressBarMount`, tracking `NodeModel.activeViewModel()`
+     *  reactively) — `null` until chrome has mounted and called it at
+     *  least once. */
+    progressBarMount: () => HTMLDivElement | null;
+    /** NOT part of the shared `ViewModel` contract — same bridging pattern
+     *  as `progressBarMount`/`setProgressBarMount` above, for
+     *  `AgentBlockContent`'s picker-host strip-clearance padding
+     *  (agent-view.tsx's own comment on that style binding explains why). */
+    tabStripVisible: () => boolean;
+    setTabStripVisible: (visible: boolean) => void;
+    /** NOT part of the shared `ViewModel` contract. ReAgent P2 on
+     *  SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's PR: owned here
+     *  (one `useAgentDefinitions()` subscription per ViewModel instance,
+     *  matching the granularity content was already reconstructed at) so
+     *  both `AgentBlockContent` (via `model.agentDefinitions`) and
+     *  `AgentPaneChrome` (via `nodeModel.activeViewModel()?.agentDefinitions`)
+     *  read the SAME list instead of each independently calling the hook —
+     *  the exact redundant-RPC-plus-subscription pattern this file's own
+     *  header comment (reagent P2 on PR #2488) already warns against. */
+    agentDefinitions: () => AgentDefinition[];
     endIconButtons: () => IconButtonDecl[];
     nodejsError: string | null = null;
 
     // Callback wired by AgentPresentationView on mount so the title-bar
     // button can open the pane-scoped Stash modal without holding a
     // SolidJS context in the model. Replaced the former separate
-    // _openIdentityModal / _openMemoryModal pair (Phase 3 slice 1 — one
+    // _openIdentityModal / _openBundleModal pair (Phase 3 slice 1 — one
     // "Stash" icon opens a unified tabbed modal). Named "Stash" (not
     // "Armory") to distinguish it from the global Armory pane — see
     // docs/reports/REPORT_ARMORY_STASH_NAMING_2026_07_27.md.
@@ -68,7 +98,27 @@ export class AgentViewModel implements ViewModel {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
         this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
-        this.viewComponent = AgentViewWrapper as any;
+        this.viewComponent = AgentBlockContent as any;
+        // createComponent (not a plain `AgentPaneChrome({...})` call) —
+        // this file is a plain .ts, so it can't use JSX's `<AgentPaneChrome>`
+        // syntax, but a bare function call would run AgentPaneChrome's own
+        // createEffect/onCleanup/createSignal calls in whatever reactive
+        // scope happens to be ambient at THIS constructor call (wrong —
+        // ties chrome's disposal to whichever effect first constructed this
+        // one vm instance, not to chrome's own actual mount/unmount in the
+        // DOM). createComponent is the JSX-free equivalent of what
+        // `<AgentPaneChrome .../>` compiles to; pane-leaf-chrome.tsx (a real
+        // .tsx file) is what actually establishes the owning scope, since
+        // that's where this returned JSX.Element gets inserted into the tree.
+        this.renderPaneChrome = (leafNodeModel: NodeModel, content: JSX.Element): JSX.Element =>
+            createComponent(AgentPaneChrome, { anchorBlockId: this.blockId, nodeModel: leafNodeModel, children: content });
+        const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
+        this.progressBarMount = progressBarMountSig;
+        this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);
+        const [tabStripVisibleSig, setTabStripVisibleSig] = createSignal(false);
+        this.tabStripVisible = tabStripVisibleSig;
+        this.setTabStripVisible = (visible: boolean) => setTabStripVisibleSig(visible);
+        this.agentDefinitions = useAgentDefinitions()[0];
 
         // Flash signal: set true briefly when the activity summary changes to a
         // new non-empty value. Compare to previous so unrelated meta writes
@@ -137,6 +187,20 @@ export class AgentViewModel implements ViewModel {
             return elems;
         };
         this.noPadding = () => true;
+        // True exactly when something above this Block is already rendering
+        // a replacement header — i.e. pane-leaf-chrome.tsx's hoisted branch,
+        // which tags the NodeModel wrapper it passes down
+        // (`paneChromeHoisted`). Suppressing BlockFrame's own inline header
+        // there is what keeps chrome's header and Block's from
+        // double-rendering.
+        //
+        // NOT unconditional (codex P2 on this PR): `tabcontent.tsx`'s
+        // `renderPreview` builds a drag-preview thumbnail as a plain
+        // `<Block preview>` with the RAW leaf nodeModel — no chrome around
+        // it — and `BlockFrame_Default_Component` honors `noHeader` in
+        // preview mode too, so a blanket `true` silently stripped the title
+        // off every agent pane's drag thumbnail.
+        this.noHeader = () => this.nodeModel.paneChromeHoisted === true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
             const oref = WOS.makeORef("block", this.blockId);
@@ -745,7 +809,7 @@ export class AgentViewModel implements ViewModel {
                     // `db_agent_instances` field, not part of the new
                     // direct-link system.
                     identity_id: overrides?.accountId,
-                    memory_id: overrides?.memoryId,
+                    memory_id: overrides?.bundleId,
                     // v8: named-agent continuation. The instance name
                     // is the AGENTMUX_AGENT_ID the user picked in the
                     // modal; finalWorkDir is the path that

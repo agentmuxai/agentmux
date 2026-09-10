@@ -51,7 +51,23 @@ jobs:
         run: choco install ninja -y
       - name: Install build deps (Linux — CEF + launcher Wayland/GTK)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
+        # The runner image ships a google-chrome apt source we do not use — none
+        # of the packages below come from it. When Google serves a corrupt index
+        # (`Hash Sum mismatch`, as on 2026-09-09) `apt-get update` exits 100 and
+        # takes the whole Linux leg down, on every branch including main.
+        #
+        # Two layers, because removing the source alone was not enough: the
+        # first attempt deleted `google-chrome.list` and the index was STILL
+        # fetched, since ubuntu-24.04 declares it in deb822 `.sources` form. The
+        # glob covers both spellings, and the `|| true` means a refresh failure
+        # on any OTHER third-party source cannot block us either. This does not
+        # weaken the gate: everything installed here comes from the Ubuntu
+        # archive, and `apt-get install` below still fails loudly if a package
+        # cannot be found.
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update || echo "apt-get update reported errors; continuing (install is the real gate)"
+          sudo apt-get install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
 
       - uses: Swatinem/rust-cache@v2
 
@@ -119,6 +135,17 @@ jobs:
       - name: Scrollbar cursor gate
         run: bash scripts/check-scrollbar-cursor.sh
 
+      # scripts/cef-verify.sh is the carry-set gate for the CEF fork
+      # (docs/cef-build/CEF_FORK_MAINTENANCE.md §5). It runs against a CEF
+      # checkout, which CI does not have -- so what runs here is its TEST SUITE,
+      # against synthetic fixtures. That is the point: four bugs in the previous
+      # markdown version of these checks made them incapable of failing (or, in
+      # one case, made them overwrite the build output they were verifying), and
+      # none were visible by reading. This is the run that would have caught all
+      # four.
+      - name: cef-verify self-test
+        run: bash scripts/cef-verify.test.sh
+
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
 
@@ -140,5 +167,32 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      # Runs BEFORE vitest, and is not redundant with it: vitest transpiles
+      # per-file without typechecking, so a type error compiles away and the
+      # suite goes green. Two reached main this way (a `#[ts(optional)]`-shaped
+      # mistake, and a test passing fields the action type does not declare —
+      # ignored at runtime, so the test was still valid and still passed while
+      # not compiling). Neither was catchable by any gate that existed.
+      #
+      # Cheap: no build, just the checker, on an install the next step needs
+      # anyway.
+      #
+      # tsconfig.citypecheck.json, not tsconfig.json: the build config includes
+      # only frontend/**, while vitest below also runs test/contract/* and
+      # test/e2e/*. Checking the narrower set would have left the same hole in
+      # a different directory (reagent P2 on #3166).
+      #
+      # IF YOU ARE HERE BECAUSE THIS STEP FAILED AND YOU BELIEVE YOU RAN IT
+      # LOCALLY: check how you read the result, not just that you ran it. Both
+      # errors this gate was built for got past a local run that LOOKED clean.
+      #   - `npx tsc ... | head -5` / `| tail -5` hides errors outside the
+      #     window you printed. tsc lists every error; a truncated view is not
+      #     a verdict.
+      #   - `npx tsc ... | tail -4; echo $?` reports TAIL's exit status, not
+      #     tsc's. A pipeline exits with its LAST command. That reads as a
+      #     confident green while the checker was failing.
+      # Run it bare and read the exit code:  npx tsc --noEmit -p tsconfig.citypecheck.json; echo $?
+      - name: tsc --noEmit
+        run: npx tsc --noEmit -p tsconfig.citypecheck.json
       - name: vitest run
         run: npx vitest run

@@ -14,7 +14,7 @@ use crate::backend::rpc_types::{
     COMMAND_DELETE_AGENT_INSTANCE,
     CommandListAgentInstancesData, CommandGetAgentInstanceData,
     CommandCreateAgentInstanceData, CommandUpdateAgentInstanceData,
-    CommandDeleteAgentInstanceData,
+    CommandDeleteAgentInstanceData, DeleteAgentInstanceResult,
 };
 use crate::backend::storage::store::{
     AgentInstance, InstanceStatus,
@@ -86,7 +86,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ended_at: 0,
                     created_at: now,
                     // PR-F.3: launch modal passes through Identity +
-                    // Memory bundle picks. Empty string = blank
+                    // Bundle picks. Empty string = blank
                     // singleton (no override; the resolver returns
                     // immediately on either "" or "blank").
                     identity_id: cmd.identity_id,
@@ -203,14 +203,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DELETE_AGENT_INSTANCE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandDeleteAgentInstanceData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandDeleteAgentInstanceData = serde_json::from_value(data)
-                    .map_err(|e| format!("deleteagentinstance: {e}"))?;
+            async move {
                 // Read the row first so we can emit a scoped event after.
                 let definition_id = wstore
                     .instance_get(&cmd.id)
@@ -228,9 +226,49 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(Some(json!({ "deleted": deleted })))
-            })
-        }),
+                Ok(DeleteAgentInstanceResult { deleted })
+            }
+        },
     );
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::rpc::engine::WshRpcEngine;
+    use crate::server::tests::test_state;
+
+    /// `deleteagentinstance` is recorded in the engine's schema with its
+    /// exact type names — the property the RPC codegen plan depends on.
+    /// `DeleteAgentInstanceResult` didn't exist before this migration; the
+    /// handler used to answer with an anonymous `json!({"deleted": ..})`.
+    #[tokio::test]
+    async fn register_typed_records_deleteagentinstance() {
+        let state = test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let row = rows
+            .iter()
+            .find(|r| r["command"] == COMMAND_DELETE_AGENT_INSTANCE)
+            .expect("deleteagentinstance missing from the schema");
+        assert_eq!(row["requestName"], "CommandDeleteAgentInstanceData");
+        assert_eq!(row["responseName"], "DeleteAgentInstanceResult");
+        // The other four instance commands are deliberately NOT migrated —
+        // their responses are the storage-level AgentInstance entity, out
+        // of scope for this batch — and must stay absent from the schema.
+        for cmd in [
+            COMMAND_LIST_AGENT_INSTANCES,
+            COMMAND_GET_AGENT_INSTANCE,
+            COMMAND_CREATE_AGENT_INSTANCE,
+            COMMAND_UPDATE_AGENT_INSTANCE,
+        ] {
+            assert!(
+                rows.iter().all(|r| r["command"] != cmd),
+                "{cmd} is not migrated and must not appear in the schema",
+            );
+        }
+    }
 }

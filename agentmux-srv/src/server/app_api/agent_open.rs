@@ -334,7 +334,7 @@ pub(crate) async fn open_agent_impl(
                     .collect::<String>();
                 // Shared with native-memory resolution so the two can never
                 // disagree about where a blank-working_directory agent
-                // actually runs — they did, and Personal Memory broke for the
+                // actually runs — they did, and Personal Bundle broke for the
                 // common case as a result (ReAgent/Codex P1, PR #2901; see
                 // SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md).
                 let work_dir = if agent.working_directory.is_empty() {
@@ -769,13 +769,13 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Inject global memory bundles (Armory global brain) into CLAUDE.md.
+    // Inject global memory bundles (Armory global bundles) into CLAUDE.md.
     // All agents get these regardless of per-agent memory selection. Each
     // section carries a `# [Workspace] <name>` heading (see
-    // format_global_brain_block) so the rules are attributable to the
-    // workspace and ordered per the Brain tab's sort_order.
-    let global_bundles = id_store.bundle_memory_list_global().unwrap_or_default();
-    let global_block = crate::backend::storage::format_global_brain_block(&global_bundles);
+    // format_global_bundle_block) so the rules are attributable to the
+    // workspace and ordered per the Armory Global section's sort_order.
+    let global_bundles = id_store.bundle_list_global().unwrap_or_default();
+    let global_block = crate::backend::storage::format_global_bundle_block(&global_bundles);
     if !global_block.is_empty() {
         content_map
             .entry("memory".to_string())
@@ -957,6 +957,20 @@ pub(super) fn write_agent_config_files(
 
     crate::backend::agent_config::write_managed_skill_file_manifest(base_path, &new_managed_skill_paths);
 
+    // Record what this agent will read as project instructions, now that
+    // AgentMux's own files are in their final state for this launch — observed
+    // before the write, this would record the previous launch's content.
+    //
+    // Phase 3 of SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md.
+    // Observing at open is the spec's §8 decision 2: it costs nothing, catches
+    // the case that matters (the repository changed since last launch), and
+    // avoids a watcher. Drift *during* a session is deliberately not covered
+    // yet — revisit only if it shows up in practice.
+    //
+    // Best-effort: an agent must never fail to launch because a tracking row
+    // could not be written.
+    observe_project_instructions(wstore, agent, &expanded_dir);
+
     tracing::info!(
         agent_id = %agent.id,
         work_dir = %expanded_dir,
@@ -965,6 +979,52 @@ pub(super) fn write_agent_config_files(
     );
 
     Ok(())
+}
+
+/// Resolve and record this agent's project instructions.
+///
+/// Split out so the launch path reads as one line and this can be tested on
+/// its own. Never returns an error: see the call site.
+pub(super) fn observe_project_instructions(
+    wstore: &crate::backend::storage::store::Store,
+    agent: &crate::backend::storage::AgentDefinition,
+    working_dir: &str,
+) {
+    use crate::backend::storage::project_instructions::ProjectInstructionObservation;
+
+    let files = crate::backend::project_instructions::resolve_project_instructions(
+        &agent.provider,
+        working_dir,
+    );
+    if files.is_empty() {
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let observations: Vec<ProjectInstructionObservation> = files
+        .iter()
+        .map(|f| ProjectInstructionObservation {
+            path: f.path.clone(),
+            content_hash: f.content_hash.clone(),
+            size_bytes: f.size_bytes as i64,
+            owner: match f.owner {
+                crate::backend::project_instructions::InstructionOwner::Agentmux => "agentmux",
+                crate::backend::project_instructions::InstructionOwner::Foreign => "foreign",
+            }
+            .to_string(),
+            existed: f.exists,
+            observed_at: now,
+        })
+        .collect();
+
+    if let Err(e) = wstore.project_instructions_record(&agent.id, &observations) {
+        tracing::warn!(
+            agent_id = %agent.id, error = %e,
+            "agent.open: could not record project-instruction observations"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1147,7 +1207,7 @@ mod write_agent_config_files_tests {
         wstore.agent_def_insert(&mut agent).unwrap();
 
         wstore
-            .bundle_memory_upsert(&crate::backend::storage::memory_bundles::Memory {
+            .bundle_upsert(&crate::backend::storage::bundles::Bundle {
                 id: "bundle-1".to_string(),
                 name: "Bundle 1".to_string(),
                 description: String::new(),

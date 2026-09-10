@@ -53,7 +53,7 @@ use super::error::StoreError;
 ///        to see what a file contained before its last write. See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
 ///   v9 — db_bundles.is_system: AgentMux-controlled, highest-priority
-///        Global Memory tier — see OBJECT_SCHEMA_VERSION's v27 doc
+///        Global Bundle tier — see OBJECT_SCHEMA_VERSION's v27 doc
 ///        comment (objects.db, above run_object_schema) for the full
 ///        design; this store just needs schema parity.
 pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
@@ -92,8 +92,8 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///   v8 — db_memory_bundles.is_global: global-tier flag for Armory
 ///        bundles injected into every agent's CLAUDE.md at launch
 ///   v9 — db_memory_bundles.sort_order: explicit ordering for the Armory
-///        global brain (controls CLAUDE.md injection order). Existing
-///        rows default to 0; the Brain tab assigns positions via reorder.
+///        global bundles (controls CLAUDE.md injection order). Existing
+///        rows default to 0; the Armory Global section assigns positions via reorder.
 ///   v10 — db_skills, db_mcp_servers, db_agent_skills_ref, db_agent_mcp_ref:
 ///        standalone MCP Server and Skill primitives with per-agent ref tables
 ///        (v1 composable model, SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md).
@@ -237,15 +237,15 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `db_lan_peer_pubkey_pins`'s exact shape (own module,
 ///        get/set-style methods, case-insensitive agent_id lookups).
 ///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority
-///        Global Memory tier (INTEGER, default 0). A system row is always
+///        Global Bundle tier (INTEGER, default 0). A system row is always
 ///        also is_global=1 (enforced in code, not a CHECK constraint —
-///        see `bundle_memory_upsert_system`). Writable only through the
+///        see `bundle_upsert_system`). Writable only through the
 ///        dedicated `upsertsystemmemory`/`deletesystemmemory` RPCs and
-///        `Store::bundle_memory_upsert_system`/`_delete_system` — the
-///        generic `bundle_memory_upsert`/`_delete`/`_reorder` all refuse
+///        `Store::bundle_upsert_system`/`_delete_system` — the
+///        generic `bundle_upsert`/`_delete`/`_reorder` all refuse
 ///        to touch an is_system=1 row. Injected first in
-///        `format_global_brain_block`'s output, wrapped in explicit
-///        override wording, ahead of every ordinary Global Memory
+///        `format_global_bundle_block`'s output, wrapped in explicit
+///        override wording, ahead of every ordinary Global Bundle
 ///        section. See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
 ///   v28 — db_agent_activity_summaries: one-shot, on-demand Haiku-generated
 ///        activity summary per `definition_id`, used as the AgentPicker's
@@ -262,7 +262,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        turn) and cached forever once non-empty — mirrors
 ///        `SubAgent.display_name`'s cache-once posture, not
 ///        `term:ambient_summary`'s per-turn refresh. Renumbered from an
-///        earlier v27 — merged alongside the Global Memory system-tier PR
+///        earlier v27 — merged alongside the Global Bundle system-tier PR
 ///        (#2782), which independently claimed v27 for an unrelated
 ///        column (same collision class as this file's own v20→v22 and
 ///        v24→v25 history, see those entries above). See
@@ -341,7 +341,23 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `m0029` runs later in the same upgrade pass and correctly drops
 ///        what the rename just produced — no special-casing needed, and no
 ///        data is stranded under the old name.
-pub const OBJECT_SCHEMA_VERSION: i64 = 32;
+///   v33 — `db_agent_project_instructions`: what each agent was last observed
+///        to read as project instructions from its working directory, keyed
+///        `(agent_id, path)`. Phase 3 of
+///        `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`.
+///
+///        Records a content hash and an observation time, never the content:
+///        this is a tracking table, not a mirror. The distinction from
+///        `db_agent_native_memory` above is deliberate — that one stores
+///        content because it is a durable copy of files AgentMux may have to
+///        serve when the originals are unreachable, whereas these files
+///        belong to the repository, are always readable from it, and are
+///        never written by AgentMux. Storing their content would create a
+///        second copy of somebody else's file with no one to keep it honest.
+///
+///        Purely additive: nothing reads it at launch, and an agent with no
+///        row simply has no prior observation to compare against.
+pub const OBJECT_SCHEMA_VERSION: i64 = 33;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -427,7 +443,7 @@ const DEAD_TABLE_DROPS: &[&str] = &[
 ///    tables found (protects dev databases created before the flatten;
 ///    see the spec §3/§7) and drops the dead workflow/sentinel tables.
 /// 2. The flat `CREATE TABLE IF NOT EXISTS` batch — the canonical schema.
-/// 3. Seeds the blank Memory singleton row.
+/// 3. Seeds the blank Bundle singleton row.
 ///
 /// A database stuck at a pre-v11 intermediate schema cannot be fully
 /// adopted (its tables predate later columns). The adopt step still
@@ -800,6 +816,23 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             PRIMARY KEY (agent_id, filename)
         );
 
+        -- v33: what each agent was last observed to READ as project
+        -- instructions. Hash and timestamp only, never content — these files
+        -- belong to the repository and are always readable from it, unlike
+        -- db_agent_native_memory above, which mirrors content precisely
+        -- because the originals can become unreachable. See
+        -- SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md Phase 3.
+        CREATE TABLE IF NOT EXISTS db_agent_project_instructions (
+            agent_id      TEXT NOT NULL,
+            path          TEXT NOT NULL,
+            content_hash  TEXT NOT NULL DEFAULT '',
+            size_bytes    INTEGER NOT NULL DEFAULT 0,
+            owner         TEXT NOT NULL DEFAULT 'foreign',
+            existed       INTEGER NOT NULL DEFAULT 0,
+            observed_at   INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, path)
+        );
+
         -- v24: append-only version history for native memory content — see
         -- db_agent_native_memory_versions in run_shared_store_schema's doc
         -- comment for the full rationale
@@ -1045,7 +1078,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // setting, like auto_continue_enabled above — not a differently-
         // named-on-db_agents case like memory_id/default_memory_id).
         "ALTER TABLE db_agents ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
-        // v27: AgentMux-controlled, highest-priority Global Memory tier —
+        // v27: AgentMux-controlled, highest-priority Global Bundle tier —
         // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
         // v29: the agent's latest launch state on db_agents — the four
@@ -1067,8 +1100,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         }
     }
 
-    // ---- Seed blank Memory singleton ----
-    // The launch UI renders this as the default option in its Memory
+    // ---- Seed blank Bundle singleton ----
+    // The launch UI renders this as the default option in its Bundle
     // dropdown. Fixed id so tests + dev seed data can hard-code
     // references.
     conn.execute_batch(
@@ -1326,7 +1359,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             ON db_agent_native_memory_versions(agent_id, filename, created_at);",
     )?;
 
-    // Seed the blank Memory singleton — same fixed id as objects.db so
+    // Seed the blank Bundle singleton — same fixed id as objects.db so
     // cross-version reads never see a missing blank row.
     conn.execute_batch(
         "INSERT OR IGNORE INTO db_bundles
@@ -1348,7 +1381,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_cron_jobs ADD COLUMN max_age_secs INTEGER",
         // v7: provider-scoped bundle instructions (ABF v0.2 §2.2).
         "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
-        // v9: AgentMux-controlled, highest-priority Global Memory tier —
+        // v9: AgentMux-controlled, highest-priority Global Bundle tier —
         // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
         "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
     ] {
@@ -1646,7 +1679,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             ON db_agent_native_memory_versions(agent_id, filename, created_at);",
     )?;
 
-    // Seed the blank Memory singleton — same fixed id as objects.db/store.db
+    // Seed the blank Bundle singleton — same fixed id as objects.db/store.db
     // so cross-version reads never see a missing blank row.
     conn.execute_batch(
         "INSERT OR IGNORE INTO db_bundles
@@ -1889,7 +1922,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(mem_blank, 1, "blank Memory singleton should be seeded");
+        assert_eq!(mem_blank, 1, "blank Bundle singleton should be seeded");
     }
 
     #[test]

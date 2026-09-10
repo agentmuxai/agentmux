@@ -6,9 +6,9 @@ import { For, onCleanup, onMount, type JSX } from "solid-js";
 import { Tooltip } from "@/app/element/tooltip";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MemoryManager } from "@/app/view/memory/memory-manager";
+import { BundleManager } from "@/app/view/bundle/bundle-manager";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
-import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
+import { GlobalBundleManager } from "@/app/view/global-bundle/global-bundle-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { SkillManager } from "@/app/view/skill/skill-manager";
 import { NativeMemoryManager } from "@/app/view/native-memory/native-memory-manager";
@@ -27,7 +27,7 @@ const RAIL: { id: ArmorySection; label: string; tooltip?: string; icon: string }
     { id: "memory",   label: ARMORY_SECTION_LABELS.memory,   tooltip: "Global (workspace-wide) and Personal (per-agent) memory", icon: "brain" },
     { id: "skills",   label: ARMORY_SECTION_LABELS.skills,   icon: "wand-magic-sparkles" },
     { id: "mcp",      label: ARMORY_SECTION_LABELS.mcp,      icon: "plug" },
-    { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
+    { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Bundles — import and export as Armory Bundle Format (ABF)", icon: "layer-group" },
 ];
 
 const MEMORY_SUBNAV: { id: MemorySubsection; label: string }[] = [
@@ -64,7 +64,10 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
     onMount(() => {
         if (!viewRef) return;
         const handleCtrlWheel = (ev: WheelEvent) => {
-            if (!ev.ctrlKey) return;
+            // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture
+            // (app.tsx) — let it bubble there instead of zooming just this
+            // pane. See SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md.
+            if (!ev.ctrlKey || ev.shiftKey) return;
             ev.preventDefault();
             ev.stopPropagation();
             const STEP = 0.1;
@@ -131,8 +134,8 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                 <div class="bundle-manager-section">
                     {/*
                      * All six manager components stay mounted (AccountsManager,
-                     * GlobalBrainManager, NativeMemoryManager, SkillManager,
-                     * McpManager, MemoryManager) — toggling is instant and
+                     * GlobalBundleManager, NativeMemoryManager, SkillManager,
+                     * McpManager, BundleManager) — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
@@ -156,7 +159,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                             </nav>
                             <div class="memory-subnav-content">
                                 <div class="bundle-manager-pane" classList={{ "is-hidden": subsection() !== "global" }}>
-                                    <GlobalBrainManager />
+                                    <GlobalBundleManager />
                                 </div>
                                 <div class="bundle-manager-pane" classList={{ "is-hidden": subsection() !== "personal" }}>
                                     <NativeMemoryManager />
@@ -171,7 +174,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                         <McpManager />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "bundles" }}>
-                        <MemoryManager />
+                        <BundleManager />
                     </div>
                 </div>
             </div>

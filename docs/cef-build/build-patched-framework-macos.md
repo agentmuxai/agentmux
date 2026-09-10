@@ -25,7 +25,13 @@ prerequisite for moving macOS onto the native drag path.
 
 The patches live in the same fork/branch as Linux:
 - **Repo:** https://github.com/agentmuxai/cef
-- **Branch:** `agentmux/7778-drag-rightclick-and-transparency`
+- **Branch:** `7778` — the **integration** branch for the milestone. Never build
+  from a feature branch such as `agentmux/7778-drag-rightclick-and-transparency`:
+  it may look newer and still be missing part of the carry-set, which is exactly
+  how the 2026-07 transparency gap happened. Verify with §5 of
+  [CEF_FORK_MAINTENANCE.md](./CEF_FORK_MAINTENANCE.md) (expect **21 `OK`**)
+  before building; if it fails, fix the integration branch rather than building
+  around it.
 - **Base:** Chromium 148 (CEF branch 7778)
 - **Rust binding:** `AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` (pinned in
   `Cargo.toml` `[patch]`; the binding's `_cef_window_t` carries `begin_window_drag`
@@ -44,10 +50,10 @@ not the `148.0.9` this table previously claimed):
 |----------|-------|
 | Path | `~/cef-build/chromium/chromium/src/out/Release_GN_arm64/Chromium Embedded Framework.framework` |
 | Arch | Mach-O 64-bit arm64 |
-| Size (unstripped) | 547 MB |
-| Version (`Info.plist` `CFBundleShortVersionString`) | 148.23.23.0 |
-| `CEF_VERSION` (`cef_version.h`) | `148.23.23-rebuild-7778-codecs.3533+g6c570e2+chromium-148.0.7778.180` |
-| Released tag | `cef-macos-arm64-148.23.23-codecs` (adds `proprietary_codecs` etc. — see `docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md`) |
+| Size (unstripped) | 428 MB binary; 181 MB as the released `.tar.gz` |
+| Version (`Info.plist` `CFBundleShortVersionString`) | 148.23.25.0 |
+| Built from | `agentmuxai/cef` `1bee8b7da` (ancestor of `7778`) — the release's `--target`, so the tag records the build commit |
+| Released tag | `cef-macos-arm64-148.23.25-codecs` (2026-09-09; adds the macOS 26 renderer fix `agentmux_process_requirement` and the renderer-side transparency work over `148.23.23-codecs`) |
 | Patch symbol | `__ZN13CefWindowImpl15BeginWindowDragEv` (local symbol, `nm` type `t`) |
 
 > ⚠️ The patch symbol is **local**, not exported. Verify with full `nm` —
@@ -61,6 +67,44 @@ not the `148.0.9` this table previously claimed):
 - macOS arm64 host (Apple Silicon) with Xcode + command-line tools.
 - ≥ 32 GB RAM, ≥ 120 GB free disk.
 - `depot_tools` on PATH; the chromium hooks pull the macOS toolchain automatically.
+- **The Metal Toolchain component — required for ANY milestone, not just 152:**
+
+  ```bash
+  xcodebuild -downloadComponent MetalToolchain     # ~688 MB
+  ```
+
+  Xcode 26 ships the `metal` *binary* but not the compiler behind it, so
+  `xcrun -f metal` resolves and the tool still refuses to run. Chromium builds
+  ANGLE with `angle_enable_metal=true` by default (neither the 148 nor the 152
+  args.gn overrides it), so any **from-scratch** build needs this. Without it the
+  build dies around 13% in:
+
+  ```
+  FAILED: gen/angle/mtl_internal_shaders_autogen.air
+  error: cannot execute tool 'metal' due to missing Metal Toolchain;
+         use: xcodebuild -downloadComponent MetalToolchain
+  ```
+
+  **`docs/cef-patches/README.md` §Metal already documented this for the 148
+  build** — including a second failure mode: `-downloadComponent` can itself be
+  broken by a stale `DVTDownloads.framework`, needing
+  `sudo installer -pkg /Applications/Xcode.app/Contents/Resources/Packages/XcodeSystemResources.pkg -target /`
+  first. Read that section if the download fails.
+
+  An INCREMENTAL rebuild of an existing tree will not hit this — the `.air`
+  shaders are already built and the target does not re-run. The 2026-09-09 macOS
+  148 rebuild never touched it for exactly that reason (its `.air` dates from
+  2026-06-02), which is why it is easy to mistake this for a 152-only
+  requirement. It is not.
+
+  Verify with a real compile rather than a presence check, because
+  `-downloadComponent` reports success regardless of whether the compiler ends
+  up usable:
+
+  ```bash
+  echo 'kernel void k() {}' > /tmp/t.metal && xcrun metal -c /tmp/t.metal -o /tmp/t.air \
+    && echo "metal OK" || echo "metal STILL BROKEN"
+  ```
 
 The depot_tools / automate-git / fork-checkout / patcher steps are **identical to
 Linux** — follow `build-patched-libcef.md` §1–§3, with `--branch=7778`.
@@ -156,8 +200,11 @@ keys on the local symbol that `strip` removes — upload the **unstripped** fram
 
 ```bash
 CEF_OUT=~/cef-build/chromium/chromium/src/out/Release_GN_arm64
-# CEF version from Info.plist CFBundleShortVersionString (e.g. 148.23.23).
-CEF_VERSION="148.23.23"
+# CEF version from Info.plist CFBundleShortVersionString. READ IT FROM THE
+# BUILD -- do not copy this example, it is a placeholder that has gone stale
+# before. `/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" \
+#   "$CEF_OUT/Chromium Embedded Framework.framework/Versions/A/Resources/Info.plist"`
+CEF_VERSION="148.23.25"
 # Append a suffix (e.g. -codecs) whenever the build adds a distinguishing
 # feature over the last release at the same numeric CEF_VERSION — see
 # docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md and the
@@ -175,9 +222,54 @@ cd "$CEF_OUT"
 # adjust the CI extract step to `ditto -x -k`.
 tar -czf "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz" "Chromium Embedded Framework.framework"
 
+# Record the exact fork commit this artifact came from -- the only thing tying
+# the three platforms' tags together. See CEF_FORK_MAINTENANCE.md section 8 (P1).
+#
+# Locate the fork clone rather than assuming a path. The mirrored copy under
+# chromium/src/cef is created with `rsync --exclude=.git`, so it has no .git of
+# its own -- and `git -C` on such a directory does not fail, it silently WALKS UP
+# and answers from the enclosing Chromium checkout, returning CHROMIUM's HEAD. A
+# SHA that does not exist in agentmuxai/cef would end up in --target and in the
+# notes, with no error. Layouts also differ: some trees clone the fork directly
+# at chromium/src/cef, others mirror into it from an outer clone.
+#
+# An explicit CEF_CLONE is a HARD requirement: validated, then used or fatal.
+# Falling through to a standard path when the override is wrong would record a
+# DIFFERENT checkout's HEAD -- a valid-looking but unrelated fork SHA -- and
+# look entirely successful.
+if [ -n "${CEF_CLONE:-}" ]; then
+  [ "$(git -C "$CEF_CLONE" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$CEF_CLONE" 2>/dev/null && pwd -P)" ] \
+    && git -C "$CEF_CLONE" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' \
+    || { echo "FATAL: CEF_CLONE=$CEF_CLONE is not an agentmuxai/cef git root." >&2; CEF_CLONE=; }
+else
+  # No override: probe. First candidate that is BOTH its own git root AND has
+  # the agentmuxai/cef remote. A .git-less mirror is not a git root, so this
+  # rejects the case where `git -C` would walk up into the Chromium checkout.
+  for _c in "$HOME/cef-build/chromium/chromium/src/cef" \
+            "$HOME/cef-build/chromium/cef" \
+            "$HOME/cef-build/chromium_git/cef"; do
+    [ "$(git -C "$_c" rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$_c" 2>/dev/null && pwd -P)" ] || continue
+    git -C "$_c" remote -v 2>/dev/null | grep -q 'agentmuxai/cef' || continue
+    CEF_CLONE="$_c"; break
+  done
+fi
+echo "fork clone: ${CEF_CLONE:-<none>}"
+
+# FULL sha: `gh release create --target` takes a branch or a full commit SHA.
+#
+# The :? on CEF_CLONE is load-bearing, not decoration. `git -C "" rev-parse HEAD`
+# does NOT fail -- git treats an empty -C as "unchanged directory", exits 0, and
+# answers for the CURRENT directory, which by this point is inside the Chromium
+# checkout. An unmatched probe would then yield Chromium's HEAD: a real-looking
+# SHA, so a downstream emptiness check never fires. Failing at expansion time,
+# before git runs at all, is what removes that path.
+CEF_FORK_SHA=$(git -C "${CEF_CLONE:?FATAL: no agentmuxai/cef clone found (a .git-less mirror does not count); set CEF_CLONE}" rev-parse HEAD)
+: "${CEF_FORK_SHA:?refusing to publish without a recorded fork commit}"
+
 gh release create "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}" --repo agentmuxai/cef \
+  --target "${CEF_FORK_SHA}" \
   --title "Patched CEF framework — macOS arm64 CEF ${CEF_VERSION}" \
-  --notes "BeginWindowDrag + drag-rightclick + transparency. Branch: agentmux/7778-drag-rightclick-and-transparency. Unstripped (~547 MB); packager strips at bundle time." \
+  --notes "BeginWindowDrag + drag-rightclick + transparency. Built from agentmuxai/cef ${CEF_FORK_SHA:0:12} (branch 7778). Unstripped (~547 MB); packager strips at bundle time." \
   "cef-macos-arm64-${CEF_VERSION}${TAG_SUFFIX}.tar.gz"
 ```
 
@@ -192,7 +284,10 @@ release via `gh release list --json tagName --jq '[.[] | select(startswith(...))
 
 > ⚠️ **"Latest" here is not what you'd assume.** `gh release list`'s default
 > order is *not* reliably publish-time-descending on this fork — confirmed
-> 2026-07-28: every release created without an explicit `--target` picks up
+> 2026-07-28. **The release recipe above now passes `--target "${CEF_FORK_SHA}"`,
+> which addresses this at the source**; the verification below stays as a
+> belt-and-braces check, and remains necessary for the tags cut before that
+> change. Historically: every release created without an explicit `--target` picks up
 > `agentmuxai/cef`'s frozen default-branch HEAD commit date as its `created_at`
 > (not the actual `gh release create` call time), and `gh release list`
 > appears to sort by `created_at`. Net effect: a brand-new release can sort

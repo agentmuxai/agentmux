@@ -194,7 +194,7 @@ pub fn default_conversation_visibility() -> String {
 /// it) and native-memory resolution (which must find the memories written
 /// inside it) share one definition and cannot drift — they previously
 /// disagreed, and the resolver simply gave up on a blank field, breaking
-/// Armory → Memory → Personal for the common case. See
+/// Armory → Bundle → Personal for the common case. See
 /// `docs/specs/SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md`.
 ///
 /// NOTE: deliberately NOT `derive_slug` above. `agent.open`'s own inline
@@ -331,7 +331,7 @@ pub struct AgentInstance {
     pub identity_id: String,
     /// FK to `db_bundles.id`. Empty string means "use the blank
     /// singleton" (= vanilla CLI, no instructions). Set at
-    /// instantiation via the launch modal's Memory dropdown.
+    /// instantiation via the launch modal's Bundle dropdown.
     #[serde(default)]
     pub memory_id: String,
     /// User-chosen instance name (becomes `AGENTMUX_AGENT_ID` in the
@@ -511,6 +511,11 @@ impl Store {
     }
 
     /// Delete all seeded agents (is_seeded=1). Used by reseed to clear built-in agents.
+    ///
+    /// No project-instruction cleanup here, unlike `agent_def_delete`: this
+    /// removes template rows, and a template is never launched — observations
+    /// are recorded by `agent.open`, so a template has none to forget (Codex,
+    /// PR #3162).
     pub fn agent_def_delete_seeded(&self) -> Result<usize, StoreError> {
         // Consolidation Phase 3b (PR 2): only the template rows go. Every
         // `is_template = 0` row — a user clone OR an agent launched from a
@@ -1011,7 +1016,7 @@ impl Store {
         if agent.memory_id.is_empty() {
             return agent.provider.clone();
         }
-        match self.bundle_memory_get(&agent.memory_id) {
+        match self.bundle_get(&agent.memory_id) {
             Ok(Some(b)) if !b.provider.is_empty() => b.provider,
             _ => agent.provider.clone(),
         }
@@ -1033,7 +1038,7 @@ impl Store {
     /// Bundles live in the shared store when one is configured (the normal
     /// case) — every real bundle-read path (`listmemories`/`getmemory`/
     /// the Armory editor/the bundle-summary panel) reads through
-    /// `id_store`, so a bundle created via `wstore.bundle_memory_upsert`
+    /// `id_store`, so a bundle created via `wstore.bundle_upsert`
     /// directly would be written to a different SQLite file and be
     /// invisible everywhere else (P1 finding, Codex review on PR #2587,
     /// live in the shipped code this fixes: `agent_def_provision_and_
@@ -1052,7 +1057,7 @@ impl Store {
         let vendor = Self::resolve_effective_vendor(&agent.provider, &agent.model_vendor_base_url);
         let bundle_id = uuid::Uuid::new_v4().to_string();
         let name = self.resolve_unique_bundle_name(&format!("{} — ABF", agent.name))?;
-        let bundle = super::memory_bundles::Memory {
+        let bundle = super::bundles::Bundle {
             id: bundle_id.clone(),
             name,
             description: String::new(),
@@ -1070,7 +1075,7 @@ impl Store {
             updated_at: now,
             is_system: false,
         };
-        self.bundle_memory_upsert(&bundle)?;
+        self.bundle_upsert(&bundle)?;
         Ok(bundle_id)
     }
 
@@ -1091,7 +1096,7 @@ impl Store {
     /// until the underlying name collision was manually resolved.
     pub(crate) fn resolve_unique_bundle_name(&self, base_name: &str) -> Result<String, StoreError> {
         let existing_names: std::collections::HashSet<String> =
-            self.bundle_memory_list()?.into_iter().map(|b| b.name).collect();
+            self.bundle_list()?.into_iter().map(|b| b.name).collect();
         if !existing_names.contains(base_name) {
             return Ok(base_name.to_string());
         }
@@ -1256,6 +1261,20 @@ impl Store {
             conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?
         };
         if rows > 0 {
+            // Project-instruction observations are keyed by agent id with no
+            // foreign key (they record files this agent READS, which is not a
+            // relationship SQLite can enforce), so nothing else would remove
+            // them and a future agent reusing this id would inherit somebody
+            // else's baseline — every file reporting `unchanged` against
+            // observations that were never made about it. Cleaned up here,
+            // beside the row it belongs to, rather than left to each caller
+            // (ReAgent, PR #3162).
+            if let Err(e) = self.project_instructions_forget(id) {
+                tracing::warn!(
+                    agent_def_id = %id, error = %e,
+                    "agent_def_delete: project-instruction observations left behind"
+                );
+            }
             if let Some(reg) = self.registry() {
                 if let Err(e) = reg.hard_delete(id) {
                     tracing::warn!(
@@ -2473,7 +2492,7 @@ mod bundle_provisioning_store_separation_tests {
         let bundle_store = Store::open_in_memory().unwrap();
         let agent = base_agent("a1", "Agent One", "claude", "");
         let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
-        assert!(bundle_store.bundle_memory_get(&bundle_id).unwrap().is_some());
+        assert!(bundle_store.bundle_get(&bundle_id).unwrap().is_some());
     }
 
     #[test]
@@ -2481,7 +2500,7 @@ mod bundle_provisioning_store_separation_tests {
         let bundle_store = Store::open_in_memory().unwrap();
         let agent = base_agent("a1", "Agent One", "claude", "https://my-proxy.example.com");
         let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
-        let bundle = bundle_store.bundle_memory_get(&bundle_id).unwrap().unwrap();
+        let bundle = bundle_store.bundle_get(&bundle_id).unwrap().unwrap();
         assert_eq!(bundle.provider, "claude");
         assert_eq!(bundle.model, "custom");
     }
@@ -2507,11 +2526,11 @@ mod bundle_provisioning_store_separation_tests {
         // The bundle itself must be absent from definition_store and
         // present only in bundle_store.
         assert!(
-            definition_store.bundle_memory_get(&agent.memory_id).unwrap().is_none(),
+            definition_store.bundle_get(&agent.memory_id).unwrap().is_none(),
             "bundle must NOT be written into the definition store"
         );
         assert!(
-            bundle_store.bundle_memory_get(&agent.memory_id).unwrap().is_some(),
+            bundle_store.bundle_get(&agent.memory_id).unwrap().is_some(),
             "bundle must be reachable via the explicit bundle_store"
         );
     }
@@ -2544,7 +2563,7 @@ mod bundle_provisioning_store_separation_tests {
         let store = Store::open_in_memory().unwrap();
         store.bundle_provision_for_new_agent(&base_agent("a1", "Dup", "claude", ""), 0).unwrap();
         // Directly seed the "(2)" slot too, so the resolver must walk to "(3)".
-        let taken = super::super::memory_bundles::Memory {
+        let taken = super::super::bundles::Bundle {
             id: "taken-2".to_string(),
             name: "Dup — ABF (2)".to_string(),
             description: String::new(),
@@ -2562,7 +2581,7 @@ mod bundle_provisioning_store_separation_tests {
             updated_at: 0,
             is_system: false,
         };
-        store.bundle_memory_upsert(&taken).unwrap();
+        store.bundle_upsert(&taken).unwrap();
 
         let unique = store.resolve_unique_bundle_name("Dup — ABF").unwrap();
         assert_eq!(unique, "Dup — ABF (3)");
@@ -2637,7 +2656,7 @@ mod bundle_provisioning_store_separation_tests {
         let mut agent = base_agent("a1", "Agent One", "claude", "");
         // provider left empty ("") deliberately, unlike the other tests'
         // bundle_provision_for_new_agent-built bundles.
-        let bundle = super::super::memory_bundles::Memory {
+        let bundle = super::super::bundles::Bundle {
             id: "bundle-empty-provider".to_string(),
             name: "Empty Provider Bundle".to_string(),
             description: String::new(),
@@ -2655,7 +2674,7 @@ mod bundle_provisioning_store_separation_tests {
             updated_at: 0,
             is_system: false,
         };
-        store.bundle_memory_upsert(&bundle).unwrap();
+        store.bundle_upsert(&bundle).unwrap();
         agent.memory_id = "bundle-empty-provider".to_string();
         assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
     }

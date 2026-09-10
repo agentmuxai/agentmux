@@ -1674,3 +1674,147 @@ mod preflight_input_tests {
         assert_eq!(preflight_input_from_meta(&meta, None).config_dir, "/home/dev/.claude");
     }
 }
+
+// ── Ambient narration ───────────────────────────────────────────────────────
+
+/// Ambient-call purpose for narrating an autonomous AgentMux action back to the
+/// user in the pane's own conversation. Its OWN purpose constant, not shared
+/// with any summary caller: two callers under one purpose cancel each other
+/// (see `AMBIENT_PURPOSE_ACTIVITY_SUMMARY_PUSHED`'s doc comment above for the
+/// case that motivated splitting them).
+const AMBIENT_PURPOSE_NARRATION: &str = "ambient_narration";
+
+/// Max simultaneous Haiku CLI spawns for narration, across ALL blocks.
+///
+/// Load-bearing, and not inherited from anywhere: `AmbientGateway` deduplicates
+/// and cancels only within a single `(entity_id, purpose)` key, so without this
+/// N panes backgrounding a task at the same moment means N concurrent CLI
+/// spawns. The pushed-summary caller this function is modelled on is bounded by
+/// a semaphore that lives in its *caller* (`activity_watcher.rs`), which an
+/// RPC-driven path inherits nothing from. The 15s timeout inside
+/// `invoke_ambient_haiku_call` bounds each call's duration, not how many run at
+/// once. (codex P2 on #3161.)
+const MAX_CONCURRENT_NARRATIONS: usize = 2;
+
+fn narration_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_NARRATIONS))
+}
+
+/// Build the prompt for one narration `kind`.
+///
+/// `kind` is what makes this a general facility rather than a
+/// background-task-specific one: adding a narrated action means adding an arm
+/// here, not new plumbing. Returns `None` for an unrecognised kind so an
+/// unknown caller is a no-op rather than an unconstrained prompt.
+fn narration_prompt(kind: &str, context: &str) -> Option<String> {
+    match kind {
+        // The first consumer: a long-running tool call the harness detached.
+        // The pane goes quiet at that moment and the user is told nothing.
+        "background_task" => Some(format!(
+            "One sentence, first person, past tense, telling the user you have started \
+             a command in the background. Name the command briefly. Do NOT promise to \
+             report back, and do NOT claim it is still running — it may already have \
+             finished by the time this is read. Plain text only — no markdown, no code \
+             fences, no backticks, no quotes, no preamble. Under 20 words.\n\n\
+             Command:\n\n{context}"
+        )),
+        _ => None,
+    }
+}
+
+/// Generate a short user-facing line narrating an autonomous action.
+///
+/// Best-effort by construction — every failure path returns `None` and the
+/// caller simply says nothing. A UI state change must NEVER be gated on this:
+/// if Haiku is slow, capped out, or absent, the thing being narrated still
+/// happened and the UI must already reflect it.
+pub(crate) async fn generate_ambient_narration(
+    wstore: &Store,
+    block_id: &str,
+    event_id: &str,
+    generation: u64,
+    kind: &str,
+    context: &str,
+) -> Option<String> {
+    let prompt = narration_prompt(kind, context)?;
+
+    // Keyed on the EVENT, not the block. `admit()` cancels the prior in-flight
+    // call for a key as soon as a newer generation arrives — correct for the
+    // summary callers this is otherwise modelled on, where only the latest
+    // result is ever shown, and wrong here. Each narrated event is independent
+    // and all of them should arrive: two Bash calls backgrounded moments apart
+    // in one block are two separate facts, and `useAmbientNarration` retains
+    // several precisely because it expects them. Keying on the block alone let
+    // the second silently cancel the first, whose Haiku call then returned
+    // "cancelled" and was swallowed by the `.ok()?` below. (reagent P1 on #3169.)
+    let key = crate::ambient::AmbientCallKey::new(
+        format!("{block_id}:{event_id}"),
+        AMBIENT_PURPOSE_NARRATION,
+    );
+    let guard = match crate::ambient::gateway().admit(key, generation) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    let block: Block = wstore.get(block_id).ok().flatten()?;
+    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+    if cli_path.is_empty() {
+        return None;
+    }
+
+    let _permit = narration_semaphore().acquire().await.ok()?;
+    let (text, _tokens) =
+        invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok()?;
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
+}
+
+#[cfg(test)]
+mod narration_tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_kind_produces_no_prompt_rather_than_an_open_ended_one() {
+        assert!(narration_prompt("no_such_kind", "anything").is_none());
+    }
+
+    #[test]
+    fn two_events_in_one_block_do_not_cancel_each_other() {
+        // The regression reagent caught on #3169. admit() cancels the prior
+        // in-flight call for a KEY, so keying narration on the block alone made
+        // a second backgrounded command in the same turn silently kill the
+        // first one's narration. Distinct event ids must be distinct keys.
+        use crate::ambient::{gateway, Admission, AmbientCallKey};
+
+        let first = AmbientCallKey::new("block-x:toolu_1", AMBIENT_PURPOSE_NARRATION);
+        let second = AmbientCallKey::new("block-x:toolu_2", AMBIENT_PURPOSE_NARRATION);
+        assert_ne!(first, second, "distinct events must not share a gateway key");
+
+        let g1 = match gateway().admit(first, 1) {
+            Admission::Proceed(g) => g,
+            Admission::StaleOnArrival => panic!("first should be admitted"),
+        };
+        let cancel1 = g1.cancellation();
+        let _g2 = match gateway().admit(second, 2) {
+            Admission::Proceed(g) => g,
+            Admission::StaleOnArrival => panic!("second should be admitted"),
+        };
+        // The second admission must leave the first alone.
+        assert!(!cancel1.is_cancelled(), "a sibling narration cancelled the first");
+    }
+
+    #[test]
+    fn the_background_task_kind_carries_the_command_into_the_prompt() {
+        let p = narration_prompt("background_task", "task dev").expect("known kind");
+        assert!(p.contains("task dev"));
+        // The constraints that keep the line short and renderable as plain
+        // text in a conversation row.
+        assert!(p.contains("One sentence"));
+        assert!(p.contains("no markdown"));
+    }
+}

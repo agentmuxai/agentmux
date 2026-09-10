@@ -48,6 +48,7 @@ pub(crate) fn test_state() -> AppState {
         lan_key: "test-lan-key".to_string(),
         boot_id: std::sync::Arc::from("test-boot"),
         version: "0.28.20".to_string(),
+        hostname: "test-host".to_string(),
         app_path: String::new(),
         wstore: wstore.clone(),
         shared_store: None,
@@ -85,6 +86,7 @@ pub(crate) fn test_state() -> AppState {
         process_broker,
         dock_snapshots: Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
         pending_background_pids: Arc::new(crate::backend::pending_background_pids::PendingBackgroundPids::new()),
+        narrated_events: Arc::new(crate::backend::narrated_events::NarratedEvents::new()),
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
         srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
@@ -136,6 +138,28 @@ async fn health_returns_200() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["status"], "ok");
     assert_eq!(json["version"], "0.28.20");
+}
+
+/// `local_url` is always loopback, so `host.hostname` is the only field that
+/// tells a client (e.g. the mobile app's discovery screen) which machine it is
+/// actually talking to. Regression guard for it being dropped from the
+/// response or never plumbed onto `AppState` — the state it was in before.
+#[tokio::test]
+async fn discovery_reports_host_hostname() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/discovery")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["host"]["hostname"], "test-host");
 }
 
 #[tokio::test]
@@ -1286,8 +1310,8 @@ async fn self_endpoint_resolves_seeded_agent() {
 
 // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1 — the scoped
 // `lan_key` (broadcast via mDNS/UDP for LAN peer discovery) must be
-// accepted by the two LAN-forwarding routes but rejected everywhere else,
-// and the full `auth_key` must keep working on those same two routes
+// accepted by the three LAN-forwarding routes but rejected everywhere else,
+// and the full `auth_key` must keep working on those same routes
 // (the normal, non-LAN case — e.g. agentmux-mcp's SendMessage tool).
 
 #[tokio::test]
@@ -1354,7 +1378,7 @@ async fn garbage_key_is_rejected_on_reactive_inject() {
 }
 
 /// The whole point of LAN P0-1: a captured `lan_key` must NOT grant access
-/// to the general API surface, only the two LAN-forwarding routes.
+/// to the general API surface, only the three LAN-forwarding routes.
 #[tokio::test]
 async fn lan_key_is_rejected_on_the_general_service_route() {
     let app = test_router();
@@ -1366,6 +1390,82 @@ async fn lan_key_is_rejected_on_the_general_service_route() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The LAN peer agent-name list (2026-09-08): a `lan_key` holder may
+/// enumerate agent NAMES, so a peer can show which agents live on another
+/// host instead of the empty `agents: []` it reported before.
+#[tokio::test]
+async fn lan_key_can_list_agent_names() {
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    let agent_id = format!("names-test-agent-{unique}");
+    state
+        .reactive_handler
+        .register_agent(&agent_id, &format!("names-test-block-{unique}"), None)
+        .unwrap();
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let names: Vec<&str> = json["agents"]
+        .as_array()
+        .expect("agents array")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(names.contains(&agent_id.as_str()), "got {names:?}");
+}
+
+/// The security scoping that made the route above acceptable: it returns
+/// NAMES and nothing else. `AgentRegistration` also carries `block_id`,
+/// `tab_id`, `registered_at`, `last_seen` and `registration_nonce` —
+/// internal delivery/routing detail that must stay behind full auth (that's
+/// why this is a separate route from `/agentmux/reactive/agents`, which
+/// `lan_key_is_rejected_on_other_reactive_routes` pins at 401).
+#[tokio::test]
+async fn agent_names_exposes_names_only_not_registration_internals() {
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    state
+        .reactive_handler
+        .register_agent(
+            &format!("names-only-agent-{unique}"),
+            &format!("names-only-block-{unique}"),
+            Some("tab-should-not-leak"),
+        )
+        .unwrap();
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let raw = String::from_utf8_lossy(&body);
+
+    for leaked in [
+        "block_id",
+        "tab_id",
+        "tab-should-not-leak",
+        "registration_nonce",
+        "registered_at",
+        "last_seen",
+    ] {
+        assert!(!raw.contains(leaked), "{leaked} leaked over the LAN route: {raw}");
+    }
 }
 
 #[tokio::test]

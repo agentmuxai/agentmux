@@ -6,7 +6,7 @@
 // docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md, §5 decision 3).
 //
 // Before this PR the `view: "identity"` / `view: "memory"` panes
-// rendered the full-CRUD `IdentityManagerBody` / `MemoryManagerBody`.
+// rendered the full-CRUD `IdentityManagerBody` / `BundleManagerBody`.
 // §4 of the spec consolidated all bundle CRUD into the Armory pane;
 // the per-agent settings tabs are now *consumers*, not editors.
 //
@@ -19,10 +19,10 @@
 // live remaining consumer. `view: "identity"` blocks stopped rendering
 // this panel entirely back in Armory Phase 5
 // (SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md §1.3
-// — see `identity-pane-view.tsx`); `view: "memory"` (`memory-view.tsx`)
+// — see `identity-pane-view.tsx`); `view: "memory"` (`bundle-view.tsx`)
 // was the one spot still stuck on the pointer-only form. Fixed the same
 // way Phase 5 fixed Identity: an optional `agentId` prop, threaded from
-// the block's own `meta.agentId` (`MemoryViewModel.agentId`, mirroring
+// the block's own `meta.agentId` (`BundleViewModel.agentId`, mirroring
 // `IdentityPaneViewModel.agentId`). When present, this resolves the
 // agent's OWN dedicated ABF bundle via `AgentDefinition.memory_id`
 // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1 — the
@@ -63,20 +63,20 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
     const boundBundleId = createMemo(() => {
         const id = props.agentId;
         if (!id) return undefined;
-        const memoryId = agents().find((a) => a.id === id)?.memory_id;
-        return memoryId || undefined;
+        const bundleId = agents().find((a) => a.id === id)?.memory_id;
+        return bundleId || undefined;
     });
     // createResource re-fetches whenever boundBundleId() changes (agent
     // switches, or the list finishes loading and a previously-undefined
     // id resolves to a real one).
     const [boundBundle] = createResource(boundBundleId, (id) =>
-        RpcApi.GetMemoryCommand(TabRpcClient, { id }).catch(() => undefined),
+        RpcApi.GetBundleCommand(TabRpcClient, { id }).catch(() => undefined),
     );
     // Identity items are still called "identity bundles"; the config
-    // collections are now branded "Armory Bundle Format (ABF)". `title` is
-    // the heading (room for the full name); `sentenceLabel` reads naturally
+    // collections are "Bundles" (ABF names only the file format). `title` is
+    // the heading; `sentenceLabel` reads naturally
     // in running prose below.
-    const title = props.kind === "Identity" ? "Identity bundles" : "Armory Bundle Format (ABF)";
+    const title = props.kind === "Identity" ? "Identity bundles" : "Bundles";
     const sentenceLabel = props.kind === "Identity" ? "Identity bundles" : "Bundles";
     const lowerPlural = props.kind === "Identity" ? "identities" : "bundles";
 
@@ -88,7 +88,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 <Show when={props.agentId && boundBundle()}>
                     {(bundle) => (
                         <div class="bundle-summary-bound">
-                            <p class="bundle-summary-bound-label">This agent's own ABF</p>
+                            <p class="bundle-summary-bound-label">This agent's own bundle</p>
                             <p class="bundle-summary-bound-name">{bundle().name}</p>
                             <Show when={bundle().provider}>
                                 <p class="bundle-summary-bound-provider">
@@ -100,12 +100,12 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 </Show>
                 <Show when={props.agentId && boundBundleId() && !boundBundle.loading && !boundBundle()}>
                     <p class="bundle-summary-body bundle-summary-hint">
-                        This agent's ABF bundle couldn't be loaded (it may have been deleted).
+                        This agent's bundle couldn't be loaded (it may have been deleted).
                     </p>
                 </Show>
                 <Show when={props.agentId && agents().length > 0 && !boundBundleId()}>
                     <p class="bundle-summary-body bundle-summary-hint">
-                        This agent has no ABF bundle of its own yet.
+                        This agent has no bundle of its own yet.
                     </p>
                 </Show>
 

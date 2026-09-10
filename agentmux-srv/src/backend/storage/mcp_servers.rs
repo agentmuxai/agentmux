@@ -25,6 +25,213 @@ pub struct McpServer {
     pub updated_at: i64,
 }
 
+impl McpServer {
+    /// Build a bundle-scoped row from an inline MCP config entry.
+    ///
+    /// The inline shape — an ABF `mcp/<slug>.server.json` body, and what
+    /// `db_bundles.mcp_servers` held before the ref tables became
+    /// authoritative — is the server's config object with its `name`
+    /// alongside. This is the one conversion from that shape to a row, shared
+    /// by the `m0030` backfill and the three ABF import paths so a server
+    /// recovered from an old bundle and one that arrives in an import cannot
+    /// end up shaped differently (Phase 0b,
+    /// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`).
+    ///
+    /// `index` disambiguates entries with no usable name; it only has to be
+    /// stable within one bundle, which is where the uniqueness check applies.
+    ///
+    /// `is_global` is false: these belong to their bundle, and
+    /// `bundle_mcp_upsert_unique` forces it to false regardless.
+    pub fn from_inline_config(entry: &serde_json::Value, index: usize, now_ms: i64) -> Self {
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            // `build_mcp_config_from_refs` keys `.mcp.json` on the row's name,
+            // so a nameless entry needs a synthetic one rather than being
+            // dropped on the floor.
+            .unwrap_or_else(|| format!("mcp-server-{}", index + 1));
+        // The entry's own `type` is the transport when it has one — an inline
+        // entry can legitimately be http/sse, and hardcoding stdio would
+        // produce a catalog row whose transport column contradicts its own
+        // config JSON (ReAgent, PR #3152). `stdio` is the column default and
+        // the right fallback for an entry that says nothing.
+        let transport = entry
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("stdio")
+            .to_string();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            transport,
+            config: serde_json::to_string(entry).unwrap_or_else(|_| "{}".to_string()),
+            is_global: false,
+            created_at: now_ms,
+            updated_at: now_ms,
+        }
+    }
+}
+
+impl Store {
+    /// Drop every skill and MCP ref belonging to `bundle_id`.
+    ///
+    /// Call after deleting the bundle itself. `bundle_delete` lives on the
+    /// store that owns `db_bundles`, which does not have the ref tables at all
+    /// — they sit beside the catalog tables they key into — so the cleanup
+    /// cannot happen inside it and has to be driven from the handler, where
+    /// both stores are in scope. Without it a deleted bundle leaves its refs
+    /// behind, and a future bundle reusing that id would inherit them.
+    ///
+    /// Returns `(skill_refs_removed, mcp_refs_removed)`.
+    pub fn bundle_unbind_all_components(&self, bundle_id: &str) -> Result<(usize, usize), StoreError> {
+        let skills = self
+            .managed_unbind_all_for_bundle::<super::skills::Skill>(bundle_id)?;
+        let mcp = self.managed_unbind_all_for_bundle::<McpServer>(bundle_id)?;
+        Ok((skills, mcp))
+    }
+
+    /// Create and bind a bundle's inline MCP entries, preserving duplicates.
+    ///
+    /// The one path from "a list of inline config objects" to "rows bound to
+    /// this bundle", shared by the `m0030` backfill and the three ABF import
+    /// paths (Phase 0b,
+    /// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`).
+    ///
+    /// Two entries may legitimately carry the same `name` — the validator
+    /// permits it and the old exporter kept both by slugging them apart. A
+    /// plain `bundle_mcp_upsert_unique` per entry would reject the second on
+    /// the name-uniqueness check and, now that export reads only bound refs,
+    /// lose it permanently (Codex, PR #3152). So names are disambiguated with
+    /// a numeric suffix, and a name colliding with a *global* server is
+    /// retried the same way rather than dropped.
+    ///
+    /// Idempotence is decided by **content**, not by name and not by whether
+    /// an upsert errored. An entry is "already carried across" only when a
+    /// bound server holds an identical config object; matching on name alone
+    /// would silently drop a genuinely different entry that happens to share a
+    /// name with something bound through the Armory (ReAgent, PR #3152), which
+    /// is the exact silent loss this whole change exists to end. Matching on
+    /// name would also mis-handle its own output: an entry disambiguated to
+    /// `foo-2` on the first run stores that name while still deriving `foo`.
+    ///
+    /// The match is a multiset consume, so two byte-identical entries stay two
+    /// entries across re-runs rather than collapsing into one.
+    ///
+    /// Returns `(created, warnings)`.
+    pub fn bundle_mcp_bind_inline_entries(
+        &self,
+        id_store: &Store,
+        bundle_id: &str,
+        entries: &[serde_json::Value],
+        now_ms: i64,
+    ) -> (usize, Vec<String>) {
+        /// How many suffixed names to try before giving up on one entry.
+        const MAX_NAME_ATTEMPTS: usize = 50;
+
+        let mut warnings: Vec<String> = Vec::new();
+
+        // What is already bound, captured BEFORE the loop so a duplicate
+        // inside `entries` is not mistaken for a previous run.
+        let bound = match self.bundle_mcp_list(bundle_id) {
+            Ok(items) => items
+                .into_iter()
+                .filter(|i| i.bound_to_bundle)
+                .map(|i| i.server)
+                .collect::<Vec<_>>(),
+            Err(e) => {
+                warnings.push(format!(
+                    "mcpServers: could not read existing bindings for bundle {bundle_id} ({e}) — nothing bound"
+                ));
+                return (0, warnings);
+            }
+        };
+        // Names are only used to avoid collisions; identity is the config.
+        let mut used: std::collections::HashSet<String> =
+            bound.iter().map(|s| s.name.clone()).collect();
+        // Multiset of configs still unaccounted for. Consuming an entry marks
+        // it matched, so N identical entries stay N across re-runs.
+        let mut unmatched: Vec<serde_json::Value> = bound
+            .iter()
+            .map(|s| serde_json::from_str(&s.config).unwrap_or(serde_json::Value::Null))
+            .collect();
+        let mut created = 0usize;
+
+        for (index, entry) in entries.iter().enumerate() {
+            if !entry.is_object() {
+                warnings.push(format!(
+                    "mcpServers: entry {} is not a JSON object — skipped",
+                    index + 1
+                ));
+                continue;
+            }
+            let mut server = McpServer::from_inline_config(entry, index, now_ms);
+
+            // Already carried across on an earlier run — identified by its
+            // config, not its name, so a different server that merely shares a
+            // name does not swallow this entry.
+            if let Some(pos) = unmatched.iter().position(|c| c == entry) {
+                unmatched.swap_remove(pos);
+                continue;
+            }
+
+            let base = server.name.clone();
+            let mut bound_ok = false;
+            for attempt in 0..MAX_NAME_ATTEMPTS {
+                let candidate = if attempt == 0 {
+                    base.clone()
+                } else {
+                    format!("{base}-{}", attempt + 1)
+                };
+                if used.contains(&candidate) {
+                    continue;
+                }
+                server.name = candidate.clone();
+                match self.bundle_mcp_upsert_unique(id_store, bundle_id, &server, true) {
+                    Ok(()) => {
+                        if candidate != base {
+                            // Not a loss, but the operator should know the
+                            // name they will see is not the name in the file.
+                            warnings.push(format!(
+                                "mcpServers: '{base}' was already taken, kept as '{candidate}'"
+                            ));
+                        }
+                        used.insert(candidate);
+                        created += 1;
+                        bound_ok = true;
+                        break;
+                    }
+                    // A name that is taken by something visible but not bound
+                    // here — a global server, typically. Try the next suffix
+                    // rather than dropping the entry.
+                    Err(e) if e.to_string().contains("already") => {
+                        used.insert(candidate);
+                        continue;
+                    }
+                    Err(e) => {
+                        warnings.push(format!(
+                            "mcpServers: server '{base}' could not be created ({e}) — it will not be exported or reach the agent"
+                        ));
+                        bound_ok = true; // reported; do not also report exhaustion
+                        break;
+                    }
+                }
+            }
+            if !bound_ok {
+                warnings.push(format!(
+                    "mcpServers: server '{base}' could not be given a free name after {MAX_NAME_ATTEMPTS} attempts — skipped"
+                ));
+            }
+        }
+
+        (created, warnings)
+    }
+}
+
 impl ManagedResource for McpServer {
     const TABLE: &'static str = "db_mcp_servers";
     const REF_COL: &'static str = "mcp_id";
@@ -328,7 +535,7 @@ impl Store {
 #[cfg(test)]
 mod bundle_ref_tests {
     use super::*;
-    use crate::backend::storage::memory_bundles::Memory;
+    use crate::backend::storage::bundles::Bundle;
 
     fn make_store() -> Store {
         Store::open_in_memory().unwrap()
@@ -336,7 +543,7 @@ mod bundle_ref_tests {
 
     fn insert_bundle(store: &Store, id: &str) {
         store
-            .bundle_memory_upsert(&Memory {
+            .bundle_upsert(&Bundle {
                 id: id.to_string(),
                 name: format!("Bundle {id}"),
                 description: String::new(),

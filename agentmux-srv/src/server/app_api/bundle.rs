@@ -32,6 +32,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_export_for_agent_with_history(engine, state);
     register_bundle_import_for_agent(engine, state);
     register_bundle_validate(engine, state);
+    register_agent_project_instructions(engine, state);
 }
 
 /// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
@@ -42,7 +43,7 @@ struct FileEntry {
     content: String,
 }
 
-/// Normalize a `bundle.upsert` request body into the shape the `Memory` struct
+/// Normalize a `bundle.upsert` request body into the shape the `Bundle` struct
 /// deserializes from, so the App API accepts the request exactly as documented
 /// in the spec:
 ///   - `id` may be omitted to create (the struct has no serde default), so an
@@ -107,9 +108,12 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
 }
 
-fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
-    let handler: crate::backend::rpc::engine::CommandHandler =
-        Box::new(move |data, _ctx| Box::pin(async move { Ok(Some(bundle_validate_impl(data)?)) }));
+fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
+        let wstore = wstore.clone();
+        Box::pin(async move { Ok(Some(bundle_validate_impl(&wstore, data)?)) })
+    });
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
@@ -128,7 +132,7 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
 ///
 /// Pure — no I/O — directly unit-testable without spinning up an
 /// `AppState`, mirroring `agent_open.rs`'s `resolve_vendor_env_override`.
-fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) -> Result<(), String> {
+fn check_provider_model_immutable(existing: Option<&Bundle>, incoming: &Bundle) -> Result<(), String> {
     let Some(existing) = existing else { return Ok(()) };
     if !existing.provider.is_empty() && existing.provider != incoming.provider {
         return Err(format!(
@@ -149,8 +153,8 @@ fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) 
 mod check_provider_model_immutable_tests {
     use super::*;
 
-    fn memory(id: &str, provider: &str, model: &str) -> Memory {
-        Memory {
+    fn memory(id: &str, provider: &str, model: &str) -> Bundle {
+        Bundle {
             id: id.to_string(),
             name: "T".to_string(),
             description: String::new(),
@@ -219,7 +223,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
-                let mut memory: Memory =
+                let mut memory: Bundle =
                     serde_json::from_value(normalize_bundle_upsert_input(data))
                         .map_err(|e| format!("bundle.upsert: {e}"))?;
 
@@ -229,9 +233,9 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("FORBIDDEN: cannot mutate a protected bundle".to_string());
                 }
                 // Guard existing global bundles: an agent must not be able to demote or
-                // corrupt a shared global brain bundle it doesn't own by supplying its id.
+                // corrupt a shared global bundle it doesn't own by supplying its id.
                 if !memory.id.is_empty() {
-                    if let Some(existing) = id_store.bundle_memory_get(&memory.id)
+                    if let Some(existing) = id_store.bundle_get(&memory.id)
                         .map_err(|e| format!("bundle.upsert: {e}"))?
                     {
                         if existing.is_global {
@@ -259,7 +263,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if memory.created_at == 0 { memory.created_at = now; }
                 memory.updated_at = now;
 
-                id_store.bundle_memory_upsert(&memory)
+                id_store.bundle_upsert(&memory)
                     .map_err(|e| format!("bundle.upsert: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -275,9 +279,11 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
+        let wstore = state.wstore.clone();
         let broker = state.broker.clone();
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let wstore = wstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -289,9 +295,10 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("FORBIDDEN: cannot delete a seeded bundle".to_string());
                 }
 
-                match id_store.bundle_memory_delete(&req.id) {
+                match id_store.bundle_delete(&req.id) {
                     Ok(deleted) => {
                         if deleted {
+                            purge_bundle_component_refs(&wstore, &req.id);
                             broker.publish(crate::backend::wps::WaveEvent {
                                 event: "memories:changed".to_string(),
                                 scopes: vec![], sender: String::new(), persist: 0, data: None,
@@ -329,6 +336,143 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
 }
 
+/// Resolve the agent definition behind an S1-authenticated `agent_id`.
+///
+/// **`check_s1` authenticates a SLUG, not a UUID.** `RpcContext.agent_id` is
+/// "slug of the authenticated agent from bus:register"
+/// (`rpc_types/misc.rs:221`), while `agent_def_get` queries `db_agents` by its
+/// UUID primary key — so calling it with the authenticated value returns
+/// `None` for every real caller (ReAgent P0, PR #3156).
+///
+/// Delegates to `resolve_agent_definition_id`, the existing resolver for
+/// exactly this, rather than hand-rolling the lookup: it already carries the
+/// registry-only fallback a previous review round forced in, for a live agent
+/// that never created a local `db_agents` row. A fresh two-tier lookup here
+/// would have that hole again.
+fn resolve_agent_for_s1(
+    state: &AppState,
+    agent_id: &str,
+) -> Result<crate::backend::storage::AgentDefinition, String> {
+    let def_id = resolve_agent_definition_id(state, agent_id)?;
+    state
+        .wstore
+        .agent_def_get(&def_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no agent with slug or id {agent_id}"))
+}
+
+/// `agent.project_instructions` — what this agent will actually read.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Until
+/// now nothing could answer this: AgentMux knew what it wrote and recorded a
+/// single boolean about anything it found already there (§2.4).
+///
+/// Agent-scoped, so `check_s1` applies — an agent's working directory contents
+/// are not window-scoped data the way a bundle is.
+///
+/// **Read-only, and there is no write counterpart on purpose.** A foreign
+/// instruction file belongs to the repository;
+/// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to keep AgentMux
+/// out of it, and this must not become a way around that.
+fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
+        Box::new(move |data, ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    agent_id: String,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.project_instructions: {e}"))?;
+                check_s1(&ctx, &req.agent_id)?;
+
+                let agent = resolve_agent_for_s1(&state, &req.agent_id)
+                    .map_err(|e| format!("agent.project_instructions: {e}"))?;
+
+                // The directory the agent will actually run in: a blank
+                // working_directory means the per-agent default and a `~`
+                // path is expanded at launch, so the stored value alone
+                // describes a directory the agent never uses (Codex, #3156).
+                let work_dir = crate::backend::project_instructions::effective_working_dir(
+                    &agent.working_directory,
+                    &agent.name,
+                );
+                let files = crate::backend::project_instructions::resolve_project_instructions(
+                    &agent.provider,
+                    &work_dir,
+                );
+
+                // Compare against what was recorded at the last launch, so a
+                // repository file that changed underneath is visible rather
+                // than merely present. Observations are written at
+                // `agent.open` (`observe_project_instructions`) — this RPC
+                // stays a pure read, which is why a file edited since the last
+                // launch reports `modified` every time it is called until the
+                // agent is next opened.
+                let previous = state
+                    .wstore
+                    .project_instructions_list(&agent.id)
+                    .unwrap_or_default();
+                let mut enriched: Vec<serde_json::Value> = files
+                    .iter()
+                    .map(|f| {
+                        let prev = previous.iter().find(|p| p.path == f.path);
+                        let change = crate::backend::storage::project_instructions::classify_change(
+                            prev,
+                            f.exists,
+                            &f.content_hash,
+                        );
+                        let mut v = serde_json::to_value(f).unwrap_or_default();
+                        if let Some(obj) = v.as_object_mut() {
+                            obj.insert("change".to_string(), json!(change));
+                            obj.insert(
+                                "last_observed_at".to_string(),
+                                json!(prev.map(|p| p.observed_at)),
+                            );
+                        }
+                        v
+                    })
+                    .collect();
+
+                // A path the resolver no longer returns at all — a scanned
+                // `.github/instructions/*.instructions.md` deleted since the
+                // last launch — would otherwise just vanish from the response,
+                // never reported as `removed`, and recreating it later would
+                // read as `unchanged` against the stale row (Codex, PR #3162).
+                // The declared paths always come back (absent ones included),
+                // so this only ever fires for dynamically scanned files.
+                for prev in previous.iter().filter(|p| !files.iter().any(|f| f.path == p.path)) {
+                    let change = crate::backend::storage::project_instructions::classify_change(
+                        Some(prev),
+                        false,
+                        "",
+                    );
+                    enriched.push(json!({
+                        "path": prev.path,
+                        "exists": false,
+                        "size_bytes": 0,
+                        "content_hash": "",
+                        "owner": prev.owner,
+                        "content": "",
+                        "truncated": false,
+                        "error": serde_json::Value::Null,
+                        "change": change,
+                        "last_observed_at": prev.observed_at,
+                    }));
+                }
+
+                Ok(Some(json!({
+                    "provider": agent.provider,
+                    "working_directory": work_dir,
+                    "files": enriched,
+                })))
+            })
+        })
+    };
+    engine.register_handler(COMMAND_AGENT_PROJECT_INSTRUCTIONS, make(state.clone()));
+}
+
 /// `bundle.export` — Armory Bundle Format (ABF) exporter, Phase 1 of
 /// docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md /
 /// https://docs.agentmux.ai/abf/. Window-scoped (no `check_s1`) like the
@@ -339,6 +483,13 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// to the pure `bundle_export::export_bundle`. `format: "zip"` returns a
 /// base64-encoded archive; anything else (including omitted) returns the
 /// raw file list for the caller to write out itself.
+#[derive(serde::Deserialize, Default)]
+struct ExportReq {
+    id: String,
+    #[serde(default)]
+    format: String,
+}
+
 fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
@@ -348,80 +499,387 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let wstore = wstore.clone();
             Box::pin(async move {
-                #[derive(serde::Deserialize, Default)]
-                struct Req {
-                    id: String,
-                    #[serde(default)]
-                    format: String,
-                }
-                let req: Req = serde_json::from_value(data)
+                let req: ExportReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export: {e}"))?;
-
-                let bundle = id_store
-                    .bundle_memory_get(&req.id)
-                    .map_err(|e| format!("bundle.export: {e}"))?
-                    .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
-
-                // Same silent-data-loss pattern already fixed for
-                // context_files/mcp_servers in bundle_export.rs -- a
-                // malformed bundle.skills value must warn, not just
-                // vanish, but a genuinely blank one is not an error
-                // (reagent P1, PR #2333). Shares the same helper so all
-                // three fields behave identically.
-                let mut handler_warnings: Vec<String> = Vec::new();
-                let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
-                    &bundle.skills,
-                    "skills",
-                    &mut handler_warnings,
-                );
-                // Distinguish a genuine DB error from a legitimately deleted
-                // skill id: `.ok().flatten()` previously collapsed both to
-                // "absent", so a locked/damaged store silently reported a
-                // successful export missing content instead of failing loudly
-                // -- unsafe for the advertised backup use case (Codex P2, PR
-                // #2325). A lookup error now fails the whole export; a
-                // missing row (Ok(None), i.e. actually deleted) is skipped
-                // and reported back in `missing_skill_ids`.
-                let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
-                let mut missing_skill_ids: Vec<String> = Vec::new();
-                for id in &skill_ids {
-                    match wstore.skill_get(id) {
-                        Ok(Some(skill)) => skills.push(skill),
-                        Ok(None) => missing_skill_ids.push(id.clone()),
-                        Err(e) => {
-                            return Err(format!("bundle.export: failed to look up skill {id}: {e}"));
-                        }
-                    }
-                }
-
-                let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
-
-                let mut all_warnings = export.warnings.clone();
-                all_warnings.append(&mut handler_warnings);
-
-                if req.format == "zip" {
-                    let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
-                        .map_err(|e| format!("bundle.export: {e}"))?;
-                    use base64::Engine as _;
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
-                    return Ok(Some(json!({
-                        "root_slug": export.root_slug,
-                        "skipped_skills": export.skipped_skills,
-                        "warnings": all_warnings,
-                        "missing_skill_ids": missing_skill_ids,
-                        "zip_base64": encoded,
-                    })));
-                }
-
-                let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
-                if let Some(obj) = result.as_object_mut() {
-                    obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
-                    obj.insert("warnings".to_string(), json!(all_warnings));
-                }
-                Ok(Some(result))
+                bundle_export_impl(&id_store, &wstore, req).map(Some)
             })
         }),
     );
+}
+
+/// The agent-less `bundle.export`, extracted from its handler closure so the
+/// warning contract in §5.1 can be asserted at the RPC boundary rather than
+/// only on its helper — matching `bundle_export_for_agent_impl` and
+/// `bundle_export_for_agent_with_history_impl`, which were already shaped this
+/// way for the same reason.
+fn bundle_export_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    req: ExportReq,
+) -> Result<serde_json::Value, String> {
+    let bundle = id_store
+        .bundle_get(&req.id)
+        .map_err(|e| format!("bundle.export: {e}"))?
+        .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
+
+    // Components come from the ref tables, which are authoritative for what a
+    // bundle contains -- see resolve_bundle_components.
+    let components = resolve_bundle_components(wstore, &bundle.id)
+        .map_err(|e| format!("bundle.export: {e}"))?;
+    let mut handler_warnings = components.warnings;
+
+    // `missing_skill_ids` predates the ref tables: the inline column stored
+    // bare ids, so an id whose skill row had been deleted had to be resolved
+    // and reported (Codex P2, PR #2325). A ref cannot be dangling the same
+    // way -- `managed_list` joins through the catalog, and `skill_delete`
+    // purges refs -- so this is now always empty. Kept in the response because
+    // it is part of the RPC's shape and callers may still read it.
+    let missing_skill_ids: Vec<String> = Vec::new();
+
+    let export = crate::backend::bundle_export::export_bundle(
+        &bundle,
+        &components.skills,
+        &components.mcp_entries,
+    );
+
+    let mut all_warnings = export.warnings.clone();
+    all_warnings.append(&mut handler_warnings);
+
+    // Export/import symmetry -- see MEMORY_NOT_EXPORTED_WARNING.
+    if bound_agent_has_native_memory(id_store, wstore, &bundle.id) {
+        all_warnings.push(MEMORY_NOT_EXPORTED_WARNING.to_string());
+    }
+
+    if req.format == "zip" {
+        let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+            .map_err(|e| format!("bundle.export: {e}"))?;
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+        return Ok(json!({
+            "root_slug": export.root_slug,
+            "skipped_skills": export.skipped_skills,
+            "warnings": all_warnings,
+            "missing_skill_ids": missing_skill_ids,
+            "zip_base64": encoded,
+        }));
+    }
+
+    let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
+        obj.insert("warnings".to_string(), json!(all_warnings));
+    }
+    Ok(result)
+}
+
+/// Drop a deleted bundle's component refs.
+///
+/// Called from **both** delete paths — `bundle.delete` here and `deletememory`
+/// in `agent_handlers/bundle.rs`, which is the one the Armory actually calls.
+/// Fixing only the first left the product path orphaning refs (Codex, PR
+/// #3153), so this exists to make "both" mean one implementation.
+///
+/// `bundle_delete` runs on the store that owns `db_bundles`, which has no ref
+/// tables — they sit beside the catalog tables they key into, in the other
+/// database, which is also why no foreign key reaches across
+/// (`migrations.rs:721-741`). So the purge cannot live inside it and has to be
+/// driven from a handler, where both stores are in scope.
+///
+/// Best-effort by design: the bundle row is already gone by the time this
+/// runs, so a failure here must not turn a successful delete into an error.
+pub(crate) fn purge_bundle_component_refs(
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) {
+    match wstore.bundle_unbind_all_components(bundle_id) {
+        Ok((skills, mcp)) if skills + mcp > 0 => {
+            tracing::info!(bundle_id, skills, mcp, "bundle delete: purged component refs")
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(
+            bundle_id, error = %e,
+            "bundle delete: component refs left behind"
+        ),
+    }
+}
+
+/// Bind an imported bundle's components into the ref tables.
+///
+/// Phase 0b. The ref tables are authoritative for what a bundle contains, so
+/// an import that only wrote the inline columns would produce a bundle that
+/// exports empty and, for MCP servers, never materialises at spawn either —
+/// the `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` "inert at runtime" state
+/// the ref tables exist to end.
+///
+/// **Must run after `bundle_upsert`.** Both bind paths check the bundle exists
+/// in `id_store` first (`storage/managed.rs:291`) and refuse otherwise.
+///
+/// Returns warnings rather than failing: by this point the bundle row is
+/// already committed, so aborting would leave a half-imported bundle behind. A
+/// component that could not be bound is reported and the import continues.
+fn bind_imported_components(
+    wstore: &crate::backend::storage::store::Store,
+    id_store: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+    imported_skill_ids: &[String],
+    mcp_configs: &[serde_json::Value],
+) -> Vec<String> {
+    let mut warnings: Vec<String> = Vec::new();
+
+    for skill_id in imported_skill_ids {
+        if let Err(e) = wstore.bundle_skill_bind(id_store, bundle_id, skill_id) {
+            warnings.push(format!(
+                "skills: imported skill {skill_id} could not be bound to the bundle ({e}) — it will not be exported or reach the agent"
+            ));
+        }
+    }
+
+    // Same shared path the m0030 backfill uses, so a server that arrives by
+    // import and one recovered from an old inline column end up identical,
+    // including duplicate-name handling.
+    let (_created, mcp_warnings) =
+        wstore.bundle_mcp_bind_inline_entries(id_store, bundle_id, mcp_configs, now_ms());
+    warnings.extend(mcp_warnings);
+
+    warnings
+}
+
+/// A bundle's components, resolved from the tables that are authoritative for
+/// them.
+pub(super) struct ResolvedComponents {
+    pub(super) skills: Vec<crate::backend::storage::Skill>,
+    /// Exporter entry shape: each server's config object with its `name`
+    /// alongside, which is what `bundle_export::redact_mcp_entry` reads.
+    pub(super) mcp_entries: Vec<serde_json::Value>,
+    pub(super) warnings: Vec<String>,
+}
+
+/// Resolve what a bundle actually contains, from `db_bundle_skills_ref` /
+/// `db_bundle_mcp_ref`.
+///
+/// Phase 0b of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Before
+/// this, export read the inline `bundle.skills` / `bundle.mcp_servers` columns
+/// while agent launch read the ref tables (`app_api/agent_open.rs:793`, `:812`),
+/// and nothing kept the two in step — so a skill bound in the Armory ran at
+/// launch but exported as an empty `skills/` directory, with no warning. One
+/// resolver, used by every export path, is what stops that recurring.
+///
+/// **Scope note:** this is deliberately narrower than `effective_skills` /
+/// `effective_mcp_servers`, which additionally union an *agent's* own binds,
+/// globals and the legacy blob. Those answer "what does this agent run with";
+/// this answers "what is in this bundle", which is what an ABF describes. The
+/// two are not meant to be equal, only to agree about the bundle's own
+/// contribution.
+///
+/// `managed_list` returns the whole catalog with a `bound_to_bundle` flag
+/// rather than just the bound rows, hence the filter; and because it joins
+/// through the catalog table, a ref whose catalog row has been deleted
+/// resolves to nothing rather than reporting itself. `skill_delete` /
+/// `mcp_server_delete` both purge refs (`storage/managed.rs:232`), so that
+/// state is not reachable through the app — but the FK that would enforce it
+/// is inert, since `PRAGMA foreign_keys` is only ever set ON in tests.
+pub(super) fn resolve_bundle_components(
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) -> Result<ResolvedComponents, String> {
+    let skills: Vec<crate::backend::storage::Skill> = wstore
+        .bundle_skill_list(bundle_id)
+        .map_err(|e| format!("failed to resolve bundle skills: {e}"))?
+        .into_iter()
+        .filter(|item| item.bound_to_bundle)
+        .map(|item| item.skill)
+        .collect();
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut mcp_entries: Vec<serde_json::Value> = Vec::new();
+    for item in wstore
+        .bundle_mcp_list(bundle_id)
+        .map_err(|e| format!("failed to resolve bundle MCP servers: {e}"))?
+        .into_iter()
+        .filter(|item| item.bound_to_bundle)
+    {
+        let server = item.server;
+        // `config` is the same JSON object the launch path writes into
+        // `.mcp.json` keyed by `server.name` (`agent_config.rs`
+        // build_mcp_config_from_refs). The exporter wants that object with the
+        // name inline, so the row's name is authoritative over any `name` the
+        // config blob happens to carry.
+        match serde_json::from_str::<serde_json::Value>(&server.config) {
+            Ok(serde_json::Value::Object(mut obj)) => {
+                obj.insert("name".to_string(), json!(server.name));
+                mcp_entries.push(serde_json::Value::Object(obj));
+            }
+            Ok(_) => warnings.push(format!(
+                "mcp server {}: config is not a JSON object — skipped",
+                server.name
+            )),
+            Err(e) => warnings.push(format!(
+                "mcp server {}: invalid config JSON ({e}) — skipped",
+                server.name
+            )),
+        }
+    }
+
+    Ok(ResolvedComponents { skills, mcp_entries, warnings })
+}
+
+/// Warning the agent-less `bundle.export` pushes when the bundle it is
+/// exporting is bound to an agent that actually has native memory.
+///
+/// Mirror of [`crate::backend::bundle_import::MEMORY_COMPONENT_IGNORED_WARNING`]
+/// on the import side, and a constant for the same reason that one is: the push
+/// site and the test that pins the wording must not drift apart.
+///
+/// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.1/§5.1. The
+/// asymmetry worth fixing was never that `bundle.export` omits memory — a
+/// bundle detached from any agent has no memory to carry, and omitting it is
+/// correct. It is that import *announces* the omission and export did not,
+/// while every `components` key is optional (`bundle_export.rs:586-606`), so a
+/// missing `memory` key is indistinguishable from "this bundle had none".
+pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
+    "memory: this bundle is bound to an agent with native memory, which bundle.export does not carry — use bundle.export_for_agent to include it";
+
+/// Does any agent bound to `bundle_id` have mirrored native memory?
+///
+/// **Both bindings count.** A bundle is reachable two ways, and they are
+/// different columns: `AgentDefinition.memory_id` is the agent's own dedicated
+/// bundle (stored in `db_agents.default_memory_id`), while
+/// `AgentInstance.memory_id` is one *launch* deliberately pointed at some other
+/// bundle (`storage/agents.rs:153-163`). Checking only the definition would
+/// miss exactly the case the operator is most likely to hit — exporting the
+/// bundle a running instance was launched with. Native memory is keyed on the
+/// definition id either way (`build_export_for_agent` resolves the agent with
+/// `agent_def_get` before reading memory), so the instance path resolves
+/// through `definition_id`.
+///
+/// Reads the `db_agent_native_memory` mirror and deliberately does NOT call
+/// `refresh_memory_mirror_from_live_fs` first, unlike `build_export_for_agent`
+/// (which must, because it is about to *copy* the files —
+/// `app_api/bundle.rs:558`). Refreshing writes to the store, and an agent-less
+/// export has no business mutating per-agent state as a side effect of
+/// producing a warning.
+///
+/// **Known limitation — a cross-channel binding is invisible here, and cannot
+/// currently be made visible.** Both lookups resolve the binding from
+/// channel-local SQLite: `instance_list` reads this channel's rows, and
+/// `agent_def_list`'s global overlay only preserves `memory_id` when a local
+/// row exists (`storage/agents.rs:462`). An agent created in another channel
+/// has no local row, so it comes back with an empty `memory_id` — because
+/// `DefinitionRecordV1` does not carry the field at all
+/// (`storage/def_registry_mirror.rs:128-133`). The bundle and the memory mirror
+/// are global; only the binding between them is not. So exporting a shared
+/// bundle from a channel other than the one its agent was created in will not
+/// warn, which is exactly the portability case the warning is for (Codex, PR
+/// #3147).
+///
+/// Closing it means adding `memory_id` to the registry wire format, which is
+/// already a tracked gap for bigger reasons than this warning — the same
+/// missing field makes a cross-channel reopen start unbound and limits m0021's
+/// backfill to local SQLite. Tracked in #3148; deliberately not widened here,
+/// because warning whenever the binding is merely *unknown* would fire on
+/// unrelated bundles and train operators to ignore it.
+///
+/// The other cost is under-warning on a stale mirror: an agent whose memory
+/// exists on disk but was never mirrored is missed. That is the residual gap
+/// `SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` already documents and
+/// accepts for the mirror generally. Both costs are one-directional and this
+/// warning is advisory — it changes no bytes in the archive.
+fn bound_agent_has_native_memory(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) -> bool {
+    // A blank bundle_id is the "blank singleton" sentinel that every unbound
+    // agent carries — treating it as a binding would warn on nearly every
+    // export.
+    if bundle_id.is_empty() {
+        return false;
+    }
+
+    let has_memory = |agent_id: &str| {
+        id_store
+            .agent_native_memory_list_meta(agent_id)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false)
+    };
+
+    // Best-effort throughout: a store error here must not fail an export that
+    // is otherwise fine. Neither table is read by the export itself.
+    let bound_by_definition = wstore
+        .agent_def_list()
+        .map(|agents| {
+            agents
+                .iter()
+                .filter(|a| a.memory_id == bundle_id)
+                .any(|a| has_memory(&a.id))
+        })
+        .unwrap_or(false);
+    if bound_by_definition {
+        return true;
+    }
+
+    wstore
+        .instance_list(None, None)
+        .map(|instances| {
+            instances
+                .iter()
+                .filter(|i| i.memory_id == bundle_id)
+                .any(|i| has_memory(&i.definition_id))
+        })
+        .unwrap_or(false)
+}
+
+/// Register `entries` under `components.<key>` in the export's `armory.json`.
+///
+/// Takes JSON values rather than paths: most components are a list of archive
+/// paths, but `projectInstructions` carries an object per file, because a bare
+/// path could not express the `owner` discriminator that keeps import from
+/// installing somebody else's instructions.
+///
+/// The manifest is built as an inline `json!` literal in `bundle_export.rs`
+/// with no struct behind it (`bundle_export.rs:615`), so every agent-aware
+/// component has to reopen and rewrite it. Shared by the memory splice below
+/// and the history splice, which otherwise duplicated the find-parse-rewrite
+/// dance byte for byte.
+///
+/// No-ops on an empty list: `components` keys are all optional, and writing
+/// `"history": []` would assert "this archive has an empty history" where
+/// absence already says "none".
+fn set_manifest_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    key: &str,
+    entries: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let manifest_idx = export
+        .files
+        .iter()
+        .position(|f| f.path == "armory.json")
+        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
+    let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
+        .map_err(|e| format!("armory.json: {e}"))?;
+    manifest["components"][key] = json!(entries);
+    export.files[manifest_idx].content =
+        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Register the transcript files `bundle.export_for_agent_with_history` already
+/// wrote into the archive under `components.history`.
+///
+/// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.5: the files were
+/// pushed into `export.files` (`app_api/bundle.rs:797`) and counted in the RPC
+/// response, but the manifest was never touched after the memory splice — so a
+/// consumer reading `components.*` to learn what an archive holds could not see
+/// history at all. The paths are caller-supplied rather than re-derived here so
+/// this cannot drift from what was actually written.
+fn splice_history_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    history_paths: Vec<String>,
+) -> Result<(), String> {
+    set_manifest_component(export, "history", history_paths.into_iter().map(|p| json!(p)).collect())
 }
 
 /// Splice native-memory files into an already-built bundle export's
@@ -436,6 +894,92 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// component category. A no-op when `memory_files` is empty — matches the
 /// existing omit-empty-components convention used elsewhere in the
 /// manifest.
+/// Carry the agent's project instructions into the export as
+/// `components.projectInstructions`.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Files
+/// land under `instructions/project/<sanitized-path>`, and each manifest entry
+/// carries its original `path`, a `contentHash`, and an `owner`.
+///
+/// **`owner` is the load-bearing field.** It is what stops this from becoming a
+/// way to install one repository's instructions into another: an importer that
+/// treated a `foreign` entry as content to write would be doing precisely what
+/// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to prevent.
+/// Import surfaces these and never applies them (spec §5.2), so an operator who
+/// wants them acts deliberately.
+///
+/// Only files that exist and were readable are carried — there is nothing to
+/// put in an archive otherwise. Their absence from the manifest is therefore
+/// not a claim that the source agent had none; `agent.project_instructions` is
+/// where the fuller picture, including absent and unreadable files, lives.
+///
+/// "Readable" is decided by `error`/`truncated`, NOT by whether the content is
+/// empty (Codex P2, PR #3163). A real, readable, zero-byte `CLAUDE.md` is a
+/// fact about the source agent — dropping it would make the export
+/// indistinguishable from one where the file was absent, which is the exact
+/// kind of quiet lie this component exists to remove.
+///
+/// Paths go through the same sanitizer the exporter uses for context files, so
+/// a scanned path can never write outside the archive's own tree.
+fn splice_project_instructions_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    files: &[crate::backend::project_instructions::ProjectInstructionFile],
+) -> Result<(), String> {
+    use crate::backend::project_instructions::InstructionOwner;
+    use std::collections::HashSet;
+
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    // Case-INSENSITIVE, for the same reason the context-file loop in
+    // `bundle_export.rs` is (reagent P2, PR #2333): a case-sensitive source
+    // filesystem can hold `.github/instructions/A.md` and `.../a.md`, and the
+    // scan in `project_instructions.rs` will find both — but they collide on
+    // extraction on Windows/macOS, where one snapshot silently overwrites the
+    // other. Scanned directories make this reachable here in a way it isn't
+    // for the fixed registry paths (Codex P2, PR #3163). The written path
+    // keeps its original case; only the check is folded.
+    let mut used_paths: HashSet<String> = HashSet::new();
+    for file in files {
+        if !file.exists || file.error.is_some() || file.truncated {
+            continue;
+        }
+        let Some(safe) = crate::backend::bundle_export::sanitize_context_relative_path(&file.path)
+        else {
+            // Warn rather than dropping in silence — a backup tool that loses
+            // an input without saying so defeats its own purpose (reagent P1,
+            // PR #2333, on the context-file equivalent).
+            export.warnings.push(format!(
+                "projectInstructions: \"{}\" could not be sanitized into an \
+                 archive-relative path; skipped",
+                file.path
+            ));
+            continue;
+        };
+        let out_path = format!("instructions/project/{safe}");
+        if !used_paths.insert(out_path.to_lowercase()) {
+            export.warnings.push(format!(
+                "projectInstructions: \"{}\" normalizes to the same path as an \
+                 earlier entry ({out_path}); skipped to avoid overwriting it",
+                file.path
+            ));
+            continue;
+        }
+        export.files.push(crate::backend::bundle_export::BundleExportFile {
+            path: out_path.clone(),
+            content: file.content.clone(),
+        });
+        entries.push(json!({
+            "path": file.path,
+            "file": out_path,
+            "contentHash": file.content_hash,
+            "owner": match file.owner {
+                InstructionOwner::Agentmux => "agentmux",
+                InstructionOwner::Foreign => "foreign",
+            },
+        }));
+    }
+    set_manifest_component(export, "projectInstructions", entries)
+}
+
 fn splice_memory_component(
     export: &mut crate::backend::bundle_export::BundleExport,
     memory_files: &[(String, String)],
@@ -443,13 +987,6 @@ fn splice_memory_component(
     if memory_files.is_empty() {
         return Ok(());
     }
-    let manifest_idx = export
-        .files
-        .iter()
-        .position(|f| f.path == "armory.json")
-        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
-    let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
-        .map_err(|e| format!("armory.json: {e}"))?;
     let mut manifest_memory: Vec<String> = Vec::new();
     for (filename, content) in memory_files {
         // Filenames here always came from db_agent_native_memory, which
@@ -465,10 +1002,7 @@ fn splice_memory_component(
         });
         manifest_memory.push(out_path);
     }
-    manifest["components"]["memory"] = json!(manifest_memory);
-    export.files[manifest_idx].content =
-        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-    Ok(())
+    set_manifest_component(export, "memory", manifest_memory.into_iter().map(|p| json!(p)).collect())
 }
 
 /// `bundle.export_for_agent` — ABF v0.2 §2.3. The only export path that
@@ -520,7 +1054,7 @@ async fn build_export_for_agent(
     Vec<String>,
 ), String> {
     let bundle = id_store
-        .bundle_memory_get(bundle_id)
+        .bundle_get(bundle_id)
         .map_err(|e| format!("{err_prefix}: {e}"))?
         .ok_or_else(|| format!("{err_prefix}: no bundle with id {bundle_id}"))?;
     let agent = wstore
@@ -528,29 +1062,23 @@ async fn build_export_for_agent(
         .map_err(|e| format!("{err_prefix}: {e}"))?
         .ok_or_else(|| format!("{err_prefix}: no agent with id {agent_id}"))?;
 
-    let mut handler_warnings: Vec<String> = Vec::new();
-    let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
-        &bundle.skills,
-        "skills",
-        &mut handler_warnings,
-    );
-    let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
-    let mut missing_skill_ids: Vec<String> = Vec::new();
-    for id in &skill_ids {
-        match wstore.skill_get(id) {
-            Ok(Some(skill)) => skills.push(skill),
-            Ok(None) => missing_skill_ids.push(id.clone()),
-            Err(e) => {
-                return Err(format!("{err_prefix}: failed to look up skill {id}: {e}"));
-            }
-        }
-    }
+    // Same resolver as the agent-less path, so the two cannot disagree about
+    // what the bundle contains.
+    let components = resolve_bundle_components(wstore, &bundle.id)
+        .map_err(|e| format!("{err_prefix}: {e}"))?;
+    let mut handler_warnings = components.warnings;
+    // Always empty now — see the note at the agent-less export path.
+    let missing_skill_ids: Vec<String> = Vec::new();
 
-    let mut export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
+    let mut export = crate::backend::bundle_export::export_bundle(
+        &bundle,
+        &components.skills,
+        &components.mcp_entries,
+    );
 
     // Refresh the mirror from the live FS, then read every mirrored
     // file's content — this agent's memory, freshest as of right now,
-    // not as of whenever its Stash Memory tab was last opened.
+    // not as of whenever its Stash Bundle tab was last opened.
     let mut memory_files: Vec<(String, String)> = Vec::new();
     if let Some(memory_dir) =
         crate::server::native_memory_handlers::memory_dir_for_agent_by_id(wstore, &agent)
@@ -588,6 +1116,21 @@ async fn build_export_for_agent(
         Err(e) => handler_warnings.push(format!("native memory: failed to list: {e}")),
     }
     splice_memory_component(&mut export, &memory_files).map_err(|e| format!("{err_prefix}: {e}"))?;
+
+    // Project instructions — carried as a record of what the source agent was
+    // reading, not as content to install. The working directory is resolved
+    // the same way launch resolves it, so the export describes the directory
+    // the agent actually runs in.
+    let work_dir = crate::backend::project_instructions::effective_working_dir(
+        &agent.working_directory,
+        &agent.name,
+    );
+    let instructions = crate::backend::project_instructions::resolve_project_instructions(
+        &agent.provider,
+        &work_dir,
+    );
+    splice_project_instructions_component(&mut export, &instructions)
+        .map_err(|e| format!("{err_prefix}: {e}"))?;
 
     let mut all_warnings = export.warnings.clone();
     all_warnings.append(&mut handler_warnings);
@@ -790,13 +1333,17 @@ async fn bundle_export_for_agent_with_history_impl(
 
         // Pass 3: actually read + include only what fit.
         let mut included = 0u32;
+        let mut history_paths: Vec<String> = Vec::new();
         for (session, _size) in sized.into_iter().take(fit_count) {
             match std::fs::read_to_string(&session.file_path) {
                 Ok(content) => {
+                    let out_path =
+                        format!("history/{}/{}.jsonl", session.provider, session.session_id);
                     export.files.push(crate::backend::bundle_export::BundleExportFile {
-                        path: format!("history/{}/{}.jsonl", session.provider, session.session_id),
+                        path: out_path.clone(),
                         content,
                     });
+                    history_paths.push(out_path);
                     included += 1;
                 }
                 Err(e) => all_warnings.push(format!(
@@ -806,6 +1353,11 @@ async fn bundle_export_for_agent_with_history_impl(
             }
         }
         all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
+
+        // §3.5: the files above are in the archive; say so in the manifest too.
+        // Must happen before zipping — armory.json is zipped from export.files.
+        splice_history_component(&mut export, history_paths)
+            .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
 
         let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
             .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
@@ -914,7 +1466,7 @@ async fn bundle_import_for_agent_impl(
 
     // reagent P0, PR #2527: the "zero existing memory" guard below only
     // consults db_agent_native_memory (the mirror) — a live file that was
-    // written autonomously but never viewed through the Stash Memory tab
+    // written autonomously but never viewed through the Stash Bundle tab
     // is NOT in the mirror yet, so the check would pass and the write
     // loop further down would silently overwrite it via fs::rename. Same
     // class of bug bundle.export_for_agent already had to guard against
@@ -1027,7 +1579,7 @@ async fn bundle_import_for_agent_impl(
             }
         }
     }
-    let memory = crate::backend::storage::store::Memory {
+    let memory = crate::backend::storage::store::Bundle {
         id: bundle_id.clone(),
         name: parsed.name,
         description: parsed.description,
@@ -1050,7 +1602,7 @@ async fn bundle_import_for_agent_impl(
         updated_at: now,
         is_system: false,
     };
-    if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+    if let Err(e) = id_store.bundle_upsert(&memory) {
         let rollback_errors = rollback_skills(&imported_skill_ids);
         let mut msg = format!("bundle.import_for_agent: {e}");
         if !rollback_errors.is_empty() {
@@ -1063,7 +1615,18 @@ async fn bundle_import_for_agent_impl(
         return Err(msg);
     }
 
-    // Memory files: write through the SAME dual-write path
+    // The bundle row now exists, so its components can be bound. Ref tables
+    // are authoritative — without this the imported bundle would export empty
+    // and its MCP servers would never reach a spawned agent.
+    warnings.extend(bind_imported_components(
+        wstore,
+        id_store,
+        &bundle_id,
+        &imported_skill_ids,
+        &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
+    ));
+
+    // Bundle files: write through the SAME dual-write path
     // agent:memory:write_file uses (live FS via memory_dir_for_cwd, then
     // the mirror) — writing only to db_agent_native_memory would leave
     // this content visible in Stash while invisible to the actual
@@ -1415,7 +1978,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                let memory = Memory {
+                let memory = Bundle {
                     id: uuid::Uuid::new_v4().to_string(),
                     name: parsed.name,
                     description: parsed.description,
@@ -1434,7 +1997,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Phase 3 spec §3.0: ImportedContextFile gained a
                     // stable `id` selection key alongside `path`/`content`
                     // -- project it away before persisting, matching
-                    // `Memory.context_files`'s existing documented
+                    // `Bundle.context_files`'s existing documented
                     // `[{path, content}]` shape.
                     context_files: serde_json::to_string(
                         &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
@@ -1445,7 +2008,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // selection key alongside the raw config) — every write
                     // site must project to `.config` before serializing, or
                     // this would persist the wrapper object instead of the
-                    // raw MCP config every consumer of `Memory.mcp_servers`
+                    // raw MCP config every consumer of `Bundle.mcp_servers`
                     // expects.
                     mcp_servers: serde_json::to_string(
                         &parsed.mcp_servers.iter().map(|m| &m.config).collect::<Vec<_>>(),
@@ -1458,7 +2021,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     updated_at: now,
                     is_system: false,
                 };
-                if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+                if let Err(e) = id_store.bundle_upsert(&memory) {
                     // Codex P2, PR #2379: same rollback as above — the
                     // skills this RPC just created must not survive a
                     // failed bundle creation as orphaned global rows.
@@ -1473,6 +2036,17 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     return Err(msg);
                 }
+
+                // Ref tables are authoritative — bind after the bundle row
+                // exists, or this import exports empty and its servers never
+                // reach a spawned agent.
+                warnings.extend(bind_imported_components(
+                    &wstore,
+                    &id_store,
+                    &memory.id,
+                    &imported_skill_ids,
+                    &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
+                ));
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -1584,6 +2158,15 @@ fn preview_commit_warning_budget() -> crate::backend::bundle_import::WarningBudg
 /// already individually bounded; concatenating two independently-bounded
 /// lists can still exceed either bound alone, so one more pass caps the
 /// combined total before it's ever serialized).
+/// Per-entry content cap for `project_instructions` in an import preview.
+///
+/// Deliberately far below `MAX_INSTRUCTIONS_PREVIEW_CHARS` (50k): that cap
+/// applies to ONE field, whereas a preview can carry up to
+/// `MAX_IMPORTED_PROJECT_INSTRUCTIONS` (200) of these, so the same number
+/// would put a 10 MB ceiling on a single response. 4k is enough to recognize a
+/// file and see how it opens; the untruncated bytes are in the archive itself.
+const MAX_PROJECT_INSTRUCTION_PREVIEW_CHARS: usize = 4_000;
+
 fn bound_warnings_for_response(warnings: Vec<String>) -> (Vec<String>, bool) {
     const MAX_COMBINED_WARNINGS: usize = 200;
     if warnings.len() <= MAX_COMBINED_WARNINGS {
@@ -1739,19 +2322,50 @@ async fn bundle_import_preview_impl(
         }))
         .collect();
 
-    // Bundle name collision -- soft, informational (§2: bundle_memory_upsert
+    // Bundle name collision -- soft, informational (§2: bundle_upsert
     // has no name uniqueness constraint, so this never blocks).
     let existing_names: std::collections::HashSet<String> = id_store
-        .bundle_memory_list()
+        .bundle_list()
         .map_err(|e| format!("bundle.import.preview: {e}"))?
         .into_iter()
         .map(|b| b.name)
         .collect();
     let name_collision = existing_names.contains(&parsed.name);
 
+    // Phase 3, Codex P1 on PR #3163. Read-only: this is what the SOURCE agent
+    // was reading, and `bundle.import.commit` has no counterpart field — the
+    // entries exist to be looked at, never to be written into the importing
+    // repository (spec §5.2). Each content is bounded the same way
+    // `instructions_preview` is, since a snapshot can be an arbitrarily large
+    // repository file and the response carries up to
+    // MAX_IMPORTED_PROJECT_INSTRUCTIONS of them.
+    let project_instructions_json: Vec<serde_json::Value> = parsed
+        .project_instructions
+        .iter()
+        .map(|pi| {
+            let total_chars = pi.content.chars().count();
+            let truncated = total_chars > MAX_PROJECT_INSTRUCTION_PREVIEW_CHARS;
+            let preview: String = if truncated {
+                pi.content.chars().take(MAX_PROJECT_INSTRUCTION_PREVIEW_CHARS).collect()
+            } else {
+                pi.content.clone()
+            };
+            json!({
+                "path": bounded_display(&pi.path),
+                "file": bounded_display(&pi.file),
+                "content_hash": bounded_display(&pi.content_hash),
+                "owner": bounded_display(&pi.owner),
+                "content_preview": preview,
+                "content_truncated": truncated,
+                "content_total_chars": total_chars,
+            })
+        })
+        .collect();
+
     let (warnings, warnings_truncated) = bound_warnings_for_response(all_warnings);
 
     Ok(json!({
+        "project_instructions": project_instructions_json,
         "name": parsed.name,
         "description": bounded_display(&parsed.description),
         "instructions_preview": instructions_preview,
@@ -2021,7 +2635,7 @@ async fn bundle_import_commit_impl(
                     }
                 }
 
-                let memory = Memory {
+                let memory = Bundle {
                     id: uuid::Uuid::new_v4().to_string(),
                     name: bundle_name,
                     description: parsed.description,
@@ -2048,7 +2662,7 @@ async fn bundle_import_commit_impl(
                     updated_at: now,
                     is_system: false,
                 };
-                if let Err(e) = id_store.bundle_memory_upsert(&memory) {
+                if let Err(e) = id_store.bundle_upsert(&memory) {
                     let rollback_errors = rollback_skills(&imported_skill_ids);
                     let mut msg = format!("bundle.import.commit: {e}");
                     if !rollback_errors.is_empty() {
@@ -2060,6 +2674,16 @@ async fn bundle_import_commit_impl(
                     }
                     return Err(msg);
                 }
+
+                // Ref tables are authoritative — bind after the bundle row
+                // exists. Only the servers the user actually selected.
+                warnings.extend(bind_imported_components(
+                    &wstore,
+                    &id_store,
+                    &memory.id,
+                    &imported_skill_ids,
+                    &selected_mcp_servers.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
+                ));
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
@@ -2225,13 +2849,13 @@ mod import_preview_commit_tests {
             .await
             .unwrap_err();
         assert!(err.contains("digest mismatch"));
-        assert!(state.id_store.bundle_memory_list().unwrap().iter().all(|b| b.name != "test-bundle"));
+        assert!(state.id_store.bundle_list().unwrap().iter().all(|b| b.name != "test-bundle"));
     }
 
     #[tokio::test]
     async fn commit_applies_bundle_name_override_not_parsed_name() {
         // codex P2, PR #2381 round 11: bundle_name must actually be
-        // substituted for Memory.name, never silently ignored.
+        // substituted for Bundle.name, never silently ignored.
         let state = test_state();
         let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
         let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
@@ -2248,7 +2872,7 @@ mod import_preview_commit_tests {
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert_eq!(saved.name, "Renamed Bundle");
     }
 
@@ -2256,7 +2880,7 @@ mod import_preview_commit_tests {
     async fn commit_bounds_an_oversized_bundle_name_override() {
         // reagentx P2, PR #2382 round 3: unlike parsed.name (bounded at
         // parse time), req.bundle_name had no length cap of its own before
-        // being used verbatim as Memory.name.
+        // being used verbatim as Bundle.name.
         let state = test_state();
         let files = vec![entry("armory.json", &manifest(serde_json::json!({})))];
         let digest = bi::content_digest_files(&files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect::<Vec<_>>());
@@ -2274,7 +2898,7 @@ mod import_preview_commit_tests {
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert_eq!(saved.name.chars().count(), bi::MAX_BUNDLE_NAME_CHARS);
     }
 
@@ -2388,7 +3012,7 @@ mod import_preview_commit_tests {
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert!(saved.context_files.contains("content B"));
         assert!(!saved.context_files.contains("content A"));
     }
@@ -2583,7 +3207,7 @@ mod import_preview_commit_tests {
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.wstore, &state.broker, req).await.unwrap();
         let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         let mcp_servers: serde_json::Value = serde_json::from_str(&saved.mcp_servers).unwrap();
         assert_eq!(mcp_servers[0]["command"], "npx");
         assert!(mcp_servers[0].get("source_path").is_none(), "must not persist the {{source_path, config}} wrapper");
@@ -2707,8 +3331,8 @@ mod export_import_for_agent_tests {
             .unwrap();
     }
 
-    fn make_bundle(state: &AppState, id: &str, instructions: &str) -> crate::backend::storage::store::Memory {
-        let bundle = crate::backend::storage::store::Memory {
+    fn make_bundle(state: &AppState, id: &str, instructions: &str) -> crate::backend::storage::store::Bundle {
+        let bundle = crate::backend::storage::store::Bundle {
             id: id.to_string(),
             name: format!("Bundle {id}"),
             description: String::new(),
@@ -2726,8 +3350,520 @@ mod export_import_for_agent_tests {
             updated_at: 0,
             is_system: false,
         };
-        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
         bundle
+    }
+
+    /// Bind an MCP server to a bundle through the ref table, the way the
+    /// Armory does.
+    fn bind_mcp(state: &AppState, bundle_id: &str, name: &str, config: &str) {
+        let server = crate::backend::storage::McpServer {
+            id: format!("srv-{name}"),
+            name: name.to_string(),
+            transport: "stdio".to_string(),
+            config: config.to_string(),
+            is_global: false,
+            created_at: 1,
+            updated_at: 1,
+        };
+        state
+            .wstore
+            .bundle_mcp_upsert_unique(&state.id_store, bundle_id, &server, true)
+            .unwrap();
+    }
+
+    /// Bind a skill to a bundle through the ref table.
+    fn bind_skill(state: &AppState, bundle_id: &str, name: &str) {
+        let skill = crate::backend::storage::Skill {
+            id: format!("skill-{name}"),
+            name: name.to_string(),
+            trigger: name.to_string(),
+            skill_type: crate::backend::agent_config::SKILL_TYPE_AGENT_SKILL.to_string(),
+            description: String::new(),
+            content: "body".to_string(),
+            is_global: false,
+            created_at: 1,
+            updated_at: 1,
+        };
+        state
+            .wstore
+            .bundle_skill_upsert_unique(&state.id_store, bundle_id, &skill, true)
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn project_instructions_resolves_the_authenticated_slug_not_a_uuid() {
+        // ReAgent P0 on #3156: check_s1 authenticates a SLUG, while
+        // agent_def_get queries by UUID — so looking the agent up directly
+        // returned None for every real caller. The existing test helper sets
+        // id == slug, which could never have caught it, so this one keeps them
+        // deliberately different.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+
+        let mut def: crate::backend::storage::AgentDefinition =
+            serde_json::from_value(serde_json::json!({
+                "id": "11111111-2222-3333-4444-555555555555",
+                "slug": "agent-slug",
+                "name": "Agent Slug",
+                "icon": "robot",
+                "provider": "claude",
+                "description": "",
+                "working_directory": work.path().to_str().unwrap(),
+                "created_at": 1,
+            }))
+            .unwrap();
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config_dir.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+
+        // The slug is what an authenticated agent actually sends.
+        let resolved = resolve_agent_for_s1(&state, "agent-slug")
+            .expect("the authenticated slug must resolve");
+        assert_eq!(resolved.id, def.id, "must find the definition behind the slug");
+
+        // And the UUID still works, for a caller that legitimately holds one.
+        let by_id = resolve_agent_for_s1(&state, &def.id).expect("a definition id must still work");
+        assert_eq!(by_id.slug, "agent-slug");
+    }
+
+    #[tokio::test]
+    async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
+        // The Phase 0b regression. Before this, binding a skill or server in
+        // the Armory wrote only a ref row while export read only the inline
+        // column, so this bundle exported as empty skills/ and mcp/
+        // directories with no warning — in a format advertised as a backup.
+        let state = test_state();
+        let bundle = make_bundle(&state, "bundle-1", "Be helpful.");
+        assert_eq!(bundle.skills, "[]", "fixture must leave the inline columns empty");
+        assert_eq!(bundle.mcp_servers, "[]");
+
+        bind_skill(&state, "bundle-1", "Deploy");
+        bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp","env":{"GITHUB_TOKEN":"tok"}}"#);
+
+        let result = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: "bundle-1".to_string(), format: String::new() },
+        )
+        .unwrap();
+
+        let paths: Vec<String> = result["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            paths.iter().any(|p| p.starts_with("skills/")),
+            "ref-bound skill must be exported: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p == "mcp/github.server.json"),
+            "ref-bound MCP server must be exported: {paths:?}"
+        );
+
+        // And the secret is still redacted on the way out — resolving from a
+        // different source must not bypass the redaction pass.
+        let server_file = result["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == "mcp/github.server.json")
+            .unwrap();
+        let content = server_file["content"].as_str().unwrap();
+        assert!(!content.contains("tok"), "secret must not survive export: {content}");
+    }
+
+    #[tokio::test]
+    async fn deleting_a_bundle_takes_its_component_refs_with_it() {
+        // No FK reaches from the ref tables to db_bundles — they live in
+        // different physical databases — so nothing else removes these, and a
+        // later bundle reusing the id would inherit components nobody chose.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_skill(&state, "bundle-1", "Deploy");
+        bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp"}"#);
+
+        let before = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert_eq!(before.skills.len(), 1);
+        assert_eq!(before.mcp_entries.len(), 1);
+
+        assert!(state.id_store.bundle_delete("bundle-1").unwrap());
+        // Through the shared helper both delete RPCs call — `bundle.delete`
+        // here and `deletememory`, the one the Armory actually uses. Fixing
+        // only one left the product path orphaning refs (Codex, PR #3153).
+        purge_bundle_component_refs(&state.wstore, "bundle-1");
+        let (skills, mcp) = state.wstore.bundle_unbind_all_components("bundle-1").unwrap();
+        assert_eq!(
+            (skills, mcp), (0, 0),
+            "the purge must have already removed both refs"
+        );
+
+        // Re-create a bundle with the same id: it must start empty.
+        make_bundle(&state, "bundle-1", "Reused id.");
+        let after = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(
+            after.skills.is_empty() && after.mcp_entries.is_empty(),
+            "a reused bundle id must not inherit the old bundle's components"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_reports_a_malformed_bound_component_instead_of_passing() {
+        // Codex on #3153: the resolver drops a bound server whose config will
+        // not parse and says so in a warning. Discarding that left validate
+        // reporting is_valid for exactly the component it exists to catch —
+        // the entry is absent from the resolved list, so nothing downstream
+        // could have seen it.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_mcp(&state, "bundle-1", "broken", "not json at all");
+
+        let report = crate::server::app_api::bundle_validate_impl(
+            &state.wstore,
+            json!({ "id": "bundle-1", "name": "Bundle bundle-1" }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report["is_valid"], json!(false),
+            "a bound component that cannot load must not validate clean: {report}"
+        );
+        let issues = report["issues"].as_array().unwrap();
+        assert!(
+            issues.iter().any(|i| i["field"] == "mcp_servers"
+                && i["message"].as_str().unwrap_or("").contains("broken")),
+            "the issue must name the server: {issues:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn export_carries_project_instructions_with_their_owner() {
+        // The last piece of Phase 3: an exported bundle records what the
+        // source agent was reading, with enough to tell whose file each was.
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+
+        std::fs::write(work.path().join("CLAUDE.md"), "# House rules\n\nBe careful.\n").unwrap();
+
+        let result = bundle_export_for_agent_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportForAgentReq {
+                bundle_id: "bundle-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                format: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let files = result["files"].as_array().unwrap();
+        let carried = files
+            .iter()
+            .find(|f| f["path"] == "instructions/project/CLAUDE.md")
+            .expect("the repository's own CLAUDE.md must be carried");
+        assert!(carried["content"].as_str().unwrap().contains("House rules"));
+
+        let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
+        let entry = entries.iter().find(|e| e["path"] == "CLAUDE.md").unwrap();
+        assert_eq!(
+            entry["owner"], "foreign",
+            "an unmarked repository file is the repository's — this field is what keeps import from installing it"
+        );
+        assert!(!entry["contentHash"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn export_carries_a_readable_but_empty_instruction_file() {
+        // Codex P2 on #3163: skipping on `content.is_empty()` conflated "the
+        // file is there and says nothing" with "there is no file", which is
+        // the exact ambiguity this component exists to remove. An empty
+        // CLAUDE.md is a real fact about what the agent reads.
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+
+        std::fs::write(work.path().join("CLAUDE.md"), "").unwrap();
+
+        let result = bundle_export_for_agent_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportForAgentReq {
+                bundle_id: "bundle-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                format: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let files = result["files"].as_array().unwrap();
+        assert!(
+            files.iter().any(|f| f["path"] == "instructions/project/CLAUDE.md"),
+            "an empty-but-present CLAUDE.md must still be recorded"
+        );
+        let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
+        assert!(
+            entries.iter().any(|e| e["path"] == "CLAUDE.md"),
+            "present-and-empty must be distinguishable from absent, got: {entries:?}"
+        );
+    }
+
+    /// Build a resolver result by hand. The two conditions below (a
+    /// case-only path collision, and unreadable/oversized files) are not
+    /// reachable through the filesystem on this repo's own dev platform —
+    /// Windows folds case, so the collision cannot be staged at all — so the
+    /// splice function is exercised directly rather than not at all.
+    fn instruction_file(
+        path: &str,
+        content: &str,
+    ) -> crate::backend::project_instructions::ProjectInstructionFile {
+        crate::backend::project_instructions::ProjectInstructionFile {
+            path: path.to_string(),
+            exists: true,
+            size_bytes: content.len() as u64,
+            content_hash: "hash".to_string(),
+            owner: crate::backend::project_instructions::InstructionOwner::Foreign,
+            content: content.to_string(),
+            truncated: false,
+            error: None,
+        }
+    }
+
+    fn empty_export() -> crate::backend::bundle_export::BundleExport {
+        crate::backend::bundle_export::BundleExport {
+            root_slug: "b".to_string(),
+            files: vec![crate::backend::bundle_export::BundleExportFile {
+                path: "armory.json".to_string(),
+                content: "{\"components\":{}}".to_string(),
+            }],
+            skipped_skills: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn case_only_different_instruction_paths_do_not_overwrite_each_other() {
+        // Codex P2 on #3163. Scanned directories (Copilot's
+        // `.github/instructions/`) make two paths differing only in case
+        // reachable on a case-sensitive source filesystem; extracted on
+        // Windows or macOS one silently clobbers the other.
+        let mut export = empty_export();
+        let files = vec![
+            instruction_file(".github/instructions/A.instructions.md", "first"),
+            instruction_file(".github/instructions/a.instructions.md", "second"),
+        ];
+        splice_project_instructions_component(&mut export, &files).unwrap();
+
+        let carried: Vec<_> = export
+            .files
+            .iter()
+            .filter(|f| f.path.to_lowercase().starts_with("instructions/project/"))
+            .collect();
+        assert_eq!(carried.len(), 1, "the second must be skipped, not written alongside");
+        assert!(
+            export.warnings.iter().any(|w| w.contains("normalizes to the same path")),
+            "the skip must be reported, not silent: {:?}",
+            export.warnings
+        );
+    }
+
+    #[test]
+    fn unreadable_and_truncated_instruction_files_are_not_exported() {
+        // The other half of the empty-file fix: `content.is_empty()` was doing
+        // two jobs, and only one of them was correct. These are the cases that
+        // genuinely have nothing to archive.
+        let mut export = empty_export();
+        let mut unreadable = instruction_file("CLAUDE.md", "");
+        unreadable.error = Some("permission denied".to_string());
+        let mut oversized = instruction_file("AGENTS.md", "");
+        oversized.truncated = true;
+        let mut absent = instruction_file("GEMINI.md", "");
+        absent.exists = false;
+
+        splice_project_instructions_component(&mut export, &[unreadable, oversized, absent])
+            .unwrap();
+
+        assert!(
+            !export.files.iter().any(|f| f.path.starts_with("instructions/project/")),
+            "nothing readable means nothing to carry"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scanned_file_deleted_after_launch_is_reported_removed() {
+        // Codex on #3162: the resolver stops returning a scanned path once the
+        // file is gone, so iterating current files only made it vanish from
+        // the response instead of reporting `removed` — and the stale row
+        // meant recreating it would later read as `unchanged`.
+        use crate::backend::storage::project_instructions::{
+            classify_change, InstructionChange, ProjectInstructionObservation,
+        };
+
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+
+        // Recorded at a previous launch, and since deleted from disk.
+        state
+            .wstore
+            .project_instructions_record(
+                "agent-1",
+                &[ProjectInstructionObservation {
+                    path: ".github/instructions/gone.instructions.md".to_string(),
+                    content_hash: "h1".to_string(),
+                    size_bytes: 3,
+                    owner: "foreign".to_string(),
+                    existed: true,
+                    observed_at: 1,
+                }],
+            )
+            .unwrap();
+
+        let current = crate::backend::project_instructions::resolve_project_instructions(
+            "copilot",
+            work.path().to_str().unwrap(),
+        );
+        assert!(
+            !current.iter().any(|f| f.path.ends_with("gone.instructions.md")),
+            "precondition: the resolver no longer returns a deleted scanned file"
+        );
+
+        let previous = state.wstore.project_instructions_list("agent-1").unwrap();
+        let orphan = previous
+            .iter()
+            .find(|p| p.path.ends_with("gone.instructions.md"))
+            .unwrap();
+        assert_eq!(
+            classify_change(Some(orphan), false, ""),
+            InstructionChange::Removed,
+            "a prior observation with no current file is a removal"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_foreign_instruction_file_changing_between_launches_is_visible() {
+        // The point of tracking: a repository's own CLAUDE.md can be the
+        // majority of what an agent is told, and until now nothing recorded
+        // enough about one to notice it had changed.
+        use crate::backend::storage::project_instructions::InstructionChange;
+
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+        let agent = state.wstore.agent_def_get("agent-1").unwrap().unwrap();
+
+        std::fs::write(work.path().join("CLAUDE.md"), "original rules").unwrap();
+
+        // First launch: nothing recorded yet.
+        let first = crate::backend::project_instructions::resolve_project_instructions(
+            &agent.provider,
+            work.path().to_str().unwrap(),
+        );
+        let claude = first.iter().find(|f| f.path == "CLAUDE.md").unwrap();
+        assert_eq!(
+            crate::backend::storage::project_instructions::classify_change(
+                None, claude.exists, &claude.content_hash
+            ),
+            InstructionChange::FirstSeen
+        );
+        crate::server::app_api::agent_open::observe_project_instructions(
+            &state.wstore,
+            &agent,
+            work.path().to_str().unwrap(),
+        );
+
+        // The repository changes underneath.
+        std::fs::write(work.path().join("CLAUDE.md"), "somebody edited this").unwrap();
+
+        let second = crate::backend::project_instructions::resolve_project_instructions(
+            &agent.provider,
+            work.path().to_str().unwrap(),
+        );
+        let claude = second.iter().find(|f| f.path == "CLAUDE.md").unwrap();
+        let recorded = state.wstore.project_instructions_list("agent-1").unwrap();
+        let prev = recorded.iter().find(|p| p.path == "CLAUDE.md");
+        assert_eq!(
+            crate::backend::storage::project_instructions::classify_change(
+                prev, claude.exists, &claude.content_hash
+            ),
+            InstructionChange::Modified,
+            "an edit between launches must be detectable"
+        );
+
+        // Observing again settles it.
+        crate::server::app_api::agent_open::observe_project_instructions(
+            &state.wstore,
+            &agent,
+            work.path().to_str().unwrap(),
+        );
+        let recorded = state.wstore.project_instructions_list("agent-1").unwrap();
+        let prev = recorded.iter().find(|p| p.path == "CLAUDE.md");
+        assert_eq!(
+            crate::backend::storage::project_instructions::classify_change(
+                prev, claude.exists, &claude.content_hash
+            ),
+            InstructionChange::Unchanged
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bound_mcp_server_with_unparseable_config_warns_instead_of_vanishing() {
+        // The guarantee that moved here from bundle_export.rs when the
+        // renderer stopped parsing MCP JSON: malformed component data warns,
+        // it does not silently disappear.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_mcp(&state, "bundle-1", "broken", "not json at all");
+
+        let components = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(components.mcp_entries.is_empty(), "unparseable config must not be exported");
+        assert!(
+            components.warnings.iter().any(|w| w.contains("broken") && w.contains("invalid config")),
+            "expected a warning naming the server, got: {:?}",
+            components.warnings
+        );
+    }
+
+    #[tokio::test]
+    async fn resolving_ignores_catalog_rows_this_bundle_is_not_bound_to() {
+        // `managed_list` returns globals alongside bound rows; only the bound
+        // ones are this bundle's contents.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        make_bundle(&state, "bundle-2", "Other.");
+        bind_mcp(&state, "bundle-2", "elsewhere", r#"{"command":"x"}"#);
+
+        let components = resolve_bundle_components(&state.wstore, "bundle-1").unwrap();
+        assert!(
+            components.mcp_entries.is_empty(),
+            "another bundle's server must not leak in: {:?}",
+            components.mcp_entries
+        );
+        assert!(components.skills.is_empty());
     }
 
     #[tokio::test]
@@ -2810,6 +3946,131 @@ mod export_import_for_agent_tests {
         assert!(err.contains("no agent"));
     }
 
+    /// Point an agent DEFINITION's own bundle at `bundle_id`.
+    ///
+    /// Uses the dedicated setter, not `agent_def_update`: that UPDATE
+    /// deliberately does not list `default_memory_id` among its columns
+    /// (`storage/agents.rs:1188-1197`), so mutating `AgentDefinition.memory_id`
+    /// and calling it would silently no-op.
+    fn bind_definition_to_bundle(state: &AppState, agent_id: &str, bundle_id: &str) {
+        assert!(
+            state
+                .wstore
+                .agent_def_set_memory_id_if_empty(agent_id, bundle_id)
+                .unwrap(),
+            "test setup: binding {agent_id} to {bundle_id} must apply"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_less_export_warns_when_a_bound_agent_has_memory() {
+        // SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §3.1/§5.1:
+        // import announces a dropped memory component; export must too.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_definition_to_bundle(&state, "agent-1", "bundle-1");
+        state
+            .id_store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
+            .unwrap();
+
+        assert!(
+            bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-1"),
+            "definition-bound agent with memory must be detected"
+        );
+
+        // The contract that matters is at the RPC boundary, not the helper.
+        let result = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: "bundle-1".to_string(), format: String::new() },
+        )
+        .unwrap();
+        let warnings = result["warnings"].as_array().unwrap();
+        assert!(
+            warnings.iter().any(|w| w == MEMORY_NOT_EXPORTED_WARNING),
+            "bundle.export must announce the memory it is not carrying: {warnings:?}"
+        );
+        // ...and still not carry it: this path has no agent to read from.
+        let files = result["files"].as_array().unwrap();
+        assert!(!files.iter().any(|f| f["path"].as_str().unwrap_or("").starts_with("memory/")));
+    }
+
+    #[tokio::test]
+    async fn agent_less_export_is_silent_without_memory_or_without_a_binding() {
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        make_bundle(&state, "bundle-2", "Other.");
+        bind_definition_to_bundle(&state, "agent-1", "bundle-1");
+
+        // Bound, but the agent has no memory at all.
+        assert!(!bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-1"));
+
+        state
+            .id_store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
+            .unwrap();
+
+        // Now it has memory — but bundle-2 is bound to nobody, so exporting
+        // bundle-2 loses nothing and must stay quiet.
+        assert!(!bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-2"));
+
+        // The blank-singleton sentinel must never warn, or nearly every
+        // export would.
+        assert!(!bound_agent_has_native_memory(&state.id_store, &state.wstore, ""));
+
+        // And the RPC stays quiet for the unbound bundle.
+        let result = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: "bundle-2".to_string(), format: String::new() },
+        )
+        .unwrap();
+        let warnings = result["warnings"].as_array().unwrap();
+        assert!(
+            !warnings.iter().any(|w| w == MEMORY_NOT_EXPORTED_WARNING),
+            "exporting a bundle nobody is bound to loses nothing: {warnings:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_less_export_warns_for_an_instance_scoped_binding_too() {
+        // The definition's own bundle and a launch's bundle are different
+        // columns; a launch pointed at another bundle still carries the
+        // definition's memory.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        make_bundle(&state, "bundle-2", "Other.");
+        bind_definition_to_bundle(&state, "agent-1", "bundle-1");
+        state
+            .id_store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
+            .unwrap();
+
+        let inst: crate::backend::storage::AgentInstance =
+            serde_json::from_value(serde_json::json!({
+                "id": "inst-1",
+                "definition_id": "agent-1",
+                "memory_id": "bundle-2",
+                "status": "running",
+                "started_at": 1,
+                "created_at": 1,
+            }))
+            .unwrap();
+        state.wstore.instance_create(&inst).unwrap();
+
+        assert!(
+            bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-2"),
+            "a launch pointed at bundle-2 still carries agent-1's memory"
+        );
+    }
+
     fn abf_files_with_memory(instructions: &str, memory_filename: &str, memory_content: &str) -> Vec<FileEntry> {
         let manifest = serde_json::json!({
             "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
@@ -2827,6 +4088,95 @@ mod export_import_for_agent_tests {
             FileEntry { path: "instructions/AGENTS.md".to_string(), content: instructions.to_string() },
             FileEntry { path: format!("memory/{memory_filename}"), content: memory_content.to_string() },
         ]
+    }
+
+    /// An ABF carrying one skill and one MCP server.
+    fn abf_files_with_components() -> Vec<FileEntry> {
+        let manifest = serde_json::json!({
+            "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
+            "name": "imported-bundle",
+            "version": "0.1.0",
+            "description": "",
+            "components": {
+                "instructions": { "default": ["instructions/AGENTS.md"] },
+                "skills": ["skills/deploy"],
+                "mcpServers": ["mcp/github.server.json"],
+            },
+            "metadata": {},
+        });
+        vec![
+            FileEntry { path: "armory.json".to_string(), content: manifest.to_string() },
+            FileEntry { path: "instructions/AGENTS.md".to_string(), content: "Be helpful.".to_string() },
+            FileEntry {
+                path: "skills/deploy/SKILL.md".to_string(),
+                // Frontmatter values are JSON-quoted — that is what
+                // `render_skill_md` writes and what `parse_skill_md` requires.
+                content: "---\nname: \"deploy\"\ndescription: \"Ship it\"\n---\n\nSteps.".to_string(),
+            },
+            FileEntry {
+                path: "mcp/github.server.json".to_string(),
+                content: r#"{"name":"github","command":"gh-mcp","env":{"GITHUB_TOKEN":"${GITHUB_TOKEN}"}}"#.to_string(),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn an_imported_bundle_exports_the_components_it_arrived_with() {
+        // Codex P1 on #3152: once export reads only the ref tables, an import
+        // that writes only the inline columns produces a bundle that exports
+        // empty — and whose MCP servers never reach a spawned agent, since
+        // launch reads the refs too. The round trip is the contract.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+
+        let result = bundle_import_for_agent_impl(
+            &state.id_store,
+            &state.wstore,
+            ImportForAgentReq {
+                agent_id: "agent-1".to_string(),
+                file_path: None,
+                zip_base64: None,
+                files: Some(abf_files_with_components()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let bundle_id = result["bundle_id"]
+            .as_str()
+            .or_else(|| result["id"].as_str())
+            .expect("import must report the bundle it created")
+            .to_string();
+
+        let components = resolve_bundle_components(&state.wstore, &bundle_id).unwrap();
+        assert_eq!(
+            components.skills.len(),
+            1,
+            "imported skill must be bound to the bundle. import result: {result}"
+        );
+        assert_eq!(
+            components.mcp_entries.len(),
+            1,
+            "imported MCP server must be bound to the bundle: {:?}",
+            components.warnings
+        );
+
+        // And it round-trips out again.
+        let exported = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: bundle_id, format: String::new() },
+        )
+        .unwrap();
+        let paths: Vec<String> = exported["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p.starts_with("skills/")), "got {paths:?}");
+        assert!(paths.iter().any(|p| p == "mcp/github.server.json"), "got {paths:?}");
     }
 
     #[tokio::test]
@@ -2922,7 +4272,7 @@ mod export_import_for_agent_tests {
         assert!(err.contains("no working directory"));
 
         // Nothing should have been created.
-        assert!(state.id_store.bundle_memory_list().unwrap().iter().all(|b| b.is_blank));
+        assert!(state.id_store.bundle_list().unwrap().iter().all(|b| b.is_blank));
     }
 
     #[tokio::test]
@@ -3022,7 +4372,7 @@ mod export_import_for_agent_tests {
 
         // The bundle row itself was also created.
         let bundle_id = result["bundle_id"].as_str().unwrap();
-        let bundle = state.id_store.bundle_memory_get(bundle_id).unwrap().unwrap();
+        let bundle = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
         assert_eq!(bundle.instructions, "Be helpful.");
     }
 
@@ -3235,7 +4585,7 @@ mod export_import_for_agent_tests {
         let mut bundle = make_bundle(&state, "bundle-src", "Shared instructions.");
         bundle.provider = "claude".to_string();
         bundle.model = "anthropic".to_string();
-        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
 
         let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
             bundle_id: "bundle-src".to_string(),
@@ -3263,7 +4613,7 @@ mod export_import_for_agent_tests {
             files: Some(files),
         }).await.unwrap();
         let new_bundle_id = imported["bundle_id"].as_str().expect("import response must include bundle_id");
-        let new_bundle = state.id_store.bundle_memory_get(new_bundle_id).unwrap().unwrap();
+        let new_bundle = state.id_store.bundle_get(new_bundle_id).unwrap().unwrap();
         assert_eq!(new_bundle.provider, "claude");
         assert_eq!(new_bundle.model, "anthropic");
     }
@@ -3363,6 +4713,21 @@ mod export_import_for_agent_tests {
             (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect()
         }
 
+        /// The `armory.json` manifest out of an exported zip.
+        fn unzip_manifest(zip_base64: &str) -> serde_json::Value {
+            use base64::Engine as _;
+            use std::io::Read as _;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(zip_base64).unwrap();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+            let name = (0..archive.len())
+                .map(|i| archive.by_index(i).unwrap().name().to_string())
+                .find(|n| n.ends_with("armory.json"))
+                .expect("export must contain armory.json");
+            let mut content = String::new();
+            archive.by_name(&name).unwrap().read_to_string(&mut content).unwrap();
+            serde_json::from_str(&content).unwrap()
+        }
+
         #[tokio::test]
         async fn includes_the_agents_sessions_alongside_the_normal_bundle_files() {
             let state = test_state();
@@ -3398,6 +4763,48 @@ mod export_import_for_agent_tests {
             let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
             assert!(paths.iter().any(|p| p.ends_with("instructions/AGENTS.md")), "base bundle files must still be present: {paths:?}");
             assert!(paths.iter().any(|p| p.ends_with("history/mock/sess-1.jsonl")), "session must be included under history/: {paths:?}");
+
+            // SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §3.5: the
+            // files above were in the archive but invisible to anything reading
+            // components.* to learn what the archive holds.
+            let manifest = unzip_manifest(result["zip_base64"].as_str().unwrap());
+            assert_eq!(
+                manifest["components"]["history"],
+                json!(["history/mock/sess-1.jsonl"]),
+                "history must be registered in the manifest, not just zipped"
+            );
+        }
+
+        #[tokio::test]
+        async fn omits_the_history_component_when_no_session_was_included() {
+            // Absence already means "none"; an empty array would assert
+            // "this archive has an empty history", which is a different claim.
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            // No identity link -> no sessions discovered.
+
+            let index = SessionIndex::with_isolated_roots(vec![], vec![]);
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                state.id_store.clone(),
+                state.identity_store.clone(),
+                &state.wstore,
+                std::sync::Arc::new(history_service),
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0);
+            let manifest = unzip_manifest(result["zip_base64"].as_str().unwrap());
+            assert!(
+                manifest["components"].get("history").is_none(),
+                "no sessions must leave the history component absent: {}",
+                manifest["components"]
+            );
         }
 
         #[tokio::test]

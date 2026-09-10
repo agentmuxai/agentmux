@@ -56,9 +56,15 @@ export const [hoveredDropTabId, setHoveredDropTabId] = createSignal<string | nul
 
 // How long a pane drag must dwell over a tab before the UI spring-switches
 // to it (the blink plays during this window). Modeled on browser/VS Code
-// spring-loading; deliberately longer than REDOCK_DWELL_MS's 180ms ghost
-// gate — switching the whole visible tab is a bigger action than showing a
-// ghost, so it gets a more deliberate threshold.
+// spring-loading.
+//
+// This used to note that it was "deliberately longer than REDOCK_DWELL_MS's
+// 180ms" on the grounds that a tab switch is the bigger action. That framing
+// was wrong — a redock is the *less* reversible of the two — so do not read
+// the current ordering as endorsing it. REDOCK_DWELL_MS has since moved
+// independently (180 -> 500 -> 300, the last on how it felt in use); the two
+// gate different subsystems and are deliberately separate constants.
+// SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md §3.1.
 export const SPRING_SWITCH_MS = 500;
 
 // Tabs whose LayoutModel.activeDrag was force-set by a mid-drag spring

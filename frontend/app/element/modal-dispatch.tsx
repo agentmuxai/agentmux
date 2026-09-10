@@ -13,21 +13,21 @@ import { AgentLaunchModalPanel } from "@/app/view/agent/components/AgentLaunchMo
 import { AgentInstallModalPanel } from "@/app/view/agent/components/AgentInstallModal";
 import { AgentPrereqModalPanel } from "@/app/view/agent/components/AgentPrereqModal";
 import { AgentAddAccountModalPanel } from "@/app/view/agent/components/AgentNewIdentityModal";
-import { AgentNewMemoryModalPanel } from "@/app/view/agent/components/AgentNewMemoryModal";
+import { AgentNewBundleModalPanel } from "@/app/view/agent/components/AgentNewBundleModal";
 import { AgentCreateFromTemplateModalPanel } from "@/app/view/agent/components/AgentCreateFromTemplateModal";
 import { BrowserAuthModalPanel } from "@/app/view/browser/components/BrowserAuthModal";
 import { AgentIdentityModalPanel } from "@/app/view/agent/components/AgentIdentityModal";
 import { AgentNativeMemoryModal } from "@/app/view/agent/components/AgentNativeMemoryModal";
 import { AgentStashModal } from "@/app/view/agent/components/AgentStashModal";
-import { BundleImportSelectModalPanel } from "@/app/view/memory/components/BundleImportSelectModal";
-import { BundleImportPreviewModalPanel } from "@/app/view/memory/components/BundleImportPreviewModal";
-import { BundleImportConfirmModalPanel } from "@/app/view/memory/components/BundleImportConfirmModal";
+import { BundleImportSelectModalPanel } from "@/app/view/bundle/components/BundleImportSelectModal";
+import { BundleImportPreviewModalPanel } from "@/app/view/bundle/components/BundleImportPreviewModal";
+import { BundleImportConfirmModalPanel } from "@/app/view/bundle/components/BundleImportConfirmModal";
 import "@/app/view/agent/components/AgentPrereqModal.scss";
 import "@/app/view/agent/components/AgentNewBundleModal.scss";
 import "@/app/view/agent/components/AgentIdentityModal.scss";
 import "@/app/view/agent/components/AgentStashModal.scss";
 import "@/app/view/browser/components/BrowserAuthModal.scss";
-import "@/app/view/memory/components/BundleImportModal.scss";
+import "@/app/view/bundle/components/BundleImportModal.scss";
 
 import type { ModalLayerApi, ModalLayerRequest } from "./modal-layer";
 
@@ -88,7 +88,7 @@ export function renderRequest(
                         }}
                         initialFormState={req.initialFormState}
                         onRequestAddAccount={req.onRequestAddAccount}
-                        onRequestNewMemory={req.onRequestNewMemory}
+                        onRequestNewBundle={req.onRequestNewBundle}
                     />
                 ),
             };
@@ -126,7 +126,7 @@ export function renderRequest(
             return {
                 label: requestLabel(req),
                 panel: (
-                    <AgentNewMemoryModalPanel
+                    <AgentNewBundleModalPanel
                         initialName={req.initialName}
                         // Same lift-up pattern as new-identity above —
                         // layer owns the UpsertMemory RPC so its
@@ -135,11 +135,11 @@ export function renderRequest(
                         onSubmit={async ({ name, description, contextFiles }) => {
                             setSubmitting(true);
                             try {
-                                const memory = await RpcApi.UpsertMemoryCommand(
+                                const memory = await RpcApi.UpsertBundleCommand(
                                     TabRpcClient,
                                     {
                                         // Wire convention from
-                                        // memory-model.ts:draftToWire —
+                                        // bundle-model.ts:draftToWire —
                                         // empty id triggers server-side
                                         // uuid; 0 timestamps trigger
                                         // server-side now-stamping.
@@ -215,7 +215,7 @@ export function renderRequest(
                         // (spec note on CreateFromTemplateRequest) so
                         // `submitting()` covers both RPC steps and ESC
                         // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, accountId, memoryId, agentType, modelVendorBaseUrl, model }) => {
+                        onSubmit={async ({ name, accountId, bundleId, agentType, modelVendorBaseUrl, model }) => {
                             setSubmitting(true);
                             try {
                                 const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
@@ -224,7 +224,7 @@ export function renderRequest(
                                         template_id: req.template.id,
                                         name,
                                         identity_id: accountId,
-                                        memory_id: memoryId,
+                                        memory_id: bundleId,
                                         // Persist the chosen runtime on the
                                         // new user-owned definition so later
                                         // reattach/auto-continue uses it too.

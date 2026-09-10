@@ -326,11 +326,13 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
+| [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
 | [`SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05`](SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md) | SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest |
 | [`SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09`](SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md) | SPEC: Session-scoped pane scrollback + a full "Agent History" view |
 | [`SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04`](SPEC_AGENT_POLLING_AND_WAKEUP_HARDENING_2026_08_04.md) | Agent Recurring-Task / Polling Primitives — Design Hardening |
 | [`SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04`](SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md) | Spec: unify the Working/Worked label with the long-running-process axis, and close the two live desync bugs |
+| [`SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09`](SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md) | Spec: Armory Naming Consolidation — Bundle vs Memory |
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
@@ -338,12 +340,16 @@ partial list.
 | [`SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31`](SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md) | SPEC: A single content-resize contract for the agent pane |
 | [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) | Docs Lifecycle Audit & Hardening Plan |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
+| [`SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09`](SPEC_FLOATING_PANE_REDOCK_DWELL_2026_09_09.md) | SPEC: Floating-pane redock — hover-intent dwell and a neutral parking zone |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
+| [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
+| [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
+| [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |
 
 ### proposed
 
@@ -373,6 +379,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31`](SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md) | Spec: Drop the composer strip's centered token/elapsed stats |
 | [`SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26`](SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) | SPEC: Composer Strip — Row-Based Layout (Rev 7) |
 | [`SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08`](SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08.md) | SPEC: Continuous session persistence + trustworthy shutdown |
+| [`SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07`](SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md) | Spec: Ctrl+Shift+Scroll zooms every pane in the window at once |
 | [`SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02`](SPEC_DEFAULT_TAB_NAME_TAB_N_2026_09_02.md) | Spec: default tab names — "Tab N", not "tabN" |
 | [`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25`](SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) | SPEC: Default fresh-start widgets — Agent, Swarm, Armory, Sysinfo |
 | [`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27`](SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md) | SPEC — A repeatable process for Claude model catalog + CLI version upgrades |
@@ -785,7 +792,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_HARD_CORNERS_2026_05_26`](SPEC_HARD_CORNERS_2026_05_26.md) | SPEC: Hard corners on buttons and modals |
 | [`SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10`](SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md) | Spec: Identity direct-links, PR-C (Armory read-only view + bundle-free agent creation) |
 | [`SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21`](SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md) | SPEC — Instance Lifecycle Consolidation |
-| [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
 | [`SPEC_LARGE_TIER_MODULARIZATION_INDEX_2026_07_02`](SPEC_LARGE_TIER_MODULARIZATION_INDEX_2026_07_02.md) | Large-Tier Modularization — Index & Sequencing |
 | [`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25`](SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md) | SPEC: Move launch modal from tab-scope to pane-scope lock |
 | [`SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN`](SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md) | SPEC: Layout Healer Misses Rootnode-Is-Orphan Case |
@@ -1181,7 +1187,6 @@ section above, do not bulk-restamp them.
 |---|---|
 | [`ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19`](ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md) | Architecture: Armory/Stash Foundation Consolidation (North Star) |
 | [`PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30`](PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md) | Proposal: A Composable Agent Model for the Armory |
-| [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
 | [`SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19`](SPEC_AGENT_WAITING_AMBIENT_SOUND_2026_06_19.md) | SPEC: Agent Waiting Ambient Sound |
 | [`SPEC_LOCAL_BUILD_VERSIONING_2026_05_28`](SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md) | SPEC: Local-build versioning — stop committing bumps for smoke builds (2026-05-28) |

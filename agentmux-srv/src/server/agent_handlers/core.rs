@@ -759,11 +759,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 mod tests {
     use super::*;
     use crate::backend::rpc_types::RpcMessage;
-    use crate::backend::storage::Memory;
+    use crate::backend::storage::Bundle;
     use crate::server::tests::test_state;
 
     fn seed_bundle(state: &AppState, id: &str, provider: &str) {
-        let bundle = Memory {
+        let bundle = Bundle {
             id: id.to_string(),
             name: "Bundle".to_string(),
             description: String::new(),
@@ -781,7 +781,7 @@ mod tests {
             updated_at: 0,
             is_system: false,
         };
-        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+        state.id_store.bundle_upsert(&bundle).unwrap();
     }
 
     // Template's own `.provider` column says "codex" (drifted/stale —

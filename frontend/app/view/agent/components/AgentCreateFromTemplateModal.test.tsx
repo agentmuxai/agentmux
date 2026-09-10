@@ -20,7 +20,7 @@ import { sleep } from "@/util/util";
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ListMemoriesCommand: vi.fn(),
+        ListBundlesCommand: vi.fn(),
         // Mount-time daemon probe (drives the host/container dropdown).
         // Default → no reachable runtime → host-only.
         ContainerRuntimeAvailableCommand: vi.fn(),
@@ -29,7 +29,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         // `template` fixture (no memory_id) never even triggers a fetch;
         // the drift regression tests below set their own
         // `.mockResolvedValue`.
-        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
+        GetBundleCommand: vi.fn().mockResolvedValue(undefined),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -74,7 +74,7 @@ beforeEach(async () => {
     vi.mocked(refreshAccountCache).mockResolvedValue([
         { id: "id-work", name: "Work", provider: "claude" } as any,
     ]);
-    vi.mocked(RpcApi.ListMemoriesCommand).mockResolvedValue([
+    vi.mocked(RpcApi.ListBundlesCommand).mockResolvedValue([
         { id: "mem-notes", name: "Notes", is_blank: false } as any,
     ]);
     // Default: Docker daemon not reachable → host-only. Consumed via the
@@ -133,7 +133,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         // the template's provider; Memory from the first non-blank
         // bundle.
         expect(args.accountId).toBe("id-work");
-        expect(args.memoryId).toBe("mem-notes");
+        expect(args.bundleId).toBe("mem-notes");
         // No Docker → runtime defaults to host (never a mode that
         // can't actually start).
         expect(args.agentType).toBe("host");
@@ -360,7 +360,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
     describe("resolves through the template's bound bundle, not a drifted provider column (ReAgent P1 on #2618)", () => {
         it("shows the resolved (bundle) provider's models, not the drifted column's", async () => {
             const drifted = { ...template, provider: "codex", memory_id: "mem-1" } as AgentDefinition;
-            vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "claude" } as any);
+            vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "claude" } as any);
 
             render(() => (
                 <AgentCreateFromTemplateModalPanel
@@ -384,7 +384,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
 
         it("filters accounts by the resolved (bundle) provider, not the drifted column's", async () => {
             const drifted = { ...template, provider: "codex", memory_id: "mem-1" } as AgentDefinition;
-            vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "claude" } as any);
+            vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "claude" } as any);
             vi.mocked(refreshAccountCache).mockResolvedValue([
                 { id: "acct-claude", name: "Claude Work", provider: "claude" } as any,
                 { id: "acct-codex", name: "Codex Work", provider: "codex" } as any,
@@ -420,7 +420,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 { id: "acct-codex", name: "Codex Work", provider: "codex" } as any,
             ]);
             let resolveBundle!: (v: any) => void;
-            vi.mocked(RpcApi.GetMemoryCommand).mockReturnValue(
+            vi.mocked(RpcApi.GetBundleCommand).mockReturnValue(
                 new Promise((resolve) => {
                     resolveBundle = resolve;
                 }),

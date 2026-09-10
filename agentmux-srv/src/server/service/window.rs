@@ -28,6 +28,13 @@ pub(super) async fn handle_window_service(state: &AppState, call: &WebCallType) 
         "FindWindowByLabel" => handle_find_window_by_label(state, call).await,
         "CreateWindow" => handle_create_window(state, call).await,
         "CloseWindow" => handle_close_window(state, call).await,
+        // OS-shutdown flush (SPEC_CONTINUOUS_SESSION_PERSISTENCE_2026_09_08
+        // Phase 0). Snapshot-only: never tears the workspace down, because
+        // the OS is about to reclaim everything and delete_workspace's
+        // per-shell grace does not fit the shutdown budget.
+        "SaveSessionSnapshot" => {
+            super::session_restore::handle_save_session_snapshot(state, call).await
+        }
         "SwitchWorkspace" => handle_switch_workspace(state, call).await,
         "SetWindowPosAndSize" => handle_set_window_pos_and_size(state, call).await,
         "SetWindowOpacity" => handle_set_window_opacity(state, call).await,

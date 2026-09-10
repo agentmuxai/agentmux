@@ -738,6 +738,15 @@ pub struct PersistentSubprocessController {
     /// carefully-ordered spawn/resume/queue state transitions. `None` for a
     /// persistent block with no muxbus identity set (a non-agent process).
     agent_id: Mutex<Option<String>>,
+    /// The STABLE jekt identity (`AGENTMUX_AGENT_ID`), captured once in
+    /// `spawn_process` and never overwritten afterward — unlike `agent_id`
+    /// above, which `input.rs`'s Register-tail deliberately refreshes every
+    /// turn to track the live, renameable display name (#2697). Exists
+    /// specifically so `Controller::stable_agent_id()` can back the jekt
+    /// registry's alias entry and the #2695 recipient-identity check even
+    /// after `agent_id` has moved on to a post-rename value. See
+    /// `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
+    stable_agent_id: Mutex<Option<String>>,
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -850,6 +859,7 @@ impl PersistentSubprocessController {
             stdout_seq: Arc::new(AtomicU64::new(0)),
             self_ref: Mutex::new(None),
             agent_id: Mutex::new(None),
+            stable_agent_id: Mutex::new(None),
         }
     }
 
@@ -2791,6 +2801,20 @@ impl PersistentSubprocessController {
         // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
         let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
         *self.agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
+        // Write-once: unlike `agent_id` above (refreshed every turn by
+        // `input.rs`'s Register-tail), `stable_agent_id` is only ever set
+        // here, at spawn, and never touched again — see its field doc
+        // comment. `spawn_process` can in principle run again for the same
+        // controller on a respawn; re-writing the SAME env-derived value
+        // each time is harmless (idempotent), and a respawn with genuinely
+        // different env (rare, config change) correctly updates the alias
+        // to match, same as the primary registration already does.
+        *self.stable_agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
+        // Defaults to this spawn's own nonce; overridden below if
+        // registration is skipped (reagent P1 on PR #3084 — see the `Err`
+        // arm just below for why `my_registration_nonce` alone is wrong
+        // once a skip is possible).
+        let mut exit_cleanup_nonce = my_registration_nonce;
         if let Some(ref agent_id) = agent_id_for_muxbus {
             // `_with_nonce` variants record this spawn's process-wide
             // registration nonce so this exact spawn's exit-handler can
@@ -2798,8 +2822,31 @@ impl PersistentSubprocessController {
             // blindly wiping a fallback respawn's (or replacement
             // controller's) fresh ones (issue #2363; codex P1 on PR
             // #2500 for why not the controller-local generation).
+            // `try_register_agent_with_nonce`, not the plain
+            // `register_agent_with_nonce` — this spawn can be running on the
+            // same thread as an in-flight `inject_message` (the
+            // reactive-delivery fallback's synchronous respawn), and that
+            // call already holds this same handler's lock. The plain
+            // version would re-lock it on that thread and deadlock the
+            // reactive handler process-wide. See
+            // `ReactiveHandler::try_register_agent_with_nonce`'s doc comment
+            // and `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
             match crate::backend::reactive::get_global_handler()
-                .register_agent_with_nonce(agent_id, &self.block_id, Some(&self.tab_id), my_registration_nonce)
+                .try_register_agent_with_nonce(
+                    agent_id,
+                    &self.block_id,
+                    Some(&self.tab_id),
+                    my_registration_nonce,
+                    // Also park `agent_id` (== AGENTMUX_AGENT_ID here) as a
+                    // permanent alias for this block, independent of the
+                    // primary registration key — `input.rs`'s Register-tail
+                    // will re-key the primary registration to the live
+                    // display name on this agent's very first turn, which
+                    // would otherwise evict this exact string with nothing
+                    // left to answer a jekt tagged with the stable ID. See
+                    // `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
+                    Some(agent_id.as_str()),
+                )
             {
                 Ok(()) => {
                     tracing::info!(
@@ -2829,12 +2876,46 @@ impl PersistentSubprocessController {
                         );
                     }
                 }
-                Err(e) => tracing::warn!(
-                    block_id = %self.block_id,
-                    agent_id = %agent_id,
-                    error = %e,
-                    "muxbus: persistent auto-register failed"
-                ),
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        agent_id = %agent_id,
+                        error = %e,
+                        "muxbus: persistent auto-register failed"
+                    );
+                    // reagent P1 on PR #3084: registration was skipped, so
+                    // `my_registration_nonce` was never written to the
+                    // handler. Using it as this spawn's exit-time cleanup
+                    // key would always mismatch whatever nonce IS on
+                    // record, making the exit-handler wrongly conclude "a
+                    // newer respawn already took over" and skip BOTH the
+                    // reactive-handler unregister and the cloud_subscriber
+                    // deregister — leaking both on every skip. Target
+                    // whichever nonce is actually on record instead, so
+                    // this spawn's own eventual exit can still correctly
+                    // clean it up. `registration_nonce == 0` (no nonce on
+                    // record at all) is handled safely by
+                    // `unregister_block_if_nonce` itself — it never
+                    // matches, so this degrades to today's no-cleanup
+                    // behavior rather than a wrong one.
+                    //
+                    // `try_get_agent_by_block`, NOT the plain
+                    // `get_agent_by_block` — this Err arm is reached
+                    // precisely when we might be on the same thread as an
+                    // in-flight `inject_message` (reagent P0 on PR #3084,
+                    // caught after the first attempt used the blocking
+                    // version here and reproduced INCIDENT_2026_09_07's
+                    // exact deadlock). In that reentrant case this
+                    // correctly returns `None` after its own retry budget
+                    // instead of hanging forever; `exit_cleanup_nonce`
+                    // then simply stays at its default, same safe
+                    // no-cleanup degradation as before this fix existed.
+                    if let Some(current) = crate::backend::reactive::get_global_handler()
+                        .try_get_agent_by_block(&self.block_id)
+                    {
+                        exit_cleanup_nonce = current.registration_nonce;
+                    }
+                }
             }
         }
 
@@ -3412,10 +3493,15 @@ impl PersistentSubprocessController {
         // unconditional clear could wipe a fallback respawn's fresh
         // registration (issue #2363, see clear_active_pid_if_pid).
         let pid_wait = pid;
-        // This exact spawn's registration identity, for the guarded
+        // This spawn's registration identity, for the guarded
         // muxbus/registry removals below (issue #2363 / codex P1 on PR
-        // #2500 — see `my_registration_nonce`'s own doc comment).
-        let nonce_wait = my_registration_nonce;
+        // #2500 — see `my_registration_nonce`'s own doc comment). NOT
+        // `my_registration_nonce` directly — `exit_cleanup_nonce` is that
+        // same value UNLESS registration was skipped above, in which case
+        // it's whatever nonce actually ended up on record instead (reagent
+        // P1 on PR #3084; see the skip arm's own comment for why using our
+        // own never-written nonce here would leak the registration).
+        let nonce_wait = exit_cleanup_nonce;
 
         tokio::spawn(async move {
             tokio::select! {
@@ -4292,6 +4378,10 @@ impl Controller for PersistentSubprocessController {
 
     fn set_agent_id(&self, id: Option<String>) {
         *self.agent_id.lock().unwrap() = id;
+    }
+
+    fn stable_agent_id(&self) -> Option<String> {
+        self.stable_agent_id.lock().unwrap().clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

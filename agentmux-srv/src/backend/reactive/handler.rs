@@ -98,6 +98,20 @@ pub struct Handler {
     agent_to_block: HashMap<String, String>,
     block_to_agent: HashMap<String, String>,
     agent_info: HashMap<String, AgentRegistration>,
+    /// Secondary, alias lookup for a block — checked by `inject_message_inner`
+    /// only after `agent_to_block` misses. Exists because `agent_to_block`
+    /// (via `block_to_agent`) only ever holds ONE key per block: `input.rs`'s
+    /// Register-tail re-keys the primary registration to the live,
+    /// renameable display name every turn, which would otherwise evict a
+    /// spawn-time registration under the STABLE `AGENTMUX_AGENT_ID` — the
+    /// identity GitHub PR-body tags embed, specifically because it doesn't
+    /// change on rename. See `PersistentSubprocessController::spawn_process`'s
+    /// `try_register_agent_with_nonce` call and
+    /// `INCIDENT_2026_09_09_JEKT_STABLE_ID_ALIAS.md`.
+    alias_to_block: HashMap<String, String>,
+    /// Inverse of `alias_to_block`, for O(1) cleanup on unregister and to
+    /// evict a block's own stale prior alias before writing a new one.
+    block_to_alias: HashMap<String, String>,
     input_sender: Option<InputSender>,
     /// Controller-aware delivery for non-PTY agents (persistent stream-json / ACP).
     /// When set, it is tried before the PTY keystroke path so messages reach (and
@@ -108,6 +122,15 @@ pub struct Handler {
     /// `agent_to_block` map. See `AgentIdentityConfirmer`'s doc comment and
     /// `set_agent_identity_confirmer`.
     agent_identity_confirmer: Option<AgentIdentityConfirmer>,
+    /// Same shape as `agent_identity_confirmer`, but backed by
+    /// `Controller::stable_agent_id()` (the frozen `AGENTMUX_AGENT_ID`)
+    /// instead of `Controller::agent_id()` (the live, renameable display
+    /// name). Checked as an alternative match in `inject_message_inner`'s
+    /// #2695 identity check — a jekt resolved via `alias_to_block` targets
+    /// the stable ID, which `agent_identity_confirmer` alone would always
+    /// report as a mismatch once the primary key has moved on to a
+    /// post-rename display name. See `alias_to_block`'s doc comment.
+    stable_agent_identity_confirmer: Option<AgentIdentityConfirmer>,
     audit_log: Vec<AuditLogEntry>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
@@ -125,9 +148,12 @@ impl Handler {
             agent_to_block: HashMap::new(),
             block_to_agent: HashMap::new(),
             agent_info: HashMap::new(),
+            alias_to_block: HashMap::new(),
+            block_to_alias: HashMap::new(),
             input_sender: None,
             message_sender: None,
             agent_identity_confirmer: None,
+            stable_agent_identity_confirmer: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
@@ -156,6 +182,11 @@ impl Handler {
         self.agent_identity_confirmer = Some(confirmer);
     }
 
+    /// See `stable_agent_identity_confirmer`'s field doc comment.
+    pub fn set_stable_agent_identity_confirmer(&mut self, confirmer: AgentIdentityConfirmer) {
+        self.stable_agent_identity_confirmer = Some(confirmer);
+    }
+
     /// Set whether to include source agent prefix in injected messages.
     #[allow(dead_code)]
     pub fn set_include_source(&mut self, include: bool) {
@@ -169,7 +200,7 @@ impl Handler {
         block_id: &str,
         tab_id: Option<&str>,
     ) -> Result<(), String> {
-        self.register_agent_with_nonce(agent_id, block_id, tab_id, 0)
+        self.register_agent_with_nonce(agent_id, block_id, tab_id, 0, None)
     }
 
     /// [`register_agent`], recording the registering persistent-controller
@@ -178,12 +209,23 @@ impl Handler {
     /// can later compare-and-remove ([`unregister_block_if_nonce`])
     /// instead of blindly wiping a fallback respawn's fresh registration
     /// (issue #2363).
+    ///
+    /// `alias`, if given, is ALSO registered for `block_id` in the separate
+    /// `alias_to_block` map — see that field's doc comment for why this
+    /// exists (a jekt addressed to `AGENTMUX_AGENT_ID` must still resolve
+    /// after the primary key has moved on to the live display name).
+    /// Independent of the primary registration above: written even when it
+    /// duplicates the primary key's value at this exact call (that's the
+    /// common case, at spawn — the point is for it to KEEP pointing at
+    /// `block_id` after a later call changes the primary key to something
+    /// else).
     pub fn register_agent_with_nonce(
         &mut self,
         agent_id: &str,
         block_id: &str,
         tab_id: Option<&str>,
         registration_nonce: u64,
+        alias: Option<&str>,
     ) -> Result<(), String> {
         if !validate_agent_id(agent_id) {
             return Err(format!("invalid agent ID: {}", agent_id));
@@ -229,7 +271,39 @@ impl Handler {
             evicted_agent.as_deref(),
         );
 
+        if let Some(alias) = alias {
+            if validate_agent_id(alias) {
+                self.register_alias(alias, block_id);
+            }
+        }
+
         Ok(())
+    }
+
+    /// Point `alias` (case-insensitively) at `block_id` in `alias_to_block`,
+    /// independent of and never evicted by the primary `agent_to_block`
+    /// registration above. Evicts any OTHER block previously holding this
+    /// alias, and this block's own prior alias if it differs — the same
+    /// one-key-per-{alias,block} bijection `agent_to_block`/`block_to_agent`
+    /// maintain, kept separately so the two registries can't evict each
+    /// other. See `alias_to_block`'s field doc comment.
+    fn register_alias(&mut self, alias: &str, block_id: &str) {
+        let alias_key = alias.to_lowercase();
+
+        if let Some(old_block) = self.alias_to_block.remove(&alias_key) {
+            if old_block != block_id {
+                self.block_to_alias.remove(&old_block);
+            }
+        }
+        if let Some(old_alias) = self.block_to_alias.remove(block_id) {
+            if old_alias != alias_key {
+                self.alias_to_block.remove(&old_alias);
+            }
+        }
+
+        self.alias_to_block
+            .insert(alias_key.clone(), block_id.to_string());
+        self.block_to_alias.insert(block_id.to_string(), alias_key);
     }
 
     /// Unregister an agent.
@@ -238,6 +312,18 @@ impl Handler {
         if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
             self.log_audit_registration("unregister", agent_id, &block_id, None, None);
+            // See `unregister_block`'s matching cleanup for why (reagent P1 /
+            // codex P2 on this PR): without this, the HTTP `/agentmux/reactive/
+            // unregister` teardown path — the normal graceful agent-close path
+            // — leaves a dangling alias that outlives the block it pointed to.
+            // Safe for the ordinary rename case too: a rename never calls
+            // `unregister_agent` (it re-registers the SAME block_id under a
+            // new primary key via `register_agent_with_nonce`, which does
+            // NOT touch the alias maps — see that method's doc comment), so
+            // this only ever fires on a genuine teardown.
+            if let Some(alias) = self.block_to_alias.remove(&block_id) {
+                self.alias_to_block.remove(&alias);
+            }
         }
         self.agent_info.remove(&agent_key);
     }
@@ -248,6 +334,15 @@ impl Handler {
             self.agent_to_block.remove(&agent_id);
             self.agent_info.remove(&agent_id);
             self.log_audit_registration("unregister", &agent_id, block_id, None, None);
+        }
+        // Also drop this block's alias, if any — otherwise a dead block's
+        // stable-ID alias would keep resolving after the block itself is
+        // gone (e.g. a block reused by a later, unrelated spawn would
+        // silently inherit the OLD block's alias instead of getting its
+        // own, since `register_alias` is only called when a NEW alias is
+        // actually supplied).
+        if let Some(alias) = self.block_to_alias.remove(block_id) {
+            self.alias_to_block.remove(&alias);
         }
     }
 
@@ -380,8 +475,16 @@ impl Handler {
         // Sanitize message
         let sanitized = sanitize_message(&req.message);
 
-        // Look up block ID
-        let block_id = match self.agent_to_block.get(&req.target_agent.to_lowercase()) {
+        // Look up block ID — primary registry first, then the alias
+        // registry (see `alias_to_block`'s doc comment: a jekt addressed to
+        // the stable AGENTMUX_AGENT_ID resolves here once the primary key
+        // has moved on to the live display name).
+        let target_key = req.target_agent.to_lowercase();
+        let block_id = match self
+            .agent_to_block
+            .get(&target_key)
+            .or_else(|| self.alias_to_block.get(&target_key))
+        {
             Some(id) => id.clone(),
             None => {
                 let err = format!("agent not found: {}", req.target_agent);
@@ -426,17 +529,45 @@ impl Handler {
         // this codebase's existing jekt trust philosophy elsewhere (see the
         // TRUST=/ESCALATE= rules): only an ACTIVE mismatch is a red flag,
         // mere absence of proof is not.
-        if let Some(confirmer) = &self.agent_identity_confirmer {
-            if let Some(actual_agent_id) = confirmer(&block_id) {
-                if actual_agent_id.to_lowercase() != req.target_agent.to_lowercase() {
+        //
+        // Checked against BOTH the live identity (`agent_identity_confirmer`)
+        // and the stable one (`stable_agent_identity_confirmer`) — a target
+        // resolved via the alias registry is legitimately the stable ID, not
+        // the live display name, and would otherwise always fail this check
+        // once the primary key has moved on post-rename. Either source
+        // reporting a match is sufficient; both reporting `None` is
+        // "unverifiable" exactly as before.
+        if self.agent_identity_confirmer.is_some() || self.stable_agent_identity_confirmer.is_some() {
+            let live_agent_id = self
+                .agent_identity_confirmer
+                .as_ref()
+                .and_then(|c| c(&block_id));
+            let stable_agent_id = self
+                .stable_agent_identity_confirmer
+                .as_ref()
+                .and_then(|c| c(&block_id));
+            // Both `None` is "unverifiable" (see above) — only proceed to
+            // the check below if at least one source reported an identity.
+            if live_agent_id.is_some() || stable_agent_id.is_some() {
+                let target_lower = req.target_agent.to_lowercase();
+                let matches = |id: &Option<String>| {
+                    id.as_deref().is_some_and(|id| id.to_lowercase() == target_lower)
+                };
+                if !matches(&live_agent_id) && !matches(&stable_agent_id) {
                     let err = format!(
-                        "identity mismatch: block {} resolved for target '{}' but its own live identity is '{}'",
-                        block_id, req.target_agent, actual_agent_id
+                        "identity mismatch: block {} resolved for target '{}' but its own identity is '{}'",
+                        block_id,
+                        req.target_agent,
+                        live_agent_id
+                            .as_deref()
+                            .or(stable_agent_id.as_deref())
+                            .unwrap_or("<unknown>")
                     );
                     tracing::error!(
                         target = %req.target_agent,
                         block_id = %block_id,
-                        actual_agent_id = %actual_agent_id,
+                        live_agent_id = ?live_agent_id,
+                        stable_agent_id = ?stable_agent_id,
                         "reactive inject: recipient identity mismatch — rejecting delivery"
                     );
                     self.log_audit(
@@ -1118,6 +1249,14 @@ impl ReactiveHandler {
             .set_agent_identity_confirmer(confirmer);
     }
 
+    /// See the inner [`Handler::set_stable_agent_identity_confirmer`].
+    pub fn set_stable_agent_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_stable_agent_identity_confirmer(confirmer);
+    }
+
     #[allow(dead_code)]
     pub fn set_include_source(&self, include: bool) {
         self.inner.lock().unwrap().set_include_source(include);
@@ -1142,11 +1281,110 @@ impl ReactiveHandler {
         block_id: &str,
         tab_id: Option<&str>,
         registration_nonce: u64,
+        alias: Option<&str>,
     ) -> Result<(), String> {
         self.inner
             .lock()
             .unwrap()
-            .register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce)
+            .register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias)
+    }
+
+    /// Like [`register_agent_with_nonce`], but never blocks: if the lock is
+    /// already held, this returns an error immediately instead of waiting
+    /// for it.
+    ///
+    /// The case that matters is this exact call running on the same OS
+    /// thread as an in-flight `inject_message` — the reactive-delivery spawn
+    /// fallback (`bootstrap.rs`'s `install_agent_turn_delivery`) runs a
+    /// respawn synchronously on the injecting thread via `block_in_place`,
+    /// and that respawn's own auto-registration (this method's caller,
+    /// `PersistentSubprocessController::spawn_process`) used to re-lock this
+    /// same non-reentrant `Mutex<Handler>` two modules away from the
+    /// call site `TurnRegistration::Skip` actually guards — permanently
+    /// deadlocking the reactive handler process-wide (every persistent
+    /// agent's first message after an idle period, or after any srv
+    /// restart). See `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
+    ///
+    /// Skipping in that case loses nothing: `inject_message` only reaches
+    /// the spawn fallback after resolving `target_agent` through
+    /// `agent_to_block`, so this exact agent/block pair is registered BY
+    /// CONSTRUCTION before this call is ever reached on that path — the
+    /// same "redundant, not just deadlock-prone" reasoning documented on
+    /// `TurnRegistration::Skip` for the sibling re-lock it guards.
+    ///
+    /// Genuine cross-thread contention is a real, separate risk this
+    /// method does not get to treat as harmless: `respawn_once_for_
+    /// leftover_queue` and other internal callers reach `spawn_process`
+    /// directly, with no `run_agent_turn` `Register`-tail behind them to
+    /// repair a skip — a losing race there can leave a live respawned
+    /// agent unregistered and unreachable until a human intervenes via
+    /// the UI (reagent P1 on PR #3084's review). The retry loop below
+    /// exists for exactly that case: a same-thread reentrant call can
+    /// never succeed no matter how many times it retries (nothing on
+    /// that call stack can release the lock), but ordinary cross-thread
+    /// contention — a few HashMap reads under the same lock elsewhere,
+    /// typically microseconds — very likely clears within the retry
+    /// budget. See the loop's own comment for the full reasoning.
+    ///
+    /// A skip's caller (`spawn_process`) is also responsible for not
+    /// trusting `registration_nonce` as this spawn's exit-time cleanup
+    /// key when the call returns `Err` here — the registration this
+    /// skip left in place (if any) still belongs to whichever nonce is
+    /// actually on record, not to this spawn's own unwritten one. See
+    /// `spawn_process`'s handling of this method's `Err` arm.
+    pub fn try_register_agent_with_nonce(
+        &self,
+        agent_id: &str,
+        block_id: &str,
+        tab_id: Option<&str>,
+        registration_nonce: u64,
+        alias: Option<&str>,
+    ) -> Result<(), String> {
+        // Bounded retry, not a single attempt (reagent P1 on PR #3084 —
+        // review of INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md's
+        // fix): this method has exactly one call site
+        // (`PersistentSubprocessController::spawn_process`'s
+        // auto-registration), shared by every caller that spawns a
+        // process — including `respawn_once_for_leftover_queue`, which
+        // calls `spawn_process` directly with no `run_agent_turn`
+        // `Register`-tail to repair a skip. A single `try_lock` cannot
+        // tell "the SAME thread already holds this lock" (the reentrant
+        // deadlock this method exists to avoid — retrying never helps,
+        // nothing on this call stack can release it) apart from "a
+        // DIFFERENT thread holds it briefly for an unrelated op" (e.g.
+        // `list_agents()` — a few HashMap reads, typically microseconds).
+        // Retrying costs the reentrant case a few bounded, wasted
+        // milliseconds and still correctly returns `Err`; it costs the
+        // ordinary-contention case nothing in the near-universal case
+        // where the next attempt lands after the brief holder is done —
+        // "bounded stalling beats silent loss", the same tradeoff
+        // `bootstrap.rs`'s `block_in_place` fallback already makes.
+        const MAX_ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.inner.try_lock() {
+                Ok(mut guard) => {
+                    return guard.register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias);
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return Err(
+                            "reactive handler lock busy after retrying — skipping \
+                             registration (either a same-thread reentrant call, \
+                             redundant by construction on that path, or contention \
+                             that outlasted the retry budget; see \
+                             INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md)"
+                                .to_string(),
+                        );
+                    }
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    return Err(format!("reactive handler mutex poisoned: {e}"));
+                }
+            }
+        }
+        unreachable!("loop always returns on its final attempt");
     }
 
     pub fn unregister_agent(&self, agent_id: &str) {
@@ -1185,13 +1423,53 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().get_agent(agent_id).cloned()
     }
 
-    #[allow(dead_code)]
+    /// Used by `server/app_api/fleet.rs`'s ordinary (non-reentrant) request
+    /// handlers — no longer dead code, but NOT safe to call from
+    /// `spawn_process`'s skip-arm; see [`try_get_agent_by_block`] for why.
     pub fn get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
         self.inner
             .lock()
             .unwrap()
             .get_agent_by_block(block_id)
             .cloned()
+    }
+
+    /// Non-blocking counterpart to [`get_agent_by_block`], for the one
+    /// caller that can be running on a thread already holding this lock:
+    /// `spawn_process`'s handling of a skipped registration
+    /// (`try_register_agent_with_nonce` returning `Err`).
+    ///
+    /// reagent P0 on PR #3084 (caught twice — the fix for the P1 nonce-leak
+    /// finding introduced this exact regression on its first attempt): that
+    /// fix originally called the plain, blocking [`get_agent_by_block`]
+    /// from inside the skip arm. In the routine reentrant case — the same
+    /// thread already holds `self.inner` via an in-flight `inject_message`
+    /// — that blocking `.lock()` reproduces INCIDENT_2026_09_07's exact
+    /// permanent self-deadlock, on the very thread `try_register_agent_
+    /// with_nonce`'s own retry-then-fail was designed to protect. Same
+    /// bounded-retry reasoning as that method: a same-thread reentrant call
+    /// can never succeed (nothing on this call stack releases the lock) and
+    /// correctly returns `None` after exhausting the budget — the caller's
+    /// nonce-leak mitigation simply doesn't apply in that sub-case, which is
+    /// a strict improvement on the pre-this-PR baseline (no cleanup, but no
+    /// deadlock either), not a regression. Ordinary cross-thread contention
+    /// gets a real chance to succeed, same as the sibling method.
+    pub fn try_get_agent_by_block(&self, block_id: &str) -> Option<AgentRegistration> {
+        const MAX_ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(2);
+        for attempt in 1..=MAX_ATTEMPTS {
+            match self.inner.try_lock() {
+                Ok(guard) => return guard.get_agent_by_block(block_id).cloned(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if attempt == MAX_ATTEMPTS {
+                        return None;
+                    }
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => return None,
+            }
+        }
+        unreachable!("loop always returns on its final attempt");
     }
 
     pub fn list_agents(&self) -> Vec<AgentRegistration> {

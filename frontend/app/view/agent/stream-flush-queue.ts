@@ -67,6 +67,28 @@ function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
             timestamp: node.timestamp,
             run_in_background: isAcceptedBackgroundLaunch(node) || undefined,
         }).catch(() => {});
+        // Narrate the handoff. This is the moment the pane goes quiet about a
+        // command that is still running, and today says nothing about it.
+        //
+        // Keyed on isAcceptedBackgroundLaunch, not the raw run_in_background
+        // flag, for the same reason the dock column is: the raw flag is true on
+        // every call that merely REQUESTED backgrounding, most of which the
+        // harness resolves synchronously (#2518: 11 of 17 in its own session).
+        // Narrating those would be both wrong and a wasted model call each.
+        //
+        // dedupe_key is the node id — a node can be re-observed, and the
+        // backend drops a repeat before spawning anything.
+        if (isAcceptedBackgroundLaunch(node)) {
+            const command = (node.params as { command?: unknown } | undefined)?.command;
+            if (typeof command === "string" && command.trim() !== "") {
+                void RpcApi.AmbientNarrateCommand(TabRpcClient, {
+                    blockid: model.blockId,
+                    kind: "background_task",
+                    context: command,
+                    dedupe_key: node.id,
+                }).catch(() => {});
+            }
+        }
         return;
     }
     // A declared-background task's real terminal outcome arrives as a
@@ -223,6 +245,23 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
                 type: "StreamFlushObserved",
                 addedCount: batchNew.length,
                 at: Date.now(),
+                // Shell CHUNKS and EXITS are excluded deliberately: they are a
+                // background process writing to (or closing) its own dock row,
+                // which says nothing about whether the model is working. Every
+                // other queue does imply turn activity — a new node, an update,
+                // a tool chunk, or the agent opening a shell in the first place.
+                //
+                // Without this split, output from a long-lived background shell
+                // refreshed the turn idle clock on every flush and pinned the
+                // pane in Streaming for as long as that process lived. The
+                // module comment above already noted that an all-empty flush
+                // never dispatches; the gap was that a shell-output-only flush
+                // is empty AS FAR AS THE TURN IS CONCERNED and still did.
+                turnRelevant:
+                    batchNew.length > 0
+                    || batchUpdates.length > 0
+                    || batchChunks.length > 0
+                    || batchShellCreates.length > 0,
             });
         });
     }
