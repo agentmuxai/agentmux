@@ -1447,7 +1447,20 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        is its own channel — see the report's §6.2, and
 ///        `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
 ///        for what the per-channel/global seam has already cost once.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 5;
+/// v6: `db_skills`, `db_mcp_servers` — Phase 2 of
+///        `SPEC_DURABLE_BINDINGS_2026_09_10.md`. These become the
+///        AUTHORITATIVE catalogs as of this version; the per-channel copies
+///        in `run_object_schema` keep their declarations (never removed —
+///        see that spec's §5.1 and §8 item 3) and continue to exist only as
+///        the same best-effort degraded-mode fallback `bootstrap.rs` already
+///        substitutes for every other identity-store table (`wstore` in
+///        place of `identity_store` when the identity store can't be
+///        resolved, created, or opened). Deliberately NOT declared with the
+///        ref tables (`db_agent_skills_ref`, `db_bundle_skills_ref`, and
+///        the MCP equivalents) — those stay channel-scoped until Phase 3/6
+///        promotes them; adding them here now, unpaired with a live writer,
+///        would be schema for a phase that hasn't shipped.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 6;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1676,7 +1689,35 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at         INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ids_native_memory_versions_lookup
-            ON db_agent_native_memory_versions(agent_id, filename, created_at);",
+            ON db_agent_native_memory_versions(agent_id, filename, created_at);
+
+        -- v6: authoritative skill/MCP-server catalogs — see this constant's
+        -- v6 doc comment above. Same column shapes as run_object_schema's
+        -- copies; no ref tables here yet (Phase 3/6), so no FK targets exist
+        -- to reference them from this store.
+        CREATE TABLE IF NOT EXISTS db_skills (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            trigger     TEXT NOT NULL DEFAULT '',
+            skill_type  TEXT NOT NULL DEFAULT 'prompt',
+            description TEXT NOT NULL DEFAULT '',
+            content     TEXT NOT NULL DEFAULT '',
+            is_global   INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_skills_is_global ON db_skills(is_global);
+
+        CREATE TABLE IF NOT EXISTS db_mcp_servers (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            transport   TEXT NOT NULL DEFAULT 'stdio',
+            config      TEXT NOT NULL DEFAULT '{}',
+            is_global   INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_mcp_servers_is_global ON db_mcp_servers(is_global);",
     )?;
 
     // Seed the blank Bundle singleton — same fixed id as objects.db/store.db
@@ -1990,6 +2031,36 @@ mod tests {
         run_shared_store_schema(&shared_conn).unwrap();
         run_shared_store_schema(&shared_conn).unwrap();
         assert!(column_exists(&shared_conn, "db_bundles", "instructions_by_provider"));
+    }
+
+    #[test]
+    fn test_db_skills_and_mcp_servers_exist_in_both_object_and_identity_schemas() {
+        // Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md (v6): the identity
+        // store gains its own db_skills/db_mcp_servers, becoming
+        // authoritative — but the channel-store copies (run_object_schema)
+        // are NOT removed, per that spec's §5.1/§8 item 3. Pins both halves
+        // of that claim, not just the new one: it would be easy to
+        // accidentally satisfy only the identity-store half of this and
+        // silently drop the channel-store fallback.
+        let object_conn = Connection::open_in_memory().unwrap();
+        run_object_schema(&object_conn).unwrap();
+        assert!(table_exists(&object_conn, "db_skills"), "channel store must keep db_skills");
+        assert!(table_exists(&object_conn, "db_mcp_servers"), "channel store must keep db_mcp_servers");
+
+        let identity_conn = Connection::open_in_memory().unwrap();
+        run_identity_store_schema(&identity_conn).unwrap();
+        run_identity_store_schema(&identity_conn).unwrap(); // idempotent second pass
+        assert!(table_exists(&identity_conn, "db_skills"), "identity store must have db_skills");
+        assert!(table_exists(&identity_conn, "db_mcp_servers"), "identity store must have db_mcp_servers");
+        assert!(index_exists(&identity_conn, "idx_ids_skills_is_global"));
+        assert!(index_exists(&identity_conn, "idx_ids_mcp_servers_is_global"));
+
+        // No ref tables here yet — those are Phase 3/6, not Phase 2. Schema
+        // for a phase that hasn't shipped would be its own kind of drift.
+        assert!(!table_exists(&identity_conn, "db_agent_skills_ref"));
+        assert!(!table_exists(&identity_conn, "db_bundle_skills_ref"));
+        assert!(!table_exists(&identity_conn, "db_agent_mcp_ref"));
+        assert!(!table_exists(&identity_conn, "db_bundle_mcp_ref"));
     }
 
     #[test]
