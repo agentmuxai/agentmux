@@ -82,8 +82,20 @@ if read_syms | grep -qE "$PATTERN"; then
     exit 0
 fi
 
-# No match. Distinguish "has symbols but unpatched" from "stripped (no symtab)".
-if read_syms | grep -q .; then
+# No match. Distinguish "has symbols but unpatched" from "stripped".
+#
+# `strip` on macOS removes LOCAL symbols and keeps the external/dynamic ones, so
+# a stripped framework still prints thousands of nm lines. Testing for "any
+# output at all" therefore misidentifies every stripped binary as UNPATCHED:
+# measured on a correctly-patched 148.23.25 build, the bundled framework has
+# 4354 symbols and 0 local ones, against 1232824 / 1228470 unstripped. Before
+# this fix, running the script against a shipped .app printed "This is the
+# UNPATCHED upstream CEF" and exited 0 -- a confident, alarming, wrong answer
+# about a correct build.
+#
+# The patch symbol is local, so the real question is whether ANY local symbols
+# survive. nm marks local symbols with a lowercase type letter.
+if [ "$(read_syms | awk '$2 ~ /^[a-z]$/' | head -1 | wc -l | tr -d ' ')" != "0" ]; then
     echo "verify-cef-framework-darwin: ✗ $BIN has a symbol table but NO BeginWindowDrag slot." >&2
     echo "                  This is the UNPATCHED upstream CEF — native window drag /" >&2
     echo "                  floating-pane resize will silently no-op. Use the patched" >&2
@@ -92,7 +104,20 @@ if read_syms | grep -q .; then
     exit 1
 fi
 
-echo "verify-cef-framework-darwin: ? $BIN is stripped (no symbol table) — cannot verify" >&2
-echo "                  the BeginWindowDrag patch by symbol. Run the check on the UNSTRIPPED" >&2
-echo "                  framework (the patch check must precede the packaging strip)." >&2
+echo "verify-cef-framework-darwin: ? $BIN is STRIPPED (no local symbols) — cannot verify" >&2
+echo "                  the BeginWindowDrag patch by symbol. This is expected for a framework" >&2
+echo "                  bundled into a .app: package-macos.sh strips at bundle time." >&2
+echo "" >&2
+echo "                  Verify the UNSTRIPPED framework instead (the cef-build tree, or a" >&2
+echo "                  freshly-extracted release asset) — the patch check must precede the" >&2
+echo "                  packaging strip." >&2
+echo "" >&2
+echo "                  To check a stripped framework against a known-good unstripped one," >&2
+echo "                  compare executable code directly — stripping does not touch it:" >&2
+echo "" >&2
+echo "                    otool -s __TEXT __text <binary> | tail -n +3 | shasum" >&2
+echo "" >&2
+echo "                  Equal hashes prove identical code. Confirmed on the 148.23.25 build:" >&2
+echo "                  the bundled and build-tree binaries hash the same despite differing" >&2
+echo "                  by 195 MB of symbol table." >&2
 exit 2
