@@ -1,6 +1,6 @@
 # Spec: Instruction and Memory Portability
 
-**Status:** active — Phases 1-2 landed (#3147); Phase 0 investigated 2026-09-09 and turned up a two-way divergence (§3.4), which makes Phase 0b its prerequisite. Phases 0b, 3 and 4 remain. Tracking: #3148.
+**Status:** active — Phases 1, 2 and 3 landed (#3147, #3162, #3163). Phase 0b landed its reconciliation (#3149, #3152, #3153) but is **not closed**: retiring the redundant inline columns turned out to be blocked by a cross-channel asymmetry (§3.4a), and Phase 4 is untouched. Tracking: #3148.
 **Date:** 2026-09-09
 **Verified against:** `a86cdee50` (code, not spec prose)
 **Follows:** `SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md` §8, which deferred
@@ -342,6 +342,42 @@ PR #3163). Reading is not applying — no import path writes these, and
 The `owner` field is what keeps this honest. A re-import that silently merged a
 foreign `CLAUDE.md` into a new machine's repo would be the exact failure the
 ownership spec exists to prevent.
+
+### 3.4a The same divergence, along the channel axis
+
+§3.4 found two stores disagreeing about a bundle's components. Phase 0b fixed
+that by making `db_bundle_skills_ref` / `db_bundle_mcp_ref` authoritative. That
+is true **within a channel** and false **across** them, which the original
+analysis did not draw out:
+
+| Table | Store | Scope |
+|---|---|---|
+| `db_bundles` + its inline `skills` / `mcp_servers` columns | `~/.agentmux/shared/store.db` | host-global, one file |
+| `db_bundle_skills_ref`, `db_bundle_mcp_ref` | `<data_dir>/db/objects.db` | per-channel |
+
+Bundles are shared. Their components are not. Two consequences:
+
+1. **Binds do not propagate.** `bundle_skill_bind` writes into the channel
+   store, consulting the shared store only to check the bundle exists. A skill
+   bound in one channel is invisible to every other, which — now that export
+   reads refs — is §3.4's divergence reappearing along a different axis.
+
+2. **The inline columns are the cross-channel representation.** `m0030` seeds a
+   channel's ref tables from them at that channel's first boot, and nothing
+   else ever does. They are therefore not a redundant duplicate to be deleted;
+   the per-channel refs are a projection of them.
+
+(2) is what blocks retiring the columns: dropping them removes the seeding
+source for every channel created afterwards. Found by Codex on PR #3168 (the
+multi-channel half) and confirmed on 26 channels against one shared store; the
+new-channel half follows from the same asymmetry. #3168 is drafted pending a
+decision.
+
+The unblock is to give bundle components a shared authoritative home first.
+That is not a table move — the ref tables carry foreign keys to `db_skills` /
+`db_mcp_servers`, which are themselves per-channel — so it reopens §5.4's
+"which store owns what" question rather than settling it. Same class as §5.3's
+memory-location invariant, and it deserves the same treatment: its own spec.
 
 ### 5.3 Memory location invariant
 
