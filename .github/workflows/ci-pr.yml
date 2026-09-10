@@ -176,7 +176,12 @@ jobs:
       #
       # Cheap: no build, just the checker, on an install the next step needs
       # anyway.
+      #
+      # tsconfig.citypecheck.json, not tsconfig.json: the build config includes
+      # only frontend/**, while vitest below also runs test/contract/* and
+      # test/e2e/*. Checking the narrower set would have left the same hole in
+      # a different directory (reagent P2 on #3166).
       - name: tsc --noEmit
-        run: npx tsc --noEmit -p tsconfig.json
+        run: npx tsc --noEmit -p tsconfig.citypecheck.json
       - name: vitest run
         run: npx vitest run
