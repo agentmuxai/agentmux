@@ -138,6 +138,27 @@ pub struct CommandToolDecisionData {
     pub feedback: Option<String>,
 }
 
+/// Data for `ambientnarrate` — ask the backend to generate a short
+/// user-facing line describing something AgentMux just did on its own.
+///
+/// Best-effort: the caller does not await a reply and must not gate any UI
+/// state change on one. If narration is capped, cancelled, or fails, the thing
+/// being narrated still happened and the UI must already show it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandAmbientNarrateData {
+    pub blockid: String,
+    /// Selects the prompt. Unknown kinds are a deliberate no-op rather than an
+    /// unconstrained prompt — see `narration_prompt`.
+    pub kind: String,
+    /// What to narrate, in the caller's own words (e.g. the command line of the
+    /// call that just went background).
+    pub context: String,
+    /// De-duplication key, unique per narrated event (the `node_id` for a
+    /// background launch). A node can be re-observed; narrating twice for one
+    /// event would be both noisy and a wasted model call.
+    pub dedupe_key: String,
+}
+
 /// Data for `docknodestatus` — a fire-and-forget push whenever a
 /// `ToolNode`'s status changes. Spec:
 /// docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.

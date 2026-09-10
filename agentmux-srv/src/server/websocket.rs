@@ -29,6 +29,7 @@ use crate::backend::rpc_types::{
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
     COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER, COMMAND_AGENT_CANCEL,
     CommandAgentAnswerData, CommandAgentCancelData,
+    COMMAND_AMBIENT_NARRATE, CommandAmbientNarrateData,
     COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
     COMMAND_BACKGROUND_TASK_COMPLETION, CommandBackgroundTaskCompletionData,
     COMMAND_BACKGROUND_TASK_PID, CommandBackgroundTaskPidData,
@@ -1243,6 +1244,91 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // structurally can't see it (the originating ToolNode's status never
     // changes again after acceptance).
     let dock_snapshots_dns = state.dock_snapshots.clone();
+    // Ambient narration — generate a short user-facing line about something
+    // AgentMux just did on its own, and broadcast it to the pane.
+    //
+    // Fire-and-forget in both directions: the renderer does not await a reply,
+    // and the work runs in a detached task so a slow or capped model call never
+    // holds the RPC open. Every failure path is silence — the narrated action
+    // has already happened and the UI already reflects it, so a missing line is
+    // a missing nicety, not a missing state change.
+    let wstore_narrate = state.wstore.clone();
+    let broker_narrate = state.broker.clone();
+    let narrated = state.narrated_events.clone();
+    engine.register_handler(
+        COMMAND_AMBIENT_NARRATE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_narrate.clone();
+            let broker = broker_narrate.clone();
+            let narrated = narrated.clone();
+            Box::pin(async move {
+                let cmd: CommandAmbientNarrateData = serde_json::from_value(data)
+                    .map_err(|e| format!("ambientnarrate: {e}"))?;
+
+                // Dedupe per narrated event. A ToolNode can be re-observed, and
+                // narrating one event twice is both noise and a wasted model
+                // call. Checked before spawning so a repeat costs nothing.
+                if !cmd.dedupe_key.is_empty() && !narrated.mark_new(&cmd.dedupe_key) {
+                    return Ok(None);
+                }
+
+                tokio::spawn(async move {
+                    let generation = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64;
+                    let Some(text) = crate::server::app_api::session::generate_ambient_narration(
+                        &wstore,
+                        &cmd.blockid,
+                        &cmd.dedupe_key,
+                        generation,
+                        &cmd.kind,
+                        &cmd.context,
+                    )
+                    .await
+                    else {
+                        return;
+                    };
+                    // A short task can finish while the model call is still
+                    // in flight, so by now the dock may already show it done.
+                    // Narrating it at that point is worse than silence: the line
+                    // describes a launch the user has already seen conclude.
+                    //
+                    // Belt and braces with the prompt, which is phrased to stay
+                    // true after completion — this drops the message entirely
+                    // rather than relying on wording alone. (codex P2 on #3169.)
+                    //
+                    // Only skips on a DEFINITE completion: an unknown id (no
+                    // registry row — the task was never observed, or this is a
+                    // narration kind that has none) falls through and publishes,
+                    // since absence of a row is not evidence of completion.
+                    if !cmd.dedupe_key.is_empty() {
+                        if let Ok(Some(task)) = wstore.background_task_get(&cmd.dedupe_key) {
+                            if task.status != crate::backend::storage::background_tasks::BackgroundTaskStatus::Running {
+                                return;
+                            }
+                        }
+                    }
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "ambient-narration".to_string(),
+                        scopes: vec![format!("block:{}", cmd.blockid)],
+                        sender: String::new(),
+                        persist: 0,
+                        // Carries the text itself, unlike background-task-updated
+                        // next to it: there is no list query to re-read, so an
+                        // invalidation ping would have nothing to invalidate.
+                        data: Some(serde_json::json!({
+                            "block_id": cmd.blockid,
+                            "kind": cmd.kind,
+                            "text": text,
+                        })),
+                    });
+                });
+                Ok(None)
+            })
+        }),
+    );
+
     let wstore_dns = state.wstore.clone();
     let pending_pids_dns = state.pending_background_pids.clone();
     let broker_dns = state.broker.clone();

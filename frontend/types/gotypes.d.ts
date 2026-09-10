@@ -192,6 +192,22 @@ declare global {
         feedback?: string;
     };
 
+    // wshrpc.CommandAmbientNarrateData — ask the backend to generate a short
+    // user-facing line about something AgentMux just did on its own. The
+    // renderer supplies the context because only it has it: docknodestatus
+    // carries tool_name but not the command text, so the backend knows *a
+    // Bash call* went background and cannot say *what* did.
+    //
+    // Best-effort — no reply is awaited, and no UI state may depend on one.
+    type CommandAmbientNarrateData = {
+        blockid: string;
+        // Selects the prompt server-side; unknown kinds are a no-op.
+        kind: string;
+        context: string;
+        // Unique per narrated event, so a re-observed node narrates once.
+        dedupe_key: string;
+    };
+
     // wshrpc.CommandDockNodeStatusData — fire-and-forget push whenever a
     // ToolNode's status changes. Backs `muxspect dock`. Spec:
     // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
