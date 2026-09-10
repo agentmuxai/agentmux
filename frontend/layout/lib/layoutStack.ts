@@ -16,30 +16,29 @@
  * branch already uses (`layoutMagnify.ts`) for payload-only changes that
  * don't need `treeReducer`'s balance/validation machinery.
  *
- * Every mutation here still evicts the target node's cached `NodeModel` (via
- * `disposeNodeModel`, `layoutNodeModels.ts`) on an active-member change —
- * this is CURRENTLY required, not optional. `activeKeyFor`
- * (`layoutNodeModels.ts`) still includes `activeBlockId` in a stacked leaf's
- * key for exactly this reason: `TabContent`/`Block` render
- * `nodeModel.blockId` as a plain, frozen field with no remount boundary of
- * their own, so this outer, whole-leaf remount is the ONLY mechanism that
- * updates the displayed block content after a switch
- * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md` documents the
- * narrower replacement — a `pane-leaf-chrome.tsx` inner remount boundary —
- * but it does not exist yet; PR #3132 tried shipping the key change and this
- * disposal removal ahead of it and ReAgent/Codex correctly caught the
- * resulting regression: switching a stack leaves the old block displayed,
- * and closing the active member can leave the deleted block displayed).
- * Do not remove these `disposeNodeModel` calls until that inner boundary
- * lands in the SAME deployable change.
+ * NONE of these mutators dispose the leaf's cached `NodeModel` on an
+ * active-member change anymore, as of `pane-leaf-chrome.tsx`
+ * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`). PR #3132 tried
+ * shipping that removal ahead of the replacement mechanism and ReAgent/Codex
+ * correctly caught the resulting regression (switching a stack left the old
+ * block displayed, with nothing left to update it) — this time the
+ * replacement landed in the SAME PR: `DisplayNodesWrapper`
+ * (`tilelayout-shared.tsx`) now keys its outer `<Key>` on `node.id` alone
+ * (inline, not via `activeKeyFor` — see that function's own doc comment for
+ * why `OverlayNodeWrapper` deliberately keeps using it, unchanged), so the
+ * leaf's whole subtree — chrome included — no longer remounts on a switch.
+ * `pane-leaf-chrome.tsx` owns a narrower, INNER remount instead, scoped to
+ * just the active block's own `<Block>` instance, keyed on
+ * `NodeModel.activeBlockId` (types.ts) — that's what now gives a fresh
+ * `ViewModel` to the newly-active member, and what `closeBlockInStack`'s
+ * comment below used to lean on `disposeNodeModel` for.
  *
- * `NodeModel.activeBlockId` (types.ts) exists as additive, currently-inert
- * groundwork for that future change — no production consumer reads it yet.
+ * `cleanupNodeModels` (`layoutNodeModels.ts`) — real leaf deletion, not
+ * active-member churn — is unaffected and still disposes normally.
  */
 
 import { findNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
-import { disposeNodeModel } from "./layoutNodeModels";
 import { closeNode } from "./layoutMagnify";
 
 /** The node's stack, or `[blockId]` when it has none yet (back-compat: a
@@ -71,7 +70,6 @@ export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: 
     const stack = effectiveStack(node.data);
     const nextStack = stack.includes(blockId) ? stack : [...stack, blockId];
     setActive(node.data, blockId, nextStack);
-    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
@@ -95,7 +93,6 @@ export function setActiveBlockInStack(model: LayoutModel, nodeId: string, blockI
         return; // already active
     }
     setActive(node.data, blockId, stack);
-    disposeNodeModel(model, nodeId);
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
     model.persistToBackend();
@@ -135,20 +132,12 @@ export async function closeBlockInStack(model: LayoutModel, nodeId: string, bloc
         const nextActive = nextStack[Math.min(idx, nextStack.length - 1)];
         node.data.activeBlockId = nextActive;
         node.data.blockId = nextActive;
-        // Dispose ONLY here, inside this branch — this is the ONLY case
-        // where activeKeyFor's key actually changes, so it's the only case
-        // where the leaf genuinely remounts. Closing a BACKGROUND
-        // (non-active) member leaves activeBlockId untouched: the key
-        // doesn't change, the DisplayNode component stays mounted, and it's
-        // STILL holding a reference to this exact NodeModel via whatever
-        // `useNodeModel()` call it made at its last real mount. Disposing
-        // unconditionally would tear down that STILL-IN-USE component's
-        // isFocused/isMagnified/innerRect/etc out from under it — not a
-        // leak, an active regression: focus/magnify/geometry would freeze
-        // at whatever they were the instant a completely unrelated
-        // background tab closed. See this file's header comment for why
-        // this disposal itself can't be removed yet either.
-        disposeNodeModel(model, nodeId);
+        // No dispose here anymore — the leaf's NodeModel survives
+        // active-member churn regardless of whether the closed member was
+        // active or background; pane-leaf-chrome.tsx's own inner <Key>
+        // (keyed on activeBlockId) is what remounts the actual block
+        // content now, scoped to just that, not the whole leaf. See this
+        // file's header comment.
     }
     model.updateTree(false);
     model.setter(model.localTreeStateAtom, { ...model.treeState });
