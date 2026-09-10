@@ -264,6 +264,40 @@ pub struct ImportedContextFile {
     pub content: String,
 }
 
+/// One `components.projectInstructions` entry, read back out of the bundle.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. This is
+/// a **record of what the SOURCE agent was reading**, not content to install:
+/// no import path writes these files, and `owner` is the field that says why
+/// (a `foreign` entry belongs to the source repository, and writing it into
+/// the importing one is exactly what
+/// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to prevent).
+///
+/// Carried through the parser rather than being reduced to a warning because
+/// "surfaced" has to mean readable to be worth anything: `agent.
+/// project_instructions` scans the IMPORTING agent's working directory, so it
+/// is structurally unable to show what the source machine had (Codex P1,
+/// PR #3163). Without this the import flow could tell you the component
+/// existed and nothing more.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ImportedProjectInstruction {
+    /// Working-directory-relative path on the SOURCE machine, e.g. `CLAUDE.md`.
+    pub path: String,
+    /// Where the snapshot lives inside the bundle (`instructions/project/...`).
+    pub file: String,
+    /// SHA-256 the exporter recorded for the source bytes. Kept verbatim and
+    /// never recomputed here — a mismatch against `content` is itself
+    /// information about the bundle, not something to paper over.
+    pub content_hash: String,
+    /// `"agentmux"` or `"foreign"`, verbatim from the manifest. Not parsed
+    /// into an enum: an unrecognized value from a future/hand-written bundle
+    /// must survive to the UI as-is rather than being silently coerced to
+    /// `foreign`, which would understate AgentMux's own authorship.
+    pub owner: String,
+    /// The snapshot's content, resolved from the bundle's files.
+    pub content: String,
+}
+
 /// Parsed, validated bundle content ready for the RPC handler to resolve
 /// accounts against and write to the Store. `mcp_servers` still contains
 /// whatever `${VAR}`-style placeholders the exporter's redaction left in
@@ -294,6 +328,10 @@ pub struct ParsedBundleImport {
     pub skills: Vec<ParsedSkill>,
     pub skipped_skills: Vec<String>,
     pub requirements: Vec<AccountRequirement>,
+    /// What the SOURCE agent was reading as project instructions. Read-only —
+    /// see [`ImportedProjectInstruction`]. No caller writes these anywhere;
+    /// `PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING` rides alongside them.
+    pub project_instructions: Vec<ImportedProjectInstruction>,
     pub warnings: Vec<String>,
 }
 
@@ -443,6 +481,15 @@ const MAX_INSTRUCTION_PROVIDER_VARIANTS: usize = 32;
 /// therefore unconditional and permanent, not a "use the other RPC" pointer.
 pub(crate) const PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING: &str =
     "components.projectInstructions: recorded for reference, never installed — these files belong to the importing repository, not to the bundle. Inspect them with agent.project_instructions and apply anything you want deliberately";
+
+/// Cap on how many `components.projectInstructions` entries are read back.
+///
+/// Matches `project_instructions::MAX_SCANNED_INSTRUCTION_FILES`, which is the
+/// most AgentMux's own exporter can ever produce — so this can only ever bite
+/// a hand-written or hostile bundle, where refusing to allocate unboundedly is
+/// the point. Overflow warns rather than truncating silently, same rule the
+/// rest of this parser follows.
+pub const MAX_IMPORTED_PROJECT_INSTRUCTIONS: usize = 200;
 
 pub(crate) const MEMORY_COMPONENT_IGNORED_WARNING: &str =
     "components.memory: present but ignored — memory requires an agent-scoped import (bundle.import_for_agent), not bundle.import";
@@ -930,8 +977,76 @@ pub fn parse_bundle_import_with_budget(
     // would be exactly what SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md
     // exists to prevent — a portability feature turning into a back door
     // (SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §5.2).
-    if components.and_then(|c| c.get("projectInstructions")).is_some() {
+    //
+    // The entries themselves ARE read back (Codex P1, PR #3163): a warning
+    // saying "this bundle recorded some instructions" with no way to see them
+    // is not surfacing anything, and `agent.project_instructions` can't fill
+    // the gap because it scans the IMPORTING agent's working directory.
+    // Reading is not applying — nothing downstream writes these.
+    let mut project_instructions: Vec<ImportedProjectInstruction> = Vec::new();
+    if let Some(raw) = components.and_then(|c| c.get("projectInstructions")) {
         warnings.push(PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING.to_string());
+        match raw.as_array() {
+            Some(entries) => {
+                if entries.len() > MAX_IMPORTED_PROJECT_INSTRUCTIONS {
+                    warnings.push(format!(
+                        "components.projectInstructions: {} entries exceeds the \
+                         {MAX_IMPORTED_PROJECT_INSTRUCTIONS}-entry cap; only the \
+                         first {MAX_IMPORTED_PROJECT_INSTRUCTIONS} were read",
+                        entries.len()
+                    ));
+                }
+                for entry in entries.iter().take(MAX_IMPORTED_PROJECT_INSTRUCTIONS) {
+                    let Some(obj) = entry.as_object() else {
+                        warnings.push(
+                            "components.projectInstructions: non-object entry skipped"
+                                .to_string(),
+                        );
+                        continue;
+                    };
+                    let str_field = |k: &str| {
+                        obj.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string()
+                    };
+                    let file_path = str_field("file");
+                    if file_path.is_empty() {
+                        warnings.push(
+                            "components.projectInstructions: entry has no \"file\"; skipped"
+                                .to_string(),
+                        );
+                        continue;
+                    }
+                    // The accounts/ allowlist applies here for the same reason
+                    // it applies to components.instructions: a manifest is not
+                    // a trustworthy inventory of its own bundle, and a
+                    // projectInstructions entry must not become a second way to
+                    // read accounts/requirements.json back out as content.
+                    if is_requirements_json(&file_path) {
+                        warnings.push(format!(
+                            "components.projectInstructions: \"{file_path}\" is the \
+                             accounts/ requirements file; not readable as instructions"
+                        ));
+                        continue;
+                    }
+                    let Some(content) = by_path.get(file_path.as_str()) else {
+                        warnings.push(format!(
+                            "components.projectInstructions: \"{file_path}\" not found \
+                             among the bundle's files; skipped"
+                        ));
+                        continue;
+                    };
+                    project_instructions.push(ImportedProjectInstruction {
+                        path: str_field("path"),
+                        file: file_path,
+                        content_hash: str_field("contentHash"),
+                        owner: str_field("owner"),
+                        content: content.to_string(),
+                    });
+                }
+            }
+            None => warnings.push(
+                "components.projectInstructions: not an array; ignored".to_string(),
+            ),
+        }
     }
 
     Ok(ParsedBundleImport {
@@ -946,6 +1061,7 @@ pub fn parse_bundle_import_with_budget(
         skills,
         skipped_skills,
         requirements,
+        project_instructions,
         warnings: warnings.into_vec(),
     })
 }
@@ -1600,6 +1716,116 @@ mod tests {
         ];
         let result = parse_bundle_import(&files).unwrap();
         assert!(!result.warnings.iter().any(|w| w.contains("components.memory")));
+    }
+
+    fn manifest_with_project_instructions(entries: Value) -> Vec<BundleImportFile> {
+        vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "instructions": ["instructions/AGENTS.md"],
+                "projectInstructions": entries,
+            }))),
+            file("instructions/AGENTS.md", "Be concise."),
+            file("instructions/project/CLAUDE.md", "# House rules\n"),
+        ]
+    }
+
+    #[test]
+    fn project_instructions_are_readable_after_import() {
+        // Codex P1, PR #3163: the warning alone told you a component existed
+        // and nothing else, and `agent.project_instructions` can't fill the
+        // gap — it scans the IMPORTING agent's working directory, not the
+        // source machine's. Reading is not applying.
+        let files = manifest_with_project_instructions(serde_json::json!([{
+            "path": "CLAUDE.md",
+            "file": "instructions/project/CLAUDE.md",
+            "contentHash": "abc123",
+            "owner": "foreign",
+        }]));
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert_eq!(result.project_instructions.len(), 1);
+        let entry = &result.project_instructions[0];
+        assert_eq!(entry.path, "CLAUDE.md");
+        assert_eq!(entry.owner, "foreign");
+        assert_eq!(entry.content_hash, "abc123");
+        assert!(entry.content.contains("House rules"), "the content must be readable");
+
+        // Readable, still not applied: the warning stays, and nothing about
+        // this entry leaks into the fields an import actually writes.
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w == PROJECT_INSTRUCTIONS_NOT_APPLIED_WARNING));
+        assert!(
+            !result.instructions.contains("House rules"),
+            "a project instruction must never become the bundle's own instructions"
+        );
+        assert!(
+            !result.context_files.iter().any(|cf| cf.content.contains("House rules")),
+            "nor a context file"
+        );
+    }
+
+    #[test]
+    fn project_instruction_entries_are_capped_and_report_the_overflow() {
+        let entries: Vec<Value> = (0..MAX_IMPORTED_PROJECT_INSTRUCTIONS + 5)
+            .map(|i| serde_json::json!({
+                "path": format!("CLAUDE{i}.md"),
+                "file": "instructions/project/CLAUDE.md",
+                "owner": "foreign",
+            }))
+            .collect();
+        let files = manifest_with_project_instructions(serde_json::json!(entries));
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert_eq!(result.project_instructions.len(), MAX_IMPORTED_PROJECT_INSTRUCTIONS);
+        assert!(
+            result.warnings.iter().any(|w| w.contains("exceeds the")),
+            "truncating a list silently is what the rest of this parser refuses to do: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn a_project_instruction_cannot_read_the_accounts_requirements_file() {
+        // The same allowlist components.instructions is held to: a manifest is
+        // not a trustworthy inventory of its own bundle, so this must not
+        // become a second route to read accounts/requirements.json back out.
+        let files = vec![
+            file("armory.json", &minimal_manifest(serde_json::json!({
+                "projectInstructions": [{
+                    "path": "CLAUDE.md",
+                    "file": "accounts/requirements.json",
+                    "owner": "foreign",
+                }],
+            }))),
+            file("accounts/requirements.json", "[{\"id\":\"x\",\"credentialProvider\":\"y\"}]"),
+        ];
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert!(result.project_instructions.is_empty());
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.contains("projectInstructions") && w.contains("requirements file")));
+    }
+
+    #[test]
+    fn a_project_instruction_referencing_a_missing_file_warns_rather_than_vanishing() {
+        let files = vec![file("armory.json", &minimal_manifest(serde_json::json!({
+            "projectInstructions": [{
+                "path": "CLAUDE.md",
+                "file": "instructions/project/GONE.md",
+                "owner": "foreign",
+            }],
+        })))];
+        let result = parse_bundle_import(&files).unwrap();
+
+        assert!(result.project_instructions.is_empty());
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.contains("GONE.md") && w.contains("not found")));
     }
 
     #[test]

@@ -913,6 +913,12 @@ fn splice_history_component(
 /// not a claim that the source agent had none; `agent.project_instructions` is
 /// where the fuller picture, including absent and unreadable files, lives.
 ///
+/// "Readable" is decided by `error`/`truncated`, NOT by whether the content is
+/// empty (Codex P2, PR #3163). A real, readable, zero-byte `CLAUDE.md` is a
+/// fact about the source agent — dropping it would make the export
+/// indistinguishable from one where the file was absent, which is the exact
+/// kind of quiet lie this component exists to remove.
+///
 /// Paths go through the same sanitizer the exporter uses for context files, so
 /// a scanned path can never write outside the archive's own tree.
 fn splice_project_instructions_component(
@@ -920,17 +926,43 @@ fn splice_project_instructions_component(
     files: &[crate::backend::project_instructions::ProjectInstructionFile],
 ) -> Result<(), String> {
     use crate::backend::project_instructions::InstructionOwner;
+    use std::collections::HashSet;
 
     let mut entries: Vec<serde_json::Value> = Vec::new();
+    // Case-INSENSITIVE, for the same reason the context-file loop in
+    // `bundle_export.rs` is (reagent P2, PR #2333): a case-sensitive source
+    // filesystem can hold `.github/instructions/A.md` and `.../a.md`, and the
+    // scan in `project_instructions.rs` will find both — but they collide on
+    // extraction on Windows/macOS, where one snapshot silently overwrites the
+    // other. Scanned directories make this reachable here in a way it isn't
+    // for the fixed registry paths (Codex P2, PR #3163). The written path
+    // keeps its original case; only the check is folded.
+    let mut used_paths: HashSet<String> = HashSet::new();
     for file in files {
-        if !file.exists || file.content.is_empty() {
+        if !file.exists || file.error.is_some() || file.truncated {
             continue;
         }
         let Some(safe) = crate::backend::bundle_export::sanitize_context_relative_path(&file.path)
         else {
+            // Warn rather than dropping in silence — a backup tool that loses
+            // an input without saying so defeats its own purpose (reagent P1,
+            // PR #2333, on the context-file equivalent).
+            export.warnings.push(format!(
+                "projectInstructions: \"{}\" could not be sanitized into an \
+                 archive-relative path; skipped",
+                file.path
+            ));
             continue;
         };
         let out_path = format!("instructions/project/{safe}");
+        if !used_paths.insert(out_path.to_lowercase()) {
+            export.warnings.push(format!(
+                "projectInstructions: \"{}\" normalizes to the same path as an \
+                 earlier entry ({out_path}); skipped to avoid overwriting it",
+                file.path
+            ));
+            continue;
+        }
         export.files.push(crate::backend::bundle_export::BundleExportFile {
             path: out_path.clone(),
             content: file.content.clone(),
@@ -2126,6 +2158,15 @@ fn preview_commit_warning_budget() -> crate::backend::bundle_import::WarningBudg
 /// already individually bounded; concatenating two independently-bounded
 /// lists can still exceed either bound alone, so one more pass caps the
 /// combined total before it's ever serialized).
+/// Per-entry content cap for `project_instructions` in an import preview.
+///
+/// Deliberately far below `MAX_INSTRUCTIONS_PREVIEW_CHARS` (50k): that cap
+/// applies to ONE field, whereas a preview can carry up to
+/// `MAX_IMPORTED_PROJECT_INSTRUCTIONS` (200) of these, so the same number
+/// would put a 10 MB ceiling on a single response. 4k is enough to recognize a
+/// file and see how it opens; the untruncated bytes are in the archive itself.
+const MAX_PROJECT_INSTRUCTION_PREVIEW_CHARS: usize = 4_000;
+
 fn bound_warnings_for_response(warnings: Vec<String>) -> (Vec<String>, bool) {
     const MAX_COMBINED_WARNINGS: usize = 200;
     if warnings.len() <= MAX_COMBINED_WARNINGS {
@@ -2291,9 +2332,40 @@ async fn bundle_import_preview_impl(
         .collect();
     let name_collision = existing_names.contains(&parsed.name);
 
+    // Phase 3, Codex P1 on PR #3163. Read-only: this is what the SOURCE agent
+    // was reading, and `bundle.import.commit` has no counterpart field — the
+    // entries exist to be looked at, never to be written into the importing
+    // repository (spec §5.2). Each content is bounded the same way
+    // `instructions_preview` is, since a snapshot can be an arbitrarily large
+    // repository file and the response carries up to
+    // MAX_IMPORTED_PROJECT_INSTRUCTIONS of them.
+    let project_instructions_json: Vec<serde_json::Value> = parsed
+        .project_instructions
+        .iter()
+        .map(|pi| {
+            let total_chars = pi.content.chars().count();
+            let truncated = total_chars > MAX_PROJECT_INSTRUCTION_PREVIEW_CHARS;
+            let preview: String = if truncated {
+                pi.content.chars().take(MAX_PROJECT_INSTRUCTION_PREVIEW_CHARS).collect()
+            } else {
+                pi.content.clone()
+            };
+            json!({
+                "path": bounded_display(&pi.path),
+                "file": bounded_display(&pi.file),
+                "content_hash": bounded_display(&pi.content_hash),
+                "owner": bounded_display(&pi.owner),
+                "content_preview": preview,
+                "content_truncated": truncated,
+                "content_total_chars": total_chars,
+            })
+        })
+        .collect();
+
     let (warnings, warnings_truncated) = bound_warnings_for_response(all_warnings);
 
     Ok(json!({
+        "project_instructions": project_instructions_json,
         "name": parsed.name,
         "description": bounded_display(&parsed.description),
         "instructions_preview": instructions_preview,
@@ -3515,6 +3587,128 @@ mod export_import_for_agent_tests {
             "an unmarked repository file is the repository's — this field is what keeps import from installing it"
         );
         assert!(!entry["contentHash"].as_str().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn export_carries_a_readable_but_empty_instruction_file() {
+        // Codex P2 on #3163: skipping on `content.is_empty()` conflated "the
+        // file is there and says nothing" with "there is no file", which is
+        // the exact ambiguity this component exists to remove. An empty
+        // CLAUDE.md is a real fact about what the agent reads.
+        let state = test_state();
+        let work = tempfile::tempdir().unwrap();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", work.path().to_str().unwrap(), config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+
+        std::fs::write(work.path().join("CLAUDE.md"), "").unwrap();
+
+        let result = bundle_export_for_agent_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportForAgentReq {
+                bundle_id: "bundle-1".to_string(),
+                agent_id: "agent-1".to_string(),
+                format: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let files = result["files"].as_array().unwrap();
+        assert!(
+            files.iter().any(|f| f["path"] == "instructions/project/CLAUDE.md"),
+            "an empty-but-present CLAUDE.md must still be recorded"
+        );
+        let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
+        assert!(
+            entries.iter().any(|e| e["path"] == "CLAUDE.md"),
+            "present-and-empty must be distinguishable from absent, got: {entries:?}"
+        );
+    }
+
+    /// Build a resolver result by hand. The two conditions below (a
+    /// case-only path collision, and unreadable/oversized files) are not
+    /// reachable through the filesystem on this repo's own dev platform —
+    /// Windows folds case, so the collision cannot be staged at all — so the
+    /// splice function is exercised directly rather than not at all.
+    fn instruction_file(
+        path: &str,
+        content: &str,
+    ) -> crate::backend::project_instructions::ProjectInstructionFile {
+        crate::backend::project_instructions::ProjectInstructionFile {
+            path: path.to_string(),
+            exists: true,
+            size_bytes: content.len() as u64,
+            content_hash: "hash".to_string(),
+            owner: crate::backend::project_instructions::InstructionOwner::Foreign,
+            content: content.to_string(),
+            truncated: false,
+            error: None,
+        }
+    }
+
+    fn empty_export() -> crate::backend::bundle_export::BundleExport {
+        crate::backend::bundle_export::BundleExport {
+            root_slug: "b".to_string(),
+            files: vec![crate::backend::bundle_export::BundleExportFile {
+                path: "armory.json".to_string(),
+                content: "{\"components\":{}}".to_string(),
+            }],
+            skipped_skills: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn case_only_different_instruction_paths_do_not_overwrite_each_other() {
+        // Codex P2 on #3163. Scanned directories (Copilot's
+        // `.github/instructions/`) make two paths differing only in case
+        // reachable on a case-sensitive source filesystem; extracted on
+        // Windows or macOS one silently clobbers the other.
+        let mut export = empty_export();
+        let files = vec![
+            instruction_file(".github/instructions/A.instructions.md", "first"),
+            instruction_file(".github/instructions/a.instructions.md", "second"),
+        ];
+        splice_project_instructions_component(&mut export, &files).unwrap();
+
+        let carried: Vec<_> = export
+            .files
+            .iter()
+            .filter(|f| f.path.to_lowercase().starts_with("instructions/project/"))
+            .collect();
+        assert_eq!(carried.len(), 1, "the second must be skipped, not written alongside");
+        assert!(
+            export.warnings.iter().any(|w| w.contains("normalizes to the same path")),
+            "the skip must be reported, not silent: {:?}",
+            export.warnings
+        );
+    }
+
+    #[test]
+    fn unreadable_and_truncated_instruction_files_are_not_exported() {
+        // The other half of the empty-file fix: `content.is_empty()` was doing
+        // two jobs, and only one of them was correct. These are the cases that
+        // genuinely have nothing to archive.
+        let mut export = empty_export();
+        let mut unreadable = instruction_file("CLAUDE.md", "");
+        unreadable.error = Some("permission denied".to_string());
+        let mut oversized = instruction_file("AGENTS.md", "");
+        oversized.truncated = true;
+        let mut absent = instruction_file("GEMINI.md", "");
+        absent.exists = false;
+
+        splice_project_instructions_component(&mut export, &[unreadable, oversized, absent])
+            .unwrap();
+
+        assert!(
+            !export.files.iter().any(|f| f.path.starts_with("instructions/project/")),
+            "nothing readable means nothing to carry"
+        );
     }
 
     #[tokio::test]

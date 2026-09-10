@@ -331,6 +331,14 @@ import the entries are **surfaced, never applied** — the same warning shape as
 §5.1, naming what the source machine's agent was reading. An operator who wants
 those instructions applies them deliberately; AgentMux does not decide that.
 
+"Surfaced" means *readable*, not merely *announced*: the importer parses the
+entries back out (path, hash, owner, content) and returns them on
+`bundle.import.preview`. A warning alone would not have been enough, because
+`agent.project_instructions` scans the **importing** agent's working directory
+and so is structurally unable to show what the source machine held (Codex P1,
+PR #3163). Reading is not applying — no import path writes these, and
+`bundle.import.commit` has no field that could select them.
+
 The `owner` field is what keeps this honest. A re-import that silently merged a
 foreign `CLAUDE.md` into a new machine's repo would be the exact failure the
 ownership spec exists to prevent.
