@@ -96,6 +96,23 @@ pub(crate) fn starter_skill_id(trigger: &str) -> Uuid {
     Uuid::new_v5(&namespace, trigger.as_bytes())
 }
 
+/// Look up a starter skill's `trigger` by its `name`, for a caller that has
+/// only a `name` in hand and needs to recompute [`starter_skill_id`] for it —
+/// e.g. the durable-bindings carry-across migration, which must converge a
+/// legacy (pre-Phase-1, randomly-id'd) starter row onto the SAME id a fresh
+/// post-Phase-1 channel would independently mint for it, not onto whichever
+/// random id happened to reach the identity store first.
+///
+/// Returns `None` for anything not in the embedded manifest — including a
+/// user-promoted global skill that merely happens to share the concept of
+/// `is_global = 1` with the six starters. Only a recognized starter has a
+/// canonical id to converge onto; everything else keeps whatever id survives
+/// the migration's ordinary first-wins dedup.
+pub(crate) fn starter_skill_trigger_for_name(name: &str) -> Option<String> {
+    let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON).ok()?;
+    manifest.into_iter().find(|s| s.name == name).map(|s| s.trigger)
+}
+
 /// Guard against a manifest-authoring mistake: two entries sharing a
 /// `trigger`.
 ///
