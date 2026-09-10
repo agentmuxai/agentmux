@@ -347,12 +347,27 @@ backend originates:
    (`inject-history-link.ts:25`) — render-time only, never dispatched into the
    document reducer.
 
-**Rate limiting is not optional here.** `isAcceptedBackgroundLaunch`'s own doc
-comment (`tool-adapter.ts:84-110`) records that fast-finishing calls are
-misclassified as backgrounded — issue #2518, 17 spurious dock rows. Narrating
-per accepted launch would inherit that noise and pay a model call for each.
-Narrate on the transition only, once per `node_id`, and only for tasks that
-survive some floor.
+**Trigger on the acceptance predicate, and do not add a survival floor.**
+An earlier revision of this section claimed `isAcceptedBackgroundLaunch`
+misclassifies fast-finishing calls and therefore needed a survival floor on top.
+**That inverts the fact** (codex P2 on #3161). `isAcceptedBackgroundLaunch` is
+the *fix* for #2518, not a victim of it: the raw `params.run_in_background` flag
+was the unsafe signal — 11 of the 17 rows in that issue's own session were
+fast-finishers wrongly treated as detached — and this predicate exists precisely
+to exclude them by additionally requiring the acceptance prefix in the result
+text (`tool-adapter.ts:84-115`). Narrating once per accepted launch inherits no
+such noise, and a survival floor would only delay or suppress narration for
+genuinely short-lived detached tasks. Dedupe per `node_id` (a node can be
+re-observed) and nothing more.
+
+**A cross-block concurrency cap IS required**, and does not come for free
+(codex P2 on #3161). `AmbientGateway` deduplicates and cancels only within a
+single `(block_id, purpose)` key, so N panes backgrounding at once means N
+concurrent Haiku subprocesses. The pushed-summary caller this plan is modelled
+on is bounded by a semaphore *external* to it
+(`backend/reactive/activity_watcher.rs:129-137`); an RPC-driven caller inherits
+none of that. Acquire a narration-specific semaphore before spawning — the 15s
+timeout bounds each call's duration, not how many run at once.
 
 ### 8.4 P4 — the general facility
 
