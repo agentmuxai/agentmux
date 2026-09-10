@@ -273,8 +273,6 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
             instructions: mem_def.instructions.clone(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             // Seed initial global-bundle order by manifest position so seeded
             // sections start in a deterministic order; users reorder later.
             sort_order: idx as i64,

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Bundles — the agent's personality and capability stack
-//! (provider, model, instructions, context files, MCP servers, skills).
+//! (provider, model, instructions, context files). Skills and MCP servers
+//! live in the ref tables — see the `Bundle` doc comment.
 //!
 //! Extracted from `store.rs` in Phase R.3 of the storage
 //! modularization plan
@@ -18,9 +19,19 @@ use super::error::StoreError;
 use super::store::Store;
 
 /// A Bundle — the agent's personality and capability stack.
-/// Provider, model, instructions, and JSON-encoded arrays of context
-/// files / MCP servers / skills. Agent definitions shadow-migrate into this
-/// table during the v7 migration.
+/// Provider, model, instructions, and a JSON-encoded array of context files.
+/// Agent definitions shadow-migrate into this table during the v7 migration.
+///
+/// **Skills and MCP servers are NOT here.** They live in `db_bundle_skills_ref`
+/// and `db_bundle_mcp_ref`, which are the single source of truth for a
+/// bundle's components. This struct once carried inline `skills` /
+/// `mcp_servers` JSON columns alongside those tables and nothing kept the two
+/// in sync — binding in the Armory wrote a ref row while ABF export read the
+/// column, so a bundle could run with components it did not export and export
+/// components it did not run with (Phase 0b,
+/// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4). The columns
+/// were retired in `m0031` once every reader had moved to the ref tables.
+/// Do not reintroduce them: two places to write one fact is the bug.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bundle {
     pub id: String,
@@ -50,12 +61,6 @@ pub struct Bundle {
     /// JSON-encoded array; the renderer types it as `[{path, content}]`.
     #[serde(default = "default_json_array_string")]
     pub context_files: String,
-    /// JSON-encoded array of MCP server configs.
-    #[serde(default = "default_json_array_string")]
-    pub mcp_servers: String,
-    /// JSON-encoded array of skill IDs.
-    #[serde(default = "default_json_array_string")]
-    pub skills: String,
     /// Explicit ordering within the Armory global bundles. Lower sorts
     /// first; this is the order sections inject into CLAUDE.md at launch.
     /// Only meaningful for `is_global` bundles; 0 for the rest. Owned by the
@@ -139,7 +144,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    context_files, sort_order, created_at, updated_at,
                     instructions_by_provider, is_system
              FROM db_bundles
              ORDER BY is_blank ASC, is_global DESC, updated_at DESC",
@@ -162,7 +167,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    context_files, sort_order, created_at, updated_at,
                     instructions_by_provider, is_system
              FROM db_bundles
              WHERE is_global = 1
@@ -180,7 +185,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
-                    context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                    context_files, sort_order, created_at, updated_at,
                     instructions_by_provider, is_system
              FROM db_bundles WHERE id = ?1",
         )?;
@@ -231,9 +236,9 @@ impl Store {
             // the guard above — is never touched here either).
             "INSERT INTO db_bundles
                 (id, name, description, is_blank, is_global, provider, model, instructions,
-                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 context_files, sort_order, created_at, updated_at,
                  instructions_by_provider, is_system)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -242,8 +247,6 @@ impl Store {
                 model = excluded.model,
                 instructions = excluded.instructions,
                 context_files = excluded.context_files,
-                mcp_servers = excluded.mcp_servers,
-                skills = excluded.skills,
                 updated_at = excluded.updated_at,
                 instructions_by_provider = excluded.instructions_by_provider",
             params![
@@ -256,8 +259,6 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
-                memory.skills,
                 memory.sort_order,
                 memory.created_at,
                 memory.updated_at,
@@ -285,9 +286,9 @@ impl Store {
         conn.execute(
             "INSERT INTO db_bundles
                 (id, name, description, is_blank, is_global, provider, model, instructions,
-                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 context_files, sort_order, created_at, updated_at,
                  instructions_by_provider, is_system)
-             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -297,8 +298,6 @@ impl Store {
                 model = excluded.model,
                 instructions = excluded.instructions,
                 context_files = excluded.context_files,
-                mcp_servers = excluded.mcp_servers,
-                skills = excluded.skills,
                 updated_at = excluded.updated_at,
                 instructions_by_provider = excluded.instructions_by_provider",
             params![
@@ -309,8 +308,6 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
-                memory.skills,
                 memory.sort_order,
                 memory.created_at,
                 memory.updated_at,
@@ -393,12 +390,10 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Bundle> {
         model: row.get(6)?,
         instructions: row.get(7)?,
         context_files: row.get(8)?,
-        mcp_servers: row.get(9)?,
-        skills: row.get(10)?,
-        sort_order: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
-        instructions_by_provider: row.get(14)?,
-        is_system: row.get::<_, i64>(15)? != 0,
+        sort_order: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+        instructions_by_provider: row.get(12)?,
+        is_system: row.get::<_, i64>(13)? != 0,
     })
 }

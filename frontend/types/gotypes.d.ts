@@ -476,8 +476,15 @@ declare global {
     // ── v7 — Bundles ────────────────────────────────────────────
 
     /** A Bundle — the agent's personality and capability stack:
-     *  provider/CLI choice, model, system instructions, context files,
-     *  MCP servers, skills. The blank singleton represents "vanilla CLI". */
+     *  provider/CLI choice, model, system instructions, context files.
+     *  The blank singleton represents "vanilla CLI".
+     *
+     *  Skills and MCP servers are NOT here: they live in the
+     *  db_bundle_skills_ref / db_bundle_mcp_ref tables, which are the single
+     *  source of truth for what a bundle contains. The inline JSON columns
+     *  that used to shadow them were retired in m0031 — see the Rust
+     *  `Bundle` doc comment for why two places to write one fact was the
+     *  bug. Manage them through the mcp.* / skill.* RPCs. */
     type Bundle = {
         id: string;
         name: string;
@@ -496,10 +503,6 @@ declare global {
         instructions_by_provider?: string;
         /** JSON-encoded array of `{ path, content }`. */
         context_files?: string;
-        /** JSON-encoded array of MCP server configs. */
-        mcp_servers?: string;
-        /** JSON-encoded array of skill IDs. */
-        skills?: string;
         /** Explicit ordering within the Armory global bundles (controls
          *  CLAUDE.md injection order). Only meaningful for is_global bundles;
          *  0 otherwise. Owned by the reorderglobalbrain RPC. */
@@ -595,7 +598,8 @@ declare global {
 
     // Mirrors agentmux-srv/src/backend/bundle_validate.rs::{ValidationIssue,
     // ValidationReport}. `field` is one of "instructions_by_provider",
-    // "context_files", "mcp_servers", "skills".
+    // "context_files", "mcp_servers". ("skills" is never emitted: the ref
+    // table's PRIMARY KEY makes both checks it once had unrepresentable.)
     type BundleValidationIssue = {
         severity: "error" | "warning";
         field: string;

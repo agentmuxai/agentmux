@@ -822,6 +822,67 @@
     // ── v7 — Bundle accessors ─────────────────────────────────────
 
     #[test]
+    /// Every column a bundle SELECT names must land in the field
+    /// `map_memory_row` reads it into.
+    ///
+    /// `bundle_list`, `bundle_list_global` and `bundle_get` share one
+    /// positional mapper, so a column added to or removed from any ONE of
+    /// them shifts every `row.get(N)` after it. Several of the neighbouring
+    /// fields are `TEXT` next to `TEXT`, which SQLite will convert without
+    /// complaint — the failure mode is a bundle's description quietly
+    /// becoming its context files, not a type error. Retiring the inline
+    /// `mcp_servers`/`skills` columns (`m0031`) required exactly that
+    /// renumber, which is why this pins it.
+    ///
+    /// Every field gets a value distinct from every other field of the same
+    /// SQL type, so any single-position shift changes an assertion.
+    #[test]
+    fn bundle_columns_map_to_the_fields_they_are_selected_as() {
+        let store = make_store();
+        let distinct = Bundle {
+            id: "map-1".to_string(),
+            name: "the name".to_string(),
+            description: "the description".to_string(),
+            is_blank: false,
+            is_global: true,
+            provider: "the provider".to_string(),
+            model: "the model".to_string(),
+            instructions: "the instructions".to_string(),
+            instructions_by_provider: r#"{"claude":"variant"}"#.to_string(),
+            context_files: r#"[{"path":"ctx.md","content":"c"}]"#.to_string(),
+            sort_order: 7,
+            created_at: 111,
+            updated_at: 222,
+            is_system: false,
+        };
+        store.bundle_upsert(&distinct).unwrap();
+
+        // Through all three readers, since they share the mapper but not the
+        // statement — a divergence between them is the bug this guards.
+        let via_get = store.bundle_get("map-1").unwrap().unwrap();
+        let via_list = store.bundle_list().unwrap();
+        let via_list = via_list.iter().find(|b| b.id == "map-1").unwrap();
+        let via_global = store.bundle_list_global().unwrap();
+        let via_global = via_global.iter().find(|b| b.id == "map-1").unwrap();
+
+        for (label, got) in [("get", &via_get), ("list", via_list), ("global", via_global)] {
+            assert_eq!(got.name, "the name", "{label}");
+            assert_eq!(got.description, "the description", "{label}");
+            assert!(!got.is_blank, "{label}");
+            assert!(got.is_global, "{label}");
+            assert_eq!(got.provider, "the provider", "{label}");
+            assert_eq!(got.model, "the model", "{label}");
+            assert_eq!(got.instructions, "the instructions", "{label}");
+            assert_eq!(got.instructions_by_provider, r#"{"claude":"variant"}"#, "{label}");
+            assert_eq!(got.context_files, r#"[{"path":"ctx.md","content":"c"}]"#, "{label}");
+            assert_eq!(got.sort_order, 7, "{label}");
+            assert_eq!(got.created_at, 111, "{label}");
+            assert_eq!(got.updated_at, 222, "{label}");
+            assert!(!got.is_system, "{label}");
+        }
+    }
+
+    #[test]
     fn test_bundle_memory_lifecycle() {
         let store = make_store();
 
@@ -843,8 +904,6 @@
             instructions: "You are a careful refactorer.".to_string(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: 0,
             created_at: 100,
             updated_at: 100,
@@ -884,8 +943,6 @@
             instructions: format!("rules for {name}"),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: order,
             created_at: 0,
             updated_at: 0,
@@ -943,8 +1000,6 @@
             instructions: format!("rules for {name}"),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: order,
             created_at: 0,
             updated_at: 0,
@@ -970,8 +1025,6 @@
             instructions: format!("system rules for {name}"),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: 0,
             created_at: 0,
             updated_at: 0,

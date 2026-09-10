@@ -8,8 +8,8 @@
 // docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
 // for the format itself.
 //
-// A bundle is the agent's capability stack: system instructions, context
-// files, MCP servers, skills — plus, as of
+// A bundle is the agent's capability stack: system instructions and context
+// files — plus, as of
 // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7, the provider
 // (harness) + model it's meant to run on, set once at creation and readonly
 // thereafter. This reverses SPEC_MEMORY_IDENTITY_ARCH §4.1a's "presets are
@@ -64,20 +64,11 @@ export interface BundleDraft {
     instructions_by_provider: string;
     /** Edited as `[{ path, content }]`; serialized to JSON on save. */
     context_files: Array<{ path: string; content: string }>;
-    /** Edited as raw JSON string for now (advanced). */
-    mcp_servers: string;
-    /** Edited as comma-separated ids for now. */
-    skills: string;
     /** Preserved from the stored bundle; not surfaced as an editable field yet. */
     is_global?: boolean;
 }
 
-/** Empty draft for the "+ New Bundle" flow.
- *
- *  All JSON-array fields default to `"[]"` (not `""`). The backend's
- *  `db_bundles.skills` column is JSON-encoded; a literal `""` would
- *  trip downstream `JSON.parse(skills)` readers. Reagent P1 on
- *  PR #747 (2026-05-08). */
+/** Empty draft for the "+ New Bundle" flow. */
 export function emptyDraft(): BundleDraft {
     return {
         id: undefined,
@@ -88,8 +79,6 @@ export function emptyDraft(): BundleDraft {
         instructions: "",
         instructions_by_provider: "{}",
         context_files: [],
-        mcp_servers: "[]",
-        skills: "[]",
     };
 }
 
@@ -120,13 +109,6 @@ export function draftFromBundle(m: Bundle): BundleDraft {
                 ? m.instructions_by_provider
                 : "{}",
         context_files,
-        // Both JSON-array fields use the same empty-string-aware
-        // fallback. A legacy row with mcp_servers = "" would
-        // otherwise load empty into the textarea, looking
-        // unconfigured. Reagent P2 (PR #749).
-        mcp_servers:
-            m.mcp_servers && m.mcp_servers.trim().length > 0 ? m.mcp_servers : "[]",
-        skills: m.skills && m.skills.trim().length > 0 ? m.skills : "[]",
         is_global: m.is_global ?? false,
     };
 }
@@ -153,10 +135,6 @@ export function draftToWire(d: BundleDraft): Bundle {
         instructions: d.instructions,
         instructions_by_provider: d.instructions_by_provider || "{}",
         context_files: JSON.stringify(d.context_files),
-        mcp_servers: d.mcp_servers || "[]",
-        // Same JSON-array invariant as mcp_servers — never write an
-        // empty string to the skills column. Reagent P1 (PR #747).
-        skills: d.skills || "[]",
         created_at: 0,
         updated_at: 0,
     };
