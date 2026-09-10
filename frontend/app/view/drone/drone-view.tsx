@@ -803,7 +803,10 @@ const VariablesEditor = (p: {
 
 interface AgentRefShape {
     identityId: string;
-    bundleId: string;
+    // Persisted key. Mirrors Rust `AgentRef.memory_id` under `#[serde(rename_all = "camelCase")]`
+    // (agentmux-srv/src/agents/types.rs) — the executor deserializes this object, so the
+    // key is wire/persisted, not a local name (spec §4). Do not rename with the locals.
+    memoryId: string;
     instanceName: string;
     workingDirectory: string;
 }
@@ -813,7 +816,7 @@ function readAgentRef(n: FlowNode): AgentRefShape {
     if (raw && typeof raw === "object") {
         return {
             identityId: raw.identityId ?? "",
-            bundleId: raw.bundleId ?? "",
+            memoryId: raw.memoryId ?? "",
             instanceName: raw.instanceName ?? "",
             workingDirectory: raw.workingDirectory ?? "",
         };
@@ -828,7 +831,7 @@ function readAgentRef(n: FlowNode): AgentRefShape {
             `[drone] Agent block ${n.id} uses legacy forge_agent_id="${legacy}"; re-pick identity/memory after PR 3.`,
         );
     }
-    return { identityId: "", bundleId: "", instanceName: "", workingDirectory: "" };
+    return { identityId: "", memoryId: "", instanceName: "", workingDirectory: "" };
 }
 
 const AgentRefEditor = (p: {
@@ -847,8 +850,8 @@ const AgentRefEditor = (p: {
             <NodeField label="Memory">
                 <select
                     class="drone-input nodrag"
-                    value={ref().bundleId}
-                    onChange={(e) => setRef({ bundleId: e.currentTarget.value })}
+                    value={ref().memoryId}
+                    onChange={(e) => setRef({ memoryId: e.currentTarget.value })}
                 >
                     <option value="">— blank —</option>
                     {/* is_system entries are AgentMux-controlled workspace policy,
