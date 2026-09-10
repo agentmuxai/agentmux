@@ -102,14 +102,12 @@ async function loadPaneLeafChrome() {
  *  tests that don't drive a real Block mount/unmount switch. */
 function makeFakeNodeModel(overrides?: {
     activeBlockId?: () => string;
-    hasEverBeenMultiMember?: () => boolean;
     activeViewModel?: () => ViewModel | null;
 }): NodeModel {
     return {
         blockId: "b1",
         nodeId: "node-1",
         activeBlockId: overrides?.activeBlockId ?? (() => "b1"),
-        hasEverBeenMultiMember: overrides?.hasEverBeenMultiMember ?? (() => false),
         activeViewModel: overrides?.activeViewModel ?? (() => null),
     } as unknown as NodeModel;
 }
@@ -149,7 +147,6 @@ function makeRealisticNodeModel(overrides?: { activeBlockId?: () => string }): N
         blockId: "b1",
         nodeId: "node-1",
         activeBlockId: overrides?.activeBlockId ?? (() => "b1"),
-        hasEverBeenMultiMember: () => true,
         activeViewModel: activeViewModelSig,
         setActiveViewModel,
     } as unknown as NodeModel;
@@ -162,9 +159,11 @@ afterEach(() => {
 });
 
 describe("PaneLeafChrome — passthrough (not hoisted)", () => {
-    it("renders the block directly, with no chrome wrapper, when the leaf has never been multi-member", async () => {
-        setBlockView("b1", "agent");
-        const nodeModel = makeFakeNodeModel({ hasEverBeenMultiMember: () => false });
+    it("renders the block directly, with no chrome wrapper, for a non-agent view type", async () => {
+        setBlockView("b1", "term");
+        const nodeModel = makeFakeNodeModel({
+            activeViewModel: () => fakeChromeViewModel("chrome-root"),
+        });
         const PaneLeafChrome = await loadPaneLeafChrome();
 
         render(() => <PaneLeafChrome nodeModel={nodeModel} />);
@@ -173,10 +172,9 @@ describe("PaneLeafChrome — passthrough (not hoisted)", () => {
         expect(screen.queryByTestId("chrome-header")).toBeNull();
     });
 
-    it("renders the block directly when hasEverBeenMultiMember is true but the effective view type isn't agent", async () => {
-        setBlockView("b1", "term");
+    it("renders the block directly when the active member's view type hasn't resolved yet", async () => {
+        setBlockView("b1", undefined);
         const nodeModel = makeFakeNodeModel({
-            hasEverBeenMultiMember: () => true,
             activeViewModel: () => fakeChromeViewModel("chrome-root"),
         });
         const PaneLeafChrome = await loadPaneLeafChrome();
@@ -189,10 +187,13 @@ describe("PaneLeafChrome — passthrough (not hoisted)", () => {
 });
 
 describe("PaneLeafChrome — hoisted", () => {
-    it("wraps the block in the active ViewModel's renderPaneChrome once multi-member and view type is agent", async () => {
+    // Hoists for EVERY agent pane, including a single-member one — gating
+    // this on "has been multi-member" was a catch-22 (the "+" that creates
+    // a 2nd member lives inside the chrome being gated), found live and
+    // fixed; see pane-leaf-chrome.tsx's own `hoisted` comment.
+    it("wraps the block in the active ViewModel's renderPaneChrome for any agent pane, even single-member", async () => {
         setBlockView("b1", "agent");
         const nodeModel = makeFakeNodeModel({
-            hasEverBeenMultiMember: () => true,
             activeViewModel: () => fakeChromeViewModel("chrome-root"),
         });
         const PaneLeafChrome = await loadPaneLeafChrome();

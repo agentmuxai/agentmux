@@ -4,7 +4,7 @@
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import { findNode } from "./layoutNode";
 import type { Properties as CSSProperties } from "csstype";
-import { createEffect, createMemo, createRoot, createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
@@ -66,16 +66,6 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     if (addlProps.hasOwnProperty(nodeid)) return addlProps[nodeid];
                     return undefined;
                 });
-                // Monotonic — see NodeModel.hasEverBeenMultiMember's own doc
-                // comment (types.ts) for why this never resets to false.
-                const [everMultiMember, setEverMultiMember] = createSignal(false);
-                createEffect(() => {
-                    model.localTreeStateAtom();
-                    const current = findNode(model.treeState.rootNode, nodeid);
-                    if (!everMultiMember() && (current?.data?.blockStack?.length ?? 0) > 1) {
-                        setEverMultiMember(true);
-                    }
-                });
                 // Owner-checked the same way unregisterBlockComponentModel
                 // is (block-component-registry.ts) — see
                 // NodeModel.setActiveViewModel's own doc comment (types.ts).
@@ -128,7 +118,6 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     const current = findNode(model.treeState.rootNode, nodeid);
                     return current?.data?.activeBlockId || current?.data?.blockId || blockId;
                 }),
-                hasEverBeenMultiMember: everMultiMember,
                 activeViewModel: activeViewModelSig,
                 setActiveViewModel,
                 blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
