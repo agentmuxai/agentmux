@@ -31,6 +31,44 @@ and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
 registered in `patch.cfg`, so it is absent from the shipped macOS binary —
 fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
 Verified 2026-09-08.
+**Update 2026-09-10 (clare) — Phase D macOS build under way; the patch set
+forward-ports cleanly and both Phase-A "verify at build time" questions are
+answered.** (An earlier revision of this note also claimed a *new* 152 toolchain
+requirement. That was wrong and is retracted below — the Metal Toolchain is an
+Xcode 26 requirement that applies to 148 too.)
+
+*Setup completed clean.* `gclient sync` zero errors; **`patcher.py` reports
+118 patches, 118 applied, 0 failed** against real Chromium 152 source — the
+whole set forward-ports without a single conflict, confirming Phase A's
+prediction on macOS rather than by inference. `translator.py` 955 files;
+`version_manager.py` 26/26 hashes match (the 148 build logged
+`WARN: version_manager` and carried on, leaving those unverified). `gn gen`
+32,197 targets. All three Chromium-side patches and every Layer B probe verified
+present in the 152 tree; 442 Chromium files patched, against 444 on 148.
+
+*The macOS hermetic Xcode pin question (§ Phase A, "unconfirmed — verify at
+Phase D build time") is ANSWERED:* no change. `mac_toolchain.py` prints
+"Skipping Mac toolchain installation for mac" on 152 exactly as on 148 — the
+system Xcode is used.
+
+*Toolchain check — the Metal Toolchain component is required, but it is an
+Xcode 26 requirement, not a 152 one.* A from-scratch macOS build dies about 13%
+in on `angle_metal_internal_shaders_to_air` without it:
+
+    xcodebuild -downloadComponent MetalToolchain     # ~688 MB
+
+Xcode 26 ships the `metal` binary but not the compiler behind it, so
+`xcrun -f metal` resolves and the tool still refuses to run — an availability
+check cannot catch it. **I initially recorded this as new in 152; that was
+wrong**, caught by Codex on #3155. `docs/cef-patches/README.md` §Metal already
+documented it for the 148 build, including a second failure mode where
+`-downloadComponent` is itself broken by a stale `DVTDownloads.framework`. My
+evidence — zero hits for that target in the 148 logs — only showed the target
+did not RE-RUN in an incremental rebuild; the 148 tree's `.air` dates from
+2026-06-02. Both milestones default to `angle_enable_metal=true`. Documented in
+`docs/cef-build/build-patched-framework-macos.md` with a compile-based check,
+because the download reports success regardless of whether the compiler works.
+
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
 ---
