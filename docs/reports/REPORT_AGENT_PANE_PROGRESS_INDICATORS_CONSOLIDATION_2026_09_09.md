@@ -314,6 +314,46 @@ Implementation, cheapest first:
 
 Cost control is already solved: the gateway has a 15s timeout, cancellation, and concurrency caps. Narration must be **best-effort and non-blocking** — if Haiku is slow or fails, the UI change in P2 must happen anyway. Never gate a UI state transition on a model call.
 
+#### 8.3.1 Concrete landing points (researched 2026-09-10, not yet built)
+
+**The trigger must come from the frontend, not the backend.** The obvious hook —
+`COMMAND_DOCK_NODE_STATUS` (`agentmux-srv/src/server/websocket.rs` ~1257), where
+`publish_background_task_updated` already fires on the background transition —
+turns out to be unusable on its own: `CommandDockNodeStatusData`
+(`agentmux-srv/src/backend/rpc_types/block.rs:145-158`) carries `tool_name` but
+**not the command text**. The backend knows a Bash call went background; it
+cannot say *what* went background, which is the entire content of the message.
+The frontend holds the `ToolNode` params.
+
+So the facility is an RPC the frontend calls with context, not an event the
+backend originates:
+
+1. **`COMMAND_AMBIENT_NARRATE`** — new constant in
+   `agentmux-srv/src/backend/rpc_types/commands.rs` (pattern: `:67`), with
+   `CommandAmbientNarrateData { block_id, kind, context }`. `kind` is what
+   selects the prompt, and is what makes this reusable rather than
+   background-specific.
+2. **Handler** modelled on `generate_pushed_activity_summary`
+   (`agentmux-srv/src/server/app_api/session.rs:295-316`): take an
+   `AmbientCallKey` under a NEW purpose constant (do not share a purpose with an
+   existing caller — see the `_PUSHED` comment at `:270-275` for why two callers
+   sharing one purpose cancel each other), resolve `cmd` from block meta, call
+   `invoke_ambient_haiku_call` (`session.rs:1022`).
+3. **Broadcast** `ambient-narration` scoped `block:<id>`, mirroring
+   `publish_background_task_updated` (`websocket.rs:765-773`) — but carrying the
+   text, since unlike that invalidation ping there is no list query to re-read.
+4. **Frontend** subscribes in `frontend/app/store/wps-events.ts` (pattern at
+   `:69`) and renders a synthetic node via the `injectHistoryLink` mechanism
+   (`inject-history-link.ts:25`) — render-time only, never dispatched into the
+   document reducer.
+
+**Rate limiting is not optional here.** `isAcceptedBackgroundLaunch`'s own doc
+comment (`tool-adapter.ts:84-110`) records that fast-finishing calls are
+misclassified as backgrounded — issue #2518, 17 spurious dock rows. Narrating
+per accepted launch would inherit that noise and pay a model call for each.
+Narrate on the transition only, once per `node_id`, and only for tasks that
+survive some floor.
+
 ### 8.4 P4 — the general facility
 
 P3's node type, provenance marking and injection path *are* the general facility. Backgrounding is its first consumer. Other candidates already exist in-tree: the resume preflight and "Not signed in" rows are hand-rolled versions of the same idea and could migrate to it.
