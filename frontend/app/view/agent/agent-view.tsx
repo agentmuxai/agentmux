@@ -52,6 +52,7 @@ import {
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
+import { findNode } from "@/layout/lib/layoutNode";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -329,11 +330,15 @@ AgentBlockContent.displayName = "AgentBlockContent";
  * FIRST called `renderPaneChrome` (i.e. the 1→2-member transition) — frozen
  * for this component's entire lifetime, the same "one instance, one
  * immutable blockId" contract every other `ViewModel`/`NodeModel` consumer
- * already follows. This remains a valid anchor for `getNodeByBlockId`
- * lookups forever after: `anchorBlockId` stays a DORMANT stack member (even
- * once no longer active) unless the user explicitly closes that specific
- * tab, and `getNodeByBlockId` matches on `blockStack.includes(blockId)`,
- * not just the active member.
+ * already follows. It is NOT used to resolve the owning `LayoutNode`,
+ * though — ReAgent P0 on this PR: `anchorBlockId` can itself be closed by
+ * the user (removed from `blockStack` by `closeBlockInStack`'s `filter`),
+ * and `hasEverBeenMultiMember` is monotonic, so `AgentPaneChrome` never
+ * unmounts to recover — a `getNodeByBlockId(anchorBlockId)` lookup that
+ * outlives that tab's closure would return `null` forever after, breaking
+ * the whole tab strip. Node resolution uses `nodeModel.nodeId` instead
+ * (`getOwnNode`, below) — the leaf's own id, stable regardless of which
+ * stack members come and go.
  */
 export const AgentPaneChrome = (props: {
     anchorBlockId: string;
@@ -343,6 +348,17 @@ export const AgentPaneChrome = (props: {
     const layoutModel = getLayoutModelForStaticTab();
     const nodeModel = props.nodeModel;
     const anchorBlockId = props.anchorBlockId;
+
+    // ReAgent P0 on this PR: resolving the owning node via
+    // layoutModel.getNodeByBlockId(anchorBlockId) — anchorBlockId's own
+    // originating tab — breaks permanently the moment the user closes THAT
+    // specific tab: closeBlockInStack removes a closed member from
+    // blockStack via filter, so getNodeByBlockId(anchorBlockId) would
+    // return null forever after (hasEverBeenMultiMember is monotonic, so
+    // AgentPaneChrome never unmounts to recover). The leaf's own nodeId
+    // (NodeModel.nodeId) is stable regardless of which stack members come
+    // and go — resolve on that instead, everywhere in this component.
+    const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
 
     // Reads the SAME reactive field `pane-leaf-chrome.tsx`'s inner `<Key>`
     // is keyed on — see NodeModel.activeBlockId's own doc comment
@@ -427,8 +443,8 @@ export const AgentPaneChrome = (props: {
         // Reactive dependency: re-derive whenever ANY layout mutation
         // happens (matches term.tsx's termTabs).
         layoutModel.localTreeStateAtom();
-        const node = layoutModel.getNodeByBlockId(anchorBlockId);
-        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [anchorBlockId];
+        const node = getOwnNode();
+        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
         return stack.map(labelForBlock);
     });
     const combinedTabs = createMemo<PaneTab[]>(() => {
@@ -475,14 +491,14 @@ export const AgentPaneChrome = (props: {
     // picker's "Switch to existing" flow already does.
     const handleTabSwitch = (targetBlockId: string) => {
         if (targetBlockId === activeBlockId()) return;
-        const node = layoutModel.getNodeByBlockId(anchorBlockId);
+        const node = getOwnNode();
         if (!node) return;
-        const stack = node.data?.blockStack?.length ? node.data.blockStack : [anchorBlockId];
+        const stack = node.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
         if (stack.includes(targetBlockId)) {
             // No reveal gate: reaching this branch at all requires
             // node.data.blockStack.length > 1 (otherwise `stack` above is
-            // just [anchorBlockId], and targetBlockId !== activeBlockId()
-            // already ruled out targetBlockId === anchorBlockId) — the
+            // just [activeBlockId()], and targetBlockId !== activeBlockId()
+            // already ruled out targetBlockId matching it) — the
             // exact same precondition NodeModel.hasEverBeenMultiMember()
             // latches on. AgentPaneChrome only exists in the DOM at all
             // once that's true, so by the time a human can click a second
@@ -502,7 +518,7 @@ export const AgentPaneChrome = (props: {
     // pane's own stack. No modal, no implicit fork of the current
     // conversation.
     const handleNewAgentTab = async (): Promise<void> => {
-        const initialNode = layoutModel.getNodeByBlockId(anchorBlockId);
+        const initialNode = getOwnNode();
         if (!initialNode) return;
         // Hide this pane while the new tab settles — pane.open's RPC round
         // trip plus pushBlockOntoStack's forced remount (layoutStack.ts's
@@ -533,7 +549,7 @@ export const AgentPaneChrome = (props: {
             // reference. If it's gone, the skip_placement block we just
             // created has nowhere to attach to; delete it instead of leaving
             // an orphaned, unreachable block behind.
-            const node = layoutModel.getNodeByBlockId(anchorBlockId);
+            const node = getOwnNode();
             if (!node) {
                 await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
                 return;
