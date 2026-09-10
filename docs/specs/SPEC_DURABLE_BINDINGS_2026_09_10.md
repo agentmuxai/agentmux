@@ -7,7 +7,9 @@ from an initial registry-only framing that Codex correctly flagged as
 rejecting real, currently-bindable agents — PR #3179), which in turn requires
 Phase 5 to add explicit agent-delete cleanup of identity-store refs (no
 cross-database `ON DELETE CASCADE`) — see §7 Phase 5 and §8 item 2 for the
-full mechanism. Phase 2 in progress.
+full mechanism. Phase 2 in progress: schema (#3180) and the carry migration
+(#3181) landed; the application-layer read/write redirect (§5.4) is the
+remaining piece.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
@@ -287,6 +289,165 @@ against, every row is a seeded global and nothing is owner-private, so only the
 first bullet has any work to do. **That is a statement about one machine, not a
 claim that the migration is lossless in general** — the second bullet exists
 precisely because other installs will not be so tidy.
+
+### 5.4 Application-layer read/write redirect is not a call-site swap
+
+Discovered while implementing Phase 2's redirect (this section documents the
+finding before the code that acts on it, per this repo's own review discipline
+— a design this load-bearing should be reviewable on its own).
+
+The naive plan — change every handler's `wstore.skill_get(...)` to
+`state.identity_store.skill_get(...)` and stop — is correct for the methods
+that touch only `db_skills`/`db_mcp_servers` (`skill_get`, `skill_delete`'s
+catalog half is not this simple, see below, but `skill_upsert_unique_global`,
+`skill_list_all_raw`, `skill_find_global_by_name_and_type` and their MCP
+equivalents genuinely are pure single-table reads/writes with no ref-table
+involvement — true zero-touch redirects). It is **wrong** for every method
+that joins the catalog table with an agent- or bundle-level ref table in one
+SQL statement — `managed_list`, `managed_list_global`,
+`managed_list_global_for_agent`, `managed_delete`, `managed_is_accessible_to`,
+and `managed_upsert_unique` (`storage/managed.rs`) all do exactly this, e.g.
+`managed_list`'s `FROM {table} s WHERE s.is_global = 1 OR s.id IN (SELECT
+{refc} FROM {reft} WHERE {key} = ?1)`. `db_agent_skills_ref` and
+`db_bundle_skills_ref` are **not** promoted by Phase 2 — only Phase 3/6
+promote them, and Phase 6 has a hard prerequisite (Phase 5) not yet built. So
+for the whole window between Phase 2 shipping and Phase 6 landing, the ref
+table and the catalog table it needs to join against live in two different
+physical SQLite files. A single-connection query against either file alone is
+wrong: querying `wstore` alone reads a catalog mirror that has stopped being
+written (per §5.1, "authoritative, not read-through fallback-mirror" — the
+mirror goes stale the moment writes redirect to `identity_store`); querying
+`identity_store` alone finds no ref rows at all (they never move there in
+Phase 2).
+
+**Resolution:** the affected `managed.rs` methods gain an explicit `catalog:
+&Store` parameter, decoupled from `self` (which keeps meaning "the ref-table
+owner," i.e. `wstore`, unchanged in this phase). Each becomes two queries
+composed in Rust instead of one SQL join: fetch the relevant ref ids from
+`self`, fetch the relevant catalog rows from `catalog`, combine and sort in
+memory. This is not a new pattern — `managed_bind_bundle` and
+`managed_upsert_unique_for_bundle` already take an `id_store: &Store`
+parameter for bundle-existence checks, for the identical reason (existence
+lives in a different store than the ref row being written). `managed_get`
+needs no such change — it is genuinely single-table, so it is called directly
+on `identity_store` as receiver, no `managed.rs` signature change at all.
+
+**Codex P1, PR #3182: the local ref tables still FK to the local catalog
+table — binding a newly-created row would fail outright, not just read
+stale data.** Confirmed against the code, not just the review text:
+`Store::configure_and_migrate` sets `PRAGMA foreign_keys=ON` on every
+production connection (`storage/store.rs`, the block whose own comment
+already warns "without this pragma... cascades silently no-op" — the same
+enforcement cuts both ways), and `db_agent_skills_ref`/`db_agent_mcp_ref`/
+`db_bundle_skills_ref`/`db_bundle_mcp_ref` all declare `FOREIGN KEY
+(skill_id/mcp_id) REFERENCES db_skills(id)/db_mcp_servers(id) ON DELETE
+CASCADE` against `run_object_schema` — i.e. `wstore`'s **local** copy of the
+catalog table (`storage/migrations.rs` v10/v23 block, lines 717-770).
+Once catalog writes redirect to `identity_store` only, `wstore`'s local
+`db_skills`/`db_mcp_servers` stops gaining new rows — so `managed_bind_agent`
+or `managed_bind_bundle`'s `INSERT INTO {ref table} ... skill_id = ?` for any
+row created after the redirect ships has no matching local parent row, and
+`PRAGMA foreign_keys=ON` turns that into a hard `FOREIGN KEY constraint
+failed` error, not silently stale data. Splitting reads into two queries (the
+fix above) does nothing for this — it is a **write**-path constraint. Fixing
+one layer without the other was exactly §3.3's lesson repeating itself one
+level down.
+
+The bundle-level ref tables already had to solve the identical problem for
+`db_bundles` — `db_bundle_skills_ref`/`db_bundle_mcp_ref` deliberately carry
+**no** FK to `db_bundles` at all (`migrations.rs`'s own comment on those
+tables: "Bundles are authoritatively written through `id_store`... An FK
+against [wstore's local copy] would make every real bind fail... Existence is
+checked at the application layer instead"). That is precisely the shape this
+gap needs, one layer over: a new **Channel**-scoped migration
+(`OBJECT_SCHEMA_VERSION` bump) rebuilds all four ref tables — SQLite has no
+`ALTER TABLE ... DROP CONSTRAINT`, so each is recreated without its
+`skill_id`/`mcp_id` FK (columns, `PRIMARY KEY`, and — for the agent-level
+pair — the existing `agent_id → db_agents` FK are all preserved verbatim;
+only the catalog-pointing FK is dropped, run with `PRAGMA foreign_keys=OFF`
+for the duration of the rebuild, the standard SQLite procedure for this).
+Existence moves to the application layer: `managed_bind_agent` gains the same
+`catalog: &Store` parameter as the read methods above and checks
+`catalog.managed_get::<R>(id).is_some()` before inserting the ref row —
+mirroring `managed_bind_bundle`'s existing `id_store` check exactly, just one
+store later in the same chain.
+
+**Codex P2, PR #3182: the unique index doesn't match the invariant the
+application actually enforces, for skills specifically.**
+`skill_upsert_unique_global`'s dup-check is `WHERE name = ?1 AND id <> ?2 AND
+is_global = 1` — no `skill_type` filter, i.e. the application's own
+contract is "a global skill's name is unique, full stop, regardless of
+type" (its error message agrees: "a global {} named '{}' already exists," not
+scoped to type). But Phase 2a's unique index,
+`idx_ids_skills_global_name_type`, is keyed on `(name, skill_type)`
+(`migrations.rs`, `IDENTITY_STORE_SCHEMA_VERSION` v7) — narrower than the
+invariant it's meant to back. Verified this is a genuinely new exposure, not
+a preexisting one merely mislabeled: `db_skills` was always per-channel
+before Phase 2, so the only concurrency `managed_upsert_unique_global` ever
+faced was same-process, already fully serialized by `Store`'s own
+`Mutex<Connection>` — the missing index was irrelevant because nothing could
+race across it. Once the catalog is shared across processes (channels), that
+serialization no longer holds, `conn.transaction()` is SQLite's default
+DEFERRED behavior (no `TransactionBehavior::Immediate` override anywhere in
+`managed.rs`), and a same-name-different-`skill_type` race between two
+channels can have both transactions' dup-check SELECTs run before either's
+INSERT takes the write lock — both see zero conflicts, both insert, and
+`idx_ids_skills_global_name_type` has nothing to say about it since the keys
+genuinely differ. (MCP servers don't have this mismatch —
+`mcp_server_upsert_unique_global`'s dup-check and
+`idx_ids_mcp_servers_global_name` are both name-only already; this bullet is
+skills-specific.) Fix: narrow the skill index to `(name) WHERE is_global = 1`
+— matching what the application already promises — via an
+`IDENTITY_STORE_SCHEMA_VERSION` bump that drops the old index and creates the
+new one. Because `m0031`'s own dedup key is `(name, skill_type)` (§5.3), this
+migration must defensively handle any store where that carry already
+produced two same-name/different-type global rows: collapse to the
+earlier-`created_at` row exactly the way `m0031` collapses starters, rewrite
+the loser's refs to the survivor, delete the loser — the same
+detect-then-converge shape, applied once more, this time scoped `Global`
+(cleaning up `identity_store`'s own rows, not carrying from a channel).
+
+**Codex P2, PR #3182: `managed_upsert_unique`'s insert-plus-bind is no longer
+atomic — add compensation, not just documentation.** The original "accepted
+interim gap" framing here undersold it: the transaction split doesn't only
+widen the owner-private name-uniqueness race (still real, still accepted
+below, still low-severity for the reasons already given) — it also means a
+catalog insert that has already committed to `identity_store` can be
+followed by a ref-bind insert into `self` (`wstore`) that fails (lock
+contention, disk full, a channel-local constraint), leaving a durable,
+unreferenced catalog row that no ordinary list/access/delete path can
+discover (they all filter through a ref table or `is_global`, and a stray
+private row is neither bound nor global). Fix: `managed_upsert_unique`
+performs a **best-effort compensating delete** of the just-inserted catalog
+row if the subsequent ref-bind fails — `catalog.managed_delete::<R>(catalog,
+row.id())`-equivalent cleanup before propagating the bind error up, so the
+RPC's failure and the durable state agree ("nothing was created") instead of
+diverging ("something was created but the caller was told it wasn't"). This
+does not restore full atomicity (the compensating delete can itself fail,
+e.g. on the same disk-full condition that broke the bind) — it converts a
+silent, permanent orphan into, at worst, a logged best-effort-cleanup
+failure with the same orphan, which is a strict improvement and cheap to add
+given the delete path already exists. The narrower race — two concurrent
+`skill.upsert` calls for a brand-new name, same owner, same instant, both
+passing the dup-check before either inserts — remains accepted as interim:
+single-owner, single-submit UI flows are not a realistic multi-writer
+scenario, and closing it fully needs either a cross-database saga or
+promoting the ref tables early (Phase 3/6), neither justified by this
+phase's scope. Flag it again once Phase 6 lands, since promoting the agent
+ref tables restores single-connection atomicity for free.
+
+**Cross-channel dangling refs on catalog delete, still accepted as
+interim (not part of Codex's PR #3182 findings — carried over unchanged).**
+`skill.catalog.delete` purges this channel's own ref rows (`managed_delete`)
+before removing the now-global catalog row — but a *different* channel's
+`db_agent_skills_ref`/`db_bundle_skills_ref` rows pointing at that same
+catalog id are unreachable from the deleting channel's `wstore` and are left
+dangling until that other channel's own migration/redirect eventually runs
+(Phase 6). A dangling ref today already degrades gracefully — `skill_get`
+against a now-missing id returns `None`, and every read path already handles
+that — so the failure mode is "a stale bound-skill entry silently
+disappears from that other channel's list," not a crash or data corruption.
+Full closure is the same Phase 6 dependency as the point above.
 
 ## 6. Non-goals
 
