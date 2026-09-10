@@ -4,8 +4,10 @@
 identity store (item 1); item 2 keeps `db_agents` unpromoted, resolving agent
 identity as local-`db_agents`-OR-registry rather than registry-only (revised
 from an initial registry-only framing that Codex correctly flagged as
-rejecting real, currently-bindable agents — PR #3179) — see §8 for the
-recorded rationale. Phase 2 in progress.
+rejecting real, currently-bindable agents — PR #3179), which in turn requires
+Phase 5 to add explicit agent-delete cleanup of identity-store refs (no
+cross-database `ON DELETE CASCADE`) — see §7 Phase 5 and §8 item 2 for the
+full mechanism. Phase 2 in progress.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
