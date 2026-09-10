@@ -304,6 +304,7 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "agent.list",
     "agent.open",
     "agent.output",
+    "agent.project_instructions",
     "agent.send",
     "agent.status",
     "agent.stop",

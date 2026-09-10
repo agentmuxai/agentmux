@@ -390,6 +390,13 @@ pub const COMMAND_BUNDLE_GET: &str = "bundle.get";
 pub const COMMAND_BUNDLE_UPSERT: &str = "bundle.upsert";
 pub const COMMAND_BUNDLE_DELETE: &str = "bundle.delete";
 pub const COMMAND_BUNDLE_SELF_GET: &str = "bundle.self.get";
+/// Read-only: every file this agent will read as project instructions from its
+/// working directory, with a content hash and an `agentmux`/`foreign` owner
+/// for each. Phase 3 of
+/// docs/specs/SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md. There is
+/// deliberately no write counterpart — a foreign instruction file is the
+/// repository's, not AgentMux's.
+pub const COMMAND_AGENT_PROJECT_INSTRUCTIONS: &str = "agent.project_instructions";
 // Armory Bundle Format (ABF) exporter — Phase 1 of
 // docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md /
 // https://docs.agentmux.ai/abf/. Serializes a bundle + its referenced
