@@ -169,6 +169,11 @@ pub struct AppState {
     /// `docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and the
     /// Codex/reagentx findings on PR #2681.
     pub pending_background_pids: Arc<crate::backend::pending_background_pids::PendingBackgroundPids>,
+    /// Which events have already produced an ambient narration. Process-wide
+    /// and bounded — a per-connection set is reset by every reconnect, which is
+    /// precisely when the frontend re-emits nodes and would narrate them twice.
+    /// See `backend::narrated_events`.
+    pub narrated_events: Arc<crate::backend::narrated_events::NarratedEvents>,
     /// Live controller for mDNS-based LAN/host peer discovery. The controller
     /// owns a swappable daemon slot so the `network:lan_discovery` setting can
     /// be toggled at runtime without restarting the process.

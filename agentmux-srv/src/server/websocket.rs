@@ -1254,9 +1254,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // a missing nicety, not a missing state change.
     let wstore_narrate = state.wstore.clone();
     let broker_narrate = state.broker.clone();
-    let narrated = std::sync::Arc::new(parking_lot::Mutex::new(
-        std::collections::HashSet::<String>::new(),
-    ));
+    let narrated = state.narrated_events.clone();
     engine.register_handler(
         COMMAND_AMBIENT_NARRATE,
         Box::new(move |data, _ctx| {
@@ -1270,9 +1268,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // Dedupe per narrated event. A ToolNode can be re-observed, and
                 // narrating one event twice is both noise and a wasted model
                 // call. Checked before spawning so a repeat costs nothing.
-                if !cmd.dedupe_key.is_empty()
-                    && !narrated.lock().insert(cmd.dedupe_key.clone())
-                {
+                if !cmd.dedupe_key.is_empty() && !narrated.mark_new(&cmd.dedupe_key) {
                     return Ok(None);
                 }
 
