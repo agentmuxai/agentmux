@@ -19,6 +19,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         DockNodeStatusCommand: vi.fn().mockResolvedValue(undefined),
         BackgroundTaskCompletionCommand: vi.fn().mockResolvedValue(undefined),
+        AmbientNarrateCommand: vi.fn().mockResolvedValue(undefined),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -231,5 +232,54 @@ describe("StreamFlushQueue.flushNow", () => {
 
         const calls = vi.mocked(RpcApi.BackgroundTaskCompletionCommand).mock.calls;
         expect(calls.find(([, d]) => d.timestamp === 424_242)).toBeUndefined();
+    });
+});
+
+const bgNode = (): ToolNode => ({
+    type: "tool", id: "toolu_bg_n", tool: "Bash", status: "success",
+    params: { command: "task dev", run_in_background: true },
+    result: { stdout: "Command running in background with ID: b999. Output is being written to: x", stderr: "", exitCode: 0 },
+    collapsed: false, summary: "", timestamp: 1000,
+});
+
+const fastFinishNode = (): ToolNode => ({
+    type: "tool", id: "toolu_fast_n", tool: "Bash", status: "success",
+    params: { command: "du -sh .cargo", run_in_background: true },
+    result: { stdout: "<exited 0 in 13.38s>\n707M    .cargo", stderr: "", exitCode: 0 },
+    collapsed: false, summary: "", timestamp: 1000,
+});
+
+describe("ambient narration trigger", () => {
+    beforeEach(() => {
+        (RpcApi.AmbientNarrateCommand as any).mockClear();
+    });
+
+    it("narrates a genuinely accepted background launch, keyed on the node id", () => {
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+        q.pushNewNode(bgNode());
+        q.flushNow();
+
+        expect(RpcApi.AmbientNarrateCommand).toHaveBeenCalledTimes(1);
+        const arg = (RpcApi.AmbientNarrateCommand as any).mock.calls[0][1];
+        expect(arg.kind).toBe("background_task");
+        expect(arg.blockid).toBe("block-1");
+        // The command text is the whole point — the backend has tool_name but
+        // not this, which is why the trigger lives on the renderer side.
+        expect(arg.context).toContain("task dev");
+        // Dedupe is per narrated event: a node can be re-observed.
+        expect(arg.dedupe_key).toBeTruthy();
+    });
+
+    it("does NOT narrate a call that merely requested backgrounding and finished synchronously", () => {
+        // Same distinction the dock column draws (#2518: 11 of 17 in its own
+        // session were fast-finishers). Narrating those would be wrong AND
+        // would buy a model call each.
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+        q.pushNewNode(fastFinishNode());
+        q.flushNow();
+
+        expect(RpcApi.AmbientNarrateCommand).not.toHaveBeenCalled();
     });
 });
