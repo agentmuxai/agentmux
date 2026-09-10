@@ -4,6 +4,7 @@
 // SolidJS migration: all Jotai/React types replaced with SolidJS equivalents.
 
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import type { NodeModel } from "@/layout/index";
 import type { SignalAtom } from "@/util/util";
 import type { Placement } from "@floating-ui/dom";
 import type * as rxjs from "rxjs";
@@ -549,6 +550,26 @@ declare global {
          *  by BlockFrame_Header (to render the mic button) and by the
          *  Ctrl+Shift+V global hotkey to retarget the voice session. */
         voiceHandle?: () => PaneVoiceHandle;
+        /** Renders this view's own pane chrome (header + any hoisted tab
+         *  strip) WRAPPED AROUND `content` — a stable outer shell that
+         *  survives an in-pane tab switch, instead of the default
+         *  `BlockFrame` header living inside `Block` (which remounts
+         *  per-switch). `content` is the switch-scoped, `<Key>`-wrapped
+         *  `Block` for whichever member is currently active; the
+         *  implementation decides where inside its own markup that content
+         *  slots in (e.g. below a floating tab strip, inside a specific
+         *  flex-column wrapper the chrome's own CSS positioning depends
+         *  on) — `pane-leaf-chrome.tsx` has no opinion on that internal
+         *  structure, only that `content` ends up mounted somewhere in the
+         *  returned tree. Takes the LEAF-level `NodeModel` (shared across
+         *  every stack member), not a per-block one. See
+         *  `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`. */
+        renderPaneChrome?: (nodeModel: NodeModel, content: JSX.Element) => JSX.Element;
+        /** Registers the DOM node hoisted chrome should portal a
+         *  per-block busy/progress indicator into, so the indicator's own
+         *  remount (tied to the active block) doesn't require the chrome
+         *  itself to remount. `null` on unmount/teardown. */
+        setProgressBarMount?: (el: HTMLDivElement | null) => void;
     }
 
     type UpdaterStatus = "up-to-date" | "checking" | "available" | "downloading" | "ready" | "error" | "installing";

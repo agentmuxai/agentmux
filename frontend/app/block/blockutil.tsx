@@ -6,7 +6,7 @@ import { getConnStatusAtom } from "@/app/store/global";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createMemo, createSignal } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 import dotsUrl from "../asset/dots-anim-4.svg?url";
 
 const colorRegex = /^((#[0-9a-f]{6,8})|([a-z]+))$/;
@@ -86,24 +86,26 @@ export function computeConnColorNum(connStatus: ConnStatus): number {
     return connColorNum;
 }
 
-export function ConnectionButton({ connection, changeConnModalAtom, ref }: ConnectionButtonProps): JSX.Element {
-    const [connModalOpen, setConnModalOpen] = createSignal(changeConnModalAtom());
-    const isLocal = util.isBlank(connection);
-    const connStatusAtom = getConnStatusAtom(connection);
-    const connStatus = createMemo(() => connStatusAtom());
-    let showDisconnectedSlash = false;
+export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
+    // Reads `props.connection` reactively throughout (never destructured) —
+    // codex P2 on PR #3134: destructuring it once, like the previous
+    // version of this component did, freezes `isLocal`/`connStatusAtom` at
+    // whatever `connection` was on first mount. That was harmless as long
+    // as every blockId change forced a remount (the header's own remount
+    // boundary), but a hoisted, switch-surviving header
+    // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) can now change
+    // which block's `connection` this same mounted instance should reflect
+    // without remounting at all.
+    const [connModalOpen, setConnModalOpen] = createSignal(props.changeConnModalAtom());
+    const isLocal = createMemo(() => util.isBlank(props.connection));
+    const connStatus = createMemo(() => getConnStatusAtom(props.connection)());
     const connColorNum = createMemo(() => computeConnColorNum(connStatus()));
     const color = createMemo(() => `var(--conn-icon-color-${connColorNum()})`);
     const clickHandler = function () {
-        changeConnModalAtom._set(true);
+        props.changeConnModalAtom._set(true);
         setConnModalOpen(true);
     };
-    let titleText = null;
     let shouldSpin = false;
-
-    if (isLocal) {
-        return null;
-    }
 
     const getConnIcon = (): JSX.Element => {
         const cs = connStatus();
@@ -125,7 +127,7 @@ export function ConnectionButton({ connection, changeConnModalAtom, ref }: Conne
 
     const getTitleText = (): string => {
         const cs = connStatus();
-        if (isLocal) return "Connected to Local Machine";
+        const connection = props.connection;
         if (cs?.status == "connecting") return "Connecting to " + connection;
         if (cs?.status == "error") {
             let t = "Error connecting to " + connection;
@@ -138,26 +140,32 @@ export function ConnectionButton({ connection, changeConnModalAtom, ref }: Conne
 
     const getShowDisconnectedSlash = (): boolean => {
         const cs = connStatus();
-        if (isLocal) return false;
         return cs?.status == "error" || !cs?.connected;
     };
 
     return (
-        <div ref={(el) => { if (ref) ref.current = el; }} class={clsx("connection-button")} onClick={clickHandler} title={getTitleText()}>
-            <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
-                {getConnIcon()}
-                <i
-                    class="fa-slash fa-solid fa-stack-1x"
-                    style={{
-                        color: color(),
-                        "margin-right": "2px",
-                        "text-shadow": "0 1px black, 0 1.5px black",
-                        opacity: getShowDisconnectedSlash() ? 1 : 0,
-                    }}
-                />
-            </span>
-            {isLocal ? null : <div class="connection-name ellipsis">{connection}</div>}
-        </div>
+        <Show when={!isLocal()}>
+            <div
+                ref={(el) => { if (props.ref) props.ref.current = el; }}
+                class={clsx("connection-button")}
+                onClick={clickHandler}
+                title={getTitleText()}
+            >
+                <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
+                    {getConnIcon()}
+                    <i
+                        class="fa-slash fa-solid fa-stack-1x"
+                        style={{
+                            color: color(),
+                            "margin-right": "2px",
+                            "text-shadow": "0 1px black, 0 1.5px black",
+                            opacity: getShowDisconnectedSlash() ? 1 : 0,
+                        }}
+                    />
+                </span>
+                <div class="connection-name ellipsis">{props.connection}</div>
+            </div>
+        </Show>
     );
 }
 
