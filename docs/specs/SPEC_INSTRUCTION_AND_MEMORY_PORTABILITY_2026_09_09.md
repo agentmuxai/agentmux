@@ -1,6 +1,6 @@
 # Spec: Instruction and Memory Portability
 
-**Status:** proposed
+**Status:** active — Phases 1-2 landed (#3147); Phase 0 investigated 2026-09-09 and turned up a two-way divergence (§3.4), which makes Phase 0b its prerequisite. Phases 0b, 3 and 4 remain. Tracking: #3148.
 **Date:** 2026-09-09
 **Verified against:** `a86cdee50` (code, not spec prose)
 **Follows:** `SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md` §8, which deferred
@@ -189,9 +189,52 @@ are read only by `Store::bundle_skill_list` (`storage/skills.rs:495`) and
 `Store::bundle_mcp_list` (`storage/mcp_servers.rs:257`), whose only callers are
 `app_api/skill.rs:542` and `app_api/mcp.rs:625`.
 
-**A skill or MCP server bound through the ref table and absent from the inline
-column does not appear in the ABF.** Whether a sync path exists elsewhere is
-unverified; §7 Phase 0 is to answer that before anything else is built on top.
+**Phase 0 answered this, 2026-09-09, and the answer is worse than the question
+assumed: there is no sync path, by design, and the divergence runs in both
+directions.**
+
+No code path writes both. Binding a skill or server to a bundle
+(`skill.catalog.bind_to_bundle`, `mcp.catalog.bind_to_bundle`) reaches
+`Store::managed_bind_bundle` (`storage/managed.rs:285`) and issues exactly one
+INSERT into the ref table (`storage/managed.rs:298-305`); the handler
+(`app_api/skill.rs:513`) never reads or writes the bundle row. Conversely
+`bundle.upsert` and the three ABF-import paths write the inline columns
+(`storage/bundles.rs:245-246`) and never call `bundle_skill_bind` /
+`bundle_mcp_bind`. The split is deliberate and stated in the v23 schema
+comment (`migrations.rs:198-199`): the inline columns are "still the .abf
+export/import" path while the ref tables are the live-resolution one.
+
+So the two consumers disagree, and each is authoritative for a different thing:
+
+| | ABF export reads | Agent launch reads |
+|---|---|---|
+| Skills | `bundle.skills` inline (`app_api/bundle.rs:388`) | `effective_skills` → ref table (`app_api/agent_open.rs:793`) |
+| MCP servers | `bundle.mcp_servers` inline (`bundle_export.rs:526`) | `effective_mcp_servers` → ref table (`app_api/agent_open.rs:812`) |
+
+Two concrete losses follow:
+
+1. **Bind, then export.** A skill or server added to a bundle in the Armory is
+   live at launch and visible in the UI, but the inline column is still `"[]"`,
+   so the `.abf` ships with empty `skills/` and `mcp/` directories **and no
+   warning**. ABF is advertised as a backup format; this is the same
+   silent-incompleteness class the export code already guards against for a
+   damaged store (`app_api/bundle.rs:390-395`).
+2. **Import, then launch.** `bundle.import` writes inline `mcp_servers` but
+   creates no `db_mcp_servers` rows and no ref rows (`app_api/bundle.rs`
+   contains zero `mcp_server_upsert*` calls), so imported servers are never
+   materialised at spawn — inert at runtime, exactly the state
+   `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md:40-42` describes and the ref
+   tables were meant to replace.
+
+That spec kept the inline columns "as-is for this delivery" as an explicit
+non-goal (`:91-95`), to be revisited once the ref tables proved out. They have.
+Reconciling them is now a prerequisite of §5.4, not a nice-to-have: adding
+`components.projectInstructions` to a format that already drops ref-table-bound
+skills would ship a second instance of the same bug.
+
+Secondary: `bundle_delete` (`storage/bundles.rs:326`) issues only
+`DELETE FROM db_bundles` and there is deliberately no FK from the ref tables
+(`migrations.rs:727-741`), so deleting a bundle orphans its ref rows.
 
 ### 3.5 History files are in the archive but not in the manifest
 
@@ -352,8 +395,17 @@ answer and `$schema` alone does not.
 
 ## 7. Phases
 
-**Phase 0 — resolve §3.4.** Determine whether a sync path exists between the
-inline columns and the ref tables. Blocks Phase 3; blocks nothing else.
+**Phase 0 — DONE (2026-09-09), and it grew.** The investigation found no sync
+path and a two-way divergence (§3.4). What it leaves behind is no longer a
+question but a fix: reconcile the two stores, or the format grows on top of a
+known-lossy base. Still blocks Phase 3.
+
+**Phase 0b — reconcile components (§5.4).** Either the ref tables become
+authoritative and `export_bundle` reads them, or the inline columns stay
+authoritative and something syncs them on bind/unbind. Sizing this is its own
+exercise; `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` §91-95 deferred exactly
+this decision and named the trigger — "once the new ref tables have shipped and
+proven out" — which has now happened.
 
 **Phase 1 — export symmetry (§5.1).** One constant, one branch, one test. No
 format change. Independently shippable and revertible.
