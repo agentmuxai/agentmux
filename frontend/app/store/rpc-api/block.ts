@@ -35,6 +35,13 @@ export const BlockApi = {
         return client.rpcCall("tooldecision", data, opts);
     },
 
+    // Fire-and-forget request to narrate an autonomous AgentMux action into
+    // the pane's conversation. The response is not the narration — that
+    // arrives later as an `ambient-narration` broadcast, or never.
+    AmbientNarrateCommand(client: RpcClient, data: CommandAmbientNarrateData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("ambientnarrate", data, opts);
+    },
+
     // Fire-and-forget push whenever a ToolNode's status changes. Backs
     // `muxspect dock`'s diagnostic snapshot. Spec:
     // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.

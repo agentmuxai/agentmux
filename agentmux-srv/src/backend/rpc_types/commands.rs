@@ -59,6 +59,18 @@ pub const COMMAND_DELETE_SUB_BLOCK: &str = "deletesubblock";
 /// docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §9.1.
 pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 
+/// Fire-and-forget request to narrate an autonomous AgentMux action back to
+/// the user, in the pane's own conversation. The renderer supplies the
+/// context because only it has it — `COMMAND_DOCK_NODE_STATUS` below carries
+/// `tool_name` but not the command text, so the backend knows *a Bash call*
+/// went background and cannot say *what* did, which is the whole content of
+/// the message.
+///
+/// `kind` selects the prompt, which is what makes this general rather than
+/// background-task-specific. No reply expected: the narration arrives later as
+/// an `ambient-narration` broadcast, or not at all.
+pub const COMMAND_AMBIENT_NARRATE: &str = "ambientnarrate";
+
 /// Fire-and-forget push from the renderer whenever a `ToolNode`'s status
 /// changes (created, or transitions running→success/failed/canceled/etc).
 /// Backs `muxspect dock`'s diagnostic snapshot — see

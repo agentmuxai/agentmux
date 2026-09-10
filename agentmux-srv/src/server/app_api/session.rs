@@ -1674,3 +1674,108 @@ mod preflight_input_tests {
         assert_eq!(preflight_input_from_meta(&meta, None).config_dir, "/home/dev/.claude");
     }
 }
+
+// ── Ambient narration ───────────────────────────────────────────────────────
+
+/// Ambient-call purpose for narrating an autonomous AgentMux action back to the
+/// user in the pane's own conversation. Its OWN purpose constant, not shared
+/// with any summary caller: two callers under one purpose cancel each other
+/// (see `AMBIENT_PURPOSE_ACTIVITY_SUMMARY_PUSHED`'s doc comment above for the
+/// case that motivated splitting them).
+const AMBIENT_PURPOSE_NARRATION: &str = "ambient_narration";
+
+/// Max simultaneous Haiku CLI spawns for narration, across ALL blocks.
+///
+/// Load-bearing, and not inherited from anywhere: `AmbientGateway` deduplicates
+/// and cancels only within a single `(entity_id, purpose)` key, so without this
+/// N panes backgrounding a task at the same moment means N concurrent CLI
+/// spawns. The pushed-summary caller this function is modelled on is bounded by
+/// a semaphore that lives in its *caller* (`activity_watcher.rs`), which an
+/// RPC-driven path inherits nothing from. The 15s timeout inside
+/// `invoke_ambient_haiku_call` bounds each call's duration, not how many run at
+/// once. (codex P2 on #3161.)
+const MAX_CONCURRENT_NARRATIONS: usize = 2;
+
+fn narration_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_NARRATIONS))
+}
+
+/// Build the prompt for one narration `kind`.
+///
+/// `kind` is what makes this a general facility rather than a
+/// background-task-specific one: adding a narrated action means adding an arm
+/// here, not new plumbing. Returns `None` for an unrecognised kind so an
+/// unknown caller is a no-op rather than an unconstrained prompt.
+fn narration_prompt(kind: &str, context: &str) -> Option<String> {
+    match kind {
+        // The first consumer: a long-running tool call the harness detached.
+        // The pane goes quiet at that moment and the user is told nothing.
+        "background_task" => Some(format!(
+            "One sentence, first person, present tense, telling the user a command \
+             is now running in the background and you will report when it finishes. \
+             Name the command briefly. Plain text only — no markdown, no code fences, \
+             no backticks, no quotes, no preamble. Under 20 words.\n\n\
+             Command:\n\n{context}"
+        )),
+        _ => None,
+    }
+}
+
+/// Generate a short user-facing line narrating an autonomous action.
+///
+/// Best-effort by construction — every failure path returns `None` and the
+/// caller simply says nothing. A UI state change must NEVER be gated on this:
+/// if Haiku is slow, capped out, or absent, the thing being narrated still
+/// happened and the UI must already reflect it.
+pub(crate) async fn generate_ambient_narration(
+    wstore: &Store,
+    block_id: &str,
+    generation: u64,
+    kind: &str,
+    context: &str,
+) -> Option<String> {
+    let prompt = narration_prompt(kind, context)?;
+
+    let key = crate::ambient::AmbientCallKey::new(block_id, AMBIENT_PURPOSE_NARRATION);
+    let guard = match crate::ambient::gateway().admit(key, generation) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    let block: Block = wstore.get(block_id).ok().flatten()?;
+    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+    if cli_path.is_empty() {
+        return None;
+    }
+
+    let _permit = narration_semaphore().acquire().await.ok()?;
+    let (text, _tokens) =
+        invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok()?;
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    Some(text)
+}
+
+#[cfg(test)]
+mod narration_tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_kind_produces_no_prompt_rather_than_an_open_ended_one() {
+        assert!(narration_prompt("no_such_kind", "anything").is_none());
+    }
+
+    #[test]
+    fn the_background_task_kind_carries_the_command_into_the_prompt() {
+        let p = narration_prompt("background_task", "task dev").expect("known kind");
+        assert!(p.contains("task dev"));
+        // The constraints that keep the line short and renderable as plain
+        // text in a conversation row.
+        assert!(p.contains("One sentence"));
+        assert!(p.contains("no markdown"));
+    }
+}

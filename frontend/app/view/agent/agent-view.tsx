@@ -67,6 +67,7 @@ import { paneBusyForInput } from "./working-indicator";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
+import { AmbientNarrationRow } from "./components/AmbientNarrationRow";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentControlBar } from "./components/AgentControlBar";
 import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
@@ -87,6 +88,7 @@ import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { useForkSet } from "./fork/useForkSet";
 import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
 import { useActivityLog } from "./hooks/useActivityLog";
+import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
 import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
 import { useAgentCommands } from "./hooks/useAgentCommands";
@@ -1724,6 +1726,10 @@ const AgentPresentationView = ({
     // owns dedup against in-flight history loads and the truncate-suppress
     // invariant that prevents the mid-session wipe bug.
     const pendingMessages = () => paneModel.state.pending;
+    // Short lines from AgentMux about its own actions (first consumer: a tool
+    // call the harness detached). Subscribe-only — nothing here can fail in a
+    // way that affects the pane, and an absent narration is simply silence.
+    const ambientNarrations = useAmbientNarration(model.blockId);
     // Forwarded to ActivityDock so it can render registry-known background
     // tasks the transcript itself has no record of (Tier 1 of
     // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
@@ -2710,6 +2716,12 @@ const AgentPresentationView = ({
                 subagents) sit just above the composer so task status is adjacent
                 to where the user's attention already is. Moved from the top per
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
+            {/* Ambient narration — AgentMux explaining its own actions, in the
+                model's voice but attributed. Directly above the dock: the first
+                consumer narrates a task the dock is about to start showing, so
+                the sentence and the row it refers to read together. */}
+            <AmbientNarrationRow narrations={ambientNarrations()} />
+
             <ActivityDock
                 documentNodes={paneModel.document}
                 blockId={model.blockId}

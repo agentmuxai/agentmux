@@ -67,4 +67,10 @@ export const WpsEvent = {
     // websocket.rs). Handlers re-fetch via ListBackgroundTasksCommand.
     // See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
     BackgroundTaskUpdated: "background-task-updated",
+    // A short, model-voiced line describing something AgentMux did on its own
+    // (first consumer: a tool call the harness detached to the background).
+    // Unlike BackgroundTaskUpdated above this carries its payload —
+    // `{ block_id, kind, text }` — because there is no list query to re-read,
+    // so an invalidation ping would have nothing to invalidate.
+    AmbientNarration: "ambient-narration",
 } as const;
