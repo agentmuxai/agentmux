@@ -67,6 +67,31 @@ not the `148.0.9` this table previously claimed):
 - macOS arm64 host (Apple Silicon) with Xcode + command-line tools.
 - ≥ 32 GB RAM, ≥ 120 GB free disk.
 - `depot_tools` on PATH; the chromium hooks pull the macOS toolchain automatically.
+- **Chromium 152+ only — the Metal Toolchain component:**
+
+  ```bash
+  xcodebuild -downloadComponent MetalToolchain     # ~688 MB
+  ```
+
+  Xcode 26 ships the `metal` *binary* but not the compiler behind it, so
+  `xcrun -f metal` resolves and the tool still refuses to run. Chromium 152 added
+  an ANGLE step that needs it and 148 did not — verified: zero hits for
+  `angle_metal_internal_shaders_to_air` across both 148 build logs. Without the
+  component the build dies ~13% in, at roughly 7,500 of 58,000 targets:
+
+  ```
+  FAILED: gen/angle/mtl_internal_shaders_autogen.air
+  error: cannot execute tool 'metal' due to missing Metal Toolchain;
+         use: xcodebuild -downloadComponent MetalToolchain
+  ```
+
+  Confirm it works before starting rather than after — the download itself
+  succeeds silently whether or not the compiler ends up usable:
+
+  ```bash
+  echo 'kernel void k() {}' > /tmp/t.metal && xcrun metal -c /tmp/t.metal -o /tmp/t.air \
+    && echo "metal OK" || echo "metal STILL BROKEN"
+  ```
 
 The depot_tools / automate-git / fork-checkout / patcher steps are **identical to
 Linux** — follow `build-patched-libcef.md` §1–§3, with `--branch=7778`.

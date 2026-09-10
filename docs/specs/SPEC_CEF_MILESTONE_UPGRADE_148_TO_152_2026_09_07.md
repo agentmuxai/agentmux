@@ -31,6 +31,38 @@ and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
 registered in `patch.cfg`, so it is absent from the shipped macOS binary —
 fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
 Verified 2026-09-08.
+**Update 2026-09-10 (clare) — Phase D macOS build under way; two open questions
+answered, one new toolchain requirement found.**
+
+*Setup completed clean.* `gclient sync` zero errors; **`patcher.py` reports
+118 patches, 118 applied, 0 failed** against real Chromium 152 source — the
+whole set forward-ports without a single conflict, confirming Phase A's
+prediction on macOS rather than by inference. `translator.py` 955 files;
+`version_manager.py` 26/26 hashes match (the 148 build logged
+`WARN: version_manager` and carried on, leaving those unverified). `gn gen`
+32,197 targets. All three Chromium-side patches and every Layer B probe verified
+present in the 152 tree; 442 Chromium files patched, against 444 on 148.
+
+*The macOS hermetic Xcode pin question (§ Phase A, "unconfirmed — verify at
+Phase D build time") is ANSWERED:* no change. `mac_toolchain.py` prints
+"Skipping Mac toolchain installation for mac" on 152 exactly as on 148 — the
+system Xcode is used.
+
+***NEW REQUIREMENT: Chromium 152 needs the Metal Toolchain component on macOS.***
+This is the "confirm the 152 build toolchain requirements haven't moved" item,
+and for macOS they moved:
+
+    xcodebuild -downloadComponent MetalToolchain     # ~688 MB
+
+Xcode 26 ships the `metal` binary but not the compiler behind it, so
+`xcrun -f metal` resolves and the tool still refuses to run. Without it the build
+dies about 13% in (~7,500 of 58,156 targets) on
+`angle_metal_internal_shaders_to_air`. 148 never compiled that target at all —
+zero hits across both 148 logs — so this is genuinely new in 152, not a local
+misconfiguration. Documented in `docs/cef-build/build-patched-framework-macos.md`
+with a verification command, because the download reports success regardless of
+whether the compiler ends up usable.
+
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
 ---
