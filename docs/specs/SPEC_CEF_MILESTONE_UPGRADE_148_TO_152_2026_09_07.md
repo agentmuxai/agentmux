@@ -23,7 +23,14 @@ feature branches, `agentmux/7977-process-requirement` and
 `agentmux/7977-drag-rightclick-and-transparency`, are merged into it).
 **Phases C/E/F/G not started; Windows built (`libcef.dll`, boot-verified);
 macOS/Linux not built — `agentmuxai/cef` has no CI, so this is the only
-compile signal that exists.** The
+compile signal that exists.**
+**Correction 2026-09-10 (Korp):** "boot-verified" above needs a caveat —
+the app *launched* on that build, but it shipped a silent GPU regression
+(dummy placeholder `libEGL.dll`/`libGLESv2.dll`, GPU fully disabled, zero
+build errors — see the finding below). "Boots" and "GPU works" are not the
+same signal; a clean compile plus a successful launch is not sufficient
+verification for this platform going forward. Root-caused and fixed — see
+below. The
 recon **corrects two errors in §2's patch table** (marked inline below), makes
 §4's Phase E work different from what's written there (see the callout in that
 section — the un-pinned-CEF finding it describes was closed by #3086/#3085/#3089),
@@ -31,6 +38,61 @@ and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
 registered in `patch.cfg`, so it is absent from the shipped macOS binary —
 fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
 Verified 2026-09-08.
+
+**Phase B completion, independently confirmed (Korp, 2026-09-10):**
+`agentmuxai/cef` PR #9 (a from-scratch merge of both feature branches into
+`7977`) verified `21 OK, 0 MISS` on the carry-set gate before being closed
+as superseded by the independent merge already recorded above — two
+separate routes landed on the same complete state.
+
+**2026-09-10 (Korp) — Phase D (Windows): build compiles clean
+(60,275/60,275 targets minus one known-broken, non-shipping test target,
+see below), but a critical runtime regression was found and fixed; not yet
+re-boot-verified or released, so not "done."**
+
+**2026-09-10 — CEF 152 Windows build: real, silent GPU regression found
+and fixed, affects all three platforms.** Chromium's `use_static_angle`
+(declared default `true` in `ui/gl/features.gni`) combines with
+`ui/gl/BUILD.gn`'s `use_angle_stubs = use_static_angle && (is_linux ||
+is_win || is_mac)` to ship DUMMY placeholder `libEGL.dll`/`libGLESv2.dll`
+(`dummy_stub.cc` — "some bot infrastructure expects these files to exist
+even in static builds") instead of a real ANGLE implementation. **This
+produces zero build errors and zero warnings — a clean compile is not
+evidence this is fine.** Confirmed on Windows: without an explicit
+`use_static_angle=false`, `libGLESv2.dll` is 471,552 bytes with no
+`glGetString`/`glCreateShader` in its export table (verified via `dumpbin
+/EXPORTS` — a `strings`-based symbol search is NOT reliable on an
+`is_official_build=true` + `use_thin_lto=true` binary and will show nothing
+either way); with the flag added, it's 8.4 MB with the full real GL export
+table. Symptom in the shipped app: GPU process dies at init
+(`eglGetProcAddress not found`), falls back to neither hardware nor
+SwiftShader — GPU fully off, not degraded. Fixed for Windows in
+`scripts/cef-build/args-windows.gn` (`use_static_angle=false`, with the
+full investigation notes inline there). **The gating condition
+(`is_linux || is_win || is_mac`) covers all three platforms — `args.gn`
+(Linux) and `args-darwin.gn` (macOS) do not yet have this line and should
+be checked before either platform's 152 build is treated as complete.**
+A clean compile on those platforms gives no signal either way — this has
+to be checked for directly (export-table check, not just build success).
+
+**2026-09-10 — a second, unrelated Windows-only compile bug also found**
+(not yet fixed, not blocking): `cef/libcef_dll/bootstrap/installer/installer_bootstrap_helpers_unittest.cc`
+fails to compile under `is_official_build=true` + `is_debug=false`
+(`NDEBUG`) — it calls `SetInstallerE2EConfigForTesting`, which
+`installer_e2e_config.h` only declares when `!(OFFICIAL_BUILD && NDEBUG)`.
+The 148 build used the same flags and had zero errors, so this looks new
+to CEF between 148 and 152, not something our fork's patches touch. Not
+blocking — the affected target (`installer_tests`) is `testonly = true`
+and never ships in the runtime bundle, so Phase D's build simply excludes
+it (`ninja ... cefsimple cefsimple_capi ceftests libcef_static_unittests
+bootstrap bootstrapc cefclient_dll cefsimple_dll cefsimple_capi_dll
+ceftests_dll cefclient`, i.e. the `cef` GN group's own `is_win` deps minus
+this one target) rather than the group as a whole. Filed as
+`agentmuxai/agentmux#3160` for whoever wants to land a proper forward-port
+patch. Confirmed via `-k 0` against the full `cef` group that no other
+target depends on this one — excluding it doesn't silently drop anything
+else.
+
 **Update 2026-09-10 (clare) — Phase D macOS build under way; the patch set
 forward-ports cleanly and both Phase-A "verify at build time" questions are
 answered.** (An earlier revision of this note also claimed a *new* 152 toolchain
@@ -369,6 +431,16 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 | Linux x86_64 | `docs/cef-build/build-patched-libcef.md` | `args.gn` | `libcef.so` (strip before publishing) |
 
 **Total build cost: 9–18 machine-hours across three machines**, plus the ~100 GB checkout on each. The three are fully independent and should run in parallel on three machines — see §6.
+
+> **2026-09-10 — before treating any platform's build as done, read the
+> `use_static_angle=false` finding in this doc's top status block.** A
+> clean, zero-error compile is not sufficient evidence — the GPU regression
+> it describes produces no build failure on any of the three platforms.
+> Windows is fixed (`scripts/cef-build/args-windows.gn`); Linux/macOS need
+> the equivalent line added to `args.gn`/`args-darwin.gn` and verified via
+> an export-table check (`dumpbin`/`nm`/`objdump` on the built
+> `libGLESv2.so`/`.dylib` — look for real symbols like `glGetString`, not
+> just file size), not a `strings` search and not build success alone.
 
 ### Phase E — Distribution
 Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create`; this is by documented convention a deliberate step separate from any source PR), then update consumers in *this* repo:
