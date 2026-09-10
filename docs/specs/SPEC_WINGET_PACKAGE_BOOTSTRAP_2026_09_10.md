@@ -57,16 +57,29 @@ doesn't own.
    the release binary directly).
 2. Run against the latest real GitHub Release asset — installer is Inno Setup
    (`scripts/package-installer.ps1`), a native WinGet `InstallerType: inno`,
-   which WinGet handles with standard silent-install switches automatically:
+   which WinGet handles with standard silent-install switches automatically.
+   **Corrected 2026-09-10 (Codex, PR #3159 review):** `new`'s only positional
+   argument is the installer URL(s) — there is no `--version`/`--urls`/
+   `--submit` flag on `new` (those exist on `update`, the *ongoing*-release
+   command, not the one-time bootstrap). Passing `AgentMux.AI` positionally,
+   as an earlier draft of this doc did, would be parsed as a malformed
+   installer URL and fail before ever reaching manifest creation. Verified
+   directly against `wingetcreate.exe new --help` (v1.12.13.0):
    ```
-   wingetcreate new AgentMux.AI \
-     --version <ver> \
-     --urls "https://github.com/agentmuxai/agentmux/releases/download/v<ver>/AgentMux-<ver>-x64-setup.exe" \
-     --submit \
+   wingetcreate.exe new \
+     "https://github.com/agentmuxai/agentmux/releases/download/v<ver>/AgentMux-<ver>-x64-setup.exe" \
      --token $WINGET_TOKEN
    ```
-   Publisher: `AgentMux`. PackageName: `AgentMux`. License: `Apache-2.0`
-   (`package.json`'s `license` field — matches the real repo license).
+   `new` downloads the installer, extracts what metadata it can, then
+   **interactively prompts** for the fields it can't infer — Package
+   Identifier, Publisher, Package Name, License, etc. Answer those prompts:
+   PackageIdentifier `AgentMux.AI`, Publisher `AgentMux`, PackageName
+   `AgentMux`, License `Apache-2.0` (`package.json`'s `license` field —
+   matches the real repo license). Passing `--token` is what makes it submit
+   directly on completion (vs. `--out <dir>` to only write the manifest
+   locally for a dry-run/inspection first, which is worth doing at least once
+   before the real submission, given the interactive surface here was already
+   wrong once).
 3. This opens a PR on `microsoft/winget-pkgs`. Automated validation there
    checks the URL is reachable, the installer runs silently, and the
    version/hash match. A human moderator merges on success — typically within
