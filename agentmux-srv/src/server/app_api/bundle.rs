@@ -32,6 +32,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_export_for_agent_with_history(engine, state);
     register_bundle_import_for_agent(engine, state);
     register_bundle_validate(engine, state);
+    register_agent_project_instructions(engine, state);
 }
 
 /// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
@@ -333,6 +334,55 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
         })
     };
     engine.register_handler(COMMAND_BUNDLE_SELF_GET, make(state.clone()));
+}
+
+/// `agent.project_instructions` — what this agent will actually read.
+///
+/// Phase 3 of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Until
+/// now nothing could answer this: AgentMux knew what it wrote and recorded a
+/// single boolean about anything it found already there (§2.4).
+///
+/// Agent-scoped, so `check_s1` applies — an agent's working directory contents
+/// are not window-scoped data the way a bundle is.
+///
+/// **Read-only, and there is no write counterpart on purpose.** A foreign
+/// instruction file belongs to the repository;
+/// `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` exists to keep AgentMux
+/// out of it, and this must not become a way around that.
+fn register_agent_project_instructions(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let make = |state: AppState| -> crate::backend::rpc::engine::CommandHandler {
+        Box::new(move |data, ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    agent_id: String,
+                }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.project_instructions: {e}"))?;
+                check_s1(&ctx, &req.agent_id)?;
+
+                let agent = state
+                    .wstore
+                    .agent_def_get(&req.agent_id)
+                    .map_err(|e| format!("agent.project_instructions: {e}"))?
+                    .ok_or_else(|| {
+                        format!("agent.project_instructions: no agent with id {}", req.agent_id)
+                    })?;
+
+                let files = crate::backend::project_instructions::resolve_project_instructions(
+                    &agent.provider,
+                    &agent.working_directory,
+                );
+                Ok(Some(json!({
+                    "provider": agent.provider,
+                    "working_directory": agent.working_directory,
+                    "files": files,
+                })))
+            })
+        })
+    };
+    engine.register_handler(COMMAND_AGENT_PROJECT_INSTRUCTIONS, make(state.clone()));
 }
 
 /// `bundle.export` — Armory Bundle Format (ABF) exporter, Phase 1 of
