@@ -282,10 +282,24 @@
         flex-shrink: 0; // a normal-flow row in this flex column now
     }
 
+    // Spans the strip AND the terminal — the positioned ancestor for the
+    // background-image layer and the agent-runtime badge that TermPaneChrome
+    // renders (both used to sit inside `.view-term` back when that contained
+    // the strip). Deliberately does NOT include the header row: the
+    // background image never painted behind the pane header before the
+    // hoist either.
+    > .term-pane-stack-body {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
     // Relocated verbatim from `.view-term > .pane-tab-strip` (this file,
     // before the hoist) — that selector matched the strip as a direct child
     // of `.view-term`, which it no longer is. Same declarations, new parent.
-    > .pane-tab-strip {
+    > .term-pane-stack-body > .pane-tab-strip {
         // Was shrink-to-fit (`align-self: flex-start` in the shared
         // PaneTabStrip.scss). The band has to span the pane for the glass
         // to read as a panel rather than a lozenge around [tabs][+].
@@ -314,7 +328,7 @@
     // filling whatever the header and strip leave. `min-height: 0` so the
     // terminal can actually shrink inside the flex column instead of
     // forcing the pane to overflow.
-    > .term-pane-stack-content {
+    > .term-pane-stack-body > .term-pane-stack-content {
         flex: 1 1 auto;
         min-height: 0;
         position: relative;
