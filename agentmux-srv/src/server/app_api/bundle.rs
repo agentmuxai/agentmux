@@ -436,18 +436,6 @@ fn bundle_export_impl(
     Ok(result)
 }
 
-/// Splice native-memory files into an already-built bundle export's
-/// `armory.json` manifest and files list, adding `components.memory` (ABF
-/// v0.2 §2.3). Kept OUTSIDE `bundle_export.rs` deliberately — that
-/// module's `export_bundle()` is scoped to a bundle's own components
-/// (instructions/skills/MCP/accounts) with no concept of "agent" or
-/// native memory at all; memory is agent-scoped, not bundle-scoped, so
-/// splicing it in here (the RPC-handler layer, which already resolves
-/// other agent-scoped data like skill rows) keeps that module's
-/// documented scope intact rather than growing it a fifth, unrelated
-/// component category. A no-op when `memory_files` is empty — matches the
-/// existing omit-empty-components convention used elsewhere in the
-/// manifest.
 /// Warning the agent-less `bundle.export` pushes when the bundle it is
 /// exporting is bound to an agent that actually has native memory.
 ///
@@ -602,6 +590,18 @@ fn splice_history_component(
     set_manifest_component(export, "history", history_paths)
 }
 
+/// Splice native-memory files into an already-built bundle export's
+/// `armory.json` manifest and files list, adding `components.memory` (ABF
+/// v0.2 §2.3). Kept OUTSIDE `bundle_export.rs` deliberately — that
+/// module's `export_bundle()` is scoped to a bundle's own components
+/// (instructions/skills/MCP/accounts) with no concept of "agent" or
+/// native memory at all; memory is agent-scoped, not bundle-scoped, so
+/// splicing it in here (the RPC-handler layer, which already resolves
+/// other agent-scoped data like skill rows) keeps that module's
+/// documented scope intact rather than growing it a fifth, unrelated
+/// component category. A no-op when `memory_files` is empty — matches the
+/// existing omit-empty-components convention used elsewhere in the
+/// manifest.
 fn splice_memory_component(
     export: &mut crate::backend::bundle_export::BundleExport,
     memory_files: &[(String, String)],
