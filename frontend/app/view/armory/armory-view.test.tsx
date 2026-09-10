@@ -123,11 +123,11 @@ describe("ArmoryView rail", () => {
         expect(rail.querySelector(".bundle-manager-rail-item .fa-brain")).toBeInTheDocument();
     });
 
-    it("orders the rail as Accounts, Memory, Skills, MCP Servers, ABF", () => {
+    it("orders the rail as Accounts, Memory, Skills, MCP Servers, Bundles", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "ABF"]);
+        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "Bundles"]);
     });
 });
 
@@ -246,21 +246,21 @@ describe("ArmoryView pane title", () => {
         expect(tabBar.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("highlights only the ABF entry in both the rail and the tab-bar", () => {
+    it("highlights only the Bundles entry in both the rail and the tab-bar", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
         for (const nav of [rail, tabBar]) {
             const highlighted = Array.from(nav.querySelectorAll("button.is-abf-highlight"));
             expect(highlighted).toHaveLength(1);
-            expect(highlighted[0].textContent).toContain("ABF");
+            expect(highlighted[0].textContent).toContain("Bundles");
         }
     });
 
     it("viewName() reflects a pre-seeded armory:section meta value", () => {
         setBlockMeta({ "armory:section": "bundles" });
         const model = new ArmoryViewModel("test-block", null as any);
-        expect(model.viewName()).toBe("ABF");
+        expect(model.viewName()).toBe("Bundles");
     });
 
     it("falls back to 'Accounts' for an invalid armory:section meta value", () => {

@@ -507,7 +507,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
     return (
         <PrimitiveListDetail
             showDetail={inDetail()}
-            backLabel="ABF"
+            backLabel="Bundles"
             onBack={handleBack}
             list={listView}
             detail={detailView}

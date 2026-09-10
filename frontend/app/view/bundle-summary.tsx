@@ -88,7 +88,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 <Show when={props.agentId && boundBundle()}>
                     {(bundle) => (
                         <div class="bundle-summary-bound">
-                            <p class="bundle-summary-bound-label">This agent's own ABF</p>
+                            <p class="bundle-summary-bound-label">This agent's own bundle</p>
                             <p class="bundle-summary-bound-name">{bundle().name}</p>
                             <Show when={bundle().provider}>
                                 <p class="bundle-summary-bound-provider">
@@ -100,12 +100,12 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 </Show>
                 <Show when={props.agentId && boundBundleId() && !boundBundle.loading && !boundBundle()}>
                     <p class="bundle-summary-body bundle-summary-hint">
-                        This agent's ABF bundle couldn't be loaded (it may have been deleted).
+                        This agent's bundle couldn't be loaded (it may have been deleted).
                     </p>
                 </Show>
                 <Show when={props.agentId && agents().length > 0 && !boundBundleId()}>
                     <p class="bundle-summary-body bundle-summary-hint">
-                        This agent has no ABF bundle of its own yet.
+                        This agent has no bundle of its own yet.
                     </p>
                 </Show>
 

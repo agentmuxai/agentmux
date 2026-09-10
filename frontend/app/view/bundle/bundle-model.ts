@@ -179,7 +179,7 @@ export class BundleViewModel implements ViewModel {
     // stay visually consistent; the brain icon is reserved for native memory.
     viewIcon: Accessor<string> = () => "layer-group";
     viewName: Accessor<string>;
-    viewText: Accessor<string | HeaderElem[]> = () => "ABF";
+    viewText: Accessor<string | HeaderElem[]> = () => "Bundles";
     noPadding: Accessor<boolean> = () => false;
 
     get viewComponent(): ViewComponent {
@@ -244,7 +244,7 @@ export class BundleViewModel implements ViewModel {
             : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
-            return (block?.meta?.["frame:title"] as string) ?? "ABF";
+            return (block?.meta?.["frame:title"] as string) ?? "Bundles";
         });
         this.agentId = createMemo(() => {
             const block = this.blockAtom();
@@ -277,7 +277,7 @@ export class BundleViewModel implements ViewModel {
             this.setMemories(list.filter((m) => !m.is_system));
             this.setError(null);
         } catch (e) {
-            this.setError(`Failed to load ABF bundles: ${(e as Error).message ?? e}`);
+            this.setError(`Failed to load bundles: ${(e as Error).message ?? e}`);
         }
     }
 

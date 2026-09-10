@@ -38,7 +38,7 @@ export const ARMORY_SECTION_LABELS: Record<ArmorySection, string> = {
     memory: "Memory",
     skills: "Skills",
     mcp: "MCP Servers",
-    bundles: "ABF",
+    bundles: "Bundles",
 };
 
 function isArmorySection(v: unknown): v is ArmorySection {
