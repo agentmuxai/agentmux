@@ -33,6 +33,19 @@ import { createMemo, Show, type JSX } from "solid-js";
  * the bare `content` below — zero behavior change for those, matching what
  * `<Block>` alone already did.
  */
+/**
+ * EFFECTIVE view types (post-`resolveEffectiveViewType`) whose `ViewModel`
+ * implements `renderPaneChrome` — i.e. the ones that own an in-pane tab
+ * strip and therefore need their chrome hoisted out of the per-block
+ * remount boundary. Everything else takes the passthrough branch below,
+ * unchanged from what a plain `<Block>` always did.
+ *
+ * A view type listed here MUST also set `noHeader` off
+ * `nodeModel.paneChromeHoisted` (see AgentViewModel/TermViewModel), or its
+ * inline BlockFrame header and its hoisted one will both render.
+ */
+const HOISTS_OWN_CHROME = new Set(["agent", "term"]);
+
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
@@ -66,7 +79,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // flash this file exists to prevent.
     let latchedHoisted = false;
     const hoisted = createMemo(() => {
-        if (!latchedHoisted && effectiveViewType() === "agent") {
+        if (!latchedHoisted && HOISTS_OWN_CHROME.has(effectiveViewType())) {
             latchedHoisted = true;
         }
         return latchedHoisted;
