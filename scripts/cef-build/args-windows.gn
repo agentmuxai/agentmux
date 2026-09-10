@@ -24,6 +24,32 @@
 # cef-windows-x86_64-148.0.7778.180 on agentmuxai/cef. See
 # docs/cef-build/build-patched-cef-windows.md's "Status" section for the
 # full list of build-config gaps this run surfaced and fixed.
+#
+# use_static_angle=false (added 2026-09-10, CEF 152 upgrade, Phase D) — NOT
+# in the 148 build above; that build got real ANGLE-linked libEGL.dll/
+# libGLESv2.dll from whatever Chromium's resolved default was at 148
+# without ever needing to set this. At 152 the declared default
+# (ui/gl/features.gni: `use_static_angle = true`) produces DUMMY stub
+# libEGL.dll/libGLESv2.dll instead (`ui/gl/BUILD.gn`'s
+# `use_angle_stubs = use_static_angle && (is_linux || is_win || is_mac)` —
+# "Some bot infrastructure expects these files to exist even in static
+# builds", i.e. placeholders, not a real GL implementation). This compiles
+# with ZERO errors and ZERO warnings — the build looks completely healthy —
+# but the shipped runtime has no working GPU/WebGL
+# (`eglGetProcAddress not found`, GPU process dies at init, falls back to
+# neither hardware NOR SwiftShader — GPU is fully disabled). Confirmed via
+# `dumpbin /EXPORTS` (a raw `strings` search for symbol names is NOT
+# reliable on an `is_official_build=true` + `use_thin_lto=true` binary —
+# it found nothing on both the broken AND the fixed DLL): without this
+# flag, libGLESv2.dll is 471,552 bytes with no glGetString/glCreateShader
+# exports; with it, 8.4 MB with the full real export table. Root-caused by
+# testing directly rather than assumed — see
+# docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md's Phase D
+# section for the full investigation. This condition (`is_linux || is_win
+# || is_mac`) means Linux's and macOS's args files need the identical line
+# — verify before treating either platform's 152 build as done, since a
+# clean compile gives no signal either way.
+use_static_angle=false
 
 alternate_cdm_storage_id_key="968b476909da4373b08903c28e859454"
 clang_use_chrome_plugins=false
