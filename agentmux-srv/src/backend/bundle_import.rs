@@ -2464,8 +2464,6 @@ mod tests {
             instructions: "Be helpful.".to_string(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
             sort_order: 0,
             created_at: 0,
             updated_at: 0,

@@ -2735,13 +2735,34 @@ mod bundle_upsert_input_tests {
         let out = normalize_bundle_upsert_input(json!({
             "name": "p",
             "context_files": [{ "path": "a.md", "content": "x" }],
-            "mcp_servers": [],
-            "skills": ["s1", "s2"],
         }));
         // serde_json::Value maps serialize keys in sorted order.
         assert_eq!(out["context_files"], json!("[{\"content\":\"x\",\"path\":\"a.md\"}]"));
-        assert_eq!(out["mcp_servers"], json!("[]"));
-        assert_eq!(out["skills"], json!("[\"s1\",\"s2\"]"));
+    }
+
+    /// `mcp_servers` / `skills` are no longer normalized, because `Bundle` no
+    /// longer has anywhere to put them (`m0031`).
+    ///
+    /// Passed through verbatim rather than stripped: `Bundle` has no
+    /// `deny_unknown_fields`, so serde drops them at deserialization anyway,
+    /// and an older client that still sends them gets a successful upsert
+    /// rather than an error about a field it has no way to know is gone.
+    #[test]
+    fn retired_component_keys_are_left_alone() {
+        let out = normalize_bundle_upsert_input(json!({
+            "name": "p",
+            "mcp_servers": [],
+            "skills": ["s1", "s2"],
+        }));
+        assert_eq!(out["mcp_servers"], json!([]), "must not be re-encoded");
+        assert_eq!(out["skills"], json!(["s1", "s2"]));
+
+        let bundle: Result<crate::backend::storage::store::Bundle, _> =
+            serde_json::from_value(out);
+        assert!(
+            bundle.is_ok(),
+            "an older client still sending the retired keys must still upsert"
+        );
     }
 
     #[test]
@@ -2749,10 +2770,8 @@ mod bundle_upsert_input_tests {
         let out = normalize_bundle_upsert_input(json!({
             "name": "p",
             "context_files": "[]",
-            "skills": "[\"already\"]",
         }));
         assert_eq!(out["context_files"], json!("[]"));
-        assert_eq!(out["skills"], json!("[\"already\"]"));
     }
 }
 

@@ -719,8 +719,9 @@ pub fn zip_bundle_export(export: &BundleExport) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
-    fn make_bundle(instructions: &str, context_files: &str, mcp_servers: &str, skills: &str) -> Bundle {
-        Bundle {
+    fn make_bundle(instructions: &str, context_files: &str, mcp_servers: &str) -> (Bundle, Vec<Value>) {
+        let entries: Vec<Value> = serde_json::from_str(mcp_servers).unwrap_or_default();
+        let bundle = Bundle {
             id: "bundle-1".to_string(),
             name: "Backend Dev Bundle".to_string(),
             description: "Backend dev conventions".to_string(),
@@ -731,26 +732,12 @@ mod tests {
             instructions: instructions.to_string(),
             instructions_by_provider: "{}".to_string(),
             context_files: context_files.to_string(),
-            mcp_servers: mcp_servers.to_string(),
-            skills: skills.to_string(),
             sort_order: 0,
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
             is_system: false,
-        }
-    }
-
-    /// Render a bundle whose MCP servers are given inline, the way these
-    /// renderer tests express a fixture.
-    ///
-    /// `export_bundle` no longer reads `bundle.mcp_servers` — the ref tables
-    /// are authoritative and the caller resolves them (Phase 0b,
-    /// SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md). These tests are
-    /// about rendering, not resolution, so this shim does the parse the
-    /// renderer used to do and hands the entries over explicitly.
-    fn export_with_inline_mcp(bundle: &Bundle, skills: &[Skill]) -> BundleExport {
-        let entries: Vec<Value> = serde_json::from_str(&bundle.mcp_servers).unwrap_or_default();
-        export_bundle(bundle, skills, &entries)
+        };
+        (bundle, entries)
     }
 
     fn make_agent_skill(name: &str) -> Skill {
@@ -769,8 +756,8 @@ mod tests {
 
     #[test]
     fn exports_instructions_as_agents_md() {
-        let bundle = make_bundle("Follow repo conventions.", "[]", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("Follow repo conventions.", "[]", "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         let f = export.files.iter().find(|f| f.path == "instructions/AGENTS.md").unwrap();
         assert_eq!(f.content, "Follow repo conventions.");
     }
@@ -778,8 +765,8 @@ mod tests {
     #[test]
     fn exports_context_files_under_instructions_context() {
         let context_files = r#"[{"path":"docs/readme.md","content":"Readme heading"}]"#;
-        let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", context_files, "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         let f = export
             .files
             .iter()
@@ -791,8 +778,8 @@ mod tests {
     #[test]
     fn rejects_path_traversal_in_context_files() {
         let context_files = r#"[{"path":"../../etc/passwd","content":"evil"}]"#;
-        let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", context_files, "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         assert!(export.files.iter().all(|f| !f.content.contains("evil")));
         assert!(!export.files.iter().any(|f| f.path.contains("..")));
         // Codex + reagent P2, PR #2333: a rejected entry must not just
@@ -807,12 +794,12 @@ mod tests {
 
     #[test]
     fn exports_agent_skill_format_skills_and_skips_prompt_format() {
-        let bundle = make_bundle("", "[]", "[]", r#"["skill-a","skill-b"]"#);
+        let (bundle, mcp) = make_bundle("", "[]", "[]");
         let mut prompt_skill = make_agent_skill("Slash Skill");
         prompt_skill.skill_type = "prompt".to_string();
         let skills = vec![make_agent_skill("Deploy Checklist"), prompt_skill];
 
-        let export = export_with_inline_mcp(&bundle, &skills);
+        let export = export_bundle(&bundle, &skills, &mcp);
         assert!(export
             .files
             .iter()
@@ -824,8 +811,8 @@ mod tests {
     #[test]
     fn exports_mcp_servers_and_infers_requirements_from_env_keys() {
         let mcp_servers = r#"[{"name":"github","type":"stdio","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let server_file = export
             .files
@@ -849,8 +836,8 @@ mod tests {
         // model-vendor sense components.instructions now uses. Exported
         // requirements must use the disambiguated key.
         let mcp_servers = r#"[{"name":"github","type":"stdio","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let req_file = export
             .files
@@ -877,8 +864,8 @@ mod tests {
             "env": {"GITHUB_TOKEN": "ghp_realSecretValue123"},
             "headers": {"Authorization": "Bearer realBearerToken456"}
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let server_file = export
             .files
@@ -915,8 +902,8 @@ mod tests {
     #[test]
     fn no_requirements_file_when_no_env_vars_present() {
         let mcp_servers = r#"[{"name":"local-tool","type":"stdio","command":"local-tool"}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         assert!(!export.files.iter().any(|f| f.path == "accounts/requirements.json"));
     }
 
@@ -926,8 +913,8 @@ mod tests {
         // treated malformed context_files as empty, with no signal to the
         // caller that data was lost -- defeats the exporter's stated
         // backup/portability guarantee.
-        let bundle = make_bundle("", "{not valid json", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "{not valid json", "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         assert!(
             export.warnings.iter().any(|w| w.contains("context_files") && w.contains("malformed")),
             "expected a warning about malformed context_files, got: {:?}",
@@ -948,8 +935,8 @@ mod tests {
         // findable from the module that used to own it. `context_files` is
         // still parsed here, and its own malformed-input test below is the
         // live example of the same rule at this layer.
-        let bundle = make_bundle("", "not an array at all", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "not an array at all", "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         assert!(
             export.warnings.iter().any(|w| w.contains("context_files") && w.contains("malformed")),
             "expected a warning about malformed context_files, got: {:?}",
@@ -960,8 +947,8 @@ mod tests {
     #[test]
     fn blank_context_files_and_mcp_servers_produce_no_warning() {
         // A genuinely empty/unset field is not an error -- must not warn.
-        let bundle = make_bundle("", "", "", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "", "");
+        let export = export_bundle(&bundle, &[], &mcp);
         assert!(export.warnings.is_empty(), "blank fields must not warn: {:?}", export.warnings);
     }
 
@@ -996,8 +983,8 @@ mod tests {
             {"path":"docs/a.md","content":"first"},
             {"path":"docs/./a.md","content":"second, would silently clobber the first"}
         ]"#;
-        let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", context_files, "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let matches: Vec<_> = export
             .files
@@ -1024,8 +1011,8 @@ mod tests {
             {"path":"Docs/A.md","content":"first"},
             {"path":"docs/a.md","content":"second, would collide on a case-insensitive filesystem"}
         ]"#;
-        let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", context_files, "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let matches: Vec<_> = export
             .files
@@ -1050,8 +1037,8 @@ mod tests {
             "url": "https://mcp.notion.com",
             "headers": {"Authorization": "Bearer realToken789"}
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let req_file = export
             .files
@@ -1076,8 +1063,8 @@ mod tests {
             "command": "linear-mcp",
             "args": ["--api-key=lin_realSecretAbc123", "--verbose"]
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/linear.server.json").unwrap();
         assert!(!server_file.content.contains("lin_realSecretAbc123"));
         assert!(server_file.content.contains("${API_KEY}"));
@@ -1097,8 +1084,8 @@ mod tests {
             "command": "custom-mcp",
             "args": ["--token", "realSecretXyz789", "--port", "8080"]
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/custom.server.json").unwrap();
         assert!(!server_file.content.contains("realSecretXyz789"));
         assert!(server_file.content.contains("${TOKEN}"));
@@ -1119,8 +1106,8 @@ mod tests {
             "command": "editor-mcp",
             "args": ["--keymap=vim", "--theme", "dark"]
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/editor.server.json").unwrap();
         assert!(server_file.content.contains("--keymap=vim"));
         assert!(server_file.content.contains("dark"));
@@ -1136,8 +1123,8 @@ mod tests {
             "type": "http",
             "url": "https://admin:realPass456@mcp.example.com/api?api_key=realKeyAbc&region=us"
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
         assert!(!server_file.content.contains("realPass456"));
         assert!(!server_file.content.contains("realKeyAbc"));
@@ -1168,8 +1155,8 @@ mod tests {
             "type": "http",
             "url": "https://api.example.com/mcp?client_secret=realClientSecret123&auth_token=realAuthToken456"
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/oauth-server.server.json").unwrap();
         assert!(!server_file.content.contains("realClientSecret123"));
         assert!(!server_file.content.contains("realAuthToken456"));
@@ -1190,8 +1177,8 @@ mod tests {
             "type": "http",
             "url": "https://svc.example.com?a=b@c&api_key=realSecretShouldBeRedacted"
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/svc.server.json").unwrap();
         assert!(
             !server_file.content.contains("realSecretShouldBeRedacted"),
@@ -1214,8 +1201,8 @@ mod tests {
             "type": "http",
             "url": "https://mcp.example.com#note@example.com"
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/svc.server.json").unwrap();
         assert!(
             server_file.content.contains("mcp.example.com#note@example.com"),
@@ -1238,8 +1225,8 @@ mod tests {
             "command": "remote-mcp",
             "args": ["--header", "Authorization: Bearer realSecretToken789", "--verbose"]
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
         assert!(!server_file.content.contains("realSecretToken789"));
         assert!(server_file.content.contains("Authorization: ${AUTHORIZATION}"));
@@ -1257,8 +1244,8 @@ mod tests {
             "command": "remote-mcp",
             "args": ["--header=Authorization: Bearer realSecretToken456"]
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/remote2.server.json").unwrap();
         assert!(!server_file.content.contains("realSecretToken456"));
         assert!(server_file.content.contains("--header=Authorization: ${AUTHORIZATION}"));
@@ -1272,8 +1259,8 @@ mod tests {
             "command": "remote-mcp",
             "args": ["--header", "X-Request-Id: abc123", "-H", "Content-Type: application/json"]
         }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let server_file = export.files.iter().find(|f| f.path == "mcp/remote3.server.json").unwrap();
         assert!(server_file.content.contains("X-Request-Id: abc123"));
         assert!(server_file.content.contains("Content-Type: application/json"));
@@ -1282,8 +1269,8 @@ mod tests {
     #[test]
     fn dedupes_colliding_mcp_server_names() {
         let mcp_servers = r#"[{"name":"Server!!!One"},{"name":"Server One"}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", mcp_servers);
+        let export = export_bundle(&bundle, &[], &mcp);
         let paths: HashSet<&str> = export.files.iter().map(|f| f.path.as_str()).collect();
         assert!(paths.contains("mcp/server-one.server.json"));
         assert!(paths.contains("mcp/server-one-2.server.json"));
@@ -1291,13 +1278,12 @@ mod tests {
 
     #[test]
     fn manifest_lists_every_component_and_validates_as_json() {
-        let bundle = make_bundle(
+        let (bundle, mcp) = make_bundle(
             "Instructions",
             r#"[{"path":"a.md","content":"A"}]"#,
             r#"[{"name":"github","env":{"GITHUB_TOKEN":""}}]"#,
-            r#"["skill-a"]"#,
         );
-        let export = export_with_inline_mcp(&bundle, &[make_agent_skill("Deploy")]);
+        let export = export_bundle(&bundle, &[make_agent_skill("Deploy")], &mcp);
         let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).expect("armory.json must be valid JSON");
         assert_eq!(manifest["name"], "backend-dev-bundle");
@@ -1311,10 +1297,10 @@ mod tests {
 
     #[test]
     fn exports_a_provider_scoped_instruction_variant() {
-        let mut bundle = make_bundle("Default instructions.", "[]", "[]", "[]");
+        let (mut bundle, mcp) = make_bundle("Default instructions.", "[]", "[]");
         bundle.instructions_by_provider =
             r#"{"claude":"Claude-specific override.","codex":"Codex-specific override."}"#.to_string();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let claude_file = export.files.iter().find(|f| f.path == "instructions/claude/AGENTS.md")
             .expect("expected instructions/claude/AGENTS.md");
@@ -1335,9 +1321,9 @@ mod tests {
         // An empty-string variant (e.g. left over from a UI field that was
         // added then cleared) must not produce an empty instructions file
         // or an empty manifest entry.
-        let mut bundle = make_bundle("Default.", "[]", "[]", "[]");
+        let (mut bundle, mcp) = make_bundle("Default.", "[]", "[]");
         bundle.instructions_by_provider = r#"{"claude":"   "}"#.to_string();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[], &mcp);
         assert!(!export.files.iter().any(|f| f.path.starts_with("instructions/claude/")));
         let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
@@ -1350,10 +1336,10 @@ mod tests {
         // the same output path — the second one must be skipped with a
         // warning, not silently overwrite the first (or worse, produce a
         // manifest listing the same path twice with ambiguous content).
-        let mut bundle = make_bundle("Default.", "[]", "[]", "[]");
+        let (mut bundle, mcp) = make_bundle("Default.", "[]", "[]");
         bundle.instructions_by_provider =
             r#"{"claude":"First.","./claude":"Second."}"#.to_string();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[], &mcp);
 
         let claude_files: Vec<_> = export.files.iter().filter(|f| f.path == "instructions/claude/AGENTS.md").collect();
         assert_eq!(claude_files.len(), 1, "must not produce two files at the same path");
@@ -1377,8 +1363,8 @@ mod tests {
     fn manifest_references_the_skill_directory_not_the_skill_md_file() {
         // Codex P1, PR #2325: the ABF spec's manifest example references
         // "skills/<slug>" (the directory), not "skills/<slug>/SKILL.md".
-        let bundle = make_bundle("", "[]", "[]", r#"["skill-a"]"#);
-        let export = export_with_inline_mcp(&bundle, &[make_agent_skill("Deploy Checklist")]);
+        let (bundle, mcp) = make_bundle("", "[]", "[]");
+        let export = export_bundle(&bundle, &[make_agent_skill("Deploy Checklist")], &mcp);
         let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         let skills = manifest["components"]["skills"].as_array().unwrap();
@@ -1389,8 +1375,8 @@ mod tests {
 
     #[test]
     fn empty_bundle_still_produces_a_valid_manifest() {
-        let bundle = make_bundle("", "[]", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("", "[]", "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         // armory.json is always written, even for a fully empty bundle.
         assert_eq!(export.files.len(), 1);
         let manifest: Value = serde_json::from_str(&export.files[0].content).unwrap();
@@ -1399,8 +1385,8 @@ mod tests {
 
     #[test]
     fn zip_bundle_export_produces_a_valid_archive_with_all_files() {
-        let bundle = make_bundle("Instructions here", "[]", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let (bundle, mcp) = make_bundle("Instructions here", "[]", "[]");
+        let export = export_bundle(&bundle, &[], &mcp);
         let zip_bytes = zip_bundle_export(&export).expect("zip should succeed");
 
         let cursor = std::io::Cursor::new(zip_bytes);

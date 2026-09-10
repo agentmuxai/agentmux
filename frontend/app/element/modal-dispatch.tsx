@@ -150,8 +150,6 @@ export function renderRequest(
                                         model: "",
                                         instructions: "",
                                         context_files: contextFiles,
-                                        mcp_servers: "[]",
-                                        skills: "[]",
                                         created_at: 0,
                                         updated_at: 0,
                                     },

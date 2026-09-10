@@ -49,18 +49,87 @@ pub struct M0030BackfillBundleComponentRefs;
 /// Same resolution, and the same never-hard-fail posture, as
 /// `m0021_backfill_agent_bundles::resolve_bundle_store`. An unusable shared
 /// store means "not today" rather than a failed boot.
-fn resolve_bundle_store(ctx: &MigrationContext, wstore: &Arc<Store>) -> Arc<Store> {
+///
+/// Returns the store **and the path it came from** — the path is needed
+/// separately because this migration reads the inline columns through a raw
+/// connection rather than through `Store` (see [`read_inline_bundle_rows`]).
+fn resolve_bundle_store(
+    ctx: &MigrationContext,
+    wstore: &Arc<Store>,
+) -> (Arc<Store>, std::path::PathBuf) {
     match Store::open_shared(&ctx.shared_store_path) {
-        Ok(shared) => Arc::new(shared),
+        Ok(shared) => (Arc::new(shared), ctx.shared_store_path.clone()),
         Err(e) => {
             tracing::warn!(
                 error = %e,
                 path = %ctx.shared_store_path.display(),
                 "backfill_bundle_component_refs: shared store unavailable, falling back to channel store"
             );
-            wstore.clone()
+            (wstore.clone(), ctx.channel_store_path.clone())
         }
     }
+}
+
+/// True when `db_bundles` still carries both inline columns.
+///
+/// `PRAGMA table_info` on a table that does not exist yields zero rows rather
+/// than an error, so this doubles as a table-existence check.
+fn inline_columns_present(conn: &rusqlite::Connection) -> bool {
+    let Ok(mut stmt) = conn.prepare("PRAGMA table_info(db_bundles)") else {
+        return false;
+    };
+    let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(1)) else {
+        return false;
+    };
+    let mut skills = false;
+    let mut mcp = false;
+    for name in rows.flatten() {
+        match name.as_str() {
+            "skills" => skills = true,
+            "mcp_servers" => mcp = true,
+            _ => {}
+        }
+    }
+    skills && mcp
+}
+
+/// Read `(id, skills, mcp_servers)` straight out of `db_bundles`.
+///
+/// Deliberately raw SQL rather than `Store::bundle_list()`. `m0031` drops
+/// these two columns, and the `Bundle` struct no longer has fields for them —
+/// but this migration still has to carry their data across on any store that
+/// predates the drop. Reading them through a struct that no longer models them
+/// is impossible, and reading them through a `SELECT *`-shaped mapper that
+/// *did* would break the moment the columns went away.
+///
+/// Returns an empty vec when the columns are already gone, which is the
+/// **normal** path for a channel first booted after `m0031` shipped: this
+/// migration is per-channel, so a brand-new channel runs it against a shared
+/// store that was dropped long ago. That is a no-op, not an error.
+fn read_inline_bundle_rows(path: &std::path::Path) -> Result<Vec<(String, String, String)>, String> {
+    let Some(conn) = super::runner::open_readonly(path)? else {
+        return Ok(Vec::new());
+    };
+    if !inline_columns_present(&conn) {
+        tracing::debug!(
+            path = %path.display(),
+            "backfill_bundle_component_refs: inline columns already retired — nothing to carry"
+        );
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn
+        .prepare("SELECT id, skills, mcp_servers FROM db_bundles")
+        .map_err(|e| format!("prepare: {e}"))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| format!("query: {e}"))?;
+    Ok(rows.flatten().collect())
 }
 
 /// Milliseconds since the epoch, for the catalog rows this creates.
@@ -166,22 +235,16 @@ impl Migration for M0030BackfillBundleComponentRefs {
         let wstore = Arc::new(Store::open(&ctx.channel_store_path).map_err(|e| {
             MigrationError(format!("backfill_bundle_component_refs: open wstore: {e}"))
         })?);
-        let bundle_store = resolve_bundle_store(ctx, &wstore);
+        let (bundle_store, bundle_store_path) = resolve_bundle_store(ctx, &wstore);
 
-        let bundles = bundle_store.bundle_list().map_err(|e| {
+        let bundles = read_inline_bundle_rows(&bundle_store_path).map_err(|e| {
             MigrationError(format!("backfill_bundle_component_refs: list bundles: {e}"))
         })?;
 
         let mut total_skills = 0usize;
         let mut total_mcp = 0usize;
-        for bundle in &bundles {
-            let (s, m) = backfill_one_bundle(
-                &wstore,
-                &bundle_store,
-                &bundle.id,
-                &bundle.skills,
-                &bundle.mcp_servers,
-            );
+        for (id, skills, mcp_servers) in &bundles {
+            let (s, m) = backfill_one_bundle(&wstore, &bundle_store, id, skills, mcp_servers);
             total_skills += s;
             total_mcp += m;
         }
@@ -241,8 +304,6 @@ mod tests {
             instructions: String::new(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: mcp.to_string(),
-            skills: skills.to_string(),
             sort_order: 0,
             created_at: 1,
             updated_at: 1,
