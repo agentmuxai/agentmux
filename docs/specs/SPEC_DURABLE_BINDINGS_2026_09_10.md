@@ -7,7 +7,9 @@ from an initial registry-only framing that Codex correctly flagged as
 rejecting real, currently-bindable agents — PR #3179), which in turn requires
 Phase 5 to add explicit agent-delete cleanup of identity-store refs (no
 cross-database `ON DELETE CASCADE`) — see §7 Phase 5 and §8 item 2 for the
-full mechanism. Phase 2 in progress.
+full mechanism. Phase 2 in progress: schema (#3180) and the carry migration
+(#3181) landed; the application-layer read/write redirect (§5.4) is the
+remaining piece.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
@@ -287,6 +289,88 @@ against, every row is a seeded global and nothing is owner-private, so only the
 first bullet has any work to do. **That is a statement about one machine, not a
 claim that the migration is lossless in general** — the second bullet exists
 precisely because other installs will not be so tidy.
+
+### 5.4 Application-layer read/write redirect is not a call-site swap
+
+Discovered while implementing Phase 2's redirect (this section documents the
+finding before the code that acts on it, per this repo's own review discipline
+— a design this load-bearing should be reviewable on its own).
+
+The naive plan — change every handler's `wstore.skill_get(...)` to
+`state.identity_store.skill_get(...)` and stop — is correct for the methods
+that touch only `db_skills`/`db_mcp_servers` (`skill_get`, `skill_delete`'s
+catalog half is not this simple, see below, but `skill_upsert_unique_global`,
+`skill_list_all_raw`, `skill_find_global_by_name_and_type` and their MCP
+equivalents genuinely are pure single-table reads/writes with no ref-table
+involvement — true zero-touch redirects). It is **wrong** for every method
+that joins the catalog table with an agent- or bundle-level ref table in one
+SQL statement — `managed_list`, `managed_list_global`,
+`managed_list_global_for_agent`, `managed_delete`, `managed_is_accessible_to`,
+and `managed_upsert_unique` (`storage/managed.rs`) all do exactly this, e.g.
+`managed_list`'s `FROM {table} s WHERE s.is_global = 1 OR s.id IN (SELECT
+{refc} FROM {reft} WHERE {key} = ?1)`. `db_agent_skills_ref` and
+`db_bundle_skills_ref` are **not** promoted by Phase 2 — only Phase 3/6
+promote them, and Phase 6 has a hard prerequisite (Phase 5) not yet built. So
+for the whole window between Phase 2 shipping and Phase 6 landing, the ref
+table and the catalog table it needs to join against live in two different
+physical SQLite files. A single-connection query against either file alone is
+wrong: querying `wstore` alone reads a catalog mirror that has stopped being
+written (per §5.1, "authoritative, not read-through fallback-mirror" — the
+mirror goes stale the moment writes redirect to `identity_store`); querying
+`identity_store` alone finds no ref rows at all (they never move there in
+Phase 2).
+
+**Resolution:** the affected `managed.rs` methods gain an explicit `catalog:
+&Store` parameter, decoupled from `self` (which keeps meaning "the ref-table
+owner," i.e. `wstore`, unchanged in this phase). Each becomes two queries
+composed in Rust instead of one SQL join: fetch the relevant ref ids from
+`self`, fetch the relevant catalog rows from `catalog`, combine and sort in
+memory. This is not a new pattern — `managed_bind_bundle` and
+`managed_upsert_unique_for_bundle` already take an `id_store: &Store`
+parameter for bundle-existence checks, for the identical reason (existence
+lives in a different store than the ref row being written). `managed_get`
+needs no such change — it is genuinely single-table, so it is called directly
+on `identity_store` as receiver, no `managed.rs` signature change at all.
+
+**Accepted interim gap: `managed_upsert_unique`'s name-uniqueness check loses
+single-transaction atomicity for owner-private rows.** Today, the dup-check
+query and the insert-plus-bind run in one `rusqlite` transaction on `self`,
+so two concurrent `skill.upsert` calls for the same name can't both pass the
+check (`storage/managed.rs`'s own doc comment: "so concurrent upserts of the
+same name can't both pass the check"). Once the dup-check reads `catalog`
+(identity_store) while the bind-insert writes `self` (wstore), no single
+`rusqlite::Transaction` can span both — this codebase's `Store` has no
+cross-database-file transaction support (same limitation Phase 2's own
+migration, `m0031`, had to design around with deterministic ids rather than
+transactional atomicity). For the **global** uniqueness path
+(`managed_upsert_unique_global`), this is a non-issue: the `(name,
+skill_type)`/`(name)` unique indexes added in Phase 2a
+(`idx_ids_skills_global_name_type`, `idx_ids_mcp_servers_global_name`) still
+arbitrate at the database level regardless of transaction boundaries — a race
+loser gets a real constraint-violation error instead of silently creating a
+duplicate, exactly the same safety net `m0031`'s carry logic relies on. For
+the **owner-private** path there is no equivalent index (per-owner name
+uniqueness isn't a plain column constraint), so a narrow race window is
+accepted here: two concurrent `skill.upsert` calls for the same new name,
+from the same owner, in the same instant, can both pass the dup-check and
+both insert. This is judged low-severity — single-owner, single-submit UI
+flows, not a multi-writer scenario — and is explicitly **not** solved by this
+phase; closing it fully would require either a cross-database saga pattern or
+promoting the ref tables early (Phase 3/6), neither of which this phase's
+scope justifies. Flag this gap again once Phase 6 lands, since promoting the
+agent ref tables restores single-connection atomicity for free.
+
+**Cross-channel dangling refs on catalog delete, also accepted as interim.**
+`skill.catalog.delete` purges this channel's own ref rows (`managed_delete`)
+before removing the now-global catalog row — but a *different* channel's
+`db_agent_skills_ref`/`db_bundle_skills_ref` rows pointing at that same
+catalog id are unreachable from the deleting channel's `wstore` and are left
+dangling until that other channel's own migration/redirect eventually runs
+(Phase 6). A dangling ref today already degrades gracefully — `skill_get`
+against a now-missing id returns `None`, and every read path already handles
+that — so the failure mode is "a stale bound-skill entry silently
+disappears from that other channel's list," not a crash or data corruption.
+Full closure is the same Phase 6 dependency as the point above.
 
 ## 6. Non-goals
 
