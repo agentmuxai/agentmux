@@ -47,8 +47,31 @@ separate routes landed on the same complete state.
 
 **2026-09-10 (Korp) — Phase D (Windows): build compiles clean
 (60,275/60,275 targets minus one known-broken, non-shipping test target,
-see below), but a critical runtime regression was found and fixed; not yet
-re-boot-verified or released, so not "done."**
+see below), critical runtime regression found and fixed. Phase C (Rust
+binding) also done: `agentmux-cef/Cargo.toml` bumped to `cef = "152"`,
+`AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` created (same
+mechanical `begin_window_drag` field-append as the 148 patch — confirmed
+`_cef_window_t` is byte-identical between the two milestones), zero
+compile fallout across the full workspace. Real-app boot-verified: the
+actual bundled app (not just `cefsimple`) launched via `task dev` against
+this runtime shows `GFX HW` in the status bar (hardware-accelerated,
+confirmed via a live window screenshot) — the exact symptom that started
+this investigation is gone. Not released (Phase E) yet.**
+
+**2026-09-10 (Korp) — a second, unrelated bug found and fixed in the same
+pass:** `scripts/verify-angle-libs.sh` (agentmuxai/agentmux#3119, a
+guardrail merged the same day this investigation started) used a uniform
+1MB size floor for both `libEGL`/`libGLESv2` and returned early on a small
+file WITHOUT running its symbol-export check. `libEGL.dll` is legitimately
+~500KB even in a genuine, working ANGLE build (it's a thin dispatch layer;
+the real code lives in `libGLESv2`) — this real, `use_static_angle=false`-fixed
+`libEGL.dll` (510,464 bytes) false-positived as a stub, blocking `task dev`
+on a build that was actually fine. The known-broken stub was 471,552
+bytes — an 8% difference from the real file, not a safe size threshold at
+all. Fixed: the symbol check (confirmed reliable — 0 matches on the real
+stub, 1 on the genuine file) is now the sole gate; size is only a coarse
+10KB sanity floor for a truly corrupt/empty file. Regression-tested
+(`scripts/verify-angle-libs.test.sh`, 6 cases, new).
 
 **2026-09-10 — CEF 152 Windows build: real, silent GPU regression found
 and fixed, affects all three platforms.** Chromium's `use_static_angle`

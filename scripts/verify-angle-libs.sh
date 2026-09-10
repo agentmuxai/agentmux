@@ -3,14 +3,29 @@
 # are genuine builds, not empty/stub artifacts from a broken or partial
 # Chromium build.
 #
-# A real ANGLE libEGL/libGLESv2 for any recent Chromium milestone is several
-# MB and exports eglGetProcAddress / glGetString by name. An interrupted or
-# misconfigured local rebuild has been observed silently producing ~460KB
-# placeholder files that pass a plain `-f` existence check, get bundled, and
-# only fail at runtime: the GPU process dies at init with "eglGetProcAddress
-# not found", falls through the SwiftShader software path too, and Chromium
-# disables GPU entirely — the status bar's GFX indicator reads "off" instead
-# of "HW"/"SW" with no build-time signal pointing at the cause.
+# A real ANGLE libGLESv2 for any recent Chromium milestone is several MB;
+# libEGL is legitimately much smaller (it's a thin dispatch layer — the
+# actual GL/D3D translation code lives in libGLESv2) and size alone cannot
+# reliably tell a real libEGL from a stub: measured on a genuine CEF 152
+# Windows build, a broken dummy_stub.cc placeholder libEGL.dll was 471,552
+# bytes and a real, functional one (confirmed via `dumpbin /EXPORTS`) was
+# 510,464 bytes — an 8% difference, not remotely a safe threshold. An
+# earlier revision of this script used a uniform 1MB floor for both files
+# and returned early on a small file WITHOUT ever running the symbol
+# check below — which false-positived on that real 510KB libEGL.dll
+# (agentmuxai/agentmux#3172's investigation). The symbol check itself is
+# reliable (confirmed: 0 matches on the known-broken 471,552-byte stub,
+# 1 match on the real 510,464-byte file) — it's the only thing this script
+# gates on now; size is reported for visibility, not treated as a signal.
+#
+# Exports eglGetProcAddress / glGetString by name in either case. An
+# interrupted or misconfigured local rebuild has been observed silently
+# producing placeholder files that pass a plain `-f` existence check, get
+# bundled, and only fail at runtime: the GPU process dies at init with
+# "eglGetProcAddress not found", falls through the SwiftShader software
+# path too, and Chromium disables GPU entirely — the status bar's GFX
+# indicator reads "off" instead of "HW"/"SW" with no build-time signal
+# pointing at the cause.
 #
 # Usage: verify-angle-libs.sh <dir> <egl-lib-filename> <glesv2-lib-filename>
 # Exit 0 if both libs (that exist) look like real ANGLE builds. A missing
@@ -23,9 +38,11 @@ dir="${1:?usage: verify-angle-libs.sh <dir> <egl-lib-filename> <glesv2-lib-filen
 egl_name="${2:?usage: verify-angle-libs.sh <dir> <egl-lib-filename> <glesv2-lib-filename>}"
 gles_name="${3:?usage: verify-angle-libs.sh <dir> <egl-lib-filename> <glesv2-lib-filename>}"
 
-# Real ANGLE shared libraries are multi-MB; the broken stubs observed so far
-# were ~460KB. 1MB leaves comfortable margin either way.
-min_bytes=1000000
+# Purely a fast-fail sanity floor for a truly empty/corrupt file (e.g. a
+# zero-byte placeholder from a failed copy) — NOT a stub-vs-real
+# discriminator. See the size discussion above for why that can't work
+# for libEGL specifically.
+min_sane_bytes=10000
 
 ok=0
 
@@ -34,12 +51,12 @@ check_one() {
   [ -f "$path" ] || return 0
 
   size=$(wc -c <"$path" 2>/dev/null | tr -d ' ')
-  if [ -z "$size" ] || [ "$size" -lt "$min_bytes" ]; then
-    echo "❌ verify-angle-libs: $path is only ${size:-0} bytes — too small to be a real ANGLE build (expect several MB)." >&2
+  if [ -z "$size" ] || [ "$size" -lt "$min_sane_bytes" ]; then
+    echo "❌ verify-angle-libs: $path is only ${size:-0} bytes — too small to be any kind of real build output." >&2
     return 1
   fi
   if ! grep -a -q "$symbol" "$path"; then
-    echo "❌ verify-angle-libs: $path does not export '$symbol' — not a genuine ANGLE build." >&2
+    echo "❌ verify-angle-libs: $path ($size bytes) does not export '$symbol' — not a genuine ANGLE build." >&2
     return 1
   fi
   return 0

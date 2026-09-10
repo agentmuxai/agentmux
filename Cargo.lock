@@ -958,9 +958,9 @@ dependencies = [
 
 [[package]]
 name = "cef"
-version = "148.3.0+148.0.9"
+version = "152.1.0+152.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a920bb7b8ff94c3abe487df2a7234d8fb8226369d97296a12ac863a15c168d59"
+checksum = "81207e518922dccc7ebc0c4480d0f2a4f23d58e0e682504712e2d9498bbb6212"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -978,8 +978,8 @@ dependencies = [
 
 [[package]]
 name = "cef-dll-sys"
-version = "148.3.0+148.0.9"
-source = "git+https://github.com/AgentU-asaf/cef-rs?rev=515b3ac53c8b3903aeac18135473858a4d3879d2#515b3ac53c8b3903aeac18135473858a4d3879d2"
+version = "152.1.0+152.0.6"
+source = "git+https://github.com/AgentU-asaf/cef-rs?rev=bfeae8047ecfc5e35cf7beb976cfeec208b2c5f5#bfeae8047ecfc5e35cf7beb976cfeec208b2c5f5"
 dependencies = [
  "anyhow",
  "cmake",
@@ -1511,7 +1511,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "download-cef"
 version = "2.3.2"
-source = "git+https://github.com/AgentU-asaf/cef-rs?rev=515b3ac53c8b3903aeac18135473858a4d3879d2#515b3ac53c8b3903aeac18135473858a4d3879d2"
+source = "git+https://github.com/AgentU-asaf/cef-rs?rev=bfeae8047ecfc5e35cf7beb976cfeec208b2c5f5#bfeae8047ecfc5e35cf7beb976cfeec208b2c5f5"
 dependencies = [
  "bzip2",
  "clap",
