@@ -1,10 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBundleManager — the Armory "Memory" tab (labeled "Brain" prior to the
-// PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming decision — "the
-// brain" is a colloquial nickname, "Memory" is the canonical term). Presents
-// the workspace-wide global bundles (is_global Memory bundles) as an ordered
+// GlobalBundleManager — the Global section of the Armory "Memory" tab (moves to
+// the Bundles tab in Phase 4 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md).
+// Presents the workspace-wide global bundles (is_global rows) as an ordered
 // list of editable sections that compose into every agent's startup
 // instructions file (CLAUDE.md, GEMINI.md, or similar, depending on
 // provider) at launch.

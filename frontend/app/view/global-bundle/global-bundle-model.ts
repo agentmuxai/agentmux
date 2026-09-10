@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBundleViewModel — drives the Armory "Memory" tab (labeled "Brain"
-// prior to the PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming
-// decision): the workspace-wide global bundles that every agent inherits at
+// GlobalBundleViewModel — drives the Global section of the Armory "Memory" tab
+// (Phase 4 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md folds it into the
+// Bundles tab): the workspace-wide global bundles that every agent inherits at
 // launch.
 //
 // A "section" is a Memory bundle with is_global=true. The global bundles is
