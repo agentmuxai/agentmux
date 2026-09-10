@@ -31,8 +31,11 @@ and surfaces one shipped-binary gap (§5 of the report): patch #1 was never
 registered in `patch.cfg`, so it is absent from the shipped macOS binary —
 fixed at source in `agentmuxai/cef` PR #7, still needs one macOS rebuild.
 Verified 2026-09-08.
-**Update 2026-09-10 (clare) — Phase D macOS build under way; two open questions
-answered, one new toolchain requirement found.**
+**Update 2026-09-10 (clare) — Phase D macOS build under way; the patch set
+forward-ports cleanly and both Phase-A "verify at build time" questions are
+answered.** (An earlier revision of this note also claimed a *new* 152 toolchain
+requirement. That was wrong and is retracted below — the Metal Toolchain is an
+Xcode 26 requirement that applies to 148 too.)
 
 *Setup completed clean.* `gclient sync` zero errors; **`patcher.py` reports
 118 patches, 118 applied, 0 failed** against real Chromium 152 source — the
