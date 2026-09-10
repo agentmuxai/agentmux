@@ -1,5 +1,53 @@
 # AgentMux Version History
 
+## 0.55.41 — 2026-09-10
+
+- feat(zoom): Ctrl+Shift+Scroll zooms every pane in the window at once
+- feat(lan): peers report which agents they host
+- docs(cef): decide on staged per-platform rollout for the 152 upgrade
+- refactor(srv): migrate agentdefcreatefromtemplate and forkagentdefinitionsuggest to register_typed — 4 more RPC types generated and gated
+- fix(session): flush the session snapshot on OS shutdown (WM_QUERYENDSESSION/WM_ENDSESSION)
+- refactor(srv): migrate deleteagentinstance + hidenamedagent to register_typed — 4 more RPC types generated and gated, two new named response types replace anonymous json! shapes
+- refactor(srv): migrate deletememory + deletesystemmemory to register_typed — 2 more RPC types generated and gated, shared response type mirrors the existing shared request type
+- docs: rename claudius -> narko in live references
+- fix(cef): macOS build broken — native_window_visible referenced Arc<AppState> without an import on macOS
+- fix(cef): linux userns-sandbox probe false-positives on AppArmor hosts
+- fix(build): fail bundle:* loudly on stub ANGLE GL libraries instead of shipping a broken GFX-off build
+- fix(srv): jekt notifications for a renamed agent's stable AGENTMUX_AGENT_ID now resolve
+- docs(cef): branch model + upgrade practice for the CEF fork, all three platforms
+- fix(floating-pane): require a real 500ms hover before a floating pane redocks
+- docs(qr-pairing): correct stale mDNS-parity claim in HostPopover
+- fix(ci): drop the unused Google Chrome apt source so a bad index cannot fail Linux CI
+- fix(floating-pane): retune the redock dwell to 300ms
+- refactor(srv): armory naming Phase 1 — rename Memory->Bundle, bundle_memory_*->bundle_*, memory_bundles->bundles; split rpc_types/memory.rs
+- refactor(layout): add inert NodeModel.activeBlockId groundwork for pane chrome-stability fix
+- refactor(block): BlockFrame_Header/EndIcons take a reactive blockId accessor
+- refactor(frontend): armory naming Phase 1 — view/memory->view/bundle, type Memory->Bundle, BundleApi/NativeMemoryApi split, bundleId locals
+- fix(agent): stop the pane header/tab-strip flash when switching Agent <-> History tabs
+- ui(armory): rename the ABF tab to Bundles; ABF stays the name of the import/export format
+- refactor: armory naming Phase 2 — retire 'brain' on the bundle side (format_global_bundle_block, view/global-bundle, GlobalBundleViewModel)
+- fix(net): lan_listeners macOS bind-conflict assumption was wrong — groups with Windows, not Linux
+- fix(cef): move the CEF carry-set gates into tested scripts
+- fix(agent-pane): bind the working indicators to one predicate so they cannot disagree
+- fix(srv): integration tests no longer trigger a real macOS Keychain prompt
+- fix(cef): ship the macOS 26 renderer fix — bump the macOS CEF pin to 148.23.25
+- feat(srv): armory portability Phase 1+2 — bundle.export announces memory it cannot carry; history registered in the ABF manifest
+- fix(cef): stop verify-cef-framework-darwin calling a stripped framework UNPATCHED
+- fix(agent): restore the pane tab strip and header layout after chrome hoisting
+- fix(srv): bundle exports now carry the skills and MCP servers actually bound to the bundle, with a migration carrying existing inline data across
+- fix(srv): deleting a bundle purges its component refs; bundle.validate checks the bound components rather than the retired inline columns
+- feat(srv): provider registry records every instruction file a provider reads, not just the one AgentMux writes
+- docs(cef): Chromium 152 needs the Metal Toolchain component on macOS
+- feat(srv): agent.project_instructions reports every file an agent will read as instructions, with a content hash and an agentmux/foreign owner
+- fix(ci): bootstrap the WinGet identifier as AgentMux.AI, distinct from the published MSIX identity
+- fix(term): stop the terminal pane header/tab-strip flash on shell-tab switch
+- fix(agent-pane): background shell output no longer pins a finished turn in Working
+- feat(srv): track what each agent reads as project instructions, so a repository file changing between launches is detectable
+- feat(srv): exported bundles carry the project instructions their agent was reading, recorded read-only and never installed on import
+- fix(agent-pane): fix a type error that a missing tsc gate let through
+- feat(agent-pane): narrate backgrounded tasks into the conversation
+- fix(cef-build): set use_static_angle=false for Windows CEF 152 — fixes a silent GPU regression
+
 ## 0.55.40 — 2026-09-08
 
 - fix(window): reveal a cold-path window even when CEF Views misreports it visible
