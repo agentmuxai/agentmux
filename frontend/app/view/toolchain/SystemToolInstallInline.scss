@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "./install-progress";
+
 .system-tool-install-inline {
     margin-top: var(--space-1, 6px);
     padding: var(--space-2, 8px);
@@ -21,6 +23,11 @@
 .system-tool-install-consent-text {
     margin: 0;
     font-size: var(--text-xs, 11px);
+    color: var(--secondary-text-color);
+}
+
+.system-tool-install-brand-icon {
+    margin-right: var(--space-1, 6px);
     color: var(--secondary-text-color);
 }
 
@@ -63,24 +70,6 @@
 
 .system-tool-install-fail {
     color: var(--error-color);
-}
-
-.system-tool-install-progress {
-    height: 3px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-}
-
-.system-tool-install-progress-bar {
-    width: 40%;
-    height: 100%;
-    background: var(--accent-color);
-    animation: system-tool-install-progress-slide 1.2s ease-in-out infinite;
-}
-
-@keyframes system-tool-install-progress-slide {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(250%); }
 }
 
 .system-tool-install-details {

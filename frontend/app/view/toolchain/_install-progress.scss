@@ -1,0 +1,26 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Shared indeterminate install-progress bar — used by SystemToolInstallInline
+// (system-tool installs) and AgentInstallModal (provider-CLI installs).
+// SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5 extracted this
+// out of SystemToolInstallInline.scss rather than duplicating it under a
+// second, differently-prefixed class set.
+
+.install-progress {
+    height: 3px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+}
+
+.install-progress-bar {
+    width: 40%;
+    height: 100%;
+    background: var(--accent-color);
+    animation: install-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes install-progress-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+}
