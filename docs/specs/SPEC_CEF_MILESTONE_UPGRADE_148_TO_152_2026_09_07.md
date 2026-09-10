@@ -45,10 +45,87 @@ Verified 2026-09-08.
 as superseded by the independent merge already recorded above — two
 separate routes landed on the same complete state.
 
-**2026-09-10 (Korp) — Phase D (Windows): build compiles clean
+**2026-09-10 (Korp) — Phase D (Windows): DONE.** Build compiles clean
 (60,275/60,275 targets minus one known-broken, non-shipping test target,
-see below), but a critical runtime regression was found and fixed; not yet
-re-boot-verified or released, so not "done."**
+see below), critical GPU runtime regression found and fixed (#3172,
+merged). Real-app boot-verified: the actual bundled app (not just
+`cefsimple`) launched via `task dev` against this runtime — built with a
+temporary, local, workspace-wide `cef = "152"` bump used only for this
+one verification, immediately reverted afterward, see below — shows
+`GFX HW` in the status bar (hardware-accelerated, confirmed via a live
+window screenshot). The exact symptom that started this investigation is
+gone. This is a genuine, working Windows 152 build; it just isn't wired
+into the committed Rust crate graph yet, for the reason below.
+
+**2026-09-10 (Korp) — Phase C (Rust binding): attempted, REVERTED, real
+blocker found.** Bumping `agentmux-cef/Cargo.toml` to `cef = "152"`
+workspace-wide compiles clean (confirmed, `cargo check --workspace`,
+zero errors) but is NOT safe to land alone — Codex P1 on #3176: it links
+**every** platform against CEF 152 headers, while
+`.github/workflows/release.yml` still resolves CEF 148 runtimes for all
+three, and unlike Windows (`scripts/verify-cef-version.sh`), macOS/Linux
+have no gate that would catch a resulting runtime mismatch before
+shipping.
+
+Tried this spec's own §4 "verified-correct mechanism" (target-gated
+`cef_win`/`cef_unix` dependency aliases + a cfg-gated `extern crate ... as
+cef;` re-export) to keep Windows on 152 while macOS/Linux stay on 148.
+**It does not work, and the "proved with a real `cargo check`" claim in
+that section does not hold up under the case that actually matters here.**
+`cef-dll-sys` declares `links = "cef_dll_wrapper"` in its own Cargo.toml —
+a native-library-linkage declaration — and Cargo enforces **at most one
+package with a given `links` value across the entire dependency graph**,
+unconditionally, regardless of `--target` or which `cfg(...)` gate a
+dependency sits behind (`[target.'cfg(...)'.dependencies]` entries are
+always part of `Cargo.lock`'s resolution graph; target-cfg only affects
+what gets *compiled*, not what gets *resolved*). Confirmed directly —
+`cargo check -p agentmux-cef --target x86_64-pc-windows-msvc` with both
+`cef_win` (→ `cef-dll-sys` 152) and `cef_unix` (→ `cef-dll-sys` 148 fork,
+same `links` value) declared fails immediately:
+```
+error: failed to select a version for `cef-dll-sys`.
+...
+Only one package in the dependency graph may specify the same links
+value.
+```
+This isn't a tuning problem — it's a hard Cargo design constraint, so the
+whole per-platform-alias approach as written in §4 cannot ship Windows on
+152 while macOS/Linux stay on 148 through Cargo's dependency graph alone.
+A real fix needs either: (a) macOS/Linux reaching their own working 152
+builds around the same time Windows does (collapsing back to one plain
+`cef = "152"` entry, no staging needed), (b) splitting `agentmux-cef` into
+genuinely separate per-platform crates (a much bigger refactor than a
+dependency alias), or (c) building real Linux/macOS equivalents of
+`verify-cef-version.sh` and accepting the interim risk consciously rather
+than silently. None of those is a config tweak — reverted the bump
+entirely rather than pick one unilaterally. `agentmux-cef/Cargo.toml`,
+root `Cargo.toml`, and `Cargo.lock` are back to `cef = "148"` /
+`AgentU-asaf/cef-rs@agentmux/148-begin-window-drag` — the same state as
+before this investigation, and what the Windows Phase D boot-verification
+above used, LOCALLY and TEMPORARILY, then discarded.
+
+**Correction to §4 above:** its "no remaining blocker" / "AgentX owns"
+close-out (2026-09-08) is wrong on this point — the `links` conflict makes
+steps 1-4 unworkable as written, not merely unvalidated. Left AgentX's
+original text in place rather than rewritten, per this doc's own
+established pattern of appending corrections instead of erasing history —
+but do not attempt the mechanism it describes without solving the `links`
+conflict first.
+
+**2026-09-10 (Korp) — a second, unrelated bug found and fixed in the same
+pass:** `scripts/verify-angle-libs.sh` (agentmuxai/agentmux#3119, a
+guardrail merged the same day this investigation started) used a uniform
+1MB size floor for both `libEGL`/`libGLESv2` and returned early on a small
+file WITHOUT running its symbol-export check. `libEGL.dll` is legitimately
+~500KB even in a genuine, working ANGLE build (it's a thin dispatch layer;
+the real code lives in `libGLESv2`) — this real, `use_static_angle=false`-fixed
+`libEGL.dll` (510,464 bytes) false-positived as a stub, blocking `task dev`
+on a build that was actually fine. The known-broken stub was 471,552
+bytes — an 8% difference from the real file, not a safe size threshold at
+all. Fixed: the symbol check (confirmed reliable — 0 matches on the real
+stub, 1 on the genuine file) is now the sole gate; size is only a coarse
+10KB sanity floor for a truly corrupt/empty file. Regression-tested
+(`scripts/verify-angle-libs.test.sh`, 6 cases, new).
 
 **2026-09-10 — CEF 152 Windows build: real, silent GPU regression found
 and fixed, affects all three platforms.** Chromium's `use_static_angle`
