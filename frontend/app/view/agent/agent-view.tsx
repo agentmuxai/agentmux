@@ -388,7 +388,14 @@ export const AgentPaneChrome = (props: {
     // `nodeModel.blockId`. `changeConnModalAtom`/`connBtnRef` are inert
     // stand-ins, not wired to any real modal state: AgentViewModel never
     // sets `manageConnection`, so BlockFrame_Header's own connection-button
-    // branch never renders for an agent pane regardless.
+    // branch never renders for an agent pane regardless. This is dead code
+    // waiting to matter, not truly inert forever (ReAgent, this PR): if a
+    // future caller ever sets `manageConnection` on an AgentViewModel, the
+    // button would render but silently do nothing, since these stand-ins
+    // aren't wired to real per-block modal state. Wire a real
+    // `changeConnModalAtom` (mirroring `useBlockAtom` keyed on
+    // `activeBlockId()`) at that point — don't assume this comment alone
+    // will be noticed.
     const changeConnModalAtom = createSignalAtom(false);
     const connBtnRef: { current: HTMLDivElement | null } = { current: null };
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
