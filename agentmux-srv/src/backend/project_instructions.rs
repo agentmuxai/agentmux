@@ -93,7 +93,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// be missing AgentMux's own contribution. It is not in the registry's
 /// `native_instruction_sources` because the provider does not discover it
 /// natively; the import line is ours.
-fn paths_for_provider(provider_id: &str) -> Vec<String> {
+fn paths_for_provider(provider_id: &str, working_dir: &Path) -> Vec<String> {
     let Some(provider) = providers::get_provider(provider_id) else {
         return Vec::new();
     };
@@ -102,13 +102,50 @@ fn paths_for_provider(provider_id: &str) -> Vec<String> {
         .iter()
         .map(|s| s.to_string())
         .collect();
+
+    // The side file is only read when a `CLAUDE.md` currently imports it.
+    //
+    // A `CLAUDE.md` write target is not enough on its own: when AgentMux owns
+    // that file it writes the content directly and adds no import, and an
+    // import appended on some earlier launch can be removed by hand while the
+    // side file stays on disk. Including it unconditionally reports stale
+    // content as instructions the agent is consuming, which is the same class
+    // of confident-but-wrong answer this module exists to prevent (Codex, PR
+    // #3156). Testing the actual `@` line is the only honest condition.
     if provider.startup_instructions_filename == Some("CLAUDE.md") {
+        let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
+        let imported = std::fs::read_to_string(working_dir.join("CLAUDE.md"))
+            .map(|c| c.contains(&import_needle))
+            .unwrap_or(false);
         let side_file = AGENTMUX_MEMORY_FILENAME.to_string();
-        if !paths.contains(&side_file) {
+        if imported && !paths.contains(&side_file) {
             paths.push(side_file);
         }
     }
     paths
+}
+
+/// The directory this agent will actually run in.
+///
+/// Must match `agent.open` exactly, or the answer describes a directory the
+/// agent never uses (Codex, PR #3156): a blank `working_directory` means the
+/// per-agent default, and a `~` path is expanded at launch. Reproducing both
+/// here rather than reading the stored value raw is the difference between
+/// reporting an agent's instructions and reporting nothing at all, since the
+/// default-workdir case is the common one
+/// (`SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md`).
+pub fn effective_working_dir(working_directory: &str, agent_name: &str) -> String {
+    let raw = if working_directory.trim().is_empty() {
+        crate::backend::storage::agents::default_agent_working_dir(agent_name)
+    } else {
+        working_directory.to_string()
+    };
+    if raw.starts_with("~/") || raw == "~" {
+        if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
+            return format!("{}/{}", home, raw.trim_start_matches("~/").trim_start_matches('~'));
+        }
+    }
+    raw
 }
 
 /// Who owns this file — by marker, or by construction.
@@ -211,6 +248,14 @@ fn read_one(working_dir: &Path, rel_path: &str) -> ProjectInstructionFile {
 /// failure mode this module exists to remove.
 pub const MAX_SCANNED_INSTRUCTION_FILES: usize = 200;
 
+/// Ceiling on the total content this resolver will return in one call.
+///
+/// The per-file cap and the file-count cap do not bound the payload between
+/// them: 200 files just under the per-file limit is roughly 2 GiB, assembled
+/// in memory before serialization (Codex, PR #3156). Past this budget a file
+/// is still listed with its hash and metadata; only its content is dropped.
+pub const MAX_TOTAL_INSTRUCTION_BYTES: u64 = 8 * 1024 * 1024;
+
 /// Collect qualifying files under one declared scan directory.
 ///
 /// Sorted by path so the answer is stable between calls — directory iteration
@@ -236,9 +281,23 @@ fn scan_dir(
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.is_dir() {
-                if recursive && !meta.is_symlink() {
+            // `file_type()` does NOT follow the link, unlike `metadata()`,
+            // which resolves the target and reports `is_symlink() == false`
+            // for every symlink — so the previous guard never fired at all
+            // (Codex, PR #3156). A repository could have pointed a link out of
+            // the working directory, or built a cycle for the walk to spin in.
+            //
+            // Symlinks are skipped outright inside a scan, files included:
+            // a scanned directory is repository-controlled and unbounded, and
+            // nothing about "follow this link" can be verified from here. The
+            // declared literal paths are still read through links normally,
+            // which is an ordinary and legible repository layout.
+            let Ok(file_type) = entry.file_type() else { continue };
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                if recursive {
                     walk(root, &path, suffix, recursive, found);
                 }
                 continue;
@@ -283,7 +342,7 @@ pub fn resolve_project_instructions(
         return Vec::new();
     }
     let root = PathBuf::from(working_directory);
-    let mut files: Vec<ProjectInstructionFile> = paths_for_provider(provider_id)
+    let mut files: Vec<ProjectInstructionFile> = paths_for_provider(provider_id, &root)
         .into_iter()
         .map(|rel| read_one(&root, &rel))
         .collect();
@@ -304,7 +363,23 @@ pub fn resolve_project_instructions(
             if files.iter().any(|f| f.path == rel) {
                 continue;
             }
-            files.push(read_one(&root, &rel));
+            let mut file = read_one(&root, &rel);
+            // Per-file and per-count ceilings do not bound the whole payload:
+            // 200 files just under the per-file cap is roughly 2 GiB of
+            // response, built in memory before serialization (Codex, PR
+            // #3156). Past the aggregate budget a file is still LISTED, with
+            // its hash and metadata — only its content is dropped. Reporting
+            // that the file is there costs nothing; shipping its bytes is
+            // what does.
+            let used: u64 = files.iter().map(|f| f.content.len() as u64).sum();
+            if used.saturating_add(file.content.len() as u64) > MAX_TOTAL_INSTRUCTION_BYTES {
+                file.content = String::new();
+                file.truncated = true;
+                file.error = Some(format!(
+                    "content omitted — the {MAX_TOTAL_INSTRUCTION_BYTES}-byte total budget for this response is exhausted"
+                ));
+            }
+            files.push(file);
         }
         if overflowed {
             files.push(ProjectInstructionFile {
@@ -384,6 +459,16 @@ mod tests {
     fn claude_includes_the_agentmux_side_file_the_import_line_points_at() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), AGENTMUX_MEMORY_FILENAME, "side file");
+        // The side file is read only when CLAUDE.md actually imports it —
+        // see `the_side_file_is_only_reported_when_claude_md_actually_imports_it`.
+        write(
+            dir.path(),
+            "CLAUDE.md",
+            &format!("# Repo rules
+
+@{AGENTMUX_MEMORY_FILENAME}
+"),
+        );
         let files = resolve_project_instructions("claude", dir.path().to_str().unwrap());
         let side = files
             .iter()
@@ -539,5 +624,118 @@ mod tests {
         assert!(claude_md.exists);
         assert!(claude_md.error.is_some(), "must not read as absent");
         assert!(claude_md.content.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod review_fix_tests {
+    use super::*;
+    use crate::backend::agent_config::CLAUDE_MD_MANAGED_MARKER;
+
+    fn write(dir: &Path, rel: &str, content: &str) {
+        let full = dir.join(rel);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(full, content).unwrap();
+    }
+
+    #[test]
+    fn the_side_file_is_only_reported_when_claude_md_actually_imports_it() {
+        // A CLAUDE.md write target does not by itself mean the side file is
+        // read: when AgentMux owns CLAUDE.md it writes the content directly
+        // and adds no import, and a previously appended import can be removed
+        // by hand while the side file stays behind (Codex, PR #3156).
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), AGENTMUX_MEMORY_FILENAME, "stale side file");
+        write(
+            dir.path(),
+            "CLAUDE.md",
+            &format!("{CLAUDE_MD_MANAGED_MARKER}\n\nowned by agentmux, no import\n"),
+        );
+
+        let files = resolve_project_instructions("claude", dir.path().to_str().unwrap());
+        assert!(
+            !files.iter().any(|f| f.path == AGENTMUX_MEMORY_FILENAME),
+            "no @-import line means the agent does not read it"
+        );
+
+        // Now the import exists, so it genuinely is read.
+        write(
+            dir.path(),
+            "CLAUDE.md",
+            &format!("# Repo rules\n\n@{AGENTMUX_MEMORY_FILENAME}\n"),
+        );
+        let files = resolve_project_instructions("claude", dir.path().to_str().unwrap());
+        let side = files
+            .iter()
+            .find(|f| f.path == AGENTMUX_MEMORY_FILENAME)
+            .expect("an active import means it is read");
+        assert_eq!(side.owner, InstructionOwner::Agentmux);
+    }
+
+    #[test]
+    fn a_symlinked_directory_inside_a_scan_is_not_followed() {
+        // `metadata()` follows the link and reports is_symlink() == false, so
+        // the original guard never fired at all — a repository could point a
+        // link out of the working directory, or build a cycle (Codex, #3156).
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        write(outside.path(), "secret.instructions.md", "not part of this project");
+        std::fs::create_dir_all(dir.path().join(".github/instructions")).unwrap();
+        write(dir.path(), ".github/instructions/own.instructions.md", "ours");
+
+        let link = dir.path().join(".github/instructions/elsewhere");
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(outside.path(), &link).is_ok();
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_dir(outside.path(), &link).is_ok();
+        if !made {
+            // Windows needs privilege for symlinks; the guard is still
+            // exercised on any platform that allows creating one.
+            return;
+        }
+
+        let files = resolve_project_instructions("copilot", dir.path().to_str().unwrap());
+        assert!(
+            files.iter().any(|f| f.path.ends_with("own.instructions.md")),
+            "the real file must still be found"
+        );
+        assert!(
+            !files.iter().any(|f| f.path.contains("secret")),
+            "a symlink must not carry the scan outside the working directory"
+        );
+    }
+
+    #[test]
+    fn a_blank_working_directory_resolves_to_the_launch_default() {
+        // The common case: launch uses default_agent_working_dir when the
+        // stored value is blank, so reading the raw value reported nothing at
+        // all for those agents (Codex, PR #3156).
+        let resolved = effective_working_dir("", "My Agent");
+        assert!(!resolved.trim().is_empty(), "must not resolve to nothing");
+        // The default is itself a `~` path, so the blank case exercises the
+        // expansion too — reading the stored value raw gave neither.
+        let default_raw = crate::backend::storage::agents::default_agent_working_dir("My Agent");
+        assert!(default_raw.starts_with('~'), "precondition: the default is a tilde path");
+        assert!(!resolved.starts_with('~'), "must be expanded: {resolved}");
+        assert!(
+            resolved.ends_with(default_raw.trim_start_matches("~/")),
+            "must be the same directory, expanded: {resolved} vs {default_raw}"
+        );
+    }
+
+    #[test]
+    fn a_tilde_path_is_expanded_the_way_launch_expands_it() {
+        let expanded = effective_working_dir("~/projects/x", "ignored");
+        assert!(!expanded.starts_with('~'), "got {expanded}");
+        assert!(expanded.ends_with("projects/x"), "got {expanded}");
+    }
+
+    #[test]
+    fn an_explicit_working_directory_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_str().unwrap();
+        assert_eq!(effective_working_dir(p, "ignored"), p);
     }
 }
