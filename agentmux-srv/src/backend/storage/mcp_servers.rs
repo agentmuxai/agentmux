@@ -93,11 +93,17 @@ impl Store {
     /// a numeric suffix, and a name colliding with a *global* server is
     /// retried the same way rather than dropped.
     ///
-    /// Idempotence is decided by what is already bound, not by whether an
-    /// upsert errored: an entry whose name is already bound to this bundle is
-    /// skipped, so a re-run creates nothing. That distinction is the whole
-    /// point — "already bound" and "name taken by something else" produce the
-    /// same error text but mean opposite things.
+    /// Idempotence is decided by **content**, not by name and not by whether
+    /// an upsert errored. An entry is "already carried across" only when a
+    /// bound server holds an identical config object; matching on name alone
+    /// would silently drop a genuinely different entry that happens to share a
+    /// name with something bound through the Armory (ReAgent, PR #3152), which
+    /// is the exact silent loss this whole change exists to end. Matching on
+    /// name would also mis-handle its own output: an entry disambiguated to
+    /// `foo-2` on the first run stores that name while still deriving `foo`.
+    ///
+    /// The match is a multiset consume, so two byte-identical entries stay two
+    /// entries across re-runs rather than collapsing into one.
     ///
     /// Returns `(created, warnings)`.
     pub fn bundle_mcp_bind_inline_entries(
@@ -112,14 +118,14 @@ impl Store {
 
         let mut warnings: Vec<String> = Vec::new();
 
-        // Names already bound to this bundle, captured BEFORE the loop so a
-        // duplicate inside `entries` is not mistaken for a previous run.
-        let already_bound: std::collections::HashSet<String> = match self.bundle_mcp_list(bundle_id) {
+        // What is already bound, captured BEFORE the loop so a duplicate
+        // inside `entries` is not mistaken for a previous run.
+        let bound = match self.bundle_mcp_list(bundle_id) {
             Ok(items) => items
                 .into_iter()
                 .filter(|i| i.bound_to_bundle)
-                .map(|i| i.server.name)
-                .collect(),
+                .map(|i| i.server)
+                .collect::<Vec<_>>(),
             Err(e) => {
                 warnings.push(format!(
                     "mcpServers: could not read existing bindings for bundle {bundle_id} ({e}) — nothing bound"
@@ -127,8 +133,15 @@ impl Store {
                 return (0, warnings);
             }
         };
-
-        let mut used: std::collections::HashSet<String> = already_bound.clone();
+        // Names are only used to avoid collisions; identity is the config.
+        let mut used: std::collections::HashSet<String> =
+            bound.iter().map(|s| s.name.clone()).collect();
+        // Multiset of configs still unaccounted for. Consuming an entry marks
+        // it matched, so N identical entries stay N across re-runs.
+        let mut unmatched: Vec<serde_json::Value> = bound
+            .iter()
+            .map(|s| serde_json::from_str(&s.config).unwrap_or(serde_json::Value::Null))
+            .collect();
         let mut created = 0usize;
 
         for (index, entry) in entries.iter().enumerate() {
@@ -141,13 +154,16 @@ impl Store {
             }
             let mut server = McpServer::from_inline_config(entry, index, now_ms);
 
-            // Already carried across on an earlier run: nothing to do.
-            if already_bound.contains(&server.name) {
+            // Already carried across on an earlier run — identified by its
+            // config, not its name, so a different server that merely shares a
+            // name does not swallow this entry.
+            if let Some(pos) = unmatched.iter().position(|c| c == entry) {
+                unmatched.swap_remove(pos);
                 continue;
             }
 
             let base = server.name.clone();
-            let mut bound = false;
+            let mut bound_ok = false;
             for attempt in 0..MAX_NAME_ATTEMPTS {
                 let candidate = if attempt == 0 {
                     base.clone()
@@ -160,9 +176,16 @@ impl Store {
                 server.name = candidate.clone();
                 match self.bundle_mcp_upsert_unique(id_store, bundle_id, &server, true) {
                     Ok(()) => {
+                        if candidate != base {
+                            // Not a loss, but the operator should know the
+                            // name they will see is not the name in the file.
+                            warnings.push(format!(
+                                "mcpServers: '{base}' was already taken, kept as '{candidate}'"
+                            ));
+                        }
                         used.insert(candidate);
                         created += 1;
-                        bound = true;
+                        bound_ok = true;
                         break;
                     }
                     // A name that is taken by something visible but not bound
@@ -176,12 +199,12 @@ impl Store {
                         warnings.push(format!(
                             "mcpServers: server '{base}' could not be created ({e}) — it will not be exported or reach the agent"
                         ));
-                        bound = true; // reported; do not also report exhaustion
+                        bound_ok = true; // reported; do not also report exhaustion
                         break;
                     }
                 }
             }
-            if !bound {
+            if !bound_ok {
                 warnings.push(format!(
                     "mcpServers: server '{base}' could not be given a free name after {MAX_NAME_ATTEMPTS} attempts — skipped"
                 ));

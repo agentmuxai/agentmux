@@ -382,6 +382,55 @@ mod tests {
     }
 
     #[test]
+    fn an_inline_entry_is_kept_when_a_different_server_already_holds_its_name() {
+        // ReAgent P1 on #3152: a server bound through the Armory (or by an
+        // earlier import that only wrote inline columns) can share a name with
+        // an inline entry while being a completely different server. Deciding
+        // "already migrated" by name would drop the inline one permanently and
+        // silently, now that export reads only bound refs — the exact failure
+        // this backfill exists to prevent. Identity is the config.
+        let s = store();
+        insert_bundle(&s, "bundle-1", "[]", "[]");
+
+        // Bound through the Armory: same name, different server.
+        let armory = crate::backend::storage::mcp_servers::McpServer {
+            id: "srv-armory".to_string(),
+            name: "github".to_string(),
+            transport: "stdio".to_string(),
+            config: r#"{"name":"github","command":"a-totally-different-binary"}"#.to_string(),
+            is_global: false,
+            created_at: 1,
+            updated_at: 1,
+        };
+        s.bundle_mcp_upsert_unique(&s, "bundle-1", &armory, true).unwrap();
+
+        let mcp = r#"[{"name":"github","command":"gh-mcp"}]"#;
+        let (_, mc) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
+        assert_eq!(mc, 1, "the inline entry must be carried across, not swallowed");
+
+        let bound: Vec<_> = s
+            .bundle_mcp_list("bundle-1")
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.bound_to_bundle)
+            .collect();
+        assert_eq!(bound.len(), 2, "both servers must exist");
+        assert!(
+            bound.iter().any(|i| i.server.config.contains("gh-mcp")),
+            "the inline entry's own config must survive"
+        );
+        assert!(
+            bound.iter().any(|i| i.server.config.contains("a-totally-different-binary")),
+            "the pre-existing server must survive"
+        );
+
+        // ...and re-running still creates nothing, because the match is by
+        // config and both configs are now accounted for.
+        let (_, again) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
+        assert_eq!(again, 0, "re-run must remain a no-op");
+    }
+
+    #[test]
     fn an_entrys_own_type_becomes_the_transport() {
         // Hardcoding stdio would give the row a transport column that
         // contradicts its own config JSON (ReAgent, PR #3152).
