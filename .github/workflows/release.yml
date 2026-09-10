@@ -163,7 +163,7 @@ jobs:
         run: |
           WIN_TAG="cef-windows-x86_64-148.0.7778.180"
           LINUX_TAG="cef-linux-x86_64-148.0.7778.180-codecs"
-          MACOS_TAG="cef-macos-arm64-148.23.23-codecs"
+          MACOS_TAG="cef-macos-arm64-148.23.25-codecs"
 
           # Chromium milestone = the leading dot-separated numeric segment
           # after the cef-<platform>-<arch>- prefix. Works across both

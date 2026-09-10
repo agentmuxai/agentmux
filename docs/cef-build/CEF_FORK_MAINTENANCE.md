@@ -517,17 +517,18 @@ All three pins live in one place — `release.yml`'s `cef-runtime-pins` job — 
 is correct and was a deliberate fix (PR #3086 and its follow-up). Keep it that
 way; do not reintroduce per-job literals.
 
-Current pins:
+**The live values are in `release.yml`, and are deliberately not repeated here.**
+This section previously pinned them inline and went stale the first time one was
+bumped — the same duplicated-value rot §5 and §7 keep running into. To read the
+current pins:
 
-```
-WIN_TAG="cef-windows-x86_64-148.0.7778.180"
-LINUX_TAG="cef-linux-x86_64-148.0.7778.180-codecs"
-MACOS_TAG="cef-macos-arm64-148.23.23-codecs"
+```bash
+sed -n '/cef-runtime-pins/,/MISMATCH/p' .github/workflows/release.yml | grep '_TAG='
 ```
 
 **Known sharp edge: the three tags use two different version schemes.** Windows
-and Linux carry the *Chromium* version (`148.0.7778.180`); macOS carries the
-*CEF* version (`148.23.23`). The job cross-checks only the leading milestone
+and Linux carry the *Chromium* version (e.g. `148.0.7778.180`); macOS carries
+the *CEF* version (e.g. `148.23.25`). The job cross-checks only the leading milestone
 (`148`), which is the one component the schemes agree on. That check is real but
 weak: **two tags can agree on `148` and still come from different fork commits
 with different carry-sets.** That is exactly the divergence §1 is about, and
