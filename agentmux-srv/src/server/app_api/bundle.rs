@@ -339,6 +339,13 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// to the pure `bundle_export::export_bundle`. `format: "zip"` returns a
 /// base64-encoded archive; anything else (including omitted) returns the
 /// raw file list for the caller to write out itself.
+#[derive(serde::Deserialize, Default)]
+struct ExportReq {
+    id: String,
+    #[serde(default)]
+    format: String,
+}
+
 fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
@@ -348,80 +355,239 @@ fn register_bundle_export(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store.clone();
             let wstore = wstore.clone();
             Box::pin(async move {
-                #[derive(serde::Deserialize, Default)]
-                struct Req {
-                    id: String,
-                    #[serde(default)]
-                    format: String,
-                }
-                let req: Req = serde_json::from_value(data)
+                let req: ExportReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export: {e}"))?;
-
-                let bundle = id_store
-                    .bundle_get(&req.id)
-                    .map_err(|e| format!("bundle.export: {e}"))?
-                    .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
-
-                // Same silent-data-loss pattern already fixed for
-                // context_files/mcp_servers in bundle_export.rs -- a
-                // malformed bundle.skills value must warn, not just
-                // vanish, but a genuinely blank one is not an error
-                // (reagent P1, PR #2333). Shares the same helper so all
-                // three fields behave identically.
-                let mut handler_warnings: Vec<String> = Vec::new();
-                let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
-                    &bundle.skills,
-                    "skills",
-                    &mut handler_warnings,
-                );
-                // Distinguish a genuine DB error from a legitimately deleted
-                // skill id: `.ok().flatten()` previously collapsed both to
-                // "absent", so a locked/damaged store silently reported a
-                // successful export missing content instead of failing loudly
-                // -- unsafe for the advertised backup use case (Codex P2, PR
-                // #2325). A lookup error now fails the whole export; a
-                // missing row (Ok(None), i.e. actually deleted) is skipped
-                // and reported back in `missing_skill_ids`.
-                let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
-                let mut missing_skill_ids: Vec<String> = Vec::new();
-                for id in &skill_ids {
-                    match wstore.skill_get(id) {
-                        Ok(Some(skill)) => skills.push(skill),
-                        Ok(None) => missing_skill_ids.push(id.clone()),
-                        Err(e) => {
-                            return Err(format!("bundle.export: failed to look up skill {id}: {e}"));
-                        }
-                    }
-                }
-
-                let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
-
-                let mut all_warnings = export.warnings.clone();
-                all_warnings.append(&mut handler_warnings);
-
-                if req.format == "zip" {
-                    let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
-                        .map_err(|e| format!("bundle.export: {e}"))?;
-                    use base64::Engine as _;
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
-                    return Ok(Some(json!({
-                        "root_slug": export.root_slug,
-                        "skipped_skills": export.skipped_skills,
-                        "warnings": all_warnings,
-                        "missing_skill_ids": missing_skill_ids,
-                        "zip_base64": encoded,
-                    })));
-                }
-
-                let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
-                if let Some(obj) = result.as_object_mut() {
-                    obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
-                    obj.insert("warnings".to_string(), json!(all_warnings));
-                }
-                Ok(Some(result))
+                bundle_export_impl(&id_store, &wstore, req).map(Some)
             })
         }),
     );
+}
+
+/// The agent-less `bundle.export`, extracted from its handler closure so the
+/// warning contract in §5.1 can be asserted at the RPC boundary rather than
+/// only on its helper — matching `bundle_export_for_agent_impl` and
+/// `bundle_export_for_agent_with_history_impl`, which were already shaped this
+/// way for the same reason.
+fn bundle_export_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    req: ExportReq,
+) -> Result<serde_json::Value, String> {
+    let bundle = id_store
+        .bundle_get(&req.id)
+        .map_err(|e| format!("bundle.export: {e}"))?
+        .ok_or_else(|| format!("bundle.export: no bundle with id {}", req.id))?;
+
+    // Same silent-data-loss pattern already fixed for
+    // context_files/mcp_servers in bundle_export.rs -- a malformed
+    // bundle.skills value must warn, not just vanish, but a genuinely
+    // blank one is not an error (reagent P1, PR #2333). Shares the same
+    // helper so all three fields behave identically.
+    let mut handler_warnings: Vec<String> = Vec::new();
+    let skill_ids: Vec<String> =
+        crate::backend::bundle_export::parse_json_field_or_warn(&bundle.skills, "skills", &mut handler_warnings);
+
+    // Distinguish a genuine DB error from a legitimately deleted skill id:
+    // `.ok().flatten()` previously collapsed both to "absent", so a
+    // locked/damaged store silently reported a successful export missing
+    // content instead of failing loudly -- unsafe for the advertised backup
+    // use case (Codex P2, PR #2325). A lookup error now fails the whole
+    // export; a missing row (Ok(None), i.e. actually deleted) is skipped and
+    // reported back in `missing_skill_ids`.
+    let mut skills: Vec<crate::backend::storage::Skill> = Vec::new();
+    let mut missing_skill_ids: Vec<String> = Vec::new();
+    for id in &skill_ids {
+        match wstore.skill_get(id) {
+            Ok(Some(skill)) => skills.push(skill),
+            Ok(None) => missing_skill_ids.push(id.clone()),
+            Err(e) => return Err(format!("bundle.export: failed to look up skill {id}: {e}")),
+        }
+    }
+
+    let export = crate::backend::bundle_export::export_bundle(&bundle, &skills);
+
+    let mut all_warnings = export.warnings.clone();
+    all_warnings.append(&mut handler_warnings);
+
+    // Export/import symmetry -- see MEMORY_NOT_EXPORTED_WARNING.
+    if bound_agent_has_native_memory(id_store, wstore, &bundle.id) {
+        all_warnings.push(MEMORY_NOT_EXPORTED_WARNING.to_string());
+    }
+
+    if req.format == "zip" {
+        let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+            .map_err(|e| format!("bundle.export: {e}"))?;
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+        return Ok(json!({
+            "root_slug": export.root_slug,
+            "skipped_skills": export.skipped_skills,
+            "warnings": all_warnings,
+            "missing_skill_ids": missing_skill_ids,
+            "zip_base64": encoded,
+        }));
+    }
+
+    let mut result = serde_json::to_value(&export).map_err(|e| e.to_string())?;
+    if let Some(obj) = result.as_object_mut() {
+        obj.insert("missing_skill_ids".to_string(), json!(missing_skill_ids));
+        obj.insert("warnings".to_string(), json!(all_warnings));
+    }
+    Ok(result)
+}
+
+/// Warning the agent-less `bundle.export` pushes when the bundle it is
+/// exporting is bound to an agent that actually has native memory.
+///
+/// Mirror of [`crate::backend::bundle_import::MEMORY_COMPONENT_IGNORED_WARNING`]
+/// on the import side, and a constant for the same reason that one is: the push
+/// site and the test that pins the wording must not drift apart.
+///
+/// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.1/§5.1. The
+/// asymmetry worth fixing was never that `bundle.export` omits memory — a
+/// bundle detached from any agent has no memory to carry, and omitting it is
+/// correct. It is that import *announces* the omission and export did not,
+/// while every `components` key is optional (`bundle_export.rs:586-606`), so a
+/// missing `memory` key is indistinguishable from "this bundle had none".
+pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
+    "memory: this bundle is bound to an agent with native memory, which bundle.export does not carry — use bundle.export_for_agent to include it";
+
+/// Does any agent bound to `bundle_id` have mirrored native memory?
+///
+/// **Both bindings count.** A bundle is reachable two ways, and they are
+/// different columns: `AgentDefinition.memory_id` is the agent's own dedicated
+/// bundle (stored in `db_agents.default_memory_id`), while
+/// `AgentInstance.memory_id` is one *launch* deliberately pointed at some other
+/// bundle (`storage/agents.rs:153-163`). Checking only the definition would
+/// miss exactly the case the operator is most likely to hit — exporting the
+/// bundle a running instance was launched with. Native memory is keyed on the
+/// definition id either way (`build_export_for_agent` resolves the agent with
+/// `agent_def_get` before reading memory), so the instance path resolves
+/// through `definition_id`.
+///
+/// Reads the `db_agent_native_memory` mirror and deliberately does NOT call
+/// `refresh_memory_mirror_from_live_fs` first, unlike `build_export_for_agent`
+/// (which must, because it is about to *copy* the files —
+/// `app_api/bundle.rs:558`). Refreshing writes to the store, and an agent-less
+/// export has no business mutating per-agent state as a side effect of
+/// producing a warning.
+///
+/// **Known limitation — a cross-channel binding is invisible here, and cannot
+/// currently be made visible.** Both lookups resolve the binding from
+/// channel-local SQLite: `instance_list` reads this channel's rows, and
+/// `agent_def_list`'s global overlay only preserves `memory_id` when a local
+/// row exists (`storage/agents.rs:462`). An agent created in another channel
+/// has no local row, so it comes back with an empty `memory_id` — because
+/// `DefinitionRecordV1` does not carry the field at all
+/// (`storage/def_registry_mirror.rs:128-133`). The bundle and the memory mirror
+/// are global; only the binding between them is not. So exporting a shared
+/// bundle from a channel other than the one its agent was created in will not
+/// warn, which is exactly the portability case the warning is for (Codex, PR
+/// #3147).
+///
+/// Closing it means adding `memory_id` to the registry wire format, which is
+/// already a tracked gap for bigger reasons than this warning — the same
+/// missing field makes a cross-channel reopen start unbound and limits m0021's
+/// backfill to local SQLite. Tracked in #3148; deliberately not widened here,
+/// because warning whenever the binding is merely *unknown* would fire on
+/// unrelated bundles and train operators to ignore it.
+///
+/// The other cost is under-warning on a stale mirror: an agent whose memory
+/// exists on disk but was never mirrored is missed. That is the residual gap
+/// `SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md` already documents and
+/// accepts for the mirror generally. Both costs are one-directional and this
+/// warning is advisory — it changes no bytes in the archive.
+fn bound_agent_has_native_memory(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) -> bool {
+    // A blank bundle_id is the "blank singleton" sentinel that every unbound
+    // agent carries — treating it as a binding would warn on nearly every
+    // export.
+    if bundle_id.is_empty() {
+        return false;
+    }
+
+    let has_memory = |agent_id: &str| {
+        id_store
+            .agent_native_memory_list_meta(agent_id)
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false)
+    };
+
+    // Best-effort throughout: a store error here must not fail an export that
+    // is otherwise fine. Neither table is read by the export itself.
+    let bound_by_definition = wstore
+        .agent_def_list()
+        .map(|agents| {
+            agents
+                .iter()
+                .filter(|a| a.memory_id == bundle_id)
+                .any(|a| has_memory(&a.id))
+        })
+        .unwrap_or(false);
+    if bound_by_definition {
+        return true;
+    }
+
+    wstore
+        .instance_list(None, None)
+        .map(|instances| {
+            instances
+                .iter()
+                .filter(|i| i.memory_id == bundle_id)
+                .any(|i| has_memory(&i.definition_id))
+        })
+        .unwrap_or(false)
+}
+
+/// Register `paths` under `components.<key>` in the export's `armory.json`.
+///
+/// The manifest is built as an inline `json!` literal in `bundle_export.rs`
+/// with no struct behind it (`bundle_export.rs:615`), so every agent-aware
+/// component has to reopen and rewrite it. Shared by the memory splice below
+/// and the history splice, which otherwise duplicated the find-parse-rewrite
+/// dance byte for byte.
+///
+/// No-ops on an empty list: `components` keys are all optional, and writing
+/// `"history": []` would assert "this archive has an empty history" where
+/// absence already says "none".
+fn set_manifest_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    key: &str,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let manifest_idx = export
+        .files
+        .iter()
+        .position(|f| f.path == "armory.json")
+        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
+    let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
+        .map_err(|e| format!("armory.json: {e}"))?;
+    manifest["components"][key] = json!(paths);
+    export.files[manifest_idx].content =
+        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Register the transcript files `bundle.export_for_agent_with_history` already
+/// wrote into the archive under `components.history`.
+///
+/// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.5: the files were
+/// pushed into `export.files` (`app_api/bundle.rs:797`) and counted in the RPC
+/// response, but the manifest was never touched after the memory splice — so a
+/// consumer reading `components.*` to learn what an archive holds could not see
+/// history at all. The paths are caller-supplied rather than re-derived here so
+/// this cannot drift from what was actually written.
+fn splice_history_component(
+    export: &mut crate::backend::bundle_export::BundleExport,
+    history_paths: Vec<String>,
+) -> Result<(), String> {
+    set_manifest_component(export, "history", history_paths)
 }
 
 /// Splice native-memory files into an already-built bundle export's
@@ -443,13 +609,6 @@ fn splice_memory_component(
     if memory_files.is_empty() {
         return Ok(());
     }
-    let manifest_idx = export
-        .files
-        .iter()
-        .position(|f| f.path == "armory.json")
-        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
-    let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
-        .map_err(|e| format!("armory.json: {e}"))?;
     let mut manifest_memory: Vec<String> = Vec::new();
     for (filename, content) in memory_files {
         // Filenames here always came from db_agent_native_memory, which
@@ -465,10 +624,7 @@ fn splice_memory_component(
         });
         manifest_memory.push(out_path);
     }
-    manifest["components"]["memory"] = json!(manifest_memory);
-    export.files[manifest_idx].content =
-        serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-    Ok(())
+    set_manifest_component(export, "memory", manifest_memory)
 }
 
 /// `bundle.export_for_agent` — ABF v0.2 §2.3. The only export path that
@@ -790,13 +946,17 @@ async fn bundle_export_for_agent_with_history_impl(
 
         // Pass 3: actually read + include only what fit.
         let mut included = 0u32;
+        let mut history_paths: Vec<String> = Vec::new();
         for (session, _size) in sized.into_iter().take(fit_count) {
             match std::fs::read_to_string(&session.file_path) {
                 Ok(content) => {
+                    let out_path =
+                        format!("history/{}/{}.jsonl", session.provider, session.session_id);
                     export.files.push(crate::backend::bundle_export::BundleExportFile {
-                        path: format!("history/{}/{}.jsonl", session.provider, session.session_id),
+                        path: out_path.clone(),
                         content,
                     });
+                    history_paths.push(out_path);
                     included += 1;
                 }
                 Err(e) => all_warnings.push(format!(
@@ -806,6 +966,11 @@ async fn bundle_export_for_agent_with_history_impl(
             }
         }
         all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
+
+        // §3.5: the files above are in the archive; say so in the manifest too.
+        // Must happen before zipping — armory.json is zipped from export.files.
+        splice_history_component(&mut export, history_paths)
+            .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
 
         let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
             .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
@@ -2810,6 +2975,131 @@ mod export_import_for_agent_tests {
         assert!(err.contains("no agent"));
     }
 
+    /// Point an agent DEFINITION's own bundle at `bundle_id`.
+    ///
+    /// Uses the dedicated setter, not `agent_def_update`: that UPDATE
+    /// deliberately does not list `default_memory_id` among its columns
+    /// (`storage/agents.rs:1188-1197`), so mutating `AgentDefinition.memory_id`
+    /// and calling it would silently no-op.
+    fn bind_definition_to_bundle(state: &AppState, agent_id: &str, bundle_id: &str) {
+        assert!(
+            state
+                .wstore
+                .agent_def_set_memory_id_if_empty(agent_id, bundle_id)
+                .unwrap(),
+            "test setup: binding {agent_id} to {bundle_id} must apply"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_less_export_warns_when_a_bound_agent_has_memory() {
+        // SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §3.1/§5.1:
+        // import announces a dropped memory component; export must too.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_definition_to_bundle(&state, "agent-1", "bundle-1");
+        state
+            .id_store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
+            .unwrap();
+
+        assert!(
+            bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-1"),
+            "definition-bound agent with memory must be detected"
+        );
+
+        // The contract that matters is at the RPC boundary, not the helper.
+        let result = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: "bundle-1".to_string(), format: String::new() },
+        )
+        .unwrap();
+        let warnings = result["warnings"].as_array().unwrap();
+        assert!(
+            warnings.iter().any(|w| w == MEMORY_NOT_EXPORTED_WARNING),
+            "bundle.export must announce the memory it is not carrying: {warnings:?}"
+        );
+        // ...and still not carry it: this path has no agent to read from.
+        let files = result["files"].as_array().unwrap();
+        assert!(!files.iter().any(|f| f["path"].as_str().unwrap_or("").starts_with("memory/")));
+    }
+
+    #[tokio::test]
+    async fn agent_less_export_is_silent_without_memory_or_without_a_binding() {
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        make_bundle(&state, "bundle-2", "Other.");
+        bind_definition_to_bundle(&state, "agent-1", "bundle-1");
+
+        // Bound, but the agent has no memory at all.
+        assert!(!bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-1"));
+
+        state
+            .id_store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
+            .unwrap();
+
+        // Now it has memory — but bundle-2 is bound to nobody, so exporting
+        // bundle-2 loses nothing and must stay quiet.
+        assert!(!bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-2"));
+
+        // The blank-singleton sentinel must never warn, or nearly every
+        // export would.
+        assert!(!bound_agent_has_native_memory(&state.id_store, &state.wstore, ""));
+
+        // And the RPC stays quiet for the unbound bundle.
+        let result = bundle_export_impl(
+            &state.id_store,
+            &state.wstore,
+            ExportReq { id: "bundle-2".to_string(), format: String::new() },
+        )
+        .unwrap();
+        let warnings = result["warnings"].as_array().unwrap();
+        assert!(
+            !warnings.iter().any(|w| w == MEMORY_NOT_EXPORTED_WARNING),
+            "exporting a bundle nobody is bound to loses nothing: {warnings:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_less_export_warns_for_an_instance_scoped_binding_too() {
+        // The definition's own bundle and a launch's bundle are different
+        // columns; a launch pointed at another bundle still carries the
+        // definition's memory.
+        let state = test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        make_bundle(&state, "bundle-2", "Other.");
+        bind_definition_to_bundle(&state, "agent-1", "bundle-1");
+        state
+            .id_store
+            .agent_native_memory_upsert("agent-1", "MEMORY.md", "a fact", None, "/x", 6, 0)
+            .unwrap();
+
+        let inst: crate::backend::storage::AgentInstance =
+            serde_json::from_value(serde_json::json!({
+                "id": "inst-1",
+                "definition_id": "agent-1",
+                "memory_id": "bundle-2",
+                "status": "running",
+                "started_at": 1,
+                "created_at": 1,
+            }))
+            .unwrap();
+        state.wstore.instance_create(&inst).unwrap();
+
+        assert!(
+            bound_agent_has_native_memory(&state.id_store, &state.wstore, "bundle-2"),
+            "a launch pointed at bundle-2 still carries agent-1's memory"
+        );
+    }
+
     fn abf_files_with_memory(instructions: &str, memory_filename: &str, memory_content: &str) -> Vec<FileEntry> {
         let manifest = serde_json::json!({
             "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
@@ -3363,6 +3653,21 @@ mod export_import_for_agent_tests {
             (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect()
         }
 
+        /// The `armory.json` manifest out of an exported zip.
+        fn unzip_manifest(zip_base64: &str) -> serde_json::Value {
+            use base64::Engine as _;
+            use std::io::Read as _;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(zip_base64).unwrap();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+            let name = (0..archive.len())
+                .map(|i| archive.by_index(i).unwrap().name().to_string())
+                .find(|n| n.ends_with("armory.json"))
+                .expect("export must contain armory.json");
+            let mut content = String::new();
+            archive.by_name(&name).unwrap().read_to_string(&mut content).unwrap();
+            serde_json::from_str(&content).unwrap()
+        }
+
         #[tokio::test]
         async fn includes_the_agents_sessions_alongside_the_normal_bundle_files() {
             let state = test_state();
@@ -3398,6 +3703,48 @@ mod export_import_for_agent_tests {
             let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
             assert!(paths.iter().any(|p| p.ends_with("instructions/AGENTS.md")), "base bundle files must still be present: {paths:?}");
             assert!(paths.iter().any(|p| p.ends_with("history/mock/sess-1.jsonl")), "session must be included under history/: {paths:?}");
+
+            // SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md §3.5: the
+            // files above were in the archive but invisible to anything reading
+            // components.* to learn what the archive holds.
+            let manifest = unzip_manifest(result["zip_base64"].as_str().unwrap());
+            assert_eq!(
+                manifest["components"]["history"],
+                json!(["history/mock/sess-1.jsonl"]),
+                "history must be registered in the manifest, not just zipped"
+            );
+        }
+
+        #[tokio::test]
+        async fn omits_the_history_component_when_no_session_was_included() {
+            // Absence already means "none"; an empty array would assert
+            // "this archive has an empty history", which is a different claim.
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            // No identity link -> no sessions discovered.
+
+            let index = SessionIndex::with_isolated_roots(vec![], vec![]);
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                state.id_store.clone(),
+                state.identity_store.clone(),
+                &state.wstore,
+                std::sync::Arc::new(history_service),
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0);
+            let manifest = unzip_manifest(result["zip_base64"].as_str().unwrap());
+            assert!(
+                manifest["components"].get("history").is_none(),
+                "no sessions must leave the history component absent: {}",
+                manifest["components"]
+            );
         }
 
         #[tokio::test]
