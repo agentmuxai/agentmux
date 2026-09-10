@@ -133,7 +133,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         // the template's provider; Memory from the first non-blank
         // bundle.
         expect(args.accountId).toBe("id-work");
-        expect(args.memoryId).toBe("mem-notes");
+        expect(args.bundleId).toBe("mem-notes");
         // No Docker → runtime defaults to host (never a mode that
         // can't actually start).
         expect(args.agentType).toBe("host");

@@ -405,7 +405,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.agentType).toBe("container");
         expect(overrides.environment).toBe("docker");
         expect(overrides.accountId).toBe("id-work");
-        expect(overrides.memoryId).toBe("mem-notes");
+        expect(overrides.bundleId).toBe("mem-notes");
         expect(overrides.instanceName).toBe("Mary");
         expect(overrides.continueOfInstanceId).toBeUndefined();
         expect(overrides.model).toBe("opus");

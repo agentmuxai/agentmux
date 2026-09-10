@@ -53,7 +53,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
             // Empty strings = blank singletons (ambient creds, vanilla CLI).
             agent_ref: {
                 identityId: "",
-                memoryId: "",
+                bundleId: "",
                 instanceName: "",
                 workingDirectory: "",
             },

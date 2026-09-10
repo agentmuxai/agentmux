@@ -165,7 +165,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                 </button>
             </div>
             <ul class="bundle-view-list">
-                <For each={model.memoriesAtom()}>
+                <For each={model.bundlesAtom()}>
                     {(memory) => (
                         <li
                             class="bundle-view-list-item"

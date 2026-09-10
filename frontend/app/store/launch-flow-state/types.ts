@@ -8,7 +8,7 @@
  * Owns the entire editable Launch-modal surface as a single state
  * object:
  *   - `form` — name, runtime, image, identity/memory/continue selections
- *   - `identities` / `memories` — loaded bundle lists + load status
+ *   - `identities` / `bundles` — loaded bundle lists + load status
  *   - `bindings` — per-identity binding cache (push-updated via
  *     backend `identitybundlebindings:changed:<id>` events)
  *   - `submit` — submit-in-flight + last error
@@ -44,7 +44,7 @@ export interface LaunchForm {
      *  binding for this provider. */
     accountId: string;
     /** Selected Memory bundle id. `""` = unselected. */
-    memoryId: string;
+    bundleId: string;
     /** When set, this launch is a continuation of a prior named
      *  agent — pulled from the user's "Continue agent" dropdown.
      *  Drives the per-row lock semantics in §3.2.2 of the spec. */
@@ -56,7 +56,7 @@ export const initialForm = (): LaunchForm => ({
     runtime: "container",
     image: "",
     accountId: "",
-    memoryId: "",
+    bundleId: "",
     continueOfId: null,
 });
 
@@ -96,7 +96,7 @@ export interface LaunchFlowState {
      *  fetch needed (see the removed `bindings`/`bindingsLoading` slices
      *  below). */
     accounts: ResourceList<Account>;
-    memories: ResourceList<Bundle>;
+    bundles: ResourceList<Bundle>;
     submit: SubmitStatus;
     /** Folded-in OAuth state machine. The `Auth` command wraps an
      *  `AuthCommand` from auth-state.ts; the reducer delegates to
@@ -110,7 +110,7 @@ export interface LaunchFlowState {
 export const initialState = (): LaunchFlowState => ({
     form: initialForm(),
     accounts: initialResourceList<Account>(),
-    memories: initialResourceList<Bundle>(),
+    bundles: initialResourceList<Bundle>(),
     submit: initialSubmit(),
     auth: initialAuthState(),
     closed: false,
@@ -129,22 +129,22 @@ export type LaunchFlowCommand =
     /** Setting account to `""` clears it (e.g. on legacy
      *  continuation with no carry-over). */
     | { type: "AccountChanged"; accountId: string }
-    | { type: "MemoryChanged"; memoryId: string }
+    | { type: "BundleChanged"; bundleId: string }
     /** Continue dropdown — `null` = "— New agent —". Setting to a
      *  real instance id locks per-row selectors with the carry-over
      *  values. */
     | {
           type: "ContinueOfChanged";
           continueOfId: string | null;
-          carry?: { name: string; accountId: string; memoryId: string };
+          carry?: { name: string; accountId: string; bundleId: string };
       }
     /** Resource lifecycle commands. */
     | { type: "AccountsLoading" }
     | { type: "AccountsLoaded"; list: Account[] }
     | { type: "AccountsFailed"; error: string }
-    | { type: "MemoriesLoading" }
-    | { type: "MemoriesLoaded"; list: Bundle[] }
-    | { type: "MemoriesFailed"; error: string }
+    | { type: "BundlesLoading" }
+    | { type: "BundlesLoaded"; list: Bundle[] }
+    | { type: "BundlesFailed"; error: string }
     /** Submit lifecycle. */
     | { type: "SubmitClicked" }
     | { type: "SubmitSucceeded" }
@@ -189,13 +189,13 @@ export function accountsForProvider(state: LaunchFlowState, providerId: string):
  *  the same way every sibling bundle-picker filter in the app does
  *  (AgentLaunchModal's own dropdown, AgentStartupModal, drone-view,
  *  BundleViewModel.refresh). Without this, AgentLaunchModal's default-pick
- *  effect (`firstReal = realMemories(flow.state)[0]`) could auto-select a
- *  system Global Memory entry as memoryId — an id with no matching
+ *  effect (`firstReal = realBundles(flow.state)[0]`) could auto-select a
+ *  system Global Memory entry as bundleId — an id with no matching
  *  <option> in that same dropdown, and one bundle_memory_upsert would
  *  permanently refuse to let the launched agent's own bundle editor
  *  modify. reagent P1, PR #2782. */
-export function realMemories(state: LaunchFlowState): Bundle[] {
-    return state.memories.list.filter((m) => !m.is_blank && !m.is_system);
+export function realBundles(state: LaunchFlowState): Bundle[] {
+    return state.bundles.list.filter((m) => !m.is_blank && !m.is_system);
 }
 
 /** True when the form is a continuation of a prior named agent
@@ -212,8 +212,8 @@ export function continueLocksIdentity(state: LaunchFlowState): boolean {
     return isContinue(state) && state.form.accountId !== "";
 }
 
-export function continueLocksMemory(state: LaunchFlowState): boolean {
-    return isContinue(state) && state.form.memoryId !== "";
+export function continueLocksBundle(state: LaunchFlowState): boolean {
+    return isContinue(state) && state.form.bundleId !== "";
 }
 
 /** Whether the selected account actually supplies credentials for
@@ -242,7 +242,7 @@ export function canSubmit(
     if (state.submit.inFlight) return false;
     if (!opts.nameValid) return false;
     if (state.form.accountId === "") return false;
-    if (state.form.memoryId === "") return false;
+    if (state.form.bundleId === "") return false;
     if (!opts.authReady) return false;
     return true;
 }

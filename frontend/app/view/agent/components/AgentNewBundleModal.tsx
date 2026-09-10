@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentNewMemoryModalPanel — creates a new Memory bundle from the
+ * AgentNewBundleModalPanel — creates a new Memory bundle from the
  * Launch modal's "+ New" affordance.
  *
  * Memory bundles are organized text content (notes, instructions,
@@ -26,7 +26,7 @@ import { Button } from "@/element/button";
 
 type SeedMode = "empty" | "paste" | "files";
 
-interface NewMemoryFormData {
+interface NewBundleFormData {
     name: string;
     description: string;
     /** JSON-encoded array of `{ path, content }` — server stores this
@@ -35,14 +35,14 @@ interface NewMemoryFormData {
     contextFiles: string;
 }
 
-interface AgentNewMemoryModalPanelProps {
+interface AgentNewBundleModalPanelProps {
     initialName?: string;
     onCancel: () => void;
-    onSubmit: (formData: NewMemoryFormData) => Promise<void>;
+    onSubmit: (formData: NewBundleFormData) => Promise<void>;
 }
 
-export const AgentNewMemoryModalPanel = (
-    props: AgentNewMemoryModalPanelProps,
+export const AgentNewBundleModalPanel = (
+    props: AgentNewBundleModalPanelProps,
 ): JSX.Element => {
     const [name, setName] = createSignal(props.initialName ?? "");
     const [description, setDescription] = createSignal("");
@@ -191,4 +191,4 @@ export const AgentNewMemoryModalPanel = (
     );
 };
 
-AgentNewMemoryModalPanel.displayName = "AgentNewMemoryModalPanel";
+AgentNewBundleModalPanel.displayName = "AgentNewBundleModalPanel";

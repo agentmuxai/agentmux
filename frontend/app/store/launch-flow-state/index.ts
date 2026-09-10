@@ -7,6 +7,6 @@ export {
     accountsForProvider,
     accountSuppliesProvider,
     continueLocksIdentity,
-    continueLocksMemory,
-    realMemories,
+    continueLocksBundle,
+    realBundles,
 } from "./types";

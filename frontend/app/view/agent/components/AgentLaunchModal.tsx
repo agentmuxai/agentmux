@@ -20,7 +20,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 
-import { createLaunchFlowStore, accountsForProvider, realMemories } from "@/app/store/launch-flow-state";
+import { createLaunchFlowStore, accountsForProvider, realBundles } from "@/app/store/launch-flow-state";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
@@ -47,7 +47,7 @@ export interface LaunchOverrides {
      *  PR-C Part B — was `identityId` (a bundle id). */
     accountId: string;
     /** Selected Memory bundle id. Required (non-empty) at submit. */
-    memoryId: string;
+    bundleId: string;
     /** v8 — when set, this launch is a continuation of a prior named
      *  agent. The id is recorded as `parent_instance_id` on the new
      *  row so the lineage is queryable. */
@@ -108,7 +108,7 @@ interface AgentLaunchModalPanelProps {
      *  directly from `PreLaunchAuthPanel`); this now only fires for
      *  manual/API-key account creation. Replaces `onRequestNewIdentity`. */
     onRequestAddAccount?: (current: LaunchFormState) => void;
-    onRequestNewMemory?: (current: LaunchFormState) => void;
+    onRequestNewBundle?: (current: LaunchFormState) => void;
 }
 
 /** Snapshot of the editable Launch form. Used to thread the user's
@@ -119,7 +119,7 @@ interface LaunchFormState {
     runtime: "host" | "container";
     image: string;
     accountId: string;
-    memoryId: string;
+    bundleId: string;
     /** Continuation context. `null` = "— New agent —". Round-trip
      *  preserved alongside the form fields so Continue mode survives
      *  the `+ New bundle` flow (otherwise an ambient-creds
@@ -148,7 +148,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // memo below: memos must stay synchronous, so the fetch lives here.
     const [boundBundle] = createResource(
         () => props.agent.memory_id || undefined,
-        (memoryId) => RpcApi.GetBundleCommand(TabRpcClient, { id: memoryId }).catch(() => undefined),
+        (bundleId) => RpcApi.GetBundleCommand(TabRpcClient, { id: bundleId }).catch(() => undefined),
     );
     // While a BOUND agent's bundle fetch is still in flight, resolve to
     // "" (empty/unknown) rather than falling back to `props.agent.provider`
@@ -190,7 +190,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // stay unchanged.
     //
     // What's still local (Stage 2d candidates):
-    //  - `memories` — local resource.
+    //  - `bundles` — local resource.
     //  - `namedAgents` (continuation list) — out of slice scope.
     //  - `authController` — auth state stays in its own controller
     //    (lifted to this component in Stage 1).
@@ -214,9 +214,9 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const accountId = () => flow.state.form.accountId;
     const setAccountId = (v: string) =>
         flow.dispatch({ type: "AccountChanged", accountId: v });
-    const memoryId = () => flow.state.form.memoryId;
-    const setMemoryId = (v: string) =>
-        flow.dispatch({ type: "MemoryChanged", memoryId: v });
+    const bundleId = () => flow.state.form.bundleId;
+    const setBundleId = (v: string) =>
+        flow.dispatch({ type: "BundleChanged", bundleId: v });
     const submitting = () => flow.state.submit.inFlight;
     const error = () => flow.state.submit.error;
 
@@ -229,7 +229,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
 
     // Accounts + Memories now live in the reducer slice
     // (Stage 2c.2 of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
-    // `loadAccountsIntoForm` / `loadMemories` are async wrappers that
+    // `loadAccountsIntoForm` / `loadBundles` are async wrappers that
     // dispatch the loading lifecycle commands; the view reads via
     // `flow.state.accounts.list` etc. Issue #1624 PR-C Part B —
     // accounts source from the shared account cache
@@ -245,18 +245,18 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
             flow.dispatch({ type: "AccountsFailed", error: String(e?.message ?? e) });
         }
     };
-    const loadMemories = async () => {
-        flow.dispatch({ type: "MemoriesLoading" });
+    const loadBundles = async () => {
+        flow.dispatch({ type: "BundlesLoading" });
         try {
             const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
-            flow.dispatch({ type: "MemoriesLoaded", list: list ?? [] });
+            flow.dispatch({ type: "BundlesLoaded", list: list ?? [] });
         } catch (e: any) {
-            flow.dispatch({ type: "MemoriesFailed", error: String(e?.message ?? e) });
+            flow.dispatch({ type: "BundlesFailed", error: String(e?.message ?? e) });
         }
     };
     void loadAccountsIntoForm();
-    void loadMemories();
-    const memories = () => flow.state.memories.list;
+    void loadBundles();
+    const bundles = () => flow.state.bundles.list;
 
     // Cross-tab + cross-pane reactivity: the shared account cache
     // (`identity-model.ts`) self-subscribes to the backend's
@@ -278,7 +278,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const hasAccountsForProvider = createMemo(
         () => accountsForProvider(flow.state, provider()?.id ?? "").length > 0,
     );
-    const hasUserMemories = createMemo(() => realMemories(flow.state).length > 0);
+    const hasUserBundles = createMemo(() => realBundles(flow.state).length > 0);
 
     // Auto-pick the first available account for this provider when
     // nothing is selected yet — saves a click for users with existing
@@ -292,9 +292,9 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     });
     createEffect(() => {
         if (isContinue()) return;
-        if (memoryId()) return;
-        const firstReal = realMemories(flow.state)[0];
-        if (firstReal) setMemoryId(firstReal.id);
+        if (bundleId()) return;
+        const firstReal = realBundles(flow.state)[0];
+        if (firstReal) setBundleId(firstReal.id);
     });
 
     // "+ New ..." buttons delegate to picker-injected callbacks that
@@ -309,7 +309,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         runtime: runtime(),
         image: image(),
         accountId: accountId(),
-        memoryId: memoryId(),
+        bundleId: bundleId(),
         // Capture continuation context so the `+ New bundle` round-trip
         // restores Continue mode on return; without this the launch
         // modal flips to New and an ambient-creds continuation's auth
@@ -320,7 +320,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // #1624 PR-C Part B) — it fires only for the "+ Add account"
     // (manual/API-key) path now.
     const handleAddAccount = () => props.onRequestAddAccount?.(snapshot());
-    const handleNewMemory = () => props.onRequestNewMemory?.(snapshot());
+    const handleNewBundle = () => props.onRequestNewBundle?.(snapshot());
 
     // ── Feature A — Continue / New view mode ──────────────────────────
     // SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A. Extracted to
@@ -335,7 +335,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         continuedRow,
         isContinue,
         continueLocksIdentity,
-        continueLocksMemory,
+        continueLocksBundle,
         handleContinueSelect,
         viewMode,
         enterNewMode,
@@ -429,7 +429,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         !submitting()
         && slugifyInstanceName(name()).length > 0
         && accountId() !== ""
-        && memoryId() !== ""
+        && bundleId() !== ""
         && authReady();
 
     const resolvedImage = () => {
@@ -449,7 +449,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
                 accountId: accountId(),
-                memoryId: memoryId(),
+                bundleId: bundleId(),
                 // v8 — when continuing a past agent, thread the id +
                 // working directory through. Launch flow uses
                 // workDirOverride to skip allocate_agent_workdir.
@@ -713,7 +713,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         {/*
                          * Preset dropdown — companion to Identity.
                          * The wire selection rides through to the
-                         * backend via `memoryId` on LaunchOverrides;
+                         * backend via `bundleId` on LaunchOverrides;
                          * the spawn-time content-injection layer
                          * (instructions, context files, MCP servers,
                          * skills — presets are provider-agnostic) ships
@@ -727,19 +727,19 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <div class="agent-launch-modal-bundle-row">
                             <span class="agent-launch-modal-bundle-row-label">Bundle</span>
                             <Show
-                                when={hasUserMemories()}
+                                when={hasUserBundles()}
                                 fallback={
                                     <button
                                         type="button"
                                         class="agent-launch-modal-bundle-empty-btn"
-                                        onClick={handleNewMemory}
+                                        onClick={handleNewBundle}
                                         disabled={
                                             submitting() ||
-                                            continueLocksMemory() ||
-                                            !props.onRequestNewMemory
+                                            continueLocksBundle() ||
+                                            !props.onRequestNewBundle
                                         }
                                         title={
-                                            props.onRequestNewMemory
+                                            props.onRequestNewBundle
                                                 ? undefined
                                                 : "Coming soon"
                                         }
@@ -750,18 +750,18 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             >
                                 <select
                                     class="agent-launch-modal-input"
-                                    value={memoryId()}
-                                    onChange={(e) => setMemoryId(e.currentTarget.value)}
-                                    disabled={submitting() || continueLocksMemory()}
+                                    value={bundleId()}
+                                    onChange={(e) => setBundleId(e.currentTarget.value)}
+                                    disabled={submitting() || continueLocksBundle()}
                                     aria-label="Bundle"
                                 >
-                                    <Show when={!memoryId()}>
+                                    <Show when={!bundleId()}>
                                         <option value="" disabled>— Pick a bundle —</option>
                                     </Show>
                                     {/* is_system entries are AgentMux-controlled workspace policy,
                                         not a selectable per-agent bundle — bundle_memory_upsert
                                         would refuse any later edit anyway. reagent P1, PR #2782. */}
-                                    <For each={(memories() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
+                                    <For each={(bundles() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
                                         {(memory) => (
                                             <option value={memory.id}>{memory.name}</option>
                                         )}
@@ -770,14 +770,14 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                 <button
                                     type="button"
                                     class="agent-launch-modal-bundle-new-btn"
-                                    onClick={handleNewMemory}
+                                    onClick={handleNewBundle}
                                     disabled={
                                         submitting() ||
-                                        continueLocksMemory() ||
-                                        !props.onRequestNewMemory
+                                        continueLocksBundle() ||
+                                        !props.onRequestNewBundle
                                     }
                                     title={
-                                        props.onRequestNewMemory
+                                        props.onRequestNewBundle
                                             ? "New bundle..."
                                             : "Coming soon"
                                     }

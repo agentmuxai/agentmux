@@ -194,9 +194,9 @@ export class BundleViewModel implements ViewModel {
      *  was opened without agent context. */
     agentId: Accessor<string | undefined>;
 
-    private _memories = createSignal<Bundle[]>([]);
-    memoriesAtom: Accessor<Bundle[]> = this._memories[0];
-    setMemories = this._memories[1];
+    private _bundles = createSignal<Bundle[]>([]);
+    bundlesAtom: Accessor<Bundle[]> = this._bundles[0];
+    setMemories = this._bundles[1];
 
     private _selectedId = createSignal<string | null>(null);
     selectedIdAtom: Accessor<string | null> = this._selectedId[0];
@@ -253,7 +253,7 @@ export class BundleViewModel implements ViewModel {
         this.selectedAtom = createMemo(() => {
             const id = this.selectedIdAtom();
             if (!id) return null;
-            return this.memoriesAtom().find((m) => m.id === id) ?? null;
+            return this.bundlesAtom().find((m) => m.id === id) ?? null;
         });
 
         // Kick off initial load. Errors land in errorAtom for UI surfacing.
@@ -390,7 +390,7 @@ export class BundleViewModel implements ViewModel {
     }
 
     async deleteMemory(id: string): Promise<void> {
-        const target = this.memoriesAtom().find((m) => m.id === id);
+        const target = this.bundlesAtom().find((m) => m.id === id);
         if (target?.is_blank) {
             this.setError("The blank bundle is system-managed and cannot be deleted.");
             return;

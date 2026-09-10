@@ -38,7 +38,7 @@ import { refreshAccountCache, type Account } from "@/app/view/identity/identity-
 interface CreateFromTemplateFormData {
     name: string;
     accountId: string;
-    memoryId: string;
+    bundleId: string;
     /** Where the new agent runs. Chosen here at instantiation time —
      *  it is NOT a property of the template (a template is runtime-
      *  agnostic). "container" requires a reachable Docker runtime. */
@@ -73,9 +73,9 @@ export const AgentCreateFromTemplateModalPanel = (
 ): JSX.Element => {
     const [name, setName] = createSignal(props.initialName ?? props.template.name);
     const [accountId, setAccountId] = createSignal("");
-    const [memoryId, setMemoryId] = createSignal("");
+    const [bundleId, setBundleId] = createSignal("");
     const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
-    const [memories, setMemories] = createSignal<Bundle[]>([]);
+    const [bundles, setBundles] = createSignal<Bundle[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
     const [modelVendorBaseUrl, setModelVendorBaseUrl] = createSignal(
@@ -237,7 +237,7 @@ export const AgentCreateFromTemplateModalPanel = (
             }
             try {
                 const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
-                setMemories(list ?? []);
+                setBundles(list ?? []);
             } catch {
                 /* non-fatal */
             }
@@ -262,7 +262,7 @@ export const AgentCreateFromTemplateModalPanel = (
     // stops the re-pick once the user has made an explicit choice.
     // is_system entries are AgentMux-controlled workspace policy, not a
     // selectable per-agent bundle (reagent P1, PR #2782).
-    const realMemories = createMemo(() => memories().filter((m) => !m.is_blank && !m.is_system));
+    const realBundles = createMemo(() => bundles().filter((m) => !m.is_blank && !m.is_system));
     let accountTouched = false;
     createEffect(() => {
         if (accountTouched) return;
@@ -273,9 +273,9 @@ export const AgentCreateFromTemplateModalPanel = (
         setAccountId(v);
     };
     createEffect(() => {
-        if (memoryId()) return;
-        const first = realMemories()[0];
-        if (first) setMemoryId(first.id);
+        if (bundleId()) return;
+        const first = realBundles()[0];
+        if (first) setBundleId(first.id);
     });
 
     const canSubmit = () =>
@@ -291,7 +291,7 @@ export const AgentCreateFromTemplateModalPanel = (
             await props.onSubmit({
                 name: name().trim(),
                 accountId: accountId(),
-                memoryId: memoryId(),
+                bundleId: bundleId(),
                 agentType: runtime(),
                 modelVendorBaseUrl: supportsCustomEndpoint() ? modelVendorBaseUrl().trim() : "",
                 model: modelOptions().length > 0 ? model() : "",
@@ -437,13 +437,13 @@ export const AgentCreateFromTemplateModalPanel = (
                     <span class="agent-new-bundle-modal-label">Memory</span>
                     <select
                         class="agent-new-bundle-modal-input"
-                        value={memoryId()}
-                        onChange={(e) => setMemoryId(e.currentTarget.value)}
+                        value={bundleId()}
+                        onChange={(e) => setBundleId(e.currentTarget.value)}
                         disabled={submitting()}
                         data-testid="create-from-template-memory-select"
                     >
                         <option value="">(vanilla CLI)</option>
-                        <For each={realMemories()}>
+                        <For each={realBundles()}>
                             {(m) => <option value={m.id}>{m.name}</option>}
                         </For>
                     </select>

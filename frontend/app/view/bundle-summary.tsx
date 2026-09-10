@@ -63,8 +63,8 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
     const boundBundleId = createMemo(() => {
         const id = props.agentId;
         if (!id) return undefined;
-        const memoryId = agents().find((a) => a.id === id)?.memory_id;
-        return memoryId || undefined;
+        const bundleId = agents().find((a) => a.id === id)?.memory_id;
+        return bundleId || undefined;
     });
     // createResource re-fetches whenever boundBundleId() changes (agent
     // switches, or the list finishes loading and a previously-undefined

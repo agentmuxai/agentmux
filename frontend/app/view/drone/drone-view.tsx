@@ -803,7 +803,7 @@ const VariablesEditor = (p: {
 
 interface AgentRefShape {
     identityId: string;
-    memoryId: string;
+    bundleId: string;
     instanceName: string;
     workingDirectory: string;
 }
@@ -813,7 +813,7 @@ function readAgentRef(n: FlowNode): AgentRefShape {
     if (raw && typeof raw === "object") {
         return {
             identityId: raw.identityId ?? "",
-            memoryId: raw.memoryId ?? "",
+            bundleId: raw.bundleId ?? "",
             instanceName: raw.instanceName ?? "",
             workingDirectory: raw.workingDirectory ?? "",
         };
@@ -828,14 +828,14 @@ function readAgentRef(n: FlowNode): AgentRefShape {
             `[drone] Agent block ${n.id} uses legacy forge_agent_id="${legacy}"; re-pick identity/memory after PR 3.`,
         );
     }
-    return { identityId: "", memoryId: "", instanceName: "", workingDirectory: "" };
+    return { identityId: "", bundleId: "", instanceName: "", workingDirectory: "" };
 }
 
 const AgentRefEditor = (p: {
     node: FlowNode;
     update: (patch: Record<string, unknown>) => void;
 }): JSX.Element => {
-    const [memories] = createResource(() =>
+    const [bundles] = createResource(() =>
         RpcApi.ListBundlesCommand(TabRpcClient, {}).catch(() => [] as Bundle[]),
     );
     const ref = () => readAgentRef(p.node);
@@ -847,13 +847,13 @@ const AgentRefEditor = (p: {
             <NodeField label="Memory">
                 <select
                     class="drone-input nodrag"
-                    value={ref().memoryId}
-                    onChange={(e) => setRef({ memoryId: e.currentTarget.value })}
+                    value={ref().bundleId}
+                    onChange={(e) => setRef({ bundleId: e.currentTarget.value })}
                 >
                     <option value="">— blank —</option>
                     {/* is_system entries are AgentMux-controlled workspace policy,
                         not a selectable per-agent bundle (reagent P1, PR #2782). */}
-                    <For each={(memories() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
+                    <For each={(bundles() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
                         {(memory) => <option value={memory.id}>{memory.name}</option>}
                     </For>
                 </select>
