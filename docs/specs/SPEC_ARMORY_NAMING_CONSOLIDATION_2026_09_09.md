@@ -1,8 +1,8 @@
 # Spec: Armory Naming Consolidation — Bundle vs Memory
 
-**Status:** proposed — needs the §9 decisions before Phase 1 starts
+**Status:** active — §9 decided; Phase 1 landed (#3133 Rust, #3135 frontend), Phase 2 landed (#3139), Bundles tab label landed (#3138). Phases 3 (wire) and 4 (UI fold) remain.
 **Date:** 2026-09-09
-**Verified against:** `b65df28c2` (code, not spec prose)
+**Verified against:** `b65df28c2` at authoring time; Phases 1-2 as landed through `a86cdee50`
 **Supersedes the naming proposal in:** `docs/status/STATUS_ARMORY_MEMORY_CONSOLIDATION_2026_09_09.md` §4, which was wrong — see §2.4
 **Related:** #2024 (tracking), `ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md` §3.1/§3.4
 
