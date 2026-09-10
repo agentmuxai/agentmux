@@ -135,6 +135,17 @@ jobs:
       - name: Scrollbar cursor gate
         run: bash scripts/check-scrollbar-cursor.sh
 
+      # scripts/cef-verify.sh is the carry-set gate for the CEF fork
+      # (docs/cef-build/CEF_FORK_MAINTENANCE.md §5). It runs against a CEF
+      # checkout, which CI does not have -- so what runs here is its TEST SUITE,
+      # against synthetic fixtures. That is the point: four bugs in the previous
+      # markdown version of these checks made them incapable of failing (or, in
+      # one case, made them overwrite the build output they were verifying), and
+      # none were visible by reading. This is the run that would have caught all
+      # four.
+      - name: cef-verify self-test
+        run: bash scripts/cef-verify.test.sh
+
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
 
