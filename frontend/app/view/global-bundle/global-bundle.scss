@@ -1,12 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Styles for the Armory "Memory" tab (GlobalBrainManager, labeled "Brain"
+// Styles for the Armory "Memory" tab (GlobalBundleManager, labeled "Brain"
 // prior to the naming decision in PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md
 // §4.2). Renders inside the bundle-manager pane, which provides the scroll
 // container.
 
-.global-brain {
+.global-bundle {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
@@ -16,7 +16,7 @@
     min-width: 0;
 }
 
-.global-brain-intro {
+.global-bundle-intro {
     margin: 0;
     font-size: 10px;
     color: var(--secondary-text-color);
@@ -29,7 +29,7 @@
     }
 }
 
-.global-brain-restart-note {
+.global-bundle-restart-note {
     padding: var(--space-1-5) var(--space-2);
     font-size: 9px;
     color: var(--secondary-text-color);
@@ -37,7 +37,7 @@
     border-left: 2px solid var(--accent-color);
 }
 
-.global-brain-error {
+.global-bundle-error {
     padding: var(--space-1-5) var(--space-2);
     background: color-mix(in srgb, var(--error-color) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--error-color) 30%, transparent);
@@ -55,18 +55,18 @@
 // SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md, but renaming the
 // selectors would be churn for no behavioural gain.
 
-.global-brain-external-files {
+.global-bundle-external-files {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
 }
 
-.global-brain-external-files-heading {
+.global-bundle-external-files-heading {
     font-size: 9px;
     color: var(--secondary-text-color);
 }
 
-.global-brain-machine-config {
+.global-bundle-machine-config {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -75,14 +75,14 @@
     border: 1px solid var(--border-color);
 }
 
-.global-brain-machine-config-header {
+.global-bundle-machine-config-header {
     display: flex;
     align-items: center;
     gap: var(--space-1-5);
     flex-wrap: wrap;
 }
 
-.global-brain-machine-config-badge {
+.global-bundle-machine-config-badge {
     flex-shrink: 0;
     padding: 1px var(--space-1-5);
     font-size: 0.68rem;
@@ -93,26 +93,26 @@
     border: 1px solid var(--border-color);
 }
 
-.global-brain-machine-config-path {
+.global-bundle-machine-config-path {
     font-family: var(--fixed-font, monospace);
     font-size: 9px;
     color: var(--secondary-text-color);
     word-break: break-all;
 }
 
-.global-brain-machine-config-caption {
+.global-bundle-machine-config-caption {
     margin: 0;
     font-size: 9px;
     color: var(--secondary-text-color);
 }
 
-.global-brain-machine-config-empty {
+.global-bundle-machine-config-empty {
     margin: 0;
     font-size: 10px;
     color: var(--secondary-text-color);
 }
 
-.global-brain-machine-config-content {
+.global-bundle-machine-config-content {
     margin: 0;
     padding: var(--space-2);
     max-height: 240px;
@@ -128,13 +128,13 @@
 
 // ── Section list ─────────────────────────────────────────────────────────────
 
-.global-brain-sections {
+.global-bundle-sections {
     display: flex;
     flex-direction: column;
     gap: var(--space-1-5);
 }
 
-.global-brain-section {
+.global-bundle-section {
     border: 1px solid var(--border-color);
     background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
 
@@ -143,14 +143,14 @@
     }
 }
 
-.global-brain-section-row {
+.global-bundle-section-row {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1-5) var(--space-2);
 }
 
-.global-brain-section-main {
+.global-bundle-section-main {
     flex: 1;
     min-width: 0;
     display: flex;
@@ -158,7 +158,7 @@
     gap: 2px;
 }
 
-.global-brain-section-name {
+.global-bundle-section-name {
     font-size: 10px;
     font-weight: 600;
     color: var(--main-text-color);
@@ -167,7 +167,7 @@
     text-overflow: ellipsis;
 }
 
-.global-brain-section-desc {
+.global-bundle-section-desc {
     font-size: 9px;
     color: var(--secondary-text-color);
     white-space: nowrap;
@@ -175,14 +175,14 @@
     text-overflow: ellipsis;
 }
 
-.global-brain-section-actions {
+.global-bundle-section-actions {
     display: flex;
     align-items: center;
     gap: var(--space-1);
     flex-shrink: 0;
 }
 
-.global-brain-empty {
+.global-bundle-empty {
     padding: var(--space-3);
     text-align: center;
     font-size: 10px;
@@ -197,11 +197,11 @@
 // never confuses the two. See
 // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5.
 
-.global-brain-sections-system {
+.global-bundle-sections-system {
     margin-bottom: var(--space-1);
 }
 
-.global-brain-section-system {
+.global-bundle-section-system {
     border-color: var(--accent-color);
     background: color-mix(in srgb, var(--accent-color) 6%, transparent);
 
@@ -211,7 +211,7 @@
     }
 }
 
-.global-brain-system-badge {
+.global-bundle-system-badge {
     flex-shrink: 0;
     padding: 1px var(--space-1-5);
     font-size: 0.68rem;
@@ -222,11 +222,11 @@
     background: var(--accent-color);
 }
 
-.global-brain-editor-system {
+.global-bundle-editor-system {
     border-left: 2px solid var(--accent-color);
 }
 
-.global-brain-btn-system-add {
+.global-bundle-btn-system-add {
     align-self: flex-start;
     border-color: var(--accent-color);
     color: var(--accent-color);
@@ -234,27 +234,27 @@
 
 // ── Inline editor ────────────────────────────────────────────────────────────
 
-.global-brain-editor {
+.global-bundle-editor {
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-2);
 }
 
-.global-brain-field {
+.global-bundle-field {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
 }
 
-.global-brain-field-label {
+.global-bundle-field-label {
     font-size: var(--text-xs);
     font-weight: 500;
     color: var(--secondary-text-color);
 }
 
-.global-brain-input,
-.global-brain-textarea {
+.global-bundle-input,
+.global-bundle-textarea {
     width: 100%;
     padding: var(--space-1-5) var(--space-2);
     font-size: 10px;
@@ -270,12 +270,12 @@
     }
 }
 
-.global-brain-textarea {
+.global-bundle-textarea {
     resize: vertical;
     font-family: var(--fixed-font, monospace);
 }
 
-.global-brain-editor-actions {
+.global-bundle-editor-actions {
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
@@ -283,13 +283,13 @@
 
 // ── Add bar ──────────────────────────────────────────────────────────────────
 
-.global-brain-add-bar {
+.global-bundle-add-bar {
     display: flex;
     align-items: center;
     gap: var(--space-2);
 }
 
-.global-brain-promote-select {
+.global-bundle-promote-select {
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-sm);
     color: var(--main-text-color);
@@ -301,7 +301,7 @@
 
 // ── Applies-to (SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4) ──
 
-.global-brain-applies-to {
+.global-bundle-applies-to {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -309,12 +309,12 @@
     padding-top: var(--space-1);
 }
 
-.global-brain-applies-to-label {
+.global-bundle-applies-to-label {
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
 }
 
-.global-brain-applies-to-chip {
+.global-bundle-applies-to-chip {
     padding: 1px var(--space-1-5);
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
@@ -326,14 +326,14 @@
     }
 }
 
-.global-brain-applies-to-chip-warning {
+.global-bundle-applies-to-chip-warning {
     color: var(--warning-color, #b8860b);
     border-color: var(--warning-color, #b8860b);
 }
 
 // ── Preview ──────────────────────────────────────────────────────────────────
 
-.global-brain-preview {
+.global-bundle-preview {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -341,7 +341,7 @@
     padding-top: var(--space-2);
 }
 
-.global-brain-preview-toggle {
+.global-bundle-preview-toggle {
     align-self: flex-start;
     padding: var(--space-1) 0;
     border: none;
@@ -355,7 +355,7 @@
     }
 }
 
-.global-brain-preview-content {
+.global-bundle-preview-content {
     margin: 0;
     padding: var(--space-2);
     max-height: 240px;
@@ -371,7 +371,7 @@
 
 // ── Buttons ──────────────────────────────────────────────────────────────────
 
-.global-brain-btn {
+.global-bundle-btn {
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-sm);
     border-radius: 0;
@@ -390,7 +390,7 @@
         cursor: default;
     }
 
-    &.global-brain-btn-primary {
+    &.global-bundle-btn-primary {
         background: var(--accent-color);
         color: var(--button-text-color);
         border-color: var(--accent-color);
@@ -400,13 +400,13 @@
         }
     }
 
-    &.global-brain-btn-danger {
+    &.global-bundle-btn-danger {
         color: var(--error-color);
         border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
     }
 }
 
-.global-brain-icon-btn {
+.global-bundle-icon-btn {
     width: 24px;
     height: 24px;
     display: flex;

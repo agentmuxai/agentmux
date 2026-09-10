@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { formatGlobalBrainBlock, groupProvidersByStartupFilename } from "./global-brain-model";
+import { formatGlobalBundleBlock, groupProvidersByStartupFilename } from "./global-bundle-model";
 
 // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §5 — must mirror
 // memory_bundles.rs's format_global_brain_block fixture-for-fixture.
@@ -31,9 +31,9 @@ function system(id: string, name: string, instructions = `system rules for ${nam
     } as Bundle;
 }
 
-describe("formatGlobalBrainBlock", () => {
+describe("formatGlobalBundleBlock", () => {
     test("system entries render first with the override preamble, ordinary sections after", () => {
-        const out = formatGlobalBrainBlock([system("sys-1", "Policy"), ordinary("g-a", "Alpha")]);
+        const out = formatGlobalBundleBlock([system("sys-1", "Policy"), ordinary("g-a", "Alpha")]);
         expect(out.startsWith("IMPORTANT: The following AgentMux-controlled instructions")).toBe(true);
         expect(out).toContain("# [AgentMux System] Policy");
         expect(out).toContain("# [Workspace] Alpha");
@@ -42,29 +42,29 @@ describe("formatGlobalBrainBlock", () => {
     });
 
     test("system-only input has the preamble and no [Workspace] section", () => {
-        const out = formatGlobalBrainBlock([system("sys-1", "Policy")]);
+        const out = formatGlobalBundleBlock([system("sys-1", "Policy")]);
         expect(out.startsWith("IMPORTANT:")).toBe(true);
         expect(out).not.toContain("[Workspace]");
     });
 
     test("ordinary-only input has no override preamble", () => {
-        const out = formatGlobalBrainBlock([ordinary("g-a", "Alpha")]);
+        const out = formatGlobalBundleBlock([ordinary("g-a", "Alpha")]);
         expect(out).not.toContain("IMPORTANT:");
         expect(out.startsWith("# [Workspace] Alpha")).toBe(true);
     });
 
     test("empty input returns an empty string", () => {
-        expect(formatGlobalBrainBlock([])).toBe("");
+        expect(formatGlobalBundleBlock([])).toBe("");
     });
 
     test("sections with blank instructions are excluded from both tiers", () => {
-        const out = formatGlobalBrainBlock([system("sys-1", "Policy", "   "), ordinary("g-a", "Alpha")]);
+        const out = formatGlobalBundleBlock([system("sys-1", "Policy", "   "), ordinary("g-a", "Alpha")]);
         expect(out).not.toContain("IMPORTANT:");
         expect(out).toBe("# [Workspace] Alpha\n\nrules for Alpha");
     });
 });
 
-// GlobalBrainViewModel's section split — mocks RpcApi entirely since the
+// GlobalBundleViewModel's section split — mocks RpcApi entirely since the
 // constructor fires an unawaited ListBundlesCommand refresh() AND an
 // unawaited GetClaudeGlobalConfigCommand fetch, same pattern as
 // frontend/app/view/bundle/bundle-model.test.ts.
@@ -87,7 +87,7 @@ vi.mock("@/app/store/wps", () => ({
     }),
 }));
 
-describe("GlobalBrainViewModel system/ordinary split", () => {
+describe("GlobalBundleViewModel system/ordinary split", () => {
     beforeEach(() => {
         listMemoriesMock.mockClear();
         listMemoriesMock.mockResolvedValue([]);
@@ -98,8 +98,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
 
     // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md
     test("subscribes to memories:changed and refreshes on it; unsubscribes on dispose", async () => {
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
+        const model = new GlobalBundleViewModel();
         await Promise.resolve();
         listMemoriesMock.mockClear();
 
@@ -112,11 +112,11 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     });
 
     test("systemSectionsAtom and ordinarySectionsAtom partition allAtom without overlap", async () => {
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
         const rows = [system("sys-1", "Policy"), ordinary("g-a", "Alpha"), ordinary("g-b", "Beta")];
         listMemoriesMock.mockResolvedValue(rows);
 
-        const model = new GlobalBrainViewModel();
+        const model = new GlobalBundleViewModel();
         await model.refresh();
 
         const systemIds = model.systemSectionsAtom().map((m) => m.id);
@@ -128,11 +128,11 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     });
 
     test("sectionsAtom (combined) still includes both tiers", async () => {
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
         const rows = [system("sys-1", "Policy"), ordinary("g-a", "Alpha")];
         listMemoriesMock.mockResolvedValue(rows);
 
-        const model = new GlobalBrainViewModel();
+        const model = new GlobalBundleViewModel();
         await model.refresh();
 
         expect(model.sectionsAtom().map((m) => m.id).sort()).toEqual(["g-a", "sys-1"]);
@@ -143,8 +143,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     // PROVIDERS catalog, not per-workspace agent data), so an empty
     // ListBundlesCommand response (the beforeEach default) is fine here.
     test("filenameGroupsAtom groups providers by resolved startup-instructions filename", async () => {
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
+        const model = new GlobalBundleViewModel();
         await model.refresh();
 
         const groups = model.filenameGroupsAtom();
@@ -159,8 +159,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     });
 
     test("noFileProvidersAtom contains exactly Kimi", async () => {
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
+        const model = new GlobalBundleViewModel();
         await model.refresh();
 
         expect(model.noFileProvidersAtom()).toEqual(["Kimi Code CLI"]);
@@ -173,8 +173,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
             content: "# Global rules\n",
             exists: true,
         });
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
+        const model = new GlobalBundleViewModel();
 
         expect(model.claudeGlobalConfigAtom()).toBeNull();
         await Promise.resolve();
@@ -189,8 +189,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
 
     test("claudeGlobalConfigAtom stays null (not an error) when the fetch rejects", async () => {
         getClaudeGlobalConfigMock.mockRejectedValue(new Error("boom"));
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
+        const model = new GlobalBundleViewModel();
         await Promise.resolve();
         await Promise.resolve();
 
@@ -212,8 +212,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
             content: "# Shared rules\n",
             exists: true,
         });
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
+        const { GlobalBundleViewModel } = await import("./global-bundle-model");
+        const model = new GlobalBundleViewModel();
         await Promise.resolve();
         await Promise.resolve();
 

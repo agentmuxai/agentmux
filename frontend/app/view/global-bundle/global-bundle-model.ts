@@ -1,12 +1,12 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBrainViewModel — drives the Armory "Memory" tab (labeled "Brain"
+// GlobalBundleViewModel — drives the Armory "Memory" tab (labeled "Brain"
 // prior to the PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming
-// decision): the workspace-wide global brain that every agent inherits at
+// decision): the workspace-wide global bundles that every agent inherits at
 // launch.
 //
-// A "section" is a Memory bundle with is_global=true. The global brain is
+// A "section" is a Memory bundle with is_global=true. The global bundles is
 // the ordered list of those sections; their instructions concatenate into
 // each agent's startup instructions file at launch (backend:
 // format_global_brain_block) — CLAUDE.md, AGENTS.md, GEMINI.md, or similar
@@ -39,7 +39,7 @@ export const NEW_SECTION_ID = "__new__";
  *  are split out and rendered first with the override preamble, exactly
  *  mirroring memory_bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
  *  Exported for direct unit testing against the Rust version's fixtures. */
-export function formatGlobalBrainBlock(sections: Bundle[]): string {
+export function formatGlobalBundleBlock(sections: Bundle[]): string {
     const nonEmpty = sections.filter((s) => (s.instructions ?? "").trim().length > 0);
     const system = nonEmpty.filter((s) => s.is_system);
     const ordinary = nonEmpty.filter((s) => !s.is_system);
@@ -67,7 +67,7 @@ export function formatGlobalBrainBlock(sections: Bundle[]): string {
  *  `startupInstructionsFilename`, e.g. `claude`+`muxcode` → `"CLAUDE.md"`,
  *  `gemini`+`antigravity` → `"GEMINI.md"`. Providers with no confirmed
  *  native file (currently only `kimi`) are excluded here — see
- *  `GlobalBrainViewModel.noFileProvidersAtom` for those. Order matches
+ *  `GlobalBundleViewModel.noFileProvidersAtom` for those. Order matches
  *  `PROVIDERS`' own declaration order (insertion order), not alphabetical —
  *  stable and deterministic without needing an extra sort.
  *  Exported for direct unit testing.
@@ -84,7 +84,7 @@ export function groupProvidersByStartupFilename(): { filename: string; providerN
     return Array.from(groups.entries()).map(([filename, providerNames]) => ({ filename, providerNames }));
 }
 
-export class GlobalBrainViewModel {
+export class GlobalBundleViewModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete/reorder made elsewhere refreshes this view
     // without a manual reopen, same pattern BundleMcpModel/BundleSkillModel
@@ -207,7 +207,7 @@ export class GlobalBrainViewModel {
                 .filter((m) => !m.is_global && !m.is_blank)
                 .sort((a, b) => a.name.localeCompare(b.name)),
         );
-        this.previewAtom = createMemo(() => formatGlobalBrainBlock(this.sectionsAtom()));
+        this.previewAtom = createMemo(() => formatGlobalBundleBlock(this.sectionsAtom()));
         this.filenameGroupsAtom = createMemo(() => groupProvidersByStartupFilename());
         this.noFileProvidersAtom = createMemo(() =>
             Object.values(PROVIDERS)
@@ -245,7 +245,7 @@ export class GlobalBrainViewModel {
             this.setAll(list);
             this.setError(null);
         } catch (e) {
-            this.setError(`Failed to load global brain: ${(e as Error).message ?? e}`);
+            this.setError(`Failed to load global bundles: ${(e as Error).message ?? e}`);
         }
     }
 
@@ -298,7 +298,7 @@ export class GlobalBrainViewModel {
                 // ordinarySectionsAtom, not sectionsAtom — see move()'s doc
                 // comment above (reagent P1, PR #2782).
                 const order = [...this.ordinarySectionsAtom().map((s) => s.id), saved.id];
-                await RpcApi.ReorderGlobalBrainCommand(TabRpcClient, { ids: order });
+                await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids: order });
             } else {
                 const existing = this.allAtom().find((m) => m.id === editingId);
                 if (!existing) {
@@ -333,7 +333,7 @@ export class GlobalBrainViewModel {
             // AND is_system = 0 guard), so including one here is pointless
             // at best. reagent P1, PR #2782 (same root cause as move() below).
             const order = [...this.ordinarySectionsAtom().map((s) => s.id), id];
-            await RpcApi.ReorderGlobalBrainCommand(TabRpcClient, { ids: order });
+            await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids: order });
             await this.refresh();
         } catch (e) {
             this.setError(`Promote failed: ${(e as Error).message ?? e}`);
@@ -373,7 +373,7 @@ export class GlobalBrainViewModel {
         [ids[i], ids[j]] = [ids[j], ids[i]];
         this.setError(null);
         try {
-            await RpcApi.ReorderGlobalBrainCommand(TabRpcClient, { ids });
+            await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids });
             await this.refresh();
         } catch (e) {
             this.setError(`Reorder failed: ${(e as Error).message ?? e}`);
