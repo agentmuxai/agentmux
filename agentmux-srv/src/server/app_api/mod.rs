@@ -48,7 +48,7 @@ mod pane;
 mod blockfile;
 pub(crate) mod session;
 mod identity;
-mod bundle;
+pub(crate) mod bundle;
 mod memory;
 mod skill;
 mod mcp;
@@ -805,16 +805,38 @@ pub(crate) fn bundle_validate_impl(
 ) -> Result<serde_json::Value, String> {
     let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
-    let mcp_entries = if memory.id.is_empty() {
-        Vec::new()
+    let (mcp_entries, resolve_warnings) = if memory.id.is_empty() {
+        (Vec::new(), Vec::new())
     } else {
-        // A draft for a bundle that does not exist yet resolves to nothing,
-        // which is the same as an unsaved draft — not an error.
-        bundle::resolve_bundle_components(wstore, &memory.id)
-            .map(|c| c.mcp_entries)
-            .unwrap_or_default()
+        // A store failure must NOT read as "this bundle has no components":
+        // that would return a clean, apparently-successful report for a check
+        // that never ran (Codex, PR #3153). The UI is built to show a failed
+        // validate; give it one.
+        let resolved = bundle::resolve_bundle_components(wstore, &memory.id)
+            .map_err(|e| format!("bundle.validate: {e}"))?;
+        (resolved.mcp_entries, resolved.warnings)
     };
-    let report = crate::backend::bundle_validate::validate_bundle(&memory, &mcp_entries);
+    let mut report = crate::backend::bundle_validate::validate_bundle(&memory, &mcp_entries);
+
+    // The resolver drops a bound server whose config will not parse, and says
+    // so in a warning. Discarding that left the validator reporting `is_valid`
+    // for exactly the malformed component it exists to catch (Codex, PR
+    // #3153) — the entry is absent from `mcp_entries`, so nothing downstream
+    // could see it. Surface each as an error: unlike a duplicate name, an
+    // unusable config is not a stylistic warning, it is a component that will
+    // not load.
+    for w in resolve_warnings {
+        report.issues.push(crate::backend::bundle_validate::ValidationIssue {
+            severity: crate::backend::bundle_validate::IssueSeverity::Error,
+            field: "mcp_servers".to_string(),
+            message: w,
+        });
+    }
+    report.is_valid = !report
+        .issues
+        .iter()
+        .any(|i| i.severity == crate::backend::bundle_validate::IssueSeverity::Error);
+
     serde_json::to_value(&report).map_err(|e| e.to_string())
 }
 

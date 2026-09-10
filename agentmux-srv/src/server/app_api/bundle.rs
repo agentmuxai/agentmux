@@ -297,23 +297,7 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 match id_store.bundle_delete(&req.id) {
                     Ok(deleted) => {
                         if deleted {
-                            // The refs live in the other store and no FK
-                            // reaches across, so nothing else would remove
-                            // them — and a later bundle reusing this id would
-                            // inherit components nobody chose. Best-effort:
-                            // the bundle is already gone, so a failure here
-                            // must not turn a successful delete into an error.
-                            match wstore.bundle_unbind_all_components(&req.id) {
-                                Ok((skills, mcp)) if skills + mcp > 0 => tracing::info!(
-                                    bundle_id = %req.id, skills, mcp,
-                                    "bundle.delete: purged component refs"
-                                ),
-                                Ok(_) => {}
-                                Err(e) => tracing::warn!(
-                                    bundle_id = %req.id, error = %e,
-                                    "bundle.delete: component refs left behind"
-                                ),
-                            }
+                            purge_bundle_component_refs(&wstore, &req.id);
                             broker.publish(crate::backend::wps::WaveEvent {
                                 event: "memories:changed".to_string(),
                                 scopes: vec![], sender: String::new(), persist: 0, data: None,
@@ -448,6 +432,37 @@ fn bundle_export_impl(
         obj.insert("warnings".to_string(), json!(all_warnings));
     }
     Ok(result)
+}
+
+/// Drop a deleted bundle's component refs.
+///
+/// Called from **both** delete paths — `bundle.delete` here and `deletememory`
+/// in `agent_handlers/bundle.rs`, which is the one the Armory actually calls.
+/// Fixing only the first left the product path orphaning refs (Codex, PR
+/// #3153), so this exists to make "both" mean one implementation.
+///
+/// `bundle_delete` runs on the store that owns `db_bundles`, which has no ref
+/// tables — they sit beside the catalog tables they key into, in the other
+/// database, which is also why no foreign key reaches across
+/// (`migrations.rs:721-741`). So the purge cannot live inside it and has to be
+/// driven from a handler, where both stores are in scope.
+///
+/// Best-effort by design: the bundle row is already gone by the time this
+/// runs, so a failure here must not turn a successful delete into an error.
+pub(crate) fn purge_bundle_component_refs(
+    wstore: &crate::backend::storage::store::Store,
+    bundle_id: &str,
+) {
+    match wstore.bundle_unbind_all_components(bundle_id) {
+        Ok((skills, mcp)) if skills + mcp > 0 => {
+            tracing::info!(bundle_id, skills, mcp, "bundle delete: purged component refs")
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(
+            bundle_id, error = %e,
+            "bundle delete: component refs left behind"
+        ),
+    }
 }
 
 /// Bind an imported bundle's components into the ref tables.
@@ -3155,8 +3170,15 @@ mod export_import_for_agent_tests {
         assert_eq!(before.mcp_entries.len(), 1);
 
         assert!(state.id_store.bundle_delete("bundle-1").unwrap());
+        // Through the shared helper both delete RPCs call — `bundle.delete`
+        // here and `deletememory`, the one the Armory actually uses. Fixing
+        // only one left the product path orphaning refs (Codex, PR #3153).
+        purge_bundle_component_refs(&state.wstore, "bundle-1");
         let (skills, mcp) = state.wstore.bundle_unbind_all_components("bundle-1").unwrap();
-        assert_eq!((skills, mcp), (1, 1), "both refs must be purged");
+        assert_eq!(
+            (skills, mcp), (0, 0),
+            "the purge must have already removed both refs"
+        );
 
         // Re-create a bundle with the same id: it must start empty.
         make_bundle(&state, "bundle-1", "Reused id.");
@@ -3164,6 +3186,35 @@ mod export_import_for_agent_tests {
         assert!(
             after.skills.is_empty() && after.mcp_entries.is_empty(),
             "a reused bundle id must not inherit the old bundle's components"
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_reports_a_malformed_bound_component_instead_of_passing() {
+        // Codex on #3153: the resolver drops a bound server whose config will
+        // not parse and says so in a warning. Discarding that left validate
+        // reporting is_valid for exactly the component it exists to catch —
+        // the entry is absent from the resolved list, so nothing downstream
+        // could have seen it.
+        let state = test_state();
+        make_bundle(&state, "bundle-1", "Be helpful.");
+        bind_mcp(&state, "bundle-1", "broken", "not json at all");
+
+        let report = crate::server::app_api::bundle_validate_impl(
+            &state.wstore,
+            json!({ "id": "bundle-1", "name": "Bundle bundle-1" }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            report["is_valid"], json!(false),
+            "a bound component that cannot load must not validate clean: {report}"
+        );
+        let issues = report["issues"].as_array().unwrap();
+        assert!(
+            issues.iter().any(|i| i["field"] == "mcp_servers"
+                && i["message"].as_str().unwrap_or("").contains("broken")),
+            "the issue must name the server: {issues:?}"
         );
     }
 

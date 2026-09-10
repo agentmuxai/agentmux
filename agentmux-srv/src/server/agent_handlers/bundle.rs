@@ -99,18 +99,29 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let id_store = state.id_store.clone();
+    let component_store = state.wstore.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_DELETE_MEMORY,
         move |cmd: CommandDeleteBundleData, _ctx| {
-            let wstore = wstore.clone();
+            let id_store = id_store.clone();
+            let component_store = component_store.clone();
             let broker = broker.clone();
             async move {
-                let deleted = wstore
+                let deleted = id_store
                     .bundle_delete(&cmd.id)
                     .map_err(|e| format!("deletememory: {e}"))?;
                 if deleted {
+                    // This is the delete the Armory actually calls
+                    // (`rpc-api/bundle.ts`), so the ref purge has to live here
+                    // too — fixing only `bundle.delete` left the product path
+                    // orphaning refs (Codex, PR #3153). Shared helper, not a
+                    // second copy of the logic.
+                    crate::server::app_api::bundle::purge_bundle_component_refs(
+                        &component_store,
+                        &cmd.id,
+                    );
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: "memories:changed".to_string(),
                         scopes: vec![],
