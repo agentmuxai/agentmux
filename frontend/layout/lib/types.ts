@@ -363,6 +363,42 @@ export interface NodeModel {
      * itself is ever evicted.
      */
     activeBlockId?: Accessor<string>;
+    /**
+     * True forever, once this leaf's `blockStack` has ever had 2+ members —
+     * never resets to false even if the stack later shrinks back to 1.
+     * Monotonic (not "is currently a stack") on purpose: it drives whether a
+     * hoisted-chrome-capable `ViewModel` (e.g. `AgentViewModel`) suppresses
+     * `BlockFrame`'s own inline header via `noHeader`, and that header must
+     * come from the hoisted chrome from the moment it FIRST mounts (the
+     * 1→2-member transition) onward — flipping back to inline on a
+     * transient 2→1 dip would tear down and rebuild the header exactly the
+     * way this whole feature exists to prevent.
+     * `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`.
+     */
+    hasEverBeenMultiMember?: Accessor<boolean>;
+    /**
+     * The `ViewModel` instance the leaf's currently-mounted `Block` owns, or
+     * `null` in the brief window between an old stack member's `Block`
+     * unmounting and the new one's mounting. Pushed by `block.tsx` itself
+     * (`setActiveViewModel`, below) — deliberately NOT read from the global
+     * block-component registry (`frontend/app/store/block-component-registry.ts`),
+     * which is a plain `Map` (not reactive) and, more fundamentally, does
+     * not survive `Block`'s own dispose-on-unmount: the inner per-block
+     * remount this feature introduces (`pane-leaf-chrome.tsx`) unmounts
+     * `Block` on every switch, including a repeat one, so by the time a
+     * user switches back to a previously-seen member its old registry entry
+     * is already gone. This is the one live pointer hoisted chrome has to a
+     * callable `ViewModel` for `renderPaneChrome`/`setProgressBarMount`.
+     */
+    activeViewModel?: Accessor<ViewModel | null>;
+    /**
+     * Owner-checked the same way `unregisterBlockComponentModel` already is:
+     * `block.tsx` passes the exact registration object it owns, so a
+     * stale/delayed cleanup from an older mount can never clobber a newer
+     * mount's live registration (the identical race that pattern already
+     * guards against).
+     */
+    setActiveViewModel?: (vm: ViewModel | null, owner: object) => void;
     addEphemeralNodeToLayout: () => void;
     animationTimeS: Accessor<number>;
     isResizing: Accessor<boolean>;

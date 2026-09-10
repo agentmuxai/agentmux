@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block } from "@/app/block/block";
+import { PaneLeafChrome } from "@/app/tab/pane-leaf-chrome";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { ModalLayer } from "@/element/ModalLayer";
 import { CenteredDiv } from "@/element/quickelems";
@@ -40,9 +41,13 @@ function TabContent(props: { tabId: string }): JSX.Element {
 
     const tileLayoutContents = createMemo<TileLayoutContents>(() => {
         const renderContent: ContentRenderer = (nodeModel: NodeModel) => {
-            return <Block nodeModel={nodeModel} preview={false} />;
+            return <PaneLeafChrome nodeModel={nodeModel} />;
         };
 
+        // Deliberately plain <Block>, not <PaneLeafChrome> — a drag-preview
+        // thumbnail has no interactive tab strip to hoist (it's a static
+        // snapshot, never switched), so routing it through the chrome
+        // decision would be pure overhead for no behavior change.
         const renderPreview: PreviewRenderer = (nodeModel: NodeModel) => {
             return <Block nodeModel={nodeModel} preview={true} />;
         };

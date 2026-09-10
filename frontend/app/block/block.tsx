@@ -39,7 +39,14 @@ import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackf
 // overlay and picker-fade, AgentPicker's own overlay).
 const READY_GATE_FADE_MS = 200;
 
-function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
+/**
+ * Applies the view-type migration/rename redirects below. Exported so
+ * `pane-leaf-chrome.tsx` can apply the identical rules when deciding
+ * whether a stack member's EFFECTIVE view is "agent" — e.g. a still-live
+ * "forge" block must route through the same redirect `makeViewModel`
+ * itself applies, not just a raw `meta.view === "agent"` check.
+ */
+export function resolveEffectiveViewType(blockView: string): string {
     // Migration shims:
     //   * v0.33.197: forge was folded into the agent pane; redirect old
     //     "forge" blocks to "agent" so they keep rendering.
@@ -61,6 +68,11 @@ function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel)
     if (effectiveView === "forge") effectiveView = "agent";
     if (effectiveView === "workflows") effectiveView = "drone";
     if (effectiveView === "trust") effectiveView = "armory";
+    return effectiveView;
+}
+
+function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
+    const effectiveView = resolveEffectiveViewType(blockView);
     const ctor = getBlockViewClass(effectiveView);
     if (ctor != null) {
         return new ctor(blockId, nodeModel as any);
@@ -291,9 +303,23 @@ function Block(props: BlockProps): JSX.Element {
             registerBlockComponentModel(props.nodeModel.blockId, registeredBcm);
         }
         setViewModel(vm);
+        // See NodeModel.activeViewModel/setActiveViewModel's own doc
+        // comments (layout/lib/types.ts) — hoisted pane chrome's only live
+        // pointer to a callable ViewModel, since the global registry
+        // doesn't survive this component's own dispose-on-unmount. Owner
+        // matches the SAME object identity `unregisterBlockComponentModel`
+        // below would be called with, so an adopting (not creating) mount's
+        // eventual cleanup correctly no-ops instead of clobbering the
+        // creating mount's still-live registration.
+        props.nodeModel.setActiveViewModel?.(vm, registeredBcm ?? bcm);
     });
 
     onCleanup(() => {
+        // Owner is `registeredBcm` here too (not `registeredBcm ?? bcm`) —
+        // an adopting mount never created its own registration object, so
+        // this correctly no-ops for it instead of clearing the creating
+        // mount's still-live activeViewModel out from under it.
+        props.nodeModel.setActiveViewModel?.(null, registeredBcm);
         if (registeredBcm) {
             unregisterBlockComponentModel(props.nodeModel.blockId, registeredBcm);
         }

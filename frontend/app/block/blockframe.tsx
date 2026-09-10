@@ -1056,4 +1056,4 @@ function BlockFrame(props: BlockFrameProps): JSX.Element {
     );
 }
 
-export { BlockFrame, NumActiveConnColors };
+export { BlockFrame, BlockFrame_Header, NumActiveConnColors };
