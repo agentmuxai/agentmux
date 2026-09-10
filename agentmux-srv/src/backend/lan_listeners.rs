@@ -29,14 +29,23 @@
 //! instead of shipping a silently broken toggle.
 //!
 //! Note what is deliberately NOT claimed: that `0.0.0.0:PORT` conflicts with an
-//! existing `127.0.0.1:PORT`. That is true on Linux/macOS but **false on
-//! Windows** (measured 2026-09-06 — absent `SO_EXCLUSIVEADDRUSE` the wildcard
-//! binds alongside loopback). An earlier draft asserted the universal version
-//! and the test failed on Windows, which is what caught it. The consequence is
-//! that "just bind the wildcard when enabled" is not a portable shortcut:
-//! on Windows it would leave two sockets on one port with ambiguous accept
-//! behaviour. Binding specific addresses has no such ambiguity anywhere. See
-//! `wildcard_vs_loopback_conflict_is_platform_dependent`.
+//! existing `127.0.0.1:PORT`. That is true on **Linux only** — **false on
+//! Windows AND macOS** (Windows measured 2026-09-06, absent
+//! `SO_EXCLUSIVEADDRUSE` the wildcard binds alongside loopback; macOS measured
+//! 2026-09-09 on real hardware — issue #3137 — after this module's own
+//! `#[cfg(not(windows))]` test grouping turned out to be wrong and failed
+//! nightly on a macOS runner for two nights before anyone looked). An earlier
+//! draft asserted the universal version and the test failed on Windows, which
+//! is what caught that half; macOS's own divergence from Linux went
+//! unnoticed for longer because nothing ran this test on macOS until the
+//! nightly build did. The consequence is that "just bind the wildcard when
+//! enabled" is not a portable shortcut: on Windows/macOS it would leave two
+//! sockets on one port. Unlike Windows, macOS's kernel routes an incoming
+//! connection to the more-specific-matching socket deterministically (also
+//! measured 2026-09-09) rather than leaving it ambiguous — so the practical
+//! risk there is a leaked, never-closed listener, not a hijack — but binding
+//! specific addresses (the chosen design) avoids needing to reason about
+//! either case. See `wildcard_vs_loopback_conflict_is_platform_dependent`.
 
 /// The address srv's own startup listeners bind, unconditionally.
 ///
@@ -44,12 +53,17 @@
 /// owner of every LAN-facing socket; startup must not pre-empt it with a
 /// wildcard bind. A `0.0.0.0:PORT` socket holding the port makes
 /// [`LanListenerSupervisor::spawn_pair`]'s per-address binds fail with
-/// `EADDRINUSE` on Linux/macOS, which leaves `active` empty and drives
+/// `EADDRINUSE` on **Linux**, which leaves `active` empty and drives
 /// [`LanListenerSupervisor::sync_advertising`] to switch mDNS *off* — silently
-/// disabling LAN on every restart for users who had already enabled it. (On
-/// Windows the binds succeed instead and you get two sockets on one port with
-/// ambiguous accept — see `wildcard_vs_loopback_conflict_is_platform_dependent`
-/// and `wildcard_then_specific_conflict_is_platform_dependent`.)
+/// disabling LAN on every restart for users who had already enabled it. On
+/// **Windows and macOS** the binds succeed instead and you get two sockets on
+/// one port — Windows leaves that ambiguous; macOS's kernel routes
+/// deterministically by most-specific match, so the practical cost there is a
+/// leaked listener rather than a hijack (both measured 2026-09-09, issue
+/// #3137 — this comment previously grouped macOS with Linux based on
+/// BSD-socket-family analogy, never empirically checked, and it was wrong).
+/// See `wildcard_vs_loopback_conflict_is_platform_dependent` and
+/// `wildcard_then_specific_conflict_is_platform_dependent`.
 /// (reagent #3021 P0)
 pub const STARTUP_BIND_ADDR: &str = "127.0.0.1:0";
 
@@ -463,23 +477,34 @@ mod tests {
     }
 
     /// Records a **platform difference**, deliberately without asserting a
-    /// universal rule — measured, 2026-09-06.
+    /// universal rule — measured 2026-09-06 (Windows/Linux), corrected
+    /// 2026-09-09 (macOS, issue #3137).
     ///
     /// The design docs originally claimed `0.0.0.0:PORT` universally conflicts
-    /// with an existing `127.0.0.1:PORT`. On Linux/macOS it does. **On Windows
-    /// it does not** — absent `SO_EXCLUSIVEADDRUSE`, the wildcard bind
-    /// succeeds alongside the loopback one. This test was written asserting
-    /// the conflict and failed on Windows, which is how the claim was caught
-    /// before it reached an implementation.
+    /// with an existing `127.0.0.1:PORT`. On **Linux** it does. **On Windows
+    /// and macOS it does not** — absent `SO_EXCLUSIVEADDRUSE`, Windows' wildcard
+    /// bind succeeds alongside loopback; macOS was originally grouped with
+    /// Linux here by BSD-socket-family analogy, never actually measured, and a
+    /// real nightly run on `macos-latest` (then reproduced on physical
+    /// hardware, 3x, macOS 26.5.2) showed it behaves like Windows: no conflict.
+    /// This test's own `#[cfg(not(windows))]` grouping was the bug — it
+    /// silently failed on every macOS nightly run for two nights before
+    /// anyone looked (see #3137's own account: `continue-on-error` on that
+    /// workflow's macOS leg meant the failure never turned the run red).
     ///
     /// Why it matters: it rules out "just bind the wildcard on toggle" as a
     /// portable shortcut. On Windows two sockets would hold the same port with
     /// ambiguous accept behaviour — precisely the port-hijack hazard
-    /// `SO_EXCLUSIVEADDRUSE` exists to prevent. Binding SPECIFIC addresses (the
-    /// chosen design) has no such ambiguity on any platform.
+    /// `SO_EXCLUSIVEADDRUSE` exists to prevent. macOS also ends up with two
+    /// sockets on one port, but its kernel was measured routing by
+    /// most-specific match deterministically rather than leaving it ambiguous
+    /// — a leaked listener, not a hijack. Binding SPECIFIC addresses (the
+    /// chosen design) sidesteps needing to reason about either case, on any
+    /// platform.
     ///
-    /// Asserts nothing about which way it goes; it exists to keep the observed
-    /// behaviour visible and to fail loudly if it ever becomes uniform.
+    /// Asserts nothing about which way it goes on a given platform; it exists
+    /// to keep the observed behaviour visible and to fail loudly if it ever
+    /// changes.
     #[test]
     fn wildcard_vs_loopback_conflict_is_platform_dependent() {
         let loopback = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
@@ -489,23 +514,24 @@ mod tests {
         let conflicts = wildcard.is_err();
         eprintln!(
             "0.0.0.0:{port} vs existing 127.0.0.1:{port} — conflicts: {conflicts} \
-             (expected: true on Linux/macOS, false on Windows)"
+             (expected: true on Linux, false on Windows/macOS)"
         );
 
-        #[cfg(windows)]
+        #[cfg(target_os = "linux")]
         assert!(
-            !conflicts,
-            "Windows was measured as ALLOWING the wildcard bind alongside \
-             loopback; if it now conflicts, the platform note in \
+            conflicts,
+            "expected the wildcard bind to conflict with loopback on Linux; \
+             if it no longer does, the platform note in \
              REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md \
              is stale"
         );
-        #[cfg(not(windows))]
+        #[cfg(any(windows, target_os = "macos"))]
         assert!(
-            conflicts,
-            "expected the wildcard bind to conflict with loopback on this \
-             platform; if it no longer does, the same report's platform note \
-             is stale"
+            !conflicts,
+            "this platform was measured as ALLOWING the wildcard bind \
+             alongside loopback (Windows 2026-09-06, macOS 2026-09-09 — \
+             issue #3137); if it now conflicts, the platform note in the same \
+             report is stale"
         );
     }
 
@@ -514,11 +540,19 @@ mod tests {
     /// performs. This is the boot sequence that existed when startup bound
     /// `0.0.0.0:0` for a user who already had `network:lan_discovery` on.
     ///
-    /// On Linux/macOS the per-address bind fails, so `reconcile` binds nothing,
+    /// On **Linux** the per-address bind fails, so `reconcile` binds nothing,
     /// `has_lan_listener()` stays false, and `sync_advertising` calls
     /// `discovery.apply(false)` — turning OFF the mDNS the user had enabled.
     /// A silent LAN-disable on every restart, for exactly the opted-in users.
-    /// On Windows the bind succeeds and you instead get two sockets on one port.
+    /// On **Windows and macOS** the bind succeeds and you instead get two
+    /// sockets on one port (macOS measured 2026-09-09, issue #3137 — this
+    /// test's own `#[cfg(not(windows))]` grouping wrongly expected it to
+    /// fail there like Linux, and that's what actually failed on the nightly
+    /// macOS runner). On macOS specifically that's a leaked listener rather
+    /// than the mDNS-disable outcome, since the bind that would have driven
+    /// `sync_advertising` to turn discovery off never errors in the first
+    /// place — milder than the Linux failure mode, but still not something
+    /// startup should be racing against.
     ///
     /// Neither outcome is acceptable, which is why [`STARTUP_BIND_ADDR`] is
     /// loopback unconditionally. Like its sibling, this asserts the *measured*
@@ -537,23 +571,24 @@ mod tests {
         let conflicts = specific.is_err();
         eprintln!(
             "{lan_ip}:{port} vs existing 0.0.0.0:{port} — conflicts: {conflicts} \
-             (expected: true on Linux/macOS, false on Windows)"
+             (expected: true on Linux, false on Windows/macOS)"
         );
 
-        #[cfg(windows)]
-        assert!(
-            !conflicts,
-            "Windows was measured as ALLOWING the per-address bind under a \
-             wildcard; if it now conflicts, STARTUP_BIND_ADDR's rationale needs \
-             re-checking (the fix is still correct either way)"
-        );
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         assert!(
             conflicts,
             "expected the per-address bind to be refused under a wildcard on \
-             this platform — this conflict is the whole reason startup binds \
-             loopback only; got {:?}",
+             Linux — this conflict is the whole reason startup binds loopback \
+             only; got {:?}",
             specific.err()
+        );
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(
+            !conflicts,
+            "this platform was measured as ALLOWING the per-address bind \
+             under a wildcard (Windows 2026-09-06, macOS 2026-09-09 — issue \
+             #3137); if it now conflicts, STARTUP_BIND_ADDR's rationale needs \
+             re-checking (the fix is still correct either way)"
         );
     }
 
