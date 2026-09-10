@@ -27,6 +27,13 @@
 //! added once that's resolved, either by computing a per-agent default at
 //! config-build time or shipping it with an explicit prereq the user fills
 //! in via the existing catalog-picker mechanism instead.
+//!
+//! **Ids are deterministic, not randomly minted** — same reasoning as
+//! `skill_seed.rs::starter_skill_id`, mirrored here for MCP servers via
+//! `entry.name` (there is no separate slug field for a server the way a
+//! skill has `trigger`; `name` already plays that role — it's the catalog
+//! key `mcp_server_upsert_unique_global` enforces uniqueness on). See Phase 1
+//! of `SPEC_DURABLE_BINDINGS_2026_09_10.md`.
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -56,6 +63,17 @@ const STARTER_MCP_SERVERS_JSON: &str = include_str!("../config/starter-mcp-serve
 /// Report returned after a seed attempt.
 pub struct McpServerSeedReport {
     pub created: usize,
+}
+
+/// Deterministic row id for a starter MCP server, derived from its `name`.
+/// See `skill_seed::starter_skill_id`'s doc comment for the full reasoning —
+/// this is the identical derivation keyed on the server's catalog name
+/// instead of a skill's trigger, in its own, distinct namespace so a skill
+/// and an MCP server that happened to share a stable-key string could never
+/// collide on id.
+fn starter_mcp_server_id(name: &str) -> Uuid {
+    let namespace = Uuid::new_v5(&Uuid::NAMESPACE_URL, b"https://agentmux.ai/catalog/mcp-servers/v1");
+    Uuid::new_v5(&namespace, name.as_bytes())
 }
 
 /// True if any global MCP server whose name matches a starter entry's name
@@ -106,7 +124,7 @@ pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerS
         let config = serde_json::to_string(&entry.config)
             .map_err(|e| StoreError::Other(format!("mcp server seed: serialize config for '{}': {e}", entry.name)))?;
         let server = McpServer {
-            id: Uuid::new_v4().to_string(),
+            id: starter_mcp_server_id(&entry.name).to_string(),
             name: entry.name.clone(),
             transport: entry.transport.clone(),
             config,
@@ -133,6 +151,47 @@ pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerS
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starter_mcp_server_ids_are_identical_across_two_independently_seeded_stores() {
+        // Mirrors skill_seed.rs's equivalent test — the property Phase 1 of
+        // SPEC_DURABLE_BINDINGS_2026_09_10.md exists for.
+        let store_a = Arc::new(Store::open_in_memory().unwrap());
+        let store_b = Arc::new(Store::open_in_memory().unwrap());
+
+        seed_starter_mcp_servers(&store_a).unwrap();
+        seed_starter_mcp_servers(&store_b).unwrap();
+
+        let mut ids_a: Vec<(String, String)> = store_a
+            .mcp_server_list_global()
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.server.name, item.server.id))
+            .collect();
+        let mut ids_b: Vec<(String, String)> = store_b
+            .mcp_server_list_global()
+            .unwrap()
+            .into_iter()
+            .map(|item| (item.server.name, item.server.id))
+            .collect();
+        ids_a.sort();
+        ids_b.sort();
+
+        assert_eq!(ids_a.len(), 6);
+        assert_eq!(ids_a, ids_b, "the same starter server must get the same id in every store");
+    }
+
+    #[test]
+    fn a_skill_and_an_mcp_server_sharing_a_stable_key_do_not_collide() {
+        // Different namespaces for the two catalogs — if a skill's trigger
+        // and a server's name were ever the same literal string, they must
+        // still land on different ids, since they're different resources in
+        // different tables.
+        assert_ne!(
+            crate::backend::skill_seed::starter_skill_id("git"),
+            starter_mcp_server_id("git"),
+        );
+    }
 
     #[test]
     fn seeds_six_mcp_servers_into_an_empty_catalog() {
