@@ -134,7 +134,7 @@ export const AgentNewBundleModalPanel = (
                                 onChange={() => setSeedMode("empty")}
                                 disabled={submitting()}
                             />
-                            <span>Start empty — add files later from the Armory (ABF)</span>
+                            <span>Start empty — add files later from the Armory (Bundles)</span>
                         </label>
                         <label class="agent-new-bundle-modal-radio">
                             <input

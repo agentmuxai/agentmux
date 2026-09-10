@@ -27,7 +27,7 @@ const RAIL: { id: ArmorySection; label: string; tooltip?: string; icon: string }
     { id: "memory",   label: ARMORY_SECTION_LABELS.memory,   tooltip: "Global (workspace-wide) and Personal (per-agent) memory", icon: "brain" },
     { id: "skills",   label: ARMORY_SECTION_LABELS.skills,   icon: "wand-magic-sparkles" },
     { id: "mcp",      label: ARMORY_SECTION_LABELS.mcp,      icon: "plug" },
-    { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
+    { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Bundles — import and export as Armory Bundle Format (ABF)", icon: "layer-group" },
 ];
 
 const MEMORY_SUBNAV: { id: MemorySubsection; label: string }[] = [
