@@ -1284,6 +1284,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     let Some(text) = crate::server::app_api::session::generate_ambient_narration(
                         &wstore,
                         &cmd.blockid,
+                        &cmd.dedupe_key,
                         generation,
                         &cmd.kind,
                         &cmd.context,
@@ -1292,6 +1293,26 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     else {
                         return;
                     };
+                    // A short task can finish while the model call is still
+                    // in flight, so by now the dock may already show it done.
+                    // Narrating it at that point is worse than silence: the line
+                    // describes a launch the user has already seen conclude.
+                    //
+                    // Belt and braces with the prompt, which is phrased to stay
+                    // true after completion — this drops the message entirely
+                    // rather than relying on wording alone. (codex P2 on #3169.)
+                    //
+                    // Only skips on a DEFINITE completion: an unknown id (no
+                    // registry row — the task was never observed, or this is a
+                    // narration kind that has none) falls through and publishes,
+                    // since absence of a row is not evidence of completion.
+                    if !cmd.dedupe_key.is_empty() {
+                        if let Ok(Some(task)) = wstore.background_task_get(&cmd.dedupe_key) {
+                            if task.status != crate::backend::storage::background_tasks::BackgroundTaskStatus::Running {
+                                return;
+                            }
+                        }
+                    }
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: "ambient-narration".to_string(),
                         scopes: vec![format!("block:{}", cmd.blockid)],

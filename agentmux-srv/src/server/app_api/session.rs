@@ -1712,10 +1712,11 @@ fn narration_prompt(kind: &str, context: &str) -> Option<String> {
         // The first consumer: a long-running tool call the harness detached.
         // The pane goes quiet at that moment and the user is told nothing.
         "background_task" => Some(format!(
-            "One sentence, first person, present tense, telling the user a command \
-             is now running in the background and you will report when it finishes. \
-             Name the command briefly. Plain text only — no markdown, no code fences, \
-             no backticks, no quotes, no preamble. Under 20 words.\n\n\
+            "One sentence, first person, past tense, telling the user you have started \
+             a command in the background. Name the command briefly. Do NOT promise to \
+             report back, and do NOT claim it is still running — it may already have \
+             finished by the time this is read. Plain text only — no markdown, no code \
+             fences, no backticks, no quotes, no preamble. Under 20 words.\n\n\
              Command:\n\n{context}"
         )),
         _ => None,
@@ -1731,13 +1732,26 @@ fn narration_prompt(kind: &str, context: &str) -> Option<String> {
 pub(crate) async fn generate_ambient_narration(
     wstore: &Store,
     block_id: &str,
+    event_id: &str,
     generation: u64,
     kind: &str,
     context: &str,
 ) -> Option<String> {
     let prompt = narration_prompt(kind, context)?;
 
-    let key = crate::ambient::AmbientCallKey::new(block_id, AMBIENT_PURPOSE_NARRATION);
+    // Keyed on the EVENT, not the block. `admit()` cancels the prior in-flight
+    // call for a key as soon as a newer generation arrives — correct for the
+    // summary callers this is otherwise modelled on, where only the latest
+    // result is ever shown, and wrong here. Each narrated event is independent
+    // and all of them should arrive: two Bash calls backgrounded moments apart
+    // in one block are two separate facts, and `useAmbientNarration` retains
+    // several precisely because it expects them. Keying on the block alone let
+    // the second silently cancel the first, whose Haiku call then returned
+    // "cancelled" and was swallowed by the `.ok()?` below. (reagent P1 on #3169.)
+    let key = crate::ambient::AmbientCallKey::new(
+        format!("{block_id}:{event_id}"),
+        AMBIENT_PURPOSE_NARRATION,
+    );
     let guard = match crate::ambient::gateway().admit(key, generation) {
         crate::ambient::Admission::Proceed(guard) => guard,
         crate::ambient::Admission::StaleOnArrival => return None,
@@ -1767,6 +1781,31 @@ mod narration_tests {
     #[test]
     fn an_unknown_kind_produces_no_prompt_rather_than_an_open_ended_one() {
         assert!(narration_prompt("no_such_kind", "anything").is_none());
+    }
+
+    #[test]
+    fn two_events_in_one_block_do_not_cancel_each_other() {
+        // The regression reagent caught on #3169. admit() cancels the prior
+        // in-flight call for a KEY, so keying narration on the block alone made
+        // a second backgrounded command in the same turn silently kill the
+        // first one's narration. Distinct event ids must be distinct keys.
+        use crate::ambient::{gateway, Admission, AmbientCallKey};
+
+        let first = AmbientCallKey::new("block-x:toolu_1", AMBIENT_PURPOSE_NARRATION);
+        let second = AmbientCallKey::new("block-x:toolu_2", AMBIENT_PURPOSE_NARRATION);
+        assert_ne!(first, second, "distinct events must not share a gateway key");
+
+        let g1 = match gateway().admit(first, 1) {
+            Admission::Proceed(g) => g,
+            Admission::StaleOnArrival => panic!("first should be admitted"),
+        };
+        let cancel1 = g1.cancellation();
+        let _g2 = match gateway().admit(second, 2) {
+            Admission::Proceed(g) => g,
+            Admission::StaleOnArrival => panic!("second should be admitted"),
+        };
+        // The second admission must leave the first alone.
+        assert!(!cancel1.is_cancelled(), "a sibling narration cancelled the first");
     }
 
     #[test]
