@@ -365,3 +365,23 @@ test before it ever needed a live run: `Store::delete` succeeds (no-ops)
 even for a row that never existed, so `.is_ok()` alone couldn't distinguish
 "stopped a real shell" from "unknown id" — fixed to check controller
 existence (`get_block_controller_status`) before tearing anything down.
+
+**A fifth real bug, this time caught by CI itself rather than review or a
+local run:** two of the deterministic tests (`create`'s own wiring test and
+the cwd-fallback test) call `/api/v1/ptyshell/create` for real — which
+spawns a genuine, persistent interactive shell process, not a mock — and
+neither cleaned it up afterward. Locally (Windows) this was invisible: the
+suite still finished in well under a second. On CI's Linux runner it hung
+`cargo test --workspace` for hours (one run sat long enough to hit a ~6h
+auto-cancel; a second, freshly re-triggered run was still stuck at 5h45m
+when caught and manually cancelled). Root cause not fully isolated beyond
+"an orphaned real shell process from a test that never stops it" — plausibly
+the runner's own job-completion wait, not `cargo test`'s own process, since
+the local Windows run (which does the same real spawn) exits promptly.
+Fixed by having both tests call `blockcontroller::delete_controller`
+directly at the end — deliberately not the HTTP `stop` endpoint, so the
+cleanup can't itself be broken by a bug in that handler. This is exactly
+the discipline the `#[ignore]`'d live test's own doc comment already
+argued for (only intentionally-real-process tests should spawn one) — these
+two just weren't meant to be in that category and had to be brought back in
+line.

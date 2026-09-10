@@ -3416,6 +3416,17 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
         Some(blockcontroller::BLOCK_CONTROLLER_SHELL)
     );
     assert_eq!(block.parentoref, "block:test-agent-block");
+
+    // `create` spawns a REAL, persistent interactive shell process (unlike
+    // every other non-`#[ignore]`d test in this file, which never spawns
+    // one at all) — clean it up directly rather than leaving it running for
+    // the rest of the test binary's life. Confirmed live: an earlier
+    // version of this test (and `ptyshell_create_defaults_cwd_from_the_agent_block`
+    // below) omitted this and left the CI Linux job's `cargo test --workspace`
+    // step hanging for hours (a stuck run had to be cancelled). Calling the
+    // backend function directly, not the HTTP `stop` endpoint, so this
+    // cleanup can't itself be broken by a bug in that handler.
+    blockcontroller::delete_controller(&shell_id);
 }
 
 #[tokio::test]
@@ -3519,6 +3530,10 @@ async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
         block.meta.get(blockcontroller::META_KEY_CMD_CWD).and_then(|v| v.as_str()),
         Some(cwd.as_str())
     );
+
+    // See the identical cleanup note in
+    // `ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block`.
+    blockcontroller::delete_controller(&shell_id);
 }
 
 #[tokio::test]
