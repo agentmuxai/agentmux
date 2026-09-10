@@ -164,7 +164,12 @@ fn reject_duplicate_triggers(manifest: &[StarterSkill]) -> Result<(), StoreError
 pub(crate) fn any_starter_skill_name_exists(wstore: &Arc<Store>) -> Result<bool, StoreError> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
-    let existing = wstore.skill_list_global()?;
+    // Pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's catalog
+    // redirect — this migration always operated on one store's own
+    // db_skills, so `wstore` plays both the ref-owner and catalog role here
+    // (the later carry-across migration, m0031, is what moves these rows
+    // into identity_store).
+    let existing = wstore.skill_list_global(wstore)?;
     Ok(manifest
         .iter()
         .any(|entry| existing.iter().any(|item| item.skill.name == entry.name)))
@@ -211,7 +216,7 @@ pub(crate) fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport
         };
         if let Err(e) = wstore.skill_upsert_unique_global(&skill) {
             for id in &inserted_ids {
-                if let Err(cleanup_err) = wstore.skill_delete(id) {
+                if let Err(cleanup_err) = wstore.skill_delete(wstore, id) {
                     tracing::error!(
                         "skill seed: cleanup after partial failure could not remove {id}: {cleanup_err}"
                     );
@@ -276,13 +281,13 @@ mod tests {
         seed_starter_skills(&store_b).unwrap();
 
         let mut ids_a: Vec<(String, String)> = store_a
-            .skill_list_global()
+            .skill_list_global(&store_a)
             .unwrap()
             .into_iter()
             .map(|item| (item.skill.name, item.skill.id))
             .collect();
         let mut ids_b: Vec<(String, String)> = store_b
-            .skill_list_global()
+            .skill_list_global(&store_b)
             .unwrap()
             .into_iter()
             .map(|item| (item.skill.name, item.skill.id))
@@ -312,12 +317,12 @@ mod tests {
     #[test]
     fn seeds_six_skills_into_an_empty_catalog() {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
-        assert!(wstore.skill_list_global().unwrap().is_empty());
+        assert!(wstore.skill_list_global(&wstore).unwrap().is_empty());
 
         let report = seed_starter_skills(&wstore).unwrap();
 
         assert_eq!(report.created, 6);
-        let after = wstore.skill_list_global().unwrap();
+        let after = wstore.skill_list_global(&wstore).unwrap();
         assert_eq!(after.len(), 6, "all six starter skills should be seeded");
         assert!(after.iter().all(|item| item.skill.is_global));
     }
@@ -358,7 +363,7 @@ mod tests {
         let result = seed_starter_skills(&wstore);
         assert!(result.is_err(), "seeding must fail when a name collides");
 
-        let after = wstore.skill_list_global().unwrap();
+        let after = wstore.skill_list_global(&wstore).unwrap();
         assert_eq!(
             after.len(),
             1,

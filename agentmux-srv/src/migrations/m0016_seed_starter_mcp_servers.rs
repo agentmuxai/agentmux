@@ -77,7 +77,7 @@ mod tests {
         M0016SeedStarterMcpServers.up(&ctx_for(tmp.path())).unwrap();
 
         let wstore = Store::open(tmp.path()).unwrap();
-        assert_eq!(wstore.mcp_server_list_global().unwrap().len(), 6);
+        assert_eq!(wstore.mcp_server_list_global(&wstore).unwrap().len(), 6);
     }
 
     #[test]
@@ -91,12 +91,12 @@ mod tests {
 
         M0016SeedStarterMcpServers.up(&ctx).unwrap();
         wstore.migration_mark_applied("0016_seed_starter_mcp_servers", "channel", 0).unwrap();
-        assert_eq!(wstore.mcp_server_list_global().unwrap().len(), 6);
+        assert_eq!(wstore.mcp_server_list_global(&wstore).unwrap().len(), 6);
 
-        for item in wstore.mcp_server_list_global().unwrap() {
-            wstore.mcp_server_delete(&item.server.id).unwrap();
+        for item in wstore.mcp_server_list_global(&wstore).unwrap() {
+            wstore.mcp_server_delete(&wstore, &item.server.id).unwrap();
         }
-        assert!(wstore.mcp_server_list_global().unwrap().is_empty());
+        assert!(wstore.mcp_server_list_global(&wstore).unwrap().is_empty());
 
         // The real runner (runner.rs) never calls `up()` again once
         // `migration_is_applied` is true — assert that precondition holds,
@@ -131,7 +131,7 @@ mod tests {
 
         M0016SeedStarterMcpServers.up(&ctx).unwrap();
 
-        let after = wstore.mcp_server_list_global().unwrap();
+        let after = wstore.mcp_server_list_global(&wstore).unwrap();
         assert_eq!(
             after.len(),
             1,

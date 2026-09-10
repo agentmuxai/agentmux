@@ -126,6 +126,7 @@ impl Store {
     /// Returns `(created, warnings)`.
     pub fn bundle_mcp_bind_inline_entries(
         &self,
+        catalog: &Store,
         id_store: &Store,
         bundle_id: &str,
         entries: &[serde_json::Value],
@@ -138,7 +139,7 @@ impl Store {
 
         // What is already bound, captured BEFORE the loop so a duplicate
         // inside `entries` is not mistaken for a previous run.
-        let bound = match self.bundle_mcp_list(bundle_id) {
+        let bound = match self.bundle_mcp_list(catalog, bundle_id) {
             Ok(items) => items
                 .into_iter()
                 .filter(|i| i.bound_to_bundle)
@@ -192,7 +193,7 @@ impl Store {
                     continue;
                 }
                 server.name = candidate.clone();
-                match self.bundle_mcp_upsert_unique(id_store, bundle_id, &server, true) {
+                match self.bundle_mcp_upsert_unique(catalog, id_store, bundle_id, &server, true) {
                     Ok(()) => {
                         if candidate != base {
                             // Not a loss, but the operator should know the
@@ -274,6 +275,12 @@ impl ManagedResource for McpServer {
     fn name(&self) -> &str {
         &self.name
     }
+    fn is_global(&self) -> bool {
+        self.is_global
+    }
+    fn updated_at(&self) -> i64 {
+        self.updated_at
+    }
 }
 
 /// `mcp_server_list`'s response shape: the server plus whether the requesting
@@ -313,9 +320,9 @@ pub struct McpServerBundleListItem {
 impl Store {
     /// List all MCP servers visible to an agent: own (referenced) + global,
     /// each annotated with whether this specific agent holds the bind ref.
-    pub fn mcp_server_list(&self, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
+    pub fn mcp_server_list(&self, catalog: &Store, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
         Ok(self
-            .managed_list::<McpServer>(Owner::Agent, agent_id)?
+            .managed_list::<McpServer>(catalog, Owner::Agent, agent_id)?
             .into_iter()
             .map(|(server, bound_to_agent)| McpServerListItem { server, bound_to_agent })
             .collect())
@@ -330,14 +337,14 @@ impl Store {
     /// always was. Deduped by id. Single source of truth for
     /// `write_agent_config_files` — mirrors `effective_skills`'s own
     /// same-source-of-truth requirement (see its doc comment).
-    pub fn effective_mcp_servers(&self, agent_id: &str) -> Vec<McpServer> {
+    pub fn effective_mcp_servers(&self, catalog: &Store, agent_id: &str) -> Vec<McpServer> {
         let mut visible: Vec<McpServer> = self
-            .mcp_server_list(agent_id)
+            .mcp_server_list(catalog, agent_id)
             .unwrap_or_default()
             .into_iter()
             .map(|item| item.server)
             .collect();
-        self.managed_union_bundle_refs(agent_id, &mut visible);
+        self.managed_union_bundle_refs(catalog, agent_id, &mut visible);
         visible
     }
 
@@ -348,9 +355,9 @@ impl Store {
     /// Each row carries `bound_count` — how many agents currently hold a
     /// `db_agent_mcp_ref` to it — per SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md
     /// §8 ("used by N agents"), tracked as gap #2 of #1960.
-    pub fn mcp_server_list_global(&self) -> Result<Vec<McpServerCatalogItem>, StoreError> {
+    pub fn mcp_server_list_global(&self, catalog: &Store) -> Result<Vec<McpServerCatalogItem>, StoreError> {
         Ok(self
-            .managed_list_global::<McpServer>()?
+            .managed_list_global::<McpServer>(catalog)?
             .into_iter()
             .map(|(server, bound_count)| McpServerCatalogItem { server, bound_count })
             .collect())
@@ -369,9 +376,9 @@ impl Store {
     /// `mcp_server_list_global` (the Armory catalog) — so exposing them
     /// alongside a caller-chosen agent's bind status is safe.
     /// reagentx P0 on PR #2329.
-    pub fn mcp_server_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
+    pub fn mcp_server_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<McpServerListItem>, StoreError> {
         Ok(self
-            .managed_list_global_for_agent::<McpServer>(agent_id)?
+            .managed_list_global_for_agent::<McpServer>(catalog, agent_id)?
             .into_iter()
             .map(|(server, bound_to_agent)| McpServerListItem { server, bound_to_agent })
             .collect())
@@ -385,8 +392,8 @@ impl Store {
     /// Delete a standalone MCP server and purge ref rows (both agent- and
     /// bundle-level — FK cascades may be off on some builds, same reasoning
     /// as `skill_delete`). Returns true if deleted.
-    pub fn mcp_server_delete(&self, id: &str) -> Result<bool, StoreError> {
-        self.managed_delete::<McpServer>(id)
+    pub fn mcp_server_delete(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
+        self.managed_delete::<McpServer>(catalog, id)
     }
 
     /// Bind an MCP server to an agent (insert ref row). Idempotent —
@@ -404,8 +411,8 @@ impl Store {
     /// case — reporting success while creating nothing. Same fix as
     /// skill_bind — see
     /// docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
-    pub fn mcp_server_bind(&self, agent_id: &str, mcp_id: &str) -> Result<(), StoreError> {
-        self.managed_bind_agent::<McpServer>(agent_id, mcp_id)
+    pub fn mcp_server_bind(&self, catalog: &Store, agent_id: &str, mcp_id: &str) -> Result<(), StoreError> {
+        self.managed_bind_agent::<McpServer>(catalog, agent_id, mcp_id)
     }
 
     /// Unbind an MCP server from an agent. Returns true if a row was removed.
@@ -420,11 +427,12 @@ impl Store {
     /// the agent (bound or global) already uses the name.
     pub fn mcp_server_upsert_unique(
         &self,
+        catalog: &Store,
         agent_id: &str,
         server: &McpServer,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        self.managed_upsert_unique(Owner::Agent, agent_id, server, bind_new, None)
+        self.managed_upsert_unique(catalog, Owner::Agent, agent_id, server, bind_new, None)
     }
 
     /// Atomically upsert a GLOBAL MCP server enforcing catalog-wide name
@@ -533,8 +541,8 @@ impl Store {
 
     /// Return true if the given MCP server is accessible to the agent (global or bound).
     /// Used for read and mutation access checks.
-    pub fn mcp_server_is_accessible_to(&self, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        self.managed_is_accessible_to::<McpServer>(Owner::Agent, agent_id, mcp_id)
+    pub fn mcp_server_is_accessible_to(&self, catalog: &Store, agent_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
+        self.managed_is_accessible_to::<McpServer>(catalog, Owner::Agent, agent_id, mcp_id)
     }
 
     /// Return true if the agent has a direct ref binding to this MCP server.
@@ -554,9 +562,9 @@ impl Store {
     /// Bundle-level sibling of `mcp_server_list` — this bundle's own
     /// (referenced) + global servers, each annotated with whether this
     /// specific bundle holds the `db_bundle_mcp_ref` row.
-    pub fn bundle_mcp_list(&self, bundle_id: &str) -> Result<Vec<McpServerBundleListItem>, StoreError> {
+    pub fn bundle_mcp_list(&self, catalog: &Store, bundle_id: &str) -> Result<Vec<McpServerBundleListItem>, StoreError> {
         Ok(self
-            .managed_list::<McpServer>(Owner::Bundle, bundle_id)?
+            .managed_list::<McpServer>(catalog, Owner::Bundle, bundle_id)?
             .into_iter()
             .map(|(server, bound_to_bundle)| McpServerBundleListItem { server, bound_to_bundle })
             .collect())
@@ -576,8 +584,8 @@ impl Store {
     /// with no possible cross-database FK to it — same "check at the
     /// application layer, not via FK" pattern as
     /// `identity::resolver::resolve_account`'s cross-store lookups.
-    pub fn bundle_mcp_bind(&self, id_store: &Store, bundle_id: &str, mcp_id: &str) -> Result<(), StoreError> {
-        self.managed_bind_bundle::<McpServer>(id_store, bundle_id, mcp_id)
+    pub fn bundle_mcp_bind(&self, catalog: &Store, id_store: &Store, bundle_id: &str, mcp_id: &str) -> Result<(), StoreError> {
+        self.managed_bind_bundle::<McpServer>(catalog, id_store, bundle_id, mcp_id)
     }
 
     /// Atomically create a NEW, PRIVATE (never global) MCP server scoped
@@ -597,12 +605,13 @@ impl Store {
     /// isn't already visible to every other agent.
     pub fn bundle_mcp_upsert_unique(
         &self,
+        catalog: &Store,
         id_store: &Store,
         bundle_id: &str,
         server: &McpServer,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        self.managed_upsert_unique_for_bundle(id_store, bundle_id, server, bind_new)
+        self.managed_upsert_unique_for_bundle(catalog, id_store, bundle_id, server, bind_new)
     }
 
     /// Unbind an MCP server from a bundle. Returns true if a row was removed.
@@ -612,8 +621,8 @@ impl Store {
 
     /// Return true if the given MCP server is accessible to the bundle
     /// (global or bundle-bound). Mirrors `mcp_server_is_accessible_to`.
-    pub fn bundle_mcp_is_accessible_to(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
-        self.managed_is_accessible_to::<McpServer>(Owner::Bundle, bundle_id, mcp_id)
+    pub fn bundle_mcp_is_accessible_to(&self, catalog: &Store, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
+        self.managed_is_accessible_to::<McpServer>(catalog, Owner::Bundle, bundle_id, mcp_id)
     }
 
     /// Return true if the bundle has a direct ref binding to this MCP
@@ -677,15 +686,15 @@ mod bundle_ref_tests {
         // A private (non-global) server, upserted without any agent bind —
         // simulates a server that exists but this bundle hasn't referenced.
         store
-            .mcp_server_upsert_unique("some-other-agent-context", &server("srv-private", "Private", false), false)
+            .mcp_server_upsert_unique(&store, "some-other-agent-context", &server("srv-private", "Private", false), false)
             .unwrap_or(());
 
-        let before = store.bundle_mcp_list("bundle-1").unwrap();
+        let before = store.bundle_mcp_list(&store, "bundle-1").unwrap();
         assert_eq!(before.len(), 1, "only the global server should be visible before any bind: {before:?}");
         assert!(!before[0].bound_to_bundle, "global server isn't bundle-bound yet");
 
-        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
-        let after = store.bundle_mcp_list("bundle-1").unwrap();
+        store.bundle_mcp_bind(&store, &store, "bundle-1", "srv-private").unwrap();
+        let after = store.bundle_mcp_list(&store, "bundle-1").unwrap();
         assert_eq!(after.len(), 2, "private server must now be visible after binding: {after:?}");
         let private_item = after.iter().find(|i| i.server.id == "srv-private").expect("private server present");
         assert!(private_item.bound_to_bundle);
@@ -697,11 +706,11 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
         insert_bundle(&store, "bundle-2");
         store
-            .mcp_server_upsert_unique("some-other-agent-context", &server("srv-private", "Private", false), false)
+            .mcp_server_upsert_unique(&store, "some-other-agent-context", &server("srv-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, &store, "bundle-1", "srv-private").unwrap();
 
-        let bundle2_list = store.bundle_mcp_list("bundle-2").unwrap();
+        let bundle2_list = store.bundle_mcp_list(&store, "bundle-2").unwrap();
         assert!(
             bundle2_list.is_empty(),
             "a private server bound to bundle-1 must not leak into bundle-2's list: {bundle2_list:?}"
@@ -712,7 +721,7 @@ mod bundle_ref_tests {
     fn bind_errors_when_the_bundle_does_not_exist() {
         let store = make_store();
         store.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
-        let result = store.bundle_mcp_bind(&store, "no-such-bundle", "srv-1");
+        let result = store.bundle_mcp_bind(&store, &store, "no-such-bundle", "srv-1");
         assert!(result.is_err(), "binding to a nonexistent bundle must error, not silently no-op");
     }
 
@@ -721,13 +730,13 @@ mod bundle_ref_tests {
         let store = make_store();
         insert_bundle(&store, "bundle-1");
         store
-            .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
+            .mcp_server_upsert_unique(&store, "ctx", &server("srv-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, &store, "bundle-1", "srv-private").unwrap();
 
         let removed = store.bundle_mcp_unbind("bundle-1", "srv-private").unwrap();
         assert!(removed);
-        assert!(store.bundle_mcp_list("bundle-1").unwrap().is_empty());
+        assert!(store.bundle_mcp_list(&store, "bundle-1").unwrap().is_empty());
 
         let removed_again = store.bundle_mcp_unbind("bundle-1", "srv-private").unwrap();
         assert!(!removed_again, "unbinding an already-unbound pair returns false, not an error");
@@ -738,14 +747,14 @@ mod bundle_ref_tests {
         let store = make_store();
         insert_bundle(&store, "bundle-1");
         store
-            .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
+            .mcp_server_upsert_unique(&store, "ctx", &server("srv-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
-        assert_eq!(store.bundle_mcp_list("bundle-1").unwrap().len(), 1);
+        store.bundle_mcp_bind(&store, &store, "bundle-1", "srv-private").unwrap();
+        assert_eq!(store.bundle_mcp_list(&store, "bundle-1").unwrap().len(), 1);
 
-        store.mcp_server_delete("srv-private").unwrap();
+        store.mcp_server_delete(&store, "srv-private").unwrap();
         assert!(
-            store.bundle_mcp_list("bundle-1").unwrap().is_empty(),
+            store.bundle_mcp_list(&store, "bundle-1").unwrap().is_empty(),
             "the bundle ref row must be purged when the underlying server is deleted"
         );
     }
@@ -763,7 +772,7 @@ mod bundle_ref_tests {
         insert_bundle(&id_store, "bundle-1");
         wstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_mcp_bind(&id_store, "bundle-1", "srv-1");
+        let result = wstore.bundle_mcp_bind(&wstore, &id_store, "bundle-1", "srv-1");
         assert!(result.is_ok(), "must check bundle existence against id_store, not self: {result:?}");
     }
 
@@ -781,7 +790,7 @@ mod bundle_ref_tests {
         insert_bundle(&wstore, "bundle-1"); // wrong store — simulates the pre-fix bug's mirror image
         wstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_mcp_bind(&id_store, "bundle-1", "srv-1");
+        let result = wstore.bundle_mcp_bind(&wstore, &id_store, "bundle-1", "srv-1");
         assert!(
             result.is_err(),
             "a bundle only present in self's non-authoritative copy must not satisfy the id_store check: {result:?}"
@@ -801,13 +810,14 @@ mod bundle_ref_tests {
         store
             .bundle_mcp_upsert_unique(
                 &store,
+                &store,
                 "bundle-1",
                 &server("new-srv", "Bundle-Only Tool", true), // is_global: true here is IGNORED
                 true,
             )
             .unwrap();
 
-        let list = store.bundle_mcp_list("bundle-1").unwrap();
+        let list = store.bundle_mcp_list(&store, "bundle-1").unwrap();
         let item = list.iter().find(|i| i.server.id == "new-srv").expect("newly created server present");
         assert!(item.bound_to_bundle);
         assert!(!item.server.is_global, "upsert_unique must force is_global=false regardless of the input struct");
@@ -817,9 +827,9 @@ mod bundle_ref_tests {
     fn upsert_unique_rejects_a_duplicate_name_already_bound_to_the_bundle() {
         let store = make_store();
         insert_bundle(&store, "bundle-1");
-        store.bundle_mcp_upsert_unique(&store, "bundle-1", &server("srv-a", "Dup Name", true), true).unwrap();
+        store.bundle_mcp_upsert_unique(&store, &store, "bundle-1", &server("srv-a", "Dup Name", true), true).unwrap();
 
-        let result = store.bundle_mcp_upsert_unique(&store, "bundle-1", &server("srv-b", "Dup Name", true), true);
+        let result = store.bundle_mcp_upsert_unique(&store, &store, "bundle-1", &server("srv-b", "Dup Name", true), true);
         assert!(result.is_err(), "a second server with the same name bound to the same bundle must be rejected");
     }
 
@@ -829,13 +839,13 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
         store.mcp_server_upsert_unique_global(&server("srv-global", "Global", true)).unwrap();
         store
-            .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
+            .mcp_server_upsert_unique(&store, "ctx", &server("srv-private", "Private", false), false)
             .unwrap_or(());
 
-        assert!(store.bundle_mcp_is_accessible_to("bundle-1", "srv-global").unwrap());
-        assert!(!store.bundle_mcp_is_accessible_to("bundle-1", "srv-private").unwrap());
-        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
-        assert!(store.bundle_mcp_is_accessible_to("bundle-1", "srv-private").unwrap());
+        assert!(store.bundle_mcp_is_accessible_to(&store, "bundle-1", "srv-global").unwrap());
+        assert!(!store.bundle_mcp_is_accessible_to(&store, "bundle-1", "srv-private").unwrap());
+        store.bundle_mcp_bind(&store, &store, "bundle-1", "srv-private").unwrap();
+        assert!(store.bundle_mcp_is_accessible_to(&store, "bundle-1", "srv-private").unwrap());
     }
 
     fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
@@ -885,11 +895,11 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
         insert_agent_with_bundle(&store, "agent-1", "bundle-1");
         store
-            .mcp_server_upsert_unique("some-other-context", &server("bundle-srv", "Bundle Server", false), false)
+            .mcp_server_upsert_unique(&store, "some-other-context", &server("bundle-srv", "Bundle Server", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind(&store, "bundle-1", "bundle-srv").unwrap();
+        store.bundle_mcp_bind(&store, &store, "bundle-1", "bundle-srv").unwrap();
 
-        let effective = store.effective_mcp_servers("agent-1");
+        let effective = store.effective_mcp_servers(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.contains(&"Bundle Server"),
@@ -909,10 +919,10 @@ mod bundle_ref_tests {
         insert_agent_with_bundle(&store, "agent-1", "bundle-1");
 
         store
-            .bundle_mcp_upsert_unique(&store, "bundle-1", &server("bundle-own-tool", "Bundle-Owned Tool", false), true)
+            .bundle_mcp_upsert_unique(&store, &store, "bundle-1", &server("bundle-own-tool", "Bundle-Owned Tool", false), true)
             .unwrap();
 
-        let effective = store.effective_mcp_servers("agent-1");
+        let effective = store.effective_mcp_servers(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.contains(&"Bundle-Owned Tool"),
@@ -927,7 +937,7 @@ mod bundle_ref_tests {
         insert_agent_with_bundle(&store, "agent-1", "bundle-1");
         store.mcp_server_upsert_unique_global(&server("global-1", "Global Server", true)).unwrap();
 
-        let effective = store.effective_mcp_servers("agent-1");
+        let effective = store.effective_mcp_servers(&store, "agent-1");
         let matches: Vec<_> = effective.iter().filter(|s| s.name == "Global Server").collect();
         assert_eq!(matches.len(), 1, "a global server visible via both the agent and its bundle must not be duplicated: {effective:?}");
     }
@@ -970,7 +980,7 @@ mod bundle_ref_tests {
         store.agent_def_insert(&mut def).unwrap();
         store.mcp_server_upsert_unique_global(&server("global-1", "Global Server", true)).unwrap();
 
-        let effective = store.effective_mcp_servers("agent-no-bundle");
+        let effective = store.effective_mcp_servers(&store, "agent-no-bundle");
         assert_eq!(effective.len(), 1, "an agent with no bundle still sees globals, unaffected by the new union logic: {effective:?}");
     }
 }

@@ -272,6 +272,12 @@ impl ManagedResource for Skill {
     fn name(&self) -> &str {
         &self.name
     }
+    fn is_global(&self) -> bool {
+        self.is_global
+    }
+    fn updated_at(&self) -> i64 {
+        self.updated_at
+    }
 }
 
 /// `skill_list`'s response shape: the skill plus whether the requesting agent
@@ -309,9 +315,11 @@ pub struct SkillBundleListItem {
 impl Store {
     /// List all skills visible to an agent: own (referenced) + global, each
     /// annotated with whether this specific agent holds the bind ref.
-    pub fn skill_list(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
+    /// `catalog` is where `db_skills` is authoritative — `identity_store` in
+    /// production (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md §5.4).
+    pub fn skill_list(&self, catalog: &Store, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
         Ok(self
-            .managed_list::<Skill>(Owner::Agent, agent_id)?
+            .managed_list::<Skill>(catalog, Owner::Agent, agent_id)?
             .into_iter()
             .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent })
             .collect())
@@ -338,10 +346,10 @@ impl Store {
     /// agent connection could (reagent P0 on PR #2322 — the launch UI is not
     /// an authenticated agent connection, so it was never able to reach the
     /// standalone Skill primitive via the RPC layer at all).
-    pub fn effective_skills(&self, agent_id: &str) -> Vec<AgentSkill> {
+    pub fn effective_skills(&self, catalog: &Store, agent_id: &str) -> Vec<AgentSkill> {
         let legacy_skills = self.agent_skill_list(agent_id).unwrap_or_default();
         let mut visible_skills: Vec<Skill> = self
-            .skill_list(agent_id)
+            .skill_list(catalog, agent_id)
             .unwrap_or_default()
             .into_iter()
             .map(|item| item.skill)
@@ -365,7 +373,7 @@ impl Store {
         // `bundle_skill_list` below. Happens AFTER the has_own decision —
         // bundle-referenced skills still appear in the final list, they
         // just never trigger the "discard legacy" path on their own.
-        self.managed_union_bundle_refs(agent_id, &mut visible_skills);
+        self.managed_union_bundle_refs(catalog, agent_id, &mut visible_skills);
         if has_own_skill_refs {
             crate::backend::agent_config::skills_to_agent_skills(&visible_skills, agent_id)
         } else {
@@ -383,9 +391,9 @@ impl Store {
     /// `db_agent_skills_ref` to it — per
     /// SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md §8 ("used by N agents"),
     /// tracked as gap #2 of #1960.
-    pub fn skill_list_global(&self) -> Result<Vec<SkillCatalogItem>, StoreError> {
+    pub fn skill_list_global(&self, catalog: &Store) -> Result<Vec<SkillCatalogItem>, StoreError> {
         Ok(self
-            .managed_list_global::<Skill>()?
+            .managed_list_global::<Skill>(catalog)?
             .into_iter()
             .map(|(skill, bound_count)| SkillCatalogItem { skill, bound_count })
             .collect())
@@ -403,9 +411,9 @@ impl Store {
     /// they're already fully visible via `skill_list_global` (the Armory
     /// catalog) — so exposing them alongside a caller-chosen agent's bind
     /// status is safe. reagentx P0 on PR #2329.
-    pub fn skill_list_global_for_agent(&self, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
+    pub fn skill_list_global_for_agent(&self, catalog: &Store, agent_id: &str) -> Result<Vec<SkillListItem>, StoreError> {
         Ok(self
-            .managed_list_global_for_agent::<Skill>(agent_id)?
+            .managed_list_global_for_agent::<Skill>(catalog, agent_id)?
             .into_iter()
             .map(|(skill, bound_to_agent)| SkillListItem { skill, bound_to_agent })
             .collect())
@@ -418,8 +426,8 @@ impl Store {
 
     /// Delete a standalone skill and purge its ref rows (both agent- and
     /// bundle-level). Returns true if deleted.
-    pub fn skill_delete(&self, id: &str) -> Result<bool, StoreError> {
-        self.managed_delete::<Skill>(id)
+    pub fn skill_delete(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
+        self.managed_delete::<Skill>(catalog, id)
     }
 
     /// Bind a skill to an agent (insert ref row). Idempotent — binding an
@@ -436,8 +444,8 @@ impl Store {
     /// affected-row-count alone, from the equally-silent "already bound"
     /// case — reporting success while creating nothing. reagentx P1, PR
     /// #2315.
-    pub fn skill_bind(&self, agent_id: &str, skill_id: &str) -> Result<(), StoreError> {
-        self.managed_bind_agent::<Skill>(agent_id, skill_id)
+    pub fn skill_bind(&self, catalog: &Store, agent_id: &str, skill_id: &str) -> Result<(), StoreError> {
+        self.managed_bind_agent::<Skill>(catalog, agent_id, skill_id)
     }
 
     /// Unbind a skill from an agent. Returns true if a row was removed.
@@ -453,11 +461,12 @@ impl Store {
     /// global) already uses the name.
     pub fn skill_upsert_unique(
         &self,
+        catalog: &Store,
         agent_id: &str,
         skill: &Skill,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        self.managed_upsert_unique(Owner::Agent, agent_id, skill, bind_new, None)
+        self.managed_upsert_unique(catalog, Owner::Agent, agent_id, skill, bind_new, None)
     }
 
     /// Atomically upsert a GLOBAL skill enforcing catalog-wide name
@@ -606,8 +615,8 @@ impl Store {
 
     /// Return true if the given skill is accessible to the agent (global or bound).
     /// Used for read and delete access checks.
-    pub fn skill_is_accessible_to(&self, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        self.managed_is_accessible_to::<Skill>(Owner::Agent, agent_id, skill_id)
+    pub fn skill_is_accessible_to(&self, catalog: &Store, agent_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        self.managed_is_accessible_to::<Skill>(catalog, Owner::Agent, agent_id, skill_id)
     }
 
     /// Return true if the agent has a direct ref binding to this skill (for delete/mutation).
@@ -624,9 +633,9 @@ impl Store {
     /// Bundle-level sibling of `skill_list` — this bundle's own (referenced)
     /// and global skills, each annotated with whether this specific bundle
     /// holds the `db_bundle_skills_ref` row.
-    pub fn bundle_skill_list(&self, bundle_id: &str) -> Result<Vec<SkillBundleListItem>, StoreError> {
+    pub fn bundle_skill_list(&self, catalog: &Store, bundle_id: &str) -> Result<Vec<SkillBundleListItem>, StoreError> {
         Ok(self
-            .managed_list::<Skill>(Owner::Bundle, bundle_id)?
+            .managed_list::<Skill>(catalog, Owner::Bundle, bundle_id)?
             .into_iter()
             .map(|(skill, bound_to_bundle)| SkillBundleListItem { skill, bound_to_bundle })
             .collect())
@@ -636,9 +645,13 @@ impl Store {
     ///
     /// `id_store` (NOT `self`) is where bundle existence is checked — see
     /// `Store::bundle_mcp_bind`'s doc comment (mcp_servers.rs) for the full
-    /// reasoning (reagentx P0 review on PR #2639).
-    pub fn bundle_skill_bind(&self, id_store: &Store, bundle_id: &str, skill_id: &str) -> Result<(), StoreError> {
-        self.managed_bind_bundle::<Skill>(id_store, bundle_id, skill_id)
+    /// reasoning (reagentx P0 review on PR #2639). `catalog` is where
+    /// `db_skills` is authoritative — see `managed_bind_bundle`'s doc
+    /// comment for why it now ALSO checks skill existence there (Part A of
+    /// SPEC_DURABLE_BINDINGS_2026_09_10.md §5.4 dropped this table's
+    /// `skill_id` FK).
+    pub fn bundle_skill_bind(&self, catalog: &Store, id_store: &Store, bundle_id: &str, skill_id: &str) -> Result<(), StoreError> {
+        self.managed_bind_bundle::<Skill>(catalog, id_store, bundle_id, skill_id)
     }
 
     /// Atomically create a NEW, PRIVATE (never global) skill scoped and
@@ -648,12 +661,13 @@ impl Store {
     /// the full reasoning (reagentx P1 review on PR #2639).
     pub fn bundle_skill_upsert_unique(
         &self,
+        catalog: &Store,
         id_store: &Store,
         bundle_id: &str,
         skill: &Skill,
         bind_new: bool,
     ) -> Result<(), StoreError> {
-        self.managed_upsert_unique_for_bundle(id_store, bundle_id, skill, bind_new)
+        self.managed_upsert_unique_for_bundle(catalog, id_store, bundle_id, skill, bind_new)
     }
 
     /// Unbind a skill from a bundle. Returns true if a row was removed.
@@ -663,8 +677,8 @@ impl Store {
 
     /// Return true if the given skill is accessible to the bundle (global or
     /// bundle-bound). Mirrors `skill_is_accessible_to`.
-    pub fn bundle_skill_is_accessible_to(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
-        self.managed_is_accessible_to::<Skill>(Owner::Bundle, bundle_id, skill_id)
+    pub fn bundle_skill_is_accessible_to(&self, catalog: &Store, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        self.managed_is_accessible_to::<Skill>(catalog, Owner::Bundle, bundle_id, skill_id)
     }
 
     /// Return true if the bundle has a direct ref binding to this skill
@@ -754,7 +768,7 @@ mod effective_skills_tests {
         store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
         // Not bound to agent-1 -- has_own_skill_refs must stay false.
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names.len(), 2, "expected legacy + global, got: {names:?}");
         assert!(names.contains(&"Legacy Skill"));
@@ -792,9 +806,9 @@ mod effective_skills_tests {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
         };
-        store.skill_upsert_unique("agent-1", &own_skill, true).unwrap();
+        store.skill_upsert_unique(&store, "agent-1", &own_skill, true).unwrap();
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names.len(), 2, "expected own + global, legacy discarded, got: {names:?}");
         assert!(names.contains(&"Own Skill"));
@@ -822,9 +836,9 @@ mod effective_skills_tests {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
         };
-        store.skill_upsert_unique("agent-1", &own_skill, true).unwrap();
+        store.skill_upsert_unique(&store, "agent-1", &own_skill, true).unwrap();
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         assert_eq!(effective.len(), 1);
         assert_eq!(effective[0].skill_type, "agent-skill");
     }
@@ -915,10 +929,10 @@ mod effective_skills_tests {
         // Upserted under an unrelated agent context, then bound to the
         // BUNDLE (not to agent-1 directly) — simulates a skill added via
         // the bundle editor, not the agent's own Stash.
-        store.skill_upsert_unique("some-other-context", &bundle_skill, false).unwrap();
-        store.bundle_skill_bind(&store, "bundle-1", "bundle-skill-1").unwrap();
+        store.skill_upsert_unique(&store, "some-other-context", &bundle_skill, false).unwrap();
+        store.bundle_skill_bind(&store, &store, "bundle-1", "bundle-skill-1").unwrap();
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.contains(&"Bundle Skill"),
@@ -947,9 +961,9 @@ mod effective_skills_tests {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
         };
-        store.bundle_skill_upsert_unique(&store, "bundle-1", &bundle_skill, true).unwrap();
+        store.bundle_skill_upsert_unique(&store, &store, "bundle-1", &bundle_skill, true).unwrap();
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.contains(&"Bundle-Owned Skill"),
@@ -995,11 +1009,11 @@ mod effective_skills_tests {
             created_at: 1_700_000_000_000,
             updated_at: 1_700_000_000_000,
         };
-        store.skill_upsert_unique("some-other-context", &bundle_private_skill, false).unwrap();
-        store.bundle_skill_bind(&store, "bundle-1", "bundle-private-1").unwrap();
+        store.skill_upsert_unique(&store, "some-other-context", &bundle_private_skill, false).unwrap();
+        store.bundle_skill_bind(&store, &store, "bundle-1", "bundle-private-1").unwrap();
         // agent-1 itself has NO own db_skills ref — only its bundle does.
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.contains(&"Legacy Skill"),
@@ -1018,7 +1032,7 @@ mod effective_skills_tests {
         insert_agent_with_bundle(&store, "agent-1", "bundle-1");
         store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
 
-        let effective = store.effective_skills("agent-1");
+        let effective = store.effective_skills(&store, "agent-1");
         let matches: Vec<_> = effective.iter().filter(|s| s.name == "Global Skill").collect();
         assert_eq!(matches.len(), 1, "a global skill visible via both the agent and its bundle must not be duplicated: {effective:?}");
     }
@@ -1076,14 +1090,14 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
         store.skill_upsert_unique_global(&skill("skill-global", "Global", true)).unwrap();
         store
-            .skill_upsert_unique("some-other-agent-context", &skill("skill-private", "Private", false), false)
+            .skill_upsert_unique(&store, "some-other-agent-context", &skill("skill-private", "Private", false), false)
             .unwrap_or(());
 
-        let before = store.bundle_skill_list("bundle-1").unwrap();
+        let before = store.bundle_skill_list(&store, "bundle-1").unwrap();
         assert_eq!(before.len(), 1, "only the global skill should be visible before any bind: {before:?}");
 
-        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
-        let after = store.bundle_skill_list("bundle-1").unwrap();
+        store.bundle_skill_bind(&store, &store, "bundle-1", "skill-private").unwrap();
+        let after = store.bundle_skill_list(&store, "bundle-1").unwrap();
         assert_eq!(after.len(), 2, "private skill must now be visible after binding: {after:?}");
         let private_item = after.iter().find(|i| i.skill.id == "skill-private").expect("private skill present");
         assert!(private_item.bound_to_bundle);
@@ -1095,11 +1109,11 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
         insert_bundle(&store, "bundle-2");
         store
-            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .skill_upsert_unique(&store, "ctx", &skill("skill-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+        store.bundle_skill_bind(&store, &store, "bundle-1", "skill-private").unwrap();
 
-        let bundle2_list = store.bundle_skill_list("bundle-2").unwrap();
+        let bundle2_list = store.bundle_skill_list(&store, "bundle-2").unwrap();
         assert!(
             bundle2_list.is_empty(),
             "a private skill bound to bundle-1 must not leak into bundle-2's list: {bundle2_list:?}"
@@ -1110,7 +1124,7 @@ mod bundle_ref_tests {
     fn bind_errors_when_the_bundle_does_not_exist() {
         let store = make_store();
         store.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
-        let result = store.bundle_skill_bind(&store, "no-such-bundle", "skill-1");
+        let result = store.bundle_skill_bind(&store, &store, "no-such-bundle", "skill-1");
         assert!(result.is_err(), "binding to a nonexistent bundle must error, not silently no-op");
     }
 
@@ -1119,13 +1133,13 @@ mod bundle_ref_tests {
         let store = make_store();
         insert_bundle(&store, "bundle-1");
         store
-            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .skill_upsert_unique(&store, "ctx", &skill("skill-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+        store.bundle_skill_bind(&store, &store, "bundle-1", "skill-private").unwrap();
 
         let removed = store.bundle_skill_unbind("bundle-1", "skill-private").unwrap();
         assert!(removed);
-        assert!(store.bundle_skill_list("bundle-1").unwrap().is_empty());
+        assert!(store.bundle_skill_list(&store, "bundle-1").unwrap().is_empty());
 
         let removed_again = store.bundle_skill_unbind("bundle-1", "skill-private").unwrap();
         assert!(!removed_again, "unbinding an already-unbound pair returns false, not an error");
@@ -1136,14 +1150,14 @@ mod bundle_ref_tests {
         let store = make_store();
         insert_bundle(&store, "bundle-1");
         store
-            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .skill_upsert_unique(&store, "ctx", &skill("skill-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
-        assert_eq!(store.bundle_skill_list("bundle-1").unwrap().len(), 1);
+        store.bundle_skill_bind(&store, &store, "bundle-1", "skill-private").unwrap();
+        assert_eq!(store.bundle_skill_list(&store, "bundle-1").unwrap().len(), 1);
 
-        store.skill_delete("skill-private").unwrap();
+        store.skill_delete(&store, "skill-private").unwrap();
         assert!(
-            store.bundle_skill_list("bundle-1").unwrap().is_empty(),
+            store.bundle_skill_list(&store, "bundle-1").unwrap().is_empty(),
             "the bundle ref row must be purged when the underlying skill is deleted"
         );
     }
@@ -1158,7 +1172,7 @@ mod bundle_ref_tests {
         insert_bundle(&id_store, "bundle-1");
         wstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_skill_bind(&id_store, "bundle-1", "skill-1");
+        let result = wstore.bundle_skill_bind(&wstore, &id_store, "bundle-1", "skill-1");
         assert!(result.is_ok(), "must check bundle existence against id_store, not self: {result:?}");
     }
 
@@ -1169,7 +1183,7 @@ mod bundle_ref_tests {
         insert_bundle(&wstore, "bundle-1");
         wstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_skill_bind(&id_store, "bundle-1", "skill-1");
+        let result = wstore.bundle_skill_bind(&wstore, &id_store, "bundle-1", "skill-1");
         assert!(
             result.is_err(),
             "a bundle only present in self's non-authoritative copy must not satisfy the id_store check: {result:?}"
@@ -1184,10 +1198,10 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
 
         store
-            .bundle_skill_upsert_unique(&store, "bundle-1", &skill("new-skill", "Bundle-Only Skill", true), true)
+            .bundle_skill_upsert_unique(&store, &store, "bundle-1", &skill("new-skill", "Bundle-Only Skill", true), true)
             .unwrap();
 
-        let list = store.bundle_skill_list("bundle-1").unwrap();
+        let list = store.bundle_skill_list(&store, "bundle-1").unwrap();
         let item = list.iter().find(|i| i.skill.id == "new-skill").expect("newly created skill present");
         assert!(item.bound_to_bundle);
         assert!(!item.skill.is_global, "upsert_unique must force is_global=false regardless of the input struct");
@@ -1197,9 +1211,9 @@ mod bundle_ref_tests {
     fn upsert_unique_rejects_a_duplicate_name_already_bound_to_the_bundle() {
         let store = make_store();
         insert_bundle(&store, "bundle-1");
-        store.bundle_skill_upsert_unique(&store, "bundle-1", &skill("skill-a", "Dup Name", true), true).unwrap();
+        store.bundle_skill_upsert_unique(&store, &store, "bundle-1", &skill("skill-a", "Dup Name", true), true).unwrap();
 
-        let result = store.bundle_skill_upsert_unique(&store, "bundle-1", &skill("skill-b", "Dup Name", true), true);
+        let result = store.bundle_skill_upsert_unique(&store, &store, "bundle-1", &skill("skill-b", "Dup Name", true), true);
         assert!(result.is_err(), "a second skill with the same name bound to the same bundle must be rejected");
     }
 
@@ -1209,12 +1223,12 @@ mod bundle_ref_tests {
         insert_bundle(&store, "bundle-1");
         store.skill_upsert_unique_global(&skill("skill-global", "Global", true)).unwrap();
         store
-            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .skill_upsert_unique(&store, "ctx", &skill("skill-private", "Private", false), false)
             .unwrap_or(());
 
-        assert!(store.bundle_skill_is_accessible_to("bundle-1", "skill-global").unwrap());
-        assert!(!store.bundle_skill_is_accessible_to("bundle-1", "skill-private").unwrap());
-        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
-        assert!(store.bundle_skill_is_accessible_to("bundle-1", "skill-private").unwrap());
+        assert!(store.bundle_skill_is_accessible_to(&store, "bundle-1", "skill-global").unwrap());
+        assert!(!store.bundle_skill_is_accessible_to(&store, "bundle-1", "skill-private").unwrap());
+        store.bundle_skill_bind(&store, &store, "bundle-1", "skill-private").unwrap();
+        assert!(store.bundle_skill_is_accessible_to(&store, "bundle-1", "skill-private").unwrap());
     }
 }
