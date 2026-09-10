@@ -662,7 +662,7 @@ pub(crate) async fn open_agent_impl(
                 //    missing and overwrites whatever's there. Same-
                 //    name same-hour launches will share a workdir;
                 //    proper allocation is tracked as a follow-up.
-                write_agent_config_files(&wstore, &app_state.id_store, &agent, routing_id, &work_dir)?;
+                write_agent_config_files(&wstore, &app_state.id_store, &app_state.identity_store, &agent, routing_id, &work_dir)?;
 
                 // 9. Register controller (resync)
                 let block_for_resync = wstore.must_get::<Block>(&block_id)
@@ -728,6 +728,7 @@ pub(crate) async fn open_agent_impl(
 pub(super) fn write_agent_config_files(
     wstore: &Store,
     id_store: &Store,
+    identity_store: &Store,
     agent: &crate::backend::storage::AgentDefinition,
     agent_slug: &str,
     work_dir: &str,
@@ -790,7 +791,7 @@ pub(super) fn write_agent_config_files(
     // db_agent_skills. See Store::effective_skills for the merge algorithm —
     // shared with the `listagentskills` RPC handler so the frontend's
     // pre-launch skill fetch and this materialization path never diverge.
-    let effective_skills = wstore.effective_skills(&agent.id);
+    let effective_skills = wstore.effective_skills(identity_store, &agent.id);
 
     let mut config_files = crate::backend::agent_config::build_config_files(
         &content_map,
@@ -809,7 +810,7 @@ pub(super) fn write_agent_config_files(
     // `effective_mcp_servers` (not the raw `mcp_server_list`) also unions in
     // the agent's bound bundle's own referenced servers — composable model
     // v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.effective_mcp_servers(&agent.id); // own refs + bundle refs + globals
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.effective_mcp_servers(identity_store, &agent.id); // own refs + bundle refs + globals
     // reagentx P1 on PR #2639: has_own_mcp_refs must reflect ONLY the
     // agent's own direct binds, computed from the raw (pre-bundle-union)
     // mcp_server_list — NOT from `visible_mcp` above, which already
@@ -820,7 +821,7 @@ pub(super) fn write_agent_config_files(
     // silently dropped, even though the agent itself never bound anything.
     // Same fix as effective_skills's has_own_skill_refs — see its own
     // comment for the full reasoning.
-    let has_own_mcp_refs = wstore.mcp_server_list(&agent.id)
+    let has_own_mcp_refs = wstore.mcp_server_list(identity_store, &agent.id)
         .unwrap_or_default()
         .iter()
         .any(|item| !item.server.is_global);
@@ -1098,17 +1099,17 @@ mod write_agent_config_files_tests {
 
         let mut agent = make_agent("agent-1", work_dir_str);
         wstore.agent_def_insert(&mut agent).unwrap();
-        wstore.skill_upsert_unique("agent-1", &make_skill("agent-skill"), true).unwrap();
+        wstore.skill_upsert_unique(&wstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
 
-        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
         let skill_md = work_dir.path().join(".claude/skills/deploy/SKILL.md");
         assert!(skill_md.exists(), "expected .claude/skills/deploy/SKILL.md to be written");
 
         // Flip the same skill to "prompt" format and relaunch.
         let mut prompt_skill = make_skill("prompt");
         prompt_skill.updated_at = 1_700_000_000_001;
-        wstore.skill_upsert_unique("agent-1", &prompt_skill, true).unwrap();
-        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        wstore.skill_upsert_unique(&wstore, "agent-1", &prompt_skill, true).unwrap();
+        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
 
         let command_md = work_dir.path().join(".claude/commands/deploy.md");
         assert!(command_md.exists(), "expected .claude/commands/deploy.md to be written");
@@ -1139,9 +1140,9 @@ mod write_agent_config_files_tests {
         std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
         std::fs::write(&user_file, "# hand-authored, not from AgentMux").unwrap();
 
-        wstore.skill_upsert_unique("agent-1", &make_skill("agent-skill"), true).unwrap();
-        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
-        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        wstore.skill_upsert_unique(&wstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
+        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(user_file.exists(), "hand-authored file outside AgentMux's manifest must survive");
     }
@@ -1182,7 +1183,7 @@ mod write_agent_config_files_tests {
 
         // No skills at all this run, so the manifest's one entry is "stale"
         // and would normally be deleted.
-        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(sentinel.exists(), "file outside the working directory must never be deleted");
     }
@@ -1228,6 +1229,7 @@ mod write_agent_config_files_tests {
             .unwrap();
         wstore
             .mcp_server_upsert_unique(
+                &wstore,
                 "some-other-context",
                 &crate::backend::storage::McpServer {
                     id: "bundle-private-server".to_string(),
@@ -1241,7 +1243,7 @@ mod write_agent_config_files_tests {
                 false,
             )
             .unwrap_or(());
-        wstore.bundle_mcp_bind(&wstore, "bundle-1", "bundle-private-server").unwrap();
+        wstore.bundle_mcp_bind(&wstore, &wstore, "bundle-1", "bundle-private-server").unwrap();
         // agent-1 itself has NO own db_mcp_servers ref — only its bundle does.
 
         wstore
@@ -1253,7 +1255,7 @@ mod write_agent_config_files_tests {
             })
             .unwrap();
 
-        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
 
         let mcp_json_path = work_dir.path().join(".mcp.json");
         let mcp_json = std::fs::read_to_string(&mcp_json_path).unwrap();

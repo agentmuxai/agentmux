@@ -123,7 +123,9 @@ fn reject_duplicate_names(manifest: &[StarterMcpServer]) -> Result<(), StoreErro
 pub(crate) fn any_starter_mcp_server_name_exists(wstore: &Arc<Store>) -> Result<bool, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
-    let existing = wstore.mcp_server_list_global()?;
+    // Pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's catalog
+    // redirect — see skill_seed.rs's identical note.
+    let existing = wstore.mcp_server_list_global(wstore)?;
     Ok(manifest
         .iter()
         .any(|entry| existing.iter().any(|item| item.server.name == entry.name)))
@@ -170,7 +172,7 @@ pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerS
         };
         if let Err(e) = wstore.mcp_server_upsert_unique_global(&server) {
             for id in &inserted_ids {
-                if let Err(cleanup_err) = wstore.mcp_server_delete(id) {
+                if let Err(cleanup_err) = wstore.mcp_server_delete(wstore, id) {
                     tracing::error!(
                         "mcp server seed: cleanup after partial failure could not remove {id}: {cleanup_err}"
                     );
@@ -222,13 +224,13 @@ mod tests {
         seed_starter_mcp_servers(&store_b).unwrap();
 
         let mut ids_a: Vec<(String, String)> = store_a
-            .mcp_server_list_global()
+            .mcp_server_list_global(&store_a)
             .unwrap()
             .into_iter()
             .map(|item| (item.server.name, item.server.id))
             .collect();
         let mut ids_b: Vec<(String, String)> = store_b
-            .mcp_server_list_global()
+            .mcp_server_list_global(&store_b)
             .unwrap()
             .into_iter()
             .map(|item| (item.server.name, item.server.id))
@@ -255,12 +257,12 @@ mod tests {
     #[test]
     fn seeds_six_mcp_servers_into_an_empty_catalog() {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
-        assert!(wstore.mcp_server_list_global().unwrap().is_empty());
+        assert!(wstore.mcp_server_list_global(&wstore).unwrap().is_empty());
 
         let report = seed_starter_mcp_servers(&wstore).unwrap();
 
         assert_eq!(report.created, 6);
-        let after = wstore.mcp_server_list_global().unwrap();
+        let after = wstore.mcp_server_list_global(&wstore).unwrap();
         assert_eq!(after.len(), 6, "all six starter MCP servers should be seeded");
         assert!(after.iter().all(|item| item.server.is_global));
         assert!(
@@ -274,7 +276,7 @@ mod tests {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         seed_starter_mcp_servers(&wstore).unwrap();
 
-        let after = wstore.mcp_server_list_global().unwrap();
+        let after = wstore.mcp_server_list_global(&wstore).unwrap();
         let git = after
             .iter()
             .find(|item| item.server.name == "git")
@@ -317,7 +319,7 @@ mod tests {
         let result = seed_starter_mcp_servers(&wstore);
         assert!(result.is_err(), "seeding must fail when a name collides");
 
-        let after = wstore.mcp_server_list_global().unwrap();
+        let after = wstore.mcp_server_list_global(&wstore).unwrap();
         assert_eq!(
             after.len(),
             1,
@@ -348,7 +350,7 @@ mod tests {
 
         assert!(any_starter_mcp_server_name_exists(&wstore).unwrap());
         assert_eq!(
-            wstore.mcp_server_list_global().unwrap().len(),
+            wstore.mcp_server_list_global(&wstore).unwrap().len(),
             1,
             "the check itself must not insert anything"
         );

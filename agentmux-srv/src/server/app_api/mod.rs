@@ -801,6 +801,7 @@ pub(crate) async fn bundle_get_impl(
 /// draft has no bindings, so it is still checked without touching the store.
 pub(crate) fn bundle_validate_impl(
     wstore: &crate::backend::storage::store::Store,
+    identity_store: &crate::backend::storage::store::Store,
     data: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
@@ -812,7 +813,7 @@ pub(crate) fn bundle_validate_impl(
         // that would return a clean, apparently-successful report for a check
         // that never ran (Codex, PR #3153). The UI is built to show a failed
         // validate; give it one.
-        let resolved = bundle::resolve_bundle_components(wstore, &memory.id)
+        let resolved = bundle::resolve_bundle_components(wstore, identity_store, &memory.id)
             .map_err(|e| format!("bundle.validate: {e}"))?;
         (resolved.mcp_entries, resolved.warnings)
     };
