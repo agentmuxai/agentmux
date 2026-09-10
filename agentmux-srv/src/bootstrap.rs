@@ -1076,9 +1076,30 @@ pub fn spawn_background_subsystems(
     ));
 
     // Cloud push subscriber — single WS connection per sidecar that the cloud
-    // uses to push reactive injections instead of polling.
-    // No-op until the user connects via muxbus.login.
-    crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
+    // uses to push reactive injections instead of polling. The WS connection
+    // itself is a no-op until the user connects via muxbus.login, but
+    // `init_global` registers the muxbus credential with the broker
+    // scheduler unconditionally, which calls `Store::muxbus_is_fresh()` —
+    // a real, synchronous OS-keychain read — almost immediately. That read
+    // is the automatic (non-user-triggered) keychain touch
+    // docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md
+    // investigates; skipping `init_global` entirely is not a no-op the way
+    // the comment above might suggest.
+    //
+    // `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER` exists so `agentmux-srv/tests/
+    // integration_test.rs` can spawn the real binary without that read
+    // firing. Those tests spawn an ad-hoc/dev-signed `target/debug`
+    // binary, which is never on the Keychain ACL's trusted-signature list
+    // (only specific notarized, Developer-ID-signed installs are) — so
+    // every spawned test process gets its own interactive consent prompt
+    // for the SAME real credential, on whatever macOS account happens to
+    // be running the test. Confirmed live: a `cargo test -p agentmux-srv`
+    // run produced 4 near-simultaneous prompts, one per spawned subprocess,
+    // on a shared dev machine. Off by default — the shipped app and `task
+    // dev` must keep muxbus reconnect-on-launch working exactly as before.
+    if !cloud_subscriber_disabled_from_env() {
+        crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(id_store.clone());
+    }
 
     // Discord messaging bridge — connects to Discord Gateway if configured.
     // Set messaging:discord:enabled + messaging:discord:token in settings.json to activate.
@@ -2045,4 +2066,56 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 }
             }
         }));
+}
+
+/// Should `CloudSubscriber::init_global` be skipped this run?
+///
+/// Presence-based, matching the `AGENTMUX_DEV`/`AGENTMUX_TRAY` idiom
+/// elsewhere in this codebase. See the call site's doc comment for why
+/// skipping this matters: `init_global` triggers a real, synchronous
+/// OS-keychain read almost immediately, which macOS gates behind an
+/// interactive consent prompt for any process whose code signature isn't
+/// on the target credential's trusted-signer ACL — exactly the case for an
+/// ad-hoc/dev-signed `target/debug` binary spawned by an integration test.
+fn cloud_subscriber_disabled_from_env() -> bool {
+    std::env::var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER").is_ok()
+}
+
+#[cfg(test)]
+mod cloud_subscriber_gate_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialize: both tests mutate the same process-global env var, and
+    // `cargo test` runs tests in parallel by default within one binary.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn defaults_to_enabled_so_shipped_and_dev_behavior_is_unchanged() {
+        let _guard = lock();
+        std::env::remove_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER");
+        assert!(
+            !cloud_subscriber_disabled_from_env(),
+            "must default to false — the shipped app and `task dev` need the \
+             real muxbus reconnect-on-launch behavior with no opt-out set"
+        );
+    }
+
+    #[test]
+    fn is_disabled_when_the_var_is_present_regardless_of_value() {
+        let _guard = lock();
+        // Presence-based, not value-based — matches AGENTMUX_DEV/AGENTMUX_TRAY.
+        // An empty value must still disable it; a caller setting the var to
+        // "" to mean "off" would otherwise silently get the opposite of
+        // what every other flag in this idiom does.
+        std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "");
+        assert!(cloud_subscriber_disabled_from_env());
+        std::env::set_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER", "1");
+        assert!(cloud_subscriber_disabled_from_env());
+        std::env::remove_var("AGENTMUX_DISABLE_CLOUD_SUBSCRIBER");
+    }
 }
