@@ -4,7 +4,7 @@
 import { createSignalAtom, fireAndForget } from "@/util/util";
 import { findNode } from "./layoutNode";
 import type { Properties as CSSProperties } from "csstype";
-import { createMemo, createRoot } from "solid-js";
+import { createEffect, createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutNode, LayoutNodeAdditionalProps, NodeModel } from "./types";
 import type { LayoutModel } from "./layoutModel";
 
@@ -66,6 +66,31 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     if (addlProps.hasOwnProperty(nodeid)) return addlProps[nodeid];
                     return undefined;
                 });
+                // Monotonic — see NodeModel.hasEverBeenMultiMember's own doc
+                // comment (types.ts) for why this never resets to false.
+                const [everMultiMember, setEverMultiMember] = createSignal(false);
+                createEffect(() => {
+                    model.localTreeStateAtom();
+                    const current = findNode(model.treeState.rootNode, nodeid);
+                    if (!everMultiMember() && (current?.data?.blockStack?.length ?? 0) > 1) {
+                        setEverMultiMember(true);
+                    }
+                });
+                // Owner-checked the same way unregisterBlockComponentModel
+                // is (block-component-registry.ts) — see
+                // NodeModel.setActiveViewModel's own doc comment (types.ts).
+                let activeViewModelOwner: object | null = null;
+                const [activeViewModelSig, setActiveViewModelSig] = createSignal<ViewModel | null>(null);
+                const setActiveViewModel = (vm: ViewModel | null, owner: object) => {
+                    if (vm === null) {
+                        if (activeViewModelOwner !== owner) return; // stale cleanup — a newer mount already owns this
+                        activeViewModelOwner = null;
+                        setActiveViewModelSig(null);
+                        return;
+                    }
+                    activeViewModelOwner = owner;
+                    setActiveViewModelSig(() => vm);
+                };
                 model.nodeModelDisposers.set(nodeid, disposeThisNodeModel);
                 model.nodeModels.set(nodeid, {
                 additionalProps: addlPropsAtom,
@@ -103,6 +128,9 @@ export function getNodeModel(model: LayoutModel, node: LayoutNode): NodeModel {
                     const current = findNode(model.treeState.rootNode, nodeid);
                     return current?.data?.activeBlockId || current?.data?.blockId || blockId;
                 }),
+                hasEverBeenMultiMember: everMultiMember,
+                activeViewModel: activeViewModelSig,
+                setActiveViewModel,
                 blockNum: createMemo(() => model.leafOrder().findIndex((leafEntry) => leafEntry.nodeid === nodeid) + 1),
                 isFocused: createMemo(() => {
                     const treeState = model.localTreeStateAtom();

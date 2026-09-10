@@ -168,7 +168,13 @@ export const DisplayNodesWrapper = (props: DisplayNodesWrapperProps) => {
     const leafs = () => props.layoutModel.leafs();
 
     return (
-        <Key each={leafs()} by={activeKeyFor}>
+        // Keyed on node.id alone — NOT activeKeyFor (which still includes
+        // activeBlockId for a stacked leaf; see that function's own doc
+        // comment). A leaf's whole subtree — DisplayNode, its NodeModel,
+        // chrome — must NOT remount when the active stack member switches;
+        // pane-leaf-chrome.tsx owns a narrower, inner remount scoped to just
+        // the active block instead. SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md.
+        <Key each={leafs()} by={(node) => node.id}>
             {(node) => <Dynamic component={props.DisplayNode} layoutModel={props.layoutModel} node={node()} />}
         </Key>
     );
@@ -351,6 +357,12 @@ export const OverlayNodeWrapper = (props: OverlayNodeWrapperProps) => {
 
     return (
         <div ref={overlayContainerRef} class="overlay-container" style={overlayStyle()}>
+            {/* Deliberately still activeKeyFor (includes activeBlockId for
+                a stacked leaf), unlike DisplayNodesWrapper above —
+                OverlayNode renders drag-overlay/placeholder geometry, not
+                block content, so it was never part of the chrome-flash
+                problem this PR fixes; left unchanged rather than as an
+                accidental side effect of touching the import. */}
             <Key each={leafs()} by={activeKeyFor}>
                 {(node) => <OverlayNode layoutModel={props.layoutModel} node={node()} />}
             </Key>
