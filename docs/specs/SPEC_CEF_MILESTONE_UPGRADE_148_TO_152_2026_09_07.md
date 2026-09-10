@@ -55,7 +55,7 @@ Verified upstream state (`chromiumembedded/cef`, read from each branch's `CHROMI
 | **7977** | **152.0.7977.83** | newest stable branch — the target |
 | master | 152.0.7977.0 | |
 
-Our pins: `agentmux-cef/Cargo.toml` → `cef = { version = "148" }`; root `Cargo.toml` `[patch.crates-io]` → `cef-dll-sys` from `AgentU-asaf/cef-rs` @ `515b3ac53c`; runtime binaries from `agentmuxai/cef` releases (`cef-windows-x86_64-148.0.7778.180`, `cef-linux-x86_64-148.0.7778.180-codecs`, `cef-macos-arm64-148.23.23-codecs`).
+Our pins: `agentmux-cef/Cargo.toml` → `cef = { version = "148" }`; root `Cargo.toml` `[patch.crates-io]` → `cef-dll-sys` from `AgentU-asaf/cef-rs` @ `515b3ac53c`; runtime binaries from `agentmuxai/cef` releases (`cef-windows-x86_64-148.0.7778.180`, `cef-linux-x86_64-148.0.7778.180-codecs`, `cef-macos-arm64-148.23.25-codecs`, bumped from `148.23.23-codecs` on 2026-09-09 to ship the macOS 26 renderer fix).
 
 ---
 
