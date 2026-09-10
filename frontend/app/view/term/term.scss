@@ -312,10 +312,13 @@
         flex-shrink: 0;
 
         // Kept from the original rule: the strip stays positioned so it
-        // paints above `termBg()`'s `z-0` full-pane background-image layer
-        // (which now sits inside `.term-pane-stack-content`, below this
-        // row, but the stacking intent is unchanged). Below the `z-index:
-        // 10` overlays (search, links) by design.
+        // paints above `termBg()`'s `z-0` background-image layer. That
+        // layer is a SIBLING of this row — both are direct children of
+        // `.term-pane-stack-body`, which spans the strip and the terminal
+        // (TermPaneChrome, term.tsx) — so it spans this row too and the
+        // backdrop-filter below has the image to blur, exactly as when
+        // both lived inside `.view-term`. Below the `z-index: 10`
+        // overlays (search, links) by design.
         position: relative;
         z-index: 1;
 
