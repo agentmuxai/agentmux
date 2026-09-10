@@ -116,6 +116,140 @@ pub struct ShellStatusResponse {
     pub line_count: u64,
 }
 
+// ── PTY Shell ─────────────────────────────────────────────────────────────────
+//
+// A REAL PTY-backed shell (not the piped subprocess `Shell` above) — for
+// driving genuinely interactive programs that check for a real terminal
+// (Sharprompt-style wizards, `sudo`, `ssh`, REPLs). Reuses the same backend
+// `blockcontroller::shell` already uses for the `term` widget and
+// `AgentShellSubblock.tsx`; this is a new agent-facing entry point onto
+// existing PTY plumbing, not a new implementation. See
+// docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md.
+//
+// Deliberately NOT UI-driven: every one of these is a plain backend RPC
+// (agent -> agentmux-mcp -> agentmux-srv), with no dependency on any window
+// being open, focused, or even rendering the shell's `term` sub-block — the
+// same posture the existing `Shell`/`ShellInput` family already has.
+
+/// `POST /api/v1/ptyshell/create`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellCreateRequest {
+    pub agent_block_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
+}
+
+/// Response from `POST /api/v1/ptyshell/create`. `shell_id` is the new
+/// sub-block's id — the same value every other `PtyShell*` call takes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellCreateResponse {
+    pub shell_id: String,
+}
+
+/// `POST /api/v1/ptyshell/input` — write raw text to the PTY, as if typed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellInputRequest {
+    pub shell_id: String,
+    pub text: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/input`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellInputResponse {
+    pub written: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `POST /api/v1/ptyshell/signal` — send a named signal (e.g. `SIGINT` for
+/// Ctrl+C) to the PTY's foreground process, the same mechanism a terminal's
+/// Ctrl+C keystroke uses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellSignalRequest {
+    pub shell_id: String,
+    pub name: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/signal`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellSignalResponse {
+    pub sent: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `POST /api/v1/ptyshell/resize` — resize the PTY. Some TUIs render
+/// differently or wrap badly at the fallback geometry (25x200).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellResizeRequest {
+    pub shell_id: String,
+    pub rows: u16,
+    pub cols: u16,
+}
+
+/// Response from `POST /api/v1/ptyshell/resize`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellResizeResponse {
+    pub resized: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `POST /api/v1/ptyshell/read` — read back the shell's raw output tail.
+///
+/// This is a raw byte/line log, not a rendered-screen snapshot — a
+/// full-screen TUI that redraws in place (cursor movement, `\r`-only
+/// updates) will not read back the way it visually renders. Sufficient for
+/// line-oriented wizards (the common case); see the spec's §5 for the
+/// rendered-snapshot follow-up this deliberately does not attempt yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellReadRequest {
+    pub shell_id: String,
+    /// Number of trailing lines to return. Defaults to 200.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail_lines: Option<u32>,
+}
+
+/// Response from `POST /api/v1/ptyshell/read`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellReadResponse {
+    pub content: String,
+    /// True if the shell's output has more lines than `tail_lines` returned.
+    pub truncated: bool,
+}
+
+/// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStatusRequest {
+    pub shell_id: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/status`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStatusResponse {
+    /// False both for "still initializing" and "exited" — callers that need
+    /// to distinguish those should check `exit_code` (`None` for the former).
+    pub running: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+}
+
+/// `POST /api/v1/ptyshell/stop` — kill the PTY and delete its sub-block.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStopRequest {
+    pub shell_id: String,
+}
+
+/// Response from `POST /api/v1/ptyshell/stop`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyShellStopResponse {
+    pub stopped: bool,
+}
+
 // ── Inject (SendMessage + Loop) ───────────────────────────────────────────────
 
 /// `POST /agentmux/reactive/inject` — deliver a message to an agent.
