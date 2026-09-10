@@ -1,9 +1,11 @@
 # Spec: Durable Bindings
 
-**Status:** proposed, Phase 1 landed (#3175). Decisions still needed on §8
-before Phase 2 (identity store vs. shared store; whether `db_agents` is
-promoted or agent identity resolves through the registry) — everything past
-Phase 1 is blocked on one or both.
+**Status:** proposed, Phase 1 landed (#3175). §8 has two open decisions on two
+separate timelines — **not both blocking Phase 2**: the identity-store-vs-
+shared-store choice (§8 item 1) blocks Phase 2 onward; whether `db_agents` is
+promoted or agent identity resolves through the registry (§8 item 2) only
+blocks Phase 5 onward, per §7's own ordering. Phases 2–4 need only item 1
+settled.
 **Date:** 2026-09-10
 **Verified against:** `94d9c6c1c` (code and live on-disk data, not spec prose)
 **Follows:** `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4a, which
@@ -84,9 +86,11 @@ host-global. Only the bindings, and the catalogs they point into, are not.
 This is the finding that determines the shape of the fix, and it is stronger
 than "bindings are lost."
 
-`m0015_seed_starter_skills` / `m0016_seed_starter_mcp_servers` seed the starter
-catalog per store, minting fresh UUIDs each time. Two versions of the same
-channel therefore hold the same six skills under six *different* ids:
+**As verified against `94d9c6c1c`** (the snapshot this section describes),
+`m0015_seed_starter_skills` / `m0016_seed_starter_mcp_servers` seeded the
+starter catalog per store, minting a fresh random UUID each time. Two versions
+of the same channel therefore held the same six skills under six *different*
+ids:
 
 ```
 channels/stable/versions/0.55.10/…/objects.db
@@ -94,6 +98,16 @@ channels/stable/versions/0.55.10/…/objects.db
 channels/stable/versions/0.55.32/…/objects.db
   455d8994-9d8c-4e2b-aeb4-d4307afe286d | Systematic Debugging
 ```
+
+**This is now Phase 1's legacy case, not current behavior.** #3175 (landed,
+§7) made the id deterministic — derived from the entry's stable key rather than
+random — so any store seeded AFTER that change mints the SAME id as every
+other store for the same starter entry. The divergence above describes every
+store that seeded BEFORE #3175 shipped — which is still every store that
+exists today, since Phase 2's migration (the thing that would reconcile them)
+hasn't run yet. A reader designing that migration needs to handle both
+populations: legacy stores with divergent ids (name-matched, per §5.3) and any
+post-#3175 store (already-converged, no matching needed).
 
 So a ref row carried forward verbatim from 0.55.10 would dangle in 0.55.32: the
 skill it names does not exist there, and the skill that *is* "Systematic
