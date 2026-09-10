@@ -528,32 +528,6 @@ describe("NodeModel.activeBlockId", () => {
     });
 });
 
-describe("NodeModel.hasEverBeenMultiMember", () => {
-    beforeEach(() => {
-        layoutStateSignals.clear();
-        vi.useFakeTimers();
-    });
-    afterEach(() => vi.useRealTimers());
-
-    // Drives AgentViewModel.noHeader (agent-model.ts) — must be MONOTONIC,
-    // never resetting to false once true, or a hoisted header would tear
-    // down and rebuild the instant a stack shrank back to 1 member. See
-    // this field's own doc comment (types.ts).
-    it("is false for a non-stacked leaf and flips permanently true once the stack ever exceeds 1 member", () => {
-        const model = createLayoutModel();
-        const nodeId = insertRootBlock(model, "b1");
-        const nodeModel = model.getNodeModel(model.treeState.rootNode!);
-        expect(nodeModel.hasEverBeenMultiMember!()).toBe(false);
-
-        pushBlockOntoStack(model, nodeId, "b2"); // stack: [b1,b2]
-        expect(nodeModel.hasEverBeenMultiMember!()).toBe(true);
-
-        // Shrink back to 1 member — must NOT reset.
-        void closeBlockInStack(model, nodeId, "b2");
-        expect(nodeModel.hasEverBeenMultiMember!()).toBe(true);
-    });
-});
-
 describe("NodeModel.activeViewModel / setActiveViewModel", () => {
     beforeEach(() => {
         layoutStateSignals.clear();

@@ -187,13 +187,14 @@ export class AgentViewModel implements ViewModel {
             return elems;
         };
         this.noPadding = () => true;
-        // Once this leaf's stack has ever had 2+ members, the header comes
-        // from AgentPaneChrome's own renderPaneChrome (hoisted, mounted
-        // once, survives every switch) instead of BlockFrame's inline one —
-        // never flips back even if the stack later shrinks to 1 member. See
-        // NodeModel.hasEverBeenMultiMember's own doc comment
-        // (layout/lib/types.ts) for why this must be monotonic.
-        this.noHeader = () => this.nodeModel.hasEverBeenMultiMember?.() ?? false;
+        // Always true for an agent pane: pane-leaf-chrome.tsx hoists
+        // AgentPaneChrome for EVERY agent pane (see that file's own
+        // `hoisted` comment for why gating it on "has been multi-member"
+        // was a catch-22 — the "+" that creates a 2nd member lives inside
+        // the chrome being gated), and chrome renders the replacement
+        // BlockFrame_Header itself. Suppressing BlockFrame's own inline
+        // header unconditionally is what keeps the two from double-rendering.
+        this.noHeader = () => true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
             const oref = WOS.makeORef("block", this.blockId);
