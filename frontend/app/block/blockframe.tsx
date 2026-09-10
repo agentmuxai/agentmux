@@ -328,11 +328,20 @@ function BlockFrame_Header(
     // live data with no leak (frontend/app/store/wos.ts).
     const blockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", props.blockId()))());
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
-    const preIconButton = util.useAtomValueSafe(props.viewModel?.preIconButton);
-    const manageConnection = util.useAtomValueSafe(props.viewModel?.manageConnection);
+    // Memos, not bare top-level reads (ReAgent P1 on PR #3157). These read
+    // through `props.viewModel`, which for a HOISTED header
+    // (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) is the
+    // currently-active stack member's ViewModel and therefore CHANGES on
+    // every tab switch, while this component stays mounted. Read once at
+    // the top level they'd snapshot whichever member was active at first
+    // mount and never update. That was invisible while only AgentViewModel
+    // hoisted (it never sets `manageConnection`), but TermViewModel sets it
+    // to `!isCmdController()`, which genuinely differs between a
+    // cmd-controller terminal and an ordinary one in the SAME stack — so
+    // the connection button would show or hide based on the wrong tab.
+    const preIconButton = createMemo(() => util.useAtomValueSafe(props.viewModel?.preIconButton));
+    const manageConnection = createMemo(() => util.useAtomValueSafe(props.viewModel?.manageConnection));
     const dragHandleRef = props.preview ? null : props.nodeModel.dragHandleRef;
-    const connName = blockData()?.meta?.connection;
-    const connStatus = util.useAtomValueSafe(getConnStatusAtom(connName));
 
     // Track previous magnified state for one-time activity report
     let prevMagnifiedState = props.nodeModel.isMagnified();
@@ -450,9 +459,9 @@ function BlockFrame_Header(
         return getViewIconElem(viewIconUnion(), blockData());
     });
 
-    const preIconButtonElem: JSX.Element = preIconButton
-        ? <IconButton decl={preIconButton} className="block-frame-preicon-button" />
-        : null;
+    const preIconButtonElem = createMemo<JSX.Element>(() =>
+        preIconButton() ? <IconButton decl={preIconButton()} className="block-frame-preicon-button" /> : null,
+    );
 
     const headerTextElems = createMemo(() => {
         const elems: JSX.Element[] = [];
@@ -506,7 +515,7 @@ function BlockFrame_Header(
             onDblClick={() => props.nodeModel.toggleMagnify()}
             style={headerStyle()}
         >
-            {preIconButtonElem}
+            {preIconButtonElem()}
             <div class="block-frame-default-header-iconview">
                 {viewIconElem()}
                 <Show
@@ -519,7 +528,7 @@ function BlockFrame_Header(
                     <div class="block-frame-blockid">[{props.blockId().substring(0, 8)}]</div>
                 </Show>
             </div>
-            <Show when={manageConnection}>
+            <Show when={manageConnection()}>
                 <ConnectionButton
                     ref={props.connBtnRef}
                     connection={blockData()?.meta?.connection}
@@ -803,7 +812,18 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const magnifiedBlockBlur = () => magnifiedBlockBlurAtom();
     const magnifiedBlockOpacityAtom = getSettingsKeyAtom("window:magnifiedblockopacity");
     const magnifiedBlockOpacity = () => magnifiedBlockOpacityAtom();
-    let connBtnRef: { current: HTMLDivElement | null } = { current: null };
+    // Shared per-block holder rather than a plain local: when a pane's
+    // header is HOISTED out of this component (pane-leaf-chrome.tsx —
+    // `nodeModel.paneChromeHoisted`), the header, and therefore the
+    // connection button whose element this captures, renders in a different
+    // component tree, but the ChangeConnectionBlockModal it anchors stays
+    // HERE. A local ref would then never be populated and the modal would
+    // lose its anchor. Keyed on blockId through the block-atom cache, so
+    // both sides resolve the same object and it's cleaned up with the block.
+    const connBtnRef = useBlockAtom(nodeModel.blockId, "connBtnRef", () => {
+        const holder: { current: HTMLDivElement | null } = { current: null };
+        return () => holder;
+    })();
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.

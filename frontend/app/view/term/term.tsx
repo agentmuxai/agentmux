@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Search, useSearch } from "@/app/element/search";
-import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, WOS } from "@/store/global";
+import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, useBlockAtom, WOS } from "@/store/global";
 import { ObjectService } from "@/store/services";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
@@ -14,7 +14,7 @@ import type { JSX } from "solid-js";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
-import { setTerminalViewComponent, TermViewModel } from "./termViewModel";
+import { setTermPaneChromeComponent, setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -24,8 +24,18 @@ import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
-import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
-import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
+import {
+    closeBlockInStack,
+    getLayoutModelForStaticTab,
+    pushBlockOntoStack,
+    setActiveBlockInStack,
+    type NodeModel,
+} from "@/layout/index";
+import { findNode } from "@/layout/lib/layoutNode";
+import { BlockFrame_Header } from "@/app/block/blockframe";
+import { ErrorBoundary } from "@/element/errorboundary";
+import { createSignalAtom } from "@/util/util";
+import type { SignalAtom } from "@/util/util";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -74,155 +84,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     let connectElemRef!: HTMLDivElement;
 
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
-
-    // In-pane tabs — Phase 5 of SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md.
-    // Unlike the agent pane's fork strip (Phase 3/4, which derives its tab
-    // list from a cross-pane definition/lineage lookup — a fork can exist as
-    // its own separate top-level pane before ever joining a stack), a
-    // terminal "tab" has no equivalent prior existence: it's only ever
-    // created fresh, directly into THIS pane's own blockStack (there is no
-    // multi-session concept for shell panes anywhere else in the app — one
-    // block = one PTY = one ShellController, always). So the tab list here
-    // is simply "whatever's in this pane's own blockStack right now" — no
-    // cross-pane derivation needed.
-    const layoutModel = getLayoutModelForStaticTab();
-    interface TermTab { blockId: string; label: string }
-    // Rename overrides, keyed by blockId — set synchronously by
-    // handleTermTabRename below so a just-renamed tab (including a dormant,
-    // non-active one whose block meta isn't reactively tracked here) reflects
-    // its new label immediately, without waiting on a cross-pane event.
-    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
-    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
-    const termTabs = createMemo<TermTab[]>(() => {
-        // Reactive dependency: re-derive whenever ANY layout mutation
-        // happens (matches the pattern getNodeModel's own isFocused/
-        // isMagnified memos already use in layoutNodeModels.ts).
-        layoutModel.localTreeStateAtom();
-        const overrides = titleOverrides();
-        const node = layoutModel.getNodeByBlockId(blockId);
-        // No stack yet (the common default case — a single, never-forked
-        // terminal) → synthesize this pane's own one-tab list rather than
-        // returning empty. An empty list would render the strip as a bare
-        // "+" with no visible tab for the terminal that's actually open —
-        // confusing; every other pane type's strip always shows at least
-        // its own active entry (see agent-view.tsx's switchableForks).
-        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [blockId];
-        // Position-based labels ("Terminal 1", "Terminal 2", …) as the
-        // fallback for an unnamed session — matches common terminal-app
-        // convention. A user-set title (double-click to rename, persisted on
-        // the tab's own block as meta["pane-title"] — the same field
-        // titlebar.tsx's pane title editor uses) wins when present, read via
-        // a non-reactive lookup since a dormant tab's block isn't mounted
-        // (no live TermViewModel — see layoutStack.ts's header comment on
-        // why switching is a remount, not a reactive update); `overrides`
-        // above is what makes a just-performed rename show up immediately.
-        return stack.map((id, i) => {
-            const persistedTitle = WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta?.["pane-title"] as
-                | string
-                | undefined;
-            return { blockId: id, label: overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}` };
-        });
-    });
-    // Only render tab pills once there's something to switch BETWEEN — a
-    // lone terminal shows just the "+" (no pill for itself). The moment a
-    // 2nd tab exists, both (including the first) appear as tabs.
-    const visibleTermTabs = createMemo(() => (termTabs().length > 1 ? termTabs() : []));
-    const activeBlockId = createMemo(() => {
-        layoutModel.localTreeStateAtom();
-        return layoutModel.getNodeByBlockId(blockId)?.data?.activeBlockId ?? blockId;
-    });
-    const handleTermTabSwitch = (targetBlockId: string) => {
-        if (targetBlockId === activeBlockId()) return;
-        const node = layoutModel.getNodeByBlockId(blockId);
-        if (!node) return;
-        // Switching to an already-open shell-tab pill forces the same
-        // remount as pushing a new one onto the stack (layoutStack.ts's
-        // setActiveBlockInStack evicts the NodeModel). Codex's review of
-        // PR #2761 caught the agent-pane analog of this same gap.
-        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-        const gen = holdLeafRevealGate(node.id);
-        setActiveBlockInStack(layoutModel, node.id, targetBlockId);
-        scheduleLeafRevealLift(node.id, gen);
-    };
-    // Gated the same as handleTermTabSwitch above, and ONLY when
-    // targetBlockId is the stack's own active member (reagent's follow-up
-    // review of PR #2761: gating unconditionally hides the pane's real,
-    // unchanging content during the close+settle window when closing a
-    // background tab, since gatingNodeIds() hides the whole node
-    // regardless of whether a remount is actually about to happen) —
-    // closing the ACTIVE member of a multi-member stack reassigns
-    // activeBlockId and evicts the NodeModel, the same forced-remount
-    // pattern as switching; closing a background member changes nothing
-    // visible. SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-    const handleTermTabClose = (targetBlockId: string) => {
-        const node = layoutModel.getNodeByBlockId(blockId);
-        if (!node) return;
-        if (node.data?.activeBlockId !== targetBlockId) {
-            void closeBlockInStack(layoutModel, node.id, targetBlockId);
-            return;
-        }
-        const gen = holdLeafRevealGate(node.id);
-        void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
-            scheduleLeafRevealLift(node.id, gen);
-        });
-    };
-    const handleTermTabAdd = async () => {
-        const initialNode = layoutModel.getNodeByBlockId(blockId);
-        if (!initialNode) return;
-        // Hide this pane while the new tab settles — same pushBlockOntoStack
-        // -forced remount handleNewAgentTab (agent-view.tsx) gates against.
-        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-        const revealGen = holdLeafRevealGate(initialNode.id);
-        try {
-            // New tab inherits the CURRENT tab's cwd, matching how a real
-            // terminal's "new tab" usually starts in the same directory rather
-            // than some unrelated default.
-            const cwd = blockData()?.meta?.["cmd:cwd"] as string | undefined;
-            try {
-                const paneOpenResult = await TabRpcClient.rpcCall(
-                    "pane.open",
-                    { view: "term", cwd: cwd || undefined, skip_placement: true },
-                    {},
-                ) as { block_id: string };
-                // Review finding (Codex): this pane could have closed while the
-                // RPC above was in flight — re-resolve the node fresh rather
-                // than trusting a pre-await reference. If it's gone, the
-                // skip_placement block we just created has nowhere to attach
-                // to; delete it instead of leaving an orphaned, unreachable
-                // PTY/block behind.
-                const node = layoutModel.getNodeByBlockId(blockId);
-                if (!node) {
-                    await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-                    return;
-                }
-                pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
-            } catch (e: unknown) {
-                pushNotification({
-                    icon: "fa-triangle-exclamation",
-                    title: "New terminal tab failed",
-                    message: e instanceof Error ? e.message : String(e),
-                    timestamp: new Date().toISOString(),
-                    type: "error",
-                    expiration: Date.now() + 8000,
-                });
-            }
-        } finally {
-            scheduleLeafRevealLift(initialNode.id, revealGen);
-        }
-    };
-
-    // Double-click-to-rename — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
-    const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
-    const handleTermTabRenameConfirm = (targetBlockId: string, title: string) => {
-        setRenamingBlockId(null);
-        setTitleOverrides((prev) => ({ ...prev, [targetBlockId]: title }));
-        fireAndForget(() =>
-            RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", targetBlockId),
-                meta: { "pane-title": title } as any,
-            }),
-        );
-    };
 
     const termSettingsAtom = getSettingsPrefixAtom("term");
     const termSettings = createMemo(() => termSettingsAtom());
@@ -422,7 +283,6 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         blockId: blockId,
     }));
 
-    const termBg = createMemo(() => computeBgStyleFromMeta(blockData()?.meta));
 
     const dndEnabledAtom = getSettingsKeyAtom("dnd:enabled");
     const dndConcurrencyAtom = getSettingsKeyAtom("dnd:concurrency");
@@ -552,68 +412,283 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             class={clsx("view-term", "term-mode-" + termMode())}
             style={{ position: "relative" }}
         >
-            {/* Tab strip — top region, above everything else, matching the
-                editor's and agent pane's own tab-strip placement. The "+"
-                always renders (that's how you'd get a second tab), but the
-                tab pill itself stays hidden until there's something to
-                switch BETWEEN — a lone terminal shows only the "+"; the
-                moment a 2nd tab exists, both appear.
-                SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md. */}
-            <PaneTabStrip
-                tabs={visibleTermTabs()}
-                activeId={activeBlockId()}
-                zoomFactor={model.termZoomAtom}
-                // NO `animateWidth` here any more. That width animation
-                // (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4)
-                // exists to smooth the strip's box growing/shrinking as tabs
-                // are added and removed — which only happens while the box is
-                // shrink-to-fit. This strip is now `width: 100%` (term.scss,
-                // for the glass band —
-                // docs/specs/SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md
-                // §3.1), so its box width no longer varies with tab count and
-                // the animation would be measuring, holding and transitioning
-                // a value that never changes. The tab pills themselves still
-                // resize inside the fixed-width box; only the box stopped
-                // moving. The agent pane's strip is full-width for the same
-                // reason and likewise does not animate.
-                getId={(t) => t.blockId}
-                getLabel={(t) => t.label}
-                onActivate={handleTermTabSwitch}
-                onClose={handleTermTabClose}
-                onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
-                renderLabel={(t) =>
-                    renamingBlockId() === t.blockId ? (
-                        <PaneTabRenameInput
-                            initialValue={t.label}
-                            onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
-                            onCancel={() => setRenamingBlockId(null)}
-                        />
-                    ) : (
-                        <span class="pane-tab-label">{t.label}</span>
-                    )
-                }
-                onAdd={() => void handleTermTabAdd()}
-                addTitle="New terminal tab"
-            />
             <DragOverlay message={dropMessage()} visible={isDragOver()} />
-            <Show when={termBg()}>
-                <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
-            </Show>
             <TermResyncHandler blockId={blockId} model={model} />
             <TermThemeUpdater blockId={blockId} model={model} termRef={model.termRef} />
             <TermStickers config={stickerConfig()} />
-            <Show when={model.agentRuntimeLabel()}>
-                <div class="agent-runtime-badge" title="Agent running time">
-                    {model.agentRuntimeLabel()}
-                </div>
-            </Show>
             <div class="term-connectelem" ref={connectElemRef!} />
             <Search {...searchProps} />
         </div>
     );
 }
 
+
+/**
+ * Chrome half of the terminal pane — the pane header and the in-pane tab
+ * strip, hoisted OUT of `TerminalView` so neither is inside the per-block
+ * remount boundary `pane-leaf-chrome.tsx` creates. Mounted once per leaf and
+ * kept mounted across every subsequent tab switch; that persistence is the
+ * whole point (`docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`).
+ * Mirrors `AgentPaneChrome` (agent-view.tsx) — see that component for the
+ * fuller commentary on the pattern; the terminal's version is simpler
+ * (no progress-bar slot, no picker cross-fade, no pane-scope ModalLayer).
+ *
+ * `anchorBlockId` is whichever stack member's `TermViewModel` first called
+ * `renderPaneChrome`; it is deliberately NOT used to resolve the owning
+ * `LayoutNode` (that member's tab can be closed while chrome lives on) —
+ * `getOwnNode` uses the leaf's own stable `nodeModel.nodeId` instead, the
+ * same correction ReAgent caught on the agent pane in #3136.
+ */
+const TermPaneChrome = (props: {
+    anchorBlockId: string;
+    nodeModel: NodeModel;
+    children: JSX.Element;
+}): JSX.Element => {
+    const layoutModel = getLayoutModelForStaticTab();
+    const nodeModel = props.nodeModel;
+    const anchorBlockId = props.anchorBlockId;
+
+    const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
+    const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
+
+    // Tracks the CURRENTLY ACTIVE member, not the anchor — getWaveObjectAtom
+    // inside a memo (not useWaveObjectValue), the reactive-oref pattern
+    // established in #3134 for exactly this kind of switch-surviving reader.
+    const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+
+    interface TermTab {
+        blockId: string;
+        label: string;
+    }
+    // Rename overrides, keyed by blockId — set synchronously by
+    // handleTermTabRenameConfirm so a just-renamed tab (including a dormant,
+    // non-active one whose block meta isn't reactively tracked here) reflects
+    // its new label immediately.
+    // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
+    const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
+    const termTabs = createMemo<TermTab[]>(() => {
+        layoutModel.localTreeStateAtom();
+        const overrides = titleOverrides();
+        const node = getOwnNode();
+        // No stack yet (the common default — a single, never-split terminal)
+        // → synthesize this pane's own one-tab list rather than returning
+        // empty, so the strip always shows at least its own active entry.
+        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
+        // Position-based labels ("Terminal 1", "Terminal 2", …) as the
+        // fallback for an unnamed session. A user-set title (double-click to
+        // rename, persisted as meta["pane-title"]) wins when present, read
+        // via a non-reactive lookup since a dormant tab's block isn't
+        // mounted; `overrides` is what makes a just-performed rename show up
+        // immediately.
+        return stack.map((id, i) => {
+            const persistedTitle = WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta?.["pane-title"] as
+                | string
+                | undefined;
+            return { blockId: id, label: overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}` };
+        });
+    });
+    // Only render tab pills once there's something to switch BETWEEN — a lone
+    // terminal shows just the "+".
+    const visibleTermTabs = createMemo(() => (termTabs().length > 1 ? termTabs() : []));
+
+    // Per-pane zoom for the strip itself, tracking whichever tab is active
+    // rather than the anchor's own block — same clamp TermViewModel's
+    // termZoomAtom applies (termViewModel.ts).
+    const tabStripZoomFactor = createMemo(() => {
+        const z = activeBlockData()?.meta?.["term:zoom"];
+        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
+        return Math.max(0.5, Math.min(2.0, z));
+    });
+
+    // None of these three hold a leaf reveal gate any more. The gates existed
+    // because each of these mutations used to force a WHOLE-LEAF remount
+    // (chrome included) — that no longer happens: pane-leaf-chrome.tsx's
+    // inner <Key> rebuilds only the active member's own <Block>, and this
+    // component stays mounted throughout. Keeping them would actively CAUSE
+    // a flash, since gatingNodeIds() hides the whole node. The content's own
+    // settle is already covered by Block's ready-gate cross-fade (block.tsx).
+    // Same removal, same reasoning, as the agent pane's handlers.
+    const handleTermTabSwitch = (targetBlockId: string) => {
+        if (targetBlockId === activeBlockId()) return;
+        const node = getOwnNode();
+        if (!node) return;
+        setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+    };
+    const handleTermTabClose = (targetBlockId: string) => {
+        const node = getOwnNode();
+        if (!node) return;
+        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+    };
+    const handleTermTabAdd = async () => {
+        const initialNode = getOwnNode();
+        if (!initialNode) return;
+        try {
+            // New tab inherits the CURRENT tab's cwd, matching how a real
+            // terminal's "new tab" usually starts in the same directory.
+            const cwd = activeBlockData()?.meta?.["cmd:cwd"] as string | undefined;
+            const paneOpenResult = (await TabRpcClient.rpcCall(
+                "pane.open",
+                { view: "term", cwd: cwd || undefined, skip_placement: true },
+                {},
+            )) as { block_id: string };
+            // This pane could have closed while the RPC was in flight —
+            // re-resolve rather than trusting a pre-await reference. If it's
+            // gone, delete the skip_placement block instead of leaving an
+            // orphaned, unreachable PTY behind.
+            const node = getOwnNode();
+            if (!node) {
+                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                return;
+            }
+            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
+        } catch (e: unknown) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "New terminal tab failed",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+        }
+    };
+
+    // Double-click-to-rename — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
+    const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
+    const handleTermTabRenameConfirm = (targetBlockId: string, title: string) => {
+        setRenamingBlockId(null);
+        setTitleOverrides((prev) => ({ ...prev, [targetBlockId]: title }));
+        fireAndForget(() =>
+            RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", targetBlockId),
+                meta: { "pane-title": title } as any,
+            }),
+        );
+    };
+
+    // NOT stand-ins, unlike AgentPaneChrome's: TermViewModel sets
+    // `manageConnection` to `!isCmd`, i.e. TRUE for every ordinary
+    // terminal, so BlockFrame_Header really does render the connection
+    // button here and it has to work. Both of these resolve the SAME
+    // per-block objects BlockFrame_Default_Component itself uses (the
+    // block-atom cache is keyed on blockId), which is what keeps the
+    // hoisted button wired to the ChangeConnectionBlockModal that still
+    // lives inside BlockFrame: the atom opens it, the ref anchors it.
+    // Re-derived per active member so switching tabs targets the right
+    // block's modal state.
+    // Both read the ACTIVE member, so they follow tab switches: the
+    // background is per-block meta, the runtime label is per-ViewModel
+    // state owned by whichever TermViewModel is currently mounted.
+    const termBg = createMemo(() => computeBgStyleFromMeta(activeBlockData()?.meta, null));
+    const runtimeLabel = () => (nodeModel.activeViewModel?.() as TermViewModel | null)?.agentRuntimeLabel?.() ?? null;
+
+    const changeConnModalAtom = createMemo(
+        () => useBlockAtom(activeBlockId(), "changeConn", () => createSignalAtom(false)) as SignalAtom<boolean>,
+    );
+    const connBtnRef = createMemo(
+        () =>
+            useBlockAtom(activeBlockId(), "connBtnRef", () => {
+                const holder: { current: HTMLDivElement | null } = { current: null };
+                return () => holder;
+            })(),
+    );
+    const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
+    const headerElem = (
+        <BlockFrame_Header
+            nodeModel={nodeModel}
+            viewModel={activeViewModelOrUndefined()}
+            preview={false}
+            blockId={activeBlockId}
+            connBtnRef={connBtnRef()}
+            changeConnModalAtom={changeConnModalAtom()}
+        />
+    );
+    const headerElemNoView = (
+        <BlockFrame_Header
+            nodeModel={nodeModel}
+            viewModel={null}
+            preview={false}
+            blockId={activeBlockId}
+            connBtnRef={connBtnRef()}
+            changeConnModalAtom={changeConnModalAtom()}
+        />
+    );
+
+    return (
+        <div
+            class="term-pane-stack"
+            // Keeps this pane reachable by the CEF browser API's
+            // `[data-blockid]` subtree scoping (UIQuery/UIClick/screenshot
+            // clip) now that chrome sits OUTSIDE the nested `.block` that
+            // otherwise carries it — see AgentPaneChrome's identical note.
+            data-blockid={activeBlockId()}
+            // Chrome is a sibling ABOVE the nested `.block`, so clicks here
+            // never reach the BlockFrame handlers that focus the pane.
+            // Without this, clicking a terminal's own header or tab strip
+            // could leave a DIFFERENT pane focused.
+            onClick={() => nodeModel.focusNode()}
+            onFocusIn={() => nodeModel.focusNode()}
+        >
+            <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>
+            {/* Spans the strip AND the terminal, and is the positioned
+                ancestor for both overlays below. Both used to live inside
+                `.view-term`, which contained the strip before it was
+                hoisted; leaving them there would have quietly moved them
+                relative to it (codex P2 x2 on PR #3157) — the background
+                image could no longer paint behind the strip, so the strip's
+                backdrop-filter had nothing of the image to blur, and the
+                runtime badge's `top: 6px` landed on the terminal's first
+                output row instead of on the strip band. */}
+            <div class="term-pane-stack-body">
+                <Show when={termBg()}>
+                    <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
+                </Show>
+                {/* Normal-flow row, unlike the agent strip's absolute overlay —
+                    the terminal strip has always reserved its own band above
+                    the xterm surface (term.scss), and keeping that avoids
+                    covering the top line of terminal output. */}
+                <PaneTabStrip
+                    tabs={visibleTermTabs()}
+                    activeId={activeBlockId()}
+                    zoomFactor={tabStripZoomFactor}
+                    getId={(t) => t.blockId}
+                    getLabel={(t) => t.label}
+                    onActivate={handleTermTabSwitch}
+                    onClose={handleTermTabClose}
+                    onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
+                    renderLabel={(t) =>
+                        renamingBlockId() === t.blockId ? (
+                            <PaneTabRenameInput
+                                initialValue={t.label}
+                                onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
+                                onCancel={() => setRenamingBlockId(null)}
+                            />
+                        ) : (
+                            <span class="pane-tab-label">{t.label}</span>
+                        )
+                    }
+                    onAdd={() => void handleTermTabAdd()}
+                    addTitle="New terminal tab"
+                />
+                <Show when={runtimeLabel()}>
+                    <div class="agent-runtime-badge" title="Agent running time">
+                        {runtimeLabel()}
+                    </div>
+                </Show>
+                <div class="term-pane-stack-content">{props.children}</div>
+            </div>
+        </div>
+    );
+};
+
+TermPaneChrome.displayName = "TermPaneChrome";
+
+export { TermPaneChrome };
+
 // Register TerminalView with the ViewModel to break the circular dependency
 setTerminalViewComponent(TerminalView);
+// Same late-binding registration, for the hoisted chrome half — see
+// setTermPaneChromeComponent's own comment in termViewModel.ts.
+setTermPaneChromeComponent(TermPaneChrome);
 
 export { TermViewModel };

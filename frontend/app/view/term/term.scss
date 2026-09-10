@@ -1,6 +1,8 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+@use "../../mixins.scss" as mixins;
+
 .connection-btn {
     min-height: 0;
     overflow: hidden;
@@ -87,28 +89,6 @@
     // `2px` matches the agent pane deliberately — `8px` was tried there and
     // rejected live because letterforms dissolved. If it changes, change
     // both.
-    > .pane-tab-strip {
-        // Was shrink-to-fit (`align-self: flex-start` in the shared
-        // PaneTabStrip.scss). The band has to span the pane for the glass
-        // to read as a panel rather than a lozenge around [tabs][+].
-        // `animateWidth` was removed from term.tsx's <PaneTabStrip> in the
-        // same change: it animates a box width that no longer varies.
-        width: 100%;
-
-        // Sits above the `z-0` full-pane background-image layer that
-        // term.tsx renders for `termBg()`. That layer spans `inset-0` —
-        // including this row — and is positioned, so without an explicit
-        // stacking position here it paints OVER this non-positioned flex
-        // child and hides the tabs whenever a terminal background image is
-        // set. Below the `z-index: 10` overlays (search, links) by design.
-        position: relative;
-        z-index: 1;
-
-        background: var(--tab-strip-bg);
-        backdrop-filter: blur(2px);
-        -webkit-backdrop-filter: blur(2px);
-    }
-
     .term-connectelem {
         flex-grow: 1;
         min-height: 0;
@@ -272,4 +252,89 @@
     /* Pure white on the amber warning badge — intentional contrast. */
     color: #fff; /* stylelint-disable-line color-no-hex */
     opacity: 0.85;
+}
+
+// Hoisted terminal chrome (TermPaneChrome, term.tsx) —
+// SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md. The pane header and
+// the in-pane tab strip now live OUTSIDE the switch-scoped `<Block>`
+// (`pane-leaf-chrome.tsx`) so neither is torn down when the active shell tab
+// changes; only the terminal itself remounts. This wrapper is what the tile
+// layout positions for such a pane, so it has to fill that slot the way
+// `.block` used to.
+.term-pane-stack {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+
+    // TermPaneChrome renders BlockFrame_Header as a direct child here —
+    // the same component, but OUTSIDE the
+    // `.block.block-frame-default .block-frame-default-inner` ancestor
+    // chain block.scss's own `.block-frame-default-header` rule needs to
+    // match. Without this it renders as unstyled stacked divs (the exact
+    // regression the agent pane hit in #3151). Applies the identical
+    // ruleset via the shared mixin rather than duplicating it.
+    > .block-frame-default-header {
+        @include mixins.block-frame-default-header-layout();
+        flex-shrink: 0; // a normal-flow row in this flex column now
+    }
+
+    // Spans the strip AND the terminal — the positioned ancestor for the
+    // background-image layer and the agent-runtime badge that TermPaneChrome
+    // renders (both used to sit inside `.view-term` back when that contained
+    // the strip). Deliberately does NOT include the header row: the
+    // background image never painted behind the pane header before the
+    // hoist either.
+    > .term-pane-stack-body {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    // Relocated verbatim from `.view-term > .pane-tab-strip` (this file,
+    // before the hoist) — that selector matched the strip as a direct child
+    // of `.view-term`, which it no longer is. Same declarations, new parent.
+    > .term-pane-stack-body > .pane-tab-strip {
+        // Was shrink-to-fit (`align-self: flex-start` in the shared
+        // PaneTabStrip.scss). The band has to span the pane for the glass
+        // to read as a panel rather than a lozenge around [tabs][+].
+        // `animateWidth` was removed from term.tsx's <PaneTabStrip> in the
+        // same change: it animates a box width that no longer varies.
+        width: 100%;
+
+        // A normal-flow row here, so pin it against the flex column rather
+        // than letting it stretch or compress.
+        flex-shrink: 0;
+
+        // Kept from the original rule: the strip stays positioned so it
+        // paints above `termBg()`'s `z-0` background-image layer. That
+        // layer is a SIBLING of this row — both are direct children of
+        // `.term-pane-stack-body`, which spans the strip and the terminal
+        // (TermPaneChrome, term.tsx) — so it spans this row too and the
+        // backdrop-filter below has the image to blur, exactly as when
+        // both lived inside `.view-term`. Below the `z-index: 10`
+        // overlays (search, links) by design.
+        position: relative;
+        z-index: 1;
+
+        background: var(--tab-strip-bg);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+    }
+
+    // The switch-scoped `<Block>` (and therefore `.view-term`) lives here,
+    // filling whatever the header and strip leave. `min-height: 0` so the
+    // terminal can actually shrink inside the flex column instead of
+    // forcing the pane to overflow.
+    > .term-pane-stack-body > .term-pane-stack-content {
+        flex: 1 1 auto;
+        min-height: 0;
+        position: relative;
+        display: flex;
+    }
 }
