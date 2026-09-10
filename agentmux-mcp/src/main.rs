@@ -30,7 +30,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use agentmux_common::api_types::{
     InjectRequest, PaneOpenRequest, PaneOpenResponse, PtyShellCreateRequest, PtyShellCreateResponse,
     PtyShellInputRequest, PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse,
-    PtyShellResizeRequest, PtyShellResizeResponse, PtyShellSignalRequest, PtyShellSignalResponse,
+    PtyShellResizeRequest, PtyShellResizeResponse,
     PtyShellStatusRequest, PtyShellStatusResponse, PtyShellStopRequest, PtyShellStopResponse,
     ShellCreateRequest, ShellCreateResponse, ShellInputFailure, ShellInputRequest,
     ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
@@ -150,8 +150,6 @@ async fn main() {
                 let pty_shell: Value = serde_json::from_str(PTY_SHELL_TOOL).expect("static json");
                 let pty_shell_input: Value =
                     serde_json::from_str(PTY_SHELL_INPUT_TOOL).expect("static json");
-                let pty_shell_signal: Value =
-                    serde_json::from_str(PTY_SHELL_SIGNAL_TOOL).expect("static json");
                 let pty_shell_resize: Value =
                     serde_json::from_str(PTY_SHELL_RESIZE_TOOL).expect("static json");
                 let pty_shell_read: Value =
@@ -223,7 +221,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_signal, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -787,51 +785,6 @@ async fn call_tool(
             } else {
                 format!(
                     "shell {shell_id}: write failed — {}",
-                    result.error.unwrap_or_else(|| "unknown reason".to_string())
-                )
-            })
-        }
-        "PtyShellSignal" => {
-            let shell_id = arguments
-                .get("shell_id")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: shell_id"))?;
-            let name = arguments
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: name"))?;
-
-            if local_url.is_empty() || auth_key.is_empty() {
-                anyhow::bail!(
-                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
-                     Is this agent pane opened via AgentMux?"
-                );
-            }
-
-            let url = format!("{}/api/v1/ptyshell/signal", local_url.trim_end_matches('/'));
-            let resp = client
-                .post(&url)
-                .header("X-AuthKey", auth_key)
-                .json(&PtyShellSignalRequest { shell_id: shell_id.to_string(), name: name.to_string() })
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                anyhow::bail!("ptyshell/signal failed: HTTP {status} — {body}");
-            }
-
-            let result: PtyShellSignalResponse = resp
-                .json()
-                .await
-                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(if result.sent {
-                format!("sent {name} to shell {shell_id}")
-            } else {
-                format!(
-                    "shell {shell_id}: signal failed — {}",
                     result.error.unwrap_or_else(|| "unknown reason".to_string())
                 )
             })

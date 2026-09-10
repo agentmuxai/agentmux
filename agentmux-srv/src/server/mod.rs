@@ -68,7 +68,7 @@ use crate::backend::wps::Broker;
 use agentmux_common::api_types::{
     PaneTitleRequest, PtyShellCreateRequest, PtyShellCreateResponse, PtyShellInputRequest,
     PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse, PtyShellResizeRequest,
-    PtyShellResizeResponse, PtyShellSignalRequest, PtyShellSignalResponse, PtyShellStatusRequest,
+    PtyShellResizeResponse, PtyShellStatusRequest,
     PtyShellStatusResponse, PtyShellStopRequest, PtyShellStopResponse, ShellCreateRequest,
     ShellCreateResponse, ShellInputFailure, ShellInputRequest, ShellInputResponse,
     ShellStatusRequest, ShellStatusResponse, ShellStopRequest, TabActivateRequest, TabNameRequest,
@@ -459,7 +459,6 @@ pub fn build_router(state: AppState) -> Router {
         // agentmux-mcp's `PtyShell*` tools POST here.
         .route("/api/v1/ptyshell/create", post(handle_pty_shell_create))
         .route("/api/v1/ptyshell/input", post(handle_pty_shell_input))
-        .route("/api/v1/ptyshell/signal", post(handle_pty_shell_signal))
         .route("/api/v1/ptyshell/resize", post(handle_pty_shell_resize))
         .route("/api/v1/ptyshell/read", post(handle_pty_shell_read))
         .route("/api/v1/ptyshell/status", post(handle_pty_shell_status))
@@ -1065,6 +1064,27 @@ async fn handle_shell_status(
     }))
 }
 
+// Meta marker stamped on every block `handle_pty_shell_create` creates.
+// Every other `ptyshell/*` handler MUST verify this before acting on a
+// caller-supplied `shell_id` (Codex P1 on PR #3177): `shell_id` lives in the
+// SAME block-id namespace as every other pane in the system, and `Layout`
+// exposes block ids for ordinary panes — without this check, an agent could
+// point `PtyShellInput`/`PtyShellStop`/etc. at any controller-backed block
+// (another agent's own CLI pane, a human's terminal pane) and inject input
+// into it or tear it down. Scoped to "was this block created by this API"
+// (matching the existing `Shell`/`ShellStop` family's own scope — no
+// per-caller-agent ownership check either), not full cross-agent isolation.
+const PTYSHELL_META_MARKER: &str = "ptyshell:managed";
+
+fn is_ptyshell_managed(wstore: &crate::backend::storage::store::Store, shell_id: &str) -> bool {
+    wstore
+        .get::<crate::backend::obj::Block>(shell_id)
+        .ok()
+        .flatten()
+        .and_then(|b| b.meta.get(PTYSHELL_META_MARKER).and_then(|v| v.as_bool()))
+        .unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // PTY shell handlers (docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)
 //
@@ -1107,6 +1127,7 @@ async fn handle_pty_shell_create(
         blockcontroller::META_KEY_CONTROLLER.to_string(),
         json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
     );
+    meta.insert(PTYSHELL_META_MARKER.to_string(), json!(true));
     // Force cmd.exe directly on Windows rather than the "shell" controller's
     // default pwsh/powershell auto-detection (`detect_local_shell_path_windows`,
     // which tries pwsh first). Discovered live, not assumed: PowerShell's
@@ -1128,7 +1149,23 @@ async fn handle_pty_shell_create(
         meta.insert(blockcontroller::META_KEY_CMD.to_string(), json!("cmd.exe"));
         meta.insert("cmd:interactive".to_string(), json!(true));
     }
-    if let Some(cwd) = &req.cwd {
+    // If the caller didn't supply a cwd, fall back to the agent block's own
+    // cmd:cwd — the project directory the agent pane was launched with.
+    // Mirrors `handle_shell_create`'s identical fallback (Codex P1 on PR
+    // #3177): without this, the PTY spawns in agentmux-srv's own cwd
+    // (typically the portable runtime/ dir), not the agent's worktree.
+    let effective_cwd = req.cwd.clone().or_else(|| {
+        state
+            .wstore
+            .get::<crate::backend::obj::Block>(&req.agent_block_id)
+            .ok()
+            .flatten()
+            .and_then(|b| {
+                let cwd = crate::backend::obj::meta_get_string(&b.meta, "cmd:cwd", "");
+                if cwd.is_empty() { None } else { Some(cwd) }
+            })
+    });
+    if let Some(cwd) = &effective_cwd {
         // Same MSYS→native normalization createsubblock's WS handler applies —
         // the PTY spawn path reads cmd:cwd raw with no conversion, so a
         // Git-Bash-style path would otherwise fail with os error 267 on
@@ -1210,6 +1247,22 @@ async fn handle_pty_shell_create(
         registry,
         state.boot_id.clone(),
     ) {
+        // Roll back — the block was already inserted and linked into the
+        // parent's subblockids above (Codex P2 on PR #3177): without this,
+        // a failed spawn leaves a stale block + parent link + (possibly)
+        // registered controller behind that the caller has no way to clean
+        // up, since it never received a `shell_id` to call PtyShellStop with.
+        blockcontroller::delete_controller(&child_id);
+        let _ = state.wstore.delete::<crate::backend::obj::Block>(&child_id);
+        if let Ok(mut parent) = state
+            .wstore
+            .must_get::<crate::backend::obj::Block>(&req.agent_block_id)
+        {
+            if let Some(ids) = parent.subblockids.as_mut() {
+                ids.retain(|id| id != &child_id);
+                let _ = state.wstore.update(&mut parent);
+            }
+        }
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("ptyshell.create: spawn: {e}") })),
@@ -1264,13 +1317,34 @@ async fn handle_pty_shell_create(
 /// `POST /api/v1/ptyshell/input` — write raw text to the PTY, as if typed.
 /// Unlike `/api/v1/shell/input`, no newline is appended: a real terminal
 /// doesn't add one either, and PTY programs (readline, Sharprompt) expect
-/// the caller to send exactly what a keyboard would (e.g. `"y\n"` or
-/// `"\x03"` for Ctrl+C — though Ctrl+C is better sent via
-/// `/api/v1/ptyshell/signal`, which doesn't require the PTY to have
-/// translated the byte itself).
+/// the caller to send exactly what a keyboard would (e.g. `"y\n"` to answer
+/// a prompt and press Enter, or `"\x03"` for Ctrl+C — the OS PTY layer
+/// translates that raw byte into a real interrupt delivered to the
+/// foreground process, same as a human pressing Ctrl+C in a real terminal,
+/// without ending the shell).
+///
+/// There is deliberately no separate "send a signal" endpoint: an earlier
+/// version of this API had one (`PtyShellSignal`, `BlockInputUnion::signal`),
+/// removed after Codex correctly flagged (PR #3177) that
+/// `ShellController`'s input loop treats ANY signal as "close the PTY" —
+/// `if input.sig_name.is_some() { break; }` in
+/// `blockcontroller/shell/lifecycle.rs` — so it terminated the whole shell
+/// instead of interrupting just the foreground command, the opposite of
+/// what it advertised. Real signal delivery through a PTY is the raw
+/// control byte, handled here, not a separate primitive.
 async fn handle_pty_shell_input(
+    State(state): State<AppState>,
     Json(req): Json<PtyShellInputRequest>,
 ) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (
+            StatusCode::OK,
+            Json(PtyShellInputResponse {
+                written: false,
+                error: Some("not a PtyShell-created shell".to_string()),
+            }),
+        );
+    }
     match blockcontroller::send_input(
         &req.shell_id,
         blockcontroller::BlockInputUnion::data(req.text.into_bytes()),
@@ -1281,27 +1355,21 @@ async fn handle_pty_shell_input(
     }
 }
 
-/// `POST /api/v1/ptyshell/signal` — send a named signal (e.g. `SIGINT`) to
-/// the PTY's foreground process, the same mechanism a terminal's Ctrl+C
-/// keystroke uses.
-async fn handle_pty_shell_signal(
-    Json(req): Json<PtyShellSignalRequest>,
-) -> impl IntoResponse {
-    match blockcontroller::send_input(
-        &req.shell_id,
-        blockcontroller::BlockInputUnion::signal(&req.name),
-        None,
-    ) {
-        Ok(()) => (StatusCode::OK, Json(PtyShellSignalResponse { sent: true, error: None })),
-        Err(e) => (StatusCode::OK, Json(PtyShellSignalResponse { sent: false, error: Some(e) })),
-    }
-}
-
 /// `POST /api/v1/ptyshell/resize` — resize the PTY. Some TUIs render
 /// differently or wrap badly at the fallback geometry (25x200).
 async fn handle_pty_shell_resize(
+    State(state): State<AppState>,
     Json(req): Json<PtyShellResizeRequest>,
 ) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (
+            StatusCode::OK,
+            Json(PtyShellResizeResponse {
+                resized: false,
+                error: Some("not a PtyShell-created shell".to_string()),
+            }),
+        );
+    }
     match blockcontroller::send_input(
         &req.shell_id,
         blockcontroller::BlockInputUnion::resize(crate::backend::obj::TermSize {
@@ -1333,6 +1401,13 @@ async fn handle_pty_shell_read(
     State(state): State<AppState>,
     Json(req): Json<PtyShellReadRequest>,
 ) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (
+            StatusCode::OK,
+            Json(PtyShellReadResponse { content: String::new(), truncated: false }),
+        )
+            .into_response();
+    }
     let content = match state.filestore.read_file(&req.shell_id, "term") {
         Ok(Some(bytes)) => String::from_utf8_lossy(&bytes).to_string(),
         Ok(None) => String::new(),
@@ -1354,8 +1429,12 @@ async fn handle_pty_shell_read(
 
 /// `POST /api/v1/ptyshell/status` — query whether the shell is still running.
 async fn handle_pty_shell_status(
+    State(state): State<AppState>,
     Json(req): Json<PtyShellStatusRequest>,
 ) -> impl IntoResponse {
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (StatusCode::OK, Json(PtyShellStatusResponse { running: false, exit_code: None }));
+    }
     match blockcontroller::get_block_controller_status(&req.shell_id) {
         Some(status) => {
             let running = status.shellprocstatus == blockcontroller::STATUS_RUNNING;
@@ -1378,6 +1457,13 @@ async fn handle_pty_shell_stop(
     State(state): State<AppState>,
     Json(req): Json<PtyShellStopRequest>,
 ) -> impl IntoResponse {
+    // Codex P1 on PR #3177: without this, an arbitrary block_id (e.g. a
+    // human's terminal pane or another agent's own CLI pane, discoverable
+    // via `Layout`) could be torn down through this endpoint. Only ever act
+    // on blocks this API itself created.
+    if !is_ptyshell_managed(&state.wstore, &req.shell_id) {
+        return (StatusCode::OK, Json(PtyShellStopResponse { stopped: false }));
+    }
     // Whether a controller actually existed is the meaningful "did this
     // stop anything" signal — unlike `Store::delete`, which succeeds
     // (no-ops) even for a row that was never there, so `.is_ok()` alone

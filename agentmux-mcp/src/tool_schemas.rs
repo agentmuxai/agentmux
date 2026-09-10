@@ -82,7 +82,7 @@ pub(crate) const PTY_SHELL_TOOL: &str = r#"{
 
 pub(crate) const PTY_SHELL_INPUT_TOOL: &str = r#"{
   "name": "PtyShellInput",
-  "description": "Write raw text to a PtyShell()'s PTY, as if typed at a keyboard. Unlike ShellInput, no newline is appended — send exactly what a keypress would produce (e.g. \"y\\n\" to answer a prompt and press Enter, or \"\\u0003\" for Ctrl+C — though PtyShellSignal is the more reliable way to send Ctrl+C).",
+  "description": "Write raw text to a PtyShell()'s PTY, as if typed at a keyboard. Unlike ShellInput, no newline is appended — send exactly what a keypress would produce (e.g. \"y\\n\" to answer a prompt and press Enter, or \"\\u0003\" for Ctrl+C — the OS PTY layer delivers that as a real interrupt to the foreground process, same as a human pressing Ctrl+C, without ending the shell).",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -90,19 +90,6 @@ pub(crate) const PTY_SHELL_INPUT_TOOL: &str = r#"{
       "text":     { "type": "string", "description": "Raw text to write — no newline is added automatically" }
     },
     "required": ["shell_id", "text"]
-  }
-}"#;
-
-pub(crate) const PTY_SHELL_SIGNAL_TOOL: &str = r#"{
-  "name": "PtyShellSignal",
-  "description": "Send a named signal (e.g. SIGINT for Ctrl+C) to a PtyShell()'s foreground process — the same mechanism a terminal's Ctrl+C keystroke uses, more reliable than sending the raw control byte via PtyShellInput.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "shell_id": { "type": "string", "description": "The shell_id returned by a prior PtyShell() call" },
-      "name":     { "type": "string", "description": "Signal name, e.g. SIGINT, SIGTERM" }
-    },
-    "required": ["shell_id", "name"]
   }
 }"#;
 

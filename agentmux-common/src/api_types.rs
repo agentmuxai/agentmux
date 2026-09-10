@@ -165,23 +165,6 @@ pub struct PtyShellInputResponse {
     pub error: Option<String>,
 }
 
-/// `POST /api/v1/ptyshell/signal` — send a named signal (e.g. `SIGINT` for
-/// Ctrl+C) to the PTY's foreground process, the same mechanism a terminal's
-/// Ctrl+C keystroke uses.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PtyShellSignalRequest {
-    pub shell_id: String,
-    pub name: String,
-}
-
-/// Response from `POST /api/v1/ptyshell/signal`
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PtyShellSignalResponse {
-    pub sent: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
 /// `POST /api/v1/ptyshell/resize` — resize the PTY. Some TUIs render
 /// differently or wrap badly at the fallback geometry (25x200).
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3419,6 +3419,109 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
 }
 
 #[tokio::test]
+async fn ptyshell_rejects_operating_on_a_block_it_did_not_create() {
+    // Codex P1 on PR #3177: `shell_id` lives in the SAME namespace as every
+    // other pane block, and `Layout` exposes block ids for ordinary panes —
+    // without an ownership check, PtyShellInput/PtyShellStop etc. could be
+    // pointed at a completely unrelated pane (another agent's own CLI pane,
+    // a human's terminal). This inserts a real, ordinary "shell"-controller
+    // block through the front door (not one PtyShell created) and asserts
+    // every mutating/reading endpoint refuses to touch it.
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut foreign = crate::backend::obj::Block {
+        oid: "someone-elses-real-pane".to_string(),
+        parentoref: "block:someone-elses-agent".to_string(),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("view".to_string(), serde_json::json!("term"));
+            m.insert(
+                blockcontroller::META_KEY_CONTROLLER.to_string(),
+                serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+            );
+            m
+        },
+        ..Default::default()
+    };
+    state.wstore.insert(&mut foreign).expect("insert foreign block");
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "text": "hi" }),
+    )
+    .await;
+    assert_eq!(json["written"], serde_json::json!(false));
+    assert!(json["error"].as_str().unwrap_or("").contains("not a PtyShell-created shell"));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/resize",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "rows": 30, "cols": 100 }),
+    )
+    .await;
+    assert_eq!(json["resized"], serde_json::json!(false));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/read",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane" }),
+    )
+    .await;
+    assert_eq!(json["content"], serde_json::json!(""));
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/stop",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane" }),
+    )
+    .await;
+    assert_eq!(json["stopped"], serde_json::json!(false));
+
+    // The foreign block must still exist — stop() must not have deleted it.
+    let still_there: Result<crate::backend::obj::Block, _> =
+        state.wstore.must_get("someone-elses-real-pane");
+    assert!(still_there.is_ok(), "ptyshell/stop must not delete a block it didn't create");
+}
+
+#[tokio::test]
+async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
+    // Codex P1 on PR #3177: without this fallback, the PTY spawns in
+    // agentmux-srv's own cwd rather than the agent's worktree — mirrors
+    // `handle_shell_create`'s identical fallback.
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "agent-with-a-cwd".to_string(),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("cmd:cwd".to_string(), serde_json::json!(cwd.clone()));
+            m
+        },
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "agent-with-a-cwd" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    let block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    assert_eq!(
+        block.meta.get(blockcontroller::META_KEY_CMD_CWD).and_then(|v| v.as_str()),
+        Some(cwd.as_str())
+    );
+}
+
+#[tokio::test]
 async fn ptyshell_status_on_unknown_id_is_a_plain_not_running_answer() {
     let app = test_router();
     let (status, json) = post_json(
@@ -3443,7 +3546,11 @@ async fn ptyshell_input_on_unknown_id_reports_written_false_with_a_reason() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["written"], serde_json::json!(false));
-    assert!(json["error"].as_str().unwrap_or("").contains("no controller"));
+    // Caught by the ownership check (Codex P1 on PR #3177) before ever
+    // reaching `blockcontroller::send_input` — an unrecognized id is
+    // indistinguishable from "not a PtyShell-created shell" by design, so
+    // this asserts the same message a real cross-pane id would get too.
+    assert!(json["error"].as_str().unwrap_or("").contains("not a PtyShell-created shell"));
 }
 
 #[tokio::test]

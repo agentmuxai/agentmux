@@ -175,8 +175,7 @@ colliding with the existing `Shell*` family:
 | Tool | Backend call it wraps |
 |---|---|
 | `PtyShell(cwd?, title?, size?)` → `shell_id`/`block_id` | `CreateSubBlockCommand`-equivalent: create a `view: "term", controller: "shell"` sub-block parented to the calling agent's own `block_id` (same shape `AgentShellSubblock.tsx:270-278` already constructs, just invoked from a backend RPC handler instead of the frontend) |
-| `PtyShellInput(shell_id, text)` | `blockcontroller::send_input(block_id, BlockInputUnion::data(text.into_bytes()), None)` |
-| `PtyShellSignal(shell_id, name)` | `blockcontroller::send_input(block_id, BlockInputUnion::signal(name), None)` |
+| `PtyShellInput(shell_id, text)` | `blockcontroller::send_input(block_id, BlockInputUnion::data(text.into_bytes()), None)` — also the correct way to send Ctrl+C (`"\x03"`; see §6b, `PtyShellSignal` was removed) |
 | `PtyShellResize(shell_id, rows, cols)` | `blockcontroller::send_input(block_id, BlockInputUnion::resize(...), None)` |
 | `PtyShellRead(shell_id, since?)` | `blockfile:read_range` (raw) now; rendered-snapshot variant per §5 as a fast-follow |
 | `PtyShellStatus(shell_id)` | Same shape as the existing `ShellStatus` tool — running/exited/exit_code |
@@ -247,6 +246,62 @@ a genuine headless terminal emulator (feeding the byte stream through a real
 VT interpreter and answering whatever it asks, on an ongoing basis) would
 subsume this one-shot fix entirely. Worth treating this as the strongest
 evidence yet for prioritizing that fast-follow, not just a nice-to-have.
+
+## 6b. Four real bugs caught by Codex review (PR #3177), not by compiling or the mocked test suite
+
+**1. `PtyShellSignal` did the opposite of what it advertised — removed.**
+The tool's own description claimed sending `SIGINT` would interrupt the
+foreground process "the same mechanism a terminal's Ctrl+C keystroke
+uses," implying the shell stays alive. Actual behavior, verified directly
+in `blockcontroller/shell/lifecycle.rs`'s input loop: `if
+input.sig_name.is_some() { break; }` — ANY signal name closes the PTY
+(drops writer + master), terminating the *entire* shell, not just the
+foreground command. `ShellController::stop()` (the real termination path,
+used by `PtyShellStop`) is a completely separate mechanism (SIGTERM/SIGKILL
+to the process group) that never goes through this code at all. Removed
+`PtyShellSignal` outright rather than trying to half-fix it: the correct,
+standard way to deliver a real interrupt through a PTY is the raw control
+byte (`"\x03"`) via `PtyShellInput` — the OS PTY line discipline (Unix) /
+ConPTY's translation layer (Windows) converts that into a genuine SIGINT to
+the foreground process group without touching the PTY itself, which is
+exactly what every real terminal (including xterm.js) already does and
+needs no new code here.
+
+**2. No check that `shell_id` was ever created by this API.** `shell_id`
+is a real block id, in the same namespace as every other pane, and
+`Layout` exposes pane block ids. Without a check, `PtyShellInput`/
+`PtyShellStop`/etc. could be pointed at an arbitrary controller-backed
+block — another agent's own CLI pane, a human's terminal pane — and
+inject input into it or tear it down. Fixed: every block `PtyShell`
+creates is stamped with a `ptyshell:managed` meta marker; every other
+handler (`input`/`resize`/`read`/`status`/`stop`) checks it first and
+treats a block that isn't ptyshell-managed exactly like an unknown id
+(same response shape, so there's no oracle for "this id exists but isn't
+mine"). Scoped to "was this created by this API," matching the existing
+`Shell`/`ShellStop` family's own scope — not full cross-agent ownership
+isolation (agent A can still touch agent B's ptyshell if it discovers the
+id), which the pipe-based family doesn't have either.
+
+**3. `cwd` silently fell back to `agentmux-srv`'s own directory.** Unlike
+`handle_shell_create` (the existing `Shell` tool's handler), the new
+`create` handler didn't fall back to the agent block's own `cmd:cwd` when
+the caller omitted `cwd` — meaning the common case (no explicit `cwd`)
+spawned the shell in the portable runtime directory, not the agent's
+worktree. Fixed to mirror `handle_shell_create`'s exact fallback.
+
+**4. A failed spawn left a stale, unreachable block behind.** If
+`resync_controller` failed after the block was already inserted and linked
+into the parent's `subblockids`, the handler returned a 500 without ever
+handing back a `shell_id` — so the caller had no way to clean up the
+now-orphaned block/controller registration. Fixed: roll back (delete the
+controller, delete the block, unlink from the parent) on that error path.
+
+All four are covered by new deterministic tests in
+`agentmux-srv/src/server/tests.rs`
+(`ptyshell_rejects_operating_on_a_block_it_did_not_create`,
+`ptyshell_create_defaults_cwd_from_the_agent_block`), re-verified against
+the live PTY round trip (§9) to confirm the fixes didn't regress the actual
+working case.
 
 ## 7. Security / scope note
 
