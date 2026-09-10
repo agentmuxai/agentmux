@@ -73,10 +73,10 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
         RpcApi.GetBundleCommand(TabRpcClient, { id }).catch(() => undefined),
     );
     // Identity items are still called "identity bundles"; the config
-    // collections are now branded "Armory Bundle Format (ABF)". `title` is
-    // the heading (room for the full name); `sentenceLabel` reads naturally
+    // collections are "Bundles" (ABF names only the file format). `title` is
+    // the heading; `sentenceLabel` reads naturally
     // in running prose below.
-    const title = props.kind === "Identity" ? "Identity bundles" : "Armory Bundle Format (ABF)";
+    const title = props.kind === "Identity" ? "Identity bundles" : "Bundles";
     const sentenceLabel = props.kind === "Identity" ? "Identity bundles" : "Bundles";
     const lowerPlural = props.kind === "Identity" ? "identities" : "bundles";
 
