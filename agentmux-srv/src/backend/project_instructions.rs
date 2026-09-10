@@ -111,6 +111,33 @@ fn paths_for_provider(provider_id: &str) -> Vec<String> {
     paths
 }
 
+/// Who owns this file — by marker, or by construction.
+///
+/// Most files are classified by their managed marker, which is the honest test
+/// for a path AgentMux may or may not have written.
+///
+/// `.claude/AGENTMUX_MEMORY.md` is the exception, and it has to be: AgentMux
+/// writes that file's content **raw**, with no marker
+/// (`agent_config.rs:1207`), because it is not a file anyone else was ever
+/// going to own — `agent_config.rs:990` calls it "100% AgentMux's own
+/// content". Testing it by marker returns `foreign` every time, which is
+/// backwards for the one field that decides whether a file is ours to touch
+/// (ReAgent, PR #3156).
+///
+/// Classifying it by path is not a guess: AgentMux creates that exact path,
+/// regenerates it on every launch, and the ownership protection exists
+/// precisely because the *other* file at that location is not ours.
+fn classify_owner(rel_path: &str, content: &str) -> InstructionOwner {
+    if rel_path == AGENTMUX_MEMORY_FILENAME {
+        return InstructionOwner::Agentmux;
+    }
+    if is_agentmux_managed_instructions(content) {
+        InstructionOwner::Agentmux
+    } else {
+        InstructionOwner::Foreign
+    }
+}
+
 /// Read one instruction file, whatever state it is in.
 fn read_one(working_dir: &Path, rel_path: &str) -> ProjectInstructionFile {
     let full = working_dir.join(rel_path);
@@ -161,11 +188,7 @@ fn read_one(working_dir: &Path, rel_path: &str) -> ProjectInstructionFile {
             out.content_hash = sha256_hex(&bytes);
             match String::from_utf8(bytes) {
                 Ok(text) => {
-                    out.owner = if is_agentmux_managed_instructions(&text) {
-                        InstructionOwner::Agentmux
-                    } else {
-                        InstructionOwner::Foreign
-                    };
+                    out.owner = classify_owner(rel_path, &text);
                     out.content = text;
                 }
                 Err(_) => {
@@ -368,6 +391,28 @@ mod tests {
             .expect("the @-imported side file is genuinely read");
         assert!(side.exists);
         assert_eq!(side.content, "side file");
+        // AgentMux writes this file's content raw, with no marker
+        // (`agent_config.rs:1207`), so a marker test would call the one file
+        // that is unambiguously ours `foreign` (ReAgent, PR #3156).
+        assert_eq!(
+            side.owner,
+            InstructionOwner::Agentmux,
+            "the side file is AgentMux's by construction, marker or not"
+        );
+    }
+
+    #[test]
+    fn only_the_side_file_gets_ownership_by_path() {
+        // The path rule must not leak into the marker rule: an unmarked
+        // CLAUDE.md is the repository's, which is the entire premise of the
+        // ownership protection.
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "CLAUDE.md", "no marker here");
+        let files = resolve_project_instructions("claude", dir.path().to_str().unwrap());
+        assert_eq!(
+            files.iter().find(|f| f.path == "CLAUDE.md").unwrap().owner,
+            InstructionOwner::Foreign
+        );
     }
 
     #[test]
