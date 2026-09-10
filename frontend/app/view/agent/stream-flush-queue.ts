@@ -223,6 +223,23 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
                 type: "StreamFlushObserved",
                 addedCount: batchNew.length,
                 at: Date.now(),
+                // Shell CHUNKS and EXITS are excluded deliberately: they are a
+                // background process writing to (or closing) its own dock row,
+                // which says nothing about whether the model is working. Every
+                // other queue does imply turn activity — a new node, an update,
+                // a tool chunk, or the agent opening a shell in the first place.
+                //
+                // Without this split, output from a long-lived background shell
+                // refreshed the turn idle clock on every flush and pinned the
+                // pane in Streaming for as long as that process lived. The
+                // module comment above already noted that an all-empty flush
+                // never dispatches; the gap was that a shell-output-only flush
+                // is empty AS FAR AS THE TURN IS CONCERNED and still did.
+                turnRelevant:
+                    batchNew.length > 0
+                    || batchUpdates.length > 0
+                    || batchChunks.length > 0
+                    || batchShellCreates.length > 0,
             });
         });
     }
