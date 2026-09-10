@@ -181,6 +181,17 @@ jobs:
       # only frontend/**, while vitest below also runs test/contract/* and
       # test/e2e/*. Checking the narrower set would have left the same hole in
       # a different directory (reagent P2 on #3166).
+      #
+      # IF YOU ARE HERE BECAUSE THIS STEP FAILED AND YOU BELIEVE YOU RAN IT
+      # LOCALLY: check how you read the result, not just that you ran it. Both
+      # errors this gate was built for got past a local run that LOOKED clean.
+      #   - `npx tsc ... | head -5` / `| tail -5` hides errors outside the
+      #     window you printed. tsc lists every error; a truncated view is not
+      #     a verdict.
+      #   - `npx tsc ... | tail -4; echo $?` reports TAIL's exit status, not
+      #     tsc's. A pipeline exits with its LAST command. That reads as a
+      #     confident green while the checker was failing.
+      # Run it bare and read the exit code:  npx tsc --noEmit -p tsconfig.citypecheck.json; echo $?
       - name: tsc --noEmit
         run: npx tsc --noEmit -p tsconfig.citypecheck.json
       - name: vitest run
