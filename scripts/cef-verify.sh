@@ -76,7 +76,13 @@ fi
 if printf '%s' "$REF" | grep -qE '^[0-9]+$'; then
   git -C "$REPO" remote get-url "$REMOTE" >/dev/null 2>&1 \
     || { echo "cef-verify: no remote '$REMOTE' in $REPO; pass --remote" >&2; exit 1; }
-  git -C "$REPO" fetch "$REMOTE" --prune >/dev/null 2>&1 || true
+  # MANDATORY, and a failure here is FATAL. These branches get force-updated
+  # mid-port, so a stale remote-tracking ref answers confidently about state
+  # that has since moved -- which is precisely how a wrong claim about the 152
+  # port got into CEF_FORK_MAINTENANCE.md §1.2. If the network or auth is down,
+  # the correct outcome is "I cannot tell you", not "21 OK" against yesterday.
+  git -C "$REPO" fetch "$REMOTE" --prune >/dev/null 2>&1 \
+    || { echo "cef-verify: fetch from '$REMOTE' failed; refusing to verify against a possibly stale ref" >&2; exit 1; }
   BR="$REMOTE/$REF"
 else
   BR="$REF"   # tag / SHA / local branch, used verbatim — see §8 P3

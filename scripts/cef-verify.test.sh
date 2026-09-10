@@ -140,6 +140,24 @@ after=$(git -C "$FIX" status --porcelain; git -C "$FIX" rev-parse HEAD)
 if [ "$before" = "$after" ]; then ok "inspected repo is left untouched"
 else bad "repo mutated by the gate"; fi
 
+# 10. A FAILED FETCH must be fatal, even when a stale remote-tracking ref still
+#     resolves locally. Verifying against yesterday's ref is the exact
+#     false-positive that put a wrong claim about the 152 port into the doc
+#     (CEF_FORK_MAINTENANCE.md §1.2) -- a confident answer about state that has
+#     since moved. Every other test here passes --ref <SHA>, which skips the
+#     fetch entirely, so without this case that path is unexercised.
+STALE="$TMP/stale"; cp -R "$FIX" "$STALE"
+# The URL must still LOOK like the fork (is_fork_clone greps for agentmuxai/cef)
+# while being unreachable -- otherwise the repo check rejects it first and this
+# test passes without ever reaching the fetch, which is how it was written the
+# first time.
+git -C "$STALE" remote set-url agentmuxai "$TMP/unreachable/agentmuxai/cef.git"
+git -C "$STALE" update-ref refs/remotes/agentmuxai/7778 "$(git -C "$STALE" rev-parse HEAD)"
+out=$("$SCRIPT" --repo "$STALE" --ref 7778 2>&1); rc=$?
+if [ $rc -ne 0 ] && ! printf '%s' "$out" | grep -q '21 OK, 0 MISS'; then
+  ok "failed fetch is fatal, even with a resolvable stale ref"
+else bad "stale-ref after failed fetch" "rc=$rc last=$(printf '%s' "$out" | tail -1)"; fi
+
 # ── scripts/cef-verify-patches.sh ───────────────────────────────────────────
 # Fake ninja + fake compiler, so the COMMAND-REWRITING logic is covered. That is
 # where the destructive bug lived: a non-global replace left `-o` on the real
