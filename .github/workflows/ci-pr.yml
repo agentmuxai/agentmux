@@ -167,5 +167,16 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      # Runs BEFORE vitest, and is not redundant with it: vitest transpiles
+      # per-file without typechecking, so a type error compiles away and the
+      # suite goes green. Two reached main this way (a `#[ts(optional)]`-shaped
+      # mistake, and a test passing fields the action type does not declare —
+      # ignored at runtime, so the test was still valid and still passed while
+      # not compiling). Neither was catchable by any gate that existed.
+      #
+      # Cheap: no build, just the checker, on an install the next step needs
+      # anyway.
+      - name: tsc --noEmit
+        run: npx tsc --noEmit -p tsconfig.json
       - name: vitest run
         run: npx vitest run
