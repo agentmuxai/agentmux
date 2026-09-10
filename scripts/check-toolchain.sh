@@ -114,18 +114,27 @@ echo
 
 if command -v node >/dev/null 2>&1; then
   NODE_VERSION="$(node --version 2>/dev/null)"
-  NODE_MAJOR="${NODE_VERSION#v}"
-  NODE_MAJOR="${NODE_MAJOR%%.*}"
-  if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -ge 24 ] 2>/dev/null; then
+  # Major-only comparison isn't enough: a transitive dep pulled in by the
+  # @vitest/coverage-istanbul major bump (@babel/core@8.0.1, via
+  # @vitest/istanbul-lib-instrument) declares engines.node
+  # "^22.18.0 || >=24.11.0" — it excludes 24.0.0-24.10.x, a real gap inside
+  # the 24.x line. Compare (major, minor) as a pair so an early 24.x is
+  # correctly rejected instead of passing on major alone (reagent P2 on #3111).
+  NODE_STRIPPED="${NODE_VERSION#v}"
+  NODE_MAJOR="${NODE_STRIPPED%%.*}"
+  NODE_REST="${NODE_STRIPPED#*.}"
+  NODE_MINOR="${NODE_REST%%.*}"
+  if [ -n "$NODE_MAJOR" ] && [ -n "$NODE_MINOR" ] \
+     && { [ "$NODE_MAJOR" -gt 24 ] 2>/dev/null || { [ "$NODE_MAJOR" -eq 24 ] 2>/dev/null && [ "$NODE_MINOR" -ge 11 ] 2>/dev/null; }; }; then
     echo "  OK   node.js — $NODE_VERSION"
   else
-    echo "  WRONG VERSION  node.js — found $NODE_VERSION, need >=24 (see .nvmrc)"
-    echo "                 https://nodejs.org/ or nvm install 24"
+    echo "  WRONG VERSION  node.js — found $NODE_VERSION, need >=24.11.0 (see .nvmrc)"
+    echo "                 https://nodejs.org/ or nvm install 24.11.0"
     FAIL=1
   fi
 else
   echo "  MISSING  node.js"
-  echo "           https://nodejs.org/ or nvm install 24 — need >=24, see .nvmrc"
+  echo "           https://nodejs.org/ or nvm install 24.11.0 — need >=24.11.0, see .nvmrc"
   FAIL=1
 fi
 
