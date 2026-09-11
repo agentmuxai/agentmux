@@ -412,3 +412,242 @@ pub(super) fn resolve_placement(
 
     (actiontype.to_string(), reference.to_string(), position.to_string())
 }
+
+/// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
+/// See docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md.
+///
+/// Identity is always verified first via the same `verified_block_id`
+/// mechanism `UIClick`/`UIQuery`/`UIScreenshot` use (§5.0 of that spec) —
+/// this both resolves the caller's OWN pane when `req.block_id` is absent,
+/// and supplies a real, checked `source_agent` for the audit log when
+/// `req.block_id` targets another agent's pane (fleet tier, §5.1/§5.2): no
+/// ownership check on the TARGET (closing another agent's stuck pane without
+/// needing its cooperation is this spec's whole motivation), but the CALLER
+/// is never anonymous the way `FleetBulkStop`'s existing calls are today.
+pub(crate) async fn handle_close_pane(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::Json(req): axum::Json<agentmux_common::api_types::ClosePaneRequest>,
+) -> impl axum::response::IntoResponse {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::Json;
+
+    let caller_agent_id = req.auth.agent_id.clone();
+    let verified_own_block_id = match crate::server::ui_handlers::verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
+
+    let target_block_id = req.block_id.clone().unwrap_or(verified_own_block_id);
+    let is_cross_pane = req.block_id.is_some();
+
+    let tab_id = {
+        let s = state.srv_state.lock().await;
+        match s.blocks.get(&target_block_id) {
+            Some(b) => b.tab_id.clone(),
+            None => {
+                let err = format!("block not found: {target_block_id}");
+                if is_cross_pane {
+                    let request_id = uuid::Uuid::new_v4().to_string();
+                    state.reactive_handler.log_fleet_action_audit(
+                        Some(&caller_agent_id), &target_block_id, &target_block_id,
+                        "pane.close", false, Some(&err), &request_id, req.reason.as_deref(),
+                    );
+                }
+                return (StatusCode::NOT_FOUND, Json(json!({ "error": err }))).into_response();
+            }
+        }
+    };
+
+    let result = crate::sagas::delete_block::run(&state, tab_id, target_block_id.clone()).await;
+
+    if is_cross_pane {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let target_agent = state
+            .reactive_handler
+            .get_agent_by_block(&target_block_id)
+            .map(|a| a.agent_id)
+            .unwrap_or_else(|| target_block_id.clone());
+        match &result {
+            Ok(_) => state.reactive_handler.log_fleet_action_audit(
+                Some(&caller_agent_id), &target_agent, &target_block_id,
+                "pane.close", true, None, &request_id, req.reason.as_deref(),
+            ),
+            Err(e) => state.reactive_handler.log_fleet_action_audit(
+                Some(&caller_agent_id), &target_agent, &target_block_id,
+                "pane.close", false, Some(e), &request_id, req.reason.as_deref(),
+            ),
+        }
+    }
+
+    match result {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod close_pane_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+    use crate::server::tests::test_state;
+    use agentmux_common::api_types::{ClosePaneRequest, UiAutomationAuth};
+    use agentmux_common::ipc::{Command, Event};
+
+    async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
+        let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
+        for ev in &evs {
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+        }
+        evs
+    }
+
+    /// Seed a workspace + tab + block, same shape as
+    /// `sagas::delete_block::tests::seed` — duplicated rather than shared
+    /// across modules (both are small, private `#[cfg(test)]` helpers).
+    async fn seed(state: &AppState) -> (String, String) {
+        let ws_evs = dispatch_apply(state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            state,
+            Command::CreateTab { workspace_id: ws_id, name: "t".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let blk_evs = dispatch_apply(
+            state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: serde_json::Value::Null },
+        )
+        .await;
+        let block_id = blk_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        (tab_id, block_id)
+    }
+
+    /// Mint a real signing key for `agent_id` (same store call
+    /// `agent_open`/spawn use) and sign a fresh `UiAutomationAuth` for it —
+    /// the exact mechanism `agentmux-mcp`'s `sign_ui_automation_auth` uses,
+    /// reproduced here since this is a different crate.
+    fn sign_auth(state: &AppState, agent_id: &str) -> UiAutomationAuth {
+        let key = state.wstore.agent_jekt_key_ensure(agent_id).unwrap();
+        let ts_secs = agentmux_common::time::now_secs();
+        let sig = agentmux_common::jekt_sign::sign_jekt(
+            &key, "ui-automation-identity", agent_id, "__srv__", ts_secs, "",
+        );
+        UiAutomationAuth { agent_id: agent_id.to_string(), ts_secs, sig }
+    }
+
+    #[tokio::test]
+    async fn own_pane_close_removes_the_caller_s_own_block() {
+        let state = test_state();
+        let (tab_id, block_id) = seed(&state).await;
+        let agent_id = format!("close-own-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent_id, &block_id, Some(&tab_id)).unwrap();
+        let auth = sign_auth(&state, &agent_id);
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            axum::Json(ClosePaneRequest { auth, block_id: None, reason: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        let s = state.srv_state.lock().await;
+        assert!(!s.blocks.contains_key(&block_id), "own pane must be gone after close");
+    }
+
+    #[tokio::test]
+    async fn cross_pane_close_removes_the_target_and_logs_the_verified_caller() {
+        let state = test_state();
+        // Caller: registered with its OWN pane, but acts on someone else's.
+        let (caller_tab, caller_block) = seed(&state).await;
+        let caller_id = format!("close-caller-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&caller_id, &caller_block, Some(&caller_tab)).unwrap();
+        let auth = sign_auth(&state, &caller_id);
+
+        // Target: a different agent's pane, entirely unrelated to the caller.
+        let (target_tab, target_block) = seed(&state).await;
+        let target_id = format!("close-target-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&target_id, &target_block, Some(&target_tab)).unwrap();
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            axum::Json(ClosePaneRequest {
+                auth,
+                block_id: Some(target_block.clone()),
+                reason: Some("verifying the fix".to_string()),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        // Target pane gone; caller's own pane untouched.
+        {
+            let s = state.srv_state.lock().await;
+            assert!(!s.blocks.contains_key(&target_block), "target pane must be closed");
+            assert!(s.blocks.contains_key(&caller_block), "caller's own pane must be untouched");
+        }
+
+        // Audit entry carries the CALLER's verified identity as source_agent —
+        // not None, the gap this spec's §5.2 fixed (FleetBulkStop still has
+        // it; this new call site must not repeat it).
+        // get_audit_log returns most-recent-first (its own doc comment) — no
+        // extra .rev() needed; the closed-block entry is naturally first.
+        let entries = state.reactive_handler.get_audit_log(50);
+        let entry = entries
+            .iter()
+            .find(|e| e.block_id == target_block)
+            .expect("expected an audit entry for the closed target block");
+        assert_eq!(entry.source_agent.as_deref(), Some(caller_id.as_str()));
+        assert_eq!(entry.target_agent, target_id);
+        assert!(entry.success);
+        assert_eq!(entry.reason.as_deref(), Some("verifying the fix"));
+    }
+
+    #[tokio::test]
+    async fn rejects_an_invalid_signature() {
+        let state = test_state();
+        let (tab_id, block_id) = seed(&state).await;
+        let agent_id = format!("close-bad-sig-{}", uuid::Uuid::new_v4());
+        state.reactive_handler.register_agent(&agent_id, &block_id, Some(&tab_id)).unwrap();
+        // A signature signed with the WRONG key — this agent's real key was
+        // never used, simulating a forged/corrupted signature.
+        let bogus_key = vec![0u8; 32];
+        let ts_secs = agentmux_common::time::now_secs();
+        let sig = agentmux_common::jekt_sign::sign_jekt(
+            &bogus_key, "ui-automation-identity", &agent_id, "__srv__", ts_secs, "",
+        );
+        let auth = UiAutomationAuth { agent_id, ts_secs, sig };
+
+        let resp = handle_close_pane(
+            axum::extract::State(state.clone()),
+            axum::Json(ClosePaneRequest { auth, block_id: None, reason: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), axum::http::StatusCode::UNAUTHORIZED);
+
+        // Nothing was touched.
+        let s = state.srv_state.lock().await;
+        assert!(s.blocks.contains_key(&block_id));
+    }
+}

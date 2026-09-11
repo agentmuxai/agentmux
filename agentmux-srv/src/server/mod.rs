@@ -578,6 +578,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
+        // Pane lifecycle (SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) —
+        // `ClosePane`. Own-pane identity is verified the same way as the
+        // ui/* routes above (`verified_block_id`); the target pane, when
+        // acting on another agent's pane, is fleet-tier (see the
+        // fleet/bulk-stop comment below) — no ownership check on the
+        // target, but the caller is never anonymous in the audit log the
+        // way `FleetBulkStop`'s calls are today.
+        .route("/api/v1/agent/pane/close", post(app_api::pane::handle_close_pane))
         // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) —
         // bulk-stop is the one fleet action exposed to agentmux-mcp (see
         // `FleetBulkStop`): stopping a controller involves no jekt signing,
