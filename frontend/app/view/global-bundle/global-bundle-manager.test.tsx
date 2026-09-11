@@ -54,7 +54,13 @@ describe("GlobalBundleManager shared-provider-config block", () => {
 
         expect(await screen.findByText("Claude Code — shared provider config")).toBeInTheDocument();
         expect(screen.getByText("/home/user/.agentmux/shared/providers/claude/CLAUDE.md")).toBeInTheDocument();
-        expect(screen.getByText("# Global rules")).toBeInTheDocument();
+        // Rendered as markdown now, not a raw <pre> dump (this test's own
+        // history predates that change) — "# Global rules" becomes an <h1>
+        // reading "Global rules", the "#" consumed by markdown parsing
+        // rather than appearing as literal text. Asserting on the rendered
+        // heading proves markdown rendering actually happened, not just
+        // that the raw string made it into the DOM somewhere.
+        expect(screen.getByText("Global rules", { selector: ".heading" })).toBeInTheDocument();
         // Scoped to this block rather than the whole pane. Kept scoped even
         // though only one block renders now (the sibling host-config block it
         // originally disambiguated from is gone) — a pane-wide assertion
