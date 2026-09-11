@@ -165,18 +165,25 @@ struct DeliveryState {
    queued message is only ever sent in response to *that new turn's own* completion event, so no
    two `send_user_message` calls for the same block are ever separated by less than one full turn
    — the no-mid-turn guarantee holds for every queued message, not just the first.
-3. **Abnormal termination (process exit/stop/replacement) before a `result`/`Done` fires.** Treat
-   controller-level process-exit as an alternate path into the same locked transition as a normal
-   completion — but rather than assuming a same-process next turn, branch on why the process ended:
-   - If the block is **respawning for the same logical agent** (crash-restart, resume), the
-     `pending` queue is carried over to the new process instance and flushes (§4.2.2) against
-     *its* first completion event, same as before.
-     - If the block is **being stopped/removed/replaced** (not coming back), every entry still in
-     `pending` is a delivery that was accepted but will now never be sent. These must not be
-     silently dropped: each `PendingMessage` carries the means to report failure back to its
-     origin (the same channel `reactive/handler.rs` already uses to report a failed injection —
-     see Appendix), and the drain-on-teardown path calls that failure report for every stranded
-     entry rather than discarding them.
+3. **Abnormal termination (process exit/stop/replacement) before a `result`/`Done` fires.** The
+   two cases are distinguished by an existing, concrete signal already in the code — not a new
+   classification this spec invents:
+   - **Deliberate stop** is exactly a call to `Controller::stop(graceful, new_status)`
+     (`persistent.rs:4314-4321`) — the only path that intentionally tears the process down (agent
+     removed, explicitly stopped, replaced). `pending` is not carried anywhere from here: `stop()`
+     is extended to drain `pending` and, for every stranded entry, call the same failure-report
+     channel `reactive/handler.rs` already uses for a failed injection (see Appendix) — before or
+     alongside `stop_process(true)`.
+   - **Unexpected crash** (the process exits without `stop()` ever being called) is already
+     handled by existing machinery: `respawn_once_for_leftover_queue`
+     (`persistent.rs:1445`) attempts exactly one fallback respawn for the controller's own
+     existing leftover send-queue (`drain_queue_after_successful_spawn`, `persistent.rs:1199`).
+     `pending` lives on the same `PersistentSubprocessController`/inner state this machinery
+     already operates on, so it survives a respawn attempt for free — no new carry-over logic is
+     needed, only that `pending` isn't cleared anywhere in the crash path. If that fallback
+     respawn is not attempted (`allow_fallback_respawn: false` call sites) or is attempted and
+     itself fails, this collapses into the same failure-reporting path as a deliberate `stop()` —
+     one terminal outcome, reached via either route, never a silent drop.
 4. **Queue overflow does not silently drop an already-"succeeded" delivery.** `deliver_agent_message`
    only returns success once a message is either sent (idle fast-path) or actually pushed onto
    `pending`. If the bounded queue is full at enqueue time, it returns an explicit error (e.g.
