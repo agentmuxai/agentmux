@@ -26,7 +26,8 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, PTY_COALESCE_MAX_BYTES, PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
+    detect_local_shell_path_windows, PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES,
+    PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
@@ -94,7 +95,7 @@ fn flush_pty_batch(
 /// it can be driven directly in a test with a synthetic channel and no real
 /// PTY — see `pty_output_flusher_tests` below.
 async fn run_pty_output_flusher(
-    mut rx: mpsc::UnboundedReceiver<PtyReadChunk>,
+    mut rx: mpsc::Receiver<PtyReadChunk>,
     broker: Option<Arc<wps::Broker>>,
     block_id: String,
     filestore: Option<Arc<crate::backend::storage::filestore::FileStore>>,
@@ -154,15 +155,33 @@ async fn run_pty_output_flusher(
             }
         };
 
-        flush_pty_batch(
-            &broker,
-            &block_id,
-            &batch,
-            &batch_osc,
-            filestore.as_ref(),
-            &mut line_buf,
-            translator.as_mut(),
-        );
+        // block_in_place, not a bare call (reagentx P1 on PR #3206):
+        // flush_pty_batch does blocking SQLite I/O (FileStore::stat /
+        // append_data_at) and takes std::sync::Mutex locks. Calling it
+        // directly here would run that on a Tokio async worker thread —
+        // this closure is inside a plain `tokio::spawn`, not
+        // `spawn_blocking` — and with several panes streaming output at
+        // once (exactly the scenario this whole fix targets), slow disk or
+        // lock contention could occupy every worker and delay WebSocket,
+        // input, and RPC tasks that have nothing to do with this pane.
+        // `block_in_place` runs the closure on this thread while telling
+        // the runtime to spin up a replacement worker if needed, so other
+        // tasks aren't starved — and unlike `spawn_blocking`, it needs no
+        // 'static/Send ownership transfer, so `&mut line_buf` and
+        // `translator.as_mut()` can stay borrowed exactly as they already
+        // are. Requires a multi-thread runtime; `agentmux-srv`'s
+        // `#[tokio::main]` (main.rs) is one by default.
+        tokio::task::block_in_place(|| {
+            flush_pty_batch(
+                &broker,
+                &block_id,
+                &batch,
+                &batch_osc,
+                filestore.as_ref(),
+                &mut line_buf,
+                translator.as_mut(),
+            );
+        });
 
         if closed_mid_batch {
             break;
@@ -798,7 +817,11 @@ impl Controller for ShellController {
         let filestore_flush = self.filestore.clone();
         let is_agent_read = is_agent;
         let is_agent_flush = is_agent;
-        let (pty_tx, mut pty_rx) = mpsc::unbounded_channel::<PtyReadChunk>();
+        // Bounded (reagentx P1 on PR #3206) — see PTY_CHANNEL_CAPACITY's own
+        // doc comment for why: an unbounded channel here would let a
+        // sustained fast producer grow queued memory without limit if the
+        // flusher ever falls behind the read rate.
+        let (pty_tx, pty_rx) = mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
 
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
@@ -845,12 +868,20 @@ impl Controller for ShellController {
                                 raw
                             };
 
-                            // Best-effort: if the flusher task is gone
-                            // (block torn down mid-read), there is nothing
-                            // useful to do with this chunk — the PTY read
-                            // loop itself must keep draining so the child
-                            // process's stdout never backs up.
-                            let _ = pty_tx.send(PtyReadChunk {
+                            // `blocking_send`, not `send` — this closure runs
+                            // on a `spawn_blocking` thread, not async, and a
+                            // bounded channel's plain `send` is itself async.
+                            // Blocks THIS (already-dedicated-to-blocking)
+                            // thread once the channel is full, which is
+                            // exactly the backpressure PTY_CHANNEL_CAPACITY's
+                            // doc comment describes — never the async runtime.
+                            //
+                            // Best-effort beyond that: if the flusher task is
+                            // gone (block torn down mid-read), there is
+                            // nothing useful to do with this chunk — the PTY
+                            // read loop itself must keep draining so the
+                            // child process's stdout never backs up.
+                            let _ = pty_tx.blocking_send(PtyReadChunk {
                                 data: chunk.to_vec(),
                                 osc_events,
                             });
@@ -1414,7 +1445,7 @@ mod controller_agent_id_tests {
 
 #[cfg(test)]
 mod pty_output_flusher_tests {
-    use super::{flush_pty_batch, run_pty_output_flusher, PtyReadChunk};
+    use super::{flush_pty_batch, run_pty_output_flusher, PtyReadChunk, PTY_CHANNEL_CAPACITY};
     use crate::backend::storage::filestore::FileStore;
     use crate::backend::wps;
     use std::sync::{Arc, Mutex};
@@ -1509,11 +1540,19 @@ mod pty_output_flusher_tests {
     /// actually waiting out any real wall-clock delay — this isn't racing
     /// the 20ms window, it's exercising the "channel closed mid-accumulation"
     /// exit path (see `run_pty_output_flusher`'s `closed_mid_batch`).
-    #[tokio::test]
+    // multi_thread: run_pty_output_flusher uses block_in_place around
+    // flush_pty_batch (reagentx P1 on PR #3206), which panics on the
+    // default current-thread test runtime — matches the real app, whose
+    // #[tokio::main] (main.rs) is multi-thread by default.
+    #[tokio::test(flavor = "multi_thread")]
     async fn rapid_chunks_coalesce_into_far_fewer_broadcasts_with_no_data_loss() {
         let (broker, events) = broker_recording_block_file_events();
         let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // Bounded, matching production (PTY_CHANNEL_CAPACITY) — comfortably
+        // above the 50 messages below, so every send below still completes
+        // without actually waiting for capacity; the determinism this test's
+        // own doc comment relies on is unaffected by the channel being bounded.
+        let (tx, rx) = tokio::sync::mpsc::channel(PTY_CHANNEL_CAPACITY);
 
         let mut expected = Vec::new();
         for i in 0..50 {
@@ -1523,6 +1562,7 @@ mod pty_output_flusher_tests {
                 data: piece.into_bytes(),
                 osc_events: Vec::new(),
             })
+            .await
             .unwrap();
         }
         drop(tx); // closes the channel once these 50 are drained
@@ -1562,11 +1602,14 @@ mod pty_output_flusher_tests {
     /// faster than the coalescing window would otherwise close — otherwise
     /// a sustained fast producer (`yes` piped into a shell pane) could grow
     /// one "batch" unboundedly.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn byte_cap_forces_a_flush_before_the_channel_closes() {
         let (broker, events) = broker_recording_block_file_events();
         let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        // Bounded, matching production — 80 messages below is comfortably
+        // under PTY_CHANNEL_CAPACITY, so this test still exercises the byte
+        // cap (not channel backpressure) as the thing forcing the split.
+        let (tx, rx) = tokio::sync::mpsc::channel(PTY_CHANNEL_CAPACITY);
 
         // Comfortably over PTY_COALESCE_MAX_BYTES (64 * 4096 = 256KiB) in
         // total, sent as many small chunks so the cap — not the channel
@@ -1579,6 +1622,7 @@ mod pty_output_flusher_tests {
                 data: piece.clone(),
                 osc_events: Vec::new(),
             })
+            .await
             .unwrap();
         }
         drop(tx);
@@ -1597,11 +1641,60 @@ mod pty_output_flusher_tests {
         );
     }
 
+    /// The actual property reagentx's P1 asked for: a full channel makes
+    /// `blocking_send` — what the real PTY read loop calls, from a real
+    /// blocking (`spawn_blocking`) thread, not an async one — block until
+    /// the receiver drains it, rather than growing queued memory without
+    /// limit. A tiny capacity (not `PTY_CHANNEL_CAPACITY`) so the test is
+    /// fast and the blocking is unambiguous with only 2 messages.
+    #[test]
+    fn blocking_send_backpressures_once_the_channel_is_full() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(1);
+
+        // Fills the one slot; must return immediately (room available).
+        tx.blocking_send(PtyReadChunk { data: vec![1], osc_events: Vec::new() })
+            .expect("first send has room");
+
+        // A real background thread — mirrors the production shape exactly:
+        // blocking_send is called from a spawn_blocking thread, never from
+        // an async task.
+        let sent_second = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sent_second_writer = sent_second.clone();
+        let handle = std::thread::spawn(move || {
+            tx.blocking_send(PtyReadChunk { data: vec![2], osc_events: Vec::new() })
+                .expect("second send eventually succeeds once drained");
+            sent_second_writer.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // The channel is full and nobody has drained it yet — the second
+        // send must still be blocked. A short, generous sleep rather than
+        // asserting instantaneously: proving a negative ("hasn't returned
+        // yet") is inherently a bit timing-sensitive, but 50ms is enormous
+        // next to what an unblocked send would take (microseconds), so a
+        // false pass here would need a wildly unlikely scheduling delay.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            !sent_second.load(std::sync::atomic::Ordering::SeqCst),
+            "second blocking_send must still be blocked while the channel is full"
+        );
+
+        // Drain the one queued message — this is the "flusher catches up"
+        // moment in production. The blocked send must now complete.
+        let first = rx.try_recv().expect("first message still queued");
+        assert_eq!(first.data, vec![1]);
+
+        handle.join().expect("background thread should complete once drained");
+        assert!(sent_second.load(std::sync::atomic::Ordering::SeqCst));
+
+        let second = rx.try_recv().expect("second message now queued");
+        assert_eq!(second.data, vec![2]);
+    }
+
     #[tokio::test]
     async fn no_broker_is_a_clean_no_op() {
         // Mirrors the read loop's own `broker_read.is_some()` gate — the
         // flusher must not panic or hang when there is nothing to flush to.
-        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel::<PtyReadChunk>();
+        let (_tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
         run_pty_output_flusher(rx, None, "block-1".to_string(), None, false).await;
     }
 }

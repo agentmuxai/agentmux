@@ -31,6 +31,23 @@ pub(super) const PTY_COALESCE_WINDOW: std::time::Duration = std::time::Duration:
 /// real bursts (a build's stdout in a 20ms window) while still bounded.
 pub(super) const PTY_COALESCE_MAX_BYTES: usize = 64 * PTY_READ_BUF_SIZE;
 
+/// Capacity of the channel handing PTY-read chunks from the blocking read
+/// loop to the async coalescing flusher (reagentx P1 on PR #3206).
+/// `PTY_COALESCE_MAX_BYTES` only bounds the batch currently being
+/// assembled — it does nothing about chunks still sitting in the channel
+/// if the flusher falls behind the read rate (slow disk, lock contention,
+/// several busy panes at once). An unbounded channel there would let a
+/// sustained fast producer (`yes`, a large `cat`) grow queued memory
+/// without limit. 128 chunks x up to ~PTY_READ_BUF_SIZE each is ~512KiB of
+/// worst-case queued-but-not-yet-batched data per pane — real headroom
+/// above one coalesced batch, but strictly bounded. The read loop sends
+/// via `blocking_send`, which blocks the calling (already-blocking-pool)
+/// thread once the channel is full, propagating real backpressure to the
+/// PTY read rate — and from there, via the kernel's own PTY buffer, to the
+/// child process itself, the same way a slow terminal reader naturally
+/// backpressures a fast writer.
+pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
+
 /// Detect the best available interactive shell on Windows.
 ///
 /// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
