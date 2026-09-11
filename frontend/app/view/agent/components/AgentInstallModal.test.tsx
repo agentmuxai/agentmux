@@ -175,3 +175,56 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
         expect(RpcApi.GetBundleCommand).not.toHaveBeenCalled();
     });
 });
+
+describe("AgentInstallModal — progress bar + Details chrome (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5)", () => {
+    it("shows the progress bar only while phase is 'installing', matching the existing spinner's gating", async () => {
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+
+        await screen.findByText("Install now");
+        expect(container.querySelector(".install-progress")).toBeNull();
+
+        fireEvent.click(screen.getByText("Install now"));
+        // `setPhase("installing")` runs synchronously in startInstall,
+        // before the InstallStartCommand RPC is even awaited — the same
+        // point the existing "⏳ Installing…" spinner already appears at.
+        await waitFor(() => expect(container.querySelector(".install-progress")).not.toBeNull());
+        expect(container.querySelector(".install-progress-bar")).not.toBeNull();
+    });
+
+    it("the Details panel wrapping the terminal defaults to open, unlike SystemToolInstallInline's default-closed panel", async () => {
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+
+        await screen.findByText("Install now");
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        expect(details).not.toBeNull();
+        expect(details.open).toBe(true);
+    });
+
+    it("re-fits the terminal when the Details panel is (re)opened", async () => {
+        const { FitAddon } = await import("@xterm/addon-fit");
+        const fitSpy = vi.spyOn(FitAddon.prototype, "fit");
+        const agent = baseAgent({ provider: "codex", memory_id: "" });
+        const { container } = render(() => (
+            <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
+        ));
+        await screen.findByText("Install now");
+
+        const details = container.querySelector(".agent-install-modal-details") as HTMLDetailsElement;
+        const callsBeforeToggle = fitSpy.mock.calls.length;
+
+        // Real click on <summary> flips `.open` before dispatching
+        // "toggle" — set it explicitly, same as a real collapse/reopen.
+        details.open = false;
+        fireEvent(details, new Event("toggle"));
+        details.open = true;
+        fireEvent(details, new Event("toggle"));
+
+        expect(fitSpy.mock.calls.length).toBeGreaterThan(callsBeforeToggle);
+    });
+});
