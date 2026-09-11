@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 #   Windows — bootstrap.exe DLL wrapper pattern (Phase 3, issue #1374)
 # Disable at runtime with AGENTMUX_UNSAFE_NOSANDBOX=1.
 default = ["sandbox"]
-sandbox = ["cef/sandbox"]
+sandbox = ["cef_win/sandbox", "cef_unix/sandbox"]
 # Opt-in for dev_authfile unit tests that touch the filesystem and Win32 ACL APIs
 test-authfile = []
 # Enables call sites that depend on the AgentMux libcef fork
@@ -49,7 +49,6 @@ resources_path = "resources"
 
 [dependencies]
 agentmux-common = { path = "../agentmux-common" }
-cef = { version = "148", default-features = false, features = ["build-util"] }
 # Native "pick a file" dialog for the Media pane (SPEC_MEDIA_PANE_2026_07_26.md).
 # Default features pick the right native backend per platform (Win32
 # IFileDialog / macOS NSOpenPanel / Linux GTK3).
@@ -81,6 +80,10 @@ futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# Stock, unpatched cef 152 — Windows needs no fork (drags via its own Win32
+# path, never routes through the patched-libcef feature). See
+# SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md Phase C.
+cef_win = { package = "cef", version = "152", default-features = false, features = ["build-util"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
@@ -119,6 +122,9 @@ winres = "0.1"
 # when `auth.cancel` fires (the portable_pty child sits inside a
 # `spawn_blocking` task that doesn't unwind on outer-task abort).
 libc = "0.2"
+# Still-148 fork — macOS/Linux stay on 148 until their own Phase D 152
+# builds land, per the staged rollout. Same rev as before the split.
+cef_unix = { package = "cef", version = "148", default-features = false, features = ["build-util"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # CGEventTap / CFRunLoop / CFMachPort / CGWindowList plumbing for the macOS

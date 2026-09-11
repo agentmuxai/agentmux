@@ -11,6 +11,16 @@
 // On non-Windows or sandbox-off builds, only the `[[bin]]` target is used;
 // this file must still compile on those platforms.
 
+// Staged CEF 152 rollout (SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md
+// Phase C): Windows links the stock, unpatched `cef` 152 crate directly;
+// macOS/Linux stay on this fork's 148 line until their own Phase D builds
+// land. Aliasing both to `cef` here means every existing `cef::` call site
+// needs zero changes.
+#[cfg(target_os = "windows")]
+extern crate cef_win as cef;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+extern crate cef_unix as cef;
+
 mod app;
 mod background_audit;
 mod browser_api;

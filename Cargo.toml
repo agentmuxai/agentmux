@@ -46,4 +46,4 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 #
 # See: docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md §5
 [patch.crates-io]
-cef-dll-sys = { git = "https://github.com/AgentU-asaf/cef-rs", rev = "515b3ac53c8b3903aeac18135473858a4d3879d2" }
+cef-dll-sys = { git = "https://github.com/GenericAgentX-asaf/cef-rs", rev = "d0c91e0e4cae2be495d7729a604bca06d4038f62" }
