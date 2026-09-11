@@ -1405,8 +1405,56 @@ async fn handle_pty_shell_create(
                 return resp;
             }
             // Winner's block vanished between the transaction and now
-            // (exceedingly unlikely) — fall back to using the block we
-            // already have in hand rather than dead-ending the request.
+            // (exceedingly unlikely — e.g. it was deleted out from under
+            // us). `block` above was only ever prepared in memory: the
+            // `with_tx` closure's `tx.insert` never ran for it (that only
+            // happens in the `Ok(None)` arm, when WE win the claim), so it
+            // has no backing row. Falling through with it as-is would send
+            // `resync_controller` a phantom block and return a `shell_id`
+            // with nothing in the store behind it — every later
+            // PtyShellInput/Read/Status/Stop call against it would then
+            // fail ownership/lookup checks (ReAgent P2 on PR #3194).
+            //
+            // Actually create it for real instead, mirroring what the
+            // `Ok(None)` arm does inside its transaction — just as a plain
+            // sequence, since we're no longer inside that transaction.
+            let insert_result = (|| -> Result<(), crate::backend::storage::error::StoreError> {
+                state.wstore.insert(&mut block)?;
+                let mut parent = state
+                    .wstore
+                    .must_get::<crate::backend::obj::Block>(&req.agent_block_id)?;
+                parent
+                    .subblockids
+                    .get_or_insert_with(Vec::new)
+                    .push(child_id.clone());
+                parent
+                    .meta
+                    .insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), json!(child_id));
+                state.wstore.update(&mut parent)?;
+                Ok(())
+            })();
+            if let Err(e) = insert_result {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("ptyshell.create: fallback insert: {e}") })),
+                )
+                    .into_response();
+            }
+            if let Ok(Some(parent)) = state
+                .wstore
+                .get::<crate::backend::obj::Block>(&req.agent_block_id)
+            {
+                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref: format!("block:{}", req.agent_block_id),
+                    data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: "block".into(),
+                        oid: req.agent_block_id.clone(),
+                        obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                    }).unwrap_or_default()),
+                });
+            }
             (child_id.clone(), block)
         }
         Ok(None) => {
@@ -1585,14 +1633,25 @@ async fn handle_pty_shell_input(
             }),
         );
     }
+    // Lock BEFORE writing, not after (ReAgent P1 on PR #3194): the
+    // previous ordering left `term:agentlockuntil` unset for the entire
+    // duration of `send_input` — the exact window `controllerinput`'s own
+    // lock check (added for Codex's earlier P1 on this same PR) needs the
+    // lock to already exist to catch anything. Locking first doesn't make
+    // the race provably impossible (a human keystroke processed in the
+    // sliver of time before this write actually commits could still slip
+    // through — true elimination would need a real mutex shared between
+    // this HTTP path and the WS `controllerinput` path, disproportionate
+    // machinery for a UX-level collision guard, not a hard security
+    // boundary), but it shrinks the window from "all of send_input's own
+    // duration plus the lock write's" down to just the lock write's own
+    // commit latency — the actual, meaningful fix here.
+    lock_shell_for_agent(&state, &req.shell_id);
     let result = blockcontroller::send_input(
         &req.shell_id,
         blockcontroller::BlockInputUnion::data(req.text.into_bytes()),
         None,
     );
-    if result.is_ok() {
-        lock_shell_for_agent(&state, &req.shell_id);
-    }
     match result {
         Ok(()) => (StatusCode::OK, Json(PtyShellInputResponse { written: true, error: None })),
         Err(e) => (StatusCode::OK, Json(PtyShellInputResponse { written: false, error: Some(e) })),
@@ -1600,10 +1659,10 @@ async fn handle_pty_shell_input(
 }
 
 /// Lock `shell_id` out from human keyboard input for `AGENT_LOCK_WINDOW_MS`
-/// from now — called after every successful agent write (input/resize).
+/// from now — called BEFORE every agent write (input/resize), not after
+/// (see the call sites' own comment for why the ordering matters).
 /// Best-effort: a failure to write the lock meta just means the human's
-/// input isn't blocked this time, not that the agent's write failed (the
-/// PTY write already succeeded by the time this runs).
+/// input isn't blocked this time, not that the agent's write itself failed.
 fn lock_shell_for_agent(state: &AppState, shell_id: &str) {
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(
@@ -1630,6 +1689,9 @@ async fn handle_pty_shell_resize(
             }),
         );
     }
+    // Lock BEFORE writing — see the identical comment in
+    // `handle_pty_shell_input` for why the ordering matters.
+    lock_shell_for_agent(&state, &req.shell_id);
     let result = blockcontroller::send_input(
         &req.shell_id,
         blockcontroller::BlockInputUnion::resize(crate::backend::obj::TermSize {
@@ -1638,9 +1700,6 @@ async fn handle_pty_shell_resize(
         }),
         None,
     );
-    if result.is_ok() {
-        lock_shell_for_agent(&state, &req.shell_id);
-    }
     match result {
         Ok(()) => (StatusCode::OK, Json(PtyShellResizeResponse { resized: true, error: None })),
         Err(e) => (StatusCode::OK, Json(PtyShellResizeResponse { resized: false, error: Some(e) })),

@@ -3695,9 +3695,13 @@ async fn ptyshell_stop_on_unknown_id_reports_not_released() {
 
 #[tokio::test]
 async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
-    // The locking feature: a successful write stamps an expiry timestamp
-    // the frontend reads to gate human keyboard input; PtyShellStop clears
-    // it immediately rather than waiting for AGENT_LOCK_WINDOW_MS to lapse.
+    // The locking feature: input/resize stamp an expiry timestamp the
+    // frontend reads to gate human keyboard input, BEFORE attempting the
+    // write itself (ReAgent P1 on PR #3194 — locking only on success left
+    // the lock unset for the write's entire duration, exactly the window
+    // controllerinput's own lock check needs it to already exist to catch
+    // anything). PtyShellStop clears it immediately rather than waiting
+    // for AGENT_LOCK_WINDOW_MS to lapse.
     let state = test_state();
     let app = build_router(state.clone());
 
@@ -3732,15 +3736,13 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
     .await;
     // No live controller for this synthetic block, so the PTY write itself
     // fails — but the ownership check passed (a different error, not the
-    // "not a shell belonging..." rejection), which is all this test needs;
-    // the lock is asserted directly against the store below regardless of
-    // whether the write "succeeded" in the no-controller sense.
+    // "not a shell belonging..." rejection), which is what proves the lock
+    // write below came from the REAL request path, not a bypassed check.
     assert!(!json["error"].as_str().unwrap_or("").contains("not a shell belonging"));
 
-    // Locking only happens on a SUCCESSFUL write (see `handle_pty_shell_input`),
-    // so simulate that success path directly for this assertion — the HTTP
-    // round trip above already proved the ownership gate passes.
-    lock_shell_for_agent(&state, &shell_id);
+    // The lock must be set by the real HTTP call itself — unconditionally,
+    // before the (here, failing) write is even attempted — not merely
+    // something this test simulates after the fact.
     let locked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
     let until = locked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).and_then(|v| v.as_i64()).unwrap();
     assert!(until > before, "lock expiry must be in the future");

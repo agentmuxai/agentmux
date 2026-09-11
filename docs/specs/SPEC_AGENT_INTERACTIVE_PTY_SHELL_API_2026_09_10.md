@@ -550,6 +550,46 @@ All three reproduced the reasoning above by direct code inspection before
 being accepted as real (not just taking the review's word for it) — see
 §10.6's test list for what backs each one.
 
+### 10.6b Two more real bugs, caught by ReAgent's round-2 review of PR #3194
+
+**P1 — §10.6a #1's fix shrank the lock race but never actually closed the
+part it could have.** The lock was still only written on the SUCCESS path,
+after `blockcontroller::send_input` returned — meaning `send_input`'s own
+entire duration (from the caller's write until it returns) ran with no
+lock in place at all, so a human keystroke landing in that window could
+still interleave with the agent's write via `controllerinput`, which reads
+`term:agentlockuntil` before `send_input` but has nothing to see yet if
+this handler hasn't written it. Fixed by moving
+`lock_shell_for_agent(&state, &req.shell_id)` to run **before** the
+`send_input` call in both `handle_pty_shell_input` and
+`handle_pty_shell_resize`, unconditional on the write's outcome rather than
+gated on success. This shrinks the remaining race to the (much smaller,
+and judged proportionate to leave open — closing it fully would need a
+shared mutex around the whole write, not just a meta flag) window between
+`controllerinput`'s own lock check and `send_input`'s actual write for a
+message that arrived concurrently with the FIRST lock-setting call itself.
+
+**P2 — the "winner's block vanished" fallback in the atomic-claim logic
+(§10.6a #3) built a phantom block instead of a real one.** When this
+request loses the claim race (`Ok(Some(winner_id))`) but
+`try_attach_to_existing_shell` finds the winner's block already gone (an
+edge case rated "exceedingly unlikely" when §10.6a #3 was written), the
+code fell back to `(child_id.clone(), block)` — reusing the in-memory
+`block` value this request had prepared. But that value was only ever
+`tx.insert`-ed inside the `Ok(None)` arm (the "we won the claim" path);
+along the `Ok(Some(...))` arm it was never persisted at all.
+`resync_controller` then ran against a block with no row behind it, and
+the handler returned 200 with a `shell_id` that every subsequent
+`PtyShellInput`/`Read`/`Status`/`Stop` call would fail to find via
+`is_owned_by_agent`'s own lookup. Fixed by actually creating the block for
+real in this fallback branch — `state.wstore.insert(&mut block)`, link it
+into the parent's `subblockids`, set `META_KEY_SHELL_SUBBLOCK_ID` on the
+parent, and broadcast the resulting `waveobj:update` — the same sequence
+the `Ok(None)` arm's transaction performs, just run as a plain
+non-transactional sequence since this code path is already past that
+transaction's scope. Any store error at this point now surfaces as a
+proper 500 instead of silently proceeding with an uninserted phantom.
+
 ### 10.6 Verification
 
 All pass-1 tests updated for the new request/response shape
@@ -577,3 +617,18 @@ race would need real parallel task orchestration against the same store,
 judged disproportionate for a fix whose own documented residual gap (the
 frontend-race half) isn't closed either way. Full `agentmux-srv` suite
 (3337 tests) and the frontend typecheck re-run clean, no regressions.
+
+§10.6b's two fixes were verified the same way: P1 by re-running
+`ptyshell_input_locks_the_shell_and_stop_releases_it_early`, updated to
+assert the lock is set by the real HTTP call itself (no more manual
+`lock_shell_for_agent` simulation in the test) — proving the handler, not
+the test, now performs the lock-before-write ordering. P2 has no dedicated
+new test (reliably provoking "the winner's block was deleted between the
+transaction and the attach attempt" needs orchestrating a real deletion
+mid-request, judged disproportionate for a fallback branch already this
+narrow) but is covered indirectly: the existing reuse/create tests and the
+`#[ignore]`'d live-PTY test all still pass against the changed code path,
+and the fix was traced against the exact store APIs (`insert`/`must_get`/
+`update`) already exercised elsewhere in this file. Full `agentmux-srv`
+suite (3337 tests, 7 ignored) re-run clean after both §10.6b fixes,
+including the `#[ignore]`'d live-PTY test run explicitly — no regressions.
