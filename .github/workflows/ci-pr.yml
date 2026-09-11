@@ -40,6 +40,13 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    # Normal baseline is ~13 min (see docs/incident/
+    # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md). Without this,
+    # a hung GitHub-hosted runner occupies the REQUIRED check for GitHub's
+    # default of 360 minutes before being reaped -- that incident hit this
+    # exact ceiling twice. 20 min gives headroom over the baseline while
+    # bounding a hang to tens of minutes instead of hours.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
