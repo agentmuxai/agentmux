@@ -6,6 +6,8 @@
 // `frontend/app/element/modal.scss` and is shared across every modal
 // panel in the app.
 
+@use "../../toolchain/install-progress";
+
 .agent-install-modal-body {
     display: flex;
     flex-direction: column;
@@ -70,6 +72,32 @@
 .agent-install-modal-fail {
     color: var(--error-color, #ff6b6b);
     font-weight: 700;
+}
+
+// Wraps .agent-install-modal-term — defaults open (see the component's
+// own comment on the <details> element for why), individually
+// collapsible. SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5.
+.agent-install-modal-details {
+    display: flex;
+    flex-direction: column;
+    // Takes over .agent-install-modal-term's old role as the body's
+    // growing flex item (the term box no longer sits directly in
+    // .agent-install-modal-body's flex layout — it's one level deeper,
+    // inside this wrapper).
+    flex: 1 1 auto;
+    min-height: 0; // let the flex child (the term box) actually shrink/scroll
+
+    summary {
+        cursor: pointer;
+        font-size: var(--text-xs, 11px);
+        color: var(--secondary-text-color);
+        user-select: none;
+        margin-bottom: var(--space-1, 6px);
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
 }
 
 // xterm.js container — Terminal mounts here and renders its own

@@ -7,7 +7,7 @@ import { createStore } from "solid-js/store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi, createBlock } from "@/store/global";
-import { CORE_TOOLS, cliCommandForPlatform, currentPlatform } from "@/app/view/agent/providers/toolchain-catalog";
+import { CORE_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass } from "@/app/view/agent/providers/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
@@ -43,6 +43,9 @@ interface ToolRow {
     id: string;
     label: string;
     icon: string;
+    /** Font Awesome brand icon name — core-tool rows only (provider/widget
+     *  rows leave this unset). See `rowIconClass` in toolchain-catalog.ts. */
+    brandIcon?: string;
     kind: "core" | "provider";
     loading: boolean;
     found: boolean;
@@ -103,7 +106,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     const [showPath, setShowPath] = createSignal(false);
 
     const coreRows: ToolRow[] = CORE_TOOLS.map((t) => ({
-        id: t.id, label: t.label, icon: t.icon, kind: "core",
+        id: t.id, label: t.label, icon: t.icon, brandIcon: t.brandIcon, kind: "core",
         loading: true, found: false,
         optional: t.optional, minVersion: t.minVersion,
         docsUrl: t.docsUrl, installUrl: t.installUrls[plat],
@@ -291,7 +294,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
 
     const renderRow = (row: ToolRow): JSX.Element => (
         <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
-            <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
+            <i class={`toolchain-row-icon ${rowIconClass(row.icon, row.brandIcon)}`} aria-hidden="true" />
             <div class="toolchain-row-main">
                 <div class="toolchain-row-title">
                     <span class="toolchain-row-name">{row.label}</span>
@@ -437,7 +440,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                     <For each={wrows}>
                         {(row, i) => (
                             <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.cliLoading && !row.cliFound && !row.running }}>
-                                <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
+                                <i class={`toolchain-row-icon ${rowIconClass(row.icon)}`} aria-hidden="true" />
                                 <div class="toolchain-row-main">
                                     <div class="toolchain-row-title">
                                         <span class="toolchain-row-name">{row.label}</span>
