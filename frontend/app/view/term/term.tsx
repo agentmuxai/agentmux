@@ -538,7 +538,22 @@ const TermPaneChrome = (props: {
         if (targetBlockId === activeBlockId()) return;
         const node = getOwnNode();
         if (!node) return;
+        const wasFocused = nodeModel.isFocused();
         setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+        // Terminal panes keep every stack member's <Block> mounted
+        // (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES) instead of swapping
+        // which one exists — so the target tab's own onMount-driven
+        // `wasFocused && giveFocus()` (TerminalView, term.tsx) only ever
+        // fires on that tab's FIRST-ever activation, not on a repeat
+        // switch back to an already-mounted one. Replicate that hand-off
+        // explicitly here instead. `nodeModel` is `chromeNodeModel()` from
+        // pane-leaf-chrome.tsx — its `activeViewModel()` is a live lookup
+        // keyed by the CURRENT active blockId, so this already reads the
+        // TARGET tab's own ViewModel once `setActiveBlockInStack` above has
+        // taken effect.
+        if (wasFocused) {
+            (nodeModel.activeViewModel?.() as { giveFocus?: () => void } | null)?.giveFocus?.();
+        }
     };
     const handleTermTabClose = (targetBlockId: string) => {
         const node = getOwnNode();
