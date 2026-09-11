@@ -865,6 +865,40 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // events without setting `isComposing`. Both checks are
         // load-bearing. See SPEC_INPUT_RESPONSIVENESS §6.2.
         if (e.isComposing || e.keyCode === 229) return;
+        // PageUp/PageDown: this textarea is a flex sibling of
+        // .agent-document-scroll-region, not a descendant of it (see
+        // .agent-composer-region in styles/_control-bar.scss) — and
+        // .agent-view itself is overflow:hidden (agent-view.scss). So the
+        // scrollable chat history (.agent-document) is never an ancestor of
+        // this element. Left unhandled, the browser's default Page Up/Down
+        // walks PAST the pane looking for the nearest scrollable ancestor
+        // and scrolls whatever it finds outside .agent-view instead —
+        // which reads as the whole chat pane flying off screen.
+        //
+        // EXCEPTION (codex P2 on PR #3190): a long draft grows the textarea
+        // up to its own 200px cap, past which `.agent-input` becomes its own
+        // scroll container (`max-height: 200px; overflow-y: auto` in
+        // _pending-footer.scss). In that state the textarea itself IS the
+        // nearest scrollable ancestor of the caret, and PageUp/PageDown
+        // should page/scroll within it exactly like any other overflowing
+        // textarea — swallowing the key here would silently break paging
+        // through a long pasted prompt. Only intercept when the textarea has
+        // nothing of its own left to scroll.
+        if (e.key === "PageUp" || e.key === "PageDown") {
+            const el = textareaRef;
+            // This read isn't preceded by a style write in this handler
+            // (unlike the typing/auto-grow path SPEC_INPUT_RESPONSIVENESS_
+            // TERMINAL_AND_AGENT_2026_05_29.md §4 guards against), and
+            // PageUp/PageDown fire far less often than every keystroke, so
+            // it isn't the layout-thrashing pattern that rule targets. The
+            // decision has to be synchronous — deferring to a rAF read
+            // would make preventDefault() too late.
+            if (el && el.scrollHeight > el.clientHeight) { // perf:allow-layout-read — see comment above, not the typing hot path
+                return;
+            }
+            e.preventDefault();
+            return;
+        }
         // Ghost-text next-prompt suggestion: Tab accepts it into the real
         // input, matching Claude Code CLI's own terminal UX (see
         // docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md).

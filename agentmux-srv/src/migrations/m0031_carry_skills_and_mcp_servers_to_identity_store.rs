@@ -54,19 +54,24 @@
 //!   `INSERT OR IGNORE` under it is race-safe on PK equality alone; no
 //!   further arbitration needed.
 //! - **Any other global row** (a user-promoted global skill/server, not one
-//!   of the six starters) dedups by `(name, skill_type)` / `name` —
-//!   first-wins. Global rows are safe to collapse across channels because a
-//!   global row is owned by nobody (§5.3). Unlike a starter, this id is
-//!   NOT deterministic, so two channels' migrations running concurrently
-//!   (multiple AgentMux instances is an explicitly supported scenario) can
-//!   both observe "no match yet" before either inserts — Codex P1, PR
-//!   #3181. Arbitrated by a real database constraint
-//!   (`idx_ids_skills_global_name_type` / `idx_ids_mcp_servers_global_name`,
-//!   `IDENTITY_STORE_SCHEMA_VERSION` v7), not just an application-level
-//!   check: the insert is attempted optimistically under this row's own id,
-//!   and whichever channel's insert the constraint accepts is authoritative
-//!   — the loser re-queries for the winner rather than trusting its own
-//!   pre-insert guess.
+//!   of the six starters) dedups by `name` alone — first-wins. Global rows
+//!   are safe to collapse across channels because a global row is owned by
+//!   nobody (§5.3). Unlike a starter, this id is NOT deterministic, so two
+//!   channels' migrations running concurrently (multiple AgentMux instances
+//!   is an explicitly supported scenario) can both observe "no match yet"
+//!   before either inserts — Codex P1, PR #3181. Arbitrated by a real
+//!   database constraint (`idx_ids_skills_global_name` /
+//!   `idx_ids_mcp_servers_global_name`, `IDENTITY_STORE_SCHEMA_VERSION` v8),
+//!   not just an application-level check: the insert is attempted
+//!   optimistically under this row's own id, and whichever channel's insert
+//!   the constraint accepts is authoritative — the loser re-queries BY NAME
+//!   ALONE (never `(name, skill_type)` — Codex P1, PR #3183: the skill index
+//!   was `(name, skill_type)` until v8 narrowed it to match
+//!   `skill_upsert_unique_global`'s own name-only invariant, and a
+//!   `(name, skill_type)`-scoped re-query can miss a winner carried under a
+//!   different `skill_type`, silently stranding a local ref pointing at an
+//!   id the identity store never actually holds) for the winner rather than
+//!   trusting its own pre-insert guess.
 //! - **An owner-private row** (`is_global = 0`) is never deduplicated —
 //!   carried across under its own id unless that id collides with something
 //!   already in the identity store, in which case it gets a fresh one.
@@ -274,8 +279,10 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
                 (id, inserted)
             } else {
                 // Non-starter global: optimistic insert under the row's own
-                // id, arbitrated by the (name, skill_type) unique index —
-                // see the module doc's race explanation.
+                // id, arbitrated by the name-only unique index (Codex P1, PR
+                // #3183 — was (name, skill_type) until IDENTITY_STORE_SCHEMA_VERSION
+                // v8 narrowed it to match skill_upsert_unique_global's own
+                // invariant; see the module doc's race explanation).
                 let mut to_insert = skill.clone();
                 let inserted = identity_store
                     .skill_insert_raw(&to_insert)
@@ -283,17 +290,29 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
                 if inserted > 0 {
                     (to_insert.id.clone(), inserted)
                 } else {
+                    // Re-query by NAME ALONE, not (name, skill_type): the
+                    // insert failed because of the name-only constraint, so
+                    // that is what must be re-queried to find the actual
+                    // winner. A (name, skill_type)-scoped re-query would miss
+                    // a winner carried under a DIFFERENT skill_type, fall
+                    // through to the "unrelated collision" branch below, and
+                    // mint a fresh id whose insert then ALSO silently
+                    // no-ops against the same name constraint — leaving a
+                    // local ref rewritten to an id the identity store never
+                    // actually holds, so the skill vanishes the moment reads
+                    // redirect there (Codex P1, PR #3183 — caught exactly
+                    // this).
                     match identity_store
-                        .skill_find_global_by_name_and_type(&skill.name, &skill.skill_type)
+                        .skill_find_global_by_name(&skill.name)
                         .map_err(|e| format!("find global skill {}: {e}", skill.name))?
                     {
                         Some(existing) => (existing.id, 0),
                         None => {
                             // The insert failed for a reason unrelated to
-                            // (name, skill_type) — an astronomically
-                            // unlikely PK collision with an unrelated row.
-                            // Deterministic fallback id, same reasoning as
-                            // the private-row branch below.
+                            // name — an astronomically unlikely PK collision
+                            // with an unrelated row. Deterministic fallback
+                            // id, same reasoning as the private-row branch
+                            // below.
                             let fresh_id = deterministic_collision_id(
                                 SKILL_COLLISION_NAMESPACE_SEED,
                                 channel_salt,
@@ -304,7 +323,32 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
                             let inserted = identity_store
                                 .skill_insert_raw(&to_insert)
                                 .map_err(|e| format!("insert skill {} under fresh id: {e}", to_insert.name))?;
-                            (fresh_id, inserted)
+                            if inserted > 0 {
+                                (fresh_id, inserted)
+                            } else {
+                                // The fresh-id insert ALSO silently no-op'd —
+                                // only reachable if a concurrent process won
+                                // the same name between our re-query above
+                                // and this insert (a narrow TOCTOU race, not
+                                // the deterministic bug this branch exists
+                                // for). Never trust a silent optimistic-
+                                // insert failure without checking what
+                                // actually won — same principle as the
+                                // private-row TOCTOU fix (ReAgent P1, PR
+                                // #3181, round 2).
+                                match identity_store
+                                    .skill_find_global_by_name(&skill.name)
+                                    .map_err(|e| format!("re-find global skill {} after fresh-id insert: {e}", skill.name))?
+                                {
+                                    Some(existing) => (existing.id, 0),
+                                    None => {
+                                        return Err(format!(
+                                            "insert skill {} under fresh id {fresh_id} silently failed with no conflicting global row found — unreachable unless the identity store's schema changed underneath this migration",
+                                            to_insert.name
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -459,7 +503,30 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store, channel_salt: &str)
                             let inserted = identity_store
                                 .mcp_server_insert_raw(&retry)
                                 .map_err(|e| format!("insert mcp server {} under fresh id: {e}", retry.name))?;
-                            (fresh_id, inserted)
+                            if inserted > 0 {
+                                (fresh_id, inserted)
+                            } else {
+                                // The fresh-id insert ALSO silently no-op'd —
+                                // mirrors carry_skills's identical defensive
+                                // re-check (ReAgent P1, PR #3197): only
+                                // reachable if a concurrent process won the
+                                // same name between our re-query above and
+                                // this insert. Never trust a silent
+                                // optimistic-insert failure without checking
+                                // what actually won.
+                                match identity_store
+                                    .mcp_server_find_global_by_name(&server.name)
+                                    .map_err(|e| format!("re-find global mcp server {} after fresh-id insert: {e}", server.name))?
+                                {
+                                    Some(existing) => (existing.id, 0),
+                                    None => {
+                                        return Err(format!(
+                                            "insert mcp server {} under fresh id {fresh_id} silently failed with no conflicting global row found — unreachable unless the identity store's schema changed underneath this migration",
+                                            retry.name
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -819,6 +886,57 @@ mod tests {
 
         assert!(identity_store.skill_get("id-from-a").unwrap().is_some());
         assert!(identity_store.skill_get("id-from-b").unwrap().is_none(), "must not create a second row for the same name+type");
+    }
+
+    /// Codex P1, PR #3183: the identity store's global-uniqueness index is
+    /// `name` alone as of `IDENTITY_STORE_SCHEMA_VERSION` v8 — narrower than
+    /// `(name, skill_type)`, which this dedup logic used to assume. Two
+    /// channels carrying the SAME NAME under DIFFERENT skill_types must
+    /// still converge onto one survivor: a re-query still scoped to
+    /// `(name, skill_type)` would find nothing (no row exists with the
+    /// LOSING channel's own exact type), fall through to the
+    /// unrelated-PK-collision branch, and mint a fresh id whose insert then
+    /// ALSO silently no-ops against the name constraint — stranding a local
+    /// ref pointing at an id the identity store never actually holds.
+    #[test]
+    fn two_channels_carrying_the_same_name_under_different_skill_types_still_converge() {
+        let identity_dir = tempfile::tempdir().unwrap();
+        let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
+
+        let dir_a = tempfile::tempdir().unwrap();
+        let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
+        let mut skill_a = skill("id-from-a", "Deploy", "", true);
+        skill_a.skill_type = "prompt".to_string();
+        wstore_a.skill_insert_raw(&skill_a).unwrap();
+        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
+
+        let dir_b = tempfile::tempdir().unwrap();
+        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        let mut skill_b = skill("id-from-b", "Deploy", "", true);
+        skill_b.skill_type = "agent-skill".to_string();
+        wstore_b.skill_insert_raw(&skill_b).unwrap();
+        rusqlite::Connection::open(dir_b.path().join("objects.db")).unwrap().execute(
+            "INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')",
+            [],
+        ).unwrap();
+        wstore_b.skill_bind(&wstore_b, "agent-1", "id-from-b").unwrap();
+
+        let (carried, rewritten) = carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+        assert_eq!(carried, 0, "A's row already occupies the name — B adds nothing new to the identity store");
+        assert_eq!(rewritten, 1, "B's own agent-1 ref must be repointed at A's surviving id");
+
+        // Exactly one row in the identity store, under A's id, with A's
+        // content (first-wins) — NOT a phantom id B's fresh-id fallback
+        // would have minted.
+        assert!(identity_store.skill_get("id-from-a").unwrap().is_some());
+        assert!(identity_store.skill_get("id-from-b").unwrap().is_none());
+
+        // B's local mirror must resolve to A's id too — the whole point:
+        // nothing is left pointing at an id the identity store doesn't hold.
+        assert!(wstore_b.skill_get("id-from-a").unwrap().is_some());
+        assert!(wstore_b.skill_get("id-from-b").unwrap().is_none());
+        assert!(wstore_b.skill_is_bound_to("agent-1", "id-from-a").unwrap());
+        assert!(!wstore_b.skill_is_bound_to("agent-1", "id-from-b").unwrap());
     }
 
     #[test]

@@ -31,6 +31,31 @@ on:
   push:
     branches: [main]
 
+# Cancel a superseded run for the same PR/branch instead of letting it run to
+# completion alongside the new one. Without this, every push to a PR spawns a
+# full new run that keeps burning windows-latest/ubuntu-latest runner minutes
+# even after it's obsolete — observed directly on 2026-09-11: several PRs had
+# 3-4 near-duplicate runs in flight within minutes of each other from quick
+# successive pushes, none cancelling the ones before it. That's wasted load
+# on a runner pool this repo's CI volume already puts real pressure on (88
+# ci-pr.yml runs in a 21-hour window from concurrent agents, sampled the same
+# day) — cutting the wasted volume doesn't fix GitHub-hosted-runner-side
+# flakiness on its own, but it reduces how often any one PR is exposed to it.
+# Codex P1 on #3198: keying on github.head_ref alone is wrong — for a
+# pull_request event it's just the source BRANCH NAME, with no owner/fork
+# qualifier. Two unrelated PRs (different forks, or even two agents in this
+# same repo) using a common branch name like "main" or "fix-typo" would
+# collide on the same group, and a push to one would cancel the OTHER PR's
+# required CI run — silent, cross-PR, and only noticed when someone's merge
+# is unexpectedly blocked. github.event.pull_request.number is unique per
+# PR regardless of branch naming; use that instead. It's only set for
+# pull_request events, so this still falls through to github.ref for `push`
+# (not a PR) — main pushes get their own group, keyed differently than PR
+# runs, same as before.
+concurrency:
+  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     name: check --tests + test (${{ matrix.os }})
@@ -40,6 +65,13 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    # Normal baseline is ~13 min (see docs/incident/
+    # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md). Without this,
+    # a hung GitHub-hosted runner occupies the REQUIRED check for GitHub's
+    # default of 360 minutes before being reaped -- that incident hit this
+    # exact ceiling twice. 20 min gives headroom over the baseline while
+    # bounding a hang to tens of minutes instead of hours.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
