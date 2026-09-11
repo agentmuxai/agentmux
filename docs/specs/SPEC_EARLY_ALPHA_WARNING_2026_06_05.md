@@ -73,27 +73,30 @@ it).
 
 ### Short form (one line, used in Store "Short description" and any tight slot)
 
-> **Early alpha — expect bugs, broken features, and breaking changes between
-> releases. Please report issues at https://github.com/agentmuxai/agentmux/issues.**
+> **AgentMux is in early alpha — expect some bugs and breaking changes
+> between releases. Please report issues at https://github.com/agentmuxai/agentmux/issues.**
 
 ### Long form (used at top of README and in Store "Description")
 
-> ## ⚠️ EARLY ALPHA — Use At Your Own Risk
+> ## Early Alpha
 >
-> **AgentMux is in early alpha.** Many features are incomplete, partially
-> broken, or change between releases without notice. Expect:
+> **AgentMux is in early alpha.** Some features are incomplete or still
+> settling, and behavior can change between releases. A few things to keep
+> in mind:
 >
-> - **Broken features** — pieces of the UI may not function, or may regress
->   from one release to the next.
-> - **Data loss** — settings, pane layouts, and agent state may not migrate
->   cleanly across versions. Don't store anything you can't reproduce.
-> - **Breaking changes** — config files, identity bundles, memory bundles,
->   and the App API may change shape with no migration path during alpha.
-> - **Platform gaps** — Windows is the primary target; macOS and Linux
->   builds lag behind and have additional known issues.
+> - **Rough edges** — parts of the UI may not work as expected, and
+>   something that works today can regress in a later release.
+> - **Don't rely on persistence** — settings, pane layouts, and agent state
+>   may not carry over cleanly across versions, so avoid storing anything
+>   you can't easily recreate.
+> - **Interfaces are still moving** — config files, identity bundles,
+>   memory bundles, and the App API can change shape without a migration
+>   path during alpha.
+> - **Platform coverage varies** — Windows gets the most testing right now;
+>   macOS and Linux builds are a bit further behind.
 >
-> If you hit a problem, **please report it as a GitHub issue** at
-> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
+> Running into something? **Please open a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues — that's how alpha gets to beta.
 
 ---
 
@@ -113,22 +116,25 @@ information. Decorative content should not push the warning below the fold.
 Prepend to `README.md` (at the repo root):
 
 ```markdown
-> ## ⚠️ EARLY ALPHA — Use At Your Own Risk
+> ## Early Alpha
 >
-> **AgentMux is in early alpha.** Many features are incomplete, partially
-> broken, or change between releases without notice. Expect:
+> **AgentMux is in early alpha.** Some features are incomplete or still
+> settling, and behavior can change between releases. A few things to keep
+> in mind:
 >
-> - **Broken features** — pieces of the UI may not function, or may regress
->   from one release to the next.
-> - **Data loss** — settings, pane layouts, and agent state may not migrate
->   cleanly across versions. Don't store anything you can't reproduce.
-> - **Breaking changes** — config files, identity bundles, memory bundles,
->   and the App API may change shape with no migration path during alpha.
-> - **Platform gaps** — Windows is the primary target; macOS and Linux
->   builds lag behind and have additional known issues.
+> - **Rough edges** — parts of the UI may not work as expected, and
+>   something that works today can regress in a later release.
+> - **Don't rely on persistence** — settings, pane layouts, and agent state
+>   may not carry over cleanly across versions, so avoid storing anything
+>   you can't easily recreate.
+> - **Interfaces are still moving** — config files, identity bundles,
+>   memory bundles, and the App API can change shape without a migration
+>   path during alpha.
+> - **Platform coverage varies** — Windows gets the most testing right now;
+>   macOS and Linux builds are a bit further behind.
 >
-> If you hit a problem, **please report it as a GitHub issue** at
-> https://github.com/agentmuxai/agentmux/issues — it's how alpha gets to beta.
+> Running into something? **Please open a GitHub issue** at
+> https://github.com/agentmuxai/agentmux/issues — that's how alpha gets to beta.
 
 ---
 
