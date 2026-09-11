@@ -175,6 +175,21 @@ jobs:
         shell: bash
         run: echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS=$CEF_RUNTIME_DIR_WINDOWS" >> "$GITHUB_ENV"
 
+      # Hard gate: the downloaded libcef.dll's major version must match what
+      # agentmux-cef/Cargo.toml's cef_win alias actually resolves to. Without
+      # this, a runtime-pin/binding drift (e.g. cef_win bumped to a new CEF
+      # milestone without updating cef-windows-x86_64-* below, or vice versa)
+      # compiles and packages successfully, then fails at startup with
+      # "Request for unsupported CEF API version" (splash, then no window) —
+      # caught only by a human running the app, not by this pipeline, until
+      # now. Placed before the build so a mismatch fails fast rather than
+      # after ~an hour of compile + package work. See
+      # docs/specs/SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md
+      # and scripts/verify-cef-version.sh's own header.
+      - name: Verify CEF runtime/binding version match
+        shell: bash
+        run: bash scripts/verify-cef-version.sh "$CEF_RUNTIME_DIR_WINDOWS"
+
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build portable (RELEASE_CHANNEL=stable, STRIP_MAPS=1)
         shell: bash
