@@ -2,10 +2,17 @@
 
 **Author:** Agent3
 **Created:** 2026-09-10
-**Status:** Implemented (PtyShell/PtyShellInput/PtyShellSignal/PtyShellResize/
-PtyShellRead/PtyShellStatus/PtyShellStop) — real-PTY round trip
-(create → type a command → read its actual output → stop) verified live,
-not just compiled; see §9.
+**Status:** Implemented in two passes. Pass 1 (PtyShell/PtyShellInput/
+PtyShellResize/PtyShellRead/PtyShellStatus/PtyShellStop — `PtyShellSignal`
+also shipped in pass 1 but was removed the same day after Codex review, §6b)
+shipped
+each tool driving its OWN independent, invisible shell — real-PTY round trip
+(create → type a command → read its actual output → stop) verified live, not
+just compiled; see §9. Pass 2 (this revision, repo owner's explicit follow-up
+request) changed the model entirely: `PtyShell` now attaches to the SAME
+shell a human's composer-drawer session already uses (or will use), with a
+short, self-expiring lock keeping the two from typing over each other. See
+§10 for the full pass-2 design and what it changed from pass 1.
 **Scope:** New MCP tool(s) letting an agent drive a real, PTY-backed shell —
 create it, send it input (including control characters/signals), read its
 current screen state, resize it, stop it — entirely through backend RPC,
@@ -385,3 +392,121 @@ the discipline the `#[ignore]`'d live test's own doc comment already
 argued for (only intentionally-real-process tests should spawn one) — these
 two just weren't meant to be in that category and had to be brought back in
 line.
+
+## 10. Pass 2 — the same shell a human sees, with a lock (repo owner request, 2026-09-10)
+
+Pass 1 shipped `PtyShell` creating its own independent, headless sub-block —
+architecturally identical to the human-facing composer-drawer shell, but a
+*different block*. A human watching the drawer saw nothing the agent did; if
+the human already had the drawer open, the agent's shell was invisible and
+separate. The repo owner's follow-up request: the agent must drive the SAME
+shell a human sees, with text appearing live as the agent works, while
+staying fully API-driven (no OS-level keystroke injection, no simulated
+DOM/xterm.js events) — and if a human is also typing, lock them out while
+the agent is actively working, unlocking again the moment it stops.
+
+### 10.1 Reuse, in both directions
+
+`create` now checks the agent's own block for `term:shellsubblockid`
+(`agent-view.tsx:2883,2890-2894` — the same key the composer drawer already
+persists there) before doing anything else:
+
+- **Pointer exists** → `resync_controller` against that id instead of
+  creating a new block. Covers a human who already opened the drawer: the
+  agent joins their exact PTY, same scrollback, same live output.
+- **Nothing exists yet** → create as pass 1 did, then persist the pointer
+  onto the agent block. Covers the reverse direction: a drawer opened
+  *after* the agent has been working attaches to what the agent already
+  started (`ControllerResyncCommand`'s own reuse path picks it up), instead
+  of spawning a second, independent shell.
+
+`req.cwd`/`rows`/`cols` are ignored on the reuse path — an already-running
+process's cwd can't change post-spawn, and geometry is `PtyShellResize`'s
+job, not a create-time parameter for a shell that already has a size. The
+Windows ConPTY-handshake check (§6a) runs unconditionally after either
+path — safe on an already-initialized shell, which simply won't have an
+unanswered query sitting in its output for the poll to find.
+
+### 10.2 Ownership reframed from "did PtyShell create it" to "is it this agent's own pane"
+
+Pass 1's `ptyshell:managed` meta-marker check assumed every legitimate
+target was a block `PtyShell` itself created — no longer true once reuse
+means a HUMAN-created drawer shell is an equally legitimate target. Replaced
+with `is_owned_by_agent`: fetch the target block, check its `parentoref`
+equals `block:<agent_block_id>` and it's a `view:"term"` block.
+`agent_block_id` is now a field on every `PtyShell*` request
+(`PtyShellInputRequest` etc., `agentmux-common/src/api_types.rs`) — filled
+in by `agentmux-mcp` from its own trusted env (`AGENTMUX_AGENT_BUS_ID`/
+`AGENTMUX_BLOCKID`), never a model-facing tool parameter, so it can't be
+forged by the calling agent's own model output. This is strictly more
+correct than pass 1's check, not just adapted for reuse: it still blocks the
+exact threat Codex found (an arbitrary block id discoverable via `Layout`,
+e.g. another agent's own CLI pane), while also correctly covering a shell
+the human created first.
+
+### 10.3 Locking: a lease, not an explicit lock/unlock
+
+Every successful `PtyShellInput`/`PtyShellResize` write stamps
+`term:agentlockuntil` (epoch ms, `AGENT_LOCK_WINDOW_MS` = 4000ms out) on the
+target block via `update_object_meta` + a `waveobj:update` broadcast — the
+same two steps the `setmeta` WS handler performs, factored into
+`broadcast_meta_update` since `ptyshell/*` needs the identical pattern from
+a plain HTTP handler with no `WshRpcEngine` in scope. The frontend
+(`AgentShellSubblock.tsx`) gates its `sendDataHandler` purely on
+`agentLockedUntil() > nowTick()` — `nowTick` a signal ticking every 500ms so
+the UI notices the lock lapsing even with no new server push. Read-only
+`PtyShellRead`/`PtyShellStatus` never touch the lock.
+
+**Deliberately a lease, not an explicit lock/unlock pair** — the repo
+owner's own framing: "make sure to unlock as soon as the agent stops using
+it... keep that binding to the shell open only when necessary." An explicit
+release call is one the agent could simply never make (crash, error,
+forgetting), leaving a human locked out indefinitely — the opposite of
+"unlock as soon as it stops." A short, self-expiring window needs no
+server-side timer to leak or get stuck: a quiet agent just lets the
+timestamp lapse.
+
+While locked, the human still **sees** live output — only their own
+keystrokes are dropped, with a small corner badge ("Agent is using this
+shell") explaining why, deliberately not a full-screen overlay (the entire
+point of the visible-shell feature is watching the agent work).
+
+### 10.4 `PtyShellStop` no longer kills anything
+
+Pass 1's `stop` deleted the controller and the block — correct for that
+version's model (the agent's own throwaway shell), wrong once the shell is
+shared with a human's live terminal session. `PtyShellStop` now means
+"release my lock immediately, don't wait for the window to lapse" — it
+clears `term:agentlockuntil` and returns `released: bool`, and never touches
+the process or the block. The shell lives for the pane's own lifetime now,
+matching `AgentShellSubblock.tsx`'s pre-existing rule ("only killed when the
+pane closes") — this tool doesn't own it outright anymore.
+
+### 10.5 Deferred: Session/History → Stash
+
+The repo owner separately raised, while working in this area, that the
+composer details panel's `<AgentControlBar>` (session archive/restore/
+export actions + "View full history") shouldn't be bundled with the shell
+toggle — candidate destination is `AgentStashModal`'s existing tabbed
+per-agent surface. **Not done in this pass** — scoped out as an unrelated
+UI reorg rather than folded into an already-large PTY-shell change; tracked
+as a separate follow-up. One open product question for whoever picks it
+up: do the transient banners (interrupted-session recovery, resume-failed,
+large-session warning) move into the Stash tab too, or stay inline near the
+composer since they're time-sensitive?
+
+### 10.6 Verification
+
+All pass-1 tests updated for the new request/response shape
+(`agent_block_id` added, `stopped` → `released`) and re-verified, plus three
+new deterministic tests
+(`ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_second_one`,
+`ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pane`,
+`ptyshell_input_locks_the_shell_and_stop_releases_it_early`) and three new
+frontend tests (`AgentShellSubblock.test.tsx`'s "agent lock" suite: drops
+keystrokes while locked, forwards them once the lock has passed, badge
+mounts/unmounts with the lock state). The `#[ignore]`'d live-PTY test was
+extended in place to assert the lock gets set on a real successful write and
+that `stop` releases it without killing the shell (`running: true`
+afterward) — re-run live, still green. Full `agentmux-srv` suite (3336
+tests) and the frontend typecheck re-run clean, no regressions.

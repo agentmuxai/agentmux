@@ -3395,10 +3395,26 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
     // afterward through the same store the request went through.
     let state = test_state();
     let app = build_router(state.clone());
+
+    // A real UUID, not a human-readable fixture id: `create`'s success path
+    // now persists `term:shellsubblockid` back onto the agent block via
+    // `update_object_meta`, which parses its oref through `ORef::parse` —
+    // strict about the oid being a real UUID (matching every genuine block
+    // in the app, always minted via `Uuid::new_v4()`). Also has to actually
+    // exist in the store, unlike the plain `wstore.get`-based checks
+    // elsewhere in this file that tolerate a fixture id referring to
+    // nothing at all.
+    let agent_block_id = uuid::Uuid::new_v4().to_string();
+    let mut agent_block = crate::backend::obj::Block {
+        oid: agent_block_id.clone(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/create",
-        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+        serde_json::json!({ "agent_block_id": agent_block_id }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -3415,7 +3431,17 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
         block.meta.get(blockcontroller::META_KEY_CONTROLLER).and_then(|v| v.as_str()),
         Some(blockcontroller::BLOCK_CONTROLLER_SHELL)
     );
-    assert_eq!(block.parentoref, "block:test-agent-block");
+    assert_eq!(block.parentoref, format!("block:{agent_block_id}"));
+
+    // The pointer is persisted on the AGENT's own block too — this is what
+    // lets a drawer opened afterward (or a human who already has one open)
+    // attach to the same shell instead of getting an independent one.
+    let agent_block: crate::backend::obj::Block =
+        state.wstore.must_get(&agent_block_id).expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some(shell_id.as_str())
+    );
 
     // `create` spawns a REAL, persistent interactive shell process (unlike
     // every other non-`#[ignore]`d test in this file, which never spawns
@@ -3430,14 +3456,90 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
 }
 
 #[tokio::test]
-async fn ptyshell_rejects_operating_on_a_block_it_did_not_create() {
-    // Codex P1 on PR #3177: `shell_id` lives in the SAME namespace as every
-    // other pane block, and `Layout` exposes block ids for ordinary panes —
-    // without an ownership check, PtyShellInput/PtyShellStop etc. could be
-    // pointed at a completely unrelated pane (another agent's own CLI pane,
-    // a human's terminal). This inserts a real, ordinary "shell"-controller
-    // block through the front door (not one PtyShell created) and asserts
-    // every mutating/reading endpoint refuses to touch it.
+async fn ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_second_one() {
+    // The core of the visible-shell feature: whichever side (agent or
+    // human-opened drawer) creates the shell first, the other attaches to
+    // the SAME one. This simulates the "human already has the drawer open"
+    // direction — a real `view:"term"` sub-block created the way
+    // `AgentShellSubblock.tsx` does it (through `createsubblock`, not
+    // `PtyShell`), with `term:shellsubblockid` already pointing at it on
+    // the agent's own block, exactly as `agent-view.tsx`'s
+    // `onSubBlockCreated` callback leaves it.
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    // Real UUIDs, not human-readable fixture ids: the agent block gets
+    // written to via `update_object_meta` (parses its oref through
+    // `ORef::parse`, strict about a real-UUID oid, matching every genuine
+    // block in the app).
+    let agent_block_id = uuid::Uuid::new_v4().to_string();
+    let human_shell_id = uuid::Uuid::new_v4().to_string();
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: agent_block_id.clone(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let mut human_shell = crate::backend::obj::Block {
+        oid: human_shell_id.clone(),
+        parentoref: format!("block:{agent_block_id}"),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("view".to_string(), serde_json::json!("term"));
+            m.insert(
+                blockcontroller::META_KEY_CONTROLLER.to_string(),
+                serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+            );
+            m
+        },
+        ..Default::default()
+    };
+    state.wstore.insert(&mut human_shell).expect("insert human shell block");
+    let mut agent_meta = crate::backend::obj::MetaMapType::new();
+    agent_meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::json!(human_shell_id));
+    crate::server::service::object_helpers::update_object_meta(
+        &state.wstore,
+        &format!("block:{agent_block_id}"),
+        &agent_meta,
+    )
+    .expect("point agent block at the human's shell");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": agent_block_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        json["shell_id"].as_str(),
+        Some(human_shell_id.as_str()),
+        "PtyShell must attach to the pane's existing shell, not create a new one"
+    );
+
+    // The agent block's pointer is unchanged — `create` didn't mint a
+    // second, independent shell and repoint it there instead of reusing.
+    let agent_block: crate::backend::obj::Block = state.wstore.must_get(&agent_block_id).unwrap();
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some(human_shell_id.as_str())
+    );
+
+    blockcontroller::delete_controller(&human_shell_id);
+}
+
+#[tokio::test]
+async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pane() {
+    // Codex P1 on PR #3177, reframed after the reuse feature (see
+    // `is_owned_by_agent`'s doc comment): `shell_id` lives in the SAME
+    // namespace as every other pane block, and `Layout` exposes block ids
+    // for ordinary panes — without this check, an agent could point
+    // PtyShellInput/PtyShellStop/etc. at a completely unrelated pane
+    // (another agent's own CLI pane, a human's terminal). This inserts a
+    // real "shell"-controller block parented to a DIFFERENT agent and
+    // asserts every mutating/reading endpoint refuses to touch it when the
+    // request claims a different `agent_block_id`.
     let state = test_state();
     let app = build_router(state.clone());
 
@@ -3460,16 +3562,16 @@ async fn ptyshell_rejects_operating_on_a_block_it_did_not_create() {
     let (_, json) = post_json(
         &app,
         "/api/v1/ptyshell/input",
-        serde_json::json!({ "shell_id": "someone-elses-real-pane", "text": "hi" }),
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent", "text": "hi" }),
     )
     .await;
     assert_eq!(json["written"], serde_json::json!(false));
-    assert!(json["error"].as_str().unwrap_or("").contains("not a PtyShell-created shell"));
+    assert!(json["error"].as_str().unwrap_or("").contains("not a shell belonging to this agent's own pane"));
 
     let (_, json) = post_json(
         &app,
         "/api/v1/ptyshell/resize",
-        serde_json::json!({ "shell_id": "someone-elses-real-pane", "rows": 30, "cols": 100 }),
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent", "rows": 30, "cols": 100 }),
     )
     .await;
     assert_eq!(json["resized"], serde_json::json!(false));
@@ -3477,7 +3579,7 @@ async fn ptyshell_rejects_operating_on_a_block_it_did_not_create() {
     let (_, json) = post_json(
         &app,
         "/api/v1/ptyshell/read",
-        serde_json::json!({ "shell_id": "someone-elses-real-pane" }),
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent" }),
     )
     .await;
     assert_eq!(json["content"], serde_json::json!(""));
@@ -3485,15 +3587,26 @@ async fn ptyshell_rejects_operating_on_a_block_it_did_not_create() {
     let (_, json) = post_json(
         &app,
         "/api/v1/ptyshell/stop",
-        serde_json::json!({ "shell_id": "someone-elses-real-pane" }),
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "attacking-agent" }),
     )
     .await;
-    assert_eq!(json["stopped"], serde_json::json!(false));
+    assert_eq!(json["released"], serde_json::json!(false));
 
-    // The foreign block must still exist — stop() must not have deleted it.
+    // The foreign block must still exist and be untouched.
     let still_there: Result<crate::backend::obj::Block, _> =
         state.wstore.must_get("someone-elses-real-pane");
-    assert!(still_there.is_ok(), "ptyshell/stop must not delete a block it didn't create");
+    assert!(still_there.is_ok(), "ptyshell/* must not delete a block outside the caller's own pane");
+
+    // The LEGITIMATE owner (matching agent_block_id) can still act on it —
+    // proves the rejection above is about ownership, not a broken check.
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/resize",
+        serde_json::json!({ "shell_id": "someone-elses-real-pane", "agent_block_id": "someone-elses-agent", "rows": 30, "cols": 100 }),
+    )
+    .await;
+    assert_eq!(json["resized"], serde_json::json!(false), "no live controller yet, but ownership check must pass");
+    assert!(!json["error"].as_str().unwrap_or("").contains("not a shell belonging"));
 }
 
 #[tokio::test]
@@ -3542,7 +3655,7 @@ async fn ptyshell_status_on_unknown_id_is_a_plain_not_running_answer() {
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/status",
-        serde_json::json!({ "shell_id": "no-such-shell" }),
+        serde_json::json!({ "shell_id": "no-such-shell", "agent_block_id": "whoever" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -3556,29 +3669,100 @@ async fn ptyshell_input_on_unknown_id_reports_written_false_with_a_reason() {
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/input",
-        serde_json::json!({ "shell_id": "no-such-shell", "text": "hello" }),
+        serde_json::json!({ "shell_id": "no-such-shell", "agent_block_id": "whoever", "text": "hello" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["written"], serde_json::json!(false));
-    // Caught by the ownership check (Codex P1 on PR #3177) before ever
-    // reaching `blockcontroller::send_input` — an unrecognized id is
-    // indistinguishable from "not a PtyShell-created shell" by design, so
-    // this asserts the same message a real cross-pane id would get too.
-    assert!(json["error"].as_str().unwrap_or("").contains("not a PtyShell-created shell"));
+    // Caught by the ownership check before ever reaching
+    // `blockcontroller::send_input` — an unrecognized id is
+    // indistinguishable from "not this agent's own pane" by design.
+    assert!(json["error"].as_str().unwrap_or("").contains("not a shell belonging to this agent's own pane"));
 }
 
 #[tokio::test]
-async fn ptyshell_stop_on_unknown_id_reports_not_stopped() {
+async fn ptyshell_stop_on_unknown_id_reports_not_released() {
     let app = test_router();
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/stop",
-        serde_json::json!({ "shell_id": "no-such-shell" }),
+        serde_json::json!({ "shell_id": "no-such-shell", "agent_block_id": "whoever" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["stopped"], serde_json::json!(false));
+    assert_eq!(json["released"], serde_json::json!(false));
+}
+
+#[tokio::test]
+async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
+    // The locking feature: a successful write stamps an expiry timestamp
+    // the frontend reads to gate human keyboard input; PtyShellStop clears
+    // it immediately rather than waiting for AGENT_LOCK_WINDOW_MS to lapse.
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    // Real UUIDs — the lock write goes through `update_object_meta`, strict
+    // about a real-UUID oid (see the identical note on the reuse test above).
+    let agent_block_id = uuid::Uuid::new_v4().to_string();
+    let shell_id = uuid::Uuid::new_v4().to_string();
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: agent_block_id.clone(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    let mut shell = crate::backend::obj::Block {
+        oid: shell_id.clone(),
+        parentoref: format!("block:{agent_block_id}"),
+        meta: {
+            let mut m = crate::backend::obj::MetaMapType::new();
+            m.insert("view".to_string(), serde_json::json!("term"));
+            m
+        },
+        ..Default::default()
+    };
+    state.wstore.insert(&mut shell).expect("insert shell block");
+
+    let before = agentmux_common::time::now_ms();
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": agent_block_id, "text": "hi" }),
+    )
+    .await;
+    // No live controller for this synthetic block, so the PTY write itself
+    // fails — but the ownership check passed (a different error, not the
+    // "not a shell belonging..." rejection), which is all this test needs;
+    // the lock is asserted directly against the store below regardless of
+    // whether the write "succeeded" in the no-controller sense.
+    assert!(!json["error"].as_str().unwrap_or("").contains("not a shell belonging"));
+
+    // Locking only happens on a SUCCESSFUL write (see `handle_pty_shell_input`),
+    // so simulate that success path directly for this assertion — the HTTP
+    // round trip above already proved the ownership gate passes.
+    lock_shell_for_agent(&state, &shell_id);
+    let locked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let until = locked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).and_then(|v| v.as_i64()).unwrap();
+    assert!(until > before, "lock expiry must be in the future");
+    assert!(until <= before + AGENT_LOCK_WINDOW_MS + 1000, "lock window should be short, not indefinite");
+
+    let (_, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/stop",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": agent_block_id }),
+    )
+    .await;
+    assert_eq!(json["released"], serde_json::json!(true));
+
+    let unlocked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    assert!(
+        unlocked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).is_none(),
+        "stop must clear the lock, not just let it expire"
+    );
+
+    // The block itself must still exist — stop() never deletes it (this
+    // shell is shared/pane-scoped now, not a private disposable one).
+    assert!(state.wstore.get::<crate::backend::obj::Block>(&shell_id).unwrap().is_some());
 }
 
 /// Real end-to-end PTY spawn: create a shell, type a command, read the
@@ -3596,7 +3780,10 @@ async fn ptyshell_stop_on_unknown_id_reports_not_stopped() {
 #[tokio::test]
 #[ignore]
 async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
-    let app = test_router();
+    // Kept `AppState` handle (not `test_router()`) so the lock meta can be
+    // asserted directly against the store below.
+    let state = test_state();
+    let app = build_router(state.clone());
 
     let (status, json) = post_json(
         &app,
@@ -3614,11 +3801,21 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/input",
-        serde_json::json!({ "shell_id": shell_id, "text": format!("echo {marker}\r\n") }),
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": format!("echo {marker}\r\n") }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["written"], serde_json::json!(true), "input write failed: {json:?}");
+
+    // A successful write must lock the shell out from human input — the
+    // whole point of the feature. Assert it directly against the store
+    // rather than adding a frontend round trip to this backend test.
+    let locked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let lock_until = locked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).and_then(|v| v.as_i64());
+    assert!(
+        lock_until.is_some_and(|until| until > agentmux_common::time::now_ms()),
+        "a successful PtyShellInput must set a future term:agentlockuntil"
+    );
 
     // Poll rather than a single fixed sleep — shell startup + echo latency
     // varies by machine/OS.
@@ -3628,14 +3825,14 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
         let (_, json) = post_json(
             &app,
             "/api/v1/ptyshell/read",
-            serde_json::json!({ "shell_id": shell_id }),
+            serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
         )
         .await;
         content = json["content"].as_str().unwrap_or("").to_string();
         let (_, status_json) = post_json(
             &app,
             "/api/v1/ptyshell/status",
-            serde_json::json!({ "shell_id": shell_id }),
+            serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
         )
         .await;
         eprintln!("[poll {i}] status={status_json:?} content={content:?}");
@@ -3651,26 +3848,33 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/status",
-        serde_json::json!({ "shell_id": shell_id }),
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(json["running"], serde_json::json!(true));
 
+    // stop() releases the lock but must NOT kill the shell — it's shared
+    // with whatever human drawer might attach to it later.
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/stop",
-        serde_json::json!({ "shell_id": shell_id }),
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["stopped"], serde_json::json!(true));
+    assert_eq!(json["released"], serde_json::json!(true));
 
     let (_, json) = post_json(
         &app,
         "/api/v1/ptyshell/status",
-        serde_json::json!({ "shell_id": shell_id }),
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block" }),
     )
     .await;
-    assert_eq!(json["running"], serde_json::json!(false));
+    assert_eq!(json["running"], serde_json::json!(true), "stop must not kill the shared shell");
+
+    // Actually kill it now, for real, so this test doesn't leave a live
+    // process running for the rest of the binary's life — see the
+    // identical cleanup note on the other real-spawn tests in this file.
+    blockcontroller::delete_controller(&shell_id);
 }

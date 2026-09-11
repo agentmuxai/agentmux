@@ -69,7 +69,7 @@ pub(crate) const SHELL_STATUS_TOOL: &str = r#"{
 
 pub(crate) const PTY_SHELL_TOOL: &str = r#"{
   "name": "PtyShell",
-  "description": "Open a REAL PTY-backed interactive shell — unlike Shell(), which runs on a plain pipe, this behaves like a real terminal, so programs that check for one (password/wizard prompts, sudo, ssh, REPLs) work instead of refusing or misbehaving. Returns a shell_id immediately; use PtyShellInput to type into it, PtyShellRead to see its output, PtyShellStatus to poll, PtyShellStop to end it. Works with no UI involved at all — the window need not be open, focused, or rendering anything for this to work; it's a plain backend call, not simulated keystrokes into a visible terminal.",
+  "description": "Attach to this pane's one interactive shell — the SAME real terminal the user sees if they open the shell drawer in the UI, creating it if it doesn't exist yet. Unlike Shell(), which runs on a plain pipe, this is a REAL PTY, so programs that check for one (password/wizard prompts, sudo, ssh, REPLs) work instead of refusing or misbehaving. Returns a shell_id immediately; use PtyShellInput to type into it, PtyShellRead to see its output, PtyShellStatus to poll, PtyShellStop to release your lock early. Because this is the user's own visible shell, PtyShellInput/PtyShellResize briefly lock out the user's own keyboard input to it (a few seconds, refreshed while you keep typing, auto-released the moment you stop) so your keystrokes and theirs don't collide — don't hold it longer than you need to. Works with no UI involved at all on your end — the window need not be open, focused, or rendering anything for you to call this; it's a plain backend call, not simulated keystrokes.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -134,7 +134,7 @@ pub(crate) const PTY_SHELL_STATUS_TOOL: &str = r#"{
 
 pub(crate) const PTY_SHELL_STOP_TOOL: &str = r#"{
   "name": "PtyShellStop",
-  "description": "Kill a PtyShell() and clean up its terminal. Prefer this over letting it linger once you're done with an interactive session.",
+  "description": "Release your lock on a PtyShell() immediately, returning keyboard control to the user right away instead of waiting a few seconds for it to expire on its own. Does NOT kill the shell or the process — it's the user's own persistent terminal, not something this tool owns; it keeps running exactly as if a human had just stopped typing. Call this as soon as you're done with a burst of interactive work.",
   "inputSchema": {
     "type": "object",
     "properties": {
