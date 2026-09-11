@@ -48,15 +48,15 @@ multiplying load on the same constrained pool during the incident).
 | UTC | Event | Source |
 |---|---|---|
 | 2026-09-09 05:12 → 2026-09-10 16:37 | Baseline: ~35 hours of `ci-pr.yml` runs, consistently 12–16 min, zero anomalies (checked across 300 fetched runs) | Actions API, `runs?per_page=100` ×3 |
-| 2026-09-10 14:38:17 | `feat(srv): redirect skill/MCP-server catalog reads and writes to identity_store` (#3183) merged to `main` | `git log origin/main` |
-| 2026-09-10 16:01:37 | `feat(mcp): add PtyShell — a real PTY-backed interactive shell, no UI required` (#3177) merged to `main` | `git log origin/main` |
+| 2026-09-10 21:38:17 | `feat(srv): redirect skill/MCP-server catalog reads and writes to identity_store` (#3183) merged to `main`. (Corrected 2026-09-11, reagent P1 on PR #3200: `git log`'s raw timestamp is `14:38:17-07:00`; this table lists UTC, so it needed the +7h conversion, not the bare local-time digits.) | `git log origin/main` |
+| 2026-09-10 23:01:37 | `feat(mcp): add PtyShell — a real PTY-backed interactive shell, no UI required` (#3177) merged to `main`. **Corrected 2026-09-11 (reagent P1 on PR #3200):** the original revision of this row read `16:01:37`, the bare local-time digits from `git log` with the `-07:00` offset dropped instead of applied — the correct UTC time is 7 hours later, **3 seconds before** the first blocking run (`34540247974`) started at 23:01:40. See §3 for why this does not overturn this document's conclusion, but does make it a closer call than the original draft acknowledged. | `git log origin/main` |
 | 2026-09-10 16:37:20 | Run `34503227484`: non-blocking `ubuntu-latest` leg starts, does not complete until 22:38:18 (**6h01m**, `cancelled`). Required `windows-latest` leg on the *same run* finishes normally at 16:58:12 — **no merge impact from this one.** | Actions API, run + jobs |
 | 2026-09-10 16:52:58 | Run `34504802608`: a second `ubuntu-latest`-only hang, `cancelled` after 348.8 min. Same "non-blocking only" shape. | Actions API |
 | 2026-09-10 16:53 → 22:42 | ~13 further runs, all normal (13–23 min) — the first two hangs did not recur immediately and did not yet represent an ongoing incident. | Actions API |
 | 2026-09-10 23:01:40 | Run `34540247974` starts. **This is where the backlog actually begins**: its `windows-latest` leg (required) does not complete until 2026-09-11 04:08:06 — 5h06m later, `failure`. | Actions API, run + jobs |
 | 2026-09-11 00:12–01:40 | Six more runs start (`34545459640`, `34546072183`, `34546854544`, `34547266894`, `34547983179`, `34551584252`), each with its own `windows-latest` leg hanging from its own start time | Actions API |
 | 2026-09-11 04:08:05–04:09:35 | **All seven** of the above `windows-latest` jobs die within a 90-second window, every one `conclusion: failure` — independent of how long each had already been running (durations at death ranged from ~2h28m to ~5h06m). This is the "mass death" signature. | Actions API, per-job timestamps |
-| 2026-09-11 01:46:28 / 02:00:16 | Two further runs (`34552004567`, `34552901880`) hang on `windows-latest`, but are **not** caught by the 04:08 mass-death moment (it had already passed) — each instead runs to almost exactly 360 minutes and is `cancelled` by GitHub's own default job timeout, at 07:46:44 and 08:00:54 respectively. | Actions API |
+| 2026-09-11 01:46:28 / 02:00:16 | Two further runs (`34552004567`, `34552901880`) hang on `windows-latest`, each `cancelled` at almost exactly 360 minutes (07:46:44 and 08:00:54) by GitHub's own default job timeout — **not** the 04:08 mass-death moment. **Unreconciled (flagged by reagent P2 on PR #3200, not resolved here):** both of these were already in flight during 04:08–04:09 (started ~2h08m–2h22m earlier) — i.e. concurrently running alongside the seven that died together — yet neither terminated at that shared moment. This document has no confirmed explanation for why these two survived the same event that killed seven others; a partial/rolling infrastructure event (not literally simultaneous across every affected runner) is one plausible shape that would fit, but that is speculation, not a finding — left as an open question. | Actions API |
 | 2026-09-11 ~02:48–06:35 | Quiet gap in the run history (no pushes recorded in this window) | Actions API |
 | 2026-09-11 06:35 onward | Runs resume at the normal 12–16 minute duration. Several near-duplicate runs fire minutes apart from quick successive pushes (06:35:49, 06:38:28, 06:39:55, 06:45:14) — the exact "no concurrency group" symptom Korp's PR targets, still present at this point. | Actions API |
 | 2026-09-11 07:18:30 | Korp opens PR #3198, `korp/ci-concurrency-groups` — root-cause writeup (matches this document's §3 independently) + concurrency groups for `ci-pr.yml` and both nightly workflows. **Still open, not merged as of this writing.** | `gh pr view 3198` |
@@ -76,13 +76,29 @@ explains termination converging on one **absolute** moment across unrelated jobs
 independently confirms Korp's PR #3198 conclusion (arrived at by comparing two of these
 runs) using five additional data points from the same episode.
 
-**Ruled out:** a regression in a specific merged PR. `feat(mcp): add PtyShell` (#3177)
-merged at 16:01:37 UTC, close to first anomaly's 16:37 start, and `main`'s own `push`
-trigger for `ci-pr.yml` means that merge did kick off a run — but that first anomaly only
-ever affected the non-blocking Ubuntu leg, and the mass-death signature at 04:08 rules out
-any single commit as the cause for the blocking episode: the seven affected runs all
-carried whatever was on `main`/each PR's branch at their own respective start times, and
-still converged on one shared death moment unrelated to what any of them were running.
+**Not ruled out as cleanly as the original draft of this document claimed — corrected
+2026-09-11, reagent P1 on PR #3200.** The original revision asserted `feat(mcp): add
+PtyShell` (#3177) was ruled out based on a *16:01:37 UTC* merge time; that number was
+wrong (see the timeline correction above) — the real UTC merge time is **23:01:37**, three
+seconds before the first blocking run (`34540247974`) started at 23:01:40. That is a much
+tighter correlation than "close to first anomaly's 16:37 start," and this document should
+not have waved it away as confidently as it did.
+
+That said, the mass-death signature still stands as the stronger disconfirming evidence,
+independent of this correction: a deterministic hang inside PtyShell's own tests would
+expire at a fixed **offset** from each run's own start (whenever `cargo test` reaches that
+specific test) — not converge with six *other* runs, several started more than two hours
+later, on one shared **absolute** wall-clock moment (04:08:05–04:09:35 UTC). If PtyShell's
+own test code were the cause, the runs starting at 00:12, 00:20, 00:31, 00:37, 00:47, and
+01:40 would each need to reach the same hanging test at wildly different elapsed times
+from their own starts, yet all still die within the same 90 seconds of each other — that
+requires an external synchronizing event regardless of what any individual run was
+executing. The corrected timing means PtyShell's merge is no longer safely dismissible as
+unrelated to why the *first* run started hanging, but it does not explain the mass-death
+convergence that follows, and this document has not investigated PtyShell's own test
+changes closely enough to either confirm or rule out a narrower, PtyShell-specific
+contribution to that first run's own hang. Left as an open question rather than resolved
+in either direction.
 
 **Contributing cause #1 — no `timeout-minutes` on the `rust` job.** `ci-pr.yml`'s `rust`
 job (the one running `cargo check --workspace --tests` + `cargo test --workspace` on both
