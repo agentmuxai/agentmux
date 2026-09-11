@@ -466,6 +466,19 @@ const TermPaneChrome = (props: {
     // its new label immediately.
     // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
     const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
+    // Stable per-blockId object cache — reused across recomputes so a tab
+    // whose blockId/label didn't change keeps the SAME object reference.
+    // `<For>` in PaneTabStrip keys rows by item identity, and this memo
+    // reruns on EVERY switch (it reads `layoutModel.localTreeStateAtom()`,
+    // which `setActiveBlockInStack` bumps on every switch, not just on
+    // add/remove/rename). Without this cache, a plain `.map()` below
+    // handed `<For>` a brand-new object for every tab on every switch —
+    // indistinguishable from "the whole tab list changed" — so `<For>`
+    // tore down and recreated every pill's DOM node each time. Invisible
+    // on the plain-text inactive tabs, but visible as a flicker on the
+    // active one, which actually has a background highlight to flash.
+    // Reported live after PR #3157 shipped the header/strip stability fix.
+    const tabObjectCache = new Map<string, TermTab>();
     const termTabs = createMemo<TermTab[]>(() => {
         layoutModel.localTreeStateAtom();
         const overrides = titleOverrides();
@@ -480,12 +493,25 @@ const TermPaneChrome = (props: {
         // via a non-reactive lookup since a dormant tab's block isn't
         // mounted; `overrides` is what makes a just-performed rename show up
         // immediately.
-        return stack.map((id, i) => {
+        const seen = new Set<string>();
+        const result = stack.map((id, i) => {
+            seen.add(id);
             const persistedTitle = WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta?.["pane-title"] as
                 | string
                 | undefined;
-            return { blockId: id, label: overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}` };
+            const label = overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}`;
+            const cached = tabObjectCache.get(id);
+            if (cached && cached.label === label) return cached;
+            const tab: TermTab = { blockId: id, label };
+            tabObjectCache.set(id, tab);
+            return tab;
         });
+        // Drop entries for tabs no longer in the stack so the cache doesn't
+        // grow unboundedly across a long session's worth of closed tabs.
+        for (const id of tabObjectCache.keys()) {
+            if (!seen.has(id)) tabObjectCache.delete(id);
+        }
+        return result;
     });
     // Only render tab pills once there's something to switch BETWEEN — a lone
     // terminal shows just the "+".
@@ -512,7 +538,22 @@ const TermPaneChrome = (props: {
         if (targetBlockId === activeBlockId()) return;
         const node = getOwnNode();
         if (!node) return;
+        const wasFocused = nodeModel.isFocused();
         setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+        // Terminal panes keep every stack member's <Block> mounted
+        // (pane-leaf-chrome.tsx's KEEP_ALIVE_TYPES) instead of swapping
+        // which one exists — so the target tab's own onMount-driven
+        // `wasFocused && giveFocus()` (TerminalView, term.tsx) only ever
+        // fires on that tab's FIRST-ever activation, not on a repeat
+        // switch back to an already-mounted one. Replicate that hand-off
+        // explicitly here instead. `nodeModel` is `chromeNodeModel()` from
+        // pane-leaf-chrome.tsx — its `activeViewModel()` is a live lookup
+        // keyed by the CURRENT active blockId, so this already reads the
+        // TARGET tab's own ViewModel once `setActiveBlockInStack` above has
+        // taken effect.
+        if (wasFocused) {
+            (nodeModel.activeViewModel?.() as { giveFocus?: () => void } | null)?.giveFocus?.();
+        }
     };
     const handleTermTabClose = (targetBlockId: string) => {
         const node = getOwnNode();

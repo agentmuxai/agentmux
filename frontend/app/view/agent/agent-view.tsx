@@ -475,6 +475,30 @@ export const AgentPaneChrome = (props: {
     // here) reflects its new label immediately, without waiting on the
     // SetMetaCommand round-trip (term.tsx's titleOverrides precedent).
     const [titleOverrides, setTitleOverrides] = createSignal<Record<string, string>>({});
+    // Stable per-blockId object cache, shared across stackTabs/combinedTabs
+    // — mirrors term.tsx's tabObjectCache (same bug, same fix, reported live
+    // on the terminal pane first): `stackTabs` reruns on EVERY switch (it
+    // reads `layoutModel.localTreeStateAtom()`, bumped by every stack
+    // mutation, not just add/remove/rename), and a plain `.map(labelForBlock)`
+    // handed `<For>` (inside PaneTabStrip) a brand-new object per tab every
+    // time, indistinguishable from "the whole tab list changed" — so every
+    // pill's DOM node got torn down and recreated on every switch. Reusing
+    // the previous object when nothing about that tab actually changed lets
+    // `<For>` keep the DOM node in place and just update its `active` prop.
+    const paneTabObjectCache = new Map<string, PaneTab>();
+    function cachedTab(id: string, next: PaneTab): PaneTab {
+        const cached = paneTabObjectCache.get(id);
+        if (
+            cached &&
+            cached.label === next.label &&
+            cached.definitionId === next.definitionId &&
+            cached.isHistoryTab === next.isHistoryTab
+        ) {
+            return cached;
+        }
+        paneTabObjectCache.set(id, next);
+        return next;
+    }
     const labelForBlock = (id: string): PaneTab => {
         // The currently ACTIVE member reads its own reactive block meta
         // (activeBlockData, already memoized above); every other (dormant)
@@ -488,10 +512,10 @@ export const AgentPaneChrome = (props: {
             // tab is never user-renamed (see PaneTab.isHistoryTab) and
             // must read distinctly from its live sibling, which carries
             // the same copied agentName in its own meta.
-            return { blockId: id, label: "History", isHistoryTab: true };
+            return cachedTab(id, { blockId: id, label: "History", isHistoryTab: true });
         }
         const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
-        return { blockId: id, label, definitionId };
+        return cachedTab(id, { blockId: id, label, definitionId });
     };
     const stackTabs = createMemo<PaneTab[]>(() => {
         // Reactive dependency: re-derive whenever ANY layout mutation
@@ -506,7 +530,14 @@ export const AgentPaneChrome = (props: {
         const stackIds = new Set(stack.map((t) => t.blockId));
         const extras = switchableForks()
             .filter((f) => f.blockId && !stackIds.has(f.blockId))
-            .map((f): PaneTab => ({ blockId: f.blockId!, label: f.title, definitionId: f.definitionId }));
+            .map((f) => cachedTab(f.blockId!, { blockId: f.blockId!, label: f.title, definitionId: f.definitionId }));
+        // Drop cache entries for blockIds no longer present anywhere in this
+        // pane's tabs, so it doesn't grow unboundedly across a long
+        // session's worth of closed tabs/forks.
+        const liveIds = new Set([...stackIds, ...extras.map((t) => t.blockId)]);
+        for (const id of paneTabObjectCache.keys()) {
+            if (!liveIds.has(id)) paneTabObjectCache.delete(id);
+        }
         return [...stack, ...extras];
     });
     // Only render tab pills once there's something to switch BETWEEN — a

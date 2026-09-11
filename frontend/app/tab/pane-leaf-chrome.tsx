@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
+import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { WOS } from "@/app/store/global";
-import type { NodeModel } from "@/layout/index";
+import { getLayoutModelForStaticTab, type NodeModel } from "@/layout/index";
+import { findNode } from "@/layout/lib/layoutNode";
 import { Key } from "@solid-primitives/keyed";
-import { createMemo, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 /**
  * Router `tabcontent.tsx` renders instead of `<Block>` directly — the
@@ -46,6 +48,25 @@ import { createMemo, Show, type JSX } from "solid-js";
  */
 const HOISTS_OWN_CHROME = new Set(["agent", "term"]);
 
+/**
+ * Subset of `HOISTS_OWN_CHROME` whose stack members stay mounted
+ * SIMULTANEOUSLY instead of being swapped one-at-a-time behind the inner
+ * `<Key>` — every member's own `<Block>` (xterm instance, PTY connection,
+ * ViewModel) is created once and never torn down again while it stays in
+ * the stack; switching tabs just toggles which one is visible. Reported
+ * live after the chrome-stability fix landed: with header/strip already
+ * stable, a terminal tab switch still showed a brief spinner/re-render
+ * flash from `block.tsx`'s ready()-gate cross-fade, since the inner `<Key>`
+ * was STILL fully remounting `<Block>` (new `TermViewModel`, new xterm.js
+ * instance) on every switch — editor's own file tabs never do this at all
+ * (one persistent block, no remount), which is why editor felt "flawless"
+ * by comparison. Scoped to `"term"` only for now: each terminal tab is a
+ * genuinely separate backend-backed block with its own live PTY, unlike
+ * agent's picker/history tabs, which have more entangled per-tab state
+ * (quick-fork, launch-in-place) not yet audited for keep-alive safety.
+ */
+const KEEP_ALIVE_TYPES = new Set(["term"]);
+
 export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
@@ -85,6 +106,16 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         return latchedHoisted;
     });
 
+    // Same latch shape as `hoisted` above, over the narrower KEEP_ALIVE_TYPES
+    // set — see that const's own doc comment for what this changes and why.
+    let latchedKeepAlive = false;
+    const keepAlive = createMemo(() => {
+        if (!latchedKeepAlive && KEEP_ALIVE_TYPES.has(effectiveViewType())) {
+            latchedKeepAlive = true;
+        }
+        return latchedKeepAlive;
+    });
+
     // Block-scoped NodeModel wrapper for the inner, per-activation <Block>
     // mount. The LEAF's own NodeModel.blockId is frozen — captured once,
     // never re-derived (see that field's own doc comment in types.ts) —
@@ -110,16 +141,171 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // title entirely. A plain field, not a signal, deliberately: it's known
     // at wrapper-construction time, so there's no window where both headers
     // could render at once.
+    //
+    // Used only when !keepAlive() — the single-active-member path below,
+    // unchanged from before KEEP_ALIVE_TYPES existed.
     const scopedNodeModel = createMemo<NodeModel>(() => ({
         ...nodeModel,
         blockId: activeBlockId(),
         paneChromeHoisted: hoisted(),
     }));
 
+    // --- Keep-alive machinery (only ever touched when keepAlive() is true) ---
+    //
+    // Under keep-alive, EVERY stack member's <Block> mounts once and stays
+    // mounted — so `nodeModel.setActiveViewModel`/`activeViewModel` (a
+    // single shared slot, last-writer-wins) can no longer be trusted: every
+    // kept-alive Block calls `setActiveViewModel` once at its OWN mount, not
+    // on every switch, so the shared slot would end up holding whichever
+    // tab happened to mount MOST RECENTLY — not necessarily the one
+    // currently visible. `TermPaneChrome`'s own `runtimeLabel` and the
+    // header's `viewModel` prop both read `nodeModel.activeViewModel()`
+    // expecting it to track the ACTIVE tab on every switch (they don't
+    // latch), so this isn't just a chrome-identity concern the way
+    // `chromeVm` below is — it's a live-correctness one.
+    //
+    // Fixed by giving each kept-alive blockId its OWN private, owner-checked
+    // slot (mirrors layoutNodeModels.ts's real activeViewModel/
+    // setActiveViewModel pair), and deriving the LEAF-level accessor chrome
+    // actually reads from a lookup keyed by the CURRENT activeBlockId() —
+    // so switching tabs is just pointing the read at a different
+    // already-populated slot, no remount, no blip.
+    interface ViewModelSlot {
+        get: () => ViewModel | null;
+        set: (vm: ViewModel | null, owner: object) => void;
+    }
+    const viewModelSlots = new Map<string, ViewModelSlot>();
+    function viewModelSlotFor(id: string): ViewModelSlot {
+        let slot = viewModelSlots.get(id);
+        if (!slot) {
+            let owner: object | null = null;
+            const [get, setSig] = createSignal<ViewModel | null>(null);
+            const set = (vm: ViewModel | null, o: object) => {
+                if (vm === null) {
+                    if (owner !== o) return;
+                    owner = null;
+                    setSig(null);
+                    return;
+                }
+                owner = o;
+                setSig(() => vm);
+            };
+            slot = { get, set };
+            viewModelSlots.set(id, slot);
+        }
+        return slot;
+    }
+
+    const keepAliveNodeModelCache = new Map<string, NodeModel>();
+    function keepAliveNodeModelFor(id: string): NodeModel {
+        let scoped = keepAliveNodeModelCache.get(id);
+        if (!scoped) {
+            const slot = viewModelSlotFor(id);
+            scoped = {
+                ...nodeModel,
+                blockId: id,
+                paneChromeHoisted: true,
+                activeViewModel: slot.get,
+                setActiveViewModel: slot.set,
+            } as NodeModel;
+            keepAliveNodeModelCache.set(id, scoped);
+        }
+        return scoped;
+    }
+
+    // The full stack, reactive — same `localTreeStateAtom()` + live
+    // `findNode` lookup pattern term.tsx's own `termTabs` and agent-view.tsx's
+    // `stackTabs` already use, falling back to a single-entry list when this
+    // leaf hasn't split into a stack yet.
+    const layoutModel = getLayoutModelForStaticTab();
+    const stackBlockIds = createMemo<string[]>(() => {
+        layoutModel.localTreeStateAtom();
+        const node = findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
+        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
+        if (keepAlive()) {
+            // Drop cache/slot entries for blockIds no longer in the stack
+            // (tab closed) so a closed tab's ViewModel/NodeModel wrapper
+            // don't linger for the rest of the pane's lifetime.
+            const live = new Set(stack);
+            for (const id of keepAliveNodeModelCache.keys()) {
+                if (!live.has(id)) keepAliveNodeModelCache.delete(id);
+            }
+            for (const id of viewModelSlots.keys()) {
+                if (!live.has(id)) viewModelSlots.delete(id);
+            }
+        }
+        return stack;
+    });
+
+    // The NodeModel chrome itself renders with — plain passthrough when not
+    // keeping tabs alive (unchanged), otherwise `activeViewModel` is
+    // overridden to the per-id lookup above so a switch re-points the read
+    // at the newly-active tab's own slot instead of following whichever
+    // Block mounted last.
+    const chromeNodeModel = createMemo<NodeModel>(() => {
+        if (!keepAlive()) return nodeModel;
+        return {
+            ...nodeModel,
+            activeViewModel: () => viewModelSlots.get(activeBlockId())?.get() ?? null,
+        };
+    });
+
     const content = (
-        <Key each={[scopedNodeModel()]} by={(nm) => nm.blockId}>
-            {(nm) => <Block nodeModel={nm()} preview={false} />}
-        </Key>
+        <Show
+            when={keepAlive()}
+            fallback={
+                <Key each={[scopedNodeModel()]} by={(nm) => nm.blockId}>
+                    {(nm) => <Block nodeModel={nm()} preview={false} />}
+                </Key>
+            }
+        >
+            {/* Every stack member mounted simultaneously, absolutely
+                positioned over one another inside the (already
+                `position: relative`) content slot each keep-alive pane
+                type reserves (e.g. term.scss's `.term-pane-stack-content`)
+                — visibility, not existence, is what switches. A hidden
+                member keeps its real (non-zero) box size the whole time
+                (`visibility: hidden` does not collapse layout the way
+                `display: none` would), so its own ResizeObserver-driven
+                fit logic (e.g. TermWrap's) stays correct in the background
+                and there is nothing to re-fit when it's revealed again. */}
+            <For each={stackBlockIds()}>
+                {(id) => {
+                    // Codex P1/P2 + ReAgent P1 on PR #3187: every "all
+                    // panes" consumer of the block-component registry
+                    // (multi-input broadcast, all-panes zoom, the
+                    // multi-input-eligible terminal count) assumes one
+                    // registry entry per currently-VISIBLE pane. Mark this
+                    // member dormant whenever it isn't the active one, so
+                    // those consumers keep seeing exactly what they did
+                    // before keep-alive existed — see
+                    // block-component-registry.ts's own comment for why
+                    // this is tracked explicitly here rather than
+                    // re-derived from a layout/tab lookup. Cleared on this
+                    // row's own unmount (the id left the stack — tab
+                    // closed), not just flipped to false, so a closed tab
+                    // can never linger as a phantom dormant entry.
+                    createEffect(() => {
+                        setKeepAliveBlockDormant(id, id !== activeBlockId());
+                    });
+                    onCleanup(() => setKeepAliveBlockDormant(id, false));
+
+                    return (
+                        <div
+                            class="pane-leaf-keepalive-slot"
+                            style={{
+                                position: "absolute",
+                                inset: "0",
+                                visibility: id === activeBlockId() ? "visible" : "hidden",
+                                "pointer-events": id === activeBlockId() ? "auto" : "none",
+                            }}
+                        >
+                            <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
+                        </div>
+                    );
+                }}
+            </For>
+        </Show>
     );
 
 
@@ -143,11 +329,15 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // via whichever vm happened to be active at that FIRST hoist and never
     // re-derives afterward — the same "frozen after first hoist" identity
     // `anchorBlockId` (agent-model.ts's own `renderPaneChrome` closure)
-    // already assumes.
+    // already assumes. Reads through `chromeNodeModel()` (not the raw
+    // `nodeModel` prop) so the keep-alive path latches onto the per-id
+    // lookup's current value rather than the shared (and, under keep-alive,
+    // unreliable) leaf-level slot — doesn't change what gets latched for
+    // the non-keep-alive path, where `chromeNodeModel()` IS `nodeModel`.
     let latchedChromeVm: ViewModel | null = null;
     const chromeVm = createMemo(() => {
         if (!latchedChromeVm) {
-            latchedChromeVm = nodeModel.activeViewModel?.() ?? null;
+            latchedChromeVm = chromeNodeModel().activeViewModel?.() ?? null;
         }
         return latchedChromeVm;
     });
@@ -160,7 +350,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                 never returns to a falsy value after its first real
                 capture. */}
             <Show when={chromeVm()}>
-                {(vm) => vm().renderPaneChrome!(nodeModel, content)}
+                {(vm) => vm().renderPaneChrome!(chromeNodeModel(), content)}
             </Show>
         </Show>
     );
