@@ -590,6 +590,36 @@ non-transactional sequence since this code path is already past that
 transaction's scope. Any store error at this point now surfaces as a
 proper 500 instead of silently proceeding with an uninserted phantom.
 
+### 10.6c One more real bug, caught by ReAgent's round-3 review of PR #3194
+
+**P1 — the spawn-failure rollback path cleaned up the orphaned block but
+left the parent still pointing at it.** `handle_pty_shell_create`'s
+rollback (added for Codex P2 on PR #3177, see the earlier §-numbered
+history above) already deletes the block and unlinks it from
+`parent.subblockids` when `resync_controller` fails after the block was
+inserted. But `term:shellsubblockid` on the parent was already persisted
+*before* `resync_controller` ever runs — either inside the atomic claim's
+own transaction (the normal `Ok(None)` win path) or by §10.6b's own
+"winner vanished" fallback — and the rollback never cleared it. After a
+spawn failure, the parent was left with `term:shellsubblockid` pointing at
+a block id that no longer exists; a human opening the composer drawer in
+that exact window reads the stale id via `agent-view.tsx`'s
+`existingSubBlockId={block()?.meta?.["term:shellsubblockid"]}` and attaches
+to nothing instead of getting a working shell. Fixed by clearing the meta
+key alongside the `subblockids` unlink (only when it still points at the
+block being rolled back — the atomic-claim design means this is always
+the block *this specific request* just inserted, but the check keeps the
+intent explicit) and broadcasting a `waveobj:update` so an already-open
+drawer sees the correction. No dedicated test: reliably forcing
+`resync_controller` to fail synchronously in this test harness (tried an
+invalid `cmd:cwd`) didn't reproduce — the underlying spawn failure
+surfaces asynchronously rather than through `resync_controller`'s own
+return value, so triggering this exact branch deterministically would need
+machinery disproportionate to a narrow rollback-path fix; same disposition
+as §10.6a #3's atomic-claim race, which also has no dedicated test for the
+same reason (a real concurrent-request harness, not a unit test, would be
+needed).
+
 ### 10.6 Verification
 
 All pass-1 tests updated for the new request/response shape

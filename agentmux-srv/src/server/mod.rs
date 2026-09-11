@@ -1512,9 +1512,39 @@ async fn handle_pty_shell_create(
             .wstore
             .must_get::<crate::backend::obj::Block>(&req.agent_block_id)
         {
+            let mut changed = false;
             if let Some(ids) = parent.subblockids.as_mut() {
+                let before = ids.len();
                 ids.retain(|id| id != &child_id);
+                changed |= ids.len() != before;
+            }
+            // The pointer was already persisted before `resync_controller`
+            // ran — either inside the atomic claim's own transaction, or by
+            // the "winner vanished" fallback above — so unlinking
+            // `subblockids` alone isn't enough: without also clearing it
+            // here, `term:shellsubblockid` is left pointing at a block that
+            // was just deleted, and a human opening the composer drawer in
+            // this exact window (`agent-view.tsx`'s
+            // `existingSubBlockId={block()?.meta?.["term:shellsubblockid"]}`)
+            // attaches to nothing instead of getting a working shell
+            // (ReAgent P1, round 3 on PR #3194).
+            if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(child_id.as_str())
+            {
+                parent.meta.remove(META_KEY_SHELL_SUBBLOCK_ID);
+                changed = true;
+            }
+            if changed {
                 let _ = state.wstore.update(&mut parent);
+                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref: format!("block:{}", req.agent_block_id),
+                    data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: "block".into(),
+                        oid: req.agent_block_id.clone(),
+                        obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                    }).unwrap_or_default()),
+                });
             }
         }
         return (
