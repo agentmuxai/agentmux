@@ -145,12 +145,39 @@ table. Symptom in the shipped app: GPU process dies at init
 (`eglGetProcAddress not found`), falls back to neither hardware nor
 SwiftShader — GPU fully off, not degraded. Fixed for Windows in
 `scripts/cef-build/args-windows.gn` (`use_static_angle=false`, with the
-full investigation notes inline there). **The gating condition
-(`is_linux || is_win || is_mac`) covers all three platforms — `args.gn`
-(Linux) and `args-darwin.gn` (macOS) do not yet have this line and should
-be checked before either platform's 152 build is treated as complete.**
-A clean compile on those platforms gives no signal either way — this has
-to be checked for directly (export-table check, not just build success).
+full investigation notes inline there).
+
+**Correction (2026-09-10, Clare, via cross-host jekt — confirmed
+cross-machine delivery works in the process) — `use_static_angle`'s
+correct value is platform-specific; this is NOT a blanket
+`use_static_angle=false`-everywhere fix.** The gating condition
+(`is_linux || is_win || is_mac`) does mean all three platforms produce
+the same 0-byte-class stub `libEGL`/`libGLESv2` in `out/` when
+`use_static_angle` resolves `true` — but macOS checked this directly on
+152 and found the OPPOSITE conclusion from Windows: macOS does not bundle
+those files at all, and the real ANGLE implementation is statically
+linked directly into the framework binary instead. Confirmed via export
+symbols: `DisplayMtl`/`rx::`/`angle::` are present in the framework
+binary (79/7352/4597 occurrences respectively) — and were ALSO present in
+the old 148 build's separate `libGLESv2.dylib`, meaning macOS's existing
+`args-darwin.gn` (which does not set `use_static_angle` at all) is
+already correct and working, not silently broken the way Windows was.
+**Setting `use_static_angle=false` on macOS would undo a working
+configuration, not fix a broken one — do not copy the Windows fix into
+`args-darwin.gn`.** Linux has not been checked yet as of this writing.
+**Codex P2 on #3189: checking only `libGLESv2.so`/`libEGL.so` is not
+sufficient** — if Linux also statically links ANGLE (like macOS, into
+`libcef.so` rather than a separate library), those files legitimately
+won't export real symbols even in a correctly configured static build,
+and concluding "broken, needs `use_static_angle=false`" from that alone
+would repeat the macOS mistake in the opposite direction. Check both
+candidates — real ANGLE symbols in `libGLESv2.so`/`libEGL.so` (dynamic
+case) OR in `libcef.so` itself (static case, same `angle::`/`rx::`-family
+symbols Clare checked on macOS) — and only call it broken if neither
+binary has them, ideally confirmed with a live GPU runtime smoke test too,
+not export tables alone. A clean compile gives no signal either way on
+any of the three platforms, and neither does file size alone (the
+Windows stub and the Windows real file differ by only 8%, see above).
 
 **2026-09-10 — a second, unrelated Windows-only compile bug also found**
 (not yet fixed, not blocking): `cef/libcef_dll/bootstrap/installer/installer_bootstrap_helpers_unittest.cc`
@@ -510,14 +537,36 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 **Total build cost: 9–18 machine-hours across three machines**, plus the ~100 GB checkout on each. The three are fully independent and should run in parallel on three machines — see §6.
 
 > **2026-09-10 — before treating any platform's build as done, read the
-> `use_static_angle=false` finding in this doc's top status block.** A
-> clean, zero-error compile is not sufficient evidence — the GPU regression
-> it describes produces no build failure on any of the three platforms.
-> Windows is fixed (`scripts/cef-build/args-windows.gn`); Linux/macOS need
-> the equivalent line added to `args.gn`/`args-darwin.gn` and verified via
-> an export-table check (`dumpbin`/`nm`/`objdump` on the built
-> `libGLESv2.so`/`.dylib` — look for real symbols like `glGetString`, not
-> just file size), not a `strings` search and not build success alone.
+> `use_static_angle` finding in this doc's top status block, including the
+> 2026-09-10 (Clare) correction.** A clean, zero-error compile is not
+> sufficient evidence — the GPU regression it describes produces no build
+> failure on any of the three platforms. **This is NOT a one-line fix to
+> copy to every platform's args file — `use_static_angle`'s correct value
+> differs per platform.** Windows needs `use_static_angle=false`
+> (`scripts/cef-build/args-windows.gn`, confirmed the existing config was
+> broken). macOS confirmed the opposite: its existing `args-darwin.gn`
+> (no `use_static_angle` override at all) is already correct — ANGLE is
+> statically linked into the framework binary there, verified by export
+> symbols, and setting the flag to `false` would undo a working config,
+> not fix a broken one. Linux has not been checked yet — **and, per Codex
+> P2 on #3189, checking only `libGLESv2.so` is not sufficient on its own,
+> for exactly the reason the macOS correction above describes.** If Linux
+> also turns out to statically link ANGLE (like macOS, into `libcef.so`
+> rather than a separate library), `libGLESv2.so` legitimately won't
+> export `glGetString` even in a CORRECTLY configured static build — that
+> file is a placeholder by design in that configuration, not evidence of
+> brokenness. Checking only `libGLESv2.so` and concluding "must set
+> `use_static_angle=false`" on a false negative would repeat the exact
+> macOS mistake this correction exists to prevent, in the other direction.
+> Check BOTH candidates before concluding anything: `glGetString`/
+> `eglGetProcAddress` in `libGLESv2.so`/`libEGL.so` (the dynamic-ANGLE
+> case, like Windows) OR the same real ANGLE symbols
+> (`angle::`/`rx::`-prefixed, same families Clare checked on macOS) inside
+> `libcef.so` itself (the static-ANGLE case, like macOS) — only treat it
+> as actually broken if NEITHER binary has real ANGLE code, ideally
+> confirmed with a live GPU runtime smoke test either way, not export
+> tables alone. `dumpbin`/`nm`/`objdump` for the export-table half; not a
+> `strings` search, and not build success alone.
 
 ### Phase E — Distribution
 Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create`; this is by documented convention a deliberate step separate from any source PR), then update consumers in *this* repo:
