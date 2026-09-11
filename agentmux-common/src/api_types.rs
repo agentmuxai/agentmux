@@ -477,3 +477,28 @@ pub struct UiQueryRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
 }
+
+/// `POST /api/v1/agent/pane/close` — backs the `ClosePane` MCP tool.
+/// See docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md.
+///
+/// `auth` is reused unchanged from `UiAutomationAuth` (the same signed
+/// per-agent identity `verified_block_id` already checks for UI automation)
+/// — it is what resolves the caller's OWN pane when `block_id` is omitted,
+/// and what supplies a verified `source_agent` for the audit log when
+/// `block_id` targets another agent's pane (§5.2 of that spec).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClosePaneRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target pane to close. Omitted = the caller's own pane (self-only,
+    /// no ownership check needed — it's already the caller's). Present =
+    /// fleet tier: close ANY pane by block_id, no ownership check on the
+    /// TARGET either, by design (§5.1) — this is the capability that
+    /// motivated the whole spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    /// Optional human-readable reason, threaded into the audit log entry
+    /// when closing another agent's pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}

@@ -59,7 +59,11 @@ fn now_unix_secs() -> i64 {
 /// agent's ACTUAL current block_id server-side. Never trusts a block_id
 /// from the client — there isn't one to trust. See this module's own doc
 /// comment for the full rationale.
-fn verified_block_id(state: &AppState, auth: &UiAutomationAuth) -> Result<String, String> {
+/// `pub(crate)`: also reused by `app_api::pane::handle_close_pane` (and any
+/// future own-pane-resolving handler) — the identity-verification mechanism
+/// isn't UI-automation-specific, just first built for it. See
+/// docs/specs/SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md §5.0.
+pub(crate) fn verified_block_id(state: &AppState, auth: &UiAutomationAuth) -> Result<String, String> {
     if auth.ts_secs <= 0 || (now_unix_secs() - auth.ts_secs).abs() > UI_AUTOMATION_SIG_MAX_AGE_SECS
     {
         return Err("signature timestamp missing or outside the freshness window".to_string());

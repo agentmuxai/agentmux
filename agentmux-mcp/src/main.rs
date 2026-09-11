@@ -36,7 +36,7 @@ use agentmux_common::api_types::{
     ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
     ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest, UiClickRequest,
     UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse, WindowFocusRequest,
-    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
+    WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -181,6 +181,8 @@ async fn main() {
                     serde_json::from_str(UI_SCREENSHOT_TOOL).expect("static json");
                 let ui_click: Value = serde_json::from_str(UI_CLICK_TOOL).expect("static json");
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
+                let close_pane: Value =
+                    serde_json::from_str(CLOSE_PANE_TOOL).expect("static json");
                 let capture_window: Value =
                     serde_json::from_str(CAPTURE_WINDOW_TOOL).expect("static json");
                 let discover_windows: Value =
@@ -221,7 +223,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -2023,6 +2025,29 @@ async fn call_tool(
                 .unwrap_or_else(|| json!([]));
             Ok(serde_json::to_string_pretty(&matches).unwrap_or_else(|_| matches.to_string()))
         }
+        "ClosePane" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let target_block_id = arguments.get("block_id").and_then(|v| v.as_str()).map(str::to_string);
+            let reason = arguments.get("reason").and_then(|v| v.as_str()).map(str::to_string);
+            let url = format!("{}/api/v1/agent/pane/close", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&ClosePaneRequest { auth, block_id: target_block_id.clone(), reason })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("close failed: HTTP {status} — {text}");
+            }
+            match target_block_id {
+                Some(b) => Ok(format!("Closed pane {b:?}")),
+                None => Ok("Closed your own pane".to_string()),
+            }
+        }
         "Loop" => {
             let prompt = arguments
                 .get("prompt")
@@ -3351,6 +3376,7 @@ mod tests {
             CAPTURE_WINDOW_TOOL,
             DISCOVER_WINDOWS_TOOL,
             LIST_CONVERSATIONS_TOOL,
+            CLOSE_PANE_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
         // response before this change too — SHELL_INPUT/STATUS, the three
@@ -3375,7 +3401,9 @@ mod tests {
         // OPEN_AGENT_TOOL added (REPORT_AGENT_OPEN_API_GAP_2026_09_06.md) —
         // same reasoning as the entries above, not fixing the pre-existing
         // drift between this running total and the prose breakdown.
-        assert_eq!(defs.len(), 43, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue");
+        // CLOSE_PANE_TOOL added (SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md
+        // Phase 1) — same reasoning, not fixing the pre-existing drift.
+        assert_eq!(defs.len(), 44, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 OpenAgent + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue + 1 ClosePane");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
