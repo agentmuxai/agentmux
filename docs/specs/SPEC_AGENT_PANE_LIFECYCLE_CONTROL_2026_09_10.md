@@ -431,13 +431,21 @@ compounding error a spec review exists to catch before code does.
 server-side. `LayoutState.magnifiednodeid` (`agentmux-srv/src/backend/obj.rs:441`)
 is a real, persisted column, round-tripped through `persist_subscriber.rs`
 and mirrored on `TabRecord`. Minimize is real too, if less directly: a
-minimized leaf is `{ minimized: true }` on its `LayoutNodeData`
-(`frontend/layout/lib/layoutMinimize.ts`'s own doc comment), and
-`LayoutNodeData.extra` (`agentmux-common/src/layout_types.rs:55`) is a
-genuine `serde_json::Map` catch-all that round-trips to `db_layout` — so a
-human clicking minimize already persists it, via the ordinary whole-tree
-layout push (`model.persistToBackend()`, called by both
-`magnifyNodeToggle` and `minimizeNodeToggle`).
+minimized leaf is `node.minimized = true` — a **top-level** field on
+`LayoutNode` itself (`frontend/layout/lib/layoutMinimize.ts:111`), not
+nested under its `.data`. **Codex P1 on PR #3195, a follow-up correction to
+this same paragraph:** `LayoutNode` and `LayoutNodeData` each carry their
+*own*, separate `extra` catch-all (`agentmux-common/src/layout_types.rs:90`
+vs `:55`) — writing `minimized` into `LayoutNodeData.extra` (the `.data`
+sub-object's catch-all) would serialize it as `data.minimized`, which
+nothing reads; it belongs in `LayoutNode.extra` (the node's own top-level
+catch-all, line 90), the one that actually round-trips to what
+`node.minimized` reads. Both are genuine `serde_json::Map` catch-alls that
+round-trip to `db_layout` — so a human clicking minimize already persists
+it correctly today, via the ordinary whole-tree layout push
+(`model.persistToBackend()`, called by both `magnifyNodeToggle` and
+`minimizeNodeToggle`); this paragraph's job is only to make sure a NEW
+targeted command writes to the same place.
 
 **What's genuinely missing, verified directly (this spec's own follow-up,
 not yet reviewer-found):** a *targeted*, single-field way to set it.
@@ -461,9 +469,10 @@ small, additive, precedented change, not a new mechanism:
   case in `object.rs` alongside `DeleteBlock`'s.
 - `pane.minimize`/`pane.restore` → add `Command::SetMinimizedNode { tab_id,
   node_id, minimized: bool }`, mirroring `SetMagnifiedNode`'s shape, writing
-  the same `{ minimized: bool }` flag into `LayoutNodeData.extra` the
-  frontend's own toggle already writes — new reducer command, small and
-  precedented, not a new *category* of state.
+  the same top-level `LayoutNode.extra.minimized` field the frontend's own
+  toggle already writes (not `LayoutNodeData.extra` — see the correction
+  above) — new reducer command, small and precedented, not a new *category*
+  of state.
 - Both are genuinely idempotent by construction (set a field to an explicit
   value), which also resolves the separate toggle-vs-idempotent finding
   from the previous draft — there is no toggle involved at all once this is
@@ -478,8 +487,67 @@ The `state.broker.publish`/window-scoped-`WaveEvent` mechanism this section
 previously proposed (verified real in the process of finding this — see
 `open_pane_floating`'s `"openfloatingpane"` push) remains valid, useful
 precedent for a *future* command that has no persisted-state answer
-available — just not this one. No open design question remains for
-maximize/minimize; §9's item 3 is resolved, not just re-scoped.
+available — just not this one. The *architectural* open question §9 item 3
+tracked (ephemeral vs. durable) is resolved — durable, via the existing
+fields. Remaining refinements to the exact reducer-command semantics are
+listed in §6.1, not re-opening this decision.
+
+### 6.1 Implementation-time refinements this spec's own review surfaced
+
+This PR (#3195) is a design spec for work that has not started — per the
+repo owner's own direction, Phase 3+ (split/float/dock/maximize/minimize)
+is explicitly on hold pending their review of §9, not proceeding to code
+yet. Six rounds of review on this document have each found real
+architectural gaps (§4.2's false registry, §5's identity/audit holes, §6's
+false "no persisted state" premise) worth fixing at the design level before
+any of that is worth writing. The review has since moved into a further,
+narrower layer — exact field paths, frontend reconciliation timing, edge
+cases in existing toggle guards — that are genuinely correct concerns, but
+belong to the *implementation* of each command, not this document's
+architecture. Listed here rather than resolved individually, so the actual
+implementer verifies each against the code *at build time* (which will
+have moved on from today's snapshot regardless of how precisely this spec
+tries to describe it now) instead of trusting this list as a final word:
+
+- **Cross-channel forwarding (Codex P1):** a target block on another local
+  channel is invisible to this instance's `AppState`. `FleetBulkStop`
+  handles this via `forward_stop_to_shared_channel`; pane-lifecycle
+  commands need the same, plus a real answer for how the remote instance
+  verifies `verified_block_id`'s per-instance HMAC across the channel
+  boundary — or v1 narrows explicitly to same-channel only, which needs
+  to be stated as a real MCP-tool-description-level limitation, not left
+  implicit.
+- **Stacked panes (Codex P1):** `pane.float`'s source-delete step, if it
+  resolves the leaf via `getNodeByBlockId`, deletes the WHOLE leaf even
+  when the caller's block is one dormant member of a `blockStack` — its
+  siblings lose their only layout node while staying live in
+  `blockids`. Needs real stacked-pane semantics (move the whole stack, or
+  detach only the targeted member) before this ships.
+- **Live reconciliation for an already-open target tab (Codex P1):**
+  persisting `SetMagnifiedNode`/`SetMinimizedNode` and broadcasting the
+  WaveObj update does not, by itself, update a frontend that already has
+  the tab's `LayoutModel` loaded — `layoutPersistence.ts`'s
+  `onBackendUpdate` doesn't copy an updated root/`magnifiednodeid` today,
+  and `layout_helpers.rs` documents this non-auto-sync explicitly (the
+  same class of gap `queue_source_layout_delete` exists to close for
+  deletes, §6's own citation above). The command needs the equivalent
+  pending-action/reconciliation path, or its target window won't visibly
+  update until some unrelated edit happens to refresh it.
+- **`SplitPane` direction (Codex P2):** `LayoutTreeInsertNodeAction` (§4.3's
+  table) takes no target node or direction — it can't honor
+  `direction: left/right/up/down` at all. Needs the real
+  `SplitHorizontal`/`SplitVertical` actions, or `open_pane`'s own
+  `resolve_placement` + queued split action, not a plain insert.
+- **Minimize's last-expanded-leaf guard (Codex P2):** the existing human
+  toggle refuses to minimize a tab's last expanded leaf
+  (`countExpandedLeaves(...) <= 1`) — an unconditional `SetMinimizedNode`
+  needs the identical guard, or an agent could leave a tab with zero
+  visible content, a state the UI is deliberately designed to prevent.
+- **`RestorePane` must be target-specific (Codex P2):** clearing
+  `magnifiednodeid` unconditionally restores whichever pane happens to be
+  maximized — if that's a different pane than the one `RestorePane`
+  targeted, it wrongly un-maximizes an unrelated pane. Clear it only when
+  its current value equals the *targeted* pane's own resolved node id.
 
 ## 7. Phased implementation plan
 
@@ -542,12 +610,16 @@ stays hand-written in `tool_schemas.rs`, same as every existing tool.
    tracking reference in the first draft).
 2. §5.5 — should a cross-pane close/maximize/minimize surface (but not
    block on) the target's `turn_active` state?
-3. **Resolved, no longer open (§6):** maximize/minimize turned out to
-   already have real persisted server-side state
-   (`LayoutState.magnifiednodeid`, `LayoutNodeData.extra`) — the "which
-   design, ephemeral or durable" question was built on a false premise.
-   Expose the existing `SetMagnifiedNode` reducer command as its own
-   dispatchable action, add its `SetMinimizedNode` counterpart, done.
+3. **Resolved at the architecture level (§6):** maximize/minimize turned
+   out to already have real persisted server-side state
+   (`LayoutState.magnifiednodeid`, `LayoutNode.extra.minimized`) — the
+   "which design, ephemeral or durable" question was built on a false
+   premise. Expose the existing `SetMagnifiedNode` reducer command as its
+   own dispatchable action, add its `SetMinimizedNode` counterpart. Several
+   real command-level refinements (last-expanded-leaf guard,
+   target-specific restore, live reconciliation for an already-open tab)
+   remain and are tracked in §6.1, not re-opening this architectural
+   decision.
 4. **Resolved, no longer open (§4.2):** a shared `register_typed`-backed
    dispatch table for REST+MCP turned out not to correspond to any real
    process-wide registry — verified directly against `websocket.rs`'s
