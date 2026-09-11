@@ -130,6 +130,15 @@ pub struct ShellStatusResponse {
 // (agent -> agentmux-mcp -> agentmux-srv), with no dependency on any window
 // being open, focused, or even rendering the shell's `term` sub-block — the
 // same posture the existing `Shell`/`ShellInput` family already has.
+//
+// `create` attaches to (creating if needed) the SAME shell a human's
+// composer-drawer session uses, not an independent, invisible one —
+// whichever side gets there first, the other joins. While the agent is
+// actively writing (`input`/`resize`), the human's own keyboard input to
+// that shell is locked out, for a short, self-expiring window
+// (`AGENT_LOCK_WINDOW_MS`) rather than an explicit lock/unlock the agent
+// could fail to release — "bound to the shell only when necessary," per
+// the repo owner's own framing of the requirement.
 
 /// `POST /api/v1/ptyshell/create`
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,9 +160,17 @@ pub struct PtyShellCreateResponse {
 }
 
 /// `POST /api/v1/ptyshell/input` — write raw text to the PTY, as if typed.
+///
+/// `agent_block_id` is filled in by `agentmux-mcp` from its own trusted
+/// env (`AGENTMUX_AGENT_BUS_ID`/`AGENTMUX_BLOCKID`), never a model-facing
+/// tool parameter — same non-forgeable guarantee `agent_slug()` documents.
+/// It's what lets the backend verify `shell_id` is actually a sub-block of
+/// THIS caller's own pane before acting on it (see
+/// `is_owned_by_agent` in `agentmux-srv`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyShellInputRequest {
     pub shell_id: String,
+    pub agent_block_id: String,
     pub text: String,
 }
 
@@ -170,6 +187,7 @@ pub struct PtyShellInputResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyShellResizeRequest {
     pub shell_id: String,
+    pub agent_block_id: String,
     pub rows: u16,
     pub cols: u16,
 }
@@ -192,6 +210,7 @@ pub struct PtyShellResizeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyShellReadRequest {
     pub shell_id: String,
+    pub agent_block_id: String,
     /// Number of trailing lines to return. Defaults to 200.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail_lines: Option<u32>,
@@ -209,6 +228,7 @@ pub struct PtyShellReadResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyShellStatusRequest {
     pub shell_id: String,
+    pub agent_block_id: String,
 }
 
 /// Response from `POST /api/v1/ptyshell/status`
@@ -221,16 +241,30 @@ pub struct PtyShellStatusResponse {
     pub exit_code: Option<i32>,
 }
 
-/// `POST /api/v1/ptyshell/stop` — kill the PTY and delete its sub-block.
+/// `POST /api/v1/ptyshell/stop` — release the agent's lock on the shell
+/// *now*, without waiting for `AGENT_LOCK_WINDOW_MS` to lapse.
+///
+/// Does **not** kill the process or delete the block. The shell this API
+/// drives is, by default, the same one a human's composer-drawer session
+/// uses (see `META_KEY_SHELL_SUBBLOCK_ID`) — it's a shared, pane-scoped
+/// resource with the pane's own lifetime ("only killed when the pane
+/// closes," `AgentShellSubblock.tsx`'s own doc comment), not a private,
+/// disposable one this tool owns outright. An earlier version of this API
+/// (PR #3177) did delete on stop, which was correct for that version's
+/// model (an agent's own throwaway shell) but would destroy a human's live
+/// terminal session under this one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyShellStopRequest {
     pub shell_id: String,
+    pub agent_block_id: String,
 }
 
 /// Response from `POST /api/v1/ptyshell/stop`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyShellStopResponse {
-    pub stopped: bool,
+    /// False if the id was unrecognized, wasn't owned by the caller, or
+    /// simply had no active lock to release.
+    pub released: bool,
 }
 
 // ── Inject (SendMessage + Loop) ───────────────────────────────────────────────

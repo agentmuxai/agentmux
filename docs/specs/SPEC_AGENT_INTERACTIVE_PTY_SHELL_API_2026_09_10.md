@@ -2,10 +2,17 @@
 
 **Author:** Agent3
 **Created:** 2026-09-10
-**Status:** Implemented (PtyShell/PtyShellInput/PtyShellSignal/PtyShellResize/
-PtyShellRead/PtyShellStatus/PtyShellStop) — real-PTY round trip
-(create → type a command → read its actual output → stop) verified live,
-not just compiled; see §9.
+**Status:** Implemented in two passes. Pass 1 (PtyShell/PtyShellInput/
+PtyShellResize/PtyShellRead/PtyShellStatus/PtyShellStop — `PtyShellSignal`
+also shipped in pass 1 but was removed the same day after Codex review, §6b)
+shipped
+each tool driving its OWN independent, invisible shell — real-PTY round trip
+(create → type a command → read its actual output → stop) verified live, not
+just compiled; see §9. Pass 2 (this revision, repo owner's explicit follow-up
+request) changed the model entirely: `PtyShell` now attaches to the SAME
+shell a human's composer-drawer session already uses (or will use), with a
+short, self-expiring lock keeping the two from typing over each other. See
+§10 for the full pass-2 design and what it changed from pass 1.
 **Scope:** New MCP tool(s) letting an agent drive a real, PTY-backed shell —
 create it, send it input (including control characters/signals), read its
 current screen state, resize it, stop it — entirely through backend RPC,
@@ -385,3 +392,273 @@ the discipline the `#[ignore]`'d live test's own doc comment already
 argued for (only intentionally-real-process tests should spawn one) — these
 two just weren't meant to be in that category and had to be brought back in
 line.
+
+## 10. Pass 2 — the same shell a human sees, with a lock (repo owner request, 2026-09-10)
+
+Pass 1 shipped `PtyShell` creating its own independent, headless sub-block —
+architecturally identical to the human-facing composer-drawer shell, but a
+*different block*. A human watching the drawer saw nothing the agent did; if
+the human already had the drawer open, the agent's shell was invisible and
+separate. The repo owner's follow-up request: the agent must drive the SAME
+shell a human sees, with text appearing live as the agent works, while
+staying fully API-driven (no OS-level keystroke injection, no simulated
+DOM/xterm.js events) — and if a human is also typing, lock them out while
+the agent is actively working, unlocking again the moment it stops.
+
+### 10.1 Reuse, in both directions
+
+`create` now checks the agent's own block for `term:shellsubblockid`
+(`agent-view.tsx:2883,2890-2894` — the same key the composer drawer already
+persists there) before doing anything else:
+
+- **Pointer exists** → `resync_controller` against that id instead of
+  creating a new block. Covers a human who already opened the drawer: the
+  agent joins their exact PTY, same scrollback, same live output.
+- **Nothing exists yet** → create as pass 1 did, then persist the pointer
+  onto the agent block. Covers the reverse direction: a drawer opened
+  *after* the agent has been working attaches to what the agent already
+  started (`ControllerResyncCommand`'s own reuse path picks it up), instead
+  of spawning a second, independent shell.
+
+`req.cwd`/`rows`/`cols` are ignored on the reuse path — an already-running
+process's cwd can't change post-spawn, and geometry is `PtyShellResize`'s
+job, not a create-time parameter for a shell that already has a size. The
+Windows ConPTY-handshake check (§6a) runs unconditionally after either
+path — safe on an already-initialized shell, which simply won't have an
+unanswered query sitting in its output for the poll to find.
+
+### 10.2 Ownership reframed from "did PtyShell create it" to "is it this agent's own pane"
+
+Pass 1's `ptyshell:managed` meta-marker check assumed every legitimate
+target was a block `PtyShell` itself created — no longer true once reuse
+means a HUMAN-created drawer shell is an equally legitimate target. Replaced
+with `is_owned_by_agent`: fetch the target block, check its `parentoref`
+equals `block:<agent_block_id>` and it's a `view:"term"` block.
+`agent_block_id` is now a field on every `PtyShell*` request
+(`PtyShellInputRequest` etc., `agentmux-common/src/api_types.rs`) — filled
+in by `agentmux-mcp` from its own trusted env (`AGENTMUX_AGENT_BUS_ID`/
+`AGENTMUX_BLOCKID`), never a model-facing tool parameter, so it can't be
+forged by the calling agent's own model output. This is strictly more
+correct than pass 1's check, not just adapted for reuse: it still blocks the
+exact threat Codex found (an arbitrary block id discoverable via `Layout`,
+e.g. another agent's own CLI pane), while also correctly covering a shell
+the human created first.
+
+### 10.3 Locking: a lease, not an explicit lock/unlock
+
+Every successful `PtyShellInput`/`PtyShellResize` write stamps
+`term:agentlockuntil` (epoch ms, `AGENT_LOCK_WINDOW_MS` = 4000ms out) on the
+target block via `update_object_meta` + a `waveobj:update` broadcast — the
+same two steps the `setmeta` WS handler performs, factored into
+`broadcast_meta_update` since `ptyshell/*` needs the identical pattern from
+a plain HTTP handler with no `WshRpcEngine` in scope. The frontend
+(`AgentShellSubblock.tsx`) gates its `sendDataHandler` purely on
+`agentLockedUntil() > nowTick()` — `nowTick` a signal ticking every 500ms so
+the UI notices the lock lapsing even with no new server push. Read-only
+`PtyShellRead`/`PtyShellStatus` never touch the lock.
+
+**Deliberately a lease, not an explicit lock/unlock pair** — the repo
+owner's own framing: "make sure to unlock as soon as the agent stops using
+it... keep that binding to the shell open only when necessary." An explicit
+release call is one the agent could simply never make (crash, error,
+forgetting), leaving a human locked out indefinitely — the opposite of
+"unlock as soon as it stops." A short, self-expiring window needs no
+server-side timer to leak or get stuck: a quiet agent just lets the
+timestamp lapse.
+
+While locked, the human still **sees** live output — only their own
+keystrokes are dropped, with a small corner badge ("Agent is using this
+shell") explaining why, deliberately not a full-screen overlay (the entire
+point of the visible-shell feature is watching the agent work).
+
+### 10.4 `PtyShellStop` no longer kills anything
+
+Pass 1's `stop` deleted the controller and the block — correct for that
+version's model (the agent's own throwaway shell), wrong once the shell is
+shared with a human's live terminal session. `PtyShellStop` now means
+"release my lock immediately, don't wait for the window to lapse" — it
+clears `term:agentlockuntil` and returns `released: bool`, and never touches
+the process or the block. The shell lives for the pane's own lifetime now,
+matching `AgentShellSubblock.tsx`'s pre-existing rule ("only killed when the
+pane closes") — this tool doesn't own it outright anymore.
+
+### 10.5 Deferred: Session/History → Stash
+
+The repo owner separately raised, while working in this area, that the
+composer details panel's `<AgentControlBar>` (session archive/restore/
+export actions + "View full history") shouldn't be bundled with the shell
+toggle — candidate destination is `AgentStashModal`'s existing tabbed
+per-agent surface. **Not done in this pass** — scoped out as an unrelated
+UI reorg rather than folded into an already-large PTY-shell change; tracked
+as a separate follow-up. One open product question for whoever picks it
+up: do the transient banners (interrupted-session recovery, resume-failed,
+large-session warning) move into the Stash tab too, or stay inline near the
+composer since they're time-sensitive?
+
+### 10.6a Three more real bugs, caught by Codex review of pass 2 (PR #3194)
+
+**1. The lock, as pass 2 first shipped it, didn't actually close the race
+it exists for.** `AgentShellSubblock.tsx`'s gate reacts to a WS-pushed meta
+value — inherently eventually-consistent, not synchronous with the
+backend's own state. A human keystroke already in flight when the lock is
+set could still reach `blockcontroller::send_input` and interleave with
+the agent's write, exactly the collision the lease is supposed to prevent.
+Fixed in the one place that's actually authoritative: `controllerinput`
+(`server/websocket.rs`, the WS command every human keystroke routes
+through) now checks `term:agentlockuntil` itself, at the moment it
+processes the message, and drops the input rather than forwarding it. The
+frontend gate stays as the UX layer (why bother sending input that'll be
+dropped, and it drives the "Agent is using this shell" badge) — it's no
+longer the correctness boundary.
+
+**2. The ConPTY-handshake check, unchanged from pass 1, was newly wrong
+once shells got reused.** Pass 1's version scanned the ENTIRE persisted
+`term` file for `ESC[6n` — safe there, because every shell was freshly
+created with an empty file. Pass 2 calls the same check on the reuse path
+too, and the `term` file is append-only for a block's whole lifetime
+(`handle_append_block_file`'s `FILE_OP_APPEND`) — so a long-running reused
+shell's history almost always still contains its own original,
+long-since-answered query from whenever it first started. Scanning the
+whole file found that stale byte sequence and injected an unsolicited
+`ESC[1;1R` into whatever a human was doing at that exact moment, on every
+single reuse. Fixed by recording the file's length immediately before
+`resync_controller` runs and only ever inspecting bytes appended after
+that baseline — correct uniformly whether the shell was already running
+(nothing new appears, correctly finds nothing) or had to be respawned from
+dead (sees only that fresh process's own new query, never anything from
+its former life).
+
+**3. Two concurrent `PtyShell` calls on a not-yet-initialized pane could
+each create their own shell.** The pointer check at the top of `create` is
+a plain read, not authoritative against a second request racing it. Fixed
+with an atomic claim: re-check the pointer INSIDE a `with_tx` transaction,
+serialized against every other `Store::*` call via the store's single
+connection lock, and only insert+link+set the pointer if it's still unset
+by the time this transaction runs; the loser pivots to reusing the
+winner's shell instead of proceeding with its own. **Explicitly does not
+close the equivalent race against the frontend's own `createsubblock`
+path** — that's a separate, non-transactional, multi-step RPC sequence
+this backend call has no way to serialize against. A human opening the
+drawer for the very first time on a pane in the same narrow window as an
+agent's first `PtyShell` call on it can still each end up with their own
+shell. Documented here as a known, accepted gap (Codex rated this P2, not
+P1) rather than silently left unmentioned — closing it fully would need a
+change to the frontend's own creation path too, out of scope for what one
+backend transaction can enforce unilaterally.
+
+All three reproduced the reasoning above by direct code inspection before
+being accepted as real (not just taking the review's word for it) — see
+§10.6's test list for what backs each one.
+
+### 10.6b Two more real bugs, caught by ReAgent's round-2 review of PR #3194
+
+**P1 — §10.6a #1's fix shrank the lock race but never actually closed the
+part it could have.** The lock was still only written on the SUCCESS path,
+after `blockcontroller::send_input` returned — meaning `send_input`'s own
+entire duration (from the caller's write until it returns) ran with no
+lock in place at all, so a human keystroke landing in that window could
+still interleave with the agent's write via `controllerinput`, which reads
+`term:agentlockuntil` before `send_input` but has nothing to see yet if
+this handler hasn't written it. Fixed by moving
+`lock_shell_for_agent(&state, &req.shell_id)` to run **before** the
+`send_input` call in both `handle_pty_shell_input` and
+`handle_pty_shell_resize`, unconditional on the write's outcome rather than
+gated on success. This shrinks the remaining race to the (much smaller,
+and judged proportionate to leave open — closing it fully would need a
+shared mutex around the whole write, not just a meta flag) window between
+`controllerinput`'s own lock check and `send_input`'s actual write for a
+message that arrived concurrently with the FIRST lock-setting call itself.
+
+**P2 — the "winner's block vanished" fallback in the atomic-claim logic
+(§10.6a #3) built a phantom block instead of a real one.** When this
+request loses the claim race (`Ok(Some(winner_id))`) but
+`try_attach_to_existing_shell` finds the winner's block already gone (an
+edge case rated "exceedingly unlikely" when §10.6a #3 was written), the
+code fell back to `(child_id.clone(), block)` — reusing the in-memory
+`block` value this request had prepared. But that value was only ever
+`tx.insert`-ed inside the `Ok(None)` arm (the "we won the claim" path);
+along the `Ok(Some(...))` arm it was never persisted at all.
+`resync_controller` then ran against a block with no row behind it, and
+the handler returned 200 with a `shell_id` that every subsequent
+`PtyShellInput`/`Read`/`Status`/`Stop` call would fail to find via
+`is_owned_by_agent`'s own lookup. Fixed by actually creating the block for
+real in this fallback branch — `state.wstore.insert(&mut block)`, link it
+into the parent's `subblockids`, set `META_KEY_SHELL_SUBBLOCK_ID` on the
+parent, and broadcast the resulting `waveobj:update` — the same sequence
+the `Ok(None)` arm's transaction performs, just run as a plain
+non-transactional sequence since this code path is already past that
+transaction's scope. Any store error at this point now surfaces as a
+proper 500 instead of silently proceeding with an uninserted phantom.
+
+### 10.6c One more real bug, caught by ReAgent's round-3 review of PR #3194
+
+**P1 — the spawn-failure rollback path cleaned up the orphaned block but
+left the parent still pointing at it.** `handle_pty_shell_create`'s
+rollback (added for Codex P2 on PR #3177, see the earlier §-numbered
+history above) already deletes the block and unlinks it from
+`parent.subblockids` when `resync_controller` fails after the block was
+inserted. But `term:shellsubblockid` on the parent was already persisted
+*before* `resync_controller` ever runs — either inside the atomic claim's
+own transaction (the normal `Ok(None)` win path) or by §10.6b's own
+"winner vanished" fallback — and the rollback never cleared it. After a
+spawn failure, the parent was left with `term:shellsubblockid` pointing at
+a block id that no longer exists; a human opening the composer drawer in
+that exact window reads the stale id via `agent-view.tsx`'s
+`existingSubBlockId={block()?.meta?.["term:shellsubblockid"]}` and attaches
+to nothing instead of getting a working shell. Fixed by clearing the meta
+key alongside the `subblockids` unlink (only when it still points at the
+block being rolled back — the atomic-claim design means this is always
+the block *this specific request* just inserted, but the check keeps the
+intent explicit) and broadcasting a `waveobj:update` so an already-open
+drawer sees the correction. No dedicated test: reliably forcing
+`resync_controller` to fail synchronously in this test harness (tried an
+invalid `cmd:cwd`) didn't reproduce — the underlying spawn failure
+surfaces asynchronously rather than through `resync_controller`'s own
+return value, so triggering this exact branch deterministically would need
+machinery disproportionate to a narrow rollback-path fix; same disposition
+as §10.6a #3's atomic-claim race, which also has no dedicated test for the
+same reason (a real concurrent-request harness, not a unit test, would be
+needed).
+
+### 10.6 Verification
+
+All pass-1 tests updated for the new request/response shape
+(`agent_block_id` added, `stopped` → `released`) and re-verified, plus three
+new deterministic tests
+(`ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_second_one`,
+`ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pane`,
+`ptyshell_input_locks_the_shell_and_stop_releases_it_early`) and three new
+frontend tests (`AgentShellSubblock.test.tsx`'s "agent lock" suite: drops
+keystrokes while locked, forwards them once the lock has passed, badge
+mounts/unmounts with the lock state). The `#[ignore]`'d live-PTY test was
+extended in place to assert the lock gets set on a real successful write and
+that `stop` releases it without killing the shell (`running: true`
+afterward) — re-run live, still green, including through the §10.6a #2 fix
+(no more spurious `ESC[1;1R` injection on a reused shell). §10.6a #1 (the
+backend-side lock enforcement) is covered by a new dedicated test,
+`controllerinput_is_dropped_while_an_agent_lock_is_active`
+(`server/websocket.rs`) — proves a locked target is dropped before ever
+reaching `send_input`, with an unlocked-target control case proving the
+call path is genuinely live rather than trivially always-dropped. §10.6a #3
+(the atomic claim) is exercised indirectly by the existing reuse/create
+tests (all still pass with the new transactional path) but has no dedicated
+concurrent-request test — writing one that reliably provokes the actual
+race would need real parallel task orchestration against the same store,
+judged disproportionate for a fix whose own documented residual gap (the
+frontend-race half) isn't closed either way. Full `agentmux-srv` suite
+(3337 tests) and the frontend typecheck re-run clean, no regressions.
+
+§10.6b's two fixes were verified the same way: P1 by re-running
+`ptyshell_input_locks_the_shell_and_stop_releases_it_early`, updated to
+assert the lock is set by the real HTTP call itself (no more manual
+`lock_shell_for_agent` simulation in the test) — proving the handler, not
+the test, now performs the lock-before-write ordering. P2 has no dedicated
+new test (reliably provoking "the winner's block was deleted between the
+transaction and the attach attempt" needs orchestrating a real deletion
+mid-request, judged disproportionate for a fallback branch already this
+narrow) but is covered indirectly: the existing reuse/create tests and the
+`#[ignore]`'d live-PTY test all still pass against the changed code path,
+and the fix was traced against the exact store APIs (`insert`/`must_get`/
+`update`) already exercised elsewhere in this file. Full `agentmux-srv`
+suite (3337 tests, 7 ignored) re-run clean after both §10.6b fixes,
+including the `#[ignore]`'d live-PTY test run explicitly — no regressions.
