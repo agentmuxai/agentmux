@@ -503,7 +503,30 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store, channel_salt: &str)
                             let inserted = identity_store
                                 .mcp_server_insert_raw(&retry)
                                 .map_err(|e| format!("insert mcp server {} under fresh id: {e}", retry.name))?;
-                            (fresh_id, inserted)
+                            if inserted > 0 {
+                                (fresh_id, inserted)
+                            } else {
+                                // The fresh-id insert ALSO silently no-op'd —
+                                // mirrors carry_skills's identical defensive
+                                // re-check (ReAgent P1, PR #3197): only
+                                // reachable if a concurrent process won the
+                                // same name between our re-query above and
+                                // this insert. Never trust a silent
+                                // optimistic-insert failure without checking
+                                // what actually won.
+                                match identity_store
+                                    .mcp_server_find_global_by_name(&server.name)
+                                    .map_err(|e| format!("re-find global mcp server {} after fresh-id insert: {e}", server.name))?
+                                {
+                                    Some(existing) => (existing.id, 0),
+                                    None => {
+                                        return Err(format!(
+                                            "insert mcp server {} under fresh id {fresh_id} silently failed with no conflicting global row found — unreachable unless the identity store's schema changed underneath this migration",
+                                            retry.name
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
