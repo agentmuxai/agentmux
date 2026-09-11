@@ -146,7 +146,7 @@ pub(crate) const PTY_SHELL_STOP_TOOL: &str = r#"{
 
 pub(crate) const SEND_MESSAGE_TOOL: &str = r#"{
   "name": "SendMessage",
-  "description": "Send a message to another agent by name. The message is injected as input into the target agent's active conversation. Use for agent-to-agent coordination — handoff, task delegation, status notifications. Delivery is best-effort and tries local → same-host → LAN → cloud in order. The first three tiers return only once the message has actually been injected; the cloud tier is store-and-forward, so success there means the relay accepted it and the recipient's AgentMux will pick it up when it next syncs (which never happens if that instance stays offline). Returns once one tier has taken the message or all have failed.",
+  "description": "Send a message to another agent by name. The message is injected as input into the target agent's active conversation. Use for agent-to-agent coordination — handoff, task delegation, status notifications. Delivery is best-effort and tries local → same-host → LAN → cloud in order. The first three tiers return only once the message has actually been injected; the cloud tier is store-and-forward, so success there means the relay accepted it and the recipient's AgentMux will pick it up when it next syncs (which never happens if that instance stays offline). The return value names which happened: \"Delivered to X\" means it was injected into a live conversation; \"QUEUED for X\" means only the relay has it. An agent name that exists nowhere also returns QUEUED, so treat that as 'unconfirmed', not 'sent' — check DiscoverAgents if you expected local delivery.",
   "inputSchema": {
     "type": "object",
     "properties": {
