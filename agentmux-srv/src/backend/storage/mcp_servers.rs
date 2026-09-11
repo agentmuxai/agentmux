@@ -520,22 +520,27 @@ impl Store {
         }
     }
 
-    /// Mirrors `Skill::skill_rewrite_ref_id` exactly, for the MCP ref tables.
-    /// Returns the number of ref rows actually repointed — see
+    /// Mirrors `Skill::skill_rewrite_ref_id` exactly, for the MCP ref tables
+    /// — including its insert-then-delete merge semantics (Codex P2, PR
+    /// #3183). Returns the number of ref rows actually repointed — see
     /// `Skill::skill_rewrite_ref_id`'s doc comment.
     pub(crate) fn mcp_server_rewrite_ref_id(&self, old_id: &str, new_id: &str) -> Result<usize, StoreError> {
         if old_id == new_id {
             return Ok(0);
         }
         let conn = self.conn.lock().unwrap();
-        let agent = conn.execute(
-            "UPDATE OR IGNORE db_agent_mcp_ref SET mcp_id = ?2 WHERE mcp_id = ?1",
+        conn.execute(
+            "INSERT OR IGNORE INTO db_agent_mcp_ref (agent_id, mcp_id)
+                SELECT agent_id, ?2 FROM db_agent_mcp_ref WHERE mcp_id = ?1",
             params![old_id, new_id],
         )?;
-        let bundle = conn.execute(
-            "UPDATE OR IGNORE db_bundle_mcp_ref SET mcp_id = ?2 WHERE mcp_id = ?1",
+        let agent = conn.execute("DELETE FROM db_agent_mcp_ref WHERE mcp_id = ?1", params![old_id])?;
+        conn.execute(
+            "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id)
+                SELECT bundle_id, ?2 FROM db_bundle_mcp_ref WHERE mcp_id = ?1",
             params![old_id, new_id],
         )?;
+        let bundle = conn.execute("DELETE FROM db_bundle_mcp_ref WHERE mcp_id = ?1", params![old_id])?;
         Ok(agent + bundle)
     }
 

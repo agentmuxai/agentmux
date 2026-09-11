@@ -12,6 +12,7 @@
 // bundle_* RPCs. Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { Markdown } from "@/app/element/markdown";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { GlobalBundleViewModel, NEW_SECTION_ID } from "./global-bundle-model";
 import "./global-bundle.scss";
@@ -183,7 +184,23 @@ export const GlobalBundleManager = (): JSX.Element => {
                                 when={cfg().exists}
                                 fallback={<p class="global-bundle-machine-config-empty">No file at this path yet.</p>}
                             >
-                                <pre class="global-bundle-machine-config-content">{cfg().content}</pre>
+                                {/* The resize handle lives on this wrapper, not on
+                                    <Markdown> itself — Markdown's own root sets
+                                    `height: 100%; overflow: hidden`, which would
+                                    fight a resize/height override applied
+                                    directly to it. Markdown fills 100% of
+                                    whatever height this wrapper resizes to and
+                                    handles its own internal scrolling
+                                    (nativeScrollbar: a plain CSS scrollbar is
+                                    plenty for a reference-only preview panel). */}
+                                <div class="global-bundle-machine-config-content">
+                                    <Markdown
+                                        text={cfg().content}
+                                        scrollable={true}
+                                        nativeScrollbar={true}
+                                        contentClass="global-bundle-machine-config-markdown-content"
+                                    />
+                                </div>
                             </Show>
                         </div>
                     </div>
@@ -383,9 +400,17 @@ export const GlobalBundleManager = (): JSX.Element => {
                     {model.showPreviewAtom() ? "▾" : "▸"} Combined preview
                 </button>
                 <Show when={model.showPreviewAtom()}>
-                    <pre class="global-bundle-preview-content">
-                        {model.previewAtom() || "(empty)"}
-                    </pre>
+                    {/* See the matching comment on the Claude Code provider-config
+                        block above — same reason this is a wrapper div, not a
+                        class applied directly to <Markdown>. */}
+                    <div class="global-bundle-preview-content">
+                        <Markdown
+                            text={model.previewAtom() || "(empty)"}
+                            scrollable={true}
+                            nativeScrollbar={true}
+                            contentClass="global-bundle-preview-markdown-content"
+                        />
+                    </div>
                 </Show>
             </div>
         </div>
