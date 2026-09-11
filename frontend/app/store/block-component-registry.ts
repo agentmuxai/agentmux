@@ -36,8 +36,40 @@ export function getBlockComponentModel(blockId: string): BlockComponentModel {
     return blockComponentModelMap.get(blockId);
 }
 
+// Codex P1/P2 on PR #3187: `pane-leaf-chrome.tsx`'s keep-alive terminal tabs
+// (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's keep-alive
+// follow-up) mount EVERY stack member's `<Block>` simultaneously, not just
+// the active one — each still registers itself here under its own blockId,
+// same as always. Every existing consumer of the two "all panes" functions
+// below (`TermViewModel.multiInputHandler`'s keystroke broadcast,
+// `zoom.ts`'s all-panes stepper, `keymodel.ts`'s multi-input-eligible
+// terminal count) assumes one registry entry == one currently-visible pane
+// — true before keep-alive (a dormant stack member was simply unmounted and
+// therefore never registered at all), no longer true now that a hidden
+// terminal tab stays mounted AND registered. Filtering here, once, fixes
+// every current (and future) "all panes" consumer instead of requiring each
+// call site to remember its own filter.
+//
+// `node.data.blockId` (`layoutStack.ts`'s mutators) is reassigned to
+// whichever stack member is ACTIVE on every switch — `getNodeByBlockId`
+// resolves the leaf for ANY member, dormant or active, of a stacked leaf
+// (`leaf.data.blockStack?.includes(blockId)`), so comparing its return
+// value's OWN `.blockId` against the id being tested is what actually
+// distinguishes "the currently active/visible member" from "some other
+// blockId that merely still exists somewhere in this leaf's stack." A
+// no-op for every non-keep-alive pane type: those only ever have their
+// current active member registered at all, so this always resolves true
+// for whatever's actually in the map.
+function isActiveStackMember(blockId: string): boolean {
+    const layoutModel = getLayoutModelForStaticTab();
+    const node = layoutModel.getNodeByBlockId(blockId);
+    return node?.data?.blockId === blockId;
+}
+
 export function getAllBlockComponentModels(): BlockComponentModel[] {
-    return Array.from(blockComponentModelMap.values());
+    return Array.from(blockComponentModelMap.keys())
+        .filter(isActiveStackMember)
+        .map((blockId) => blockComponentModelMap.get(blockId));
 }
 
 // `ViewModel`'s base interface does not declare `blockId` (concrete view
@@ -47,7 +79,7 @@ export function getAllBlockComponentModels(): BlockComponentModel[] {
 // getAllBlockComponentModels() value. The map is already keyed on blockId;
 // this just exposes that key alongside its value instead of discarding it.
 export function getAllBlockComponentModelEntries(): [string, BlockComponentModel][] {
-    return Array.from(blockComponentModelMap.entries());
+    return Array.from(blockComponentModelMap.entries()).filter(([blockId]) => isActiveStackMember(blockId));
 }
 
 export function getFocusedBlockId(): string {
