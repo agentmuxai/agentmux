@@ -1,4 +1,4 @@
-# SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float, and Unifying RPC + App API + MCP Behind One Registration
+# SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float
 
 **Status:** proposed — design only, nothing implemented yet
 **Date:** 2026-09-10
@@ -18,7 +18,8 @@ mechanism §5.0 adopts), `agentmux-srv/src/sagas/delete_block.rs`,
 (established MCP → REST `/api/v1/agent/*` → server-side-identity-stamped handler
 as the canonical agent entry point),
 [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`](./SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md)
-(the `register_typed`/`RpcSchema` registry this spec's §4 extends),
+(the `register_typed`/`RpcSchema` registry — §4.2 checked whether this spec
+could extend it to MCP and found it can't, see that section),
 [`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`](./SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md)
 (the "fleet" authorization tier this spec's §5 borrows and contrasts with),
 [`SPEC_MCP_SETNAME_TARGET_ID_2026_06_19.md`](./SPEC_MCP_SETNAME_TARGET_ID_2026_06_19.md)
@@ -129,7 +130,7 @@ for this spec, not an implementation detail to discover later.
   peer has no block_id this instance can address. Confined to host +
   cross-channel for v1, same ceiling `FleetBulkStop` already has today.
 
-## 4. Design — one registration, three consumers
+## 4. Design — what "combine API + MCP + RPC" turns out to actually mean
 
 ### 4.1 The problem this has to solve, stated precisely
 
@@ -143,73 +144,56 @@ codegen + a diff gate. It says nothing about MCP, because MCP is a separate
 process with no crate dependency on srv (confirmed: `agentmux-mcp` talks to
 srv purely over HTTP with its own hand-written `reqwest` calls).
 
-### 4.2 Extend `RpcSchema` to be the MCP source of truth too
+### 4.2 §4.2/4.3 v1 were wrong — there is no process-wide registry to dispatch through
 
-Every pane-lifecycle command in this spec registers **once**, via
-`register_typed` (the mechanism `SPEC_RPC_BINDINGS_CODEGEN` is already adding),
-with one addition: an `mcp_tool` annotation carrying the pieces
-`tool_schemas.rs` currently hand-writes — display name, parameter descriptions,
-and which fields are agent-supplied vs. server-stamped (the same
-`block_id`-from-`AGENTMUX_BLOCKID` pattern `SPEC_AGENT_APP_API_MCP_BINDINGS`
-established).
+**Codex P1 on PR #3195, correctly, and this needed real verification, not a
+patch:** the original design here assumed a `register_typed`/`RpcSchema`
+registry an HTTP handler could look commands up in. That registry does not
+exist in a form either transport could share. Checked directly against the
+code:
 
-```rust
-engine.register_typed::<ClosePaneReq, ClosePaneResp, _, _>(
-    "pane.close",
-    RpcMeta {
-        mcp_tool: Some(McpToolMeta {
-            name: "ClosePane",
-            description: "Close a pane (yours by default, or any pane by block_id).",
-            stamped_fields: &["block_id"], // present in Req, but ONLY stamped
-                                            // server-side when the agent omits it
-        }),
-        ..Default::default()
-    },
-    close_pane_impl,
-)
-```
+- `agentmux-srv/src/server/websocket.rs:125` — `WshRpcEngine::new()` is
+  constructed **fresh inside every WebSocket connection handler**, not once
+  process-wide. Each connection's engine, and everything registered on it, is
+  private to that connection.
+- The HTTP router's `AppState` holds no engine at all — there is nothing for
+  a `POST /api/v1/agent/rpc/:command` handler to look `:command` up in, typed
+  or untyped, even if `register_typed` recorded a schema.
+- Some WS registrations close over that connection's own `conn_id`, so even a
+  hypothetical process-wide engine couldn't safely serve an HTTP request with
+  no connection of its own.
 
-`--dump-rpc-schema` (already proposed by `SPEC_RPC_BINDINGS_CODEGEN` §3.2) gains
-a second output alongside `rpc.gen.d.ts`: `agentmux-mcp/src/tool_schemas.gen.rs`,
-a generated `const` array of MCP tool JSON schemas, replacing the hand-written
-entries in `tool_schemas.rs` for every migrated command. `scripts/check-rpc-
-bindings.sh` (already proposed) is extended to diff this file too.
+So a shared dispatch table is not "a small addition to what already exists
+internally" — it would require inventing a genuinely new process-wide command
+registry, decoupled from per-connection state, that neither transport has
+today. That is a real, separate infrastructure project, not part of this
+spec's scope.
 
-**Codex P2 on PR #3191, correctly:** the metadata sketched above (name,
-description, stamped fields) is enough to generate the MCP *schema*, but
-nothing here gives `agentmux-mcp` an HTTP method/path to call, or installs an
-Axum route — so without more, the REST leg still has to be hand-added to
-`server/mod.rs` per command, and "one registration, three consumers" would be
-false. Fixed in §4.3 below by not needing per-command REST routes at all.
+### 4.3 What actually ships instead: one Rust function, two hand-written call sites
 
-### 4.3 A single generic REST dispatcher, not a growing route table
+Drop the shared-registry idea entirely. Use the pattern that is **already
+shipped and proven** in this exact codebase — `FleetBulkStop` and `ClosePane`
+(§7 step 1-2, landed in PR #3196) both work this way today:
 
-Rather than add a hand-written `.route("/api/v1/agent/pane/close", ...)` line
-per command (which is exactly the per-command REST maintenance §4.2 is trying
-to eliminate), add **one** generic route:
+1. One `*_impl` function holds the real logic (e.g. `close_pane_impl` /
+   `handle_close_pane`), taking `&AppState` plus plain arguments — no
+   transport-specific types.
+2. A hand-written Axum route in `server/mod.rs` (`POST /api/v1/agent/pane/close`)
+   deserializes the REST request and calls it — this is MCP's transport.
+3. If the command also needs a WS/frontend caller, a hand-written
+   `engine.register_handler` closure deserializes the WS request and calls
+   the *same* function.
 
-```
-POST /api/v1/agent/rpc/:command
-```
-
-Its handler looks up `:command` in the `RpcSchema` registry `register_typed`
-already populates, deserializes the body as that command's `Req` type,
-and dispatches through the identical typed handler function the WS engine
-calls — no new per-command Rust code, no new per-command route. This is the
-"documented generic dispatcher" Codex's review proposed as the alternative to
-richer per-command REST metadata, and it's the smaller change: it only needs
-the registry to expose `(command) -> dyn Fn(Value) -> Future<Result<Value>>`,
-which `register_typed`'s type-erased storage already has to do internally to
-support the untyped WS path today.
-
-`agentmux-mcp/src/main.rs`'s dispatch loop calls `POST /api/v1/agent/rpc/pane.close`
-(etc.) directly — reading the target path from the same generated
-`tool_schemas.gen.rs` table §4.2 already produces, so there is still exactly
-one place (`register_typed`) where a new command's shape and name are ever
-written down. This generalizes past pane-lifecycle: every future
-`register_typed` command gets an MCP-reachable REST door for free, with zero
-additional route-table maintenance, which is the actual "one registration,
-three consumers" claim now made true rather than aspirational.
+This is "one implementation, N thin transport adapters," not "one
+registration, zero adapters" — the earlier draft overclaimed the latter.
+`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md`'s `register_typed` work remains
+worth doing on its own merits (it stops frontend TS stubs drifting from
+srv's Rust types), but it doesn't extend to MCP: the REST route for a new
+pane-lifecycle command is a genuinely separate, small, hand-written addition
+each time — exactly as `ClosePane`'s route was. That's the accurate scope,
+and it's still cheap: one route line, one match arm in
+`agentmux-mcp/src/main.rs`, one schema constant in `tool_schemas.rs` — the
+same three-line pattern `ClosePane` already added.
 
 | Command | MCP tool | Own-pane semantics | Cross-pane semantics |
 |---|---|---|---|
@@ -229,15 +213,33 @@ has no destination to resolve against. `sagas::redock_floating_pane::run`
 requires an explicit `source_tab_id`, `source_workspace_id`, `target_tab_id`,
 `target_workspace_id`, and optional `dst_index` — `tear_off_block::run` does
 not persist where a floated block came from, so today there is nothing a
-no-arg `DockPane` could read. Fixed: `pane.float` must record its origin
-(`source_tab_id`, `source_workspace_id`, and the leaf's position at
-tear-off time) — most naturally as block meta, alongside the other
-`agent:*`/`cmd:*` meta keys already carried on a block (§0's DB inspection
-found these directly) — and `pane.dock` defaults to that recorded origin,
-with optional explicit `target_tab_id`/`target_workspace_id`/`dst_index`
-params for redocking somewhere else. This makes the no-arg "put me back"
-call agent-ergonomic while still satisfying `redock_floating_pane`'s real
-required signature underneath.
+no-arg `DockPane` could read.
+
+**Round 2 (Codex P1 on PR #3195), on the first fix:** recording the origin
+alone still isn't a usable destination. The *drag-initiated* tear-off path
+(`server/service/tear_off.rs`'s `handle_tear_off_block`, called with
+`auto_close: bool` defaulting to `true`) auto-deletes the source tab once
+it's empty — so if `pane.float` used that same wrapper, the recorded
+`source_tab_id` would frequently already be gone by the time `pane.dock`
+runs, and `redock_floating_pane::run` rejects a missing target tab outright.
+
+Fixed properly, verified against the actual code this time: `pane.float`
+must **not** go through `handle_tear_off_block` at all. It reuses
+`sagas::tear_off_block::run` directly — the same lower-level call
+`app_api::pane::open_pane_floating` already makes for the existing
+floating-editor feature (`pane.rs`, `SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md`)
+— which never touches the source tab's auto-close behavior; that logic lives
+entirely in the drag-tear-off's own wrapper, a sibling `pane.float` doesn't
+call. `pane.float` records `source_tab_id`/`source_workspace_id` (block meta,
+alongside the other `agent:*`/`cmd:*` keys already carried on a block, §0's
+DB inspection found these directly) knowing the source tab survives. As a
+second line of defense against any *other* path that might still prune an
+empty tab later, `pane.dock` checks whether `source_tab_id` still exists
+before calling `redock_floating_pane::run`; if it doesn't, it creates a
+fresh tab in the recorded `source_workspace_id` (if that workspace still
+exists) as the redock target, rather than failing outright. Optional explicit
+`target_tab_id`/`target_workspace_id`/`dst_index` params remain available for
+redocking somewhere else entirely.
 
 ## 5. Authorization model — the actual hard part
 
@@ -363,32 +365,58 @@ to the persisted `LayoutNode` shape in `db_layout`, same as position/size are
 today. Bigger change, but consistent with "the frontend's layout tree and the
 server's `db_layout` should agree," and survives a reload.
 
-**(b) Ephemeral server-mediated relay, no persistence.** srv accepts
-`pane.maximize`, resolves which live WS connection owns the target tab
-(same resolution `FleetBroadcast` already does to find a target agent's
-delivery channel), and pushes a `{eventtype: "layout-command", ...}` event
-down that connection for the frontend to apply locally — same event-push
-shape used elsewhere on the WS channel (`SPEC_AGENT_APP_API_MCP_BINDINGS` §3
-already documents the `{eventtype: "rpc", data: ...}` wrapper as precedent
-for push-style messages on this transport). Cheaper, ships faster, but the
-state doesn't survive the owning window closing and reopening.
+**(b) Ephemeral server-mediated relay, no persistence — REVISED.** The first
+draft of this option leaned on two things that turned out not to exist:
 
-**Recommendation: (b) for v1**, explicitly flagged as a known limitation
-(maximize/minimize via MCP is best-effort while the target window is open;
-it is not durable), revisit (a) only if that limitation actually bites in
-practice. `pane.close`, `pane.split`, and `pane.float` all have real
-persisted or process-level server state already (§1) and don't face this
-question.
+- **Codex P1 on PR #3195, correctly:** `FleetBroadcast`'s server-side
+  resolution (`fleet_broadcast_impl`, `app_api/fleet.rs`) resolves a
+  `block_id` to an **agent**, then `inject_message`s that agent's own
+  controller (its CLI process's stdin, effectively) — it never touches a
+  frontend WebSocket connection. It is not "the same resolution" this needs
+  at all.
+- Every WS connection's own tab scoping is also a dead end:
+  `websocket.rs:79` sets `let tab_id = String::new();` at connection open and
+  never populates it before calling `event_bus.register_ws(&conn_id,
+  &tab_id)` — so no tab is ever actually registered against any connection.
+  There is no existing tab→connection index to look a target up in.
+
+**What actually works, verified against real shipped code:**
+`app_api::pane::open_pane_floating` already solves the adjacent problem —
+telling *one specific window's* frontend to do something srv can't do
+itself (open the CEF host's floating window). It resolves
+`workspace_id → window_id` from `state.srv_state`'s own `s.windows` map,
+then calls `state.broker.publish(WaveEvent { event: "openfloatingpane",
+scopes: vec![window_id], data: Some(json!({...})), .. })` — a real,
+shipped, window-scoped push, not a WS-connection-keyed one.
+
+Maximize/minimize can reuse exactly this path: resolve `block_id → tab_id`
+(`s.blocks`) `→ workspace_id` (`s.tabs`) `→ window_id` (`s.windows`, same
+lookup `open_pane_floating` performs), then `state.broker.publish` a new
+event kind (e.g. `"paneMaximize"`/`"paneMinimize"`, carrying `block_id`) to
+that one window. The frontend adds one small listener next to its existing
+`"openfloatingpane"` handler, calling the same local `magnifyNodeToggle`/
+`minimizeNodeToggle` a human's own click already triggers. This is real,
+traceable, existing-state-only plumbing — no new registry, no new
+connection-scoping mechanism, unlike the original (b).
+
+**Recommendation: (b), REVISED shape, for v1.** Still explicitly a known
+limitation (best-effort while the target window is open; state doesn't
+survive that window closing and reopening — same caveat as before, just now
+resting on a mechanism that actually exists), and revisit (a) (durable
+`db_layout` persistence) only if that limitation bites in practice.
+`pane.close`, `pane.split`, and `pane.float` all have real persisted or
+process-level server state already (§1) and don't face this question.
 
 ## 7. Phased implementation plan
 
 1. **`pane.close`, own pane.** Lowest risk — reuses the existing
-   `sagas::delete_block::run` path, just gives it a typed `register_typed`
-   entry and an MCP door. Confirms/fixes the history-preservation question
-   from §1.2 as a blocking prerequisite, not a follow-up.
+   `sagas::delete_block::run` path behind a hand-written REST route + MCP
+   tool (§4.3's actual, proven pattern). Confirms/fixes the
+   history-preservation question from §1.2 as a blocking prerequisite, not a
+   follow-up. **Shipped in PR #3196.**
 2. **`pane.close`, cross-agent (fleet tier).** The capability this
    investigation actually needed. Ships with per-target reporting + audit
-   logging from day one, per §5.
+   logging from day one, per §5. **Shipped alongside step 1 in PR #3196.**
 3. **`pane.split`, `pane.float`, `pane.dock` — own pane only.** `split`
    reuses the existing `LayoutTreeInsertNodeAction` path; `float`/`dock` cross
    into the srv↔cef named-pipe IPC (§1) for the first time from MCP — new
@@ -399,12 +427,10 @@ question.
 5. **`pane.maximize`/`pane.minimize`/`pane.restore`, cross-agent (fleet
    tier).** Last — highest-novelty combination (new server concept *and*
    fleet-tier cross-agent targeting at once).
-6. **MCP schema codegen (§4.2).** Can land in parallel with steps 1-2 once
-   the first `register_typed` + `mcp_tool` annotation exists to generate
-   from; migrating the *existing* hand-written MCP tools
-   (`OpenAgent`/`FleetBulkStop`/etc.) to generated schemas is a separate,
-   optional follow-up cleanup, not required for this spec's own tools to
-   ship generated from day one.
+Step 6 ("MCP schema codegen") from the original draft is **removed** — §4.2
+found the shared-registry premise it depended on doesn't exist. There is no
+codegen follow-up pending from this spec; each command's MCP tool schema
+stays hand-written in `tool_schemas.rs`, same as every existing tool.
 
 ## 8. Acceptance criteria
 
@@ -419,12 +445,11 @@ question.
   verified against a real running instance (not just unit-tested), the same
   way the existing floating-pane feature is manually verified today.
 - `MaximizePane`/`MinimizePane`/`RestorePane` work on the caller's own pane
-  while the window stays open; the best-effort/non-durable limitation from
-  §6(b) is documented in the tool description itself, not just this spec.
-- `scripts/check-rpc-bindings.sh` (extended per §4.2) fails CI if
-  `tool_schemas.gen.rs` drifts from the `register_typed` registry, the same
-  guarantee `SPEC_RPC_BINDINGS_CODEGEN` already established for the frontend
-  TS stubs.
+  while the window stays open, via a `state.broker.publish`/window-scoped
+  `WaveEvent` (§6(b) revised) — not the earlier tab→connection idea, which
+  §6 found doesn't correspond to anything real. The best-effort/non-durable
+  limitation is documented in the tool description itself, not just this
+  spec.
 
 ## 9. Open questions summary (for repo-owner sign-off before implementation)
 
@@ -438,9 +463,12 @@ question.
 3. §6 — accept option (b) (ephemeral relay) for v1, or is durable
    `db_layout` persistence for maximize/minimize worth the larger change up
    front?
-4. §7 step 6 — is migrating the *existing* hand-written MCP tools to
-   generated schemas wanted as a near-term follow-up, or left indefinitely
-   as hand-written legacy alongside the newly-generated ones?
+4. **Resolved, no longer open (§4.2):** a shared `register_typed`-backed
+   dispatch table for REST+MCP turned out not to correspond to any real
+   process-wide registry — verified directly against `websocket.rs`'s
+   per-connection `WshRpcEngine` construction. Each new command gets a
+   hand-written REST route + MCP tool, same pattern `ClosePane` already
+   shipped with (PR #3196).
 5. §5.2 — should fixing `FleetBulkStop`'s existing `source_agent: None` gap
    (using the same signing/verification helper this spec adds for its own
    fleet-tier commands) be folded into this work, or filed as its own
