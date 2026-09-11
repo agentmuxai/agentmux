@@ -873,10 +873,22 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // this element. Left unhandled, the browser's default Page Up/Down
         // walks PAST the pane looking for the nearest scrollable ancestor
         // and scrolls whatever it finds outside .agent-view instead —
-        // which reads as the whole chat pane flying off screen. Nothing in
-        // this textarea needs paging (it's a composer box, not a scrollback
-        // buffer), so simply swallow the key here.
+        // which reads as the whole chat pane flying off screen.
+        //
+        // EXCEPTION (codex P2 on PR #3190): a long draft grows the textarea
+        // up to its own 200px cap, past which `.agent-input` becomes its own
+        // scroll container (`max-height: 200px; overflow-y: auto` in
+        // _pending-footer.scss). In that state the textarea itself IS the
+        // nearest scrollable ancestor of the caret, and PageUp/PageDown
+        // should page/scroll within it exactly like any other overflowing
+        // textarea — swallowing the key here would silently break paging
+        // through a long pasted prompt. Only intercept when the textarea has
+        // nothing of its own left to scroll.
         if (e.key === "PageUp" || e.key === "PageDown") {
+            const el = textareaRef;
+            if (el && el.scrollHeight > el.clientHeight) {
+                return;
+            }
             e.preventDefault();
             return;
         }

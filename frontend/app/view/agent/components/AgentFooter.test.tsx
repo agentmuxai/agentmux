@@ -114,6 +114,24 @@ describe("AgentFooter PageUp/PageDown", () => {
         ta.dispatchEvent(pageDown);
         expect(pageDown.defaultPrevented).toBe(true);
     });
+
+    it("does not prevent default when the composer itself is overflowing and has its own paging to do (codex P2 on PR #3190)", async () => {
+        render(() => <AgentFooter agentName="Test" />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+
+        // jsdom never computes real layout, so scrollHeight/clientHeight are
+        // both 0 by default — simulate the "draft grew past the 200px cap"
+        // state (_pending-footer.scss's `max-height: 200px; overflow-y: auto`)
+        // the same way a long pasted prompt would trigger it for real.
+        Object.defineProperty(ta, "scrollHeight", { value: 400, configurable: true });
+        Object.defineProperty(ta, "clientHeight", { value: 200, configurable: true });
+
+        const pageUp = new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true });
+        ta.dispatchEvent(pageUp);
+        expect(pageUp.defaultPrevented).toBe(false);
+    });
 });
 
 /**
