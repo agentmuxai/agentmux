@@ -139,8 +139,10 @@ contributor, consistent with everything measured.
 read loop's blocking `read()` semantics are completely untouched (this file
 supports both Unix and Windows PTYs, and that boundary is not something to
 risk getting subtly platform-wrong). Instead, the loop now sends each
-already-OSC-cleaned chunk through an `mpsc::unbounded_channel` to a new,
-standalone async fn, `run_pty_output_flusher`, which:
+already-OSC-cleaned chunk through a **bounded** `mpsc::channel` (capacity
+`PTY_CHANNEL_CAPACITY` = 128, via `blocking_send` from the read loop's
+own blocking thread — see §7's review-round fixes for why this matters) to
+a new, standalone async fn, `run_pty_output_flusher`, which:
 
 - waits for the first chunk of a new batch, then opportunistically drains
   any more that are already queued (or arrive within `PTY_COALESCE_WINDOW`
@@ -194,3 +196,57 @@ action on shared state, not something to do unasked mid-investigation.
 Left for the repo owner to trigger deliberately (a `task package:macos`
 build + manual swap, or simply picking this fix up in the next normal
 release) rather than done silently here.
+
+## 8. Review round — two real gaps in the first cut (reagentx P1 x2, PR #3206)
+
+Both caught before merge, both would have undermined the fix under the
+exact load scenario it targets (several busy panes streaming at once):
+
+1. **The channel itself was unbounded.** `PTY_COALESCE_MAX_BYTES` only
+   bounds the batch currently being assembled — nothing bounded chunks
+   still queued in the channel if the flusher fell behind the read rate
+   (slow disk, lock contention, several busy panes at once). A sustained
+   fast producer (`yes`, a large `cat`) could have grown queued memory
+   without limit — the exact failure mode §4's fix was supposed to close,
+   reintroduced one layer up.
+
+   Fixed: bounded `mpsc::channel(PTY_CHANNEL_CAPACITY = 128)`. The read
+   loop's send moved from `send` to `blocking_send` (correct because that
+   closure runs on a `spawn_blocking` thread, not async — a bounded
+   channel's plain `send` is itself async). `blocking_send` blocks the
+   calling thread once the channel is full, propagating real backpressure
+   to the PTY read rate and, via the kernel's own PTY buffer, to the child
+   process itself.
+
+2. **`flush_pty_batch` ran synchronously inside a plain `tokio::spawn`
+   task.** It does blocking SQLite I/O and takes `std::sync::Mutex`
+   locks — previously safe inside `spawn_blocking`, now running directly
+   on a Tokio async worker thread. With several streaming panes at once,
+   slow disk or lock contention could occupy every worker and delay
+   WebSocket/input/RPC tasks unrelated to the pane that's actually slow.
+
+   Fixed: wrapped the flush call in `tokio::task::block_in_place` rather
+   than `spawn_blocking` — the latter needs `'static + Send` ownership of
+   everything the closure touches, and `flush_pty_batch` borrows `&mut
+   line_buf` / `translator.as_mut()` from the flusher's own stack;
+   `block_in_place` runs inline on the current thread with no such
+   transfer, while telling the runtime to spin up a replacement worker so
+   other tasks aren't starved. Requires a multi-thread runtime —
+   `agentmux-srv`'s `#[tokio::main]` is one by default.
+
+**Verification, this round:**
+
+- New test, `blocking_send_backpressures_once_the_channel_is_full`: fills
+  a capacity-1 channel, confirms a second `blocking_send` from a real
+  background thread (mirroring the production call shape — a genuine OS
+  thread, not an async task) stays blocked while the channel is full, then
+  completes once drained. Stable across 6 repeated local runs before
+  trusting the timing-based negative assertion.
+- The two existing end-to-end coalescing tests needed
+  `#[tokio::test(flavor = "multi_thread")]` — plain `#[tokio::test]`
+  defaults to a current-thread runtime, which panics on
+  `block_in_place`. This is a test-harness-only requirement; production
+  is unaffected, since `#[tokio::main]` already defaults multi-thread.
+  Caught immediately by the test suite itself the moment `block_in_place`
+  was added — exactly the way it's supposed to work.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3332 passed, 0 failed.
