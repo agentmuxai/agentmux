@@ -112,18 +112,24 @@
     color: var(--secondary-text-color);
 }
 
+// Wraps a <Markdown> (see the component for why: its root sets its own
+// `height: 100%; overflow: hidden`, so the resize handle + explicit height
+// have to live on this wrapper instead — Markdown fills 100% of whatever
+// height this resizes to and scrolls its own content internally).
+// `resize: vertical` needs an explicit starting `height`, not just
+// `max-height` — a resizable box needs a real starting value for the
+// browser's resize handle to grow/shrink from. `min-height`/`max-height`
+// bound the drag range.
 .global-bundle-machine-config-content {
-    margin: 0;
+    height: 240px;
+    min-height: 120px;
+    max-height: 600px;
+    overflow: hidden;
+    resize: vertical;
     padding: var(--space-2);
-    max-height: 240px;
-    overflow: auto;
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
-    font-family: var(--fixed-font, monospace);
-    font-size: 9px;
-    color: var(--main-text-color);
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
+    font-size: 11px;
 }
 
 // ── Section list ─────────────────────────────────────────────────────────────
@@ -355,18 +361,18 @@
     }
 }
 
+// See .global-bundle-machine-config-content's comment — same wrapper-around-
+// <Markdown> pattern and the same reason `resize` needs an explicit `height`.
 .global-bundle-preview-content {
-    margin: 0;
+    height: 240px;
+    min-height: 120px;
+    max-height: 600px;
+    overflow: hidden;
+    resize: vertical;
     padding: var(--space-2);
-    max-height: 240px;
-    overflow: auto;
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
-    font-family: var(--fixed-font, monospace);
-    font-size: 9px;
-    color: var(--main-text-color);
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
+    font-size: 11px;
 }
 
 // ── Buttons ──────────────────────────────────────────────────────────────────
