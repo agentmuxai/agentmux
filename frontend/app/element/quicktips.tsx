@@ -331,7 +331,7 @@ const QuickTips = (): JSX.Element => {
                 </div>
                 <div class="flex flex-col gap-2 text-secondary text-sm">
                     <p>
-                        AgentMux is in <b class="text-amber-300">early alpha</b>. Features may be incomplete, unstable, or change between releases.
+                        AgentMux is <b class="text-amber-300">alpha software</b>. Features may be incomplete, unstable, or change between releases.
                         AI agents generate code, text, and other outputs that may be <b>inaccurate, incomplete, or inappropriate</b>.
                         Always review agent outputs before using them.
                     </p>
