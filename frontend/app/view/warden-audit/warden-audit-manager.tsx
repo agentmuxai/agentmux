@@ -100,7 +100,13 @@ export const WardenAuditManager = (): JSX.Element => {
                                     >
                                         <span class="warden-audit-bytes" />
                                     </Show>
-                                    <Show when={entry.outcome != null && entry.reason} fallback={
+                                    {/* codex P2 / reagent P1 on PR #3196: this used to require
+                                        entry.outcome != null too — a condition written for
+                                        Supervisor-nudge entries specifically. ClosePane's
+                                        caller-supplied `reason` (fleet-tier close) always has
+                                        outcome=None, so it never rendered — reason alone is
+                                        enough to show it, regardless of which feature set it. */}
+                                    <Show when={entry.reason} fallback={
                                         <Show when={!entry.success && entry.error_message}>
                                             <span class="warden-audit-error">{entry.error_message}</span>
                                         </Show>
