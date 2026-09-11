@@ -441,6 +441,18 @@ pub(crate) async fn handle_close_pane(
     let target_block_id = req.block_id.clone().unwrap_or(verified_own_block_id);
     let is_cross_pane = req.block_id.is_some();
 
+    // codex P2 on PR #3193: resolve the target's agent name BEFORE deleting
+    // the block, not after. `delete_block::run` stops the block's
+    // controller, and a running agent's own exit-triggered
+    // `unregister_block` can race ahead of this lookup once it does — a
+    // post-delete lookup would then fall back to the bare block UUID
+    // instead of the real agent name, making attribution timing-dependent.
+    let target_agent = state
+        .reactive_handler
+        .get_agent_by_block(&target_block_id)
+        .map(|a| a.agent_id)
+        .unwrap_or_else(|| target_block_id.clone());
+
     let tab_id = {
         let s = state.srv_state.lock().await;
         match s.blocks.get(&target_block_id) {
@@ -450,7 +462,7 @@ pub(crate) async fn handle_close_pane(
                 if is_cross_pane {
                     let request_id = uuid::Uuid::new_v4().to_string();
                     state.reactive_handler.log_fleet_action_audit(
-                        Some(&caller_agent_id), &target_block_id, &target_block_id,
+                        Some(&caller_agent_id), &target_agent, &target_block_id,
                         "pane.close", false, Some(&err), &request_id, req.reason.as_deref(),
                     );
                 }
@@ -463,11 +475,6 @@ pub(crate) async fn handle_close_pane(
 
     if is_cross_pane {
         let request_id = uuid::Uuid::new_v4().to_string();
-        let target_agent = state
-            .reactive_handler
-            .get_agent_by_block(&target_block_id)
-            .map(|a| a.agent_id)
-            .unwrap_or_else(|| target_block_id.clone());
         match &result {
             Ok(_) => state.reactive_handler.log_fleet_action_audit(
                 Some(&caller_agent_id), &target_agent, &target_block_id,
