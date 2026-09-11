@@ -3785,6 +3785,18 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     let state = test_state();
     let app = build_router(state.clone());
 
+    // A real block, not just a fixture id: `create`'s atomic claim-or-lose
+    // step (Codex P2 on PR #3194) does a hard `must_get` on the agent
+    // block to check/set its shellsubblockid pointer inside one
+    // transaction — unlike the old best-effort parent-link, a genuinely
+    // missing agent block is now a real error, matching every actual
+    // caller in production (agent_block_id always names a real, live pane).
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "test-agent-block".to_string(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
     let (status, json) = post_json(
         &app,
         "/api/v1/ptyshell/create",

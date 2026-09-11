@@ -495,6 +495,61 @@ up: do the transient banners (interrupted-session recovery, resume-failed,
 large-session warning) move into the Stash tab too, or stay inline near the
 composer since they're time-sensitive?
 
+### 10.6a Three more real bugs, caught by Codex review of pass 2 (PR #3194)
+
+**1. The lock, as pass 2 first shipped it, didn't actually close the race
+it exists for.** `AgentShellSubblock.tsx`'s gate reacts to a WS-pushed meta
+value — inherently eventually-consistent, not synchronous with the
+backend's own state. A human keystroke already in flight when the lock is
+set could still reach `blockcontroller::send_input` and interleave with
+the agent's write, exactly the collision the lease is supposed to prevent.
+Fixed in the one place that's actually authoritative: `controllerinput`
+(`server/websocket.rs`, the WS command every human keystroke routes
+through) now checks `term:agentlockuntil` itself, at the moment it
+processes the message, and drops the input rather than forwarding it. The
+frontend gate stays as the UX layer (why bother sending input that'll be
+dropped, and it drives the "Agent is using this shell" badge) — it's no
+longer the correctness boundary.
+
+**2. The ConPTY-handshake check, unchanged from pass 1, was newly wrong
+once shells got reused.** Pass 1's version scanned the ENTIRE persisted
+`term` file for `ESC[6n` — safe there, because every shell was freshly
+created with an empty file. Pass 2 calls the same check on the reuse path
+too, and the `term` file is append-only for a block's whole lifetime
+(`handle_append_block_file`'s `FILE_OP_APPEND`) — so a long-running reused
+shell's history almost always still contains its own original,
+long-since-answered query from whenever it first started. Scanning the
+whole file found that stale byte sequence and injected an unsolicited
+`ESC[1;1R` into whatever a human was doing at that exact moment, on every
+single reuse. Fixed by recording the file's length immediately before
+`resync_controller` runs and only ever inspecting bytes appended after
+that baseline — correct uniformly whether the shell was already running
+(nothing new appears, correctly finds nothing) or had to be respawned from
+dead (sees only that fresh process's own new query, never anything from
+its former life).
+
+**3. Two concurrent `PtyShell` calls on a not-yet-initialized pane could
+each create their own shell.** The pointer check at the top of `create` is
+a plain read, not authoritative against a second request racing it. Fixed
+with an atomic claim: re-check the pointer INSIDE a `with_tx` transaction,
+serialized against every other `Store::*` call via the store's single
+connection lock, and only insert+link+set the pointer if it's still unset
+by the time this transaction runs; the loser pivots to reusing the
+winner's shell instead of proceeding with its own. **Explicitly does not
+close the equivalent race against the frontend's own `createsubblock`
+path** — that's a separate, non-transactional, multi-step RPC sequence
+this backend call has no way to serialize against. A human opening the
+drawer for the very first time on a pane in the same narrow window as an
+agent's first `PtyShell` call on it can still each end up with their own
+shell. Documented here as a known, accepted gap (Codex rated this P2, not
+P1) rather than silently left unmentioned — closing it fully would need a
+change to the frontend's own creation path too, out of scope for what one
+backend transaction can enforce unilaterally.
+
+All three reproduced the reasoning above by direct code inspection before
+being accepted as real (not just taking the review's word for it) — see
+§10.6's test list for what backs each one.
+
 ### 10.6 Verification
 
 All pass-1 tests updated for the new request/response shape
@@ -508,5 +563,17 @@ keystrokes while locked, forwards them once the lock has passed, badge
 mounts/unmounts with the lock state). The `#[ignore]`'d live-PTY test was
 extended in place to assert the lock gets set on a real successful write and
 that `stop` releases it without killing the shell (`running: true`
-afterward) — re-run live, still green. Full `agentmux-srv` suite (3336
-tests) and the frontend typecheck re-run clean, no regressions.
+afterward) — re-run live, still green, including through the §10.6a #2 fix
+(no more spurious `ESC[1;1R` injection on a reused shell). §10.6a #1 (the
+backend-side lock enforcement) is covered by a new dedicated test,
+`controllerinput_is_dropped_while_an_agent_lock_is_active`
+(`server/websocket.rs`) — proves a locked target is dropped before ever
+reaching `send_input`, with an unlocked-target control case proving the
+call path is genuinely live rather than trivially always-dropped. §10.6a #3
+(the atomic claim) is exercised indirectly by the existing reuse/create
+tests (all still pass with the new transactional path) but has no dedicated
+concurrent-request test — writing one that reliably provokes the actual
+race would need real parallel task orchestration against the same store,
+judged disproportionate for a fix whose own documented residual gap (the
+frontend-race half) isn't closed either way. Full `agentmux-srv` suite
+(3337 tests) and the frontend typecheck re-run clean, no regressions.

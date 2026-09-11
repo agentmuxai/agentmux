@@ -1087,7 +1087,9 @@ const AGENT_LOCK_WINDOW_MS: i64 = 4000;
 // gates human keyboard input purely on `Date.now() < this`, reactively —
 // no server-side timer to leak or get stuck; a quiet agent just lets the
 // timestamp lapse and control returns on its own.
-const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
+// pub(crate): `server::websocket`'s `controllerinput` handler also reads
+// this — see that handler's own doc comment for why.
+pub(crate) const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
 
 /// Whether `shell_id` is a real `view:"term"` sub-block PARENTED TO
 /// `agent_block_id` — the actual safety property Codex asked for (PR
@@ -1166,6 +1168,56 @@ fn broadcast_meta_update(
 // focused, or rendering the shell's `term` sub-block at all.
 // ---------------------------------------------------------------------------
 
+/// Shared by both the top-level reuse check and the "lost the atomic
+/// claim" fallback in `handle_pty_shell_create`: resync `id`'s controller
+/// and reply, or return `None` if `id` doesn't resolve to a real block
+/// (stale pointer) so the caller falls through to creating a fresh one.
+async fn try_attach_to_existing_shell(
+    state: &AppState,
+    agent_block_id: &str,
+    id: &str,
+) -> Option<axum::response::Response> {
+    let block = state.wstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
+
+    // Baseline BEFORE resync — see `answer_conpty_handshake_if_seen`'s doc
+    // comment (Codex P1 on PR #3194) for why this matters: the `term` file
+    // is append-only for the block's whole lifetime, so an already-running
+    // reused shell's history almost certainly still contains its own old,
+    // long-since-answered `ESC[6n` from whenever it first started.
+    let baseline_len = state
+        .filestore
+        .stat(id, "term")
+        .ok()
+        .flatten()
+        .map(|info| info.size as usize)
+        .unwrap_or(0);
+
+    let registry = state.wstore.shared_agent_registry();
+    if let Err(e) = blockcontroller::resync_controller(
+        &block,
+        "ptyshell",
+        None,
+        false,
+        Some(Arc::clone(&state.broker)),
+        Some(Arc::clone(&state.event_bus)),
+        Some(Arc::clone(&state.wstore)),
+        Some(Arc::clone(&state.filestore)),
+        registry,
+        state.boot_id.clone(),
+    ) {
+        return Some(
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("ptyshell.create: resync existing shell: {e}") })),
+            )
+                .into_response(),
+        );
+    }
+    answer_conpty_handshake_if_seen(state, id, baseline_len).await;
+    tracing::info!(block_id = %id, parent_id = %agent_block_id, "ptyshell.create: reused");
+    Some((StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id.to_string() })).into_response())
+}
+
 /// `POST /api/v1/ptyshell/create` — attach to (creating if needed) "this
 /// pane's one shell."
 ///
@@ -1203,29 +1255,8 @@ async fn handle_pty_shell_create(
     // legitimate post-hoc operation via PtyShellResize, not a create-time
     // parameter for a process that already has a size.
     if let Some(id) = existing_id {
-        if let Ok(Some(block)) = state.wstore.get::<crate::backend::obj::Block>(&id) {
-            let registry = state.wstore.shared_agent_registry();
-            if let Err(e) = blockcontroller::resync_controller(
-                &block,
-                "ptyshell",
-                None,
-                false,
-                Some(Arc::clone(&state.broker)),
-                Some(Arc::clone(&state.event_bus)),
-                Some(Arc::clone(&state.wstore)),
-                Some(Arc::clone(&state.filestore)),
-                registry,
-                state.boot_id.clone(),
-            ) {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("ptyshell.create: resync existing shell: {e}") })),
-                )
-                    .into_response();
-            }
-            answer_conpty_handshake_if_seen(&state, &id).await;
-            tracing::info!(block_id = %id, parent_id = %req.agent_block_id, "ptyshell.create: reused");
-            return (StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id })).into_response();
+        if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &id).await {
+            return resp;
         }
         // Stale pointer (the block was deleted some other way) — fall
         // through to creating a fresh one, same as if none existed.
@@ -1323,27 +1354,91 @@ async fn handle_pty_shell_create(
         ..Default::default()
     };
 
-    if let Err(e) = state.wstore.insert(&mut block) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("ptyshell.create: insert: {e}") })),
-        )
-            .into_response();
-    }
-
-    // Best-effort link into the parent's subblockids — same posture as
-    // createsubblock's WS handler (not a CAS; an acceptable race for a
-    // single lazily-created shell per agent pane).
-    if let Ok(mut parent) = state
-        .wstore
-        .must_get::<crate::backend::obj::Block>(&req.agent_block_id)
-    {
+    // Atomic claim-or-lose (Codex P2 on PR #3194): without this, two
+    // concurrent `PtyShell` calls that both observe an unset
+    // `term:shellsubblockid` (the check at the top of this function is
+    // NOT authoritative — it's a plain read, before this point) would each
+    // insert their own block and race to overwrite the other's pointer
+    // write, leaving one controller registered but orphaned from the
+    // pointer that's supposed to track it, and the two callers ending up
+    // attached to DIFFERENT shells despite both believing they're on "the
+    // pane's one shell." `with_tx` holds the store's single connection
+    // lock for its whole closure, so re-checking the pointer INSIDE it,
+    // atomically with the insert+link+set that follows, serializes any
+    // concurrent `PtyShell` call against this same agent_block_id.
+    //
+    // Does NOT close the equivalent race against the FRONTEND's own
+    // `createsubblock` path (`AgentShellSubblock.tsx`'s "no
+    // existingSubBlockId yet" branch): that's a separate, non-transactional
+    // multi-step RPC sequence (create, then a follow-up `SetMetaCommand`)
+    // this backend call has no visibility into or ability to serialize
+    // against. A human opening the drawer for the very first time on a
+    // pane in the same narrow window as an agent's first `PtyShell` call
+    // on that pane can still each end up with their own shell — a real,
+    // documented, accepted gap (see the spec's §10 for the full
+    // reasoning), not silently ignored, just out of scope for what a
+    // single backend transaction can enforce unilaterally.
+    let claim = state.wstore.with_tx(|tx| {
+        let mut parent = tx.must_get::<crate::backend::obj::Block>(&req.agent_block_id)?;
+        if let Some(winner_id) = parent
+            .meta
+            .get(META_KEY_SHELL_SUBBLOCK_ID)
+            .and_then(|v| v.as_str())
+        {
+            return Ok(Some(winner_id.to_string()));
+        }
+        tx.insert(&mut block)?;
+        parent.subblockids.get_or_insert_with(Vec::new).push(child_id.clone());
         parent
-            .subblockids
-            .get_or_insert_with(Vec::new)
-            .push(child_id.clone());
-        let _ = state.wstore.update(&mut parent);
-    }
+            .meta
+            .insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), json!(child_id));
+        tx.update(&mut parent)?;
+        Ok(None)
+    });
+
+    let (shell_id, block) = match claim {
+        // We lost the race — someone else's transaction committed the
+        // pointer first. Pivot to reusing THEIRS rather than proceeding
+        // with the block we prepared but never actually inserted.
+        Ok(Some(winner_id)) => {
+            if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &winner_id).await {
+                return resp;
+            }
+            // Winner's block vanished between the transaction and now
+            // (exceedingly unlikely) — fall back to using the block we
+            // already have in hand rather than dead-ending the request.
+            (child_id.clone(), block)
+        }
+        Ok(None) => {
+            // We won the claim and the parent's meta changed (inside the
+            // transaction, via a raw `tx.update`, which — unlike
+            // `broadcast_meta_update` — does NOT itself notify any
+            // subscribed frontend). Broadcast now so a drawer already open
+            // (or opened moments later) actually sees the pointer reactively
+            // instead of only on its next unrelated refetch.
+            if let Ok(Some(parent)) = state.wstore.get::<crate::backend::obj::Block>(&req.agent_block_id) {
+                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref: format!("block:{}", req.agent_block_id),
+                    data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                        updatetype: "update".into(),
+                        otype: "block".into(),
+                        oid: req.agent_block_id.clone(),
+                        obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                    }).unwrap_or_default()),
+                });
+            }
+            (child_id.clone(), block)
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("ptyshell.create: claim: {e}") })),
+            )
+                .into_response();
+        }
+    };
+    let child_id = shell_id;
 
     let registry = state.wstore.shared_agent_registry();
     if let Err(e) = blockcontroller::resync_controller(
@@ -1381,19 +1476,16 @@ async fn handle_pty_shell_create(
             .into_response();
     }
 
-    answer_conpty_handshake_if_seen(&state, &child_id).await;
+    // baseline_len=0: a genuinely new block has no prior "term" file content
+    // to accidentally match against (see the reuse path's identical
+    // baseline logic above for why this matters at all).
+    answer_conpty_handshake_if_seen(&state, &child_id, 0).await;
 
-    // Persist the pointer so a drawer opened AFTER this call attaches to
-    // the shell the agent just started instead of spawning a second,
-    // independent one. Best-effort (same posture as the parent-link write
-    // above) — a failure here means a later-opened drawer gets its own
-    // separate shell instead of joining this one, degraded but not broken.
-    let mut agent_meta = crate::backend::obj::MetaMapType::new();
-    agent_meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), json!(child_id));
-    if let Err(e) = broadcast_meta_update(&state, &req.agent_block_id, &agent_meta) {
-        tracing::warn!(agent_block_id = %req.agent_block_id, shell_id = %child_id, error = %e, "ptyshell.create: failed to persist shellsubblockid");
-    }
-
+    // NOTE: the shellsubblockid pointer is already persisted — the atomic
+    // claim transaction above sets it on the parent in the same
+    // transaction as the insert, which is also strictly more correct than
+    // a separate post-hoc write here would be (no window where the block
+    // exists but isn't yet pointed to).
     tracing::info!(block_id = %child_id, parent_id = %req.agent_block_id, "ptyshell.create: fresh");
     (StatusCode::OK, Json(PtyShellCreateResponse { shell_id: child_id })).into_response()
 }
@@ -1414,11 +1506,25 @@ async fn handle_pty_shell_create(
 /// ConPTY only wants to reconcile its internal buffer, not validate the
 /// value against anything a person would see.
 ///
-/// Safe to call unconditionally on both the fresh-create and reuse paths:
-/// an already-initialized shell has long since resolved its one startup
-/// query, so this simply finds nothing within the poll window and returns.
+/// `baseline_len` MUST be the "term" file's byte length taken immediately
+/// before `resync_controller` ran (0 for a genuinely new block) — see the
+/// call sites. Only bytes appended AFTER that offset are ever inspected.
+/// **Not** safe to scan the whole file regardless of reuse/fresh (an
+/// earlier version of this function did exactly that): the "term" file is
+/// append-only for the block's entire lifetime
+/// (`handle_append_block_file`'s `FILE_OP_APPEND`), so a long-running
+/// reused shell's history almost always still contains its own original,
+/// long-since-answered `ESC[6n` from whenever it first started — matching
+/// against that stale byte sequence would inject an unsolicited
+/// `ESC[1;1R` into whatever a human is doing RIGHT NOW on that shell
+/// (Codex P1 on PR #3194, confirmed live before this fix: `create` on an
+/// already-running reused shell always found the old query and misfired).
+/// The baseline makes every case correct uniformly: nothing new appears
+/// (the common reuse case) → correctly finds nothing; `resync_controller`
+/// had to respawn a dead process → correctly sees only ITS fresh query,
+/// never anything from the block's former life.
 #[cfg_attr(not(windows), allow(unused_variables))]
-async fn answer_conpty_handshake_if_seen(state: &AppState, block_id: &str) {
+async fn answer_conpty_handshake_if_seen(state: &AppState, block_id: &str, baseline_len: usize) {
     #[cfg(windows)]
     {
         let mut answered = false;
@@ -1429,7 +1535,10 @@ async fn answer_conpty_handshake_if_seen(state: &AppState, block_id: &str) {
                 .read_file(block_id, "term")
                 .ok()
                 .flatten()
-                .map(|bytes| bytes.windows(4).any(|w| w == b"\x1b[6n"))
+                .map(|bytes| {
+                    let new_bytes = bytes.get(baseline_len..).unwrap_or(&[]);
+                    new_bytes.windows(4).any(|w| w == b"\x1b[6n")
+                })
                 .unwrap_or(false);
             if saw_dsr {
                 let _ = blockcontroller::send_input(
