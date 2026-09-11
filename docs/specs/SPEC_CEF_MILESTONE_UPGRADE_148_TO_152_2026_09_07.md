@@ -164,9 +164,18 @@ the old 148 build's separate `libGLESv2.dylib`, meaning macOS's existing
 already correct and working, not silently broken the way Windows was.
 **Setting `use_static_angle=false` on macOS would undo a working
 configuration, not fix a broken one — do not copy the Windows fix into
-`args-darwin.gn`.** Linux has not been checked yet as of this writing;
-verify by export table on the actual built `.so`, the same method both
-Windows and macOS used — a clean compile gives no signal either way on
+`args-darwin.gn`.** Linux has not been checked yet as of this writing.
+**Codex P2 on #3189: checking only `libGLESv2.so`/`libEGL.so` is not
+sufficient** — if Linux also statically links ANGLE (like macOS, into
+`libcef.so` rather than a separate library), those files legitimately
+won't export real symbols even in a correctly configured static build,
+and concluding "broken, needs `use_static_angle=false`" from that alone
+would repeat the macOS mistake in the opposite direction. Check both
+candidates — real ANGLE symbols in `libGLESv2.so`/`libEGL.so` (dynamic
+case) OR in `libcef.so` itself (static case, same `angle::`/`rx::`-family
+symbols Clare checked on macOS) — and only call it broken if neither
+binary has them, ideally confirmed with a live GPU runtime smoke test too,
+not export tables alone. A clean compile gives no signal either way on
 any of the three platforms, and neither does file size alone (the
 Windows stub and the Windows real file differ by only 8%, see above).
 
@@ -539,11 +548,25 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 > (no `use_static_angle` override at all) is already correct — ANGLE is
 > statically linked into the framework binary there, verified by export
 > symbols, and setting the flag to `false` would undo a working config,
-> not fix a broken one. Linux has not been checked yet. Whichever value
-> turns out right for it, verify by the same method both other platforms
-> used — an export-table check (`dumpbin`/`nm`/`objdump` on the built
-> `libGLESv2.so` — look for real symbols like `glGetString`, not just file
-> size) — not a `strings` search and not build success alone.
+> not fix a broken one. Linux has not been checked yet — **and, per Codex
+> P2 on #3189, checking only `libGLESv2.so` is not sufficient on its own,
+> for exactly the reason the macOS correction above describes.** If Linux
+> also turns out to statically link ANGLE (like macOS, into `libcef.so`
+> rather than a separate library), `libGLESv2.so` legitimately won't
+> export `glGetString` even in a CORRECTLY configured static build — that
+> file is a placeholder by design in that configuration, not evidence of
+> brokenness. Checking only `libGLESv2.so` and concluding "must set
+> `use_static_angle=false`" on a false negative would repeat the exact
+> macOS mistake this correction exists to prevent, in the other direction.
+> Check BOTH candidates before concluding anything: `glGetString`/
+> `eglGetProcAddress` in `libGLESv2.so`/`libEGL.so` (the dynamic-ANGLE
+> case, like Windows) OR the same real ANGLE symbols
+> (`angle::`/`rx::`-prefixed, same families Clare checked on macOS) inside
+> `libcef.so` itself (the static-ANGLE case, like macOS) — only treat it
+> as actually broken if NEITHER binary has real ANGLE code, ideally
+> confirmed with a live GPU runtime smoke test either way, not export
+> tables alone. `dumpbin`/`nm`/`objdump` for the export-table half; not a
+> `strings` search, and not build success alone.
 
 ### Phase E — Distribution
 Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create`; this is by documented convention a deliberate step separate from any source PR), then update consumers in *this* repo:
