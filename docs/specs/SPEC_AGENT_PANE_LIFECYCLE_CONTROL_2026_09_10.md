@@ -216,8 +216,10 @@ same three-line pattern `ClosePane` already added.
 | `pane.float` | `FloatPane` | float caller's own pane to a new OS window; **records its origin** (see `pane.dock` below) | **not exposed cross-agent in v1** — see §7 |
 | `pane.dock` | `DockPane` | dock a floated pane back to its recorded origin (see below) — own-pane only | not applicable |
 
-`pane.maximize`/`pane.minimize`/`pane.restore` require the srv-side concept
-gap from §1 to be closed first — see §6.
+`pane.maximize`/`pane.minimize`/`pane.restore` need one small, precedented
+reducer-command addition first (not a "gap" — see §6, revised after
+verification: the persisted state already exists, only a targeted
+dispatchable command to set it is missing).
 
 **Codex P1 on PR #3191, correctly:** a no-argument "dock back into its tab"
 has no destination to resolve against. `sagas::redock_floating_pane::run`
@@ -264,15 +266,45 @@ layout node behind in the source tab (now a dangling reference) and does
 nothing to materialize the new tab's layout or open the actual floating
 window. `pane.float`'s implementation must do everything
 `open_pane_floating` does *after* its own `tear_off_block::run` call too,
-not just the saga call in isolation:
-`server::service::layout_helpers`'s `LayoutDeleteNodeByBlock`-style prune of
-the source node (same step `sagas::delete_block::run` performs for its own
-Step 2, §1), `setup_torn_off_block_layout` for the destination,
-`event_bus.broadcast_wave_obj_updates` for the new workspace/tab/block, and
-the `state.broker.publish(WaveEvent{event: "openfloatingpane", ...})` call
-to actually open the OS window — `open_pane_floating`'s full body (`pane.rs`
-lines ~30-190) is the real reference implementation to adapt, not just its
-saga call.
+not just the saga call in isolation: `setup_torn_off_block_layout` for the
+destination, `event_bus.broadcast_wave_obj_updates` for the new
+workspace/tab/block, and the `state.broker.publish(WaveEvent{event:
+"openfloatingpane", ...})` call to actually open the OS window —
+`open_pane_floating`'s full body (`pane.rs` lines ~30-190) is the real
+reference implementation to adapt, not just its saga call.
+
+**Round 4 (Codex P1 on PR #3195), the specific miss in Round 3's list:**
+naming a "`LayoutDeleteNodeByBlock`-style prune" undersold what's actually
+required. `server::service::layout_helpers::queue_source_layout_delete`
+(`pub(crate)`, already used by both `tab_move.rs` and the drag-tear-off's
+`tear_off.rs`) is the specific function needed — it does the reducer-level
+prune **and** queues a `pendingbackendactions` entry so an already-loaded
+frontend converges instead of resurrecting the dangling source leaf on its
+next unrelated edit (the exact bug
+`INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md`
+documents, and the reason `sagas::delete_block::run`'s own Step 2b exists —
+§1 already cited that saga as `pane.close`'s foundation without connecting
+that its Step 2b is solving the identical problem `pane.float` now also
+has). Call `queue_source_layout_delete` by name, not an approximation of
+it.
+
+**Same finding applies to `pane.dock` — DockPane needs the redock
+wrapper's layout work too, not just the raw saga.** Exactly the same shape
+of gap as `pane.float`'s: `sagas::redock_floating_pane::run` (§4.3's table)
+only moves tab membership; it does not touch either tab's layout tree. The
+real, shipped RPC handler, `server::service::tear_off::handle_redock_floating_pane`
+(`pub(crate)`, sibling to `handle_tear_off_block` in the same file), is what
+actually does `queue_target_layout_insert`/`queue_target_layout_split` on
+the destination, `queue_source_layout_delete` on the (now-empty) floating
+source, and broadcasts both resulting layouts — without which the block
+moves but never visually appears anywhere. `pane.dock`'s implementation
+should call `handle_redock_floating_pane` directly (filling in its
+`source_tab_id`/`source_workspace_id`/`target_tab_id`/`target_workspace_id`
+arguments from the recorded-origin defaults resolved above, or from
+explicit override params) rather than calling the raw saga and
+re-deriving its wrapper's layout work by hand — including when the
+resolved destination is a freshly-created fallback tab, not just the
+originally-recorded one.
 
 ## 5. Authorization model — the actual hard part
 
@@ -388,64 +420,66 @@ in-flight but isn't actually progressing — but surface `turn_active`
 description so the calling agent can make an informed choice, and always log
 it in the audit entry.
 
-## 6. Closing the maximize/minimize server-side gap
+## 6. Maximize/minimize: not a gap at all — REVISED after verification
 
-Maximize/minimize are pure client `LayoutNode` flags today (§1) — no server
-RPC, so nothing for `register_typed` to wrap yet. Two options:
+§1 and this section's first two drafts both assumed maximize/minimize have
+**no server-side concept to build on** — that was wrong, and building an
+entire relay mechanism on that wrong premise is exactly the kind of
+compounding error a spec review exists to catch before code does.
 
-**(a) Make them genuine persisted layout state.** Add `magnified`/`minimized`
-to the persisted `LayoutNode` shape in `db_layout`, same as position/size are
-today. Bigger change, but consistent with "the frontend's layout tree and the
-server's `db_layout` should agree," and survives a reload.
+**Codex P2 on PR #3195, correctly:** maximize state is **already persisted**
+server-side. `LayoutState.magnifiednodeid` (`agentmux-srv/src/backend/obj.rs:441`)
+is a real, persisted column, round-tripped through `persist_subscriber.rs`
+and mirrored on `TabRecord`. Minimize is real too, if less directly: a
+minimized leaf is `{ minimized: true }` on its `LayoutNodeData`
+(`frontend/layout/lib/layoutMinimize.ts`'s own doc comment), and
+`LayoutNodeData.extra` (`agentmux-common/src/layout_types.rs:55`) is a
+genuine `serde_json::Map` catch-all that round-trips to `db_layout` — so a
+human clicking minimize already persists it, via the ordinary whole-tree
+layout push (`model.persistToBackend()`, called by both
+`magnifyNodeToggle` and `minimizeNodeToggle`).
 
-**(b) Ephemeral server-mediated relay, no persistence — REVISED.** The first
-draft of this option leaned on two things that turned out not to exist:
+**What's genuinely missing, verified directly (this spec's own follow-up,
+not yet reviewer-found):** a *targeted*, single-field way to set it.
+`Command::SetMagnifiedNode { tab_id, node_id }` already exists as a reducer
+command (`agentmux-srv/src/reducer.rs:83`, `reducer/layout.rs`) — but its
+**only** call site (`server/service/object.rs:267`) fires it as an internal
+side-effect of a different action, never as its own dispatchable command a
+client can invoke directly. Minimize has no equivalent targeted command at
+all; the only existing path is the coarse whole-tree push, which needs the
+caller to already hold a full, current copy of the layout tree — awkward
+for a stateless MCP call and a real way to lose a concurrent edit.
 
-- **Codex P1 on PR #3195, correctly:** `FleetBroadcast`'s server-side
-  resolution (`fleet_broadcast_impl`, `app_api/fleet.rs`) resolves a
-  `block_id` to an **agent**, then `inject_message`s that agent's own
-  controller (its CLI process's stdin, effectively) — it never touches a
-  frontend WebSocket connection. It is not "the same resolution" this needs
-  at all.
-- Every WS connection's own tab scoping is also a dead end:
-  `websocket.rs:79` sets `let tab_id = String::new();` at connection open and
-  never populates it before calling `event_bus.register_ws(&conn_id,
-  &tab_id)` — so no tab is ever actually registered against any connection.
-  There is no existing tab→connection index to look a target up in.
+**Design: expose `SetMagnifiedNode` as its own dispatchable action, and add
+its minimize counterpart the same way.** Both follow the exact
+`("object", "DeleteBlock")` pattern `ClosePane` already reuses (§4.3) — a
+small, additive, precedented change, not a new mechanism:
 
-**What actually works, verified against real shipped code:**
-`app_api::pane::open_pane_floating` already solves the adjacent problem —
-telling *one specific window's* frontend to do something srv can't do
-itself (open the CEF host's floating window). It resolves
-`workspace_id → window_id` from `state.srv_state`'s own `s.windows` map,
-then calls `state.broker.publish(WaveEvent { event: "openfloatingpane",
-scopes: vec![window_id], data: Some(json!({...})), .. })` — a real,
-shipped, window-scoped push, not a WS-connection-keyed one.
+- `pane.maximize`/`pane.restore` → dispatch the *existing*
+  `Command::SetMagnifiedNode { tab_id, node_id: block's node (or "" to
+  restore) }` directly, exposed via a new `("object", "SetMagnifiedNode")`
+  case in `object.rs` alongside `DeleteBlock`'s.
+- `pane.minimize`/`pane.restore` → add `Command::SetMinimizedNode { tab_id,
+  node_id, minimized: bool }`, mirroring `SetMagnifiedNode`'s shape, writing
+  the same `{ minimized: bool }` flag into `LayoutNodeData.extra` the
+  frontend's own toggle already writes — new reducer command, small and
+  precedented, not a new *category* of state.
+- Both are genuinely idempotent by construction (set a field to an explicit
+  value), which also resolves the separate toggle-vs-idempotent finding
+  from the previous draft — there is no toggle involved at all once this is
+  a direct field set, so `MaximizePane` called twice trivially stays
+  maximized.
+- REST route + MCP tool for each, exactly `ClosePane`'s shape (§4.3): no
+  new transport, no window-scoped push, no relay. Real, durable,
+  `db_layout`-agreeing state — the win the discarded option (a) was reaching
+  for, obtained for free once the actual existing mechanism was found.
 
-Maximize/minimize can reuse exactly this path: resolve `block_id → tab_id`
-(`s.blocks`) `→ workspace_id` (`s.tabs`) `→ window_id` (`s.windows`, same
-lookup `open_pane_floating` performs), then `state.broker.publish` a new
-event kind (e.g. `"paneMaximize"`/`"paneMinimize"`, carrying `block_id`) to
-that one window. The frontend adds one small listener next to its existing
-`"openfloatingpane"` handler — **not** calling `magnifyNodeToggle`/
-`minimizeNodeToggle` directly, per **Codex P2 on PR #3195**: those are
-genuine toggles (a human's click flips current state either direction),
-whereas `MaximizePane`/`MinimizePane`/`RestorePane` are meant to be
-idempotent — calling `MaximizePane` on an already-maximized pane must stay
-maximized, not flip back to normal. The listener needs the small,
-currently-missing idempotent counterpart to each toggle (set-maximized /
-set-minimized / clear-both, reading current state first and no-op-ing if
-already there) rather than invoking the toggle blind. This is real,
-traceable, existing-state-only plumbing otherwise — no new registry, no new
-connection-scoping mechanism, unlike the original (b).
-
-**Recommendation: (b), REVISED shape, for v1.** Still explicitly a known
-limitation (best-effort while the target window is open; state doesn't
-survive that window closing and reopening — same caveat as before, just now
-resting on a mechanism that actually exists), and revisit (a) (durable
-`db_layout` persistence) only if that limitation bites in practice.
-`pane.close`, `pane.split`, and `pane.float` all have real persisted or
-process-level server state already (§1) and don't face this question.
+The `state.broker.publish`/window-scoped-`WaveEvent` mechanism this section
+previously proposed (verified real in the process of finding this — see
+`open_pane_floating`'s `"openfloatingpane"` push) remains valid, useful
+precedent for a *future* command that has no persisted-state answer
+available — just not this one. No open design question remains for
+maximize/minimize; §9's item 3 is resolved, not just re-scoped.
 
 ## 7. Phased implementation plan
 
@@ -465,11 +499,17 @@ process-level server state already (§1) and don't face this question.
    into the srv↔cef named-pipe IPC (§1) for the first time from MCP — new
    ground, gets its own smoke test against a real floated window before
    merging.
-4. **`pane.maximize`/`pane.minimize`/`pane.restore`, own pane.** Blocked on
-   §6's design decision landing first.
+4. **`pane.maximize`/`pane.minimize`/`pane.restore`, own pane.** No longer
+   blocked on an open design question — §6 found both already have real
+   persisted server-side state, just no targeted set-command yet. Expose
+   `Command::SetMagnifiedNode` as its own dispatchable `("object", ...)`
+   action; add the small, precedented `Command::SetMinimizedNode`
+   counterpart; wrap each in a REST route + MCP tool exactly like
+   `ClosePane`.
 5. **`pane.maximize`/`pane.minimize`/`pane.restore`, cross-agent (fleet
-   tier).** Last — highest-novelty combination (new server concept *and*
-   fleet-tier cross-agent targeting at once).
+   tier).** Same fleet-tier pattern §5.1 already establishes for `pane.close`
+   — no longer "new server concept and cross-agent at once," since step 4
+   resolved the server-concept half.
 Step 6 ("MCP schema codegen") from the original draft is **removed** — §4.2
 found the shared-registry premise it depended on doesn't exist. There is no
 codegen follow-up pending from this spec; each command's MCP tool schema
@@ -487,12 +527,11 @@ stays hand-written in `tool_schemas.rs`, same as every existing tool.
 - `SplitPane`/`FloatPane`/`DockPane` round-trip on the caller's own pane,
   verified against a real running instance (not just unit-tested), the same
   way the existing floating-pane feature is manually verified today.
-- `MaximizePane`/`MinimizePane`/`RestorePane` work on the caller's own pane
-  while the window stays open, via a `state.broker.publish`/window-scoped
-  `WaveEvent` (§6(b) revised) — not the earlier tab→connection idea, which
-  §6 found doesn't correspond to anything real. The best-effort/non-durable
-  limitation is documented in the tool description itself, not just this
-  spec.
+- `MaximizePane`/`MinimizePane`/`RestorePane` set real, `db_layout`-persisted
+  state (`LayoutState.magnifiednodeid` / the leaf's `extra.minimized`) via
+  the new targeted `SetMagnifiedNode`/`SetMinimizedNode` actions (§6) —
+  durable across a reload, not best-effort, since §6 found the earlier
+  "no persisted state exists" premise was wrong.
 
 ## 9. Open questions summary (for repo-owner sign-off before implementation)
 
@@ -503,9 +542,12 @@ stays hand-written in `tool_schemas.rs`, same as every existing tool.
    tracking reference in the first draft).
 2. §5.5 — should a cross-pane close/maximize/minimize surface (but not
    block on) the target's `turn_active` state?
-3. §6 — accept option (b) (ephemeral relay) for v1, or is durable
-   `db_layout` persistence for maximize/minimize worth the larger change up
-   front?
+3. **Resolved, no longer open (§6):** maximize/minimize turned out to
+   already have real persisted server-side state
+   (`LayoutState.magnifiednodeid`, `LayoutNodeData.extra`) — the "which
+   design, ephemeral or durable" question was built on a false premise.
+   Expose the existing `SetMagnifiedNode` reducer command as its own
+   dispatchable action, add its `SetMinimizedNode` counterpart, done.
 4. **Resolved, no longer open (§4.2):** a shared `register_typed`-backed
    dispatch table for REST+MCP turned out not to correspond to any real
    process-wide registry — verified directly against `websocket.rs`'s
