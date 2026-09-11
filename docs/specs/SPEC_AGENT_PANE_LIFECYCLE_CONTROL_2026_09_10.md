@@ -497,7 +497,7 @@ listed in §6.1, not re-opening this decision.
 This PR (#3195) is a design spec for work that has not started — per the
 repo owner's own direction, Phase 3+ (split/float/dock/maximize/minimize)
 is explicitly on hold pending their review of §9, not proceeding to code
-yet. Six rounds of review on this document have each found real
+yet. Seven rounds of review on this document have each found real
 architectural gaps (§4.2's false registry, §5's identity/audit holes, §6's
 false "no persisted state" premise) worth fixing at the design level before
 any of that is worth writing. The review has since moved into a further,
@@ -517,12 +517,22 @@ tries to describe it now) instead of trusting this list as a final word:
   boundary — or v1 narrows explicitly to same-channel only, which needs
   to be stated as a real MCP-tool-description-level limitation, not left
   implicit.
-- **Stacked panes (Codex P1):** `pane.float`'s source-delete step, if it
-  resolves the leaf via `getNodeByBlockId`, deletes the WHOLE leaf even
-  when the caller's block is one dormant member of a `blockStack` — its
-  siblings lose their only layout node while staying live in
-  `blockids`. Needs real stacked-pane semantics (move the whole stack, or
-  detach only the targeted member) before this ships.
+- **Stacked panes (Codex P1, round 6+7) — affects shipped code, not just
+  future work:** a layout leaf can host a `blockStack` of multiple
+  blockIds (`frontend/layout/lib/layoutStack.ts`), and
+  `getNodeByBlockId` matches ANY member — so anything that resolves a
+  leaf this way and deletes it (`delete_block::run`'s
+  `LayoutDeleteNodeByBlock` step, and therefore `pane.float`'s planned
+  source-delete too) removes the WHOLE leaf even when the target is one
+  member of a multi-block stack, orphaning its siblings (still live in
+  `blockids`, no layout node, invisible). **This is not hypothetical for
+  `pane.close`** — PR #3196 already ships `delete_block::run` this way.
+  Tracked as [agentmuxai/agentmux#3202](https://github.com/agentmuxai/agentmux/issues/3202)
+  rather than left as a spec-only note, since it affects code already
+  under review, not just Phase 3+. Needs a server-side stack-aware close
+  (detach only the targeted member when others remain; fall back to the
+  existing whole-leaf delete only for the last/only member) for both
+  `pane.close` and, later, `pane.float`.
 - **Live reconciliation for an already-open target tab (Codex P1):**
   persisting `SetMagnifiedNode`/`SetMinimizedNode` and broadcasting the
   WaveObj update does not, by itself, update a frontend that already has
@@ -538,6 +548,13 @@ tries to describe it now) instead of trusting this list as a final word:
   `direction: left/right/up/down` at all. Needs the real
   `SplitHorizontal`/`SplitVertical` actions, or `open_pane`'s own
   `resolve_placement` + queued split action, not a plain insert.
+- **`SplitPane` must create the block before placing it (Codex P2, round
+  7):** both the frontend split helpers and `app_api::open_pane` dispatch
+  `CreateBlock` (deriving/validating its meta) *before* enqueueing
+  placement — the table's `view` param alone has no creation/default/
+  inheritance step behind it, so there's no block ID yet for the
+  placement actions above to place. Reuse `open_pane`'s create-then-place
+  flow rather than assuming a block already exists.
 - **Minimize's last-expanded-leaf guard (Codex P2):** the existing human
   toggle refuses to minimize a tab's last expanded leaf
   (`countExpandedLeaves(...) <= 1`) — an unconditional `SetMinimizedNode`
@@ -548,6 +565,15 @@ tries to describe it now) instead of trusting this list as a final word:
   maximized — if that's a different pane than the one `RestorePane`
   targeted, it wrongly un-maximizes an unrelated pane. Clear it only when
   its current value equals the *targeted* pane's own resolved node id.
+- **`DockPane`'s `dst_index` is currently a no-op (Codex P2, round 7):**
+  `handle_redock_floating_pane` (§4.3's citation for `pane.dock`) takes
+  its own optional args as `target_block_id`/`direction` and always calls
+  `redock_floating_pane::run` with `dst_index: None` — it has no path to
+  honor an explicit ordering today. Either extend that wrapper to accept
+  and forward a real `dst_index`, or `pane.dock` performs the wrapper's
+  layout work itself around a direct saga call instead of calling the
+  wrapper as-is. Don't advertise `dst_index` as functional until one of
+  those is true.
 
 ## 7. Phased implementation plan
 
