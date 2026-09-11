@@ -886,7 +886,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // nothing of its own left to scroll.
         if (e.key === "PageUp" || e.key === "PageDown") {
             const el = textareaRef;
-            if (el && el.scrollHeight > el.clientHeight) {
+            // This read isn't preceded by a style write in this handler
+            // (unlike the typing/auto-grow path SPEC_INPUT_RESPONSIVENESS_
+            // TERMINAL_AND_AGENT_2026_05_29.md §4 guards against), and
+            // PageUp/PageDown fire far less often than every keystroke, so
+            // it isn't the layout-thrashing pattern that rule targets. The
+            // decision has to be synchronous — deferring to a rAF read
+            // would make preventDefault() too late.
+            if (el && el.scrollHeight > el.clientHeight) { // perf:allow-layout-read — see comment above, not the typing hot path
                 return;
             }
             e.preventDefault();
