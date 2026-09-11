@@ -11,6 +11,26 @@ use crate::backend::obj::RuntimeOpts;
 /// PTY read buffer size (matches Go's 4096).
 pub(super) const PTY_READ_BUF_SIZE: usize = 4096;
 
+/// How long the PTY output flusher waits, after the first chunk of a new
+/// batch, for more chunks to arrive before broadcasting — see
+/// `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md`.
+/// A fast producer (a build, a verbose test run, a busy agent) delivers
+/// output across many separate `read()` returns in quick succession; without
+/// this window, each one fired its own file write + WebSocket broadcast +
+/// OSC/translation pass, and the aggregate IPC/wakeup rate was measurably
+/// costing real CPU in the renderer and GPU-helper processes. 20ms is well
+/// under human-perceptible latency (and under round-trip costs already
+/// elsewhere in this pipeline), so a single short burst — a keystroke echo,
+/// a one-line response — still appears with no felt delay.
+pub(super) const PTY_COALESCE_WINDOW: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Hard cap on how many bytes one coalesced batch accumulates before it is
+/// flushed regardless of the time window — bounds both broadcast latency and
+/// memory during a sustained, very fast burst (e.g. `yes` piped through a
+/// shell pane). 64x a single PTY_READ_BUF_SIZE read: generous headroom for
+/// real bursts (a build's stdout in a 20ms window) while still bounded.
+pub(super) const PTY_COALESCE_MAX_BYTES: usize = 64 * PTY_READ_BUF_SIZE;
+
 /// Detect the best available interactive shell on Windows.
 ///
 /// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
