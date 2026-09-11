@@ -155,33 +155,51 @@ async fn run_pty_output_flusher(
             }
         };
 
-        // block_in_place, not a bare call (reagentx P1 on PR #3206):
-        // flush_pty_batch does blocking SQLite I/O (FileStore::stat /
-        // append_data_at) and takes std::sync::Mutex locks. Calling it
-        // directly here would run that on a Tokio async worker thread —
-        // this closure is inside a plain `tokio::spawn`, not
-        // `spawn_blocking` — and with several panes streaming output at
-        // once (exactly the scenario this whole fix targets), slow disk or
-        // lock contention could occupy every worker and delay WebSocket,
-        // input, and RPC tasks that have nothing to do with this pane.
-        // `block_in_place` runs the closure on this thread while telling
-        // the runtime to spin up a replacement worker if needed, so other
-        // tasks aren't starved — and unlike `spawn_blocking`, it needs no
-        // 'static/Send ownership transfer, so `&mut line_buf` and
-        // `translator.as_mut()` can stay borrowed exactly as they already
-        // are. Requires a multi-thread runtime; `agentmux-srv`'s
-        // `#[tokio::main]` (main.rs) is one by default.
-        tokio::task::block_in_place(|| {
+        // spawn_blocking, not block_in_place (reagentx P2 on PR #3206,
+        // correcting the round before it): flush_pty_batch does blocking
+        // SQLite I/O and takes std::sync::Mutex locks, so it must not run
+        // on a Tokio async worker directly — this closure is inside a
+        // plain `tokio::spawn`, not `spawn_blocking`. The first fix for
+        // that reached for `block_in_place` specifically to avoid moving
+        // `&mut line_buf`/`translator.as_mut()` across a 'static+Send
+        // boundary — but `block_in_place` gets its own replacement worker
+        // via THE SAME shared `spawn_blocking` pool internally (verified
+        // directly against the vendored tokio 1.52.3 source,
+        // `runtime/scheduler/multi_thread/worker.rs`'s `block_in_place`:
+        // `runtime::spawn_blocking(move || run(worker))`), so per flush it
+        // draws on that shared pool TWICE — once for the replacement
+        // worker, once implicitly for the original thread's own blocking
+        // — for work `spawn_blocking` alone would cover with one. Tokio's
+        // own docs single out `block_in_place`'s one real advantage
+        // (protecting OTHER concurrent work in the SAME task, e.g. across
+        // a `join!`) as the reason to prefer it over `spawn_blocking` —
+        // this task does nothing else concurrently, so that advantage
+        // never applies here, and `spawn_blocking` is strictly the better
+        // fit. The ownership problem is solved properly instead: `batch`/
+        // `batch_osc` are freshly built each iteration (cheap to move),
+        // and `line_buf`/`translator` — the only state the flush actually
+        // MUTATES — are moved into the closure and handed back out via the
+        // `JoinHandle`'s return value, rather than trying to keep them
+        // borrowed across the call.
+        let broker_owned = broker.clone();
+        let block_id_owned = block_id.clone();
+        let filestore_owned = filestore.clone();
+        let (new_line_buf, new_translator) = tokio::task::spawn_blocking(move || {
             flush_pty_batch(
-                &broker,
-                &block_id,
+                &broker_owned,
+                &block_id_owned,
                 &batch,
                 &batch_osc,
-                filestore.as_ref(),
+                filestore_owned.as_ref(),
                 &mut line_buf,
                 translator.as_mut(),
             );
-        });
+            (line_buf, translator)
+        })
+        .await
+        .expect("PTY output flush task panicked");
+        line_buf = new_line_buf;
+        translator = new_translator;
 
         if closed_mid_batch {
             break;
@@ -1540,11 +1558,7 @@ mod pty_output_flusher_tests {
     /// actually waiting out any real wall-clock delay — this isn't racing
     /// the 20ms window, it's exercising the "channel closed mid-accumulation"
     /// exit path (see `run_pty_output_flusher`'s `closed_mid_batch`).
-    // multi_thread: run_pty_output_flusher uses block_in_place around
-    // flush_pty_batch (reagentx P1 on PR #3206), which panics on the
-    // default current-thread test runtime — matches the real app, whose
-    // #[tokio::main] (main.rs) is multi-thread by default.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn rapid_chunks_coalesce_into_far_fewer_broadcasts_with_no_data_loss() {
         let (broker, events) = broker_recording_block_file_events();
         let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
@@ -1602,7 +1616,7 @@ mod pty_output_flusher_tests {
     /// faster than the coalescing window would otherwise close — otherwise
     /// a sustained fast producer (`yes` piped into a shell pane) could grow
     /// one "batch" unboundedly.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn byte_cap_forces_a_flush_before_the_channel_closes() {
         let (broker, events) = broker_recording_block_file_events();
         let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
