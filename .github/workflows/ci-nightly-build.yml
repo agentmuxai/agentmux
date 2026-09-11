@@ -23,6 +23,25 @@ on:
     - cron: '0 7 * * *' # 07:00 UTC daily
   workflow_dispatch: {}
 
+# Own group, separate from ci-pr.yml's — a manual workflow_dispatch re-trigger
+# (or an unlucky overlap with the scheduled run) queues behind an
+# already-running nightly instead of racing it on the same windows-latest/
+# ubuntu-latest/macos-latest runners for no reason. cancel-in-progress:
+# false, not true — unlike a superseded PR run, a nightly run in progress is
+# still a real signal worth finishing; queue rather than throw it away.
+#
+# This does NOT give nightly its own runner capacity separate from
+# ci-pr.yml's — GitHub-hosted `windows-latest`/`ubuntu-latest`/`macos-latest`
+# are one shared pool per repo/org regardless of concurrency group; two
+# different groups still draw from the same queue. Actual capacity
+# separation would need self-hosted runners or GitHub Enterprise runner
+# groups, neither of which this repo has. What this achieves is narrower but
+# real: nightly stops competing with itself, which is one less source of
+# load on that shared pool.
+concurrency:
+  group: ci-nightly-build
+  cancel-in-progress: false
+
 jobs:
   build-and-test:
     name: cargo build + test (${{ matrix.os }})
