@@ -194,7 +194,12 @@ export const GlobalBundleManager = (): JSX.Element => {
                                     (nativeScrollbar: a plain CSS scrollbar is
                                     plenty for a reference-only preview panel). */}
                                 <div class="global-bundle-machine-config-content">
-                                    <Markdown text={cfg().content} scrollable={true} nativeScrollbar={true} />
+                                    <Markdown
+                                        text={cfg().content}
+                                        scrollable={true}
+                                        nativeScrollbar={true}
+                                        contentClass="global-bundle-machine-config-markdown-content"
+                                    />
                                 </div>
                             </Show>
                         </div>
@@ -399,7 +404,12 @@ export const GlobalBundleManager = (): JSX.Element => {
                         block above — same reason this is a wrapper div, not a
                         class applied directly to <Markdown>. */}
                     <div class="global-bundle-preview-content">
-                        <Markdown text={model.previewAtom() || "(empty)"} scrollable={true} nativeScrollbar={true} />
+                        <Markdown
+                            text={model.previewAtom() || "(empty)"}
+                            scrollable={true}
+                            nativeScrollbar={true}
+                            contentClass="global-bundle-preview-markdown-content"
+                        />
                     </div>
                 </Show>
             </div>

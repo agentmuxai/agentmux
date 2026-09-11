@@ -132,6 +132,18 @@
     font-size: 11px;
 }
 
+// Compound selector (needs the extra specificity to beat the base `.content
+// { overflow: scroll }` rule in markdown.scss). `nativeScrollbar` skips
+// OverlayScrollbars entirely, so `.content`'s own CSS `overflow` is what
+// actually renders the scrollbar — `auto` (not `scroll`) so a scrollbar
+// only appears when the content genuinely overflows this panel, matching
+// `.content.editor-preview-markdown-content`'s identical fix (codex P2 on
+// PR #2774, and again on PR #3199 for these two call sites). Shorthand,
+// not just overflow-y — the base rule sets BOTH axes.
+.content.global-bundle-machine-config-markdown-content {
+    overflow: auto;
+}
+
 // ── Section list ─────────────────────────────────────────────────────────────
 
 .global-bundle-sections {
@@ -373,6 +385,11 @@
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     font-size: 11px;
+}
+
+// See .global-bundle-machine-config-markdown-content's comment — same fix.
+.content.global-bundle-preview-markdown-content {
+    overflow: auto;
 }
 
 // ── Buttons ──────────────────────────────────────────────────────────────────
