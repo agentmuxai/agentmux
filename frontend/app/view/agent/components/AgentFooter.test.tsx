@@ -93,6 +93,48 @@ describe("AgentFooter Esc-clear Undo", () => {
 });
 
 /**
+ * Regression test: the composer textarea is a flex sibling of the chat
+ * scroll region, not a descendant of it (see the PageUp/PageDown branch's
+ * own comment in handleKeyDown). Left unprevented, Page Up/Down's browser
+ * default escapes past the pane entirely to scroll an unrelated ancestor,
+ * which reads as the whole chat pane jumping off screen.
+ */
+describe("AgentFooter PageUp/PageDown", () => {
+    it("prevents the default scroll for PageUp and PageDown while the composer is focused", async () => {
+        render(() => <AgentFooter agentName="Test" />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+
+        const pageUp = new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true });
+        ta.dispatchEvent(pageUp);
+        expect(pageUp.defaultPrevented).toBe(true);
+
+        const pageDown = new KeyboardEvent("keydown", { key: "PageDown", bubbles: true, cancelable: true });
+        ta.dispatchEvent(pageDown);
+        expect(pageDown.defaultPrevented).toBe(true);
+    });
+
+    it("does not prevent default when the composer itself is overflowing and has its own paging to do (codex P2 on PR #3190)", async () => {
+        render(() => <AgentFooter agentName="Test" />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+
+        // jsdom never computes real layout, so scrollHeight/clientHeight are
+        // both 0 by default — simulate the "draft grew past the 200px cap"
+        // state (_pending-footer.scss's `max-height: 200px; overflow-y: auto`)
+        // the same way a long pasted prompt would trigger it for real.
+        Object.defineProperty(ta, "scrollHeight", { value: 400, configurable: true });
+        Object.defineProperty(ta, "clientHeight", { value: 200, configurable: true });
+
+        const pageUp = new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true });
+        ta.dispatchEvent(pageUp);
+        expect(pageUp.defaultPrevented).toBe(false);
+    });
+});
+
+/**
  * Regression tests for
  * docs/specs/SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md.
  *
