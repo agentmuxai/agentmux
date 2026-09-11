@@ -41,11 +41,19 @@ on:
 # ci-pr.yml runs in a 21-hour window from concurrent agents, sampled the same
 # day) — cutting the wasted volume doesn't fix GitHub-hosted-runner-side
 # flakiness on its own, but it reduces how often any one PR is exposed to it.
-# `github.head_ref` is empty for `push` (not a PR), so it falls through to
-# `github.ref` (the branch) — main pushes still get their own group, just
-# keyed differently than PR runs.
+# Codex P1 on #3198: keying on github.head_ref alone is wrong — for a
+# pull_request event it's just the source BRANCH NAME, with no owner/fork
+# qualifier. Two unrelated PRs (different forks, or even two agents in this
+# same repo) using a common branch name like "main" or "fix-typo" would
+# collide on the same group, and a push to one would cancel the OTHER PR's
+# required CI run — silent, cross-PR, and only noticed when someone's merge
+# is unexpectedly blocked. github.event.pull_request.number is unique per
+# PR regardless of branch naming; use that instead. It's only set for
+# pull_request events, so this still falls through to github.ref for `push`
+# (not a PR) — main pushes get their own group, keyed differently than PR
+# runs, same as before.
 concurrency:
-  group: ci-pr-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
