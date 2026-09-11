@@ -440,7 +440,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                     <For each={wrows}>
                         {(row, i) => (
                             <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.cliLoading && !row.cliFound && !row.running }}>
-                                <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
+                                <i class={`toolchain-row-icon ${rowIconClass(row.icon)}`} aria-hidden="true" />
                                 <div class="toolchain-row-main">
                                     <div class="toolchain-row-title">
                                         <span class="toolchain-row-name">{row.label}</span>
