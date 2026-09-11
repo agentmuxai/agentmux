@@ -7,8 +7,9 @@
 delivery (`agentmux-srv/src/backend/blockcontroller/mod.rs::deliver_agent_message`,
 `persistent.rs::send_user_message`), muxbus/cloud subscriber and messaging-bridge delivery paths
 (`cloud_subscriber.rs`, Slack/Discord/Telegram/WhatsApp bridges), MCP `SendMessage` tool.
-**Explicitly out of scope:** the direct human-operator UI path (`agentinput` RPC →
-`websocket.rs:884-1048`) — a human choosing to interrupt their own agent's in-progress turn by
+**Explicitly out of scope:** the direct human-operator UI path (`agentinput` RPC, dispatched via
+`COMMAND_AGENT_INPUT` in `agentmux-srv/src/backend/rpc_types/commands.rs:109` to the handler in
+`agentmux-srv/src/server/agent_handlers/input.rs:849-864`) — a human choosing to interrupt their own agent's in-progress turn by
 typing into its pane is intentional steering, not the problem this spec addresses.
 **Related:**
 - `docs/specs/SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md` — implemented the controller-aware
@@ -89,7 +90,7 @@ of something other than the human operator's own deliberate action is in scope:
 | ACP `session/prompt` mid-prompt | `acp.rs::send_input` | Unproven/agent-dependent (§7.4 of the 06-16 spec) — treat as "assume yes, must be gated" until proven otherwise |
 | One-shot subprocess providers (codex/gemini/qwen/kimi/default muxcode) | `subprocess.rs` | **No** — structurally cannot (no live stdin between turns); already behaves like "wait for idle" today. No change needed. |
 | PTY keystrokes (shell/TUI blocks, legacy `ject`) | `send_input` | N/A — these are real terminal keystrokes into a shell, not an LLM turn; "explanation section" doesn't apply. No change needed (`jekt-inject-timing.md` unaffected). |
-| Direct human UI (`agentinput`) | `websocket.rs:884-1048` | Yes — **intentionally out of scope**, see header. |
+| Direct human UI (`agentinput`) | `agent_handlers/input.rs:849-864` | Yes — **intentionally out of scope**, see header. |
 
 So the actual code change is narrowly scoped to **persistent-controller delivery via
 `deliver_agent_message`/`send_user_message`**, plus the same gate applied to ACP's
@@ -206,5 +207,5 @@ unaffected.
 | Reactive HTTP inject entry point | `agentmux-srv/src/backend/reactive/handler.rs::inject_message` |
 | Reactive HTTP + forwarding | `agentmux-srv/src/server/reactive.rs:18-143` |
 | Steering evidence (proves mid-turn abandonment, tool-call case only) | `docs/specs/evidence/steer-probe.py`, `steer-probe-claude-run1.txt`, `steer-probe-claude-run2.txt` |
-| ACP prompt delivery | `agentmux-srv/src/backend/blockcontroller/acp.rs:569-611` |
-| Human UI delivery path (unaffected) | `agentmux-srv/src/server/websocket.rs:884-1048` |
+| ACP prompt delivery (`send_input` → `session/prompt`) | `agentmux-srv/src/backend/blockcontroller/acp.rs:695-730` |
+| Human UI delivery path (unaffected) | `agentmux-srv/src/server/agent_handlers/input.rs:849-864` (dispatch), `agentmux-srv/src/backend/rpc_types/commands.rs:109` (`COMMAND_AGENT_INPUT`) |
