@@ -1,5 +1,29 @@
 # AgentMux Version History
 
+## 0.55.42 — 2026-09-11
+
+- feat(install-ui): auto-scroll install-log Details, provider-installer progress bar, and system-tool brand icons
+- fix(srv): seed starter skills/MCP servers with deterministic ids on fresh channels
+- chore(deps): bump vitest, @vitest/mocker and @vitest/coverage-istanbul (major)
+- feat(mcp): add PtyShell — a real PTY-backed interactive shell agents can drive without any UI
+- fix(cef-build): verify-angle-libs.sh no longer false-positives on a small-but-real libEGL.dll
+- feat(srv): identity store gains authoritative db_skills/db_mcp_servers tables (Phase 2a, no readers/writers yet)
+- feat(srv): carry each channel's skills/MCP servers into the identity store (Phase 2b)
+- feat(srv): redirect skill/MCP-server catalog reads and writes to the identity store
+- docs: tone down the early-alpha warning
+- docs: say 'alpha software', not 'early alpha'
+- fix(term): keep-alive terminal tabs no longer leak input/zoom into hidden dormant tabs
+- fix(mcp): SendMessage reports whether a message was delivered or only queued
+- fix(agent-pane): PageUp/PageDown in composer no longer scrolls the pane off screen
+- feat(mcp): PtyShell attaches to the pane's real visible shell, with a lease-based lock instead of destroying it on stop
+- fix(mcp): PtyShell — enforce the agent lock server-side, fix stale-handshake injection on reused shells, atomic first-create claim
+- fix(mcp): PtyShell — lock the shell before writing not after, persist the fallback block when the atomic claim's winner has vanished
+- fix(srv): correct three review findings in the catalog redirect (#3183)
+- fix(ci): add concurrency groups to ci-pr.yml and nightly workflows — stop stale runs piling up on the shared runner pool
+- fix(armory): render Global Memory's provider-config and combined preview as markdown, make both resizable
+- fix(ci): cap ci-pr.yml's required job at 20 minutes
+- fix(mcp): PtyShell create's spawn-failure rollback now also clears the parent's stale shellsubblockid pointer
+
 ## 0.55.41 — 2026-09-10
 
 - feat(zoom): Ctrl+Shift+Scroll zooms every pane in the window at once
