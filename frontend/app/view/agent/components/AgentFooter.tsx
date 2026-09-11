@@ -865,6 +865,21 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // events without setting `isComposing`. Both checks are
         // load-bearing. See SPEC_INPUT_RESPONSIVENESS §6.2.
         if (e.isComposing || e.keyCode === 229) return;
+        // PageUp/PageDown: this textarea is a flex sibling of
+        // .agent-document-scroll-region, not a descendant of it (see
+        // .agent-composer-region in styles/_control-bar.scss) — and
+        // .agent-view itself is overflow:hidden (agent-view.scss). So the
+        // scrollable chat history (.agent-document) is never an ancestor of
+        // this element. Left unhandled, the browser's default Page Up/Down
+        // walks PAST the pane looking for the nearest scrollable ancestor
+        // and scrolls whatever it finds outside .agent-view instead —
+        // which reads as the whole chat pane flying off screen. Nothing in
+        // this textarea needs paging (it's a composer box, not a scrollback
+        // buffer), so simply swallow the key here.
+        if (e.key === "PageUp" || e.key === "PageDown") {
+            e.preventDefault();
+            return;
+        }
         // Ghost-text next-prompt suggestion: Tab accepts it into the real
         // input, matching Claude Code CLI's own terminal UX (see
         // docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md).

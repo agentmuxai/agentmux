@@ -93,6 +93,30 @@ describe("AgentFooter Esc-clear Undo", () => {
 });
 
 /**
+ * Regression test: the composer textarea is a flex sibling of the chat
+ * scroll region, not a descendant of it (see the PageUp/PageDown branch's
+ * own comment in handleKeyDown). Left unprevented, Page Up/Down's browser
+ * default escapes past the pane entirely to scroll an unrelated ancestor,
+ * which reads as the whole chat pane jumping off screen.
+ */
+describe("AgentFooter PageUp/PageDown", () => {
+    it("prevents the default scroll for PageUp and PageDown while the composer is focused", async () => {
+        render(() => <AgentFooter agentName="Test" />);
+        const user = userEvent.setup();
+        const ta = getComposer();
+        await user.click(ta);
+
+        const pageUp = new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true });
+        ta.dispatchEvent(pageUp);
+        expect(pageUp.defaultPrevented).toBe(true);
+
+        const pageDown = new KeyboardEvent("keydown", { key: "PageDown", bubbles: true, cancelable: true });
+        ta.dispatchEvent(pageDown);
+        expect(pageDown.defaultPrevented).toBe(true);
+    });
+});
+
+/**
  * Regression tests for
  * docs/specs/SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md.
  *
