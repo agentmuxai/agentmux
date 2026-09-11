@@ -1,7 +1,9 @@
 # SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons
 
 **Date:** 2026-09-10
-**Status:** proposed — not yet implemented.
+**Status:** implemented — §1-§6 shipped in PR #3165, including a stickiness
+regression fix (codex P2: re-check `stickToBottom` inside the deferred rAF
+callback, not just at schedule time) caught by review before merge.
 **Related:** `docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md` (built
 the component §1-§4 fix), `docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`
 (the `install.start` / `install_chunk` streaming machinery both installers
