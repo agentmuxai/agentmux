@@ -126,26 +126,84 @@ enum DeliverPolicy {
   steering surfaces later, it should be its own follow-up spec with its own justification, not a
   flag threaded through on day one.
 
-### 4.2 Mechanism: a per-block pending-delivery queue, flushed on turn-end
+### 4.2 Mechanism: a per-block pending-delivery queue, flushed one message per turn
+
+**Revised after ReAgent review (2026-09-11) — the first draft of this section had four real
+soundness gaps, all fixed below: (1) draining the whole queue in one burst on turn-completion
+re-triggers a new active turn for the 2nd+ message and writes to live stdin while THAT turn is
+running, which is exactly the mid-turn write this spec exists to prevent; (2) the busy-check and
+the turn-completion flush were two separately-timed checks, racing (a message enqueued right as
+the queue is observed empty and "drained" would be stranded with no future trigger); (3) no
+handling was specified for the process exiting/being replaced before a `result`/`Done` event ever
+fires, silently losing already-accepted messages; (4) queue overflow was specified to silently
+drop a message after already returning success to the caller.**
 
 `persistent.rs` already tracks turn-active state (`health_monitor.mark_turn_active_returning_was_active`,
-`persistent.rs:2153`) and already has a controller-level home for per-block mutable state. Add:
+`persistent.rs:2153`) and already has a controller-level home for per-block mutable state.
+Add, all guarded by **one mutex** covering both the turn-active flag and the pending queue
+together — this single lock is what closes gap (2):
 
-1. A bounded, per-block `VecDeque<PendingMessage>` (reuse `messagebus.rs`'s existing bounding
-   pattern — same idea already used for ordering/backpressure elsewhere).
-2. `deliver_agent_message` with `DeliverPolicy::NextIdle`: if the block is idle, deliver via
-   `send_user_message` immediately (idle fast-path — matches Q4 of the 06-16 spec, "trivial: if
-   already idle, `send_message()` starts a normal turn"). If busy, push onto the queue and return
-   success (delivery accepted, not yet surfaced) rather than blocking the caller.
-3. On the turn-completion event the translator already emits (`result`/`Done` — the same signal
-   `persistent.rs` uses to clear turn-active state), drain the queue in FIFO order, one
-   `send_user_message` call per entry, before the controller reports itself idle to anything else.
-4. `InjectionRequest.wait_for_idle` is removed (it was unread dead code) rather than repurposed,
+```rust
+struct DeliveryState {
+    turn_active: bool,
+    pending: VecDeque<PendingMessage>, // bounded — see overflow handling below
+}
+```
+
+1. **Enqueue-or-send is one atomic operation.** `deliver_agent_message` with
+   `DeliverPolicy::NextIdle` takes the lock once: if `!turn_active`, it sets `turn_active = true`
+   and calls `send_user_message` **inside the same critical section** (idle fast-path — matches Q4
+   of the 06-16 spec). If `turn_active`, it pushes onto `pending` and returns success, still inside
+   the same lock. Because both branches share one lock with the flush path below, there is no
+   window where a message can be enqueued against a queue that a concurrent flush already observed
+   as empty and finished draining.
+2. **Flush delivers exactly ONE message per turn-completion event, not the whole queue.** On the
+   `result`/`Done` event, take the lock: if `pending` is non-empty, `pop_front()` **one** entry and
+   call `send_user_message` for it **inside the same critical section**, leaving `turn_active =
+   true` (the send just started a new turn) and the rest of `pending` untouched. Only if `pending`
+   was already empty does this event set `turn_active = false`. This closes gap (1): the next
+   queued message is only ever sent in response to *that new turn's own* completion event, so no
+   two `send_user_message` calls for the same block are ever separated by less than one full turn
+   — the no-mid-turn guarantee holds for every queued message, not just the first.
+3. **Abnormal termination (process exit/stop/replacement) before a `result`/`Done` fires.** Treat
+   controller-level process-exit as an alternate path into the same locked transition as a normal
+   completion — but rather than assuming a same-process next turn, branch on why the process ended:
+   - If the block is **respawning for the same logical agent** (crash-restart, resume), the
+     `pending` queue is carried over to the new process instance and flushes (§4.2.2) against
+     *its* first completion event, same as before.
+     - If the block is **being stopped/removed/replaced** (not coming back), every entry still in
+     `pending` is a delivery that was accepted but will now never be sent. These must not be
+     silently dropped: each `PendingMessage` carries the means to report failure back to its
+     origin (the same channel `reactive/handler.rs` already uses to report a failed injection —
+     see Appendix), and the drain-on-teardown path calls that failure report for every stranded
+     entry rather than discarding them.
+4. **Queue overflow does not silently drop an already-"succeeded" delivery.** `deliver_agent_message`
+   only returns success once a message is either sent (idle fast-path) or actually pushed onto
+   `pending`. If the bounded queue is full at enqueue time, it returns an explicit error (e.g.
+   `DeliveryError::QueueFull`) instead of a false success — the caller (reactive handler, muxbus
+   consumer, bridge) sees this exactly like any other transient delivery failure and can retry,
+   the same as it already has to handle a network error to the target instance. Nothing is ever
+   reported delivered and then quietly lost.
+5. `InjectionRequest.wait_for_idle` is removed (it was unread dead code) rather than repurposed,
    since its name would collide confusingly with the new explicit enum.
 
 This requires no new visibility into content-block-level turn phase (text vs. tool_use) — it
 sidesteps the open question flagged in §2 entirely by never writing to stdin until the whole turn
 is done, which is the strictly stronger and simpler guarantee the ask calls for.
+
+#### 4.2.1 Why one lock, not two
+
+The original draft implicitly used two separate points of truth (a turn-active flag read by the
+enqueue path, a queue drained by the completion path) without specifying they shared a lock. Any
+implementation of this spec MUST treat `turn_active` and `pending` as one piece of state behind one
+mutex — splitting them reintroduces gap (2) even if each individually looks correct.
+
+#### 4.2.2 Why one-at-a-time, not burst-drain
+
+`send_user_message` starts a new active turn (§2, `persistent.rs:2147-2153`). Sending message #2
+immediately after message #1 — before message #1's turn has actually completed — would write to
+live stdin while a turn is active, which is precisely what this spec forbids. The queue must
+therefore be drained strictly one entry per observed turn-completion event, never more.
 
 ### 4.3 ACP
 
