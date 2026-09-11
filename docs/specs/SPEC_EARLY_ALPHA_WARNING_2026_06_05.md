@@ -14,14 +14,14 @@
 ## Motivation
 
 AgentMux is publicly available (GitHub README, Microsoft Store listing) but the
-product is still in **early alpha**: significant feature surfaces are partially
+product is still **alpha software**: significant feature surfaces are partially
 implemented, regress between releases, or are known-broken on specific
 platforms. Users arriving from the Microsoft Store in particular have no signal
 that they are installing pre-production software — the Store listing reads as a
 finished product, which produces unfair 1-star reviews and wastes the user's
 time.
 
-This spec defines a single, consistent **early-alpha warning** that lands in
+This spec defines a single, consistent **alpha warning** that lands in
 two places:
 
 1. **Top of `README.md`** in the `agentmuxai/agentmux` repo (the first thing a
@@ -73,14 +73,14 @@ it).
 
 ### Short form (one line, used in Store "Short description" and any tight slot)
 
-> **AgentMux is in early alpha — expect some bugs and breaking changes
+> **AgentMux is alpha software — expect some bugs and breaking changes
 > between releases. Please report issues at https://github.com/agentmuxai/agentmux/issues.**
 
 ### Long form (used at top of README and in Store "Description")
 
-> ## Early Alpha
+> ## Alpha
 >
-> **AgentMux is in early alpha.** Some features are incomplete or still
+> **AgentMux is alpha software.** Some features are incomplete or still
 > settling, and behavior can change between releases. A few things to keep
 > in mind:
 >
@@ -116,9 +116,9 @@ information. Decorative content should not push the warning below the fold.
 Prepend to `README.md` (at the repo root):
 
 ```markdown
-> ## Early Alpha
+> ## Alpha
 >
-> **AgentMux is in early alpha.** Some features are incomplete or still
+> **AgentMux is alpha software.** Some features are incomplete or still
 > settling, and behavior can change between releases. A few things to keep
 > in mind:
 >
@@ -174,7 +174,7 @@ any other locales we publish):
 4. For every additional locale, replicate the same English text (we are not
    translating during alpha).
 5. In the **Notes for certification** field, add: *"This submission adds an
-   early-alpha disclaimer to the Store listing. No package binary changes
+   alpha disclaimer to the Store listing. No package binary changes
    versus the previous submission unless otherwise noted."*
 6. Submit for certification.
 
@@ -212,7 +212,7 @@ that fallback to still carry the warning.
 
 ## Out-of-band: keeping the surfaces in sync
 
-When the warning text changes (e.g., when we drop "early alpha" for "beta"):
+When the warning text changes (e.g., when we drop "alpha" for "beta"):
 
 1. Edit this spec's **Canonical Warning Text** section.
 2. Update `README.md` to match.
