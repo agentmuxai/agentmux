@@ -108,12 +108,20 @@ for this spec, not an implementation detail to discover later.
 1. Agents can close, maximize, minimize, split, and float **their own** pane.
 2. Agents can close, maximize, and minimize **another agent's** pane —
    the exact capability this investigation needed and didn't have.
-3. Every new verb is reachable from MCP, from the frontend's own UI (already
-   true for close/maximize/minimize/split; float already works), and from the
-   REST App API — through **one registration**, not three hand-written copies.
-4. The design closes the gap `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` left
-   explicitly out of scope (it stops at frontend TS stubs + a diff gate) by
-   extending the same registry one step further: to MCP tool schemas too.
+3. Every new verb is reachable from MCP and (already true today) the
+   frontend's own UI, through **one shared Rust implementation per command**
+   plus a thin, hand-written transport adapter for each caller (REST for
+   MCP, WS `register_handler` for the frontend where one is needed) — not
+   three independently-diverging copies of the actual logic. §4.2 found
+   that a single shared *dispatch registry* spanning both transports isn't
+   buildable against the real `WshRpcEngine`/`AppState` architecture; §4.3
+   is the corrected, smaller goal this spec actually delivers, and it's
+   what `ClosePane` (PR #3196) already ships.
+4. ~~The design closes the gap `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` left
+   explicitly out of scope by extending the same registry one step further,
+   to MCP tool schemas too.~~ **Dropped (§4.2).** That registry doesn't
+   exist in a cross-transport form to extend. MCP tool schemas stay
+   hand-written in `tool_schemas.rs`, same as every tool before this spec.
 
 ## 3. Non-goals
 
@@ -172,8 +180,11 @@ spec's scope.
 ### 4.3 What actually ships instead: one Rust function, two hand-written call sites
 
 Drop the shared-registry idea entirely. Use the pattern that is **already
-shipped and proven** in this exact codebase — `FleetBulkStop` and `ClosePane`
-(§7 step 1-2, landed in PR #3196) both work this way today:
+shipped and proven** in this exact codebase — `FleetBulkStop`, on `main`
+today, works this way. `ClosePane` (§7 step 1-2) is built the same way in
+[PR #3196](https://github.com/agentmuxai/agentmux/pull/3196), not yet merged
+as of this revision — a second, independent instance of the same pattern,
+not yet itself a "shipped" precedent to point to until it lands:
 
 1. One `*_impl` function holds the real logic (e.g. `close_pane_impl` /
    `handle_close_pane`), taking `&AppState` plus plain arguments — no
@@ -240,6 +251,28 @@ fresh tab in the recorded `source_workspace_id` (if that workspace still
 exists) as the redock target, rather than failing outright. Optional explicit
 `target_tab_id`/`target_workspace_id`/`dst_index` params remain available for
 redocking somewhere else entirely.
+
+**Round 3 (Codex P1 on PR #3195), on the second fix:** reusing the raw saga
+call correctly avoids the auto-close problem, but `open_pane_floating` and
+`pane.float` are not actually solving the same problem — `open_pane_floating`
+starts from a block that was created fresh and **never inserted into the
+source tab's layout tree at all** (§0's own comment on that function: "no
+layout node," "the block never renders docked before the saga moves it").
+`pane.float` starts from an *existing, already-laid-out* pane, so calling
+just `tear_off_block::run` moves the block's ownership but leaves the OLD
+layout node behind in the source tab (now a dangling reference) and does
+nothing to materialize the new tab's layout or open the actual floating
+window. `pane.float`'s implementation must do everything
+`open_pane_floating` does *after* its own `tear_off_block::run` call too,
+not just the saga call in isolation:
+`server::service::layout_helpers`'s `LayoutDeleteNodeByBlock`-style prune of
+the source node (same step `sagas::delete_block::run` performs for its own
+Step 2, §1), `setup_torn_off_block_layout` for the destination,
+`event_bus.broadcast_wave_obj_updates` for the new workspace/tab/block, and
+the `state.broker.publish(WaveEvent{event: "openfloatingpane", ...})` call
+to actually open the OS window — `open_pane_floating`'s full body (`pane.rs`
+lines ~30-190) is the real reference implementation to adapt, not just its
+saga call.
 
 ## 5. Authorization model — the actual hard part
 
@@ -394,9 +427,16 @@ Maximize/minimize can reuse exactly this path: resolve `block_id → tab_id`
 lookup `open_pane_floating` performs), then `state.broker.publish` a new
 event kind (e.g. `"paneMaximize"`/`"paneMinimize"`, carrying `block_id`) to
 that one window. The frontend adds one small listener next to its existing
-`"openfloatingpane"` handler, calling the same local `magnifyNodeToggle`/
-`minimizeNodeToggle` a human's own click already triggers. This is real,
-traceable, existing-state-only plumbing — no new registry, no new
+`"openfloatingpane"` handler — **not** calling `magnifyNodeToggle`/
+`minimizeNodeToggle` directly, per **Codex P2 on PR #3195**: those are
+genuine toggles (a human's click flips current state either direction),
+whereas `MaximizePane`/`MinimizePane`/`RestorePane` are meant to be
+idempotent — calling `MaximizePane` on an already-maximized pane must stay
+maximized, not flip back to normal. The listener needs the small,
+currently-missing idempotent counterpart to each toggle (set-maximized /
+set-minimized / clear-both, reading current state first and no-op-ing if
+already there) rather than invoking the toggle blind. This is real,
+traceable, existing-state-only plumbing otherwise — no new registry, no new
 connection-scoping mechanism, unlike the original (b).
 
 **Recommendation: (b), REVISED shape, for v1.** Still explicitly a known
@@ -413,10 +453,13 @@ process-level server state already (§1) and don't face this question.
    `sagas::delete_block::run` path behind a hand-written REST route + MCP
    tool (§4.3's actual, proven pattern). Confirms/fixes the
    history-preservation question from §1.2 as a blocking prerequisite, not a
-   follow-up. **Shipped in PR #3196.**
+   follow-up. **Implemented in [PR #3196](https://github.com/agentmuxai/agentmux/pull/3196)
+   — not yet merged at the time of this revision; check that PR for current
+   status rather than treating this spec as confirmation it's on `main`.**
 2. **`pane.close`, cross-agent (fleet tier).** The capability this
    investigation actually needed. Ships with per-target reporting + audit
-   logging from day one, per §5. **Shipped alongside step 1 in PR #3196.**
+   logging from day one, per §5. **Implemented alongside step 1 in PR #3196
+   (same merge-status caveat).**
 3. **`pane.split`, `pane.float`, `pane.dock` — own pane only.** `split`
    reuses the existing `LayoutTreeInsertNodeAction` path; `float`/`dock` cross
    into the srv↔cef named-pipe IPC (§1) for the first time from MCP — new
