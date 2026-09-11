@@ -250,3 +250,39 @@ exact load scenario it targets (several busy panes streaming at once):
   Caught immediately by the test suite itself the moment `block_in_place`
   was added — exactly the way it's supposed to work.
 - `cargo test -p agentmux-srv -- --test-threads=1`: 3332 passed, 0 failed.
+
+## 9. Second review round — `block_in_place` itself was the wrong tool (reagentx P1, PR #3206)
+
+`block_in_place`, added in §8 specifically to avoid `spawn_blocking`'s
+`'static + Send` ownership requirement, was flagged as risking worker-thread
+growth under this fix's own target scenario (many panes, each flushing
+every ~20ms, concurrently, on a long-running process).
+
+Checked the claim against the actual mechanism rather than taking it on
+either side's word — read the vendored `tokio` 1.52.3 source directly
+(`runtime/scheduler/multi_thread/worker.rs`). `block_in_place`'s own
+replacement-worker path is `runtime::spawn_blocking(move || run(worker))` —
+it draws on the *same* shared `spawn_blocking` pool internally, so "unbounded
+growth" distinct from that pool doesn't hold literally. What does hold: using
+`block_in_place` here drew on that shared pool **twice** per flush (once for
+the replacement worker, once implicitly for the original thread continuing
+to run) for work `spawn_blocking` alone covers with one call — and tokio's
+own docs name `block_in_place`'s one genuine advantage over `spawn_blocking`
+as protecting other concurrent work *in the same task* (e.g. across a
+`join!`). This flusher task does nothing else concurrently, so that
+advantage never applied here — `spawn_blocking` was strictly the better fit,
+and the extra indirection was pure waste under exactly the high-throughput,
+many-panes scenario this whole fix targets.
+
+**Fix:** switched to `spawn_blocking`, solving the original ownership
+problem properly instead of routing around it — `batch`/`batch_osc` are
+freshly built every iteration (cheap to move), and `line_buf`/`translator`
+(the only state the flush mutates) are moved into the closure and handed
+back out via the `JoinHandle`'s return value, rather than kept borrowed
+across the call.
+
+**Verification:** the two coalescing tests no longer need
+`#[tokio::test(flavor = "multi_thread")]` — that requirement came from
+`block_in_place` specifically (panics on a current-thread runtime);
+`spawn_blocking` has none. Reverted to plain `#[tokio::test]`.
+`cargo test -p agentmux-srv -- --test-threads=1`: 3332 passed, 0 failed.
