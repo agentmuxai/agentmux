@@ -25,11 +25,187 @@ use super::super::{
 use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
-use super::pty::{detect_local_shell_path_windows, PTY_READ_BUF_SIZE};
+use super::pty::{
+    detect_local_shell_path_windows, PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES,
+    PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
+};
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::ShellProc;
 use crate::backend::wps;
+
+/// One PTY read's worth of already-OSC-cleaned output, on its way from the
+/// blocking read loop to the coalescing flusher (`start()`, below). See
+/// docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md.
+struct PtyReadChunk {
+    data: Vec<u8>,
+    osc_events: Vec<crate::backend::osc_extractor::OscEvent>,
+}
+
+/// Do the actual per-batch work the read loop used to do per-read: write
+/// through to the FileStore, broadcast the raw bytes, publish any OSC
+/// activity, and (for agent panes) feed the JSON-stream translator. Called
+/// once per coalesced batch instead of once per (up to 4KB) PTY read.
+#[allow(clippy::too_many_arguments)]
+fn flush_pty_batch(
+    broker: &wps::Broker,
+    block_id: &str,
+    data: &[u8],
+    osc_events: &[crate::backend::osc_extractor::OscEvent],
+    filestore: Option<&Arc<crate::backend::storage::filestore::FileStore>>,
+    line_buf: &mut Vec<u8>,
+    translator: Option<&mut crate::agents::translator::claude::ClaudeTranslator>,
+) {
+    if data.is_empty() && osc_events.is_empty() {
+        return;
+    }
+
+    handle_append_block_file(
+        broker,
+        block_id,
+        "term",
+        data,
+        // Write-through so scrollback survives a reconnect
+        // (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md
+        // §2.1) — was `None` (raw PTY bytes discarded after
+        // the live broadcast), which meant every `view:"term"`
+        // pane (standalone Terminal panes and the agent-shell
+        // drawer alike) lost all output on remount.
+        filestore,
+        None, // not an agent output stream; no global mirror
+    );
+
+    for ev in osc_events {
+        wps::publish_block_activity(broker, block_id, &ev.payload);
+    }
+
+    if let Some(t) = translator {
+        accumulate_and_translate(broker, block_id, line_buf, data, t);
+    }
+}
+
+/// Drain `rx`, coalescing chunks into batches — waiting up to
+/// `PTY_COALESCE_WINDOW` after the first chunk of a new batch for more to
+/// arrive, or until `PTY_COALESCE_MAX_BYTES`, whichever comes first — and
+/// flushing each batch through [`flush_pty_batch`]. Runs until `rx` closes
+/// (the PTY read loop's sender dropped, i.e. the PTY hit EOF or an error),
+/// flushing any final partial batch before returning.
+///
+/// A standalone fn rather than inlined into its `tokio::spawn` call site so
+/// it can be driven directly in a test with a synthetic channel and no real
+/// PTY — see `pty_output_flusher_tests` below.
+async fn run_pty_output_flusher(
+    mut rx: mpsc::Receiver<PtyReadChunk>,
+    broker: Option<Arc<wps::Broker>>,
+    block_id: String,
+    filestore: Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    is_agent: bool,
+) {
+    let Some(broker) = broker else {
+        // No broker means the read loop's sender never had anything worth
+        // sending (see its own `broker_read.is_some()` gate) — nothing to
+        // drain or flush.
+        return;
+    };
+    // Phase 1.5 PR 1 (additive): if this is an agent pane, also try to
+    // interpret stdout as Claude Code stream-json line-by-line, feeding
+    // successful parses through ClaudeTranslator and emitting AgentEvents
+    // on a new WPS scope `agent_event:<block_id>`. The existing raw-chunk
+    // path stays byte-equal — interactive panes (which don't emit JSON) see
+    // no behavior change because every line fails the JSON parse and is
+    // silently dropped. The future stream-json-mode pane and the drone
+    // inspector (issue #830 / Phase 1.5 PR 3) will be the first real
+    // consumers.
+    let mut translator: Option<crate::agents::translator::claude::ClaudeTranslator> = if is_agent
+    {
+        Some(crate::agents::translator::claude::ClaudeTranslator::new())
+    } else {
+        None
+    };
+    // Per-block line-buffer (raw bytes — see `extract_agent_events`). Capped
+    // to AGENT_LINE_BUFFER_CAP so a producer that never emits a newline
+    // can't grow the buffer unboundedly.
+    let mut line_buf: Vec<u8> = Vec::new();
+
+    loop {
+        let Some(first) = rx.recv().await else {
+            break; // channel closed, nothing pending
+        };
+        let mut batch = first.data;
+        let mut batch_osc = first.osc_events;
+        let deadline = tokio::time::Instant::now() + PTY_COALESCE_WINDOW;
+
+        // Opportunistically drain more already-queued (or about-to-arrive)
+        // chunks into the same batch, bounded by whichever limit hits first.
+        let closed_mid_batch = loop {
+            if batch.len() >= PTY_COALESCE_MAX_BYTES {
+                break false;
+            }
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break false;
+            }
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(next)) => {
+                    batch.extend_from_slice(&next.data);
+                    batch_osc.extend(next.osc_events);
+                }
+                Ok(None) => break true, // channel closed mid-accumulation
+                Err(_elapsed) => break false, // coalescing window elapsed
+            }
+        };
+
+        // spawn_blocking, not block_in_place (reagentx P2 on PR #3206,
+        // correcting the round before it): flush_pty_batch does blocking
+        // SQLite I/O and takes std::sync::Mutex locks, so it must not run
+        // on a Tokio async worker directly — this closure is inside a
+        // plain `tokio::spawn`, not `spawn_blocking`. The first fix for
+        // that reached for `block_in_place` specifically to avoid moving
+        // `&mut line_buf`/`translator.as_mut()` across a 'static+Send
+        // boundary — but `block_in_place` gets its own replacement worker
+        // via THE SAME shared `spawn_blocking` pool internally (verified
+        // directly against the vendored tokio 1.52.3 source,
+        // `runtime/scheduler/multi_thread/worker.rs`'s `block_in_place`:
+        // `runtime::spawn_blocking(move || run(worker))`), so per flush it
+        // draws on that shared pool TWICE — once for the replacement
+        // worker, once implicitly for the original thread's own blocking
+        // — for work `spawn_blocking` alone would cover with one. Tokio's
+        // own docs single out `block_in_place`'s one real advantage
+        // (protecting OTHER concurrent work in the SAME task, e.g. across
+        // a `join!`) as the reason to prefer it over `spawn_blocking` —
+        // this task does nothing else concurrently, so that advantage
+        // never applies here, and `spawn_blocking` is strictly the better
+        // fit. The ownership problem is solved properly instead: `batch`/
+        // `batch_osc` are freshly built each iteration (cheap to move),
+        // and `line_buf`/`translator` — the only state the flush actually
+        // MUTATES — are moved into the closure and handed back out via the
+        // `JoinHandle`'s return value, rather than trying to keep them
+        // borrowed across the call.
+        let broker_owned = broker.clone();
+        let block_id_owned = block_id.clone();
+        let filestore_owned = filestore.clone();
+        let (new_line_buf, new_translator) = tokio::task::spawn_blocking(move || {
+            flush_pty_batch(
+                &broker_owned,
+                &block_id_owned,
+                &batch,
+                &batch_osc,
+                filestore_owned.as_ref(),
+                &mut line_buf,
+                translator.as_mut(),
+            );
+            (line_buf, translator)
+        })
+        .await
+        .expect("PTY output flush task panicked");
+        line_buf = new_line_buf;
+        translator = new_translator;
+
+        if closed_mid_batch {
+            break;
+        }
+    }
+}
 
 /// Resolve the effective AGENTMUX_AGENT_ID for jekt auto-registration from a
 /// block's own spawn metadata — both the canonical key and the legacy
@@ -643,44 +819,42 @@ impl Controller for ShellController {
             format!("failed to take PTY writer: {e}")
         })?;
 
-        // Spawn PTY read task (blocking I/O → spawn_blocking)
+        // Spawn PTY read task (blocking I/O → spawn_blocking) + a companion
+        // coalescing flusher (async task). Split in two, connected by an
+        // mpsc channel, so the actual OS-level `read()` loop's blocking
+        // semantics are untouched (this file supports both Unix and
+        // Windows PTYs and that boundary is not something to risk getting
+        // subtly wrong per-platform) while the expensive per-chunk work —
+        // file write, WebSocket broadcast, OSC/translation — is batched.
+        // See docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md.
         let block_id_read = self.block_id.clone();
+        let block_id_flush = self.block_id.clone();
         let broker_read = self.broker.clone();
+        let broker_flush = self.broker.clone();
         let inner_read = self.inner.clone();
-        let filestore_read = self.filestore.clone();
+        let filestore_flush = self.filestore.clone();
         let is_agent_read = is_agent;
+        let is_agent_flush = is_agent;
+        // Bounded (reagentx P1 on PR #3206) — see PTY_CHANNEL_CAPACITY's own
+        // doc comment for why: an unbounded channel here would let a
+        // sustained fast producer grow queued memory without limit if the
+        // flusher ever falls behind the read rate.
+        let (pty_tx, pty_rx) = mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
             let mut buf = [0u8; PTY_READ_BUF_SIZE];
-
-            // Phase 1.5 PR 1 (additive): if this is an agent pane,
-            // also try to interpret stdout as Claude Code stream-json
-            // line-by-line, feeding successful parses through
-            // ClaudeTranslator and emitting AgentEvents on a new WPS
-            // scope `agent_event:<block_id>`. The existing raw-chunk
-            // path stays byte-equal — interactive panes (which don't
-            // emit JSON) see no behavior change because every line
-            // fails the JSON parse and is silently dropped. The
-            // future stream-json-mode pane and the drone inspector
-            // (issue #830 / Phase 1.5 PR 3) will be the first real
-            // consumers.
-            let mut translator: Option<crate::agents::translator::claude::ClaudeTranslator> =
-                if is_agent_read {
-                    Some(crate::agents::translator::claude::ClaudeTranslator::new())
-                } else {
-                    None
-                };
-            // Per-block line-buffer (raw bytes — see
-            // `extract_agent_events`). Capped to AGENT_LINE_BUFFER_CAP
-            // so a producer that never emits a newline can't grow
-            // the buffer unboundedly.
-            let mut line_buf: Vec<u8> = Vec::new();
 
             // OSC extractor: only for agent panes. Terminal panes forward
             // raw bytes to xterm.js which handles OSC natively — stripping
             // there would suppress the native window-title update. Agent
             // panes don't use xterm.js; OSC bytes in FileStore corrupt the
-            // document renderer, so we extract and strip them here.
+            // document renderer, so we extract and strip them here. Kept
+            // in THIS (per-read) loop rather than the flusher: it is
+            // cheap, and its own internal state must see every read in
+            // order exactly as they arrive — moving it to the batched side
+            // would change nothing about correctness but would mean
+            // holding it across an .await, so it stays here for simplicity.
             let mut osc_extractor: Option<crate::backend::osc_extractor::OscExtractor> =
                 if is_agent_read {
                     Some(crate::backend::osc_extractor::OscExtractor::new())
@@ -693,7 +867,7 @@ impl Controller for ShellController {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         inner_read.lock().unwrap().last_pty_output = Some(Instant::now());
-                        if let Some(ref broker) = broker_read {
+                        if broker_read.is_some() {
                             let raw = &buf[..n];
 
                             // Extract OSC sequences from agent-pane output.
@@ -712,34 +886,23 @@ impl Controller for ShellController {
                                 raw
                             };
 
-                            handle_append_block_file(
-                                broker,
-                                &block_id_read,
-                                "term",
-                                chunk,
-                                // Write-through so scrollback survives a reconnect
-                                // (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md
-                                // §2.1) — was `None` (raw PTY bytes discarded after
-                                // the live broadcast), which meant every `view:"term"`
-                                // pane (standalone Terminal panes and the agent-shell
-                                // drawer alike) lost all output on remount.
-                                filestore_read.as_ref(),
-                                None, // not an agent output stream; no global mirror
-                            );
-
-                            for ev in &osc_events {
-                                wps::publish_block_activity(broker, &block_id_read, &ev.payload);
-                            }
-
-                            if let Some(ref mut t) = translator {
-                                accumulate_and_translate(
-                                    broker,
-                                    &block_id_read,
-                                    &mut line_buf,
-                                    chunk,
-                                    t,
-                                );
-                            }
+                            // `blocking_send`, not `send` — this closure runs
+                            // on a `spawn_blocking` thread, not async, and a
+                            // bounded channel's plain `send` is itself async.
+                            // Blocks THIS (already-dedicated-to-blocking)
+                            // thread once the channel is full, which is
+                            // exactly the backpressure PTY_CHANNEL_CAPACITY's
+                            // doc comment describes — never the async runtime.
+                            //
+                            // Best-effort beyond that: if the flusher task is
+                            // gone (block torn down mid-read), there is
+                            // nothing useful to do with this chunk — the PTY
+                            // read loop itself must keep draining so the
+                            // child process's stdout never backs up.
+                            let _ = pty_tx.blocking_send(PtyReadChunk {
+                                data: chunk.to_vec(),
+                                osc_events,
+                            });
                         }
                     }
                     Err(e) => {
@@ -748,7 +911,25 @@ impl Controller for ShellController {
                     }
                 }
             }
+            // `pty_tx` drops here, closing the channel — the flusher below
+            // sees `recv()` return `None` once it has drained everything
+            // already sent, flushes any final partial batch, and exits.
         });
+
+        // Coalescing flusher: batches chunks the read loop above sends,
+        // waiting up to PTY_COALESCE_WINDOW for more to arrive (or until
+        // PTY_COALESCE_MAX_BYTES, whichever comes first) before doing the
+        // actual file write + broadcast + translation — once per batch
+        // instead of once per (up to 4KB) PTY read. A standalone fn (not
+        // inlined into the spawn) so it can be driven directly in tests
+        // with a synthetic channel, no real PTY required.
+        tokio::spawn(run_pty_output_flusher(
+            pty_rx,
+            broker_flush,
+            block_id_flush,
+            filestore_flush,
+            is_agent_flush,
+        ));
 
         // Spawn input task (routes input channel → PTY writer + resize + signals)
         // Owns writer and master — dropping them closes the PTY, causing child to exit.
@@ -1277,5 +1458,257 @@ mod controller_agent_id_tests {
 
         ctrl.set_agent_id(None);
         assert_eq!(ctrl.agent_id(), None);
+    }
+}
+
+#[cfg(test)]
+mod pty_output_flusher_tests {
+    use super::{flush_pty_batch, run_pty_output_flusher, PtyReadChunk, PTY_CHANNEL_CAPACITY};
+    use crate::backend::storage::filestore::FileStore;
+    use crate::backend::wps;
+    use std::sync::{Arc, Mutex};
+
+    /// Records every event delivered to it — lets a test count broadcasts
+    /// rather than only inspect final file content, which is what actually
+    /// distinguishes "coalesced into one broadcast" from "one broadcast per
+    /// PTY read" (both produce identical final content; only the broadcast
+    /// COUNT tells them apart). Holds an `Arc` (not an owned `Vec`) because
+    /// `Broker::set_client` takes ownership of the client, so the test needs
+    /// its own handle to read events back out afterward.
+    struct RecordingClient {
+        events: Arc<Mutex<Vec<wps::WaveEvent>>>,
+    }
+
+    impl wps::WpsClient for RecordingClient {
+        fn send_event(&self, _route_id: &str, event: wps::WaveEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    /// A broker wired to a `RecordingClient`, subscribed (all-scopes, so
+    /// this doesn't need to know the exact `block:<id>` scope string) to
+    /// `EVENT_BLOCK_FILE` — the event `handle_append_block_file` publishes.
+    fn broker_recording_block_file_events() -> (wps::Broker, Arc<Mutex<Vec<wps::WaveEvent>>>) {
+        let broker = wps::Broker::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        broker.set_client(Box::new(RecordingClient {
+            events: events.clone(),
+        }));
+        broker.subscribe(
+            "test-route",
+            wps::SubscriptionRequest {
+                event: wps::EVENT_BLOCK_FILE.to_string(),
+                scopes: vec![],
+                allscopes: true,
+            },
+        );
+        (broker, events)
+    }
+
+    /// Decode the base64 `data64` payload of a `term`-file `EVENT_BLOCK_FILE`
+    /// broadcast back to raw bytes, for asserting on content.
+    fn decode_event_data(event: &wps::WaveEvent) -> Vec<u8> {
+        use base64::Engine;
+        let data: wps::WSFileEventData =
+            serde_json::from_value(event.data.clone().expect("event has data")).expect("valid WSFileEventData");
+        base64::engine::general_purpose::STANDARD
+            .decode(&data.data64)
+            .expect("valid base64")
+    }
+
+    #[test]
+    fn flush_pty_batch_writes_and_broadcasts_one_call() {
+        let (broker, events) = broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let mut line_buf = Vec::new();
+
+        flush_pty_batch(&broker, "block-1", b"hello world", &[], Some(&fs), &mut line_buf, None);
+
+        let data = fs
+            .read_file("block-1", "term")
+            .expect("read_file ok")
+            .expect("data present");
+        assert_eq!(data, b"hello world");
+
+        let evs = events.lock().unwrap();
+        assert_eq!(evs.len(), 1, "one flush call must produce exactly one broadcast");
+        assert_eq!(decode_event_data(&evs[0]), b"hello world");
+    }
+
+    #[test]
+    fn flush_pty_batch_is_a_no_op_for_empty_input() {
+        // Guards against a spurious empty broadcast on a batch that ended
+        // up with nothing in it (shouldn't happen given how the flusher
+        // calls this, but a no-op guard here is cheap and cheaper than
+        // debugging a phantom empty append if that assumption ever breaks).
+        let (broker, events) = broker_recording_block_file_events();
+        let mut line_buf = Vec::new();
+        flush_pty_batch(&broker, "block-1", b"", &[], None, &mut line_buf, None);
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    /// The actual property this whole change exists to deliver: N chunks
+    /// that arrive back-to-back (well inside the coalescing window and the
+    /// byte cap) collapse into far fewer broadcasts than N — ideally one —
+    /// with no data lost, duplicated, or reordered.
+    ///
+    /// Deterministic, not timing-dependent: every chunk is sent to the
+    /// channel BEFORE the flusher is ever polled, so its first "opportunistic
+    /// drain" pass finds them all already queued and drains them without
+    /// actually waiting out any real wall-clock delay — this isn't racing
+    /// the 20ms window, it's exercising the "channel closed mid-accumulation"
+    /// exit path (see `run_pty_output_flusher`'s `closed_mid_batch`).
+    #[tokio::test]
+    async fn rapid_chunks_coalesce_into_far_fewer_broadcasts_with_no_data_loss() {
+        let (broker, events) = broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        // Bounded, matching production (PTY_CHANNEL_CAPACITY) — comfortably
+        // above the 50 messages below, so every send below still completes
+        // without actually waiting for capacity; the determinism this test's
+        // own doc comment relies on is unaffected by the channel being bounded.
+        let (tx, rx) = tokio::sync::mpsc::channel(PTY_CHANNEL_CAPACITY);
+
+        let mut expected = Vec::new();
+        for i in 0..50 {
+            let piece = format!("line {i}\n");
+            expected.extend_from_slice(piece.as_bytes());
+            tx.send(PtyReadChunk {
+                data: piece.into_bytes(),
+                osc_events: Vec::new(),
+            })
+            .await
+            .unwrap();
+        }
+        drop(tx); // closes the channel once these 50 are drained
+
+        run_pty_output_flusher(rx, Some(Arc::new(broker)), "block-1".to_string(), Some(fs.clone()), false)
+            .await;
+
+        let data = fs.read_file("block-1", "term").expect("read_file ok").expect("data present");
+        assert_eq!(data, expected, "coalescing must not lose, duplicate, or reorder bytes");
+
+        // Deterministic exact count, not a loose bound: every chunk was
+        // already queued before the flusher was ever polled (see the test's
+        // own doc comment), so its very first opportunistic-drain pass finds
+        // all 50 sitting in the channel and drains them without actually
+        // waiting out any real time — one batch, one broadcast. Verified
+        // stable across repeated local runs before asserting on it exactly;
+        // a looser "< 50" bound would also pass on a much weaker result
+        // (say, 40 broadcasts) that wouldn't actually demonstrate the fix.
+        let broadcast_count = events.lock().unwrap().len();
+        assert_eq!(
+            broadcast_count, 1,
+            "50 chunks queued before the flusher ever polled should collapse into \
+             exactly one broadcast; got {broadcast_count}"
+        );
+        // Concatenating every broadcast's own payload, in delivery order,
+        // must also reconstruct the exact original stream — proves the
+        // coalescing boundaries themselves never split/reordered content
+        // even if more than one broadcast happened.
+        let mut reconstructed = Vec::new();
+        for ev in events.lock().unwrap().iter() {
+            reconstructed.extend(decode_event_data(ev));
+        }
+        assert_eq!(reconstructed, expected);
+    }
+
+    /// The byte cap must still force a flush even if chunks keep arriving
+    /// faster than the coalescing window would otherwise close — otherwise
+    /// a sustained fast producer (`yes` piped into a shell pane) could grow
+    /// one "batch" unboundedly.
+    #[tokio::test]
+    async fn byte_cap_forces_a_flush_before_the_channel_closes() {
+        let (broker, events) = broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        // Bounded, matching production — 80 messages below is comfortably
+        // under PTY_CHANNEL_CAPACITY, so this test still exercises the byte
+        // cap (not channel backpressure) as the thing forcing the split.
+        let (tx, rx) = tokio::sync::mpsc::channel(PTY_CHANNEL_CAPACITY);
+
+        // Comfortably over PTY_COALESCE_MAX_BYTES (64 * 4096 = 256KiB) in
+        // total, sent as many small chunks so the cap — not the channel
+        // closing — is what has to trigger the split.
+        let piece = vec![b'x'; 4096];
+        let mut expected = Vec::new();
+        for _ in 0..80 {
+            expected.extend_from_slice(&piece);
+            tx.send(PtyReadChunk {
+                data: piece.clone(),
+                osc_events: Vec::new(),
+            })
+            .await
+            .unwrap();
+        }
+        drop(tx);
+
+        run_pty_output_flusher(rx, Some(Arc::new(broker)), "block-1".to_string(), Some(fs.clone()), false)
+            .await;
+
+        let data = fs.read_file("block-1", "term").expect("read_file ok").expect("data present");
+        assert_eq!(data, expected);
+
+        let broadcast_count = events.lock().unwrap().len();
+        assert!(
+            broadcast_count >= 2,
+            "80 * 4096 bytes exceeds PTY_COALESCE_MAX_BYTES; expected at least 2 broadcasts \
+             (the cap forcing an early flush), got {broadcast_count}"
+        );
+    }
+
+    /// The actual property reagentx's P1 asked for: a full channel makes
+    /// `blocking_send` — what the real PTY read loop calls, from a real
+    /// blocking (`spawn_blocking`) thread, not an async one — block until
+    /// the receiver drains it, rather than growing queued memory without
+    /// limit. A tiny capacity (not `PTY_CHANNEL_CAPACITY`) so the test is
+    /// fast and the blocking is unambiguous with only 2 messages.
+    #[test]
+    fn blocking_send_backpressures_once_the_channel_is_full() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(1);
+
+        // Fills the one slot; must return immediately (room available).
+        tx.blocking_send(PtyReadChunk { data: vec![1], osc_events: Vec::new() })
+            .expect("first send has room");
+
+        // A real background thread — mirrors the production shape exactly:
+        // blocking_send is called from a spawn_blocking thread, never from
+        // an async task.
+        let sent_second = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sent_second_writer = sent_second.clone();
+        let handle = std::thread::spawn(move || {
+            tx.blocking_send(PtyReadChunk { data: vec![2], osc_events: Vec::new() })
+                .expect("second send eventually succeeds once drained");
+            sent_second_writer.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        // The channel is full and nobody has drained it yet — the second
+        // send must still be blocked. A short, generous sleep rather than
+        // asserting instantaneously: proving a negative ("hasn't returned
+        // yet") is inherently a bit timing-sensitive, but 50ms is enormous
+        // next to what an unblocked send would take (microseconds), so a
+        // false pass here would need a wildly unlikely scheduling delay.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            !sent_second.load(std::sync::atomic::Ordering::SeqCst),
+            "second blocking_send must still be blocked while the channel is full"
+        );
+
+        // Drain the one queued message — this is the "flusher catches up"
+        // moment in production. The blocked send must now complete.
+        let first = rx.try_recv().expect("first message still queued");
+        assert_eq!(first.data, vec![1]);
+
+        handle.join().expect("background thread should complete once drained");
+        assert!(sent_second.load(std::sync::atomic::Ordering::SeqCst));
+
+        let second = rx.try_recv().expect("second message now queued");
+        assert_eq!(second.data, vec![2]);
+    }
+
+    #[tokio::test]
+    async fn no_broker_is_a_clean_no_op() {
+        // Mirrors the read loop's own `broker_read.is_some()` gate — the
+        // flusher must not panic or hang when there is nothing to flush to.
+        let (_tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+        run_pty_output_flusher(rx, None, "block-1".to_string(), None, false).await;
     }
 }

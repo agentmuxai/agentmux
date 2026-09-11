@@ -11,6 +11,43 @@ use crate::backend::obj::RuntimeOpts;
 /// PTY read buffer size (matches Go's 4096).
 pub(super) const PTY_READ_BUF_SIZE: usize = 4096;
 
+/// How long the PTY output flusher waits, after the first chunk of a new
+/// batch, for more chunks to arrive before broadcasting — see
+/// `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md`.
+/// A fast producer (a build, a verbose test run, a busy agent) delivers
+/// output across many separate `read()` returns in quick succession; without
+/// this window, each one fired its own file write + WebSocket broadcast +
+/// OSC/translation pass, and the aggregate IPC/wakeup rate was measurably
+/// costing real CPU in the renderer and GPU-helper processes. 20ms is well
+/// under human-perceptible latency (and under round-trip costs already
+/// elsewhere in this pipeline), so a single short burst — a keystroke echo,
+/// a one-line response — still appears with no felt delay.
+pub(super) const PTY_COALESCE_WINDOW: std::time::Duration = std::time::Duration::from_millis(20);
+
+/// Hard cap on how many bytes one coalesced batch accumulates before it is
+/// flushed regardless of the time window — bounds both broadcast latency and
+/// memory during a sustained, very fast burst (e.g. `yes` piped through a
+/// shell pane). 64x a single PTY_READ_BUF_SIZE read: generous headroom for
+/// real bursts (a build's stdout in a 20ms window) while still bounded.
+pub(super) const PTY_COALESCE_MAX_BYTES: usize = 64 * PTY_READ_BUF_SIZE;
+
+/// Capacity of the channel handing PTY-read chunks from the blocking read
+/// loop to the async coalescing flusher (reagentx P1 on PR #3206).
+/// `PTY_COALESCE_MAX_BYTES` only bounds the batch currently being
+/// assembled — it does nothing about chunks still sitting in the channel
+/// if the flusher falls behind the read rate (slow disk, lock contention,
+/// several busy panes at once). An unbounded channel there would let a
+/// sustained fast producer (`yes`, a large `cat`) grow queued memory
+/// without limit. 128 chunks x up to ~PTY_READ_BUF_SIZE each is ~512KiB of
+/// worst-case queued-but-not-yet-batched data per pane — real headroom
+/// above one coalesced batch, but strictly bounded. The read loop sends
+/// via `blocking_send`, which blocks the calling (already-blocking-pool)
+/// thread once the channel is full, propagating real backpressure to the
+/// PTY read rate — and from there, via the kernel's own PTY buffer, to the
+/// child process itself, the same way a slow terminal reader naturally
+/// backpressures a fast writer.
+pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
+
 /// Detect the best available interactive shell on Windows.
 ///
 /// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
