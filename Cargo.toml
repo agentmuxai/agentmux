@@ -44,6 +44,16 @@ opt-level = 2       # Still optimized, but not as aggressive as "s"
 # AgentMux's libcef build becomes the only consumer), remove this block
 # and the workspace can use the public binding directly.
 #
+# As of the CEF 152 staged-rollout mechanism (agentmux-cef/Cargo.toml's
+# cef_win/cef_unix split, SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md
+# Phase C, PR #3204), the same patched fork also carries a `links` value
+# rename (`cef_dll_wrapper` -> `cef_dll_wrapper_agentmux`) — required so
+# this crate's cef-dll-sys and the stock crates.io one (once cef_win
+# actually moves off 148) can coexist in one dependency graph; Cargo
+# otherwise enforces one `links` value graph-wide, not per-target. See
+# AgentU-asaf/cef-rs#4/#5, currently unmerged — this points at
+# GenericAgentX-asaf/cef-rs pending that, repoint once it lands.
+#
 # See: docs/specs/SPEC_CEF_148_LINUX_FORWARD_PORT_2026_06_04.md §5
 [patch.crates-io]
 cef-dll-sys = { git = "https://github.com/GenericAgentX-asaf/cef-rs", rev = "d0c91e0e4cae2be495d7729a604bca06d4038f62" }

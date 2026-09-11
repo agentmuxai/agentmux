@@ -80,9 +80,25 @@ futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-# Stock, unpatched cef 152 — Windows needs no fork (drags via its own Win32
-# path, never routes through the patched-libcef feature). See
-# SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md Phase C.
+# Stock, unpatched cef 152. MUST be a different semver *major* from
+# cef_unix's 148 (below), not just a different exact version within 148 —
+# tried pinning cef_win to a newer-but-still-148.x stock release first
+# (keep Windows nominally "unchanged"), and Cargo's resolver unifies
+# same-major dependency edges on one package name into a single chosen
+# version, so two different 148.x versions of `cef` cannot coexist as
+# separate resolved instances even under different target-gated aliases —
+# only genuinely different majors can. That makes this jump to 152
+# mechanically required for the split to resolve at all, not a choice.
+#
+# IMPORTANT — not verified end-to-end: this box has no MSVC toolchain, so
+# only `cargo metadata`'s dependency-graph resolution was confirmed here,
+# not an actual Windows compile of `cef::` call sites against the 152 API
+# (ReAgent/Codex review on PR #3204), and release.yml still packages a
+# 148 DLL against this 152-linked host, which fails at startup (Codex,
+# same review) — scripts/verify-cef-version.sh needs to become
+# target-aware too, see its own updated comment. Do not merge until a real
+# Windows CI run confirms compilation and the runtime pin is updated in
+# the same change.
 cef_win = { package = "cef", version = "152", default-features = false, features = ["build-util"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
@@ -122,6 +138,14 @@ winres = "0.1"
 # when `auth.cancel` fires (the portable_pty child sits inside a
 # `spawn_blocking` task that doesn't unwind on outer-task abort).
 libc = "0.2"
+
+# Deliberately narrower than the `cfg(unix)` table above, and must stay in
+# lockstep with lib.rs's `extern crate cef_unix as cef` gate
+# (cfg(any(target_os = "macos", target_os = "linux"))) — AgentMux only
+# ships those two, but `cfg(unix)` is broader (any unix-family target), so
+# putting this dependency there while the alias is scoped narrower would
+# leave it an unused, un-aliased dependency on any other unix target.
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
 # Still-148 fork — macOS/Linux stay on 148 until their own Phase D 152
 # builds land, per the staged rollout. Same rev as before the split.
 cef_unix = { package = "cef", version = "148", default-features = false, features = ["build-util"] }

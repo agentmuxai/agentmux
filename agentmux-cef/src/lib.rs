@@ -12,10 +12,23 @@
 // this file must still compile on those platforms.
 
 // Staged CEF 152 rollout (SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md
-// Phase C): Windows links the stock, unpatched `cef` 152 crate directly;
-// macOS/Linux stay on this fork's 148 line until their own Phase D builds
-// land. Aliasing both to `cef` here means every existing `cef::` call site
-// needs zero changes.
+// Phase C): Windows links stock, unpatched `cef` 152 directly; macOS/Linux
+// stay on this fork's 148 line until their own Phase D builds land.
+// Aliasing both to `cef` here means every existing `cef::` call site needs
+// zero changes.
+//
+// The version split isn't optional plumbing — Cargo's resolver unifies two
+// dependency edges on the same package name into one chosen version
+// whenever their requirements are semver-compatible (i.e. same major), so
+// cef_win and cef_unix can only resolve as genuinely separate crate
+// instances by being on different majors. A same-major attempt (Windows
+// nominally staying on 148 too) fails resolution outright; see
+// agentmux-cef/Cargo.toml's cef_win comment and PR #3204's review history.
+//
+// NOT independently verified end-to-end on Windows from this change (no
+// MSVC toolchain available where this was authored) — only `cargo
+// metadata`'s dependency-graph resolution was confirmed. Needs real
+// Windows CI plus a release.yml runtime-pin update before merge.
 #[cfg(target_os = "windows")]
 extern crate cef_win as cef;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
