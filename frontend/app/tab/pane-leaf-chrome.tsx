@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
+import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { WOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import { Key } from "@solid-primitives/keyed";
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 /**
  * Router `tabcontent.tsx` renders instead of `<Block>` directly — the
@@ -269,19 +270,40 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
                 fit logic (e.g. TermWrap's) stays correct in the background
                 and there is nothing to re-fit when it's revealed again. */}
             <For each={stackBlockIds()}>
-                {(id) => (
-                    <div
-                        class="pane-leaf-keepalive-slot"
-                        style={{
-                            position: "absolute",
-                            inset: "0",
-                            visibility: id === activeBlockId() ? "visible" : "hidden",
-                            "pointer-events": id === activeBlockId() ? "auto" : "none",
-                        }}
-                    >
-                        <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
-                    </div>
-                )}
+                {(id) => {
+                    // Codex P1/P2 + ReAgent P1 on PR #3187: every "all
+                    // panes" consumer of the block-component registry
+                    // (multi-input broadcast, all-panes zoom, the
+                    // multi-input-eligible terminal count) assumes one
+                    // registry entry per currently-VISIBLE pane. Mark this
+                    // member dormant whenever it isn't the active one, so
+                    // those consumers keep seeing exactly what they did
+                    // before keep-alive existed — see
+                    // block-component-registry.ts's own comment for why
+                    // this is tracked explicitly here rather than
+                    // re-derived from a layout/tab lookup. Cleared on this
+                    // row's own unmount (the id left the stack — tab
+                    // closed), not just flipped to false, so a closed tab
+                    // can never linger as a phantom dormant entry.
+                    createEffect(() => {
+                        setKeepAliveBlockDormant(id, id !== activeBlockId());
+                    });
+                    onCleanup(() => setKeepAliveBlockDormant(id, false));
+
+                    return (
+                        <div
+                            class="pane-leaf-keepalive-slot"
+                            style={{
+                                position: "absolute",
+                                inset: "0",
+                                visibility: id === activeBlockId() ? "visible" : "hidden",
+                                "pointer-events": id === activeBlockId() ? "auto" : "none",
+                            }}
+                        >
+                            <Block nodeModel={keepAliveNodeModelFor(id)} preview={false} />
+                        </div>
+                    );
+                }}
             </For>
         </Show>
     );

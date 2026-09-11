@@ -12,6 +12,58 @@ import { createBlock } from "./block-layout-actions";
 
 const blockComponentModelMap = new Map<string, BlockComponentModel>();
 
+// Codex P1/P2 on PR #3187: `pane-leaf-chrome.tsx`'s keep-alive terminal tabs
+// (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's keep-alive
+// follow-up) mount EVERY stack member's `<Block>` simultaneously, not just
+// the active one — each still registers itself here under its own blockId,
+// same as always. Every existing consumer of the two "all panes" functions
+// below (`TermViewModel.multiInputHandler`'s keystroke broadcast,
+// `zoom.ts`'s all-panes stepper, `keymodel.ts`'s multi-input-eligible
+// terminal count) assumes one registry entry == one currently-visible pane
+// — true before keep-alive (a dormant stack member was simply unmounted and
+// therefore never registered at all), no longer true now that a hidden
+// terminal tab stays mounted AND registered.
+//
+// ReAgent P1 on this PR: a first version of this fix filtered via
+// `getLayoutModelForStaticTab().getNodeByBlockId(blockId)`, comparing the
+// found leaf's own (always-active) `data.blockId` — but
+// `getLayoutModelForStaticTab()` only resolves the CURRENTLY ACTIVE TAB's
+// own tree (`atoms.activeTabId()`). A block belonging to any OTHER (open
+// but not front-most) tab can never be found by that lookup at all, so
+// that version silently excluded every pane in every background TAB too —
+// far broader than the actual dormant-stack-member scope this exists to
+// cover, and a real regression for `stepAllPanes` (which its own spec,
+// SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md, defines as
+// "every pane in the current window", not just the active tab).
+//
+// Fixed by tracking dormancy explicitly instead of re-deriving it from a
+// tab-scoped layout lookup: `pane-leaf-chrome.tsx`'s keep-alive rendering
+// is the ONE place that actually knows "this blockId is a currently-hidden
+// stack member," so it marks that directly via `setKeepAliveBlockDormant`
+// below — no layout/tab resolution involved at all, so cross-tab panes are
+// never touched by this filter. A no-op for every non-keep-alive pane
+// type and for a block in any other tab: nothing ever marks those,
+// so they're never excluded.
+const dormantKeepAliveBlockIds = new Set<string>();
+
+/**
+ * Marks `blockId` as a currently-HIDDEN, kept-alive stack member (a
+ * terminal tab that isn't the active one but stays mounted+registered
+ * anyway) — called only by `pane-leaf-chrome.tsx`'s keep-alive rendering,
+ * reactively, as a stack member's own visibility toggles. Clearing this
+ * (dormant=false, including on that member's own unmount/tab-close) is
+ * just as load-bearing as setting it: a stale `true` entry would silently
+ * exclude an ordinary, currently-visible pane from every "all panes"
+ * consumer forever.
+ */
+export function setKeepAliveBlockDormant(blockId: string, dormant: boolean) {
+    if (dormant) {
+        dormantKeepAliveBlockIds.add(blockId);
+    } else {
+        dormantKeepAliveBlockIds.delete(blockId);
+    }
+}
+
 export function registerBlockComponentModel(blockId: string, bcm: BlockComponentModel) {
     blockComponentModelMap.set(blockId, bcm);
 }
@@ -29,6 +81,10 @@ export function unregisterBlockComponentModel(blockId: string, owner?: BlockComp
         return;
     }
     blockComponentModelMap.delete(blockId);
+    // Safety net alongside pane-leaf-chrome.tsx's own onCleanup-driven
+    // clear: a real unregistration means the dormancy marker (if any) can
+    // never become meaningful again for this blockId.
+    dormantKeepAliveBlockIds.delete(blockId);
     cleanupBlockAtomCache(blockId);
 }
 
@@ -36,40 +92,10 @@ export function getBlockComponentModel(blockId: string): BlockComponentModel {
     return blockComponentModelMap.get(blockId);
 }
 
-// Codex P1/P2 on PR #3187: `pane-leaf-chrome.tsx`'s keep-alive terminal tabs
-// (SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's keep-alive
-// follow-up) mount EVERY stack member's `<Block>` simultaneously, not just
-// the active one — each still registers itself here under its own blockId,
-// same as always. Every existing consumer of the two "all panes" functions
-// below (`TermViewModel.multiInputHandler`'s keystroke broadcast,
-// `zoom.ts`'s all-panes stepper, `keymodel.ts`'s multi-input-eligible
-// terminal count) assumes one registry entry == one currently-visible pane
-// — true before keep-alive (a dormant stack member was simply unmounted and
-// therefore never registered at all), no longer true now that a hidden
-// terminal tab stays mounted AND registered. Filtering here, once, fixes
-// every current (and future) "all panes" consumer instead of requiring each
-// call site to remember its own filter.
-//
-// `node.data.blockId` (`layoutStack.ts`'s mutators) is reassigned to
-// whichever stack member is ACTIVE on every switch — `getNodeByBlockId`
-// resolves the leaf for ANY member, dormant or active, of a stacked leaf
-// (`leaf.data.blockStack?.includes(blockId)`), so comparing its return
-// value's OWN `.blockId` against the id being tested is what actually
-// distinguishes "the currently active/visible member" from "some other
-// blockId that merely still exists somewhere in this leaf's stack." A
-// no-op for every non-keep-alive pane type: those only ever have their
-// current active member registered at all, so this always resolves true
-// for whatever's actually in the map.
-function isActiveStackMember(blockId: string): boolean {
-    const layoutModel = getLayoutModelForStaticTab();
-    const node = layoutModel.getNodeByBlockId(blockId);
-    return node?.data?.blockId === blockId;
-}
-
 export function getAllBlockComponentModels(): BlockComponentModel[] {
-    return Array.from(blockComponentModelMap.keys())
-        .filter(isActiveStackMember)
-        .map((blockId) => blockComponentModelMap.get(blockId));
+    return Array.from(blockComponentModelMap.entries())
+        .filter(([blockId]) => !dormantKeepAliveBlockIds.has(blockId))
+        .map(([, bcm]) => bcm);
 }
 
 // `ViewModel`'s base interface does not declare `blockId` (concrete view
@@ -79,7 +105,7 @@ export function getAllBlockComponentModels(): BlockComponentModel[] {
 // getAllBlockComponentModels() value. The map is already keyed on blockId;
 // this just exposes that key alongside its value instead of discarding it.
 export function getAllBlockComponentModelEntries(): [string, BlockComponentModel][] {
-    return Array.from(blockComponentModelMap.entries()).filter(([blockId]) => isActiveStackMember(blockId));
+    return Array.from(blockComponentModelMap.entries()).filter(([blockId]) => !dormantKeepAliveBlockIds.has(blockId));
 }
 
 export function getFocusedBlockId(): string {
