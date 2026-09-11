@@ -1,8 +1,8 @@
 # INCIDENT 2026-09-10 — `ci-pr.yml`'s required Windows leg hangs for hours, backing up every open PR
 
-**Status:** partially addressed — Korp's PR #3198 (concurrency groups) is open, not yet
-merged. The two structural gaps that let a single hang become an hours-long backlog
-(no `timeout-minutes`, no concurrency groups) are analyzed below; only one is fixed so far.
+**Status:** active — one of the two structural gaps identified below has a fix in
+flight (Korp's PR #3198, concurrency groups; open, not yet merged); the other
+(`timeout-minutes`) has no PR yet. See §5 for exactly what's shipped vs. outstanding.
 
 **Severity:** High — every open PR against `agentmuxai/agentmux` is gated on
 `check --tests + test (windows-latest)`; while it hangs, nothing merges.
