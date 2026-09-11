@@ -6,8 +6,13 @@
 **Related:** `agentmux-mcp/src/main.rs`, `agentmux-mcp/src/tool_schemas.rs`,
 `agentmux-srv/src/backend/rpc/engine.rs`, `agentmux-srv/src/backend/rpc/schema.rs`,
 `agentmux-srv/src/server/mod.rs`, `agentmux-srv/src/server/app_api/fleet.rs`,
-`agentmux-srv/src/sagas/delete_block.rs`, `frontend/layout/lib/layoutMagnify.ts`,
-`frontend/layout/lib/layoutMinimize.ts`, `agentmux-cef/src/commands/floating_pane.rs`
+`agentmux-srv/src/server/ui_handlers.rs` (the `verified_block_id` signed-identity
+mechanism §5.0 adopts), `agentmux-srv/src/sagas/delete_block.rs`,
+`agentmux-srv/src/sagas/tear_off_block.rs`, `agentmux-srv/src/sagas/redock_floating_pane.rs`,
+`frontend/layout/lib/layoutMagnify.ts`, `frontend/layout/lib/layoutMinimize.ts`,
+`agentmux-cef/src/commands/floating_pane.rs`
+**Tracked prerequisite:** [agentmuxai/agentmux#3192](https://github.com/agentmuxai/agentmux/issues/3192)
+(§1.2/§9 — confirm `delete_block` preserves conversation history)
 **Predecessors (extend, don't duplicate):**
 [`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md`](./SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md)
 (established MCP → REST `/api/v1/agent/*` → server-side-identity-stamped handler
@@ -166,70 +171,163 @@ engine.register_typed::<ClosePaneReq, ClosePaneResp, _, _>(
 
 `--dump-rpc-schema` (already proposed by `SPEC_RPC_BINDINGS_CODEGEN` §3.2) gains
 a second output alongside `rpc.gen.d.ts`: `agentmux-mcp/src/tool_schemas.gen.rs`,
-a generated `const` array of MCP tool JSON schemas plus a generated dispatch
-table (command name → REST path + required/optional fields), replacing the
-hand-written entries in `tool_schemas.rs` for every migrated command.
-`agentmux-mcp/src/main.rs`'s dispatch loop calls the generated table instead
-of a hand-written `match` arm per tool. `scripts/check-rpc-bindings.sh`
-(already proposed) is extended to diff this file too — one gate covers all
-three consumers going forward, not just frontend↔srv.
+a generated `const` array of MCP tool JSON schemas, replacing the hand-written
+entries in `tool_schemas.rs` for every migrated command. `scripts/check-rpc-
+bindings.sh` (already proposed) is extended to diff this file too.
 
-This is the concrete mechanism for "combine API + MCP + RPC into one coherent
-system": **one `register_typed` call is the only place a new command's shape
-is ever written down.** The WS path (frontend), the REST path
-(`/api/v1/agent/pane/*`, MCP's transport), and the MCP tool schema all derive
-from it. This does not touch the wire formats themselves (`RpcClient.rpcCall`,
-the REST `X-AuthKey` middleware) — same non-goal `SPEC_RPC_BINDINGS_CODEGEN`
-§4 already states, extended to cover the MCP transport too.
+**Codex P2 on PR #3191, correctly:** the metadata sketched above (name,
+description, stamped fields) is enough to generate the MCP *schema*, but
+nothing here gives `agentmux-mcp` an HTTP method/path to call, or installs an
+Axum route — so without more, the REST leg still has to be hand-added to
+`server/mod.rs` per command, and "one registration, three consumers" would be
+false. Fixed in §4.3 below by not needing per-command REST routes at all.
 
-### 4.3 REST routes (MCP's transport, per the established pattern)
+### 4.3 A single generic REST dispatcher, not a growing route table
 
-Following `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md` §5 exactly — the
-REST handler resolves identity server-side from `block_id`/`AGENTMUX_BLOCKID`,
-never from agent-supplied JSON, for the *caller's own identity*. The
-*target* pane's `block_id`, when acting on another agent's pane, is supplied
-explicitly by the agent (see §5 for why this is safe and matches
-`SetName`'s `target_id` precedent) and resolved through `fleet.rs`'s existing
-target-validation path, not trusted blindly:
+Rather than add a hand-written `.route("/api/v1/agent/pane/close", ...)` line
+per command (which is exactly the per-command REST maintenance §4.2 is trying
+to eliminate), add **one** generic route:
 
-| Command | REST route | MCP tool | Own-pane semantics | Cross-pane semantics |
-|---|---|---|---|---|
-| `pane.close` | `POST /api/v1/agent/pane/close` | `ClosePane` | close caller's own pane | close pane at `block_id` (fleet tier) |
-| `pane.maximize` | `POST /api/v1/agent/pane/maximize` | `MaximizePane` | maximize caller's own pane | maximize pane at `block_id` (fleet tier) |
-| `pane.minimize` | `POST /api/v1/agent/pane/minimize` | `MinimizePane` | minimize caller's own pane | minimize pane at `block_id` (fleet tier) |
-| `pane.restore` | `POST /api/v1/agent/pane/restore` | `RestorePane` | undo maximize/minimize on caller's own pane | restore pane at `block_id` (fleet tier) |
-| `pane.split` | `POST /api/v1/agent/pane/split` | `SplitPane` | split caller's own pane; `direction`, optional `view` for the new half | **not exposed cross-agent in v1** — see §7 |
-| `pane.float` | `POST /api/v1/agent/pane/float` | `FloatPane` | float caller's own pane to a new OS window | **not exposed cross-agent in v1** — see §7 |
-| `pane.dock` | `POST /api/v1/agent/pane/dock` | `DockPane` | dock a floated pane back into its tab | own-pane only |
+```
+POST /api/v1/agent/rpc/:command
+```
+
+Its handler looks up `:command` in the `RpcSchema` registry `register_typed`
+already populates, deserializes the body as that command's `Req` type,
+and dispatches through the identical typed handler function the WS engine
+calls — no new per-command Rust code, no new per-command route. This is the
+"documented generic dispatcher" Codex's review proposed as the alternative to
+richer per-command REST metadata, and it's the smaller change: it only needs
+the registry to expose `(command) -> dyn Fn(Value) -> Future<Result<Value>>`,
+which `register_typed`'s type-erased storage already has to do internally to
+support the untyped WS path today.
+
+`agentmux-mcp/src/main.rs`'s dispatch loop calls `POST /api/v1/agent/rpc/pane.close`
+(etc.) directly — reading the target path from the same generated
+`tool_schemas.gen.rs` table §4.2 already produces, so there is still exactly
+one place (`register_typed`) where a new command's shape and name are ever
+written down. This generalizes past pane-lifecycle: every future
+`register_typed` command gets an MCP-reachable REST door for free, with zero
+additional route-table maintenance, which is the actual "one registration,
+three consumers" claim now made true rather than aspirational.
+
+| Command | MCP tool | Own-pane semantics | Cross-pane semantics |
+|---|---|---|---|
+| `pane.close` | `ClosePane` | close caller's own pane (§5 identity) | close pane at `block_id` (fleet tier) |
+| `pane.maximize` | `MaximizePane` | maximize caller's own pane | maximize pane at `block_id` (fleet tier) |
+| `pane.minimize` | `MinimizePane` | minimize caller's own pane | minimize pane at `block_id` (fleet tier) |
+| `pane.restore` | `RestorePane` | undo maximize/minimize on caller's own pane | restore pane at `block_id` (fleet tier) |
+| `pane.split` | `SplitPane` | split caller's own pane; `direction`, optional `view` for the new half | **not exposed cross-agent in v1** — see §7 |
+| `pane.float` | `FloatPane` | float caller's own pane to a new OS window; **records its origin** (see `pane.dock` below) | **not exposed cross-agent in v1** — see §7 |
+| `pane.dock` | `DockPane` | dock a floated pane back to its recorded origin (see below) — own-pane only | not applicable |
 
 `pane.maximize`/`pane.minimize`/`pane.restore` require the srv-side concept
 gap from §1 to be closed first — see §6.
 
+**Codex P1 on PR #3191, correctly:** a no-argument "dock back into its tab"
+has no destination to resolve against. `sagas::redock_floating_pane::run`
+requires an explicit `source_tab_id`, `source_workspace_id`, `target_tab_id`,
+`target_workspace_id`, and optional `dst_index` — `tear_off_block::run` does
+not persist where a floated block came from, so today there is nothing a
+no-arg `DockPane` could read. Fixed: `pane.float` must record its origin
+(`source_tab_id`, `source_workspace_id`, and the leaf's position at
+tear-off time) — most naturally as block meta, alongside the other
+`agent:*`/`cmd:*` meta keys already carried on a block (§0's DB inspection
+found these directly) — and `pane.dock` defaults to that recorded origin,
+with optional explicit `target_tab_id`/`target_workspace_id`/`dst_index`
+params for redocking somewhere else. This makes the no-arg "put me back"
+call agent-ergonomic while still satisfying `redock_floating_pane`'s real
+required signature underneath.
+
 ## 5. Authorization model — the actual hard part
 
 Per §1.1, two tiers already exist. This spec assigns each verb explicitly
-rather than inventing new rules per-command:
+rather than inventing new rules per-command — but §5.0 below corrects a real
+hole Codex found in how "own-pane" was originally defined here.
+
+### 5.0 Own-pane identity must be resolved server-side from a *signature*, not an optional field (Codex P1 on PR #3191)
+
+The first draft of this spec described own-pane operations as needing "no
+additional guard," citing `UIClick` as precedent. That understated what
+`UIClick` actually does. Per `agentmux-srv/src/server/ui_handlers.rs`'s own
+module doc comment (written after a real vulnerability, PR #2662): **a bare
+client-supplied `block_id` is never trusted for anything, including the
+caller's own identity** — `/api/v1/ui/*` shares the same instance-wide
+`X-AuthKey` every agent can read from its own environment, so "the MCP schema
+never exposes a block_id param" is not a real boundary; a bypassing agent can
+call the REST endpoint directly with any block_id it wants. `verified_block_id`
+closes this the only way that actually works: the request carries
+`UiAutomationAuth` — an HMAC-SHA256 signature over the caller's own
+`agent_id`, produced with that agent's own `AGENTMUX_JEKT_KEY` (the same
+per-agent key `agentmux-mcp` already holds out-of-band for jekt sender
+authentication) — srv verifies the signature against that agent's key on
+file, and *only then* looks up that agent's actual current `block_id` itself,
+server-side, via the `ReactiveHandler` registry. There is no field in the
+request that names the caller's own pane at all.
+
+This spec's own-pane operations (§4.3: own-only `pane.split`/`pane.float`/
+`pane.dock`, and the own-pane path of `pane.close`/`pane.maximize`/
+`pane.minimize`/`pane.restore`) adopt the identical mechanism: `agentmux-mcp`
+signs the caller's `agent_id` with its `AGENTMUX_JEKT_KEY` on every pane-
+lifecycle call; the REST/generic-dispatcher handler (§4.3) verifies it via
+the same `verified_block_id`-style lookup before resolving "my own pane."
+**Own-pane operations never accept a `block_id` request field at all** — not
+optional, not defaulted, absent from the schema entirely — so there is
+nothing for a bypassing direct-REST-call agent to substitute. A `block_id`
+parameter exists ONLY on the commands this spec explicitly designates
+fleet-tier (close/maximize/minimize/restore's cross-pane form, §5.1 below),
+and its presence is exactly what routes a call to fleet-tier handling instead
+of own-pane handling — the two are different request shapes, not the same
+shape with an optional field, precisely so a foreign `block_id` can never
+leak into what was meant to be a self-only call.
+
+### 5.1 Cross-pane operations: fleet tier, with real caller attribution
 
 - **Close/maximize/minimize/restore, targeting another agent's pane: fleet
-  tier.** Same posture as `FleetBulkStop` — gated by the instance `X-AuthKey`
-  only, no per-agent ownership check, because (matching the existing route
-  comment's own reasoning) that *is* the feature: an agent fixing another
-  agent's stuck pane is exactly this spec's motivating case, and it cannot
-  require the broken pane's own agent to cooperate (it might not be able to —
-  that's the whole problem). Every cross-pane call gets per-target
-  success/failure reporting and mandatory audit logging identical to
-  `fleet.rs`'s existing `log_fleet_action_audit`, so "who closed my pane and
-  why" is always answerable after the fact.
+  tier.** Same posture as `FleetBulkStop` — no per-agent *ownership* check on
+  the target, because (matching the existing route comment's own reasoning)
+  that *is* the feature: an agent fixing another agent's stuck pane is
+  exactly this spec's motivating case, and it cannot require the broken
+  pane's own agent to cooperate (it might not be able to — that's the whole
+  problem). Unlike `FleetBulkStop` today, though, the *caller's* identity is
+  not optional — see §5.2, Codex's second P1 finding, which this spec's
+  fleet-tier commands must not inherit.
 - **Split/float, own pane only in v1.** These create new panes/windows rather
   than acting on an existing one; there's no motivating case from this
   investigation for doing this to another agent's layout, and doing so
   correctly (which tab? which agent's workspace?) is a bigger design question
   deferred to §7 rather than rushed into v1 alongside the close/maximize/
   minimize work this spec is actually motivated by.
-- **Own-pane operations: self-only, no additional guard** — same posture as
-  every other self-scoped MCP tool (`MemoryWrite`, `UIClick`).
 
-### 5.1 Do not repeat `SetName`'s unguarded `target_id` precedent uncritically
+### 5.2 Audit attribution must be a verified `source_agent`, not `None` (Codex P1 on PR #3191)
+
+This spec originally claimed cross-pane calls get "mandatory audit logging
+identical to `fleet.rs`'s existing `log_fleet_action_audit`, so 'who closed my
+pane and why' is always answerable." Codex checked that claim against the
+actual code and it's false as stated: `log_fleet_action_audit` *accepts* a
+`source_agent: Option<&str>` parameter, but `fleet_bulk_stop_impl`
+(`agentmux-srv/src/server/app_api/fleet.rs`) currently calls it with
+`source_agent: None` on every invocation — because the caller's identity was
+never verified in the first place, there's nothing trustworthy to pass. Under
+the `X-AuthKey`-only posture, "who" is unanswerable by construction: the key
+is shared by every agent on the instance.
+
+Fixed by reusing §5.0's signing mechanism for fleet-tier calls too: the
+caller signs its own `agent_id` the same way, srv verifies it the same way
+`verified_block_id` does, and the now-*verified* agent_id is what
+`log_fleet_action_audit` receives as `source_agent: Some(&verified_agent_id)`
+— not the unverified claim, the checked one. Add an optional `reason: String`
+request field (absent from every existing fleet command, also missing today)
+threaded into the audit record alongside it, since "why" was never captured
+either. This is a **prerequisite for this spec's fleet-tier commands**, not
+optional polish — without it, §8's acceptance criterion ("an audit log entry")
+would ship an entry that still can't say who. It's also a real, standing gap
+in `FleetBulkStop` itself; fixing the shared signing/verification helper as
+part of this work is the natural point to close that gap too, but
+`FleetBulkStop`'s own call sites switching to it is this spec's choice to
+make, not a requirement — see open question in §9.
+
+### 5.3 Do not repeat `SetName`'s unguarded `target_id` precedent uncritically
 
 `SPEC_MCP_SETNAME_TARGET_ID_2026_06_19.md` §2 relaxed `SetName`'s guard so
 that supplying `target_id` bypasses the caller's own `block_id` requirement
@@ -243,7 +341,7 @@ knowledge. Adopting fleet tier (§5) rather than `SetName`'s bare-`target_id`
 tier is a deliberate choice to get the audit trail and per-target reporting
 `SetName` never had, not an oversight.
 
-### 5.2 Open question for the repo owner
+### 5.5 Open question for the repo owner
 
 Should a cross-pane close/maximize/minimize call require the *target* agent
 to be idle (no turn in flight), the way `FleetBulkStop` has no such guard
@@ -315,7 +413,8 @@ question.
   (§1.2).
 - An agent can call `ClosePane(block_id: "<another agent's pane>")` and that
   pane closes, with a `FleetActionResult`-shaped response and an audit log
-  entry, matching `FleetBulkStop`'s existing response/audit shape.
+  entry whose `source_agent` is the caller's *verified* identity (§5.2), not
+  `None`.
 - `SplitPane`/`FloatPane`/`DockPane` round-trip on the caller's own pane,
   verified against a real running instance (not just unit-tested), the same
   way the existing floating-pane feature is manually verified today.
@@ -331,8 +430,10 @@ question.
 
 1. §1.2 — does `delete_block` already preserve conversation history
    independent of the block? Must be confirmed (and fixed if not) before
-   step 1.
-2. §5.2 — should a cross-pane close/maximize/minimize surface (but not
+   step 1. **Tracked as [agentmuxai/agentmux#3192](https://github.com/agentmuxai/agentmux/issues/3192)**
+   (reagent P1 on PR #3191: this was a blocking prerequisite with no owner or
+   tracking reference in the first draft).
+2. §5.5 — should a cross-pane close/maximize/minimize surface (but not
    block on) the target's `turn_active` state?
 3. §6 — accept option (b) (ephemeral relay) for v1, or is durable
    `db_layout` persistence for maximize/minimize worth the larger change up
@@ -340,3 +441,8 @@ question.
 4. §7 step 6 — is migrating the *existing* hand-written MCP tools to
    generated schemas wanted as a near-term follow-up, or left indefinitely
    as hand-written legacy alongside the newly-generated ones?
+5. §5.2 — should fixing `FleetBulkStop`'s existing `source_agent: None` gap
+   (using the same signing/verification helper this spec adds for its own
+   fleet-tier commands) be folded into this work, or filed as its own
+   separate follow-up? Either way it should not ship as a *known* new gap
+   given this spec now has the fix sitting right next to it.
