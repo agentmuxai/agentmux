@@ -325,17 +325,39 @@ impl Store {
         }
     }
 
-    /// Purge `id`'s ref rows on `self`, then delete the catalog row on
-    /// `catalog`. True if a catalog row was deleted.
+    /// Delete the catalog row on `catalog` FIRST, then purge `id`'s ref rows
+    /// on `self`. True if a catalog row was deleted.
+    ///
+    /// Order matters (Codex P1, PR #3183): with the ref-purge running first,
+    /// a catalog-delete failure AFTER the ref purge already committed (disk
+    /// full, the identity store locked, any I/O error) stranded the row —
+    /// still present in `catalog`, but no ref points at it and it is not
+    /// necessarily global, so no access-check path can find it again, and
+    /// the ordinary delete RPC's own pre-check (`skill_is_bound_to`) now
+    /// rejects a retry too, since the ref that check depends on is already
+    /// gone. Catalog-first fixes the failure mode entirely: if the catalog
+    /// delete itself errors, `?` returns before the ref purge ever runs, so
+    /// the row keeps its ref(s) and stays exactly as accessible/retryable as
+    /// before the call. If the catalog delete SUCCEEDS (including "0 rows,
+    /// already gone") and the SUBSEQUENT ref purge then fails or a process
+    /// crashes between the two, the worst case is a dangling ref pointing at
+    /// an id the identity store no longer holds — the same already-accepted,
+    /// gracefully-degrading gap `SPEC_DURABLE_BINDINGS_2026_09_10.md` §5.4
+    /// documents for cross-channel dangling refs (`skill_get` on a missing
+    /// id returns `None`, which every read path already handles), not a new
+    /// failure mode.
     pub(super) fn managed_delete<R: ManagedResource>(&self, catalog: &Store, id: &str) -> Result<bool, StoreError> {
+        let deleted = {
+            let conn = catalog.conn.lock().unwrap();
+            let rows = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", R::TABLE), params![id])?;
+            rows > 0
+        };
         {
             let conn = self.conn.lock().unwrap();
             conn.execute(&format!("DELETE FROM {} WHERE {} = ?1", R::AGENT_REF_TABLE, R::REF_COL), params![id])?;
             conn.execute(&format!("DELETE FROM {} WHERE {} = ?1", R::BUNDLE_REF_TABLE, R::REF_COL), params![id])?;
         }
-        let conn = catalog.conn.lock().unwrap();
-        let rows = conn.execute(&format!("DELETE FROM {} WHERE id = ?1", R::TABLE), params![id])?;
-        Ok(rows > 0)
+        Ok(deleted)
     }
 
     /// Purge every bundle-level ref for `bundle_id`, for one resource kind.

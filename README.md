@@ -1,10 +1,10 @@
-<!-- The early-alpha warning is the first content block by design — see
+<!-- The alpha warning is the first content block by design — see
 docs/specs/SPEC_EARLY_ALPHA_WARNING_2026_06_05.md. Decorative logo/title
 follow below so the warning is never pushed below the fold. -->
 
-> ## Early Alpha
+> ## Alpha
 >
-> **AgentMux is in early alpha.** Some features are incomplete or still
+> **AgentMux is alpha software.** Some features are incomplete or still
 > settling, and behavior can change between releases. A few things to keep
 > in mind:
 >
