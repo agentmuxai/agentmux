@@ -26,6 +26,14 @@ on:
     - cron: '0 6 * * *' # 06:00 UTC daily (ahead of Phase A at 07:00)
   workflow_dispatch: {}
 
+# Own group, distinct from both ci-pr.yml's and ci-nightly-build.yml's — see
+# the matching comment in ci-nightly-build.yml for the full reasoning
+# (queue rather than cancel a real nightly run; this does not give artifact
+# builds separate runner capacity from PR CI, only prevents self-collision).
+concurrency:
+  group: ci-nightly-artifacts
+  cancel-in-progress: false
+
 jobs:
   windows:
     name: Windows portable + installer + MSIX
