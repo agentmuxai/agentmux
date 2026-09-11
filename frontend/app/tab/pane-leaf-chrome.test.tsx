@@ -92,6 +92,31 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
+// Fake layout-tree lookup for `stackBlockIds` (pane-leaf-chrome.tsx) — the
+// keep-alive branch (term panes) reads a leaf's `data.blockStack` via
+// `getLayoutModelForStaticTab()` + `findNode()`. Reactive via a plain
+// signal so a test can push a new stack and see `stackBlockIds()`
+// re-derive, same as a real `localTreeStateAtom()` bump would.
+// Defaults to no configured node for a given nodeId — `stackBlockIds`
+// falls back to `[activeBlockId()]` in that case, so tests that never call
+// `setBlockStack` (every non-keep-alive one, and the single-member term
+// tests) see exactly the old single-entry list.
+const [fakeTreeVersion, bumpFakeTreeVersion] = createSignal(0);
+const fakeNodesByNodeId = new Map<string, { data?: { blockStack?: string[] } }>();
+function setBlockStack(nodeId: string, blockStack: string[] | undefined) {
+    fakeNodesByNodeId.set(nodeId, { data: { blockStack } });
+    bumpFakeTreeVersion((v) => v + 1);
+}
+vi.mock("@/layout/index", () => ({
+    getLayoutModelForStaticTab: () => ({
+        localTreeStateAtom: () => fakeTreeVersion(),
+        treeState: { rootNode: {} as any },
+    }),
+}));
+vi.mock("@/layout/lib/layoutNode", () => ({
+    findNode: (_root: unknown, nodeId: string) => fakeNodesByNodeId.get(nodeId),
+}));
+
 async function loadPaneLeafChrome() {
     const mod = await import("./pane-leaf-chrome");
     return mod.PaneLeafChrome;
@@ -155,6 +180,7 @@ function makeRealisticNodeModel(overrides?: { activeBlockId?: () => string }): N
 afterEach(() => {
     cleanup();
     blockMetaSignals.clear();
+    fakeNodesByNodeId.clear();
     renderPaneChromeCallCount = { count: 0 };
 });
 
@@ -289,5 +315,64 @@ describe("PaneLeafChrome — hoisted", () => {
 
         setActiveBlockId("b1");
         expect(renderPaneChromeCallCount.count).toBe(1); // switching back doesn't re-invoke either
+    });
+});
+
+describe("PaneLeafChrome — keep-alive (term)", () => {
+    // The content-side acceptance criterion, mirroring the chrome-side one
+    // above: under KEEP_ALIVE_TYPES (term), every stack member's own Block
+    // mounts ONCE and stays mounted — a switch must not unmount/remount
+    // either one, only change which is visible. Reported live: with
+    // chrome already stable, term still fully remounted its <Block> (new
+    // TermViewModel, new xterm.js instance) on every switch, showing a
+    // brief spinner flash editor's own (never-remounting) file tabs never
+    // have.
+    it("keeps every stack member's Block mounted across a switch instead of remounting", async () => {
+        setBlockView("b1", "term");
+        setBlockView("b2", "term");
+        setBlockStack("node-1", ["b1", "b2"]);
+        const [activeBlockId, setActiveBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+
+        // Both members are mounted up front, not just the active one.
+        const blockB1Before = screen.getByTestId("block-b1");
+        const blockB2Before = screen.getByTestId("block-b2");
+        expect(renderPaneChromeCallCount.count).toBe(1);
+
+        setActiveBlockId("b2");
+
+        // Same DOM nodes for BOTH — neither one remounted, only which is
+        // visible changed. A naive re-render would have torn down and
+        // recreated at least the newly-active one.
+        expect(screen.getByTestId("block-b1")).toBe(blockB1Before);
+        expect(screen.getByTestId("block-b2")).toBe(blockB2Before);
+        expect(renderPaneChromeCallCount.count).toBe(1); // chrome still didn't re-invoke either
+
+        setActiveBlockId("b1");
+        expect(screen.getByTestId("block-b1")).toBe(blockB1Before);
+        expect(screen.getByTestId("block-b2")).toBe(blockB2Before);
+    });
+
+    // A brand-new tab (pushed onto the stack, not yet ever active) must
+    // still mount — keep-alive doesn't mean "only the members that have
+    // ever been active."
+    it("mounts a newly-pushed stack member immediately, before it's ever active", async () => {
+        setBlockView("b1", "term");
+        setBlockView("b2", "term");
+        setBlockStack("node-1", ["b1"]);
+        const [activeBlockId] = createSignal("b1");
+        const nodeModel = makeRealisticNodeModel({ activeBlockId });
+        const PaneLeafChrome = await loadPaneLeafChrome();
+
+        render(() => <PaneLeafChrome nodeModel={nodeModel} />);
+        expect(screen.queryByTestId("block-b2")).toBeNull();
+
+        setBlockStack("node-1", ["b1", "b2"]);
+
+        expect(screen.getByTestId("block-b1")).toBeInTheDocument();
+        expect(screen.getByTestId("block-b2")).toBeInTheDocument();
     });
 });
