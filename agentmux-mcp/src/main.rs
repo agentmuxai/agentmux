@@ -765,7 +765,11 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellInputRequest { shell_id: shell_id.to_string(), text: text.to_string() })
+                .json(&PtyShellInputRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                    text: text.to_string(),
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -814,7 +818,12 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellResizeRequest { shell_id: shell_id.to_string(), rows, cols })
+                .json(&PtyShellResizeRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                    rows,
+                    cols,
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -856,7 +865,11 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellReadRequest { shell_id: shell_id.to_string(), tail_lines })
+                .json(&PtyShellReadRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                    tail_lines,
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -891,7 +904,10 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellStatusRequest { shell_id: shell_id.to_string() })
+                .json(&PtyShellStatusRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -930,7 +946,10 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellStopRequest { shell_id: shell_id.to_string() })
+                .json(&PtyShellStopRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -945,10 +964,10 @@ async fn call_tool(
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(if result.stopped {
-                format!("stopped shell {shell_id}")
+            Ok(if result.released {
+                format!("released the agent lock on shell {shell_id} (the shell itself keeps running)")
             } else {
-                format!("shell {shell_id} was not running (unknown or already stopped)")
+                format!("shell {shell_id}: no active agent lock to release (unrecognized id, not yours, or already unlocked)")
             })
         }
         "OpenEditor" => {

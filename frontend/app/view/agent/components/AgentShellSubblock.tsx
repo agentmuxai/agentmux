@@ -138,6 +138,28 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
         return Math.max(0.5, Math.min(2.0, z));
     });
+
+    // Agent-lock gating (SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md):
+    // while an agent is actively driving THIS shell via PtyShellInput/
+    // PtyShellResize, the human's own keystrokes are dropped instead of
+    // forwarded — the two typing into the same PTY at once would interleave
+    // into garbage. `term:agentlockuntil` is an absolute expiry timestamp
+    // (epoch ms) the backend stamps on every successful agent write; gating
+    // on it here needs no server push to UN-lock — a quiet agent just lets
+    // the timestamp lapse, and `nowTick` (below) re-evaluates this memo on
+    // its own schedule so the UI actually notices the moment it does.
+    // Deliberately a lease, not an explicit lock/unlock the agent could
+    // fail to release (crash, error) — see the backend const's own doc
+    // comment (`AGENT_LOCK_WINDOW_MS`) for why.
+    const [nowTick, setNowTick] = createSignal(Date.now());
+    const tickInterval = setInterval(() => setNowTick(Date.now()), 500);
+    onCleanup(() => clearInterval(tickInterval));
+
+    const agentLockedUntil = createMemo(() => {
+        const v = subBlockAtom()?.()?.meta?.["term:agentlockuntil"];
+        return typeof v === "number" ? v : 0;
+    });
+    const agentLocked = createMemo(() => agentLockedUntil() > nowTick());
     const termFontSize = createMemo(() => {
         const paneZoom = props.agentPaneZoom() || 1;
         return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));
@@ -333,6 +355,12 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                         // controllerinput RPC, so consecutive keystrokes stay in
                         // TCP order. No chunked-paste handling for this spike.
                         sendDataHandler: (data: string) => {
+                            // Dropped, not queued: while the agent holds the
+                            // lock, this shell's PTY is being actively driven
+                            // by PtyShellInput — forwarding the human's
+                            // keystrokes too would interleave both into the
+                            // same input stream. See `agentLocked` above.
+                            if (agentLocked()) return;
                             sendWSCommand({
                                 wscommand: "blockinput",
                                 blockid: id,
@@ -397,6 +425,11 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             <Show when={spinnerMounted()}>
                 <div class="agent-shell-loading-overlay" classList={{ "is-fading": spinnerFading() }}>
                     <BrainSpinner />
+                </div>
+            </Show>
+            <Show when={agentLocked()}>
+                <div class="agent-shell-agentlock-badge" title="The agent is actively typing into this shell — your own input is paused until it stops.">
+                    Agent is using this shell
                 </div>
             </Show>
         </div>
