@@ -114,6 +114,8 @@ pub enum CodexAppServerProtocolError {
     TurnScopeMismatch { expected: String, actual: String },
     #[error("cannot start a turn before a thread is loaded")]
     ThreadNotLoaded,
+    #[error("cannot steer or interrupt without an active turn")]
+    TurnNotActive,
     #[error("cannot start a second turn while turn {0} is active")]
     TurnAlreadyActive(String),
     #[error("resume response did not identify the requested thread")]
@@ -271,6 +273,65 @@ impl CodexAppServerSession {
         state.turn_id = Some(turn_id.clone());
         state.phase = SessionPhase::Running;
         Ok(turn_id)
+    }
+
+    /// Add input to the active turn only when the caller supplies the exact
+    /// turn precondition. Ordinary queued messages should not call this API.
+    pub async fn steer_turn(
+        &self,
+        text: String,
+        expected_turn_id: String,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        let (thread_id, active_turn_id) = self.active_turn()?;
+        if active_turn_id != expected_turn_id {
+            return Err(CodexAppServerProtocolError::TurnScopeMismatch {
+                expected: active_turn_id,
+                actual: expected_turn_id,
+            });
+        }
+        Ok(self
+            .transport
+            .request(
+                "turn/steer",
+                json!({
+                    "threadId": thread_id,
+                    "expectedTurnId": expected_turn_id,
+                    "input": [{"type": "text", "text": text}],
+                }),
+                timeout,
+            )
+            .await?)
+    }
+
+    /// Interrupt the active turn. The turn remains active locally until its
+    /// authoritative `turn/completed` notification arrives.
+    pub async fn interrupt_turn(
+        &self,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        let (thread_id, turn_id) = self.active_turn()?;
+        Ok(self
+            .transport
+            .request(
+                "turn/interrupt",
+                json!({"threadId": thread_id, "turnId": turn_id}),
+                timeout,
+            )
+            .await?)
+    }
+
+    fn active_turn(&self) -> Result<(String, String), CodexAppServerProtocolError> {
+        let state = self.state.lock().unwrap();
+        let thread_id = state
+            .thread_id
+            .clone()
+            .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?;
+        let turn_id = state
+            .turn_id
+            .clone()
+            .ok_or(CodexAppServerProtocolError::TurnNotActive)?;
+        Ok((thread_id, turn_id))
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
@@ -610,6 +671,70 @@ mod tests {
             "thread-2"
         );
         assert_eq!(session.snapshot().thread_id.as_deref(), Some("thread-2"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn steers_and_interrupts_only_the_active_turn() {
+        let (session, server_reader, mut server_writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let steer: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(steer["method"], "turn/steer");
+            assert_eq!(steer["params"]["expectedTurnId"], "turn-1");
+            server_writer
+                .write_all(
+                    br#"{"id":1,"result":{"accepted":true}}
+"#,
+                )
+                .await
+                .unwrap();
+            let interrupt: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(interrupt["method"], "turn/interrupt");
+            assert_eq!(interrupt["params"]["turnId"], "turn-1");
+            server_writer
+                .write_all(
+                    br#"{"id":2,"result":{"accepted":true}}
+"#,
+                )
+                .await
+                .unwrap();
+        });
+        assert_eq!(
+            session
+                .steer_turn(
+                    "continue".to_string(),
+                    "turn-1".to_string(),
+                    Duration::from_secs(1)
+                )
+                .await
+                .unwrap()["accepted"],
+            true
+        );
+        assert_eq!(
+            session
+                .interrupt_turn(Duration::from_secs(1))
+                .await
+                .unwrap()["accepted"],
+            true
+        );
+        assert!(matches!(
+            session
+                .steer_turn(
+                    "stale".to_string(),
+                    "turn-old".to_string(),
+                    Duration::from_secs(1)
+                )
+                .await,
+            Err(CodexAppServerProtocolError::TurnScopeMismatch { .. })
+        ));
         server.await.unwrap();
     }
 
