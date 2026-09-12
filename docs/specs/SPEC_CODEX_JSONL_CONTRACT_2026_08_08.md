@@ -1,11 +1,11 @@
 # Codex CLI JSONL Adapter Contract
 
 **Date:** 2026-08-08
-**Status:** implemented — PR #2476 (codex-translator.ts + tests); verified in code 2026-08-10.
+**Status:** implemented — PR #2476 (translator + tests); 0.154.0 compatibility evidence and drift gate added in PR #3207.
 **Scope:** Codex CLI subprocess output, turn lifecycle, session continuity, translation, and fixtures
 **Target:** AgentMux Codex provider (`styledOutputFormat: "codex-json"`)
-**Current AgentMux pin:** `@openai/codex@0.116.0`
-**Current locally inspected CLI:** `codex-cli 0.147.0`
+**Current AgentMux pin:** `@openai/codex@0.154.0`
+**Current locally inspected CLI:** `codex-cli 0.154.0`
 
 ---
 
@@ -503,6 +503,19 @@ CLI and declare whether they were captured on the host or in Docker. The bootstr
 translator suite may use host captures produced without bypass in a disposable
 workspace; the integrated acceptance gate and every pin change still require the
 Docker smoke subset captured inside the AgentMux Docker system.
+
+### 10.1.1 Captured version matrix
+
+| CLI version | Host fixtures | Container fixture | Unknown event/item types | Evidence |
+|---|---|---|---|---|
+| `0.116.0` | normal, command, file-change, failure | — | synthetic compatibility test only | PR #2476 |
+| `0.154.0` | normal, command, file-change, two-turn resume | two-turn resume in `ghcr.io/agentmuxai/agent-claude:latest` | 0 / 0 across candidate captures | PR #3207 |
+
+The `0.154.0` captures add two usage fields,
+`cache_write_input_tokens` and `reasoning_output_tokens`. They are intentionally
+ignored by the provider-neutral `SessionStats` mapping. All top-level and item types
+in the candidate captures are known to `CodexTranslator`; its diagnostic counters
+remain zero during replay.
 
 ### 10.2 Required scenarios
 
