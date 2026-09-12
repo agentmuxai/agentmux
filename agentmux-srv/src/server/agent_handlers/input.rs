@@ -1,17 +1,15 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-
 use std::sync::Arc;
 
-
+use crate::backend::blockcontroller;
+use crate::backend::obj::Block;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    COMMAND_SUBPROCESS_SPAWN, COMMAND_AGENT_INPUT, COMMAND_AGENT_STOP,
-    CommandSubprocessSpawnData, CommandAgentInputData, CommandAgentStopData,
+    CommandAgentInputData, CommandAgentStopData, CommandSubprocessSpawnData, COMMAND_AGENT_INPUT,
+    COMMAND_AGENT_STOP, COMMAND_SUBPROCESS_SPAWN,
 };
-use crate::backend::obj::Block;
-use crate::backend::blockcontroller;
 
 use super::super::AppState;
 
@@ -130,9 +128,7 @@ fn flags_with_arity(args: &'static [&'static str]) -> Vec<(&'static str, bool)> 
         if !tok.starts_with('-') {
             continue;
         }
-        let takes_value = args
-            .get(i + 1)
-            .is_some_and(|next| !next.starts_with('-'));
+        let takes_value = args.get(i + 1).is_some_and(|next| !next.starts_with('-'));
         out.push((*tok, takes_value));
     }
     out
@@ -186,7 +182,6 @@ fn git_identity_env_vars(agent_id: &str) -> [(&'static str, String); 4] {
         ("GIT_COMMITTER_EMAIL", git_email),
     ]
 }
-
 
 /// The slice of [`AppState`] an agent turn needs in order to be started.
 ///
@@ -293,9 +288,7 @@ pub async fn run_agent_turn(
         .map_err(|e| format!("agentinput: load block: {e}"))?
         .ok_or_else(|| format!("block {} not found", block_id))?;
 
-    let cli_command = crate::backend::obj::meta_get_string(
-        &block.meta, "cmd", "claude",
-    );
+    let cli_command = crate::backend::obj::meta_get_string(&block.meta, "cmd", "claude");
     let cli_args: Vec<String> = match block.meta.get("cmd:args") {
         Some(serde_json::Value::Array(arr)) => arr
             .iter()
@@ -309,9 +302,7 @@ pub async fn run_agent_turn(
             "stream-json".to_string(),
         ],
     };
-    let working_dir = crate::backend::obj::meta_get_string(
-        &block.meta, "cmd:cwd", "",
-    );
+    let working_dir = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
     let mut env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
         Some(serde_json::Value::Object(obj)) => obj
             .iter()
@@ -376,12 +367,8 @@ pub async fn run_agent_turn(
             // code/stderr/result-frame — just the gate's own
             // Display text, exactly like health.rs's in-band-error
             // reclassification call.
-            let gate_failure = crate::agents::failure::classify(
-                None,
-                None,
-                &gate.to_string(),
-                None,
-            );
+            let gate_failure =
+                crate::agents::failure::classify(None, None, &gate.to_string(), None);
             crate::backend::blockcontroller::core::persist_last_failure(
                 &block_id,
                 Some(&gate_failure),
@@ -436,9 +423,7 @@ pub async fn run_agent_turn(
     // architecture analyst report).
     // Only set if not already present in cmd:env — user-provided values take precedence.
     if !env_vars.contains_key("AGENTMUX_AGENT_ID") {
-        let agent_display_name = crate::backend::obj::meta_get_string(
-            &block.meta, "agentName", "",
-        );
+        let agent_display_name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
         if !agent_display_name.is_empty() {
             env_vars.insert("AGENTMUX_AGENT_ID".to_string(), agent_display_name);
         }
@@ -488,14 +473,21 @@ pub async fn run_agent_turn(
         }
     }
 
-    let session_id_field = crate::backend::obj::meta_get_string(
-        &block.meta, "agent:session_id_field", "session_id",
-    );
+    let session_id_field =
+        crate::backend::obj::meta_get_string(&block.meta, "agent:session_id_field", "session_id");
 
+    // App Server owns a persistent thread/turn process and has its own typed
+    // protocol path. Keep it ahead of the legacy stream-json branches.
+    if let Some(app_server_ctrl) =
+        ctrl.as_any()
+            .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
+    {
+        app_server_ctrl.send_message(message)?;
+    }
     // Try persistent controller first, fall back to subprocess
-    if let Some(persistent_ctrl) = ctrl
-        .as_any()
-        .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+    else if let Some(persistent_ctrl) =
+        ctrl.as_any()
+            .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
     {
         // Container agents use per-turn docker exec — incompatible with a
         // long-lived persistent subprocess. Fail loudly instead of silently
@@ -510,12 +502,10 @@ pub async fn run_agent_turn(
         // the same conversation. Same meta keys the subprocess path
         // reads below. Without this, switching model on a persistent
         // agent would either no-op (old behavior) or lose context.
-        let resume_flag = crate::backend::obj::meta_get_string(
-            &block.meta, "agent:resume_flag", "--resume",
-        );
-        let persisted_session_id = crate::backend::obj::meta_get_string(
-            &block.meta, "agent:sessionid", "",
-        );
+        let resume_flag =
+            crate::backend::obj::meta_get_string(&block.meta, "agent:resume_flag", "--resume");
+        let persisted_session_id =
+            crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "");
         let config = blockcontroller::persistent::PersistentSpawnConfig {
             cli_command,
             cli_args,
@@ -527,13 +517,12 @@ pub async fn run_agent_turn(
             message_id: message_id.clone(),
         };
         persistent_ctrl.send_message(message, config)?;
-    } else if let Some(subprocess_ctrl) = ctrl
-        .as_any()
-        .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
+    } else if let Some(subprocess_ctrl) =
+        ctrl.as_any()
+            .downcast_ref::<blockcontroller::subprocess::SubprocessController>()
     {
-        let resume_flag = crate::backend::obj::meta_get_string(
-            &block.meta, "agent:resume_flag", "--resume",
-        );
+        let resume_flag =
+            crate::backend::obj::meta_get_string(&block.meta, "agent:resume_flag", "--resume");
         let resume_strategy = crate::backend::obj::meta_get_string(
             &block.meta,
             "agent:resume_strategy",
@@ -550,38 +539,36 @@ pub async fn run_agent_turn(
         // `continueOfInstanceId`. spawn_turn hydrates its
         // inner.session_id from this on the first turn so
         // --resume <sid> lands on the very first launch.
-        let persisted_session_id = crate::backend::obj::meta_get_string(
-            &block.meta, "agent:sessionid", "",
-        );
+        let persisted_session_id =
+            crate::backend::obj::meta_get_string(&block.meta, "agent:sessionid", "");
 
         // Container agent branch: use Docker socket API exec (P1a: no
         // secrets in argv). Host agent branch: regular CLI subprocess.
-        let agent_mode = crate::backend::obj::meta_get_string(
-            &block.meta, "agentMode", "host",
-        );
+        let agent_mode = crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host");
         // Cross-process session-lease key (registry::LeaseStore) —
         // read once here for both branches below. Only the host
         // branch's spawn_turn actually enforces it in this PR;
         // the container branch's config field is unused for now
         // (struct-completeness — see host_spawn.rs's doc comment).
-        let instance_id = crate::backend::obj::meta_get_string(
-            &block.meta, "agentId", "",
-        );
+        let instance_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
         if agent_mode == "container" {
-            let cm = container_manager.get().await
-                .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
+            let cm = container_manager.get().await.ok_or_else(|| {
+                "Docker not available on this host; cannot start container agent".to_string()
+            })?;
             let container_image = {
-                let img = crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");
-                if img.is_empty() { "ghcr.io/agentmuxai/agent-claude:latest".to_string() } else { img }
+                let img =
+                    crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");
+                if img.is_empty() {
+                    "ghcr.io/agentmuxai/agent-claude:latest".to_string()
+                } else {
+                    img
+                }
             };
             // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
-            let agent_id = crate::backend::obj::meta_get_string(
-                &block.meta, "agentId", "",
-            );
+            let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
             let container_name = crate::backend::container::container_name_for_slug(&agent_id);
-            let volumes_json = crate::backend::obj::meta_get_string(
-                &block.meta, "agent:container_volumes", "[]",
-            );
+            let volumes_json =
+                crate::backend::obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
             let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
 
             // Mount the bound account's credentials and the agent's working
@@ -593,13 +580,22 @@ pub async fn run_agent_turn(
             // operator logs in via Armory.
             let mount_spec = crate::backend::container::ContainerMountSpec {
                 claude_config_host_dir: env_vars
-                .get("CLAUDE_CONFIG_DIR")
-                .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
+                    .get("CLAUDE_CONFIG_DIR")
+                    .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
                 workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
             };
 
             // Ensure container is alive (pull image if needed — P1b).
-            if let Err(e) = cm.ensure_running(&container_name, &container_image, &volumes, &[], &mount_spec).await {
+            if let Err(e) = cm
+                .ensure_running(
+                    &container_name,
+                    &container_image,
+                    &volumes,
+                    &[],
+                    &mount_spec,
+                )
+                .await
+            {
                 // Surface the error in the agent pane before returning, so the user
                 // sees why the container failed (image not found, Docker down, etc.).
                 let error_frame = serde_json::json!({
@@ -607,7 +603,8 @@ pub async fn run_agent_turn(
                     "is_error": true,
                     "subtype": "error_during_execution",
                     "error": {"message": format!("[AgentMux] container ensure_running failed: {e}")}
-                }).to_string();
+                })
+                .to_string();
                 // Some(&filestore_gate): PERSIST, not just live-broadcast —
                 // same requirement as the identity spawn-gate frame above
                 // (reagent P1, PR #2164 round 2). Previously passed None
@@ -648,12 +645,13 @@ pub async fn run_agent_turn(
             // …) + provider flags — no host paths, safe as-is.
             // spawn_container_turn appends --resume <sid> internally.
             let container_command = crate::backend::obj::meta_get_string(
-                &block.meta, "agent:container_command", "claude",
+                &block.meta,
+                "agent:container_command",
+                "claude",
             );
             // Provider id for the one-shot argv rebuild below.
-            let agent_provider = crate::backend::obj::meta_get_string(
-                &block.meta, "agentProvider", "claude",
-            );
+            let agent_provider =
+                crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
             let mut base_cmd = vec![container_command];
             base_cmd.extend(container_argv(cli_args, &agent_provider));
 
@@ -697,7 +695,10 @@ pub async fn run_agent_turn(
             subprocess_ctrl.spawn_turn(config)?;
         }
     } else {
-        return Err("controller is not a SubprocessController or PersistentSubprocessController".to_string());
+        return Err(
+            "controller is not a SubprocessController or PersistentSubprocessController"
+                .to_string(),
+        );
     }
 
     // Registration is skipped on the reactive-delivery path — see
@@ -713,9 +714,7 @@ pub async fn run_agent_turn(
         // key and the poll key are always consistent.
         // Both calls are idempotent: add_agent skips the WS send if already
         // subscribed; register_agent replaces any stale mapping from a prior session.
-        let agent_name = crate::backend::obj::meta_get_string(
-            &block.meta, "agentName", "",
-        );
+        let agent_name = crate::backend::obj::meta_get_string(&block.meta, "agentName", "");
         if !agent_name.is_empty() {
             let registered = crate::backend::reactive::handler::get_global_handler()
                 .register_agent(&agent_name, &block_id, None);
@@ -783,8 +782,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let filestore = filestore_spawn.clone();
             let boot_id = boot_id_spawn.clone();
             Box::pin(async move {
-                let cmd: CommandSubprocessSpawnData = serde_json::from_value(data)
-                    .map_err(|e| format!("subprocessspawn: {e}"))?;
+                let cmd: CommandSubprocessSpawnData =
+                    serde_json::from_value(data).map_err(|e| format!("subprocessspawn: {e}"))?;
                 tracing::info!(
                     block_id = %cmd.blockid,
                     cli = %cmd.cli_command,
@@ -793,7 +792,11 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 // Get or create a SubprocessController for this block
                 let ctrl = match blockcontroller::get_controller(&cmd.blockid) {
-                    Some(c) if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS => c,
+                    Some(c)
+                        if c.controller_type() == blockcontroller::BLOCK_CONTROLLER_SUBPROCESS =>
+                    {
+                        c
+                    }
                     _ => {
                         // Create and register a new SubprocessController
                         let registry = wstore.shared_agent_registry();
@@ -856,8 +859,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
         Box::new(move |data, _ctx| {
             let deps = deps_ai.clone();
             Box::pin(async move {
-                let cmd: CommandAgentInputData = serde_json::from_value(data)
-                    .map_err(|e| format!("agentinput: {e}"))?;
+                let cmd: CommandAgentInputData =
+                    serde_json::from_value(data).map_err(|e| format!("agentinput: {e}"))?;
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
                 run_agent_turn(
                     &deps,
@@ -877,8 +880,8 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
         COMMAND_AGENT_STOP,
         Box::new(|data, _ctx| {
             Box::pin(async move {
-                let cmd: CommandAgentStopData = serde_json::from_value(data)
-                    .map_err(|e| format!("agentstop: {e}"))?;
+                let cmd: CommandAgentStopData =
+                    serde_json::from_value(data).map_err(|e| format!("agentstop: {e}"))?;
                 tracing::info!(block_id = %cmd.blockid, force = cmd.force, "AgentStop");
                 match blockcontroller::get_controller(&cmd.blockid) {
                     Some(ctrl) => {
@@ -925,12 +928,20 @@ mod tests {
     /// 2026-08-31).
     fn stale_persistent_argv() -> Vec<String> {
         v(&[
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--verbose", "--include-partial-messages",
-            "--permission-prompt-tool", "stdio",
-            "--permission-mode", "default",
-            "--model", "sonnet", "--effort", "high",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompt-tool",
+            "stdio",
+            "--permission-mode",
+            "default",
+            "--model",
+            "sonnet",
+            "--effort",
+            "high",
         ])
     }
 
@@ -941,13 +952,22 @@ mod tests {
     fn rebuilds_a_stale_persistent_argv_into_the_one_shot_form() {
         let got = container_argv(stale_persistent_argv(), "claude");
 
-        assert!(!got.iter().any(|a| a == "--input-format"), "the fatal parse flag must go");
-        assert!(got.iter().any(|a| a == "-p"), "one-shot print mode must be present");
+        assert!(
+            !got.iter().any(|a| a == "--input-format"),
+            "the fatal parse flag must go"
+        );
+        assert!(
+            got.iter().any(|a| a == "-p"),
+            "one-shot print mode must be present"
+        );
         assert!(
             !got.iter().any(|a| a == "--permission-prompt-tool"),
             "the container turn has no control channel to answer can_use_tool",
         );
-        assert!(!got.iter().any(|a| a == "stdio"), "its value token must go with it");
+        assert!(
+            !got.iter().any(|a| a == "stdio"),
+            "its value token must go with it"
+        );
         assert!(
             !got.iter().any(|a| a == "--permission-mode"),
             "non-bypass permission mode needs the control protocol",
@@ -975,13 +995,18 @@ mod tests {
     #[test]
     fn leaves_an_already_correct_one_shot_argv_completely_untouched() {
         let correct = v(&[
-            "-p", "--output-format", "stream-json",
-            "--verbose", "--include-partial-messages",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
             "--dangerously-skip-permissions",
             "--exclude-dynamic-system-prompt-sections",
-            "--model", "opus",
-            "--my-custom-provider-flag", "42",   // agent.provider_flags
-            "--fork-session",                    // resolveForkSessionArgs
+            "--model",
+            "opus",
+            "--my-custom-provider-flag",
+            "42",             // agent.provider_flags
+            "--fork-session", // resolveForkSessionArgs
         ]);
         assert_eq!(container_argv(correct.clone(), "claude"), correct);
     }
@@ -995,14 +1020,27 @@ mod tests {
 
         let got = container_argv(stale, "claude");
 
-        assert!(got.iter().any(|a| a == "--my-custom-provider-flag"), "provider_flags survive");
+        assert!(
+            got.iter().any(|a| a == "--my-custom-provider-flag"),
+            "provider_flags survive"
+        );
         assert_eq!(
-            got[got.iter().position(|a| a == "--my-custom-provider-flag").unwrap() + 1],
+            got[got
+                .iter()
+                .position(|a| a == "--my-custom-provider-flag")
+                .unwrap()
+                + 1],
             "42",
             "…with its value",
         );
-        assert!(got.iter().any(|a| a == "--fork-session"), "fork-session survives");
-        assert!(!got.iter().any(|a| a == "--input-format"), "while still being healed");
+        assert!(
+            got.iter().any(|a| a == "--fork-session"),
+            "fork-session survives"
+        );
+        assert!(
+            !got.iter().any(|a| a == "--input-format"),
+            "while still being healed"
+        );
         assert!(got.iter().any(|a| a == "-p"));
     }
 
@@ -1010,7 +1048,10 @@ mod tests {
     /// removing only the outright-fatal flag rather than guessing.
     #[test]
     fn an_unknown_provider_falls_back_to_removing_only_the_fatal_flag() {
-        let got = container_argv(v(&["--input-format", "stream-json", "--custom"]), "no-such-provider");
+        let got = container_argv(
+            v(&["--input-format", "stream-json", "--custom"]),
+            "no-such-provider",
+        );
         assert_eq!(got, v(&["--custom"]));
     }
 
@@ -1029,7 +1070,11 @@ mod tests {
         static ARGS: &[&str] = &["-p", "--output-format", "stream-json", "--verbose"];
         assert_eq!(
             flags_with_arity(ARGS),
-            vec![("-p", false), ("--output-format", true), ("--verbose", false)],
+            vec![
+                ("-p", false),
+                ("--output-format", true),
+                ("--verbose", false)
+            ],
         );
     }
 
@@ -1039,7 +1084,10 @@ mod tests {
             strip_flag_with_value(v(&["--x", "1", "--keep", "--x", "2"]), "--x"),
             v(&["--keep"]),
         );
-        assert_eq!(strip_flag_with_value(v(&["--keep", "--x"]), "--x"), v(&["--keep"]));
+        assert_eq!(
+            strip_flag_with_value(v(&["--keep", "--x"]), "--x"),
+            v(&["--keep"])
+        );
         assert_eq!(strip_flag_with_value(vec![], "--x"), Vec::<String>::new());
     }
 
