@@ -305,7 +305,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@openai/codex",
-    pinned_version: "0.153.4",
+    pinned_version: "0.154.0",
     base_url_env_var: None,
     supported_vendors: &["openai"],
     // Confirmed: SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md §10.2 —
