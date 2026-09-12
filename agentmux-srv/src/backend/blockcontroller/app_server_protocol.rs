@@ -1,0 +1,684 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Codex App Server's stable thread/turn adapter.
+//!
+//! The transport in [`super::app_server`] owns framing and request lifecycle.
+//! This module owns the first protocol-semantic layer: typed request shapes,
+//! thread identity, turn identity, and notification reconciliation. It is
+//! intentionally not registered as a production block controller yet.
+
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use serde::Serialize;
+use serde_json::{json, Value};
+use thiserror::Error;
+
+use super::app_server::{AppServerError, AppServerIncoming, AppServerTransport};
+
+const MAX_RAW_EVENTS: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionPhase {
+    Idle,
+    Running,
+    Completed,
+    Failed,
+}
+
+impl Default for SessionPhase {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemSnapshot {
+    pub id: String,
+    pub kind: String,
+    /// Preview text accumulated from delta notifications. This is cleared
+    /// when the authoritative item completion is observed.
+    pub preview: String,
+    pub completed: bool,
+    pub authoritative: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionSnapshot {
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub phase: SessionPhase,
+    pub items: HashMap<String, ItemSnapshot>,
+    pub raw_unknown_events: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodexAppServerEvent {
+    ThreadStarted {
+        thread_id: String,
+    },
+    TurnStarted {
+        thread_id: String,
+        turn_id: String,
+    },
+    AgentMessageDelta {
+        thread_id: String,
+        turn_id: String,
+        item_id: String,
+        delta: String,
+        preview: String,
+    },
+    ItemStarted {
+        thread_id: String,
+        turn_id: String,
+        item_id: String,
+        kind: String,
+    },
+    ItemCompleted {
+        thread_id: String,
+        turn_id: String,
+        item_id: String,
+        kind: String,
+        item: Value,
+    },
+    TurnCompleted {
+        thread_id: String,
+        turn_id: String,
+        status: String,
+    },
+    ThreadStatusChanged {
+        thread_id: String,
+        status: Value,
+    },
+    UnknownNotification {
+        method: String,
+        params: Value,
+    },
+}
+
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum CodexAppServerProtocolError {
+    #[error(transparent)]
+    Transport(#[from] AppServerError),
+    #[error("App Server response is missing a string field: {0}")]
+    MissingStringField(&'static str),
+    #[error("App Server response is missing an object field: {0}")]
+    MissingObjectField(&'static str),
+    #[error("App Server event is missing a string field: {0}")]
+    MissingEventField(&'static str),
+    #[error("App Server event belongs to thread {actual}, but active thread is {expected}")]
+    ThreadScopeMismatch { expected: String, actual: String },
+    #[error("App Server event belongs to turn {actual}, but active turn is {expected}")]
+    TurnScopeMismatch { expected: String, actual: String },
+    #[error("cannot start a turn before a thread is loaded")]
+    ThreadNotLoaded,
+    #[error("cannot start a second turn while turn {0} is active")]
+    TurnAlreadyActive(String),
+    #[error("resume response did not identify the requested thread")]
+    ResumeMissingThread,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadStartOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub developer_instructions: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadResumeParams {
+    thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TurnStartParams {
+    thread_id: String,
+    input: Vec<TextUserInput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TextUserInput {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    text: String,
+}
+
+pub struct CodexAppServerSession {
+    transport: Arc<AppServerTransport>,
+    state: Mutex<SessionState>,
+}
+
+#[derive(Default)]
+struct SessionState {
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    phase: SessionPhase,
+    items: HashMap<String, ItemSnapshot>,
+    raw_unknown_events: VecDeque<Value>,
+}
+
+impl CodexAppServerSession {
+    pub fn new(transport: Arc<AppServerTransport>) -> Self {
+        Self {
+            transport,
+            state: Mutex::new(SessionState {
+                phase: SessionPhase::Idle,
+                ..SessionState::default()
+            }),
+        }
+    }
+
+    pub async fn start_thread(
+        &self,
+        options: ThreadStartOptions,
+        timeout: Duration,
+    ) -> Result<String, CodexAppServerProtocolError> {
+        let params = serde_json::to_value(options)
+            .map_err(|error| AppServerError::Protocol(error.to_string()))?;
+        let result = self
+            .transport
+            .request("thread/start", params, timeout)
+            .await?;
+        let thread_id = extract_thread_id(&result)?;
+        let mut state = self.state.lock().unwrap();
+        state.thread_id = Some(thread_id.clone());
+        state.turn_id = None;
+        state.phase = SessionPhase::Idle;
+        state.items.clear();
+        Ok(thread_id)
+    }
+
+    pub async fn resume_thread(
+        &self,
+        thread_id: String,
+        model: Option<String>,
+        cwd: Option<String>,
+        timeout: Duration,
+    ) -> Result<String, CodexAppServerProtocolError> {
+        let requested_id = thread_id.clone();
+        let result = self
+            .transport
+            .request(
+                "thread/resume",
+                serde_json::to_value(ThreadResumeParams {
+                    thread_id,
+                    model,
+                    cwd,
+                })
+                .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                timeout,
+            )
+            .await?;
+        let resumed_id = extract_thread_id(&result)?;
+        if resumed_id != requested_id {
+            return Err(CodexAppServerProtocolError::ResumeMissingThread);
+        }
+        let mut state = self.state.lock().unwrap();
+        state.thread_id = Some(resumed_id.clone());
+        state.turn_id = None;
+        state.phase = SessionPhase::Idle;
+        state.items.clear();
+        Ok(resumed_id)
+    }
+
+    pub async fn start_turn(
+        &self,
+        text: String,
+        timeout: Duration,
+    ) -> Result<String, CodexAppServerProtocolError> {
+        let thread_id = {
+            let state = self.state.lock().unwrap();
+            if let Some(turn_id) = &state.turn_id {
+                return Err(CodexAppServerProtocolError::TurnAlreadyActive(
+                    turn_id.clone(),
+                ));
+            }
+            state
+                .thread_id
+                .clone()
+                .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?
+        };
+        let result = self
+            .transport
+            .request(
+                "turn/start",
+                serde_json::to_value(TurnStartParams {
+                    thread_id,
+                    input: vec![TextUserInput { kind: "text", text }],
+                })
+                .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                timeout,
+            )
+            .await?;
+        let turn = result
+            .get("turn")
+            .and_then(Value::as_object)
+            .ok_or(CodexAppServerProtocolError::MissingObjectField("turn"))?;
+        let turn_id = string_field(turn.get("id"), "turn.id")?;
+        let mut state = self.state.lock().unwrap();
+        state.turn_id = Some(turn_id.clone());
+        state.phase = SessionPhase::Running;
+        Ok(turn_id)
+    }
+
+    pub fn snapshot(&self) -> SessionSnapshot {
+        let state = self.state.lock().unwrap();
+        SessionSnapshot {
+            thread_id: state.thread_id.clone(),
+            turn_id: state.turn_id.clone(),
+            phase: state.phase,
+            items: state.items.clone(),
+            raw_unknown_events: state.raw_unknown_events.iter().cloned().collect(),
+        }
+    }
+
+    pub fn apply_incoming(
+        &self,
+        incoming: AppServerIncoming,
+    ) -> Result<CodexAppServerEvent, CodexAppServerProtocolError> {
+        let AppServerIncoming::Notification { method, params } = incoming else {
+            return Err(CodexAppServerProtocolError::Transport(
+                AppServerError::Protocol(
+                    "server request requires an explicit approval adapter".to_string(),
+                ),
+            ));
+        };
+        let mut state = self.state.lock().unwrap();
+        match method.as_str() {
+            "thread/started" => {
+                let thread = params
+                    .get("thread")
+                    .and_then(Value::as_object)
+                    .ok_or(CodexAppServerProtocolError::MissingObjectField("thread"))?;
+                let thread_id = string_field(thread.get("id"), "thread.id")?;
+                state.thread_id = Some(thread_id.clone());
+                state.turn_id = None;
+                state.phase = SessionPhase::Idle;
+                state.items.clear();
+                Ok(CodexAppServerEvent::ThreadStarted { thread_id })
+            }
+            "turn/started" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                ensure_thread_scope(&state, &thread_id)?;
+                let turn = params
+                    .get("turn")
+                    .and_then(Value::as_object)
+                    .ok_or(CodexAppServerProtocolError::MissingObjectField("turn"))?;
+                let turn_id = string_field(turn.get("id"), "turn.id")?;
+                state.turn_id = Some(turn_id.clone());
+                state.phase = SessionPhase::Running;
+                Ok(CodexAppServerEvent::TurnStarted { thread_id, turn_id })
+            }
+            "item/agentMessage/delta" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                let turn_id = string_field(params.get("turnId"), "turnId")?;
+                ensure_scopes(&state, &thread_id, &turn_id)?;
+                let item_id = string_field(params.get("itemId"), "itemId")?;
+                let delta = string_field(params.get("delta"), "delta")?;
+                let item = state.items.entry(item_id.clone()).or_insert(ItemSnapshot {
+                    id: item_id.clone(),
+                    kind: "agentMessage".to_string(),
+                    preview: String::new(),
+                    completed: false,
+                    authoritative: None,
+                });
+                item.preview.push_str(&delta);
+                Ok(CodexAppServerEvent::AgentMessageDelta {
+                    thread_id,
+                    turn_id,
+                    item_id,
+                    delta,
+                    preview: item.preview.clone(),
+                })
+            }
+            "item/started" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                let turn_id = string_field(params.get("turnId"), "turnId")?;
+                ensure_scopes(&state, &thread_id, &turn_id)?;
+                let item = params
+                    .get("item")
+                    .and_then(Value::as_object)
+                    .ok_or(CodexAppServerProtocolError::MissingObjectField("item"))?;
+                let item_id = string_field(item.get("id"), "item.id")?;
+                let kind = string_field(item.get("type"), "item.type")?;
+                state.items.insert(
+                    item_id.clone(),
+                    ItemSnapshot {
+                        id: item_id.clone(),
+                        kind: kind.clone(),
+                        preview: String::new(),
+                        completed: false,
+                        authoritative: None,
+                    },
+                );
+                Ok(CodexAppServerEvent::ItemStarted {
+                    thread_id,
+                    turn_id,
+                    item_id,
+                    kind,
+                })
+            }
+            "item/completed" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                let turn_id = string_field(params.get("turnId"), "turnId")?;
+                ensure_scopes(&state, &thread_id, &turn_id)?;
+                let item = params
+                    .get("item")
+                    .and_then(Value::as_object)
+                    .ok_or(CodexAppServerProtocolError::MissingObjectField("item"))?;
+                let item_id = string_field(item.get("id"), "item.id")?;
+                let kind = string_field(item.get("type"), "item.type")?;
+                state.items.insert(
+                    item_id.clone(),
+                    ItemSnapshot {
+                        id: item_id.clone(),
+                        kind: kind.clone(),
+                        preview: String::new(),
+                        completed: true,
+                        authoritative: Some(Value::Object(item.clone())),
+                    },
+                );
+                Ok(CodexAppServerEvent::ItemCompleted {
+                    thread_id,
+                    turn_id,
+                    item_id,
+                    kind,
+                    item: Value::Object(item.clone()),
+                })
+            }
+            "turn/completed" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                ensure_thread_scope(&state, &thread_id)?;
+                let turn = params
+                    .get("turn")
+                    .and_then(Value::as_object)
+                    .ok_or(CodexAppServerProtocolError::MissingObjectField("turn"))?;
+                let turn_id = string_field(turn.get("id"), "turn.id")?;
+                if let Some(expected) = &state.turn_id {
+                    if expected != &turn_id {
+                        return Err(CodexAppServerProtocolError::TurnScopeMismatch {
+                            expected: expected.clone(),
+                            actual: turn_id.clone(),
+                        });
+                    }
+                }
+                let status = string_field(turn.get("status"), "turn.status")?;
+                state.turn_id = None;
+                state.phase = if status == "completed" {
+                    SessionPhase::Completed
+                } else {
+                    SessionPhase::Failed
+                };
+                Ok(CodexAppServerEvent::TurnCompleted {
+                    thread_id,
+                    turn_id,
+                    status,
+                })
+            }
+            "thread/status/changed" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                ensure_thread_scope(&state, &thread_id)?;
+                let status = params.get("status").cloned().unwrap_or(Value::Null);
+                Ok(CodexAppServerEvent::ThreadStatusChanged { thread_id, status })
+            }
+            _ => {
+                let raw = json!({ "method": method, "params": params });
+                if state.raw_unknown_events.len() == MAX_RAW_EVENTS {
+                    state.raw_unknown_events.pop_front();
+                }
+                state.raw_unknown_events.push_back(raw.clone());
+                Ok(CodexAppServerEvent::UnknownNotification {
+                    method: raw["method"].as_str().unwrap_or_default().to_string(),
+                    params: raw["params"].clone(),
+                })
+            }
+        }
+    }
+}
+
+fn extract_thread_id(result: &Value) -> Result<String, CodexAppServerProtocolError> {
+    let thread = result
+        .get("thread")
+        .and_then(Value::as_object)
+        .ok_or(CodexAppServerProtocolError::MissingObjectField("thread"))?;
+    string_field(thread.get("id"), "thread.id")
+}
+
+fn string_field(
+    value: Option<&Value>,
+    field: &'static str,
+) -> Result<String, CodexAppServerProtocolError> {
+    value
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or(CodexAppServerProtocolError::MissingStringField(field))
+}
+
+fn ensure_thread_scope(
+    state: &SessionState,
+    actual: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    if let Some(expected) = &state.thread_id {
+        if expected != actual {
+            return Err(CodexAppServerProtocolError::ThreadScopeMismatch {
+                expected: expected.clone(),
+                actual: actual.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn ensure_scopes(
+    state: &SessionState,
+    thread_id: &str,
+    turn_id: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    ensure_thread_scope(state, thread_id)?;
+    if let Some(expected) = &state.turn_id {
+        if expected != turn_id {
+            return Err(CodexAppServerProtocolError::TurnScopeMismatch {
+                expected: expected.clone(),
+                actual: turn_id.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    fn session() -> (
+        Arc<CodexAppServerSession>,
+        tokio::io::ReadHalf<tokio::io::DuplexStream>,
+        tokio::io::WriteHalf<tokio::io::DuplexStream>,
+    ) {
+        let (client, server) = duplex(8192);
+        let (client_reader, client_writer) = tokio::io::split(client);
+        let (server_reader, server_writer) = tokio::io::split(server);
+        let transport = Arc::new(AppServerTransport::new(
+            client_reader,
+            client_writer,
+            Default::default(),
+        ));
+        (
+            Arc::new(CodexAppServerSession::new(transport)),
+            server_reader,
+            server_writer,
+        )
+    }
+
+    #[tokio::test]
+    async fn starts_thread_and_turn_with_schema_shaped_requests() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let start: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(start["method"], "thread/start");
+            assert_eq!(start["params"]["model"], "gpt-5-codex");
+            server_writer
+                .write_all(
+                    br#"{"id":1,"result":{"thread":{"id":"thread-1"}}}
+"#,
+                )
+                .await
+                .unwrap();
+            let turn: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(turn["method"], "turn/start");
+            assert_eq!(turn["params"]["threadId"], "thread-1");
+            assert_eq!(
+                turn["params"]["input"][0],
+                json!({"type":"text","text":"hello"})
+            );
+            server_writer
+                .write_all(
+                    br#"{"id":2,"result":{"turn":{"id":"turn-1"}}}
+"#,
+                )
+                .await
+                .unwrap();
+        });
+
+        assert_eq!(
+            session
+                .start_thread(
+                    ThreadStartOptions {
+                        model: Some("gpt-5-codex".to_string()),
+                        ..Default::default()
+                    },
+                    Duration::from_secs(1),
+                )
+                .await
+                .unwrap(),
+            "thread-1"
+        );
+        assert_eq!(
+            session
+                .start_turn("hello".to_string(), Duration::from_secs(1))
+                .await
+                .unwrap(),
+            "turn-1"
+        );
+        assert_eq!(session.snapshot().phase, SessionPhase::Running);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn resumes_only_the_requested_thread() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let request: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(request["method"], "thread/resume");
+            assert_eq!(request["params"]["threadId"], "thread-2");
+            server_writer
+                .write_all(
+                    br#"{"id":1,"result":{"thread":{"id":"thread-2"}}}
+"#,
+                )
+                .await
+                .unwrap();
+        });
+        assert_eq!(
+            session
+                .resume_thread(
+                    "thread-2".to_string(),
+                    None,
+                    Some("C:\\workspace".to_string()),
+                    Duration::from_secs(1),
+                )
+                .await
+                .unwrap(),
+            "thread-2"
+        );
+        assert_eq!(session.snapshot().thread_id.as_deref(), Some("thread-2"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reconciles_delta_preview_with_authoritative_completion() {
+        let (session, _reader, _writer) = session();
+        session.state.lock().unwrap().thread_id = Some("thread-1".to_string());
+        session.state.lock().unwrap().turn_id = Some("turn-1".to_string());
+
+        let delta = session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "item/agentMessage/delta".to_string(),
+                params: json!({"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"hel"}),
+            })
+            .unwrap();
+        assert!(
+            matches!(delta, CodexAppServerEvent::AgentMessageDelta { ref preview, .. } if preview == "hel")
+        );
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "item/agentMessage/delta".to_string(),
+                params: json!({"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"lo"}),
+            })
+            .unwrap();
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "item/completed".to_string(),
+                params: json!({"threadId":"thread-1","turnId":"turn-1","item":{"id":"item-1","type":"agentMessage","text":"hello"}}),
+            })
+            .unwrap();
+        let item = session.snapshot().items.remove("item-1").unwrap();
+        assert_eq!(item.preview, "");
+        assert!(item.completed);
+        assert_eq!(item.authoritative.unwrap()["text"], "hello");
+
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "turn/completed".to_string(),
+                params: json!({"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}),
+            })
+            .unwrap();
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.phase, SessionPhase::Completed);
+        assert_eq!(snapshot.turn_id, None);
+    }
+
+    #[tokio::test]
+    async fn rejects_cross_thread_events_and_retains_unknown_notifications_bounded() {
+        let (session, _reader, _writer) = session();
+        session.state.lock().unwrap().thread_id = Some("thread-1".to_string());
+        let error = session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "thread/status/changed".to_string(),
+                params: json!({"threadId":"thread-2","status":{"type":"idle"}}),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CodexAppServerProtocolError::ThreadScopeMismatch { .. }
+        ));
+
+        for _ in 0..(MAX_RAW_EVENTS + 7) {
+            session
+                .apply_incoming(AppServerIncoming::Notification {
+                    method: "future/event".to_string(),
+                    params: json!({"ok":true}),
+                })
+                .unwrap();
+        }
+        assert_eq!(session.snapshot().raw_unknown_events.len(), MAX_RAW_EVENTS);
+    }
+}
