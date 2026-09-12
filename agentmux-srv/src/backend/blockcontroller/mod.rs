@@ -12,6 +12,7 @@
 //! - Controllers dispatch I/O between the user and the process/service
 
 pub mod acp;
+pub mod app_server;
 pub mod core;
 pub mod health;
 pub mod persistent;
@@ -50,6 +51,7 @@ pub const BLOCK_CONTROLLER_TSUNAMI: &str = "tsunami";
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
+pub const BLOCK_CONTROLLER_APP_SERVER: &str = "app-server";
 
 // ---- Block metadata key constants (match Go) ----
 
@@ -880,6 +882,7 @@ mod tests {
         assert_eq!(BLOCK_CONTROLLER_SHELL, "shell");
         assert_eq!(BLOCK_CONTROLLER_CMD, "cmd");
         assert_eq!(BLOCK_CONTROLLER_TSUNAMI, "tsunami");
+        assert_eq!(BLOCK_CONTROLLER_APP_SERVER, "app-server");
     }
 
     #[test]
