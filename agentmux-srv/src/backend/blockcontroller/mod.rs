@@ -13,6 +13,7 @@
 
 pub mod acp;
 pub mod app_server;
+pub mod app_server_protocol;
 pub mod core;
 pub mod health;
 pub mod persistent;
