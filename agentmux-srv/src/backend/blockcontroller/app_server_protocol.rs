@@ -16,7 +16,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use thiserror::Error;
 
-use super::app_server::{AppServerError, AppServerIncoming, AppServerTransport};
+use super::app_server::{
+    AppServerError, AppServerIncoming, AppServerTransport, RpcId, ServerResponseError,
+};
 
 const MAX_RAW_EVENTS: usize = 128;
 
@@ -98,6 +100,26 @@ pub enum CodexAppServerEvent {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerRequestKind {
+    CommandApproval,
+    FileChangeApproval,
+    PermissionsApproval,
+    UserInput,
+    McpElicitation,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingServerRequest {
+    pub id: RpcId,
+    pub kind: ServerRequestKind,
+    pub method: String,
+    pub params: Value,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub item_id: Option<String>,
+}
+
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CodexAppServerProtocolError {
     #[error(transparent)]
@@ -120,6 +142,12 @@ pub enum CodexAppServerProtocolError {
     TurnAlreadyActive(String),
     #[error("resume response did not identify the requested thread")]
     ResumeMissingThread,
+    #[error("unsupported or unsafe App Server request method: {0}")]
+    UnsupportedServerRequest(String),
+    #[error("no pending App Server request matches id")]
+    UnknownServerRequest,
+    #[error("App Server request id is already pending")]
+    DuplicateServerRequest,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -169,6 +197,7 @@ struct SessionState {
     phase: SessionPhase,
     items: HashMap<String, ItemSnapshot>,
     raw_unknown_events: VecDeque<Value>,
+    pending_requests: HashMap<RpcId, PendingServerRequest>,
 }
 
 impl CodexAppServerSession {
@@ -345,6 +374,93 @@ impl CodexAppServerSession {
         }
     }
 
+    /// Validate and queue a server request for an explicit UI/policy decision.
+    /// No request is approved implicitly.
+    pub fn accept_server_request(
+        &self,
+        incoming: AppServerIncoming,
+    ) -> Result<PendingServerRequest, CodexAppServerProtocolError> {
+        let AppServerIncoming::Request { id, method, params } = incoming else {
+            return Err(CodexAppServerProtocolError::UnsupportedServerRequest(
+                "notifications cannot be queued as requests".to_string(),
+            ));
+        };
+        let kind = match method.as_str() {
+            "item/commandExecution/requestApproval" => ServerRequestKind::CommandApproval,
+            "item/fileChange/requestApproval" => ServerRequestKind::FileChangeApproval,
+            "item/permissions/requestApproval" => ServerRequestKind::PermissionsApproval,
+            "item/tool/requestUserInput" => ServerRequestKind::UserInput,
+            "mcpServer/elicitation/request" => ServerRequestKind::McpElicitation,
+            _ => {
+                return Err(CodexAppServerProtocolError::UnsupportedServerRequest(
+                    method,
+                ))
+            }
+        };
+        let thread_id = params
+            .get("threadId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let turn_id = params
+            .get("turnId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let item_id = params
+            .get("itemId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let mut state = self.state.lock().unwrap();
+        if state.pending_requests.contains_key(&id) {
+            return Err(CodexAppServerProtocolError::DuplicateServerRequest);
+        }
+        if let Some(thread) = &thread_id {
+            ensure_thread_scope(&state, thread)?;
+        }
+        if let (Some(thread), Some(turn)) = (&thread_id, &turn_id) {
+            ensure_scopes(&state, thread, turn)?;
+        }
+        let pending = PendingServerRequest {
+            id: id.clone(),
+            kind,
+            method,
+            params,
+            thread_id,
+            turn_id,
+            item_id,
+        };
+        state.pending_requests.insert(id, pending.clone());
+        Ok(pending)
+    }
+
+    /// Send a decision for a queued request. The request remains pending if the
+    /// transport write fails, allowing a retry; successful responses consume it.
+    pub async fn respond_server_request(
+        &self,
+        id: &RpcId,
+        result: Result<Value, ServerResponseError>,
+        timeout: Duration,
+    ) -> Result<(), CodexAppServerProtocolError> {
+        {
+            let state = self.state.lock().unwrap();
+            if !state.pending_requests.contains_key(id) {
+                return Err(CodexAppServerProtocolError::UnknownServerRequest);
+            }
+        }
+        self.transport.respond(id.clone(), result, timeout).await?;
+        self.state.lock().unwrap().pending_requests.remove(id);
+        Ok(())
+    }
+
+    pub fn pending_server_requests(&self) -> Vec<PendingServerRequest> {
+        self.state
+            .lock()
+            .unwrap()
+            .pending_requests
+            .values()
+            .cloned()
+            .collect()
+    }
+
     pub fn apply_incoming(
         &self,
         incoming: AppServerIncoming,
@@ -482,6 +598,7 @@ impl CodexAppServerSession {
                 } else {
                     SessionPhase::Failed
                 };
+                state.pending_requests.clear();
                 Ok(CodexAppServerEvent::TurnCompleted {
                     thread_id,
                     turn_id,
@@ -805,5 +922,93 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(session.snapshot().raw_unknown_events.len(), MAX_RAW_EVENTS);
+    }
+
+    #[tokio::test]
+    async fn routes_supported_requests_without_auto_approval_and_scopes_them() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        for (id, method) in [
+            ("command", "item/commandExecution/requestApproval"),
+            ("file", "item/fileChange/requestApproval"),
+            ("permissions", "item/permissions/requestApproval"),
+            ("input", "item/tool/requestUserInput"),
+        ] {
+            let pending = session
+                .accept_server_request(AppServerIncoming::Request {
+                    id: RpcId::String(id.to_string()),
+                    method: method.to_string(),
+                    params: json!({"threadId":"thread-1","turnId":"turn-1","itemId":id}),
+                })
+                .unwrap();
+            assert_eq!(pending.method, method);
+        }
+        let mcp = session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("mcp".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message":"confirm","mode":"form","requestedSchema":{}}),
+            })
+            .unwrap();
+        assert_eq!(mcp.kind, ServerRequestKind::McpElicitation);
+        assert_eq!(session.pending_server_requests().len(), 5);
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("unknown".to_string()),
+                method: "future/request".to_string(),
+                params: json!({})
+            }),
+            Err(CodexAppServerProtocolError::UnsupportedServerRequest(_))
+        ));
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("cross".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId":"thread-2","turnId":"turn-1","itemId":"x"})
+            }),
+            Err(CodexAppServerProtocolError::ThreadScopeMismatch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_duplicate_or_unknown_decisions_and_clears_on_turn_completion() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        let incoming = AppServerIncoming::Request {
+            id: id.clone(),
+            method: "item/tool/requestUserInput".to_string(),
+            params: json!({"threadId":"thread-1","turnId":"turn-1","itemId":"item-1"}),
+        };
+        session.accept_server_request(incoming.clone()).unwrap();
+        assert!(matches!(
+            session.accept_server_request(incoming),
+            Err(CodexAppServerProtocolError::DuplicateServerRequest)
+        ));
+        assert!(matches!(
+            session
+                .respond_server_request(
+                    &RpcId::String("missing".to_string()),
+                    Ok(json!({})),
+                    Duration::from_millis(10)
+                )
+                .await,
+            Err(CodexAppServerProtocolError::UnknownServerRequest)
+        ));
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "turn/completed".to_string(),
+                params: json!({"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}),
+            })
+            .unwrap();
+        assert!(session.pending_server_requests().is_empty());
     }
 }
