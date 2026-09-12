@@ -1,0 +1,14 @@
+{
+    "provider": "codex",
+    "cli_version": "0.154.0",
+    "platform": "windows-x64",
+    "container": false,
+    "scenario": "two-turn-resume",
+    "captured_at": "2026-09-12",
+    "invocation_shape": "exec --json <prompt>; exec resume --json <thread_id> <prompt>",
+    "redactions": ["thread_id", "absolute_paths", "usernames", "prompt"],
+    "unknown_event_types": [],
+    "unknown_item_types": [],
+    "same_thread_id": true,
+    "resume_answer_verified": true
+}
