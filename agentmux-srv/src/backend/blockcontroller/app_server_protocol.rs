@@ -193,6 +193,35 @@ struct TurnStartParams {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadForkOptions {
+    pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_turns: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadListOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_term: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct TextUserInput {
     #[serde(rename = "type")]
     kind: &'static str,
@@ -386,6 +415,141 @@ impl CodexAppServerSession {
         state.turn_id = Some(turn_id.clone());
         state.phase = SessionPhase::Running;
         Ok(turn_id)
+    }
+
+    /// Fork the active thread without changing this session's thread identity.
+    /// The returned id is independent and must be persisted by the caller that
+    /// creates the new AgentMux pane.
+    pub async fn fork_thread(
+        &self,
+        options: ThreadForkOptions,
+        timeout: Duration,
+    ) -> Result<String, CodexAppServerProtocolError> {
+        let active_thread = self
+            .state
+            .lock()
+            .unwrap()
+            .thread_id
+            .clone()
+            .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?;
+        if options.thread_id != active_thread {
+            return Err(CodexAppServerProtocolError::ThreadScopeMismatch {
+                expected: active_thread,
+                actual: options.thread_id,
+            });
+        }
+        let result = self
+            .transport
+            .request(
+                "thread/fork",
+                serde_json::to_value(options)
+                    .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                timeout,
+            )
+            .await?;
+        extract_thread_id(&result)
+    }
+
+    pub async fn read_thread(
+        &self,
+        include_turns: bool,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        let thread_id = self
+            .state
+            .lock()
+            .unwrap()
+            .thread_id
+            .clone()
+            .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?;
+        Ok(self
+            .transport
+            .request(
+                "thread/read",
+                json!({"threadId": thread_id, "includeTurns": include_turns}),
+                timeout,
+            )
+            .await?)
+    }
+
+    pub async fn list_threads(
+        &self,
+        options: ThreadListOptions,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        Ok(self
+            .transport
+            .request(
+                "thread/list",
+                serde_json::to_value(options)
+                    .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                timeout,
+            )
+            .await?)
+    }
+
+    pub async fn archive_thread(
+        &self,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        let thread_id = self
+            .state
+            .lock()
+            .unwrap()
+            .thread_id
+            .clone()
+            .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?;
+        Ok(self
+            .transport
+            .request("thread/archive", json!({"threadId": thread_id}), timeout)
+            .await?)
+    }
+
+    pub async fn compact_thread(
+        &self,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        let thread_id = self
+            .state
+            .lock()
+            .unwrap()
+            .thread_id
+            .clone()
+            .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?;
+        Ok(self
+            .transport
+            .request(
+                "thread/compact/start",
+                json!({"threadId": thread_id}),
+                timeout,
+            )
+            .await?)
+    }
+
+    /// Verify the account selected by the caller's isolated CODEX_HOME.
+    pub async fn read_account(
+        &self,
+        refresh_token: bool,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        Ok(self
+            .transport
+            .request(
+                "account/read",
+                json!({"refreshToken": refresh_token}),
+                timeout,
+            )
+            .await?)
+    }
+
+    pub async fn logout_account(
+        &self,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        Ok(self
+            .transport
+            .request("account/logout", Value::Null, timeout)
+            .await?)
     }
 
     /// Add input to the active turn only when the caller supplies the exact
@@ -1084,6 +1248,169 @@ mod tests {
         );
         assert_eq!(session.snapshot().thread_id.as_deref(), Some("thread-2"));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn builds_thread_lifecycle_and_account_requests_with_exact_shapes() {
+        let (session, server_reader, mut server_writer) = session();
+        session.state.lock().unwrap().thread_id = Some("thread-1".to_string());
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let fork: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(fork["method"], "thread/fork");
+            assert_eq!(
+                fork["params"],
+                json!({"threadId":"thread-1","model":"gpt-5-codex","cwd":"C:\\workspace","lastTurnId":"turn-1","excludeTurns":true})
+            );
+            server_writer
+                .write_all(
+                    br#"{"id":1,"result":{"thread":{"id":"thread-2"}}}
+"#,
+                )
+                .await
+                .unwrap();
+            let read: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(read["method"], "thread/read");
+            assert_eq!(
+                read["params"],
+                json!({"threadId":"thread-1","includeTurns":true})
+            );
+            server_writer
+                .write_all(
+                    br#"{"id":2,"result":{"thread":{"id":"thread-1"}}}
+"#,
+                )
+                .await
+                .unwrap();
+            let list: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(list["method"], "thread/list");
+            assert_eq!(list["params"], json!({"limit":10,"searchTerm":"codex"}));
+            server_writer
+                .write_all(
+                    br#"{"id":3,"result":{"data":[]}}
+"#,
+                )
+                .await
+                .unwrap();
+            let archive: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(archive["method"], "thread/archive");
+            assert_eq!(archive["params"], json!({"threadId":"thread-1"}));
+            server_writer
+                .write_all(
+                    br#"{"id":4,"result":{"archived":true}}
+"#,
+                )
+                .await
+                .unwrap();
+            let compact: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(compact["method"], "thread/compact/start");
+            assert_eq!(compact["params"], json!({"threadId":"thread-1"}));
+            server_writer
+                .write_all(
+                    br#"{"id":5,"result":{"turn":{"id":"compact-1"}}}
+"#,
+                )
+                .await
+                .unwrap();
+            let account: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(account["method"], "account/read");
+            assert_eq!(account["params"], json!({"refreshToken":false}));
+            server_writer
+                .write_all(
+                    br#"{"id":6,"result":{"type":"chatgpt","email":"a@example.com"}}
+"#,
+                )
+                .await
+                .unwrap();
+            let logout: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(logout["method"], "account/logout");
+            assert_eq!(logout["params"], Value::Null);
+            server_writer
+                .write_all(
+                    br#"{"id":7,"result":{}}
+"#,
+                )
+                .await
+                .unwrap();
+        });
+        assert_eq!(
+            session
+                .fork_thread(
+                    ThreadForkOptions {
+                        thread_id: "thread-1".to_string(),
+                        model: Some("gpt-5-codex".to_string()),
+                        cwd: Some("C:\\workspace".to_string()),
+                        last_turn_id: Some("turn-1".to_string()),
+                        exclude_turns: Some(true)
+                    },
+                    Duration::from_secs(1)
+                )
+                .await
+                .unwrap(),
+            "thread-2"
+        );
+        session
+            .read_thread(true, Duration::from_secs(1))
+            .await
+            .unwrap();
+        session
+            .list_threads(
+                ThreadListOptions {
+                    limit: Some(10),
+                    search_term: Some("codex".to_string()),
+                    ..Default::default()
+                },
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
+        session
+            .archive_thread(Duration::from_secs(1))
+            .await
+            .unwrap();
+        session
+            .compact_thread(Duration::from_secs(1))
+            .await
+            .unwrap();
+        session
+            .read_account(false, Duration::from_secs(1))
+            .await
+            .unwrap();
+        session
+            .logout_account(Duration::from_secs(1))
+            .await
+            .unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fork_rejects_a_thread_id_that_is_not_the_active_thread() {
+        let (session, _reader, _writer) = session();
+        session.state.lock().unwrap().thread_id = Some("thread-1".to_string());
+        let error = session
+            .fork_thread(
+                ThreadForkOptions {
+                    thread_id: "thread-2".to_string(),
+                    model: None,
+                    cwd: None,
+                    last_turn_id: None,
+                    exclude_turns: None,
+                },
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CodexAppServerProtocolError::ThreadScopeMismatch { .. }
+        ));
     }
 
     #[tokio::test]
