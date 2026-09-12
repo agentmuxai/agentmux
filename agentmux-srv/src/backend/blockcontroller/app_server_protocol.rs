@@ -228,6 +228,7 @@ impl CodexAppServerSession {
         state.turn_id = None;
         state.phase = SessionPhase::Idle;
         state.items.clear();
+        state.pending_requests.clear();
         Ok(thread_id)
     }
 
@@ -261,6 +262,7 @@ impl CodexAppServerSession {
         state.turn_id = None;
         state.phase = SessionPhase::Idle;
         state.items.clear();
+        state.pending_requests.clear();
         Ok(resumed_id)
     }
 
@@ -440,14 +442,21 @@ impl CodexAppServerSession {
         result: Result<Value, ServerResponseError>,
         timeout: Duration,
     ) -> Result<(), CodexAppServerProtocolError> {
-        {
-            let state = self.state.lock().unwrap();
-            if !state.pending_requests.contains_key(id) {
-                return Err(CodexAppServerProtocolError::UnknownServerRequest);
-            }
+        let pending = self
+            .state
+            .lock()
+            .unwrap()
+            .pending_requests
+            .remove(id)
+            .ok_or(CodexAppServerProtocolError::UnknownServerRequest)?;
+        if let Err(error) = self.transport.respond(id.clone(), result, timeout).await {
+            self.state
+                .lock()
+                .unwrap()
+                .pending_requests
+                .insert(id.clone(), pending);
+            return Err(error.into());
         }
-        self.transport.respond(id.clone(), result, timeout).await?;
-        self.state.lock().unwrap().pending_requests.remove(id);
         Ok(())
     }
 
