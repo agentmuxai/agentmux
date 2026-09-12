@@ -12,11 +12,18 @@ interface ItemState {
     lastText: string;
 }
 
+export interface CodexTranslatorDiagnostics {
+    unknownEventTypes: Record<string, number>;
+    unknownItemTypes: Record<string, number>;
+}
+
 /** Translate Codex `exec --json` snapshots into AgentMux stream events. */
 export class CodexTranslator implements OutputTranslator {
     private tools = new ToolCorrelator();
     private items = new Map<string, ItemState>();
     private seenErrors = new Set<string>();
+    private unknownEventTypes = new Map<string, number>();
+    private unknownItemTypes = new Map<string, number>();
     private terminal = false;
 
     translate(rawEvent: any): StreamEvent[] {
@@ -41,8 +48,11 @@ export class CodexTranslator implements OutputTranslator {
                 if (error.message.includes("Reconnecting...")) return [];
                 return this.emitError(error.code, error.message);
             }
-            default:
+            default: {
+                const eventType = typeof rawEvent.type === "string" ? rawEvent.type : "<missing>";
+                this.increment(this.unknownEventTypes, eventType);
                 return [];
+            }
         }
     }
 
@@ -139,6 +149,7 @@ export class CodexTranslator implements OutputTranslator {
             }
             default:
                 state.completed = completed;
+                this.increment(this.unknownItemTypes, itemType || "<missing>");
                 return [];
         }
     }
@@ -281,6 +292,17 @@ export class CodexTranslator implements OutputTranslator {
         return state;
     }
 
+    private increment(counter: Map<string, number>, key: string): void {
+        counter.set(key, (counter.get(key) ?? 0) + 1);
+    }
+
+    diagnostics(): CodexTranslatorDiagnostics {
+        return {
+            unknownEventTypes: Object.fromEntries(this.unknownEventTypes),
+            unknownItemTypes: Object.fromEntries(this.unknownItemTypes),
+        };
+    }
+
     private resetTurn(): void {
         this.items.clear();
         this.seenErrors.clear();
@@ -290,5 +312,7 @@ export class CodexTranslator implements OutputTranslator {
     reset(): void {
         this.tools.reset();
         this.resetTurn();
+        this.unknownEventTypes.clear();
+        this.unknownItemTypes.clear();
     }
 }
