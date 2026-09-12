@@ -1,0 +1,19 @@
+{
+    "provider": "codex",
+    "cli_version": "0.154.0",
+    "platform": "linux-x64",
+    "container": true,
+    "container_image": "ghcr.io/agentmuxai/agent-claude:latest",
+    "container_user": "agent",
+    "scenario": "command-file-two-turn-resume",
+    "captured_at": "2026-09-12",
+    "invocation_shape": "exec --json <prompt>; exec resume --json <thread_id> <prompt>",
+    "redactions": ["thread_id", "auth_mount", "prompt"],
+    "unknown_event_types": [],
+    "unknown_item_types": [],
+    "same_thread_id": true,
+    "created_file": "fixture-docker-7419.txt",
+    "created_file_content_verified": true,
+    "resume_answer_verified": true,
+    "process_tree_reaped": true
+}
