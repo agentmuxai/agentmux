@@ -75,6 +75,14 @@ impl RpcId {
             Self::String(_) | Self::Null => None,
         }
     }
+
+    fn to_value(&self) -> Value {
+        match self {
+            Self::Number(value) => serde_json::from_str(value).unwrap_or(Value::Null),
+            Self::String(value) => Value::String(value.clone()),
+            Self::Null => Value::Null,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -287,6 +295,33 @@ impl AppServerTransport {
             .map_err(|_| AppServerError::Timeout(write_timeout))?
     }
 
+    /// Reply to a server-initiated request. The caller must have an explicit
+    /// policy/UI decision; this primitive never invents an approval.
+    pub async fn respond(
+        &self,
+        id: RpcId,
+        result: Result<Value, ServerResponseError>,
+        write_timeout: Duration,
+    ) -> Result<(), AppServerError> {
+        let mut frame = Map::new();
+        frame.insert("id".to_string(), id.to_value());
+        match result {
+            Ok(result) => {
+                frame.insert("result".to_string(), result);
+            }
+            Err(error) => {
+                frame.insert(
+                    "error".to_string(),
+                    serde_json::to_value(error)
+                        .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                );
+            }
+        }
+        tokio::time::timeout(write_timeout, self.write_value(Value::Object(frame)))
+            .await
+            .map_err(|_| AppServerError::Timeout(write_timeout))?
+    }
+
     pub async fn initialize(&self, timeout: Duration) -> Result<Value, AppServerError> {
         if self
             .initialize_state
@@ -371,6 +406,14 @@ impl AppServerTransport {
             .map_err(|_| AppServerError::Closed)?;
         written_rx.await.unwrap_or(Err(AppServerError::Closed))
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ServerResponseError {
+    pub code: i64,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -821,6 +864,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::OnceLock;
 
+    use serde_json::json;
     use tokio::io::{duplex, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     use super::*;
@@ -931,6 +975,42 @@ mod tests {
             })
         );
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn responds_to_server_requests_without_auto_approving_them() {
+        let (client_io, server_io) = duplex(4096);
+        let (client_reader, client_writer) = tokio::io::split(client_io);
+        let (server_reader, mut server_writer) = tokio::io::split(server_io);
+        let transport =
+            AppServerTransport::new(client_reader, client_writer, AppServerLimits::default());
+        server_writer
+            .write_all(
+                br#"{"id":"approval-1","method":"item/commandExecution/requestApproval","params":{"command":"echo hi"}}
+"#,
+            )
+            .await
+            .unwrap();
+        let request = transport.next_incoming().await.unwrap();
+        let AppServerIncoming::Request { id, method, .. } = request else {
+            panic!("expected server request");
+        };
+        assert_eq!(method, "item/commandExecution/requestApproval");
+        transport
+            .respond(id, Ok(json!({"decision":"accept"})), Duration::from_secs(1))
+            .await
+            .unwrap();
+        let response = BufReader::new(server_reader)
+            .lines()
+            .next_line()
+            .await
+            .unwrap()
+            .unwrap();
+        let response: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(
+            response,
+            json!({"id":"approval-1","result":{"decision":"accept"}})
+        );
     }
 
     #[test]
