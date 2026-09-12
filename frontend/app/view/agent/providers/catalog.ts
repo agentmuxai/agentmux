@@ -196,7 +196,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["login", "status"],
         authLoginCommand: ["login"],
         npmPackage: "@openai/codex",
-        pinnedVersion: "0.153.4",
+        pinnedVersion: "0.154.0",
         docsUrl: "https://platform.openai.com/docs/codex",
         windowsInstallCommand: "npm install -g @openai/codex",
         unixInstallCommand: "npm install -g @openai/codex",
