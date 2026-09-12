@@ -31,7 +31,9 @@
             "account/login/start",
             "account/login/cancel",
             "account/logout",
-            "account/rateLimits/read"
+            "account/rateLimits/read",
+            "skills/list",
+            "config/read"
         ],
         "server_requests": [
             "item/commandExecution/requestApproval",
@@ -49,6 +51,12 @@
             "item/commandExecution/outputDelta",
             "item/fileChange/outputDelta",
             "item/mcpToolCall/progress",
+            "skills/changed",
+            "item/reasoning/summaryTextDelta",
+            "item/reasoning/summaryPartAdded",
+            "item/reasoning/textDelta",
+            "item/plan/delta",
+            "turn/plan/updated",
             "turn/started",
             "turn/completed",
             "error",

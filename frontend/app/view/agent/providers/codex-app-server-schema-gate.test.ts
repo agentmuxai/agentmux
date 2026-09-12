@@ -13,6 +13,60 @@ const pin = PROVIDERS.codex.pinnedVersion;
 const schemaDir = resolve(repoRoot, "schema/providers/codex/app-server", pin);
 const manifestPath = resolve(schemaDir, "manifest.json");
 
+// This inventory is intentionally checked independently of manifest.json. If
+// a future edit removes a method from the manifest, the test must fail rather
+// than accepting a self-consistent but incomplete inventory.
+const SPEC_REQUIRED_SURFACE: Record<string, string[]> = {
+    client_notifications: ["initialized"],
+    client_requests: [
+        "initialize",
+        "thread/start",
+        "thread/resume",
+        "thread/fork",
+        "thread/compact/start",
+        "turn/start",
+        "turn/steer",
+        "turn/interrupt",
+        "account/read",
+        "account/login/start",
+        "account/login/cancel",
+        "account/logout",
+        "account/rateLimits/read",
+        "skills/list",
+        "config/read",
+    ],
+    server_requests: [
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "item/permissions/requestApproval",
+        "item/tool/requestUserInput",
+        "mcpServer/elicitation/request",
+    ],
+    server_notifications: [
+        "thread/started",
+        "thread/status/changed",
+        "item/started",
+        "item/completed",
+        "item/agentMessage/delta",
+        "item/commandExecution/outputDelta",
+        "item/fileChange/outputDelta",
+        "item/mcpToolCall/progress",
+        "skills/changed",
+        "item/reasoning/summaryTextDelta",
+        "item/reasoning/summaryPartAdded",
+        "item/reasoning/textDelta",
+        "item/plan/delta",
+        "turn/plan/updated",
+        "turn/started",
+        "turn/completed",
+        "error",
+        "serverRequest/resolved",
+        "account/login/completed",
+        "account/updated",
+        "account/rateLimits/updated",
+    ],
+};
+
 function readJson(path: string): any {
     return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -62,7 +116,8 @@ describe("Codex App Server schema snapshot", () => {
             server_notifications: methodSet(readJson(resolve(schemaDir, "ServerNotification.json"))),
         };
 
-        for (const [kind, requiredMethods] of Object.entries(manifest.required_surface as Record<string, string[]>)) {
+        expect(manifest.required_surface).toEqual(SPEC_REQUIRED_SURFACE);
+        for (const [kind, requiredMethods] of Object.entries(SPEC_REQUIRED_SURFACE)) {
             const available = schemas[kind as keyof typeof schemas];
             expect(available, `unknown schema category ${kind}`).toBeDefined();
             for (const method of requiredMethods) {
