@@ -106,6 +106,11 @@ pub enum CodexAppServerEvent {
         thread_id: String,
         request_id: RpcId,
     },
+    AccountLoginCompleted {
+        login_id: Option<String>,
+        success: bool,
+        error: Option<String>,
+    },
     UnknownNotification {
         method: String,
         params: Value,
@@ -219,6 +224,26 @@ pub struct ThreadListOptions {
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub search_term: Option<String>,
+}
+
+/// Login choices accepted by the pinned App Server schema. API keys are kept
+/// in this typed request only and are never included in protocol events/logs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum AccountLoginOptions {
+    #[serde(rename = "chatgptDeviceCode")]
+    ChatgptDeviceCode,
+    #[serde(rename = "chatgpt")]
+    Chatgpt {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_brand: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        codex_streamlined_login: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        use_hosted_login_success_page: Option<bool>,
+    },
+    #[serde(rename = "apiKey")]
+    ApiKey { api_key: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -549,6 +574,37 @@ impl CodexAppServerSession {
         Ok(self
             .transport
             .request("account/logout", Value::Null, timeout)
+            .await?)
+    }
+
+    pub async fn login_account(
+        &self,
+        options: AccountLoginOptions,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        Ok(self
+            .transport
+            .request(
+                "account/login/start",
+                serde_json::to_value(options)
+                    .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                timeout,
+            )
+            .await?)
+    }
+
+    pub async fn cancel_login(
+        &self,
+        login_id: String,
+        timeout: Duration,
+    ) -> Result<Value, CodexAppServerProtocolError> {
+        Ok(self
+            .transport
+            .request(
+                "account/login/cancel",
+                json!({"loginId": login_id}),
+                timeout,
+            )
             .await?)
     }
 
@@ -1006,6 +1062,23 @@ impl CodexAppServerSession {
                     request_id,
                 })
             }
+            "account/login/completed" => {
+                let success = params
+                    .get("success")
+                    .and_then(Value::as_bool)
+                    .ok_or(CodexAppServerProtocolError::MissingStringField("success"))?;
+                Ok(CodexAppServerEvent::AccountLoginCompleted {
+                    login_id: params
+                        .get("loginId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    success,
+                    error: params
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                })
+            }
             _ => {
                 let raw = json!({ "method": method, "params": params });
                 if state.raw_unknown_events.len() == MAX_RAW_EVENTS {
@@ -1339,6 +1412,28 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            let login: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(login["method"], "account/login/start");
+            assert_eq!(login["params"], json!({"type":"chatgptDeviceCode"}));
+            server_writer
+                .write_all(
+                    br#"{"id":8,"result":{"loginId":"login-1","userCode":"ABCD"}}
+"#,
+                )
+                .await
+                .unwrap();
+            let cancel: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(cancel["method"], "account/login/cancel");
+            assert_eq!(cancel["params"], json!({"loginId":"login-1"}));
+            server_writer
+                .write_all(
+                    br#"{"id":9,"result":{}}
+"#,
+                )
+                .await
+                .unwrap();
         });
         assert_eq!(
             session
@@ -1387,7 +1482,37 @@ mod tests {
             .logout_account(Duration::from_secs(1))
             .await
             .unwrap();
+        session
+            .login_account(
+                AccountLoginOptions::ChatgptDeviceCode,
+                Duration::from_secs(1),
+            )
+            .await
+            .unwrap();
+        session
+            .cancel_login("login-1".to_string(), Duration::from_secs(1))
+            .await
+            .unwrap();
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn parses_account_login_completion_without_leaking_credentials() {
+        let (session, _reader, _writer) = session();
+        let event = session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "account/login/completed".to_string(),
+                params: json!({"loginId":"login-1","success":false,"error":"cancelled"}),
+            })
+            .unwrap();
+        assert!(matches!(
+            event,
+            CodexAppServerEvent::AccountLoginCompleted {
+                login_id: Some(ref id),
+                success: false,
+                error: Some(ref error),
+            } if id == "login-1" && error == "cancelled"
+        ));
     }
 
     #[tokio::test]
