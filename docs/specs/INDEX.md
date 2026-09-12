@@ -781,6 +781,7 @@ Fix one when you touch it and know its real state.
 | [`SPEC_BULLETPROOF_TERMINALS_2026_05_21`](SPEC_BULLETPROOF_TERMINALS_2026_05_21.md) | SPEC_BULLETPROOF_TERMINALS_2026_05_21.md |
 | [`SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17`](SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md) | SPEC: Bundle-as-container v2 (GH issue #2024, item 3) |
 | [`SPEC_CEF_WINDOWS_PR_FINALIZATION_2026_07_27`](SPEC_CEF_WINDOWS_PR_FINALIZATION_2026_07_27.md) | Spec: Finalize Media pane + CEF Windows codec PRs, confirm CI pulls the real build |
+| [`SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12`](SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md) | Proposed split between fast high-signal PR checks and the full nightly suite |
 | [`SPEC_CI_TEST_RUNNER_2026_06_22`](SPEC_CI_TEST_RUNNER_2026_06_22.md) | SPEC — CI test runner on public GitHub-hosted runners |
 | [`SPEC_COLOR_PALETTE_EXPANSION_REUSE_2026_06_30`](SPEC_COLOR_PALETTE_EXPANSION_REUSE_2026_06_30.md) | SPEC: Color Palette Expansion & Reuse |
 | [`SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31`](SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) | Spec: Detecting and Handling Context Compaction in Agent Panes |
