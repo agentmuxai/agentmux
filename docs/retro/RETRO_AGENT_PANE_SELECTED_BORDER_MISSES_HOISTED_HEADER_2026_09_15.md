@@ -5,8 +5,8 @@
 session; makes the currently-focused agent pane harder to spot at a glance
 compared to every other pane type (terminal, editor, browser), which still
 get a full-perimeter selection ring.
-**Status:** fixed (Agent pane + Terminal pane, both confirmed to share the
-same root cause). See "Fix" below for what shipped.
+**Status:** implemented — Agent pane + Terminal pane, both confirmed to
+share the same root cause. See "Fix" below for what shipped.
 
 ## What happened
 
