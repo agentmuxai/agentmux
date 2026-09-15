@@ -19,7 +19,7 @@ name: CI (PR) — compile tests + run
 # build.rs) before any test even ran — direct measurement on 2026-09-15 showed
 # compile alone taking ~19 of the 20 minutes. That's not the runner-pool
 # flakiness INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md
-# documents (which this job's timeout-minutes and ci.yml's concurrency groups
+# documents (which this job's timeout-minutes and this file's concurrency group
 # already mitigate) — it's this job duplicating the nightly workflow's full
 # CEF-inclusive build on every PR, on a budget too small to finish it. The
 # fix is the lane split the spec above lays out: PR gets fast CEF-free
@@ -104,7 +104,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install build deps (Linux — launcher Wayland toolkit)
+      - name: Install build deps (Linux — launcher Wayland toolkit + agentmux-mcp's xcap)
         if: matrix.os == 'ubuntu-latest'
         # The runner image ships a google-chrome apt source we do not use — none
         # of the packages below come from it. When Google serves a corrupt index
@@ -122,7 +122,13 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update || echo "apt-get update reported errors; continuing (install is the real gate)"
-          sudo apt-get install -y libwayland-dev libxkbcommon-dev
+          # libwayland-dev/libxkbcommon-dev: agentmux-launcher's Linux splash
+          # (smithay-client-toolkit). libdbus-1-dev/pkg-config: agentmux-mcp's
+          # xcap (screen capture) needs dbus-1.pc on Linux — previously
+          # satisfied as an incidental side effect of installing libgtk-3-dev
+          # (a CEF-only need, dropped with this split), not because anything
+          # here actually needs GTK.
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev libdbus-1-dev pkg-config
 
       - uses: Swatinem/rust-cache@v2
 
