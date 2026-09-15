@@ -365,6 +365,60 @@ pub fn delete_controller(block_id: &str) {
     }
 }
 
+// ---- Close-on-exit handler (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10) ----
+
+/// `shell/lifecycle.rs`'s PTY wait/cleanup task needs to actually CLOSE a
+/// pane (delete its block, prune it from the owning tab's layout tree, and
+/// notify any connected frontend) when the shell inside it exits — but that
+/// task lives deep in `backend::blockcontroller`, which has no `AppState`
+/// handle (only the individual `Store`/`EventBus`/`Broker` pieces
+/// `ShellController` was constructed with). The actual close logic
+/// (`crate::sagas::delete_block::run`) needs the full `AppState` — its
+/// reducer state, saga-id allocator, and saga log, not just those three
+/// pieces. Rather than threading `AppState` through every
+/// `ShellController::new`/`resync_controller` call site (a much larger,
+/// architecture-inverting change), this mirrors the exact shape
+/// `crate::broker::process::set_global`/`global` already use for the
+/// identical class of problem (`broker::process`'s `AppState`-derived
+/// `ProcessBroker` also needs to be reachable from deep in `blockcontroller`
+/// without a direct dependency): a process-wide callback slot, set once at
+/// boot from `bootstrap::install_close_on_exit_handler` (which has
+/// `AppState` in scope) and read from `shell/lifecycle.rs`.
+type CloseOnExitFn = Arc<dyn Fn(String, String) + Send + Sync>;
+
+static CLOSE_ON_EXIT_HANDLER: std::sync::OnceLock<CloseOnExitFn> = std::sync::OnceLock::new();
+
+/// Install the close-on-exit callback. Called exactly once, from
+/// `bootstrap::install_close_on_exit_handler` right after `AppState` is
+/// built in `main.rs` — see that function's doc comment for what the
+/// callback actually does. A second call is a no-op (`OnceLock::set`
+/// silently returns `Err` on an already-initialized cell, which this
+/// discards — matching `broker::process::set_global`'s identical
+/// fire-and-forget style; there is exactly one legitimate caller).
+pub fn set_close_on_exit_handler(f: CloseOnExitFn) {
+    let _ = CLOSE_ON_EXIT_HANDLER.set(f);
+}
+
+/// Trigger the installed close-on-exit handler for `(tab_id, block_id)`, if
+/// one has been installed. Fire-and-forget: the handler owns spawning
+/// whatever async work it needs (the saga call is `async`; this function
+/// itself is not). A missing handler (astronomically early in boot, before
+/// `main.rs` finishes wiring `AppState` — no real caller can reach this
+/// before then, since nothing spawns a PTY that early) just skips closing;
+/// the pane sits inert the same way it did before this feature existed, not
+/// a hard failure.
+pub(crate) fn close_on_exit(tab_id: String, block_id: String) {
+    match CLOSE_ON_EXIT_HANDLER.get() {
+        Some(f) => f(tab_id, block_id),
+        None => {
+            tracing::warn!(
+                block_id = %block_id,
+                "close_on_exit: handler not installed yet, skipping pane close"
+            );
+        }
+    }
+}
+
 /// Get all controllers (snapshot).
 pub fn get_all_controllers() -> HashMap<String, Arc<dyn Controller>> {
     CONTROLLER_REGISTRY.read().unwrap().clone()

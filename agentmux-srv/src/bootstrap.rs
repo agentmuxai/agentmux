@@ -2069,6 +2069,48 @@ pub fn install_agent_turn_delivery(state: &AppState) {
         }));
 }
 
+/// Wires `blockcontroller::close_on_exit` (see that function's own doc
+/// comment) up to the real close action, now that `AppState` exists.
+/// Mirrors `install_agent_turn_delivery` just above — same "backend code
+/// needs a capability only available once `AppState` is built" shape,
+/// solved the same way (a process-wide callback set once at boot).
+///
+/// The callback itself is deliberately synchronous (`Fn(String, String)`,
+/// not `async fn`) — `shell/lifecycle.rs`'s wait/cleanup task calls it from
+/// a plain (non-async) decision point after its own cleanup, and trait
+/// objects can't hold an `async fn` without extra boxing machinery this
+/// doesn't need. `tokio::spawn` here is what actually runs the (necessarily
+/// async) `sagas::delete_block::run` call; the callback returns
+/// immediately, fire-and-forget, matching `close_on_exit`'s own contract.
+///
+/// See `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §10 for why
+/// this exists: a shell pane's controller has no code path today that
+/// closes it when the shell process exits, which (combined with §7-9's
+/// fix for the OTHER half of that bug) leaves an exited pane sitting inert
+/// — technically correct, but indistinguishable from "hung" to a user.
+pub fn install_close_on_exit_handler(state: &AppState) {
+    let state = state.clone();
+    backend::blockcontroller::set_close_on_exit_handler(Arc::new(move |tab_id: String, block_id: String| {
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::sagas::delete_block::run(&state, tab_id.clone(), block_id.clone()).await {
+                // Best-effort, same posture as every other close-on-exit
+                // failure mode: the shell already exited and its PTY is
+                // already gone either way, so there is nothing left to roll
+                // back — a failed close just leaves the pane sitting inert,
+                // the same as if close-on-exit weren't enabled for it at
+                // all, not a lost or corrupted state.
+                tracing::warn!(
+                    tab_id = %tab_id,
+                    block_id = %block_id,
+                    error = %e,
+                    "close-on-exit: delete_block saga failed"
+                );
+            }
+        });
+    }));
+}
+
 /// Should `CloudSubscriber::init_global` be skipped this run?
 ///
 /// Presence-based, matching the `AGENTMUX_DEV`/`AGENTMUX_TRAY` idiom

@@ -3981,9 +3981,15 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
 
     // Poll until the controller actually reports done — shell teardown
     // latency varies by machine/OS, same as the round-trip test above.
+    // Budgeted generously (was 40x250ms=10s, uncomfortably tight): STATUS_DONE
+    // isn't published until the wait/cleanup task's flusher-drain wait
+    // resolves, and that hits its full 10s `FLUSHER_DRAIN_TIMEOUT` on
+    // essentially every ordinary `cmd.exe` exit on Windows (discovered live
+    // while adding `ptyshell_shell_pane_closes_itself_after_exit` — see its
+    // own comment, and the close-on-exit trigger's comment in lifecycle.rs).
     let mut done = false;
-    for _ in 0..40 {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let (_, status_json) = post_json(
             &app,
             "/api/v1/ptyshell/status",
@@ -4022,4 +4028,97 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
 
     blockcontroller::delete_controller(&first_shell_id);
     blockcontroller::delete_controller(&second_shell_id);
+}
+
+/// Regression test for close-on-exit
+/// (`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §10): once a
+/// shell's process exits, the controller must actually trigger a pane
+/// close — not just stop looping (§7-9) or sit inert indefinitely.
+///
+/// Installs a LOCAL close-on-exit handler directly via
+/// `blockcontroller::set_close_on_exit_handler`, bypassing
+/// `bootstrap::install_close_on_exit_handler` (which needs a full
+/// saga-capable `AppState` — `main.rs`'s real boot sequence, not
+/// `test_state()`). This verifies `lifecycle.rs`'s decision-and-trigger
+/// logic in isolation — does it call the hook at all, with the right
+/// `(tab_id, block_id)`, after the configured delay — independent of
+/// `sagas::delete_block::run`'s own separately-tested correctness
+/// (`agentmux-srv/src/sagas/delete_block.rs`'s test suite).
+///
+/// `set_close_on_exit_handler`'s `OnceLock` is PROCESS-global and can only
+/// be set once — once this test installs its handler, it stays installed
+/// for the rest of this test binary's life. Like this file's other
+/// real-PTY tests, run this one individually
+/// (`cargo test -p agentmux-srv --bin agentmux-srv
+/// ptyshell_shell_pane_closes_itself_after_exit -- --ignored --nocapture`),
+/// not as part of a bulk `--ignored` run alongside some future test that
+/// also wants to install its own handler.
+#[tokio::test]
+#[ignore]
+async fn ptyshell_shell_pane_closes_itself_after_exit() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "test-agent-block".to_string(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let closed_for_handler = closed.clone();
+    blockcontroller::set_close_on_exit_handler(std::sync::Arc::new(
+        move |tab_id: String, block_id: String| {
+            *closed_for_handler.lock().unwrap() = Some((tab_id, block_id));
+        },
+    ));
+
+    // Give the PTY a moment to spawn its shell before typing into it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": "exit\r\n" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["written"], serde_json::json!(true), "input write failed: {json:?}");
+
+    // Budget generously, not just past close_on_exit_delay_ms's 2000ms
+    // default: the close-on-exit trigger only runs after the wait/cleanup
+    // task's own flusher-drain wait resolves, and that hits its full 10s
+    // `FLUSHER_DRAIN_TIMEOUT` on essentially every ordinary `cmd.exe` exit
+    // on Windows (discovered live while writing this test — see the
+    // close-on-exit trigger's own comment in lifecycle.rs). 30s covers
+    // that plus the delay plus real margin.
+    let mut fired = None;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if let Some(v) = closed.lock().unwrap().clone() {
+            fired = Some(v);
+            break;
+        }
+    }
+    let (fired_tab_id, fired_block_id) =
+        fired.expect("close-on-exit handler should have fired after the shell exited");
+    assert_eq!(
+        fired_tab_id, "ptyshell",
+        "tab_id passed to close_on_exit should be the ShellController's own tab_id \
+         (the \"ptyshell\" tracing placeholder resync_controller is called with for a \
+         PtyShellCreate-spawned block, not a real Tab id — see try_attach_to_existing_shell)"
+    );
+    assert_eq!(fired_block_id, shell_id);
+
+    blockcontroller::delete_controller(&shell_id);
 }
