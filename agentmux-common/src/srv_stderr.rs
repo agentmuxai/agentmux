@@ -15,6 +15,20 @@
 //!   to run; supervisors extend their ESTART deadline. (Still emitted and
 //!   parsed with inline literals at the three sites above — not migrated to
 //!   this module yet; only the new line below lives here.)
+//! - `AGENTMUXSRV-MIGRATION-BEGIN id:<id> description:<text>` /
+//!   `AGENTMUXSRV-MIGRATION-END id:<id> duration_ms:<n>` — one pending
+//!   migration is starting / has finished, inside the `AGENTMUXSRV-MIGRATING`
+//!   window above. Before these existed, a slow migration was invisible
+//!   past the initial count — the splash showed a bare, silently-running
+//!   "Backend startup" clock with no indication anything unusual (a
+//!   multi-minute migration) was happening inside it. See
+//!   `docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md`
+//!   §2.1. Only the launcher supervisor turns these into splash sub-rows
+//!   (against the already-open `backend` stage — a migration is not a
+//!   separate top-level stage, it happens entirely inside that one); the
+//!   CEF-host sidecar has no splash to report to and simply logs them like
+//!   any other stderr line, same as it already did for the unparsed line
+//!   before this existed.
 //! - `AGENTMUXSRV-MIGRATION-FAILED error:<text>` — a migration failed and srv
 //!   is about to exit 1 **without** emitting ESTART. Added by Phase 1 of
 //!   `docs/specs/SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md`; before it,
@@ -52,6 +66,60 @@ fn one_line(s: &str) -> String {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join(" | ")
+}
+
+/// Prefix of the line srv writes to stderr just before applying one pending
+/// migration.
+pub const MIGRATION_BEGIN_PREFIX: &str = "AGENTMUXSRV-MIGRATION-BEGIN";
+/// Prefix of the line srv writes to stderr just after one migration applies
+/// successfully. (No `-END` line is written on failure — `up()` returning
+/// `Err` goes straight to `AGENTMUXSRV-MIGRATION-FAILED` and srv exits.)
+pub const MIGRATION_END_PREFIX: &str = "AGENTMUXSRV-MIGRATION-END";
+
+/// A parsed `MIGRATION_BEGIN_PREFIX` line.
+pub struct MigrationBegin {
+    pub id: String,
+    pub description: String,
+}
+
+/// A parsed `MIGRATION_END_PREFIX` line.
+pub struct MigrationEnd {
+    pub id: String,
+    pub duration_ms: u64,
+}
+
+/// Migration ids (`m.id()`, e.g. `"0020_agent_color_backfill"`) are a fixed,
+/// engineer-chosen identifier format with no spaces — never free text — so
+/// splitting `id:<id> description:<text>` on the first space is safe and
+/// exact, unlike `description` itself which is flattened via `one_line`.
+pub fn migration_begin_line(id: &str, description: &str) -> String {
+    format!("{} id:{} description:{}", MIGRATION_BEGIN_PREFIX, id, one_line(description))
+}
+
+pub fn migration_end_line(id: &str, duration_ms: u64) -> String {
+    format!("{} id:{} duration_ms:{}", MIGRATION_END_PREFIX, id, duration_ms)
+}
+
+/// Parse a `MIGRATION_BEGIN_PREFIX` line. `None` for any other line, or a
+/// begin line missing the `id:` field it cannot be meaningfully split
+/// without.
+pub fn parse_migration_begin_line(line: &str) -> Option<MigrationBegin> {
+    let rest = line.strip_prefix(MIGRATION_BEGIN_PREFIX)?.trim_start();
+    let rest = rest.strip_prefix("id:")?;
+    let (id, rest) = rest.split_once(' ')?;
+    let description = rest.strip_prefix("description:").unwrap_or(rest).trim();
+    Some(MigrationBegin { id: id.to_string(), description: description.to_string() })
+}
+
+/// Parse a `MIGRATION_END_PREFIX` line. `None` for any other line, a
+/// malformed one, or a non-numeric/missing `duration_ms:` field.
+pub fn parse_migration_end_line(line: &str) -> Option<MigrationEnd> {
+    let rest = line.strip_prefix(MIGRATION_END_PREFIX)?.trim_start();
+    let rest = rest.strip_prefix("id:")?;
+    let (id, rest) = rest.split_once(' ')?;
+    let ms_str = rest.trim().strip_prefix("duration_ms:")?;
+    let duration_ms = ms_str.trim().parse::<u64>().ok()?;
+    Some(MigrationEnd { id: id.to_string(), duration_ms })
 }
 
 #[cfg(test)]
@@ -101,5 +169,63 @@ mod tests {
         // `starts_with` for each, so neither may be a prefix of the other.
         assert!(!MIGRATION_FAILED_PREFIX.starts_with("AGENTMUXSRV-MIGRATING"));
         assert!(!"AGENTMUXSRV-MIGRATING".starts_with(MIGRATION_FAILED_PREFIX));
+    }
+
+    #[test]
+    fn none_of_the_four_migration_prefixes_are_a_prefix_of_another() {
+        // All four share "AGENTMUXSRV-MIGRAT"; every supervisor matches with
+        // `starts_with`/`strip_prefix`, so a false-positive prefix match
+        // would misroute a real line.
+        let all = [
+            "AGENTMUXSRV-MIGRATING",
+            MIGRATION_FAILED_PREFIX,
+            MIGRATION_BEGIN_PREFIX,
+            MIGRATION_END_PREFIX,
+        ];
+        for a in all {
+            for b in all {
+                if a == b { continue; }
+                assert!(!a.starts_with(b), "{a:?} must not start with {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn begin_line_round_trips_through_parse() {
+        let line = migration_begin_line("0020_agent_color_backfill", "backfill default agent colors");
+        let parsed = parse_migration_begin_line(&line).expect("must parse");
+        assert_eq!(parsed.id, "0020_agent_color_backfill");
+        assert_eq!(parsed.description, "backfill default agent colors");
+    }
+
+    #[test]
+    fn begin_line_flattens_a_multiline_description() {
+        let line = migration_begin_line("0007_x", "line one\nline two");
+        assert!(!line.contains('\n'));
+        assert_eq!(parse_migration_begin_line(&line).unwrap().description, "line one | line two");
+    }
+
+    #[test]
+    fn end_line_round_trips_through_parse() {
+        let line = migration_end_line("0020_agent_color_backfill", 147);
+        let parsed = parse_migration_end_line(&line).expect("must parse");
+        assert_eq!(parsed.id, "0020_agent_color_backfill");
+        assert_eq!(parsed.duration_ms, 147);
+    }
+
+    #[test]
+    fn begin_and_end_parsers_ignore_other_protocol_lines_and_each_other() {
+        assert!(parse_migration_begin_line("AGENTMUXSRV-MIGRATING migrations:3").is_none());
+        assert!(parse_migration_begin_line("AGENTMUXSRV-ESTART ws:x web:y").is_none());
+        assert!(parse_migration_begin_line(&migration_end_line("0007_x", 5)).is_none());
+        assert!(parse_migration_end_line(&migration_begin_line("0007_x", "d")).is_none());
+    }
+
+    #[test]
+    fn malformed_begin_and_end_lines_do_not_panic() {
+        assert!(parse_migration_begin_line(MIGRATION_BEGIN_PREFIX).is_none());
+        assert!(parse_migration_begin_line(&format!("{MIGRATION_BEGIN_PREFIX} garbage")).is_none());
+        assert!(parse_migration_end_line(MIGRATION_END_PREFIX).is_none());
+        assert!(parse_migration_end_line(&format!("{MIGRATION_END_PREFIX} id:0007_x duration_ms:notanumber")).is_none());
     }
 }
