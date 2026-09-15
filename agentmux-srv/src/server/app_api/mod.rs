@@ -1274,14 +1274,32 @@ pub(crate) fn global_memory_read_impl(state: &AppState, id: &str) -> Result<serd
 /// Demotes a Global Memory entry (clears `is_global`) — matches the Armory
 /// UI's own "Remove" semantics: the bundle row itself survives (still
 /// available in the Bundles tab), only its Global Memory membership is
-/// cleared. Refuses a system-tier id. Backs the `GlobalMemoryRemove` MCP
-/// tool.
+/// cleared. Refuses a system-tier id, the blank singleton, or any id that
+/// wasn't ALREADY a Global Memory entry before this call — same ownership
+/// guards as `global_memory_write_impl`, for the identical reason: bundle
+/// ids are enumerable via `PresetList` regardless of `is_global`. Backs the
+/// `GlobalMemoryRemove` MCP tool.
 pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
     let mut bundle = state.id_store.bundle_get(id)
         .map_err(|e| format!("globalmemory.remove: {e}"))?
         .ok_or_else(|| format!("globalmemory.remove: not found id={id}"))?;
     if bundle.is_system {
         return Err("globalmemory.remove: cannot remove a system Global Memory entry through this API".to_string());
+    }
+    // reagent P1, PR #3237 (re-review): same missing-ownership-check bug
+    // already fixed for write above, left unfixed here. Bundle ids for
+    // every bundle are enumerable via PresetList (unfiltered), so without
+    // this an agent could call GlobalMemoryRemove with another agent's
+    // private preset id (or 'blank') — is_global is already false so the
+    // flag write is a no-op, but bundle_upsert still rewrites the row and
+    // bumps updated_at on a bundle this API has no business touching at
+    // all. This API may only ever act on an entry that was already Global
+    // Memory before the call.
+    if bundle.is_blank || bundle.id == "blank" {
+        return Err("globalmemory.remove: cannot mutate the blank Bundle singleton".to_string());
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory.remove: id={id} is not a Global Memory entry"));
     }
     bundle.is_global = false;
     bundle.updated_at = agentmux_common::time::now_ms();
@@ -1480,6 +1498,37 @@ mod global_memory_impl_tests {
 
         let after = state.id_store.bundle_get("to-remove").unwrap().unwrap();
         assert!(!after.is_global);
+    }
+
+    /// reagent P1, PR #3237 (re-review): remove had the SAME missing-
+    /// ownership-check bug already fixed for write, left unfixed here.
+    #[tokio::test]
+    async fn remove_refuses_to_hijack_the_blank_singleton() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("blank", false)).unwrap();
+
+        let err = global_memory_remove_impl(&state, "blank").unwrap_err();
+        assert!(err.contains("blank"), "error should mention the blank singleton: {err}");
+
+        let unchanged = state.id_store.bundle_get("blank").unwrap().unwrap();
+        assert_eq!(unchanged.updated_at, 0, "must not have been touched at all");
+    }
+
+    /// reagent P1, PR #3237 (re-review): an agent could call
+    /// GlobalMemoryRemove with another agent's private preset id
+    /// (discovered via PresetList) — is_global was already false so the
+    /// flag write was a no-op, but bundle_upsert still rewrote the row and
+    /// bumped updated_at on a bundle this API has no business touching.
+    #[tokio::test]
+    async fn remove_refuses_to_touch_a_non_global_bundle() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("someone-elses-preset", false)).unwrap();
+
+        let err = global_memory_remove_impl(&state, "someone-elses-preset").unwrap_err();
+        assert!(err.contains("not a Global Memory entry"), "unexpected error: {err}");
+
+        let unchanged = state.id_store.bundle_get("someone-elses-preset").unwrap().unwrap();
+        assert_eq!(unchanged.updated_at, 0, "must not have been touched at all");
     }
 }
 
