@@ -153,6 +153,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                                         scrollable={true}
                                         nativeScrollbar={true}
                                         contentClass="global-bundle-file-markdown-content"
+                                        fontSizeOverride={11}
                                     />
                                 </div>
                             </Show>
@@ -228,6 +229,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                                                     scrollable={true}
                                                     nativeScrollbar={true}
                                                     contentClass="global-bundle-file-markdown-content"
+                                                    fontSizeOverride={11}
                                                 />
                                             </div>
                                         </>
@@ -281,6 +283,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                             scrollable={true}
                             nativeScrollbar={true}
                             contentClass="global-bundle-preview-markdown-content"
+                            fontSizeOverride={11}
                         />
                     </div>
                 </Show>
