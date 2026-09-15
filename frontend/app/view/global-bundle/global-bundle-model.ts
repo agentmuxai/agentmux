@@ -13,9 +13,12 @@
 // depending on the agent's provider (agent_config.rs's build_config_files,
 // resolved per-provider since
 // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md; see
-// `filenameGroupsAtom`/`noFileProvidersAtom` below for the UI-facing
-// mapping). Section order is the sort_order column, mutated via
-// reorderglobalbrain.
+// `filenameGroupsAtom`/`noFileProvidersAtom` below for that mapping — no
+// longer rendered by GlobalBundleManager as of
+// docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md §3 (the user
+// didn't want it in that view), kept here since the mapping itself is still
+// real, tested domain logic that may be surfaced elsewhere later). Section
+// order is the sort_order column, mutated via reorderglobalbrain.
 //
 // This model is block-free (same shape as BundleViewModel) and drives off
 // the bundle_* RPCs. Mutations refresh the list afterwards; it does not
@@ -156,8 +159,9 @@ export class GlobalBundleViewModel {
      *  docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4. */
     filenameGroupsAtom: Accessor<{ filename: string; providerNames: string[] }[]>;
     /** Display names of providers with no confirmed startup-instructions
-     *  file (currently just Kimi) — surfaced as an explicit "not applied
-     *  to" callout rather than silently omitted. */
+     *  file (currently just Kimi). Not currently rendered by
+     *  GlobalBundleManager (SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md
+     *  §3) — kept as tested domain logic, same as filenameGroupsAtom above. */
     noFileProvidersAtom: Accessor<string[]>;
 
     // Backs the "Claude Code provider config" section — a read-only
