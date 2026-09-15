@@ -1092,28 +1092,44 @@ impl Controller for ShellController {
             // loop keep running independently in the background, still
             // persisting and broadcasting whatever the descendant produces
             // next, and exit naturally once the PTY genuinely reaches EOF.
-            match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    tracing::warn!(
-                        block_id = %block_id_wait,
-                        error = %e,
-                        "PTY output flusher task panicked or was cancelled before completing; \
-                         proceeding with pane teardown anyway — some trailing output may be missing"
-                    );
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        block_id = %block_id_wait,
-                        timeout = ?FLUSHER_DRAIN_TIMEOUT,
-                        "PTY output flusher did not finish draining within the timeout after \
-                         process exit (a background descendant still holding the PTY open?) — \
-                         proceeding with pane teardown without waiting further; leaving the \
-                         flusher and its PTY read loop running detached in the background \
-                         rather than aborting them, so no output produced after this point is \
-                         silently lost — some trailing output as of teardown time may still be \
-                         missing"
-                    );
+            //
+            // Skipped entirely when this pane is about to close on exit
+            // (§13): the whole point of the wait is to order trailing
+            // output BEFORE clients observe `STATUS_DONE`, and there is no
+            // client left to order it for once the block is deleted a
+            // moment later. On Windows this wait is reached at its full
+            // ceiling on every ordinary exit (§12), so skipping it here is
+            // the difference between a pane that closes the instant its
+            // shell exits and one that visibly lingers a second first.
+            // The flusher is detached either way — exactly as it would be
+            // on timeout — so nothing it produces later is lost any more
+            // than it already would be.
+            if close_on_exit {
+                drop(flusher_handle);
+            } else {
+                match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            error = %e,
+                            "PTY output flusher task panicked or was cancelled before completing; \
+                             proceeding with pane teardown anyway — some trailing output may be missing"
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            timeout = ?FLUSHER_DRAIN_TIMEOUT,
+                            "PTY output flusher did not finish draining within the timeout after \
+                             process exit (a background descendant still holding the PTY open?) — \
+                             proceeding with pane teardown without waiting further; leaving the \
+                             flusher and its PTY read loop running detached in the background \
+                             rather than aborting them, so no output produced after this point is \
+                             silently lost — some trailing output as of teardown time may still be \
+                             missing"
+                        );
+                    }
                 }
             }
 

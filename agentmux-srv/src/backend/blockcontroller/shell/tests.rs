@@ -379,7 +379,9 @@ use std::sync::Arc;
     #[test]
     fn test_close_on_exit_delay() {
         let mut meta = MetaMapType::new();
-        assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 2000); // default
+        // Default 0 — close immediately (§13). Was 2000 while the knob had
+        // no caller at all; the pause read as lag once it was actually wired up.
+        assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 0);
 
         meta.insert(
             META_KEY_CMD_CLOSE_ON_EXIT_DELAY.to_string(),
