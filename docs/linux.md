@@ -145,10 +145,11 @@ own `build-linux.yml` / `task package:linux:deb` / `task package:linux:tarball`
 |---|---|---|---|
 | AppImage | `task package:linux` | Extract-and-run, no install step | Primary format; self-registers a desktop entry on first launch via `install-linux-desktop.sh` |
 | `.deb` | `task package:linux:deb` | `sudo apt install ./AgentMux_<version>_amd64.deb` (or `sudo dpkg -i`) | Installs to `/opt/agentmux`, wrapper at `/usr/bin/agentmux`. Built via [`fpm`](https://github.com/jordansissel/fpm); requires `gem install fpm` for local builds |
+| `.rpm` | `task package:linux:rpm` | `sudo rpm -i AgentMux-<version>-1.x86_64.rpm` (or `sudo dnf install ./AgentMux-<version>-1.x86_64.rpm`) | Same `/opt/agentmux` install layout as the `.deb`. Built via `fpm`; also requires `rpmbuild` (`apt-get install rpm` on Debian/Ubuntu, or `dnf install rpm-build` on Fedora) |
 | `.tar.gz` | `task package:linux:tarball` | Extract, run `./AgentMux/agentmux.sh` | No install step, no packaging tool dependency — closest Linux equivalent to the Windows portable ZIP |
 
-All three formats are built from the identical staged runtime
+All four formats are built from the identical staged runtime
 (`scripts/stage-linux-runtime.sh`) — same binaries, same CEF runtime, same
 BeginWindowDrag release gate — only the final packaging step differs. See
 `docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md` for
-the full design and the formats still planned (`.rpm`, `.pacman`, arm64).
+the full design and the formats still planned (`.pacman`, arm64).

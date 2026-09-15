@@ -185,6 +185,19 @@ tasks:
             - bash scripts/guard-stable-build.sh
             - bash -c 'RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=deb {{.CLI_ARGS}}'
 
+    package:linux:rpm:
+        desc: 'Like `task package:linux` but produces a .rpm via fpm instead of an AppImage. Same per-build channel isolation and ephemeral label. Requires fpm (`gem install fpm`) and rpmbuild (`apt-get install rpm` on Debian/Ubuntu) on PATH. See docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md.'
+        platforms: [linux]
+        cmds:
+            - bash scripts/package-linux.sh --format=rpm {{.CLI_ARGS}}
+
+    package:release:linux:rpm:
+        desc: 'Like `task package:release:linux` but produces a .rpm. Same stable-build guard.'
+        platforms: [linux]
+        cmds:
+            - bash scripts/guard-stable-build.sh
+            - bash -c 'RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=rpm {{.CLI_ARGS}}'
+
     package:linux:tarball:
         desc: 'Like `task package:linux` but produces a portable .tar.gz instead of an AppImage — no fpm/appimagetool dependency. Same per-build channel isolation and ephemeral label. See docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md.'
         platforms: [linux]

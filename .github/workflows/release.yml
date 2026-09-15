@@ -339,10 +339,11 @@ jobs:
         # deploy that reads it (Codex review, PR #3234; see
         # docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
         # §2.5). *.deb and *.tar.gz added for that spec's Phase 1
-        # (AppImage/deb/tar.gz — .rpm/.pacman land here too once Phases 2-3 ship).
+        # (AppImage/deb/tar.gz); *.rpm added for Phase 2 (.pacman lands here
+        # too once Phase 3 ships).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.tar.gz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" \) -exec cp {} dist-flat/ \;
           echo "--- Release artifacts ---"
           ls -lh dist-flat/
 
