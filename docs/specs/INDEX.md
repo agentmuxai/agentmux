@@ -608,6 +608,7 @@ partial list.
 | [`SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06`](SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md) | Plan: MuxBus multi-tenant security — current state and path to production isolation |
 | [`SPEC_NATIVE_BROWSER_PANE_2026_04_17`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md) | SPEC: Native Browser Pane via CefBrowserView |
 | [`SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23`](SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md) | Nightly Release Automation — Auto-Publish the Latest Pending Version Bump |
+| [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14`](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | SPEC: Internal-event → frontend WaveObjUpdate bridge |
 | [`SPEC_OPENCLAW_AGENT_2026_05_17`](SPEC_OPENCLAW_AGENT_2026_05_17.md) | SPEC: OpenClaw integration — shared interfaces, distinct flavor |
 | [`SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md) | SPEC: OS-level activity indicator when an agent is busy |
