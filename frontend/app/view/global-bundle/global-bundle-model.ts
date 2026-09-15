@@ -275,7 +275,7 @@ export class GlobalBundleViewModel {
     async saveEdit(): Promise<void> {
         const name = this.draftNameAtom().trim();
         if (!name) {
-            this.setError("Section name is required.");
+            this.setError("Name is required.");
             return;
         }
         const editingId = this.editingIdAtom();
@@ -299,7 +299,7 @@ export class GlobalBundleViewModel {
             } else {
                 const existing = this.allAtom().find((m) => m.id === editingId);
                 if (!existing) {
-                    this.setError("Section no longer exists.");
+                    this.setError("Memory no longer exists.");
                     return;
                 }
                 await RpcApi.UpsertBundleCommand(TabRpcClient, {
@@ -394,7 +394,7 @@ export class GlobalBundleViewModel {
     async saveSystemEdit(): Promise<void> {
         const name = this.draftSystemNameAtom().trim();
         if (!name) {
-            this.setError("Section name is required.");
+            this.setError("Name is required.");
             return;
         }
         const editingId = this.editingSystemIdAtom();
@@ -408,7 +408,7 @@ export class GlobalBundleViewModel {
             } else {
                 const existing = this.systemSectionsAtom().find((m) => m.id === editingId);
                 if (!existing) {
-                    this.setError("Section no longer exists.");
+                    this.setError("Memory no longer exists.");
                     return;
                 }
                 await RpcApi.UpsertSystemBundleCommand(TabRpcClient, { ...existing, name, instructions });
