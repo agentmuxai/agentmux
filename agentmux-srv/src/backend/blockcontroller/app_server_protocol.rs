@@ -145,6 +145,8 @@ pub enum CodexAppServerProtocolError {
     MissingStringField(&'static str),
     #[error("App Server response is missing an object field: {0}")]
     MissingObjectField(&'static str),
+    #[error("App Server response is missing a boolean field: {0}")]
+    MissingBoolField(&'static str),
     #[error("App Server event is missing a string field: {0}")]
     MissingEventField(&'static str),
     #[error("App Server event belongs to thread {actual}, but active thread is {expected}")]
@@ -1075,7 +1077,7 @@ impl CodexAppServerSession {
                 let success = params
                     .get("success")
                     .and_then(Value::as_bool)
-                    .ok_or(CodexAppServerProtocolError::MissingStringField("success"))?;
+                    .ok_or(CodexAppServerProtocolError::MissingBoolField("success"))?;
                 Ok(CodexAppServerEvent::AccountLoginCompleted {
                     login_id: params
                         .get("loginId")
@@ -1521,6 +1523,26 @@ mod tests {
                 success: false,
                 error: Some(ref error),
             } if id == "login-1" && error == "cancelled"
+        ));
+    }
+
+    /// ReAgent P2, PR #3214: a missing/wrong-typed `success` (a bool) was
+    /// reported via MissingStringField, whose Display text ("...missing a
+    /// string field: success") is inaccurate -- `success` is a bool, not a
+    /// string, and every other use of that variant in this file is for an
+    /// actual string field.
+    #[tokio::test]
+    async fn account_login_completed_missing_success_reports_the_right_field_type() {
+        let (session, _reader, _writer) = session();
+        let error = session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "account/login/completed".to_string(),
+                params: json!({"loginId": "login-1"}),
+            })
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            CodexAppServerProtocolError::MissingBoolField("success")
         ));
     }
 
