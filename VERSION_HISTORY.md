@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.55.43 — 2026-09-14
+
+- feat(jekt): 24h TTL / lazy rotation for the host-tier signing key
+- feat(armory): show current file content in Personal Memory history panel
+- fix(swarm): couple tracked-blocks refresh to the registry it actually reads
+
 ## 0.55.42 — 2026-09-11
 
 - feat(install-ui): auto-scroll install-log Details, provider-installer progress bar, and system-tool brand icons
