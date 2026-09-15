@@ -279,12 +279,22 @@ impl ShellController {
         obj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT_FORCE, false)
     }
 
-    /// Get the close-on-exit delay in ms (defaults to 2000) — how long to
-    /// leave the pane showing its final output before actually closing it.
+    /// Get the close-on-exit delay in ms — how long to leave the pane
+    /// showing its final output before actually closing it.
+    ///
+    /// **Defaults to 0 (close immediately).** The knob predates any caller
+    /// and its original 2000 was never exercised; when close-on-exit was
+    /// first wired up (§10) that 2s was kept as-is, and the reporter's
+    /// first working retest asked for it to go — a shell you just typed
+    /// `exit` into has already shown you whatever it was going to show, so
+    /// the pause reads as lag, not as a chance to read the output. Still
+    /// honored when set explicitly via `cmd:closeonexitdelay`, for a pane
+    /// that genuinely wants a beat before vanishing. See
+    /// docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §13.
     pub(super) fn close_on_exit_delay_ms(meta: &MetaMapType) -> u64 {
         match meta.get(META_KEY_CMD_CLOSE_ON_EXIT_DELAY) {
-            Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(2000),
-            _ => 2000,
+            Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0),
+            _ => 0,
         }
     }
 

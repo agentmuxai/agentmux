@@ -2,9 +2,10 @@
 
 **Date:** 2026-09-15
 **Status:** implemented (§4b's respawn loop, §7-9; §4a's close-on-exit,
-§10-12. §11-12 correct two real regressions in §10 found by live retest —
+§10-13. §11-12 correct two real regressions in §10 found by live retest —
 read §12 first: it supersedes §11's guess about which pane was involved,
-and adds the 10s `FLUSHER_DRAIN_TIMEOUT` half of the reported "hang")
+and adds the 10s `FLUSHER_DRAIN_TIMEOUT` half of the reported "hang".
+§13 takes the confirmed-working close from ~4s down to immediate.)
 **Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
 `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
 
@@ -626,3 +627,44 @@ Measured effect, same test, same machine: 13.09s → **4.06s** end to end.
 with a realistic `tab:` parent) passes; the sub-block exclusion test still
 passes; full `ptyshell_*` suite (6) passes; full non-ignored suite (3352
 passed, 0 failed).
+
+## 13. Closing immediately
+
+With §12 in, the reporter confirmed the pane finally closes — "now it
+exits after about 3-5 seconds. can it exit immediately?" It can. That
+residual was two deliberate waits stacked in front of a pane that is
+about to be deleted:
+
+**`close_on_exit_delay_ms`: 2000 → 0.** This knob predates any caller —
+it was dead code until §10 wired close-on-exit up, and its 2000 was
+carried over unexamined at that point. The stated intent ("leave the pane
+showing its final output before closing it") doesn't survive contact with
+the actual moment it fires: a shell you just typed `exit` into has already
+shown you whatever it was going to show, so the pause reads as lag rather
+than as a chance to read anything. Still honored when set explicitly via
+`cmd:closeonexitdelay` for a pane that genuinely wants a beat.
+
+**The flusher drain wait is skipped entirely when the pane is closing.**
+§12 cut `FLUSHER_DRAIN_TIMEOUT` 10s → 1s, but on Windows that 1s is still
+paid on every exit (ConPTY, §12). The wait exists to order trailing output
+*before* clients observe `STATUS_DONE` — and there is no client left to
+order it for when the block is deleted a moment later. So when
+`close_on_exit` is true the handle is simply dropped, which detaches the
+flusher exactly as a timeout would have; nothing it produces afterward is
+lost any more than it already would have been. Panes that stay open are
+untouched and still get the full ordered wait.
+
+Measured, same test/machine across the three rounds:
+
+| | end-to-end |
+|---|---|
+| §11 (broken — never closed) | — |
+| §12 (10s→1s drain, 2s delay) | 13.09s → 4.06s |
+| §13 (drain skipped, delay 0) | **1.56s** |
+
+and ~1s of that final figure is the test's own fixed setup sleeps plus its
+500ms poll granularity, not close latency — the close itself is now below
+what that test can resolve.
+
+**Verified:** full `ptyshell_*` real-PTY suite (6) passes, full
+non-ignored suite (3352 passed, 0 failed).
