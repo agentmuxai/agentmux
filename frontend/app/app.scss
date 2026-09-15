@@ -271,3 +271,23 @@ a {
         color: inherit;
     }
 }
+
+// ── Tab-switch view transition ──────────────────────────────────────────────
+// workspace.tsx wraps the active-tab swap in document.startViewTransition(),
+// scoped to this one named group via `view-transition-name` on the tab-
+// content wrapper — NOT the default document-wide transition, which would
+// snapshot (and briefly freeze) the whole window including the header and
+// status bar. Only this one region cross-fades.
+//
+// Duration override: the UA default is 250ms, which reads as a visible fade
+// rather than the near-instant feel a real Chrome tab switch has (Chrome's
+// own switch has NO fade at all — it's a hard cut to an already-composited
+// frame). 120ms matches the constant the opacity-fade this replaces used to
+// animate over (SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md), the closest
+// available approximation within a single-renderer architecture — see
+// ANALYSIS_CHROME_PARITY_TAB_SWITCH_LATENCY_2026_09_15.md for why a literal
+// zero-cost cached-texture swap isn't available here.
+::view-transition-old(workspace-tab-content),
+::view-transition-new(workspace-tab-content) {
+    animation-duration: 120ms;
+}
