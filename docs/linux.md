@@ -116,5 +116,26 @@ Opening a second instance sends an `open_new_window` command to the running laun
 | Splash screen | Not yet implemented (Windows + macOS have native splash screens) |
 | Window transparency | Under investigation — root cause identified (views::SolidBackground), fix blocked on Mutter wl_surface visibility without opaque base pixel |
 | Native Wayland (non-XWayland) | Experimental; set `AGENTMUX_OZONE_PLATFORM=wayland` |
-| Linux .deb package | Produced by CI builder (`agentmuxai/agentmux-builder`) only, not by `task package:linux` |
 | Owned-window floaters (`transient-for` + destroy-with-parent) | Phase B, not yet implemented — floaters open as independent top-level windows |
+
+**Correction (2026-09-15):** this table previously listed `.deb` as
+"Produced by CI builder (`agentmuxai/agentmux-builder`) only" —
+`agentmuxai/agentmux-builder` does not exist in the org and never did as far
+as this repo's history shows; that line was stale since at least
+2026-06-06. `.deb` (and a portable `.tar.gz`) are now built by this repo's
+own `build-linux.yml` / `task package:linux:deb` / `task package:linux:tarball`
+— see the Package formats section below.
+
+## Package formats
+
+| Format | Local build | Install | Notes |
+|---|---|---|---|
+| AppImage | `task package:linux` | Extract-and-run, no install step | Primary format; self-registers a desktop entry on first launch via `install-linux-desktop.sh` |
+| `.deb` | `task package:linux:deb` | `sudo apt install ./AgentMux_<version>_amd64.deb` (or `sudo dpkg -i`) | Installs to `/opt/agentmux`, wrapper at `/usr/bin/agentmux`. Built via [`fpm`](https://github.com/jordansissel/fpm); requires `gem install fpm` for local builds |
+| `.tar.gz` | `task package:linux:tarball` | Extract, run `./AgentMux/agentmux.sh` | No install step, no packaging tool dependency — closest Linux equivalent to the Windows portable ZIP |
+
+All three formats are built from the identical staged runtime
+(`scripts/stage-linux-runtime.sh`) — same binaries, same CEF runtime, same
+BeginWindowDrag release gate — only the final packaging step differs. See
+`docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md` for
+the full design and the formats still planned (`.rpm`, `.pacman`, arm64).

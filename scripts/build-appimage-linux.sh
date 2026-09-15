@@ -65,145 +65,18 @@ if [ -z "$APPIMAGETOOL" ]; then
     fi
 fi
 
-# Verify required build artifacts exist
-require() {
-    if [ ! -e "$1" ]; then
-        echo "ERROR: required artifact $1 missing — run \`task build:host && task build:backend && task build:frontend && task bundle && task copy:schema\` first" >&2
-        exit 1
-    fi
-}
-require dist/cef/agentmux-cef
-require dist/cef/agentmux-launcher
-require dist/cef/libcef.so
-require dist/bin/agentmux-srv-${VERSION}-linux.x64
-require target/release/agentmux-mcp
-# `task build:frontend` outputs to dist/frontend (per vite.config.ts outDir).
-# `dev:serve` symlinks dist/cef/frontend → ../frontend for the host's runtime
-# lookup, but that symlink isn't created by `task bundle` — and on a clean
-# checkout running `task package:linux` it doesn't exist. Read straight from
-# the build output to keep packaging reproducible from a fresh checkout.
-require dist/frontend/index.html
-
-# --- Release gate: the bundled libcef.so MUST carry the BeginWindowDrag patch,
-#     or left-click window drag silently no-ops in the shipped AppImage (the
-#     runtime ABI guard only surfaces it after the user clicks). The symbol check
-#     needs an UNSTRIPPED .so: dist/cef/libcef.so is unstripped at this point in the
-#     canonical `task package:linux` flow (bundle:linux copies the build-tree output;
-#     the strip below runs on the AppDir copy). If dist/cef was pre-stripped
-#     out-of-band, fall back to verifying the resolved build-tree source. This is
-#     release-only — `task dev`/`task bundle` never run this script. Override with
-#     AGENTMUX_SKIP_CEF_PATCH_CHECK=1 (emergency only). ---
-if [ "${AGENTMUX_SKIP_CEF_PATCH_CHECK:-0}" != "1" ]; then
-    set +e
-    bash "$REPO_ROOT/scripts/verify-cef-patch.sh" dist/cef/libcef.so
-    patch_rc=$?
-    if [ "$patch_rc" = "2" ]; then
-        echo "→ dist/cef/libcef.so couldn't be verified (stripped?); checking the resolved source…" >&2
-        cef_src="$(bash "$REPO_ROOT/scripts/resolve-cef-runtime.sh" 2>/dev/null || true)"
-        if [ -n "$cef_src" ]; then
-            bash "$REPO_ROOT/scripts/verify-cef-patch.sh" "$cef_src"
-            patch_rc=$?
-        fi
-    fi
-    set -e
-    case "$patch_rc" in
-        0) echo "✓ libcef.so carries the BeginWindowDrag patch" ;;
-        1) echo "ERROR: bundled libcef.so lacks the BeginWindowDrag patch — refusing to" >&2
-           echo "       package a release with broken left-click window drag. Build the" >&2
-           echo "       patched libcef (docs/cef-build/build-patched-libcef.md) or set" >&2
-           echo "       AGENTMUX_SKIP_CEF_PATCH_CHECK=1 to override." >&2
-           exit 1 ;;
-        *) echo "WARNING: could not verify the BeginWindowDrag patch (stripped runtime and" >&2
-           echo "         no unstripped source to check). Proceeding — verify drag manually." >&2 ;;
-    esac
-fi
-
-echo "Building AgentMux v$VERSION AppImage → $OUTPUT"
-
-# --- 1. Wipe and recreate AppDir ---
-rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin/locales"
+# --- 1-6b. Shared runtime staging (binaries, CEF libs, frontend, schema,
+#           VERSION marker) — extracted into stage-linux-runtime.sh so
+#           build-deb-linux.sh and build-tarball-linux.sh ship the identical
+#           runtime instead of a hand-copied subset. This call also performs
+#           the required-artifact checks and the BeginWindowDrag release gate
+#           that used to be inlined here. ---
+bash "$REPO_ROOT/scripts/stage-linux-runtime.sh" "$APPDIR"
 mkdir -p "$APPDIR/usr/share/icons/hicolor"
 mkdir -p "$APPDIR/usr/share/applications"
 mkdir -p "$APPDIR/assets"
 
-# --- 2. Host binary (keep cargo name agentmux-cef so the launcher's
-#        find_cef_binary final fallback resolves it without a launcher
-#        code change — see SPEC §3 step 1a) ---
-cp dist/cef/agentmux-cef "$APPDIR/usr/bin/agentmux-cef"
-
-# --- 2b. Launcher binary — the AppRun's exec target. The launcher
-#         supervises srv + host as a process group (A0). Without this
-#         the AppImage host binary runs alone; every launcher_ipc
-#         report_* call from the host silently no-ops. ---
-cp dist/cef/agentmux-launcher "$APPDIR/usr/bin/agentmux-launcher"
-
-# --- 3. Backend sidecar (versioned filename — host's resolve_backend_binary
-#        looks for `agentmux-srv-<VERSION>-linux.x64` next to the host) ---
-cp "dist/bin/agentmux-srv-${VERSION}-linux.x64" "$APPDIR/usr/bin/"
-
-# --- 3b. Bundled tools — agentmux-srv adds <exe_dir>/tools/bin to Claude's PATH.
-#         On Linux, exe_dir = usr/bin, so tools land at usr/bin/tools/bin/.
-#         agentmux-mcp is the Shell MCP server; without it the Shell tool
-#         fails with command-not-found on packaged builds. ---
-mkdir -p "$APPDIR/usr/bin/tools/bin"
-cp target/release/agentmux-mcp "$APPDIR/usr/bin/tools/bin/agentmux-mcp"
-
-# --- 4. CEF runtime (libcef.so, GL libs, paks, snapshots, sandbox) ---
-for f in libcef.so libEGL.so libGLESv2.so chrome-sandbox chrome_crashpad_handler \
-         icudtl.dat snapshot_blob.bin v8_context_snapshot.bin \
-         chrome_100_percent.pak chrome_200_percent.pak resources.pak \
-         headless_command_resources.pak \
-         libvk_swiftshader.so vk_swiftshader_icd.json libvulkan.so.1; do
-    if [ -f "dist/cef/$f" ]; then
-        cp "dist/cef/$f" "$APPDIR/usr/bin/"
-    fi
-done
-
-# Strip the unstripped libcef.so + GL libs to halve their size. The chromium
-# build emits libcef.so at 613MB with full .symtab/.strtab — fine for dev
-# debugging in dist/cef/ but huge for distribution. `strip` removes the local
-# (non-dynamic) symbol table but keeps .dynsym so dlopen + relocations still
-# work; saves ~210MB on libcef.so alone (~33% AppImage reduction).
-# libvk_swiftshader.so + libvulkan.so.1 added for CEF 148 — same treatment.
-for so in libcef.so libEGL.so libGLESv2.so libvk_swiftshader.so libvulkan.so.1; do
-    if [ -f "$APPDIR/usr/bin/$so" ]; then
-        strip "$APPDIR/usr/bin/$so"
-    fi
-done
-
-# Locales
-if [ -d dist/cef/locales ]; then
-    cp -r dist/cef/locales/. "$APPDIR/usr/bin/locales/"
-fi
-
-# --- 5. Frontend — copy from the canonical `task build:frontend` output
-#        (dist/frontend) into the AppImage at usr/bin/frontend, the path
-#        agentmux-cef looks for next to its binary. ---
-cp -r dist/frontend "$APPDIR/usr/bin/frontend"
-
-# Strip frontend source maps from the release artifact (debug-only, ~28 MB).
-# Mirrors the STRIP_MAPS policy for release builds
-# (docs/specs/SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md): the app runs identically;
-# only prod-stack-trace symbolication is lost.
-_maps=$(find "$APPDIR/usr/bin/frontend" -name '*.map' | wc -l)
-if [ "$_maps" -gt 0 ]; then
-    find "$APPDIR/usr/bin/frontend" -name '*.map' -delete
-    echo "Stripped $_maps source-map file(s) from the AppImage frontend"
-fi
-
-# --- 6. Schema (optional — only present if `task copy:schema` ran) ---
-if [ -d dist/schema ]; then
-    mkdir -p "$APPDIR/usr/share/agentmux"
-    cp -r dist/schema "$APPDIR/usr/share/agentmux/"
-fi
-
-# --- 6b. VERSION marker — read by AppRun to key the extract-once-cache.
-#         AppRun re-execs from $HOME/.local/share/agentmux/extracted/<VERSION>/
-#         on second+ launches to skip SquashFS decompression. Spec:
-#         docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md (Phase 2).
-mkdir -p "$APPDIR/usr/share/agentmux"
-echo "$VERSION" > "$APPDIR/usr/share/agentmux/VERSION"
+echo "Building AgentMux v$VERSION AppImage → $OUTPUT"
 
 # --- 7. AppRun + helper script + assets the installer reads ---
 cp scripts/linux-apprun.sh "$APPDIR/AppRun"

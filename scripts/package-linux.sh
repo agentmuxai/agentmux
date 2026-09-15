@@ -8,12 +8,21 @@
 # docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md.
 #
 # Usage:
-#   bash scripts/package-linux.sh [--fresh] [output-dir]
+#   bash scripts/package-linux.sh [--fresh] [--format=appimage|deb|tarball] [output-dir]
 #
 #   --fresh      No-op (accepted for back-compat). Every local build is now
 #                already its own isolated data dir — see CHANNEL below — so
 #                there is nothing left for --fresh to do.
-#   output-dir   Where the AppImage lands (default ~/Desktop).
+#   --format=X   Which package format(s) to build (default: appimage).
+#                Comma-separated for more than one (e.g. --format=appimage,deb,tarball)
+#                — the compile (frontend/backend/host/schema/bundle) runs
+#                EXACTLY ONCE regardless of how many formats are listed, then
+#                each format's build-<format>-linux.sh packages the same
+#                build output. Added for
+#                docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
+#                Phase 1 specifically so CI can produce every release format
+#                without recompiling per format (build-linux.yml uses this).
+#   output-dir   Where the package lands (default ~/Desktop).
 #
 # What gets stamped:
 #   - VERSION  : the semver core from package.json, UNCHANGED.
@@ -37,12 +46,22 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 FRESH=0
+FORMAT="appimage"
 OUTDIR=""
 for arg in "$@"; do
     case "$arg" in
         --fresh) FRESH=1 ;;
-        --*) echo "ERROR: unknown flag $arg (supported: --fresh)" >&2; exit 1 ;;
+        --format=*) FORMAT="${arg#--format=}" ;;
+        --*) echo "ERROR: unknown flag $arg (supported: --fresh, --format=appimage|deb|tarball)" >&2; exit 1 ;;
         *) OUTDIR="$arg" ;;
+    esac
+done
+
+IFS=',' read -r -a FORMATS <<< "$FORMAT"
+for f in "${FORMATS[@]}"; do
+    case "$f" in
+        appimage|deb|tarball) ;;
+        *) echo "ERROR: unknown format '$f' in --format=$FORMAT (supported: appimage, deb, tarball)" >&2; exit 1 ;;
     esac
 done
 
@@ -76,7 +95,7 @@ if [ -n "${RELEASE_CHANNEL:-}" ]; then
     CHANNEL="$RELEASE_CHANNEL"
 fi
 
-echo "────────────────── linux appimage build ──────────────────"
+echo "────────────────── linux ${FORMATS[*]} build ──────────────────"
 echo "  version : $VERSION   (unchanged — no bump, no git mutation)"
 echo "  label   : $LABEL"
 echo "  channel : $CHANNEL"
@@ -108,8 +127,11 @@ task build:host
 task copy:schema
 task bundle
 
-if [ -n "$OUTDIR" ]; then
-    bash scripts/build-appimage-linux.sh "$OUTDIR"
-else
-    bash scripts/build-appimage-linux.sh
-fi
+for f in "${FORMATS[@]}"; do
+    BUILD_SCRIPT="scripts/build-${f}-linux.sh"
+    if [ -n "$OUTDIR" ]; then
+        bash "$BUILD_SCRIPT" "$OUTDIR"
+    else
+        bash "$BUILD_SCRIPT"
+    fi
+done

@@ -1,8 +1,11 @@
 name: build-linux
 
-# Linux AppImage release pipeline for AgentMux.
-# Builds a patched-libcef.so-backed AppImage (x86_64) and uploads it to the
-# corresponding GitHub release.
+# Linux release pipeline for AgentMux.
+# Builds a patched-libcef.so-backed AppImage, .deb, and portable .tar.gz
+# (all x86_64, from one compile — see the "Build AppImage + deb + tarball"
+# step below) and uploads them to the corresponding GitHub release.
+# docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
+# Phase 1 widened this from AppImage-only.
 #
 # The upstream cef-dll-sys libcef.so lacks BeginWindowDrag; building from source
 # takes 3-6 h and 99 GB. Instead we download a pre-built patched libcef.so from
@@ -214,33 +217,66 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
 
-      # ── Build AppImage ────────────────────────────────────────────────────
-      - name: Build AppImage
+      # ── fpm (packages .deb from the same staged tree — see
+      #    docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
+      #    §2.1). The ubuntu-22.04 runner ships Ruby; fpm's `-t deb` backend
+      #    is pure-Ruby (no rpmbuild/native extension needed for this format). ──
+      - name: Install fpm
+        run: gem install --no-document fpm
+
+      # ── Build all Linux release formats from ONE compile ───────────────────
+      # package-linux.sh's --format= flag accepts a comma-separated list and
+      # runs the frontend/backend/host/schema/bundle build exactly once,
+      # then packages each format from that same build output — see that
+      # script's header comment. Do not call it once per format here; that
+      # would silently triple the compile time (and the CEF download/cache
+      # cost above is per-job, not per-format, so this is the only place
+      # that duplication could sneak back in).
+      - name: Build AppImage + deb + tarball
         run: |
           mkdir -p "$OUT"
-          RELEASE_CHANNEL=stable bash scripts/package-linux.sh "$OUT"
+          RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=appimage,deb,tarball "$OUT"
 
-      - name: Locate AppImage
-        id: appimage
+      - name: Locate built packages
+        id: pkgs
         run: |
           APPIMAGE=$(ls "$OUT"/AgentMux_*_amd64.AppImage | head -1)
-          echo "path=$APPIMAGE"                     >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$APPIMAGE")"        >> "$GITHUB_OUTPUT"
+          DEB=$(ls "$OUT"/AgentMux_*_amd64.deb | head -1)
+          TARBALL=$(ls "$OUT"/AgentMux_*_amd64-portable.tar.gz | head -1)
+          echo "appimage_path=$APPIMAGE" >> "$GITHUB_OUTPUT"
+          echo "deb_path=$DEB"           >> "$GITHUB_OUTPUT"
+          echo "tarball_path=$TARBALL"   >> "$GITHUB_OUTPUT"
 
       # ── Upload to GitHub Actions artifacts (always) ────────────────────────
       - name: Upload AppImage as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-appimage
-          path: ${{ steps.appimage.outputs.path }}
+          path: ${{ steps.pkgs.outputs.appimage_path }}
+          if-no-files-found: error
+
+      - name: Upload deb as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: ${{ steps.pkgs.outputs.deb_path }}
+          if-no-files-found: error
+
+      - name: Upload tarball as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: ${{ steps.pkgs.outputs.tarball_path }}
           if-no-files-found: error
 
       # ── Upload to GitHub Release (when release-tag is set) ─────────────────
-      - name: Upload AppImage to GitHub Release
+      - name: Upload Linux packages to GitHub Release
         if: steps.in.outputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ steps.in.outputs.release_tag }}" \
-            "${{ steps.appimage.outputs.path }}" \
+            "${{ steps.pkgs.outputs.appimage_path }}" \
+            "${{ steps.pkgs.outputs.deb_path }}" \
+            "${{ steps.pkgs.outputs.tarball_path }}" \
             --repo agentmuxai/agentmux --clobber
