@@ -4,21 +4,28 @@
 // GlobalBundleManager — the Global section of the Armory "Memory" tab (moves to
 // the Bundles tab in Phase 4 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md).
 // Presents the workspace-wide global bundles (is_global rows) as an ordered
-// list of editable sections that compose into every agent's startup
+// list of editable memories that compose into every agent's startup
 // instructions file (CLAUDE.md, GEMINI.md, or similar, depending on
 // provider) at launch.
 //
 // Context-free: owns its own GlobalBundleViewModel and drives off the
 // bundle_* RPCs. Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 //
-// Layout restructured per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_
-// 2026_09_15.md: the Claude Code reference file, system-tier entries, and
-// ordinary sections used to each render with their own divergent chrome, and
-// none of them showed their content outside an "Edit" click. They now share
-// one `.global-bundle-file` row shape (label, then an always-visible
-// markdown preview) in a single list, and the "applies to" filename-mapping
-// block is gone from this view entirely (per that spec's §3 — the user did
-// not want it here).
+// Layout restructured twice: first per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_
+// DECLUTTER_2026_09_15.md (nine divergent blocks collapsed into one
+// consistently-shaped file-list, "applies to" chips removed), then per
+// docs/specs/SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md —
+// the "system tier" (AgentMux-controlled, pinned-first, override-wording
+// entries) and ordinary sections used to render as two structurally
+// separate lists with two editor components mirroring the backend's own
+// write-path isolation. That backend isolation (SPEC_GLOBAL_MEMORY_SYSTEM_
+// TIER_2026_08_24.md — is_system, the two upsert/delete RPCs, never wired
+// to any MCP tool) is real and unchanged; only the FRONTEND presentation
+// unifies here into one list, one MemoryEditor, one "Memory" vocabulary —
+// see that unify spec's postmortem for why mirroring the backend split into
+// the UI was the actual mistake, not the backend split itself. Creating a
+// NEW system-tier entry has no UI trigger anymore; existing ones remain
+// fully editable/removable via their own still-isolated RPCs.
 
 import { For, onCleanup, Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
@@ -26,9 +33,24 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { GlobalBundleViewModel, NEW_SECTION_ID } from "./global-bundle-model";
 import "./global-bundle.scss";
 
-/** Inline editor card shared by the "new section" and "edit section" flows. */
-function SectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX.Element {
-    const { model } = props;
+/** Inline editor card for both ordinary and (existing, `isSystem`) system
+ *  memories — one component, not two, per docs/specs/SPEC_GLOBAL_MEMORY_
+ *  UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md. Reads/writes whichever of the
+ *  model's two draft-state signal pairs `isSystem` selects, and calls the
+ *  correspondingly correct (still backend-isolated) save method — the only
+ *  place that distinction survives is which RPC ends up called, never in
+ *  what's rendered. */
+function MemoryEditor(props: { model: GlobalBundleViewModel; isNew: boolean; isSystem: boolean }): JSX.Element {
+    const { model, isSystem } = props;
+    const nameValue = () => (isSystem ? model.draftSystemNameAtom() : model.draftNameAtom());
+    const setNameValue = (v: string) => (isSystem ? model.setDraftSystemName(v) : model.setDraftName(v));
+    const instructionsValue = () => (isSystem ? model.draftSystemInstructionsAtom() : model.draftInstructionsAtom());
+    const setInstructionsValue = (v: string) =>
+        isSystem ? model.setDraftSystemInstructions(v) : model.setDraftInstructions(v);
+    const cancel = () => (isSystem ? model.cancelEditSystem() : model.cancelEdit());
+    const save = () => void (isSystem ? model.saveSystemEdit() : model.saveEdit());
+    const canSave = () => !model.savingAtom() && nameValue().trim().length > 0;
+
     return (
         <div class="global-bundle-editor">
             <label class="global-bundle-field">
@@ -36,8 +58,8 @@ function SectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }):
                 <input
                     class="global-bundle-input"
                     type="text"
-                    value={model.draftNameAtom()}
-                    onInput={(e) => model.setDraftName(e.currentTarget.value)}
+                    value={nameValue()}
+                    onInput={(e) => setNameValue(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
                     placeholder="e.g. Coding Standards"
                 />
@@ -47,77 +69,22 @@ function SectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }):
                 <textarea
                     class="global-bundle-textarea"
                     rows={8}
-                    value={model.draftInstructionsAtom()}
-                    onInput={(e) => model.setDraftInstructions(e.currentTarget.value)}
+                    value={instructionsValue()}
+                    onInput={(e) => setInstructionsValue(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
+                    placeholder={
+                        isSystem
+                            ? "Markdown injected FIRST into every agent's startup instructions file, wrapped in explicit override wording."
+                            : "Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
+                    }
                     spellcheck={false}
                 />
             </label>
             <div class="global-bundle-editor-actions">
-                <button
-                    class="global-bundle-btn"
-                    disabled={model.savingAtom()}
-                    onClick={() => model.cancelEdit()}
-                >
+                <button class="global-bundle-btn" disabled={model.savingAtom()} onClick={cancel}>
                     Cancel
                 </button>
-                <button
-                    class="global-bundle-btn global-bundle-btn-primary"
-                    disabled={model.savingAtom() || !model.draftNameAtom().trim()}
-                    onClick={() => void model.saveEdit()}
-                >
-                    {model.savingAtom() ? "Saving…" : props.isNew ? "Add section" : "Save"}
-                </button>
-            </div>
-        </div>
-    );
-}
-
-/** Inline editor card for the system tier — a separate component (not a
- *  parameterized SectionEditor) so its state is never accidentally wired to
- *  the ordinary draft signals. See
- *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5. */
-function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX.Element {
-    const { model } = props;
-    return (
-        <div class="global-bundle-editor">
-            <label class="global-bundle-field">
-                <span class="global-bundle-field-label">Name</span>
-                <input
-                    class="global-bundle-input"
-                    type="text"
-                    value={model.draftSystemNameAtom()}
-                    onInput={(e) => model.setDraftSystemName(e.currentTarget.value)}
-                    onContextMenu={showTextInputContextMenu}
-                    placeholder="e.g. Global Memory Policy"
-                />
-            </label>
-            <label class="global-bundle-field">
-                <span class="global-bundle-field-label">Content</span>
-                <textarea
-                    class="global-bundle-textarea"
-                    rows={8}
-                    value={model.draftSystemInstructionsAtom()}
-                    onInput={(e) => model.setDraftSystemInstructions(e.currentTarget.value)}
-                    onContextMenu={showTextInputContextMenu}
-                    placeholder="Markdown injected FIRST into every agent's startup instructions file, wrapped in explicit override wording."
-                    spellcheck={false}
-                />
-            </label>
-            <div class="global-bundle-editor-actions">
-                <button
-                    class="global-bundle-btn"
-                    disabled={model.savingAtom()}
-                    onClick={() => model.cancelEditSystem()}
-                >
-                    Cancel
-                </button>
-                <button
-                    class="global-bundle-btn global-bundle-btn-primary"
-                    disabled={model.savingAtom() || !model.draftSystemNameAtom().trim()}
-                    onClick={() => void model.saveSystemEdit()}
-                >
+                <button class="global-bundle-btn global-bundle-btn-primary" disabled={!canSave()} onClick={save}>
                     {model.savingAtom() ? "Saving…" : props.isNew ? "Add Memory" : "Save"}
                 </button>
             </div>
@@ -128,6 +95,15 @@ function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boole
 export const GlobalBundleManager = (): JSX.Element => {
     const model = new GlobalBundleViewModel();
     onCleanup(() => model.dispose());
+
+    // System rows first, then ordinary — NOT model.sectionsAtom() directly,
+    // which sorts by raw sort_order/name and isn't documented as
+    // system-first (only the backend's ORDER BY and the composed-file
+    // formatter guarantee that independently of this atom's own order —
+    // SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.2/§3.4). Building it
+    // explicitly from the two split atoms keeps on-screen order visibly
+    // matching actual injection order.
+    const memoryEntries = () => [...model.systemSectionsAtom(), ...model.ordinarySectionsAtom()];
 
     return (
         <div class="global-bundle">
@@ -184,140 +160,99 @@ export const GlobalBundleManager = (): JSX.Element => {
                     )}
                 </Show>
 
-                {/* System tier — pinned above ordinary sections, always
-                    injected first with override wording. No move up/down:
-                    position is fixed server-side regardless of what a
-                    reorder call sends. See
-                    docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */}
-                <For each={model.systemSectionsAtom()}>
-                    {(section) => (
-                        <div
-                            class="global-bundle-file global-bundle-file-system"
-                            classList={{ "is-editing": model.editingSystemIdAtom() === section.id }}
-                        >
-                            <Show
-                                when={model.editingSystemIdAtom() === section.id}
-                                fallback={
-                                    <>
-                                        <div class="global-bundle-file-header">
-                                            <span class="global-bundle-file-system-tag">Global Memory</span>
-                                            <span class="global-bundle-file-label">{section.name}</span>
-                                            <div class="global-bundle-file-actions">
-                                                <button
-                                                    class="global-bundle-btn"
-                                                    onClick={() => model.startEditSystem(section)}
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    class="global-bundle-btn global-bundle-btn-danger"
-                                                    title="Delete this Memory"
-                                                    onClick={() => void model.removeSystem(section.id)}
-                                                >
-                                                    Remove
-                                                </button>
+                {/* One list for every memory (system-tier + ordinary) — see
+                    this component's own top-of-file comment for why these
+                    used to be two lists and why that was the wrong place to
+                    carry the backend's write-path isolation. */}
+                <For each={memoryEntries()}>
+                    {(section) => {
+                        const isSystem = !!section.is_system;
+                        const isEditing = () =>
+                            isSystem ? model.editingSystemIdAtom() === section.id : model.editingIdAtom() === section.id;
+                        // Only meaningful for ordinary rows — system rows never
+                        // reorder (backend silently no-ops it, see move()'s own
+                        // doc comment in the model), so ↑/↓ isn't rendered for
+                        // them at all rather than rendered-but-inert.
+                        const ordIndex = () => model.ordinarySectionsAtom().findIndex((s) => s.id === section.id);
+                        return (
+                            <div class="global-bundle-file" classList={{ "is-editing": isEditing() }}>
+                                <Show
+                                    when={isEditing()}
+                                    fallback={
+                                        <>
+                                            <div class="global-bundle-file-header">
+                                                <span class="global-bundle-file-label">{section.name}</span>
+                                                <div class="global-bundle-file-actions">
+                                                    <Show when={!isSystem}>
+                                                        <button
+                                                            class="global-bundle-icon-btn"
+                                                            title="Move up"
+                                                            disabled={ordIndex() === 0}
+                                                            onClick={() => void model.move(section.id, -1)}
+                                                        >
+                                                            ↑
+                                                        </button>
+                                                        <button
+                                                            class="global-bundle-icon-btn"
+                                                            title="Move down"
+                                                            disabled={ordIndex() === model.ordinarySectionsAtom().length - 1}
+                                                            onClick={() => void model.move(section.id, 1)}
+                                                        >
+                                                            ↓
+                                                        </button>
+                                                    </Show>
+                                                    <button
+                                                        class="global-bundle-btn"
+                                                        onClick={() =>
+                                                            isSystem ? model.startEditSystem(section) : model.startEdit(section)
+                                                        }
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        class="global-bundle-btn global-bundle-btn-danger"
+                                                        title="Delete this Memory"
+                                                        onClick={() =>
+                                                            void (isSystem
+                                                                ? model.removeSystem(section.id)
+                                                                : model.remove(section.id))
+                                                        }
+                                                    >
+                                                        Remove
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                        <div class="global-bundle-file-content">
-                                            <Markdown
-                                                text={section.instructions || "(empty)"}
-                                                scrollable={true}
-                                                nativeScrollbar={true}
-                                                contentClass="global-bundle-file-markdown-content"
-                                            />
-                                        </div>
-                                    </>
-                                }
-                            >
-                                <SystemSectionEditor model={model} isNew={false} />
-                            </Show>
-                        </div>
-                    )}
+                                            <div class="global-bundle-file-content">
+                                                <Markdown
+                                                    text={section.instructions || "(empty)"}
+                                                    scrollable={true}
+                                                    nativeScrollbar={true}
+                                                    contentClass="global-bundle-file-markdown-content"
+                                                />
+                                            </div>
+                                        </>
+                                    }
+                                >
+                                    <MemoryEditor model={model} isNew={false} isSystem={isSystem} />
+                                </Show>
+                            </div>
+                        );
+                    }}
                 </For>
 
-                <Show when={model.editingSystemIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-bundle-file global-bundle-file-system is-editing">
-                        <SystemSectionEditor model={model} isNew={true} />
-                    </div>
-                </Show>
-
-                <Show when={model.systemSectionsAtom().length === 0 && model.editingSystemIdAtom() === null}>
-                    <button class="global-bundle-add-row" onClick={() => model.startNewSystem()}>
-                        + Add Memory
-                    </button>
-                </Show>
-
-                <For each={model.ordinarySectionsAtom()}>
-                    {(section, i) => (
-                        <div
-                            class="global-bundle-file"
-                            classList={{ "is-editing": model.editingIdAtom() === section.id }}
-                        >
-                            <Show
-                                when={model.editingIdAtom() === section.id}
-                                fallback={
-                                    <>
-                                        <div class="global-bundle-file-header">
-                                            <span class="global-bundle-file-label">{section.name}</span>
-                                            <div class="global-bundle-file-actions">
-                                                <button
-                                                    class="global-bundle-icon-btn"
-                                                    title="Move up"
-                                                    disabled={i() === 0}
-                                                    onClick={() => void model.move(section.id, -1)}
-                                                >
-                                                    ↑
-                                                </button>
-                                                <button
-                                                    class="global-bundle-icon-btn"
-                                                    title="Move down"
-                                                    disabled={i() === model.ordinarySectionsAtom().length - 1}
-                                                    onClick={() => void model.move(section.id, 1)}
-                                                >
-                                                    ↓
-                                                </button>
-                                                <button
-                                                    class="global-bundle-btn"
-                                                    onClick={() => model.startEdit(section)}
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    class="global-bundle-btn global-bundle-btn-danger"
-                                                    title="Remove from the global bundles (keeps the bundle)"
-                                                    onClick={() => void model.remove(section.id)}
-                                                >
-                                                    Remove
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div class="global-bundle-file-content">
-                                            <Markdown
-                                                text={section.instructions || "(empty)"}
-                                                scrollable={true}
-                                                nativeScrollbar={true}
-                                                contentClass="global-bundle-file-markdown-content"
-                                            />
-                                        </div>
-                                    </>
-                                }
-                            >
-                                <SectionEditor model={model} isNew={false} />
-                            </Show>
-                        </div>
-                    )}
-                </For>
-
-                {/* New-section draft renders at the END — saveEdit appends it
-                    to the order, so its draft position matches where it lands. */}
+                {/* New-memory draft renders at the END — saveEdit appends it
+                    to the order, so its draft position matches where it
+                    lands. Always ordinary: creating a NEW system-tier entry
+                    has no UI trigger anymore (see top-of-file comment) —
+                    existing ones stay fully editable/removable above. */}
                 <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
                     <div class="global-bundle-file is-editing">
-                        <SectionEditor model={model} isNew={true} />
+                        <MemoryEditor model={model} isNew={true} isSystem={false} />
                     </div>
                 </Show>
 
-                <Show when={model.ordinarySectionsAtom().length === 0 && model.editingIdAtom() === null}>
-                    <div class="global-bundle-empty">No global sections yet.</div>
+                <Show when={memoryEntries().length === 0 && model.editingIdAtom() === null}>
+                    <div class="global-bundle-empty">No memories yet.</div>
                 </Show>
             </div>
 
@@ -326,7 +261,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                 disabled={model.editingIdAtom() === NEW_SECTION_ID}
                 onClick={() => model.startNew()}
             >
-                + New section
+                + Add Memory
             </button>
 
             <div class="global-bundle-preview">

@@ -6,13 +6,17 @@
 // §4.2). Renders inside the bundle-manager pane, which provides the scroll
 // container.
 //
-// Restructured per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md:
-// the Claude Code reference file, system-tier entries, and ordinary sections
-// used to each have their own divergent chrome (badge+path+caption here,
-// name+description there, content hidden behind "Edit" everywhere). They now
-// share ONE `.global-bundle-file` shape — label row + always-visible markdown
-// preview — so scanning current Global Memory content doesn't require
-// opening every row's editor.
+// Restructured twice: first per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_
+// DECLUTTER_2026_09_15.md — the Claude Code reference file, system-tier
+// entries, and ordinary sections used to each have their own divergent
+// chrome (badge+path+caption here, name+description there, content hidden
+// behind "Edit" everywhere). They now share ONE `.global-bundle-file` shape
+// — label row + always-visible markdown preview. Then per docs/specs/
+// SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md — system-tier
+// and ordinary entries no longer get a distinct accent border/tag at all;
+// every entry renders identically regardless of `is_system` (a deliberate
+// choice, not an oversight — see that spec's open-question §2.2 if this
+// needs revisiting).
 
 .global-bundle {
     display: flex;
@@ -63,17 +67,6 @@
         border-color: var(--accent-color);
     }
 
-    // System tier — visually distinct so editing regular Global Memory never
-    // gets confused with the AgentMux-controlled, highest-priority tier.
-    &.global-bundle-file-system {
-        border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 6%, transparent);
-
-        &.is-editing {
-            box-shadow: 0 0 0 1px var(--accent-color);
-        }
-    }
-
     // The Claude Code reference entry — no actions, never editable here.
     &.global-bundle-file-readonly {
         background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
@@ -109,18 +102,6 @@ code.global-bundle-file-label {
     color: var(--secondary-text-color);
     white-space: normal;
     word-break: break-all;
-}
-
-// Inline text, not a filled badge — SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md
-// §3.5's distinctiveness goal is carried by the whole row's accent
-// border/background above instead of a dedicated badge block.
-.global-bundle-file-system-tag {
-    flex-shrink: 0;
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--accent-color);
 }
 
 .global-bundle-file-actions {
@@ -229,11 +210,12 @@ code.global-bundle-file-label {
 
 // ── Add row ──────────────────────────────────────────────────────────────────
 // Shrunk from a bordered "add bar" to a single small affordance —
-// SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md §3. Reused for both
-// "+ New section" and (when there are zero system entries) "+ Add Memory".
-// The "Promote existing bundle" dropdown that used to sit alongside these
-// (and the wrapping `.global-bundle-add-bar` flex row it needed) was removed
-// outright per direct request — not merely decluttered.
+// SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md §3. One "+ Add Memory"
+// button for the whole (now-unified) list — SPEC_GLOBAL_MEMORY_UNIFY_
+// SYSTEM_AND_ORDINARY_2026_09_15.md. The "Promote existing bundle" dropdown
+// that used to sit alongside this (and the wrapping `.global-bundle-add-bar`
+// flex row it needed) was removed outright per direct request — not merely
+// decluttered.
 
 .global-bundle-add-row {
     align-self: flex-start;
