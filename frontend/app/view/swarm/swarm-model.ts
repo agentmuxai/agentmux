@@ -1074,6 +1074,12 @@ export class SwarmViewModel implements ViewModel {
     private loadCronsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_CRONS_DEBOUNCE_MS = 150;
 
+    // Bounded self-healing safety net for trackedBlockIdsAtom — see the
+    // comment at this timer's setInterval call site (in the constructor)
+    // for why it exists alongside the five event-based refresh triggers.
+    private trackedBlocksPollTimer: ReturnType<typeof setInterval> | undefined;
+    private static readonly TRACKED_BLOCKS_POLL_MS = 12_000;
+
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
@@ -1243,6 +1249,34 @@ export class SwarmViewModel implements ViewModel {
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
+
+        // Authoritative signal, in addition to the four above: published
+        // directly from blockcontroller::register_controller/delete_controller
+        // — the exact functions that determine what agent.tracked-blocks
+        // returns — rather than from a structurally different, independently-
+        // timed mechanism standing in as a proxy for it. The four events
+        // above are process_tracker's 2s poll-and-diff loop and the separate
+        // `reactive` registration map; neither is guaranteed to fire in step
+        // with a controller actually (de)registering, which is how a
+        // restored agent's controller could register successfully server-side
+        // while this list stayed stale client-side indefinitely. See
+        // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
+        const unsubTrackedBlocksChanged = waveEventSubscribe({
+            eventType: "processbroker:tracked-blocks-changed",
+            handler: () => void this.loadTrackedBlocks(),
+        });
+        if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
+
+        // Bounded self-healing safety net: re-poll regardless of whether any
+        // of the five event-based triggers above actually fired. Deliberately
+        // redundant with them — its only job is to guarantee this list can't
+        // go stale forever from a gap in event wiring not yet discovered, the
+        // same class of bug this poll is itself a response to. Cheap: the RPC
+        // is a HashMap clone + Vec filter server-side, not a per-block probe.
+        this.trackedBlocksPollTimer = setInterval(
+            () => void this.loadTrackedBlocks(),
+            SwarmViewModel.TRACKED_BLOCKS_POLL_MS,
+        );
 
         // term:osc_title / term:ambient_summary meta changes — force re-read
         // of block meta. The block atom in WOS updates reactively, so the
@@ -1952,6 +1986,10 @@ export class SwarmViewModel implements ViewModel {
         if (this.loadCronsDebounceTimer !== undefined) {
             clearTimeout(this.loadCronsDebounceTimer);
             this.loadCronsDebounceTimer = undefined;
+        }
+        if (this.trackedBlocksPollTimer !== undefined) {
+            clearInterval(this.trackedBlocksPollTimer);
+            this.trackedBlocksPollTimer = undefined;
         }
         for (const detail of this.dispatchDetailCache.values()) detail.dispose();
         this.dispatchDetailCache.clear();

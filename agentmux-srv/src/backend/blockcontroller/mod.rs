@@ -296,6 +296,22 @@ pub fn register_controller(block_id: &str, controller: Arc<dyn Controller>) {
         let _ = old.stop(true, STATUS_DONE);
     }
     registry.insert(block_id.to_string(), controller);
+    drop(registry);
+    notify_tracked_blocks_changed();
+}
+
+/// Announce a `CONTROLLER_REGISTRY` membership change to the Process Broker,
+/// if one is running (never set in most unit tests). See
+/// `ProcessBroker::emit_tracked_blocks_changed`'s doc comment for why this
+/// exists: `agent.tracked-blocks` reads this registry directly, but nothing
+/// used to tell a subscriber when a write here changed what that read would
+/// return — Swarm's client-side list depended on two unrelated, independently-
+/// timed events instead, and went stale whenever neither happened to fire for
+/// a given block. See docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
+fn notify_tracked_blocks_changed() {
+    if let Some(broker) = crate::broker::process::global() {
+        broker.emit_tracked_blocks_changed();
+    }
 }
 
 /// Remove a controller from `CONTROLLER_REGISTRY` only — does NOT touch the
@@ -335,6 +351,7 @@ pub fn delete_controller(block_id: &str) {
     // already won't list it — see ProcessBroker::forget's doc comment).
     if let Some(broker) = crate::broker::process::global() {
         broker.forget(block_id);
+        broker.emit_tracked_blocks_changed();
     }
 }
 
