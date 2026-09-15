@@ -1079,6 +1079,459 @@ pub(crate) fn memory_write_impl(
     Ok(())
 }
 
+// ---- Global Memory (agent-facing) — SPEC_AGENT_FACING_GLOBAL_MEMORY_API_
+// 2026_09_15.md Phase 1. Unlike native memory above (per-agent, filesystem-
+// backed), Global Memory is a pure `db_bundles` row an agent can read/write
+// through here for the FIRST time — previously only reachable via the
+// authenticated WebSocket RPC channel the frontend uses
+// (`agent_handlers/bundle.rs`'s `upsertmemory`), which `agentmux-mcp`
+// cannot reach at all. Every function here calls the SAME
+// `Store::bundle_upsert`/`bundle_get`/`bundle_list_global` the human-facing
+// Armory editor already uses — no new storage-layer write path, no new way
+// to touch a row this app didn't already know how to touch.
+//
+// The one invariant every function below shares: NONE of them ever read or
+// set `is_system` from caller input, and none of them accept/return a
+// system-tier row. This is enforced twice, independently, on purpose:
+// `Store::bundle_upsert` itself already refuses to touch an existing
+// `is_system=1` row (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md), and
+// separately, the code below never even constructs a request/response that
+// could carry `is_system=true` in the first place. A future refactor would
+// have to break BOTH independently to let an agent reach the system tier
+// through this surface.
+
+/// Caller-supplied provenance for a `globalmemory.write` call — same shape
+/// as `MemoryWriteProvenance` above; kept as a distinct type since callers
+/// are conceptually different (an agent writing to a workspace-wide list
+/// every other agent inherits, not its own private memory) even though the
+/// wire shape is identical.
+pub(crate) struct GlobalMemoryWriteProvenance<'a> {
+    pub source: &'a str,
+    pub detail: &'a str,
+}
+
+/// Creates a new ordinary Global Memory entry, or updates an existing one
+/// by `id`. Backs the `GlobalMemoryWrite` MCP tool.
+pub(crate) fn global_memory_write_impl(
+    state: &AppState,
+    agent_id: &str,
+    id: Option<&str>,
+    name: &str,
+    content: &str,
+    provenance: Option<GlobalMemoryWriteProvenance<'_>>,
+) -> Result<serde_json::Value, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("globalmemory.write: name is required".to_string());
+    }
+    // Generous but bounded — Global Memory entries are meant to be readable
+    // instructions text, not arbitrary file storage (memory.write's own
+    // 10MB cap is for markdown notes files; this is an order of magnitude
+    // tighter since every agent's launch has to parse and inject this).
+    const MAX: usize = 1024 * 1024;
+    if content.len() > MAX {
+        return Err(format!("globalmemory.write: content too large ({} bytes, max {MAX})", content.len()));
+    }
+
+    let now = agentmux_common::time::now_ms();
+    let is_new = id.map(|v| v.is_empty()).unwrap_or(true);
+    let bundle = match id {
+        Some(existing_id) if !existing_id.is_empty() => {
+            let mut existing = state.id_store.bundle_get(existing_id)
+                .map_err(|e| format!("globalmemory.write: {e}"))?
+                .ok_or_else(|| format!("globalmemory.write: not found id={existing_id}"))?;
+            // Belt-and-suspenders with bundle_upsert's own guard (see this
+            // section's top-of-block comment) — refuse here too, before
+            // even attempting the write, so the error message is specific
+            // to this API rather than bundle_upsert's generic one.
+            if existing.is_system {
+                return Err(
+                    "globalmemory.write: cannot modify a system Global Memory entry through this API"
+                        .to_string(),
+                );
+            }
+            // reagent P0, PR #3237: `id` is caller-supplied and bundle ids
+            // for EVERY bundle in the system (not just global ones) are
+            // already enumerable by any agent via PresetList
+            // (bundle_list_impl, unfiltered). Without these two checks, an
+            // agent could target any other agent's private preset — or the
+            // seeded 'blank' singleton — by id, rename/replace its content,
+            // and force it into is_global=true, hijacking it into every
+            // agent's launch instructions workspace-wide. Mirrors
+            // upsertmemory's own already-fixed blank-singleton guard
+            // (agent_handlers/bundle.rs, reagent P1, 2026-05-08) and adds
+            // the is_global check that guard alone doesn't cover: this API
+            // may only ever EDIT an entry that was already a Global Memory
+            // entry BEFORE this call, never silently promote/adopt an
+            // unrelated bundle into one.
+            if existing.is_blank || existing.id == "blank" {
+                return Err("globalmemory.write: cannot mutate the blank Bundle singleton".to_string());
+            }
+            if !existing.is_global {
+                return Err(format!(
+                    "globalmemory.write: id={existing_id} is not a Global Memory entry — this API cannot adopt an unrelated bundle, only create a new entry (omit id) or edit an existing Global Memory one"
+                ));
+            }
+            existing.name = name.to_string();
+            existing.instructions = content.to_string();
+            existing.is_global = true;
+            existing.updated_at = now;
+            existing
+        }
+        _ => Bundle {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: content.to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            is_system: false,
+            created_at: now,
+            updated_at: now,
+        },
+    };
+
+    // `written_by` is the TRUSTED `agent_id` this function received
+    // (agentmux-mcp's own AGENTMUX_AGENT_ID, unforgeable from the agent's
+    // PTY — see this section's top-of-block comment) — never taken from
+    // caller-supplied `source`/`source_detail`, which stay free-form
+    // annotation. bundle_upsert_with_version records both, atomically with
+    // the bundle write itself (codex P2, PR #3237 — see that method's own
+    // doc comment for why two separate calls here would have been unsafe
+    // under concurrent writers).
+    let (source, detail) = match &provenance {
+        Some(p) => (p.source, p.detail),
+        None => ("agent_inferred", "{}"),
+    };
+    let source_detail = if detail.is_empty() { "{}" } else { detail };
+    state.id_store
+        .bundle_upsert_with_version(&bundle, agent_id, source, source_detail)
+        .map_err(|e| format!("globalmemory.write: {e}"))?;
+
+    // New entries sort LAST, matching the Armory UI's own "+ New section"
+    // behavior (global-bundle-model.ts's saveEdit) — without this, a fresh
+    // bundle_id defaults to sort_order=0 and could land ambiguously
+    // interleaved with any other 0-sort_order row instead of visibly
+    // appended at the end of the order the operator/agent expects.
+    if is_new {
+        let ordinary_ids: Vec<String> = state.id_store.bundle_list_global()
+            .map_err(|e| format!("globalmemory.write: {e}"))?
+            .into_iter()
+            .filter(|b| !b.is_system && b.id != bundle.id)
+            .map(|b| b.id)
+            .chain(std::iter::once(bundle.id.clone()))
+            .collect();
+        if let Err(e) = state.id_store.bundle_reorder(&ordinary_ids) {
+            tracing::warn!(agent_id, bundle_id = %bundle.id, error = %e, "globalmemory.write: append-to-order failed (non-fatal)");
+        }
+    }
+
+    state.broker.publish(crate::backend::wps::WaveEvent {
+        event: "memories:changed".to_string(),
+        scopes: vec![], sender: String::new(), persist: 0, data: None,
+    });
+    tracing::info!(agent_id, bundle_id = %bundle.id, name = %bundle.name, "globalmemory.write");
+    Ok(json!({ "id": bundle.id, "name": bundle.name }))
+}
+
+/// Ordinary (non-system) Global Memory entries only — id/name/updated_at,
+/// no content (mirrors `memory_list_impl`'s summary shape). The `is_system`
+/// filter is structural here, not just a response projection. Backs the
+/// `GlobalMemoryList` MCP tool.
+pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+    let entries: Vec<_> = state.id_store.bundle_list_global()
+        .map_err(|e| format!("globalmemory.list: {e}"))?
+        .into_iter()
+        .filter(|b| !b.is_system)
+        .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at }))
+        .collect();
+    Ok(json!({ "entries": entries }))
+}
+
+/// Full content of one ordinary Global Memory entry by id. Refuses a
+/// system-tier id, same reasoning as write. Backs the `GlobalMemoryRead`
+/// MCP tool.
+pub(crate) fn global_memory_read_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
+    let bundle = state.id_store.bundle_get(id)
+        .map_err(|e| format!("globalmemory.read: {e}"))?
+        .ok_or_else(|| format!("globalmemory.read: not found id={id}"))?;
+    if bundle.is_system {
+        return Err("globalmemory.read: cannot read a system Global Memory entry through this API".to_string());
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory.read: {id} is not a Global Memory entry"));
+    }
+    Ok(json!({ "id": bundle.id, "name": bundle.name, "content": bundle.instructions }))
+}
+
+/// Demotes a Global Memory entry (clears `is_global`) — matches the Armory
+/// UI's own "Remove" semantics: the bundle row itself survives (still
+/// available in the Bundles tab), only its Global Memory membership is
+/// cleared. Refuses a system-tier id, the blank singleton, or any id that
+/// wasn't ALREADY a Global Memory entry before this call — same ownership
+/// guards as `global_memory_write_impl`, for the identical reason: bundle
+/// ids are enumerable via `PresetList` regardless of `is_global`. Backs the
+/// `GlobalMemoryRemove` MCP tool.
+pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
+    let mut bundle = state.id_store.bundle_get(id)
+        .map_err(|e| format!("globalmemory.remove: {e}"))?
+        .ok_or_else(|| format!("globalmemory.remove: not found id={id}"))?;
+    if bundle.is_system {
+        return Err("globalmemory.remove: cannot remove a system Global Memory entry through this API".to_string());
+    }
+    // reagent P1, PR #3237 (re-review): same missing-ownership-check bug
+    // already fixed for write above, left unfixed here. Bundle ids for
+    // every bundle are enumerable via PresetList (unfiltered), so without
+    // this an agent could call GlobalMemoryRemove with another agent's
+    // private preset id (or 'blank') — is_global is already false so the
+    // flag write is a no-op, but bundle_upsert still rewrites the row and
+    // bumps updated_at on a bundle this API has no business touching at
+    // all. This API may only ever act on an entry that was already Global
+    // Memory before the call.
+    if bundle.is_blank || bundle.id == "blank" {
+        return Err("globalmemory.remove: cannot mutate the blank Bundle singleton".to_string());
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory.remove: id={id} is not a Global Memory entry"));
+    }
+    bundle.is_global = false;
+    bundle.updated_at = agentmux_common::time::now_ms();
+    state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
+    state.broker.publish(crate::backend::wps::WaveEvent {
+        event: "memories:changed".to_string(),
+        scopes: vec![], sender: String::new(), persist: 0, data: None,
+    });
+    Ok(json!({ "ok": true }))
+}
+
+#[cfg(test)]
+mod global_memory_impl_tests {
+    use super::*;
+
+    // Name derived from `id`, not a fixed literal — db_bundles.name is
+    // globally UNIQUE (migrations.rs), so two fixtures in the same test
+    // (e.g. an ordinary entry alongside a system one) would otherwise
+    // collide on insert.
+    fn ordinary_bundle(id: &str, is_global: bool) -> Bundle {
+        Bundle {
+            id: id.to_string(),
+            name: format!("Existing ({id})"),
+            description: String::new(),
+            is_blank: false,
+            is_global,
+            provider: String::new(),
+            model: String::new(),
+            instructions: "original content".to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            is_system: false,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn write_new_entry_creates_an_ordinary_global_bundle() {
+        let state = crate::server::tests::test_state();
+        let result = global_memory_write_impl(&state, "agent-1", None, "New Entry", "hello", None).unwrap();
+        let id = result.get("id").and_then(|v| v.as_str()).unwrap();
+        let saved = state.id_store.bundle_get(id).unwrap().unwrap();
+        assert!(saved.is_global);
+        assert!(!saved.is_system);
+        assert_eq!(saved.name, "New Entry");
+        assert_eq!(saved.instructions, "hello");
+    }
+
+    /// reagent P0, PR #3237: `{id: "blank", ...}` must not be able to
+    /// rename/re-describe the seeded blank Bundle singleton — the exact bug
+    /// class already fixed once for `upsertmemory`
+    /// (agent_handlers/bundle.rs, 2026-05-08).
+    #[tokio::test]
+    async fn write_refuses_to_hijack_the_blank_singleton() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("blank", false)).unwrap();
+
+        let err = global_memory_write_impl(&state, "agent-1", Some("blank"), "evil", "evil content", None)
+            .unwrap_err();
+        assert!(err.contains("blank"), "error should mention the blank singleton: {err}");
+
+        let unchanged = state.id_store.bundle_get("blank").unwrap().unwrap();
+        assert_eq!(unchanged.name, "Existing (blank)");
+        assert_eq!(unchanged.instructions, "original content");
+    }
+
+    /// reagent P0, PR #3237: bundle ids are enumerable by any agent via
+    /// PresetList (unfiltered — every bundle, not just global ones). Without
+    /// this guard, an agent could target another agent's private,
+    /// non-global preset by id and hijack it into Global Memory, renaming
+    /// and replacing its content in the process.
+    #[tokio::test]
+    async fn write_refuses_to_hijack_an_existing_non_global_bundle() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("someone-elses-preset", false)).unwrap();
+
+        let err = global_memory_write_impl(
+            &state,
+            "agent-1",
+            Some("someone-elses-preset"),
+            "hijacked",
+            "hijacked content",
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("not a Global Memory entry"), "unexpected error: {err}");
+
+        let unchanged = state.id_store.bundle_get("someone-elses-preset").unwrap().unwrap();
+        assert!(!unchanged.is_global, "must not have been promoted to global");
+        assert_eq!(unchanged.name, "Existing (someone-elses-preset)");
+        assert_eq!(unchanged.instructions, "original content");
+    }
+
+    #[tokio::test]
+    async fn write_can_edit_an_existing_global_entry() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("already-global", true)).unwrap();
+
+        global_memory_write_impl(&state, "agent-1", Some("already-global"), "Renamed", "new content", None)
+            .unwrap();
+
+        let updated = state.id_store.bundle_get("already-global").unwrap().unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.instructions, "new content");
+        assert!(updated.is_global);
+    }
+
+    #[tokio::test]
+    async fn write_refuses_to_touch_a_system_entry() {
+        let state = crate::server::tests::test_state();
+        let mut sys = ordinary_bundle("sys-1", true);
+        sys.is_system = true;
+        state.id_store.bundle_upsert_system(&sys).unwrap();
+
+        let err = global_memory_write_impl(&state, "agent-1", Some("sys-1"), "hijacked", "x", None).unwrap_err();
+        assert!(err.contains("system"), "unexpected error: {err}");
+    }
+
+    /// codex P2, PR #3237: `written_by` must be the TRUSTED `agent_id` this
+    /// function received, never whatever the caller's own `source` claims
+    /// (an agent could otherwise falsely label its own write `source:
+    /// "human"`).
+    #[tokio::test]
+    async fn write_records_a_version_with_the_trusted_agent_id_as_written_by() {
+        let state = crate::server::tests::test_state();
+        let result = global_memory_write_impl(
+            &state,
+            "the-real-writer",
+            None,
+            "Versioned",
+            "v1",
+            Some(GlobalMemoryWriteProvenance { source: "human", detail: "{}" }),
+        )
+        .unwrap();
+        let id = result.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        let history = state.id_store.bundle_version_list(&id).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].source, "human", "caller-supplied annotation, kept as-is");
+        assert_eq!(history[0].written_by, "the-real-writer", "trusted identity, not the caller's own claim");
+    }
+
+    /// codex P2, PR #3237: editing an existing Global Memory entry must
+    /// also produce exactly one new version, chained onto the entry's
+    /// creation version.
+    #[tokio::test]
+    async fn editing_an_existing_entry_chains_a_second_version() {
+        let state = crate::server::tests::test_state();
+        let created = global_memory_write_impl(&state, "agent-1", None, "V1", "content-1", None).unwrap();
+        let id = created.get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        global_memory_write_impl(&state, "agent-2", Some(&id), "V1", "content-2", None).unwrap();
+
+        let history = state.id_store.bundle_version_list(&id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].written_by, "agent-2", "newest first");
+        assert_eq!(history[1].written_by, "agent-1");
+        assert_eq!(history[0].parent_version_id.as_deref(), Some(history[1].id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn list_excludes_system_entries() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("ordinary-1", true)).unwrap();
+        let mut sys = ordinary_bundle("sys-2", true);
+        sys.is_system = true;
+        state.id_store.bundle_upsert_system(&sys).unwrap();
+
+        let result = global_memory_list_impl(&state).unwrap();
+        let entries = result.get("entries").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].get("id").and_then(|v| v.as_str()), Some("ordinary-1"));
+    }
+
+    #[tokio::test]
+    async fn read_refuses_a_system_entry() {
+        let state = crate::server::tests::test_state();
+        let mut sys = ordinary_bundle("sys-3", true);
+        sys.is_system = true;
+        state.id_store.bundle_upsert_system(&sys).unwrap();
+
+        let err = global_memory_read_impl(&state, "sys-3").unwrap_err();
+        assert!(err.contains("system"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn remove_demotes_but_does_not_delete() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("to-remove", true)).unwrap();
+
+        global_memory_remove_impl(&state, "to-remove").unwrap();
+
+        let after = state.id_store.bundle_get("to-remove").unwrap().unwrap();
+        assert!(!after.is_global);
+    }
+
+    /// reagent P1, PR #3237 (re-review): remove had the SAME missing-
+    /// ownership-check bug already fixed for write, left unfixed here.
+    #[tokio::test]
+    async fn remove_refuses_to_hijack_the_blank_singleton() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("blank", false)).unwrap();
+
+        let err = global_memory_remove_impl(&state, "blank").unwrap_err();
+        assert!(err.contains("blank"), "error should mention the blank singleton: {err}");
+
+        let unchanged = state.id_store.bundle_get("blank").unwrap().unwrap();
+        assert_eq!(unchanged.updated_at, 0, "must not have been touched at all");
+    }
+
+    /// reagent P1, PR #3237 (re-review): an agent could call
+    /// GlobalMemoryRemove with another agent's private preset id
+    /// (discovered via PresetList) — is_global was already false so the
+    /// flag write was a no-op, but bundle_upsert still rewrote the row and
+    /// bumped updated_at on a bundle this API has no business touching.
+    #[tokio::test]
+    async fn remove_refuses_to_touch_a_non_global_bundle() {
+        let state = crate::server::tests::test_state();
+        state.id_store.bundle_upsert(&ordinary_bundle("someone-elses-preset", false)).unwrap();
+
+        let err = global_memory_remove_impl(&state, "someone-elses-preset").unwrap_err();
+        assert!(err.contains("not a Global Memory entry"), "unexpected error: {err}");
+
+        let unchanged = state.id_store.bundle_get("someone-elses-preset").unwrap().unwrap();
+        assert_eq!(unchanged.updated_at, 0, "must not have been touched at all");
+    }
+}
+
 pub(crate) fn memory_history_impl(
     state: &AppState,
     agent_id: &str,
