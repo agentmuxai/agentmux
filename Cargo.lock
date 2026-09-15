@@ -47,7 +47,8 @@ dependencies = [
  "agentmux-common",
  "ash",
  "axum 0.8.9",
- "cef",
+ "cef 148.3.0+148.0.9",
+ "cef 152.1.0+152.0.6",
  "chrono",
  "core-foundation",
  "core-graphics",
@@ -964,7 +965,27 @@ checksum = "a920bb7b8ff94c3abe487df2a7234d8fb8226369d97296a12ac863a15c168d59"
 dependencies = [
  "anyhow",
  "cargo_metadata",
- "cef-dll-sys",
+ "cef-dll-sys 148.3.0+148.0.9",
+ "clap",
+ "libloading 0.9.0",
+ "objc2",
+ "plist",
+ "semver",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "cef"
+version = "152.1.0+152.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81207e518922dccc7ebc0c4480d0f2a4f23d58e0e682504712e2d9498bbb6212"
+dependencies = [
+ "anyhow",
+ "cargo_metadata",
+ "cef-dll-sys 152.1.0+152.0.6",
  "clap",
  "libloading 0.9.0",
  "objc2",
@@ -979,11 +1000,23 @@ dependencies = [
 [[package]]
 name = "cef-dll-sys"
 version = "148.3.0+148.0.9"
-source = "git+https://github.com/AgentU-asaf/cef-rs?rev=515b3ac53c8b3903aeac18135473858a4d3879d2#515b3ac53c8b3903aeac18135473858a4d3879d2"
+source = "git+https://github.com/GenericAgentX-asaf/cef-rs?rev=d0c91e0e4cae2be495d7729a604bca06d4038f62#d0c91e0e4cae2be495d7729a604bca06d4038f62"
 dependencies = [
  "anyhow",
  "cmake",
- "download-cef",
+ "download-cef 2.3.2 (git+https://github.com/GenericAgentX-asaf/cef-rs?rev=d0c91e0e4cae2be495d7729a604bca06d4038f62)",
+ "serde_json",
+]
+
+[[package]]
+name = "cef-dll-sys"
+version = "152.1.0+152.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9473ca242cc8690175838c7c15ce764f74daa96cc294430167a032f463992c8"
+dependencies = [
+ "anyhow",
+ "cmake",
+ "download-cef 2.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json",
 ]
 
@@ -1511,7 +1544,27 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 [[package]]
 name = "download-cef"
 version = "2.3.2"
-source = "git+https://github.com/AgentU-asaf/cef-rs?rev=515b3ac53c8b3903aeac18135473858a4d3879d2#515b3ac53c8b3903aeac18135473858a4d3879d2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c169adf067a787e1f1c58ed62906a557de85388bee4b54fb878b722ff606b113"
+dependencies = [
+ "bzip2",
+ "clap",
+ "fs-err",
+ "indicatif",
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha1_smol",
+ "tar",
+ "thiserror 2.0.18",
+ "ureq",
+]
+
+[[package]]
+name = "download-cef"
+version = "2.3.2"
+source = "git+https://github.com/GenericAgentX-asaf/cef-rs?rev=d0c91e0e4cae2be495d7729a604bca06d4038f62#d0c91e0e4cae2be495d7729a604bca06d4038f62"
 dependencies = [
  "bzip2",
  "clap",
