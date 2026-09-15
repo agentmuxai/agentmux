@@ -43,10 +43,15 @@ bash "$REPO_ROOT/scripts/stage-linux-runtime.sh" "$STAGEDIR/AgentMux"
 
 # --- 2. Top-level launch script — no AppImage runtime, no install step,
 #        no wrapper indirection through /usr/bin like the .deb's. Just exec
-#        the launcher relative to wherever this got extracted. ---
+#        the launcher relative to wherever this got extracted.
+#        LD_LIBRARY_PATH: agentmux-cef is built without RPATH (same as the
+#        AppImage's — see scripts/linux-apprun.sh's identical comment), so
+#        without this the launcher's exec fails to find libcef.so.
+#        Codex P1, PR #3236. ---
 cat > "$STAGEDIR/AgentMux/agentmux.sh" <<'LAUNCH'
 #!/usr/bin/env bash
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export LD_LIBRARY_PATH="$DIR/usr/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$DIR/usr/bin/agentmux-launcher" "$@"
 LAUNCH
 chmod +x "$STAGEDIR/AgentMux/agentmux.sh"

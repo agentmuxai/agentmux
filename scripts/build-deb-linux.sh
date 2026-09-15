@@ -69,13 +69,31 @@ bash "$REPO_ROOT/scripts/stage-linux-runtime.sh" "$PKGROOT/opt/agentmux"
 mv "$PKGROOT/opt/agentmux/usr"/* "$PKGROOT/opt/agentmux/"
 rmdir "$PKGROOT/opt/agentmux/usr"
 
+# --- 1b. AppArmor userns-fix helper (Codex P1, PR #3236) —
+#         linux_sandbox::resolve_helper_script_path() prefers $APPDIR (set
+#         by the AppImage's AppRun, never set here) and otherwise falls
+#         back to a path relative to agentmux-cef's own binary directory —
+#         i.e. exactly /opt/agentmux/bin/ once the flatten above runs, so
+#         placing the script there (not the AppImage's AppDir-root
+#         convention) is what makes that fallback actually resolve.
+#         build_apparmor_profile() now includes a stanza for
+#         /opt/agentmux/bin/agentmux-cef (agentmux-cef/src/linux_sandbox.rs)
+#         so "Fix it now" actually grants userns at this install's real path
+#         instead of silently succeeding without doing so. ---
+cp scripts/install-userns-apparmor-fix.sh "$PKGROOT/opt/agentmux/bin/install-userns-apparmor-fix.sh"
+chmod +x "$PKGROOT/opt/agentmux/bin/install-userns-apparmor-fix.sh"
+
 # --- 2. /usr/bin wrapper — the actual `agentmux` command on PATH after
-#        install. Thin exec into the launcher; no AppImage-style env setup
-#        needed since this is a real filesystem install, not a mounted
-#        squashfs. ---
+#        install. No AppImage runtime/extract-once-cache needed since this
+#        is a real filesystem install, but LD_LIBRARY_PATH still is:
+#        agentmux-cef is built without RPATH (same as the AppImage's
+#        agentmux-cef — see scripts/linux-apprun.sh's identical comment),
+#        so without this the launcher's exec fails to find libcef.so.
+#        Codex P1, PR #3236. ---
 mkdir -p "$PKGROOT/usr/bin"
 cat > "$PKGROOT/usr/bin/agentmux" <<'WRAP'
 #!/usr/bin/env bash
+export LD_LIBRARY_PATH="/opt/agentmux/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec /opt/agentmux/bin/agentmux-launcher "$@"
 WRAP
 chmod +x "$PKGROOT/usr/bin/agentmux"
