@@ -503,12 +503,18 @@ impl CodexAppServerSession {
         // (e.g. the first thread/started) but wrong here — a request
         // claiming a threadId/turnId while no thread/turn is actually
         // active must be rejected, not queued as if it were in scope
-        // (ReAgent P1, PR #3212 3rd review).
-        if let Some(thread) = &thread_id {
-            ensure_active_thread_scope(&state, thread)?;
-        }
-        if let (Some(thread), Some(turn)) = (&thread_id, &turn_id) {
-            ensure_active_scopes(&state, thread, turn)?;
+        // (ReAgent P1, PR #3212 3rd review). Matched on both fields
+        // together, not two independent `if let Some`s: a request with
+        // turnId but no threadId is a real, distinct case (McpElicitation
+        // may carry either field alone) and must still validate the turn
+        // it claims — two independent checks silently skip it whenever
+        // thread_id is None, whatever turn_id says (ReAgent P1, PR #3212
+        // 4th review).
+        match (&thread_id, &turn_id) {
+            (Some(thread), Some(turn)) => ensure_active_scopes(&state, thread, turn)?,
+            (Some(thread), None) => ensure_active_thread_scope(&state, thread)?,
+            (None, Some(turn)) => ensure_active_turn_scope(&state, turn)?,
+            (None, None) => {}
         }
         let pending = PendingServerRequest {
             id: id.clone(),
@@ -555,13 +561,20 @@ impl CodexAppServerSession {
             // make a now-invalidated approval answerable again in the new
             // session/turn context (ReAgent P1, PR #3212 3rd review).
             let mut state = self.state.lock().unwrap();
+            // Matched on both fields together, not `(None, _) => true`: a
+            // pending entry with turn_id but no thread_id is still
+            // turn-scoped and must not be resurrected once that turn has
+            // ended, whatever thread_id says (ReAgent P1, PR #3212 4th
+            // review — the same asymmetry as accept_server_request's
+            // check, mirrored here).
             let still_current = match (&pending.thread_id, &pending.turn_id) {
                 (Some(thread), Some(turn)) => {
                     state.thread_id.as_deref() == Some(thread.as_str())
                         && state.turn_id.as_deref() == Some(turn.as_str())
                 }
                 (Some(thread), None) => state.thread_id.as_deref() == Some(thread.as_str()),
-                (None, _) => true,
+                (None, Some(turn)) => state.turn_id.as_deref() == Some(turn.as_str()),
+                (None, None) => true,
             };
             if still_current {
                 state.pending_requests.insert(id.clone(), pending);
@@ -872,11 +885,22 @@ fn ensure_active_scopes(
     turn_id: &str,
 ) -> Result<(), CodexAppServerProtocolError> {
     ensure_active_thread_scope(state, thread_id)?;
+    ensure_active_turn_scope(state, turn_id)
+}
+
+/// See ensure_active_thread_scope — fails closed when no turn is active.
+/// Split out from ensure_active_scopes so a turn can be validated on its
+/// own when a request carries a turnId without a threadId (ReAgent P1,
+/// PR #3212 4th review).
+fn ensure_active_turn_scope(
+    state: &SessionState,
+    actual: &str,
+) -> Result<(), CodexAppServerProtocolError> {
     match &state.turn_id {
-        Some(expected) if expected == turn_id => Ok(()),
+        Some(expected) if expected == actual => Ok(()),
         Some(expected) => Err(CodexAppServerProtocolError::TurnScopeMismatch {
             expected: expected.clone(),
-            actual: turn_id.to_string(),
+            actual: actual.to_string(),
         }),
         None => Err(CodexAppServerProtocolError::TurnNotActive),
     }
@@ -1791,5 +1815,83 @@ mod tests {
                 MAX_PENDING_SERVER_REQUESTS
             ))
         ));
+    }
+
+    /// ReAgent P1, PR #3212 (4th review): a request carrying turnId but no
+    /// threadId (McpElicitation may supply either field alone) fell through
+    /// both `if let Some(thread) = &thread_id` and the `(Some, Some)` tuple
+    /// match untouched, so a claimed-but-stale turnId was never validated
+    /// and the request was queued unconditionally. Same asymmetry mirrored
+    /// in respond_server_request's reinsert-on-failure check.
+    #[tokio::test]
+    async fn a_turn_only_request_is_still_scoped_to_the_active_turn() {
+        let (session, _reader, _writer) = session();
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("turn-only-no-turn".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-1"}),
+            }),
+            Err(CodexAppServerProtocolError::TurnNotActive)
+        ));
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.turn_id = Some("turn-1".to_string());
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("turn-only-stale".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-stale"}),
+            }),
+            Err(CodexAppServerProtocolError::TurnScopeMismatch { .. })
+        ));
+        assert!(session.pending_server_requests().is_empty());
+
+        let pending = session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("turn-only-current".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-1"}),
+            })
+            .unwrap();
+        assert_eq!(pending.turn_id.as_deref(), Some("turn-1"));
+    }
+
+    /// See a_turn_only_request_is_still_scoped_to_the_active_turn -- the
+    /// same asymmetry existed on the reinsert side: a pending entry with
+    /// turn_id but no thread_id was unconditionally resurrected on a
+    /// transport-write failure (`(None, _) => true`) regardless of
+    /// whether that turn was still active.
+    #[tokio::test]
+    async fn a_failed_turn_only_respond_is_not_resurrected_after_its_turn_ends() {
+        let (session, server_reader, server_writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("turn-only".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-1"}),
+            })
+            .unwrap();
+
+        drop(server_reader);
+        drop(server_writer);
+        session.state.lock().unwrap().pending_requests.clear();
+        session.state.lock().unwrap().turn_id = None;
+
+        let result = session
+            .respond_server_request(&id, Ok(json!({"approved": true})), Duration::from_secs(1))
+            .await;
+        assert!(result.is_err(), "the write should fail once the transport is closed");
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "a stale turn-only approval must not be resurrected once its turn has ended"
+        );
     }
 }
