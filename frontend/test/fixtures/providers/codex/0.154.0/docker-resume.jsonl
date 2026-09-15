@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000014"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc \"printf 'docker-resume-secret-7419\\\\n' > fixture-docker-7419.txt\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/bash -lc \"printf 'docker-resume-secret-7419\\\\n' > fixture-docker-7419.txt\"","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"first-docker-turn-done"}}
+{"type":"turn.completed","usage":{"input_tokens":26626,"cached_input_tokens":22272,"cache_write_input_tokens":0,"output_tokens":67,"reasoning_output_tokens":0}}
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000014"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"fixture-docker-7419.txt"}}
+{"type":"turn.completed","usage":{"input_tokens":40128,"cached_input_tokens":34944,"cache_write_input_tokens":0,"output_tokens":78,"reasoning_output_tokens":0}}

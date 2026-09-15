@@ -6,6 +6,11 @@ import commandFixture from "../../../../test/fixtures/providers/codex/0.116.0/co
 import failureFixture from "../../../../test/fixtures/providers/codex/0.116.0/failure.jsonl?raw";
 import fileChangeFixture from "../../../../test/fixtures/providers/codex/0.116.0/file-change.jsonl?raw";
 import normalFixture from "../../../../test/fixtures/providers/codex/0.116.0/normal.jsonl?raw";
+import candidateCommandFixture from "../../../../test/fixtures/providers/codex/0.154.0/command.jsonl?raw";
+import candidateDockerResumeFixture from "../../../../test/fixtures/providers/codex/0.154.0/docker-resume.jsonl?raw";
+import candidateFileChangeFixture from "../../../../test/fixtures/providers/codex/0.154.0/file-change.jsonl?raw";
+import candidateNormalFixture from "../../../../test/fixtures/providers/codex/0.154.0/normal.jsonl?raw";
+import candidateResumeFixture from "../../../../test/fixtures/providers/codex/0.154.0/resume.jsonl?raw";
 import type { StreamEvent } from "../types";
 import { CodexTranslator } from "./codex-translator";
 
@@ -17,12 +22,54 @@ function translateFixture(raw: string): StreamEvent[] {
         .flatMap((line) => translator.translate(JSON.parse(line)));
 }
 
+function translateCandidateFixture(raw: string): StreamEvent[] {
+    const translator = new CodexTranslator();
+    const events = raw
+        .trim()
+        .split(/\r?\n/)
+        .flatMap((line) => translator.translate(JSON.parse(line)));
+    expect(translator.diagnostics()).toEqual({ unknownEventTypes: {}, unknownItemTypes: {} });
+    return events;
+}
+
 describe("CodexTranslator", () => {
     it("translates the pinned normal-turn fixture", () => {
         expect(translateFixture(normalFixture)).toEqual([
             { type: "text", content: "fixture-ok" },
             { type: "session_end", stats: { input_tokens: 11478, output_tokens: 26 } },
         ]);
+    });
+
+    it("replays the 0.154.0 host smoke fixtures without unknown protocol types", () => {
+        expect(translateCandidateFixture(candidateNormalFixture)).toEqual([
+            { type: "text", content: "fixture-ok" },
+            { type: "session_end", stats: { input_tokens: 14010, output_tokens: 6 } },
+        ]);
+
+        expect(translateCandidateFixture(candidateCommandFixture).map((event) => event.type)).toEqual([
+            "tool_call",
+            "tool_chunk",
+            "tool_result",
+            "text",
+            "session_end",
+        ]);
+
+        expect(translateCandidateFixture(candidateFileChangeFixture).map((event) => event.type)).toEqual([
+            "text",
+            "tool_call",
+            "tool_result",
+            "text",
+            "session_end",
+        ]);
+    });
+
+    it("replays 0.154.0 host and AgentMux-image two-turn resume captures", () => {
+        for (const fixture of [candidateResumeFixture, candidateDockerResumeFixture]) {
+            const events = translateCandidateFixture(fixture);
+            expect(events.filter((event) => event.type === "session_end")).toHaveLength(2);
+            expect(events.at(-2)?.type).toBe("text");
+            expect(events.at(-1)?.type).toBe("session_end");
+        }
     });
 
     it("opens, streams, and completes command_execution snapshots", () => {
@@ -179,6 +226,12 @@ describe("CodexTranslator", () => {
                 item: { id: "future", type: "future_item", value: 1 },
             })
         ).toEqual([]);
+        expect(translator.diagnostics()).toEqual({
+            unknownEventTypes: { "future.event": 1 },
+            unknownItemTypes: { future_item: 1 },
+        });
+        translator.reset();
+        expect(translator.diagnostics()).toEqual({ unknownEventTypes: {}, unknownItemTypes: {} });
     });
 
     it("keeps legacy function_call correlation compatible", () => {
