@@ -221,20 +221,66 @@ impl ShellController {
         obj::meta_get_bool(meta, META_KEY_CMD_CLEAR_ON_START, false)
     }
 
-    /// Check block meta for close-on-exit (used in full lifecycle integration).
-    #[allow(dead_code)]
+    /// Check block meta for close-on-exit, as literally set — no default
+    /// inference. Use [`effective_close_on_exit`](Self::effective_close_on_exit)
+    /// at call sites that need the controller-type-aware default; this raw
+    /// getter exists so that default logic has a single, testable "was it
+    /// explicitly set" primitive to build on.
     pub(super) fn should_close_on_exit(meta: &MetaMapType) -> bool {
         obj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT, false)
     }
 
-    /// Check block meta for force close-on-exit (used in full lifecycle integration).
+    /// Whether this block should close its pane when the underlying process
+    /// exits — [`should_close_on_exit`](Self::should_close_on_exit) layered
+    /// with a controller-type-aware default for when `cmd:closeonexit`
+    /// isn't set at all. An explicit value in meta always wins either way;
+    /// this only decides the unset case.
+    ///
+    /// Defaults to `true` for `BLOCK_CONTROLLER_SHELL` (the interactive PTY
+    /// both the `Terminal` widget and an agent's composer-drawer shell
+    /// use) — matches the ordinary expectation that typing `exit` closes
+    /// the pane, the default behavior of most terminal apps. Defaults to
+    /// `false` for `BLOCK_CONTROLLER_CMD` (one-shot, non-interactive
+    /// command execution, e.g. a build command) — that pane exists
+    /// specifically to show its output/exit code after the command
+    /// finishes, and auto-closing it by default would hide exactly the
+    /// information it's for. See
+    /// docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10.
+    pub(super) fn effective_close_on_exit(meta: &MetaMapType, controller_type: &str) -> bool {
+        if meta.contains_key(META_KEY_CMD_CLOSE_ON_EXIT) {
+            return Self::should_close_on_exit(meta);
+        }
+        controller_type == super::super::BLOCK_CONTROLLER_SHELL
+    }
+
+    /// Check block meta for force close-on-exit. **Not currently read by
+    /// any call site** — kept as a meta getter (parsed, tested, and
+    /// available for a future distinction) rather than deleted outright,
+    /// because two attempts at giving it a real meaning during this PR
+    /// both turned out unworkable, not because the getter itself is wrong:
+    ///
+    /// - Exit-code-based ("close even on a non-zero exit"): `wait()`'s
+    ///   exit-code capture is itself lossy — portable-pty's `ExitStatus`
+    ///   doesn't expose a raw code on all platforms, so success/failure is
+    ///   all that's reliably known (see the wait/cleanup task's own
+    ///   comment in `lifecycle.rs`) — not enough to build a principled
+    ///   "force" distinction on.
+    /// - Flusher-drain-timeout-based ("close even if a background
+    ///   descendant might still be producing output"): tried and reverted
+    ///   in this same PR after live-testing on Windows showed
+    ///   `FLUSHER_DRAIN_TIMEOUT` (10s) gets hit on essentially every
+    ///   ordinary `cmd.exe` exit — ConPTY's own console-host process
+    ///   routinely outlives the direct child by design — which made
+    ///   gating close-on-exit on it fire almost never, defeating the
+    ///   whole feature on the one platform this was tested on. See
+    ///   `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §10.
     #[allow(dead_code)]
     pub(super) fn should_close_on_exit_force(meta: &MetaMapType) -> bool {
         obj::meta_get_bool(meta, META_KEY_CMD_CLOSE_ON_EXIT_FORCE, false)
     }
 
-    /// Get the close-on-exit delay in ms (defaults to 2000, used in full lifecycle integration).
-    #[allow(dead_code)]
+    /// Get the close-on-exit delay in ms (defaults to 2000) — how long to
+    /// leave the pane showing its final output before actually closing it.
     pub(super) fn close_on_exit_delay_ms(meta: &MetaMapType) -> u64 {
         match meta.get(META_KEY_CMD_CLOSE_ON_EXIT_DELAY) {
             Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(2000),
