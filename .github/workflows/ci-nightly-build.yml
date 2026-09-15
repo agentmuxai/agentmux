@@ -56,7 +56,7 @@ jobs:
     # GitHub's 360-minute default) was fixed on ci-pr.yml but explicitly
     # flagged there as "not yet addressed" for this workflow. This full
     # cross-platform build+test (CEF included) legitimately needs more room
-    # than the PR lane's 15 min — 60 min is generous headroom over a
+    # than the PR lane's 20 min (ci-pr.yml) — 60 min is generous headroom over a
     # from-scratch CEF build+test on any of the three platforms while still
     # bounding a hang to a fraction of the 360-minute default.
     timeout-minutes: 60
