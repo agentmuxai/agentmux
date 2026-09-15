@@ -762,6 +762,62 @@ pub(crate) const MEMORY_REVERT_TOOL: &str = r#"{
   }
 }"#;
 
+pub(crate) const GLOBAL_MEMORY_LIST_TOOL: &str = r#"{
+  "name": "GlobalMemoryList",
+  "description": "List Global Memory entries (summary only: id, name, last-updated time). Global Memory is inherited by EVERY agent in this workspace at launch, not just you — unlike MemoryList, which only shows your own private native memory. Use this to discover entries before fetching one in full with GlobalMemoryRead, or before updating one with GlobalMemoryWrite. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+pub(crate) const GLOBAL_MEMORY_READ_TOOL: &str = r#"{
+  "name": "GlobalMemoryRead",
+  "description": "Read the full content of one Global Memory entry by id. Get valid ids from GlobalMemoryList.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The entry id (from GlobalMemoryList)" }
+    },
+    "required": ["id"]
+  }
+}"#;
+
+pub(crate) const GLOBAL_MEMORY_WRITE_TOOL: &str = r#"{
+  "name": "GlobalMemoryWrite",
+  "description": "Create a new Global Memory entry, or update an existing one by id. Global Memory is inherited by EVERY agent in this workspace at launch — this is workspace-wide shared state, not your own private memory (use MemoryWrite for that). Every write is retained as a version internally, though history/diff/revert for Global Memory is not yet exposed as a tool. Cannot create or touch AgentMux's own system-tier (highest-priority, override-wording) entries — those are managed exclusively through the Armory UI.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "Omit to create a new entry. Provide an existing entry's id (from GlobalMemoryList) to update it instead." },
+      "name": { "type": "string", "description": "The entry's display name (shown in the Armory Global Memory list, and injected as a heading)" },
+      "content": { "type": "string", "description": "Markdown instructions injected into every agent's startup instructions file" },
+      "provenance": {
+        "type": "object",
+        "description": "Optional context for why you're writing this — helps a human reviewing this later. Omit for an ordinary write from your own reasoning.",
+        "properties": {
+          "source": { "type": "string", "description": "\"human\" if directly instructed by the operator, \"jekt\" if this write is a direct response to jekt content still in your context, omit otherwise (defaults to agent_inferred)" },
+          "detail":  { "type": "object", "description": "Extra structured context — e.g. the jekt's marker fields (FROM/TIER/TRUST/DELIVERY/MSGID) when source is \"jekt\"" }
+        },
+        "required": ["source"]
+      }
+    },
+    "required": ["name", "content"]
+  }
+}"#;
+
+pub(crate) const GLOBAL_MEMORY_REMOVE_TOOL: &str = r#"{
+  "name": "GlobalMemoryRemove",
+  "description": "Remove a Global Memory entry (id from GlobalMemoryList) from the workspace-wide list every agent inherits at launch — the entry itself isn't deleted, only its Global Memory membership (matches the Armory UI's own \"Remove\" button). Cannot remove AgentMux's own system-tier entries.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "description": "The entry id to remove (from GlobalMemoryList)" }
+    },
+    "required": ["id"]
+  }
+}"#;
+
 pub(crate) const PRESET_LIST_TOOL: &str = r#"{
   "name": "PresetList",
   "description": "List the presets available to you (summary fields only). A preset is a provider-agnostic config bundle — instructions, context files, MCP servers, and skills. Use it to discover presets before fetching one in full with PresetGet. Takes no arguments.",

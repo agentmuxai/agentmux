@@ -56,7 +56,12 @@ use super::error::StoreError;
 ///        Global Bundle tier — see OBJECT_SCHEMA_VERSION's v27 doc
 ///        comment (objects.db, above run_object_schema) for the full
 ///        design; this store just needs schema parity.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
+///   v10 — db_bundle_versions: append-only version history for Global
+///        Memory bundle content — see OBJECT_SCHEMA_VERSION's v35 doc
+///        comment for the full rationale
+///        (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this store
+///        just needs schema parity, same as v9 above.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 10;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -375,7 +380,20 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        existing store's four tables are rebuilt by
 ///        `m0032_drop_catalog_fk_from_ref_tables`; a fresh install gets the
 ///        trimmed FK directly from the CREATE TABLE statements below.
-pub const OBJECT_SCHEMA_VERSION: i64 = 34;
+///   v35 — db_bundle_versions: append-only version history for Global
+///        Memory bundle content (`name` + `instructions`), one row per
+///        write through the new agent-facing Global Memory API
+///        (`docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md`
+///        Phase 0) — mirrors `db_agent_native_memory_versions`'s shape
+///        exactly, keyed by a single `bundle_id` instead of that table's
+///        composite `(agent_id, filename)`, since a Bundle's identity is
+///        already a single id. Global Memory (`db_bundles`) previously had
+///        no audit trail at all — only `updated_at`, no way to see what
+///        changed, when, or by which agent, unlike native memory which has
+///        had this since v24. Opened specifically because Global Memory is
+///        about to gain a write path an agent (not just a human at the
+///        Armory UI) can reach.
+pub const OBJECT_SCHEMA_VERSION: i64 = 35;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -881,6 +899,25 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_native_memory_versions_lookup
             ON db_agent_native_memory_versions(agent_id, filename, created_at);
+
+        -- v35: append-only version history for Global Memory bundle content
+        -- — see OBJECT_SCHEMA_VERSION's own doc comment above for the full
+        -- rationale (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md).
+        -- Single `bundle_id` key, not a composite one — a Bundle's identity
+        -- is already a single id, unlike native memory's (agent_id, filename).
+        CREATE TABLE IF NOT EXISTS db_bundle_versions (
+            id                 TEXT PRIMARY KEY,
+            bundle_id          TEXT NOT NULL,
+            name               TEXT NOT NULL,
+            instructions       TEXT NOT NULL,
+            content_hash       TEXT NOT NULL,
+            parent_version_id  TEXT,
+            source             TEXT NOT NULL DEFAULT 'agent_inferred',
+            source_detail      TEXT NOT NULL DEFAULT '{}',
+            created_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_bundle_versions_lookup
+            ON db_bundle_versions(bundle_id, created_at);
 
         -- v18: per-agent HMAC-SHA256 signing key for host-tier jekt sender
         -- verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2).
@@ -1396,7 +1433,24 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at         INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ss_native_memory_versions_lookup
-            ON db_agent_native_memory_versions(agent_id, filename, created_at);",
+            ON db_agent_native_memory_versions(agent_id, filename, created_at);
+
+        -- v10: append-only version history for Global Memory bundle content
+        -- — see SHARED_STORE_SCHEMA_VERSION's own doc comment for the full
+        -- rationale (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md).
+        CREATE TABLE IF NOT EXISTS db_bundle_versions (
+            id                 TEXT PRIMARY KEY,
+            bundle_id          TEXT NOT NULL,
+            name               TEXT NOT NULL,
+            instructions       TEXT NOT NULL,
+            content_hash       TEXT NOT NULL,
+            parent_version_id  TEXT,
+            source             TEXT NOT NULL DEFAULT 'agent_inferred',
+            source_detail      TEXT NOT NULL DEFAULT '{}',
+            created_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_bundle_versions_lookup
+            ON db_bundle_versions(bundle_id, created_at);",
     )?;
 
     // Seed the blank Bundle singleton — same fixed id as objects.db so
@@ -1528,7 +1582,12 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        any existing same-name/different-type pair `m0031`'s own
 ///        `(name, skill_type)`-keyed dedup may already have produced, to the
 ///        earlier-`created_at` row, before the new index is created.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 8;
+///   v9 — db_bundle_versions, for schema parity with OBJECT_SCHEMA_VERSION
+///        v35 / SHARED_STORE_SCHEMA_VERSION v10 (same table, same reasoning
+///        as v3 above — this store's copy is not an actively-written
+///        duplicate either). See
+///        docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 9;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1758,6 +1817,22 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_ids_native_memory_versions_lookup
             ON db_agent_native_memory_versions(agent_id, filename, created_at);
+
+        -- v9: schema parity with the db_bundle_versions table above (own
+        -- store) — see IDENTITY_STORE_SCHEMA_VERSION's own doc comment.
+        CREATE TABLE IF NOT EXISTS db_bundle_versions (
+            id                 TEXT PRIMARY KEY,
+            bundle_id          TEXT NOT NULL,
+            name               TEXT NOT NULL,
+            instructions       TEXT NOT NULL,
+            content_hash       TEXT NOT NULL,
+            parent_version_id  TEXT,
+            source             TEXT NOT NULL DEFAULT 'agent_inferred',
+            source_detail      TEXT NOT NULL DEFAULT '{}',
+            created_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_bundle_versions_lookup
+            ON db_bundle_versions(bundle_id, created_at);
 
         -- v6: authoritative skill/MCP-server catalogs — see this constant's
         -- v6 doc comment above. Same column shapes as run_object_schema's
