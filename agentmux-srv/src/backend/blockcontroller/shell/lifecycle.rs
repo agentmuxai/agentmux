@@ -1036,9 +1036,24 @@ impl Controller for ShellController {
 
             // Bounded wait for the flusher to drain trailing output — see
             // `FLUSHER_DRAIN_TIMEOUT`'s own doc comment for why this must be
-            // bounded, and `abort()` (not just stop waiting) once it fires,
-            // mirroring persistent.rs's identical stdout-reader bound.
-            let flusher_abort = flusher_handle.abort_handle();
+            // bounded. Deliberately does NOT `abort()` on timeout (reagentx
+            // P1, same round, on the timeout+abort version of this fix):
+            // the flusher (consumer) and the PTY read loop (producer,
+            // `spawn_blocking` doing a raw, un-cancellable OS-level
+            // `reader.read()`) are separate tasks, unlike persistent.rs's
+            // single combined reader task. Aborting only the flusher would
+            // stop it draining `pty_tx` — but the read loop, still blocked
+            // in real OS I/O, cannot be interrupted by tokio's cooperative
+            // cancellation and keeps running regardless, so the leaked
+            // thread is NOT reclaimed either way. Aborting would only add a
+            // regression on top: every later `blocking_send` finds the
+            // receiver gone and is silently discarded, permanently losing
+            // any further output from a still-live descendant with no log
+            // at the point of loss. Simply letting `flusher_handle` drop
+            // here (no `abort()`) detaches it — the flusher and its read
+            // loop keep running independently in the background, still
+            // persisting and broadcasting whatever the descendant produces
+            // next, and exit naturally once the PTY genuinely reaches EOF.
             match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
@@ -1055,10 +1070,12 @@ impl Controller for ShellController {
                         timeout = ?FLUSHER_DRAIN_TIMEOUT,
                         "PTY output flusher did not finish draining within the timeout after \
                          process exit (a background descendant still holding the PTY open?) — \
-                         aborting it and proceeding with pane teardown anyway; some trailing \
-                         output may be missing"
+                         proceeding with pane teardown without waiting further; leaving the \
+                         flusher and its PTY read loop running detached in the background \
+                         rather than aborting them, so no output produced after this point is \
+                         silently lost — some trailing output as of teardown time may still be \
+                         missing"
                     );
-                    flusher_abort.abort();
                 }
             }
 

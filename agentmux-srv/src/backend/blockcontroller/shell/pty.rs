@@ -64,10 +64,18 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// descendant-held-descriptor scenario: generous enough that normal
 /// flushing (bounded by `PTY_COALESCE_WINDOW`, milliseconds) never trips
 /// it, but a hard ceiling so a genuinely stuck descendant can't hang pane
-/// teardown. On expiry the flusher task is aborted (not just abandoned) —
-/// same reasoning as `persistent.rs`: a bare timeout without abort leaves
-/// the task running in the background, still able to write trailing output
-/// after cleanup already ran.
+/// teardown. Unlike `persistent.rs`'s bound, expiry does NOT abort the
+/// flusher (reagentx P1 on PR #3206, same round): there, one combined async
+/// reader task both reads and processes, so aborting it genuinely stops the
+/// read. Here reading (a separate `spawn_blocking` doing a raw, blocking,
+/// un-cancellable OS `read()`) and flushing are two different tasks —
+/// aborting only the flusher can't reclaim the read loop's thread either
+/// way, and would additionally make every later `blocking_send` find the
+/// receiver gone and silently drop it, permanently losing any further
+/// output from a still-live descendant. Letting the `JoinHandle` simply
+/// drop on timeout detaches the flusher (and transitively its read loop)
+/// to keep running independently in the background instead, so nothing
+/// produced after teardown gives up waiting is silently lost.
 pub(super) const FLUSHER_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Detect the best available interactive shell on Windows.

@@ -401,3 +401,55 @@ stuck descendant can't hang pane teardown indefinitely.
   this fix now mirrors) and all of `blockcontroller::shell::tests`.
 - `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
   7 ignored — no regressions.
+
+## 12. Same round, on §11's own fix — `abort()` on timeout didn't do what it claimed (reagentx P1, PR #3206)
+
+§11 claimed to mirror `persistent.rs`'s abort-on-timeout pattern; reagentx
+pointed out the mirroring was only superficial and the `abort()` call was
+actively counterproductive. The distinction: `persistent.rs`'s stdout
+reader is a *single* async task that both reads and processes each
+line — aborting that one task's `JoinHandle` genuinely stops the read,
+because tokio's cooperative cancellation can interrupt an async task at its
+next `.await`. This PR's PTY pipeline is split into two separate tasks: the
+raw read loop (`spawn_blocking`, a genuinely blocking OS-level
+`reader.read()` call, no `.await` anywhere in it) and the flusher
+(`run_pty_output_flusher`, the async consumer whose `JoinHandle` §11
+captured and aborted). Aborting the flusher does nothing to the read
+loop — a `spawn_blocking` task that has already started running cannot be
+interrupted by `abort()` at all (this is documented tokio behavior, not
+specific to this code). So on timeout, §11's fix left the read-loop thread
+running exactly as long either way — the "leak" it was reaching for was
+never actually reclaimed — while ADDING a real regression: with the
+receiver dropped (the aborted flusher owned `pty_rx`), every subsequent
+`blocking_send` in the read loop finds the channel closed and is silently
+discarded (the code already does `let _ = pty_tx.blocking_send(...)`), so
+any further output from a still-live descendant was permanently and
+silently lost from that point on, with no log marking the loss.
+
+**Fix:** removed the `abort()` call entirely. On timeout, `flusher_handle`
+is simply allowed to drop (it's owned by the `tokio::time::timeout` future,
+which drops it on expiry) — dropping a `JoinHandle` without calling
+`abort()` first detaches the task rather than cancelling it, so the flusher
+(and transitively the read loop feeding it) keeps running independently in
+the background, continuing to persist and broadcast whatever the
+descendant produces, until the PTY genuinely reaches EOF on its own. This
+accepts trading a guaranteed resource bound (which the abort version never
+actually delivered) for correctness: nothing produced after the timeout is
+silently dropped. The underlying OS thread genuinely does keep running for
+as long as something holds the PTY open — an inherent limitation of raw
+blocking PTY reads not being cancellable via tokio, orthogonal to what this
+round's fix was scoped to solve (ordering of `STATUS_DONE` relative to
+trailing output), not a new problem this fix introduces.
+
+**Verification:**
+
+- `cargo check -p agentmux-srv --tests`: clean.
+- No test changes — this fix only removes an `abort()` call and updates
+  its surrounding comments/doc comment; the resource-leak/data-loss
+  distinction it corrects requires a real PTY and a real lingering
+  descendant to observe end-to-end, same reasoning as §11's own
+  no-new-test note.
+- `cargo test -p agentmux-srv backend::blockcontroller:: -- --test-threads=1`:
+  261 passed.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
+  7 ignored — no regressions.
