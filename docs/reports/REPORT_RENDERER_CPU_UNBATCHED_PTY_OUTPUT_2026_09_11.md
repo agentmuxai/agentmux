@@ -345,3 +345,59 @@ before it was ever run, not by a reviewer.
   touched most directly.
 - `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
   7 ignored — no regressions.
+
+## 11. Same round, caught on this fix itself before merge — reaping the child must not depend on PTY EOF (codex P1, PR #3206)
+
+§10's fix (`flusher_handle.await` before the wait task's cleanup) introduced
+a new failure mode of its own: if a background descendant inherits the PTY
+slave fd and keeps it open after the direct child (the shell) exits — e.g.
+it ignores SIGHUP — the read loop's `read()` may never observe EOF. `pty_tx`
+is then never dropped, the flusher's channel never closes, and
+`flusher_handle` never resolves on its own. Awaiting it *before* `child.wait()`
+meant that scenario would hang child reaping itself, and everything
+downstream of it — `STATUS_DONE`, pidregistry/reactive/registry
+deregistration, and `run_lock` release — for as long as that descendant kept
+running. The pane would report `running` forever and could never restart.
+
+This is the identical descendant-held-descriptor hazard
+`agentmux-srv/src/backend/blockcontroller/persistent.rs`'s stdout/stderr
+reader cleanup already solves, for the exact same reason (a CLI's own
+background descendant can inherit its stdout pipe). That code establishes
+the fix this one now mirrors: reap the child first, unconditionally, never
+gated on a reader/flusher task; then bound the reader/flusher wait with
+`tokio::time::timeout`, and `abort()` — not just stop awaiting — on expiry,
+so a stuck task doesn't keep running in the background able to write
+trailing output after cleanup already happened.
+
+**Fix:** moved `child.wait()` into its own `spawn_blocking`, run first and
+unconditionally. Only after it resolves does the wait task
+`tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle)` — on success,
+proceed as before; on the flusher panicking/being cancelled, log and
+proceed (unchanged from §10); on timeout, log a distinct warning and
+`abort()` the flusher before proceeding. `FLUSHER_DRAIN_TIMEOUT = 10s`
+(`pty.rs`), chosen to match `persistent.rs`'s identical stdout-reader bound
+exactly — generous enough that ordinary flushing (bounded by the 20ms
+`PTY_COALESCE_WINDOW`) never trips it, but a hard ceiling so a genuinely
+stuck descendant can't hang pane teardown indefinitely.
+
+**Verification:**
+
+- `cargo check -p agentmux-srv --tests`: one compile error on the first
+  attempt (`block_id_wait` moved into the new child-reap closure, then used
+  again afterward) — fixed by cloning it into that closure instead of
+  moving the outer binding. Clean after.
+- No new dedicated test for the abort-on-timeout branch itself: like the
+  wait task as a whole (see §10's own note), this requires a real PTY and a
+  real lingering child process to exercise end-to-end, and — unlike §10's
+  property, which a synthetic channel could stand in for — the failure mode
+  here is specifically about *real* PTY fd-holding semantics, which a
+  synthetic `mpsc` channel can't reproduce. `persistent.rs`'s own identical
+  pattern has no dedicated test for its abort-on-timeout branch either, for
+  the same reason.
+- `cargo test -p agentmux-srv pty_output_flusher_tests`: 7 passed (unchanged
+  from §10 — this round didn't touch `run_pty_output_flusher` itself).
+- `cargo test -p agentmux-srv backend::blockcontroller:: -- --test-threads=1`:
+  261 passed, including `persistent.rs`'s own test modules (whose pattern
+  this fix now mirrors) and all of `blockcontroller::shell::tests`.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
+  7 ignored — no regressions.

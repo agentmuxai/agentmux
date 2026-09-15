@@ -26,8 +26,8 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, PTY_CHANNEL_CAPACITY, PTY_COALESCE_MAX_BYTES,
-    PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
+    detect_local_shell_path_windows, FLUSHER_DRAIN_TIMEOUT, PTY_CHANNEL_CAPACITY,
+    PTY_COALESCE_MAX_BYTES, PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
@@ -990,32 +990,31 @@ impl Controller for ShellController {
         // yet broadcast at the moment clients observe `STATUS_DONE`,
         // widening a race that used to be negligible into a real one.
         //
-        // Fixed by awaiting `flusher_handle` before any of the existing
-        // cleanup/status-publish logic runs — moved into its own inner
-        // `spawn_blocking` below, UNCHANGED from before, so none of its
-        // own synchronous work (`registry::remove`'s file write, etc.)
-        // newly runs on an async worker either.
+        // codex P1 on PR #3206 (same round, caught on the fix above before
+        // merge): reaping the child must NOT be gated behind awaiting the
+        // flusher. If a background descendant inherits the PTY slave fd and
+        // keeps it open after the direct child (the shell) exits — e.g. it
+        // ignores SIGHUP — the read loop's `read()` may never observe EOF,
+        // `pty_tx` is never dropped, the flusher's accumulation loop never
+        // sees its channel close, and `flusher_handle` never resolves.
+        // Awaiting it before `child.wait()` would then hang cleanup,
+        // `STATUS_DONE` publication, and `run_lock` release for that
+        // descendant's entire remaining lifetime — the pane reports running
+        // forever and can never restart. `persistent.rs`'s stdout/stderr
+        // reader cleanup hits the identical descendant-held-descriptor case
+        // and already establishes the fix: reap the child first
+        // (unconditional, not gated on any reader/flusher), then bound the
+        // reader/flusher wait with a timeout that `abort()`s on expiry
+        // rather than waiting forever.
         tokio::spawn(async move {
-            if let Err(e) = flusher_handle.await {
-                tracing::warn!(
-                    block_id = %block_id_wait,
-                    error = %e,
-                    "PTY output flusher task panicked or was cancelled before completing; \
-                     proceeding with pane teardown anyway — some trailing output may be missing"
-                );
-            }
-
-            // Entire body below is UNCHANGED from before this fix, still
-            // inside its own spawn_blocking — child.wait() is a blocking OS
-            // call, and registry::remove (among others here) does its own
-            // synchronous file I/O, so none of it belongs on an async
-            // worker either.
-            tokio::task::spawn_blocking(move || {
+            // Reap the child (blocking OS call) on its own — depends only
+            // on the direct child exiting, never on PTY EOF. Clones
+            // `block_id_wait` in (rather than moving the outer binding)
+            // since the rest of this task still needs it afterward.
+            let block_id_reap = block_id_wait.clone();
+            let exit_code = tokio::task::spawn_blocking(move || {
                 let mut child = child;
-
-                // Wait for child to exit (blocking)
-                let exit_status = child.wait();
-                let exit_code = match exit_status {
+                match child.wait() {
                     Ok(status) => {
                         if status.success() {
                             0
@@ -1025,13 +1024,49 @@ impl Controller for ShellController {
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("wait error for block {}: {}", block_id_wait, e);
+                        tracing::warn!("wait error for block {}: {}", block_id_reap, e);
                         -1
                     }
-                };
+                }
+            })
+            .await
+            .expect("PTY child wait task panicked");
 
-                tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
+            tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
 
+            // Bounded wait for the flusher to drain trailing output — see
+            // `FLUSHER_DRAIN_TIMEOUT`'s own doc comment for why this must be
+            // bounded, and `abort()` (not just stop waiting) once it fires,
+            // mirroring persistent.rs's identical stdout-reader bound.
+            let flusher_abort = flusher_handle.abort_handle();
+            match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        block_id = %block_id_wait,
+                        error = %e,
+                        "PTY output flusher task panicked or was cancelled before completing; \
+                         proceeding with pane teardown anyway — some trailing output may be missing"
+                    );
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        block_id = %block_id_wait,
+                        timeout = ?FLUSHER_DRAIN_TIMEOUT,
+                        "PTY output flusher did not finish draining within the timeout after \
+                         process exit (a background descendant still holding the PTY open?) — \
+                         aborting it and proceeding with pane teardown anyway; some trailing \
+                         output may be missing"
+                    );
+                    flusher_abort.abort();
+                }
+            }
+
+            // Entire body below is UNCHANGED from before this fix, still
+            // inside its own spawn_blocking — registry::remove (among
+            // others here) does its own synchronous file I/O, so it
+            // doesn't belong on an async worker either.
+            tokio::task::spawn_blocking(move || {
                 // Unregister PID from per-pane metrics
                 super::super::pidregistry::unregister(&block_id_wait);
 

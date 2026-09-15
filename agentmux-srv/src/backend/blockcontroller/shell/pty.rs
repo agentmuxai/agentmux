@@ -48,6 +48,28 @@ pub(super) const PTY_COALESCE_MAX_BYTES: usize = 64 * PTY_READ_BUF_SIZE;
 /// backpressures a fast writer.
 pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 
+/// Bound on how long the wait task waits for the coalescing flusher to
+/// drain trailing output after the direct child has already been reaped
+/// (codex P1 on PR #3206, third round). Normally resolves almost
+/// immediately: the read loop observes real PTY EOF once the direct child
+/// exits and drops `pty_tx`, closing the flusher's channel. But EOF depends
+/// on every process holding the PTY slave fd closing it, not just the
+/// direct child — a background descendant that inherited the fd and
+/// ignores SIGHUP can keep it open indefinitely, in which case the flusher
+/// would never see its channel close and its `JoinHandle` would never
+/// resolve on its own. An unbounded await here would then hang child
+/// reaping's own downstream cleanup (STATUS_DONE, run_lock release)
+/// forever, for a case that must never block them. 10s mirrors
+/// `persistent.rs`'s identical stdout-reader bound for the same
+/// descendant-held-descriptor scenario: generous enough that normal
+/// flushing (bounded by `PTY_COALESCE_WINDOW`, milliseconds) never trips
+/// it, but a hard ceiling so a genuinely stuck descendant can't hang pane
+/// teardown. On expiry the flusher task is aborted (not just abandoned) —
+/// same reasoning as `persistent.rs`: a bare timeout without abort leaves
+/// the task running in the background, still able to write trailing output
+/// after cleanup already ran.
+pub(super) const FLUSHER_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Detect the best available interactive shell on Windows.
 ///
 /// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
