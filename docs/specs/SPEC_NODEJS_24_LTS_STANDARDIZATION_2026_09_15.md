@@ -2,7 +2,8 @@
 
 **Author:** Vmer
 **Date:** 2026-09-15
-**Status:** draft — audit complete, no code changed yet
+**Status:** in progress — `agentmux`'s own gaps implemented (this PR); `agentmux-docs`
+and `muxcode` fixes are open PRs, not yet merged. See §0 for current state.
 
 ---
 
@@ -13,16 +14,16 @@ Audited every `agentmuxai` repo cloned in this workspace (`agentmux`, `agentmux-
 already fully standardized on Node 24 LTS** — this was fixed as part of
 `docs/reports/REPORT_FRESH_PC_ONBOARDING_AUDIT_2026_09_02.md`'s finding 2a (that report
 recorded README.md/BUILD.md still saying "22 LTS" against a `.nvmrc`/CI baseline of 24;
-both docs now correctly say 24). Two gaps remain even inside `agentmux`, and two sibling
-repos are not on 24 at all:
+both docs now correctly say 24). This PR closes the two remaining gaps inside
+`agentmux` itself; two sibling repos have their own open PRs, not yet merged:
 
 | Repo | Current state | Action needed |
 |---|---|---|
 | `agentmux` (main app + CI) | **24 everywhere** (`.nvmrc`, `package.json` engines, 8 CI workflow files, `check-toolchain.sh`, README.md, BUILD.md) | None — compliant |
-| `agentmux` `docker/Dockerfile.agent-agentmux` | `FROM node:22-slim` | Bump to `node:24-slim`, or explicitly decide it's exempt (see §2.1) |
-| `agentmux` `.github/workflows/container-image.yml` | No `actions/setup-node` step at all — runs `npm view` on whatever Node ships on `ubuntu-latest` | Low priority; pin explicitly for reproducibility (see §2.1) |
-| `agentmux-docs` | CI pinned to **Node 22** (3 workflows); `package.json` has **no `engines` field** | Bump CI to 24, add `engines` |
-| `muxcode` | `package.json` engines: **`>=20.0.0`**; no `.nvmrc`; **no CI at all** | Bump engines floor to 24, add `.nvmrc`; CI is a separate open question |
+| `agentmux` `docker/Dockerfile.agent-agentmux` | ✅ **Done, this PR** — bumped to `node:24-slim` | None — could not be rebuilt/tested locally (no Docker in the environment this was prepared in); first real verification is this PR's own `container-image.yml` build-and-push job |
+| `agentmux` `.github/workflows/container-image.yml` | ✅ **Done, this PR** — added an explicit `actions/setup-node@v4` (`node-version: '24'`) step | None |
+| `agentmux-docs` | CI pinned to **Node 22** (3 workflows); `package.json` has **no `engines` field** | Open PR (agentmux-docs#123): bumps CI to 24, adds `engines`. Not yet merged. |
+| `muxcode` | `package.json` engines: **`>=20.0.0`**; no `.nvmrc`; **no CI at all** | Open PR (muxcode#2): bumps engines floor to 24, adds `.nvmrc`. Not yet merged. CI itself remains a separate open question. |
 | `agentmux-mobile` | Flutter/Dart app — **no Node.js anywhere** in its toolchain or CI | Out of scope, documented so a future drift-checker doesn't flag it as a silent gap |
 
 ---
@@ -58,25 +59,23 @@ README.md line 73                -> | **Node.js** | 24 LTS | Frontend build |
 BUILD.md line 15                 -> | **Node.js** | v24 LTS | Frontend build (SolidJS/Vite) |
 ```
 
-Two things outside that list are **not** on 24, and are arguably different in kind from
-the rest — worth a deliberate decision rather than a blind bump:
+Two things outside that list were **not** on 24 — both fixed as part of this same PR:
 
 - **`docker/Dockerfile.agent-agentmux`** (`FROM node:22-slim`) is not this repo's own
   build toolchain — it's the container image AgentMux ships for *running agent CLIs
   inside a sandboxed container* (the "container pane" feature). Its only Node-dependent
-  step is `npm install -g @anthropic-ai/claude-code`. Bumping it to `node:24-slim` is
-  probably right for consistency and to stay ahead of Node 22's EOL clock, but it's a
-  shipped, published image (`ghcr.io/agentmuxai/agent-claude`) rather than a dev
-  dependency, so it deserves its own compatibility check (does the pinned
+  step is `npm install -g @anthropic-ai/claude-code`. **✅ Bumped to `node:24-slim`.**
+  It's a shipped, published image (`ghcr.io/agentmuxai/agent-claude`) rather than a dev
+  dependency, so the real compatibility check (does the pinned
   `@anthropic-ai/claude-code@2.1.263` install and run cleanly under Node 24-slim/glibc)
-  rather than a blind find-replace.
-- **`.github/workflows/container-image.yml`** never calls `actions/setup-node` — its one
-  Node-touching step (`npm view @anthropic-ai/claude-code version`) runs on whatever
-  Node ships baked into the `ubuntu-latest` runner image, which is unpinned and drifts
-  on GitHub's own schedule. Low-risk today (it only queries the npm registry, doesn't
-  build anything), but it's the one place in this repo where "what Node version is CI
-  actually using" isn't a checked-in fact. Worth an explicit `setup-node` step for the
-  same reproducibility reason the other 8 workflows already have one.
+  could not be done locally — no Docker was available in the environment this was
+  prepared in. This PR's own `container-image.yml` build-and-push job is the first
+  actual verification.
+- **`.github/workflows/container-image.yml`** never called `actions/setup-node` — its
+  one Node-touching step (`npm view @anthropic-ai/claude-code version`) ran on whatever
+  Node shipped baked into the `ubuntu-latest` runner image, unpinned and drifting on
+  GitHub's own schedule. **✅ Added an explicit `actions/setup-node@v4`
+  (`node-version: '24'`) step**, matching the other 8 workflows.
 
 ### 2.2 `agentmux-docs` — CI on 22, no engines guard
 
@@ -127,39 +126,41 @@ standard — one version string to keep in sync across repos, not two.
 
 ## 4. Work breakdown
 
-### 4.1 `agentmux` (two edge cases only — everything else already compliant)
+### 4.1 `agentmux` (two edge cases only — everything else already compliant) — ✅ DONE
 
-1. Decide, and if yes, bump `docker/Dockerfile.agent-agentmux`'s `FROM node:22-slim` to
-   `FROM node:24-slim`; rebuild the image locally and confirm
-   `npm install -g @anthropic-ai/claude-code@2.1.263` still succeeds and the CLI still
-   runs under the new base before publishing.
-2. Add an explicit `actions/setup-node@v4` (`node-version: '24'`) step to
+1. ✅ Bumped `docker/Dockerfile.agent-agentmux`'s `FROM node:22-slim` to
+   `FROM node:24-slim`. Could not rebuild/confirm
+   `npm install -g @anthropic-ai/claude-code@2.1.263` locally — no Docker available
+   in the environment this was prepared in. `container-image.yml`'s own
+   build-and-push job is the first real verification; watch it on this PR before
+   merging.
+2. ✅ Added an explicit `actions/setup-node@v4` (`node-version: '24'`) step to
    `.github/workflows/container-image.yml`, matching the other 8 workflows, so CI's
    Node version is a checked-in fact rather than whatever `ubuntu-latest` happens to
    ship.
 
-### 4.2 `agentmux-docs`
+### 4.2 `agentmux-docs` — open PR, not yet merged: [agentmux-docs#123](https://github.com/agentmuxai/agentmux-docs/pull/123)
 
-1. Bump `node-version` from `22`/`'22'` to `'24'` in all three workflows
+1. ✅ Bumped `node-version` from `22`/`'22'` to `'24'` in all three workflows
    (`deploy.yml`, `pr-check.yml`, `deploy-prod.yml`).
-2. Add an `engines` field to `package.json` (`{"node": ">=24.11.0"}`), matching
+2. ✅ Added an `engines` field to `package.json` (`{"node": ">=24.11.0"}`), matching
    `agentmux`'s convention, so a local `npm install` on the wrong Node fails loudly
    instead of silently.
-3. Run `npm run build:full` locally under Node 24 before merging — this repo's own
-   `CLAUDE.md` flags `build:full` (typedoc + rust-docs + astro build) as the real
-   production build; a plain `astro dev` working is not sufficient evidence.
-4. Since `deploy.yml` deploys to production on every merge to `main` with no separate
-   manual gate, land this on a branch and verify the CI run (`gh run list --repo
-   agentmuxai/agentmux-docs --workflow deploy.yml`) and the post-deploy CSS-hash check
-   in that repo's `CLAUDE.md` before considering it done.
+3. ✅ Verified locally under Node 24.12.0: `npm install` + `npm run build` clean, 58
+   pages built. `npm run build:full` (typedoc + rustdoc) was not exercised — needs the
+   `src/agentmux` submodule and a cargo toolchain, which CI already covers.
+4. Still to do before merge: since `deploy.yml` deploys to production on every merge to
+   `main` with no separate manual gate, verify the CI run and the post-deploy CSS-hash
+   check in that repo's `CLAUDE.md` before considering it done.
 
-### 4.3 `muxcode`
+### 4.3 `muxcode` — open PR, not yet merged: [muxcode#2](https://github.com/agentmuxai/muxcode/pull/2)
 
-1. Bump `package.json`'s `engines.node` floor from `>=20.0.0` to `>=24.11.0`.
-2. Add a `.nvmrc` (`24.11.0`) for parity with `agentmux`.
-3. Run `npm test` (Jest, per `package.json`) and `npm run build` (`tsc`) locally under
-   Node 24 to confirm nothing in the dependency set (`@anthropic-ai/sdk`,
-   `@modelcontextprotocol/sdk`, `commander`, `openai`) breaks.
+1. ✅ Bumped `package.json`'s `engines.node` floor from `>=20.0.0` to `>=24.11.0`.
+2. ✅ Added a `.nvmrc` (`24.11.0`) for parity with `agentmux`.
+3. ✅ Verified locally under Node 24.12.0: `npm install` and `npm run build` (`tsc`)
+   both clean. `npm test` fails, but pre-existing and unrelated — the `test` script
+   invokes `jest`, which was never added to `devDependencies`, so it was never
+   actually installed. Not fixed as part of this change.
 4. **Open question, not decided by this spec:** should `muxcode` get a CI workflow at
    all as part of this? Today nothing enforces its `engines` field even after bumping
    it — see §5.
