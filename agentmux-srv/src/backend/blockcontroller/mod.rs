@@ -42,6 +42,16 @@ pub const STATUS_INIT: &str = "init";
 pub const STATUS_RUNNING: &str = "running";
 pub const STATUS_DONE: &str = "done";
 
+/// Sentinel error string `resync_controller` returns when it declines to
+/// respawn a `STATUS_DONE` controller because its caller passed
+/// `respawn_if_done: false` (see that parameter's own doc comment). Callers
+/// that want to treat "already exited" differently from a genuine failure
+/// (e.g. `try_attach_to_existing_shell` falling through to a fresh shell
+/// instead of surfacing a 500) match on this exact string rather than
+/// parsing every other possible error message `resync_controller` can
+/// return.
+pub const RESYNC_ERR_ALREADY_EXITED: &str = "resync_controller: controller already exited (respawn suppressed)";
+
 // ---- Controller type constants (match Go) ----
 
 pub const BLOCK_CONTROLLER_SHELL: &str = "shell";
@@ -469,11 +479,27 @@ fn is_runtime_config_only_replace(existing_type: &str, target_type: &str, force:
     force && existing_type == BLOCK_CONTROLLER_PERSISTENT && target_type == BLOCK_CONTROLLER_PERSISTENT
 }
 
+/// `respawn_if_done`: when the existing controller's status is
+/// `STATUS_DONE` (its process already exited), should this call revive it
+/// via `ctrl.start()` (the historical, unconditional behavior — pass
+/// `true`), or leave it dead and return `Err(RESYNC_ERR_ALREADY_EXITED)`
+/// instead (pass `false`)? `true` is correct for crash/backend-restart
+/// recovery (the WS `ControllerResyncCommand` path, `TermResyncHandler` —
+/// see its own doc comment for why a dead PTY must come back transparently
+/// there). `false` is for a caller that needs to tell "this exited on
+/// purpose" apart from "this needs reviving" using the SAME status read
+/// `resync_controller` itself makes, rather than checking status in the
+/// caller first and racing a StatusDone transition landing between that
+/// check and this call — `try_attach_to_existing_shell`
+/// (`server/mod.rs`, PtyShellCreate's pane-shell-reuse path) is the one
+/// caller that needs this; see
+/// `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §7.
 pub fn resync_controller(
     block: &Block,
     tab_id: &str,
     rt_opts: Option<serde_json::Value>,
     force: bool,
+    respawn_if_done: bool,
     broker: Option<Arc<Broker>>,
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<Store>>,
@@ -581,8 +607,14 @@ pub fn resync_controller(
                 status = %status.shellprocstatus,
                 "[dnd-debug] existing controller — skipping spawn (no cmd:cwd seed)"
             );
-            if status.shellprocstatus == STATUS_INIT || status.shellprocstatus == STATUS_DONE {
+            if status.shellprocstatus == STATUS_INIT {
                 return ctrl.start(block_meta.clone(), rt_opts, force);
+            }
+            if status.shellprocstatus == STATUS_DONE {
+                if respawn_if_done {
+                    return ctrl.start(block_meta.clone(), rt_opts, force);
+                }
+                return Err(RESYNC_ERR_ALREADY_EXITED.to_string());
             }
             return Ok(());
         }
@@ -878,7 +910,7 @@ mod tests {
         meta.insert(META_KEY_CMD_RUN_ON_START.to_string(), serde_json::Value::Bool(false));
         let block = Block { oid: block_id.to_string(), version: 1, meta, ..Default::default() };
 
-        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None, None, Arc::from("test-boot"));
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, Arc::from("test-boot"));
         assert!(result.is_ok(), "resync_controller failed: {result:?}");
 
         assert_eq!(
@@ -1010,7 +1042,7 @@ mod tests {
             ..Default::default()
         };
         // No "controller" key in meta = no-op
-        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None, None, std::sync::Arc::from("test-boot"));
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"));
         assert!(result.is_ok());
     }
 
@@ -1027,7 +1059,7 @@ mod tests {
             meta,
             ..Default::default()
         };
-        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None, None, std::sync::Arc::from("test-boot"));
+        let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, std::sync::Arc::from("test-boot"));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unknown controller type"));
     }
