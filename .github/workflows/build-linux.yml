@@ -1,11 +1,12 @@
 name: build-linux
 
 # Linux release pipeline for AgentMux.
-# Builds a patched-libcef.so-backed AppImage, .deb, and portable .tar.gz
-# (all x86_64, from one compile — see the "Build AppImage + deb + tarball"
-# step below) and uploads them to the corresponding GitHub release.
-# docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
-# Phase 1 widened this from AppImage-only.
+# Builds a patched-libcef.so-backed AppImage, .deb, .rpm, and portable
+# .tar.gz (all x86_64, from one compile — see the "Build AppImage + deb +
+# rpm + tarball" step below) and uploads them to the corresponding GitHub
+# release. docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
+# Phase 1 widened this from AppImage-only (.deb + .tar.gz); Phase 2 added
+# .rpm.
 #
 # The upstream cef-dll-sys libcef.so lacks BeginWindowDrag; building from source
 # takes 3-6 h and 99 GB. Instead we download a pre-built patched libcef.so from
@@ -217,34 +218,41 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
 
-      # ── fpm (packages .deb from the same staged tree — see
+      # ── fpm (packages .deb/.rpm from the same staged tree — see
       #    docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
       #    §2.1). The ubuntu-22.04 runner ships Ruby; fpm's `-t deb` backend
-      #    is pure-Ruby (no rpmbuild/native extension needed for this format). ──
+      #    is pure-Ruby, but `-t rpm` shells out to `rpmbuild` (NOT pure Ruby),
+      #    hence the separate `rpm` apt package below (Debian/Ubuntu's cross-
+      #    packaging path — see build-rpm-linux.sh's header comment). ──
       - name: Install fpm
         run: gem install --no-document fpm
+
+      - name: Install rpmbuild
+        run: sudo apt-get install -y --no-install-recommends rpm
 
       # ── Build all Linux release formats from ONE compile ───────────────────
       # package-linux.sh's --format= flag accepts a comma-separated list and
       # runs the frontend/backend/host/schema/bundle build exactly once,
       # then packages each format from that same build output — see that
       # script's header comment. Do not call it once per format here; that
-      # would silently triple the compile time (and the CEF download/cache
+      # would silently quadruple the compile time (and the CEF download/cache
       # cost above is per-job, not per-format, so this is the only place
       # that duplication could sneak back in).
-      - name: Build AppImage + deb + tarball
+      - name: Build AppImage + deb + rpm + tarball
         run: |
           mkdir -p "$OUT"
-          RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=appimage,deb,tarball "$OUT"
+          RELEASE_CHANNEL=stable bash scripts/package-linux.sh --format=appimage,deb,rpm,tarball "$OUT"
 
       - name: Locate built packages
         id: pkgs
         run: |
           APPIMAGE=$(ls "$OUT"/AgentMux_*_amd64.AppImage | head -1)
           DEB=$(ls "$OUT"/AgentMux_*_amd64.deb | head -1)
+          RPM=$(ls "$OUT"/AgentMux-*.x86_64.rpm | head -1)
           TARBALL=$(ls "$OUT"/AgentMux_*_amd64-portable.tar.gz | head -1)
           echo "appimage_path=$APPIMAGE" >> "$GITHUB_OUTPUT"
           echo "deb_path=$DEB"           >> "$GITHUB_OUTPUT"
+          echo "rpm_path=$RPM"           >> "$GITHUB_OUTPUT"
           echo "tarball_path=$TARBALL"   >> "$GITHUB_OUTPUT"
 
       # ── Upload to GitHub Actions artifacts (always) ────────────────────────
@@ -260,6 +268,13 @@ jobs:
         with:
           name: linux-deb
           path: ${{ steps.pkgs.outputs.deb_path }}
+          if-no-files-found: error
+
+      - name: Upload rpm as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm
+          path: ${{ steps.pkgs.outputs.rpm_path }}
           if-no-files-found: error
 
       - name: Upload tarball as workflow artifact
@@ -278,5 +293,6 @@ jobs:
           gh release upload "${{ steps.in.outputs.release_tag }}" \
             "${{ steps.pkgs.outputs.appimage_path }}" \
             "${{ steps.pkgs.outputs.deb_path }}" \
+            "${{ steps.pkgs.outputs.rpm_path }}" \
             "${{ steps.pkgs.outputs.tarball_path }}" \
             --repo agentmuxai/agentmux --clobber
