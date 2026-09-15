@@ -10,6 +10,34 @@
 # emits for a non-component Release). The size-reduction block at the bottom is the
 # AgentMux addition — see the comment there.
 
+# use_static_angle=false (added 2026-09-15, CEF 152 upgrade, Phase D) — this
+# file previously had no `use_static_angle` override, which was fine at 148
+# (Chromium's resolved default at that milestone produced a real ANGLE-linked
+# libEGL.so/libGLESv2.so without needing this set). At 152 the declared
+# default (ui/gl/features.gni: `use_static_angle = true`) combines with
+# ui/gl/BUILD.gn's `use_angle_stubs = use_static_angle && (is_linux || is_win
+# || is_mac)` to ship DUMMY stub libEGL.so/libGLESv2.so instead ("some bot
+# infrastructure expects these files to exist even in static builds" — i.e.
+# placeholders, not a real GL implementation). Compiles with ZERO errors and
+# ZERO warnings; the shipped runtime has no working GPU/WebGL
+# (`eglGetProcAddress` not found at init, falls back to neither hardware NOR
+# SwiftShader — GPU fully disabled, not degraded). Confirmed directly: the
+# built libEGL.so/libGLESv2.so (963,712 / 963,912 bytes) export neither
+# `eglGetProcAddress` nor `glGetString` (`scripts/verify-angle-libs.sh`), and
+# — unlike macOS, which statically links real ANGLE straight into the
+# framework binary and is correct leaving this unset (see
+# args-darwin.gn) — a full `nm` symbol-table search of libcef.so itself found
+# zero `angle::`/`rx::` symbols, so Linux is not that case either. This is
+# the identical bug Korp found and fixed for Windows in args-windows.gn
+# (#3172) — that fix does not cover Linux; the `is_linux || is_win || is_mac`
+# gate means each platform must be checked independently, not that each
+# needs this same line — Linux and Windows both need it, but macOS must
+# leave `use_static_angle` unset (see args-darwin.gn) since it statically
+# links a real ANGLE into the framework binary already.
+# See docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md's Phase D
+# section for the full investigation across all three platforms.
+use_static_angle=false
+
 blink_heap_inside_shared_library=true
 clang_use_chrome_plugins=false
 enable_background_mode=false
