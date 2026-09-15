@@ -473,3 +473,79 @@ saga succeeds for this specific case, which is exactly this known gap.
   Verified passing alongside the rest of the `ptyshell_*` suite run
   together in one process (6 passed), and the full non-ignored suite
   (3352 passed, 0 failed) — both re-run after these changes.
+
+## 11. §10's close-on-exit broke the agent composer-drawer shell — found live, fixed
+
+Rebuilt and shipped §10 to a live dev instance for the reporter to retest.
+Report back: "still hangs," then "after a couple seconds the pane changes
+to the in-progress pulsating brain," then "the pane header has the 'shell
+exited, refresh' icon." That sequence, plus srv logs showing a SECOND
+`ControllerResync`/spawn/exit cycle appearing ~16s after the first exit,
+diagnosed to: the pane under test was an agent pane's composer-drawer
+shell (`AgentShellSubblock.tsx`), not a plain top-level `Terminal` widget
+— confirmed via `blockcontroller::obj::Block.parentoref` being non-empty
+for this shell's block (`block:<agent_block_id>`).
+
+**Root cause:** §10's `effective_close_on_exit` didn't distinguish a
+top-level pane from a SUB-block. `sagas::delete_block::run` doesn't know
+about `META_KEY_SHELL_SUBBLOCK_ID` — that pointer lives on the PARENT
+agent block's own meta and is entirely unrelated to, and untouched by,
+the generic delete-block saga. So close-on-exit's saga call deleted the
+drawer's shell block correctly, but left the parent's
+`term:shellsubblockid` pointing at now-nothing. `AgentShellSubblock.tsx`'s
+own "attach or create" logic (mount-time, or on next observation that its
+pointed-to block is gone) then did exactly what it's designed to do for
+a genuinely-missing shell: silently create a fresh one — the BrainSpinner
+is that recreate's own loading state (per its doc comment,
+`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`, "masks the
+drawer from mount until... the terminal is constructed"). Net effect: the
+original bug, reproduced via a slower path — respawn instead of a tight
+loop, but still not "closed," and now with §10's delay stacked in front
+of it too. The "shell exited, refresh" icon the reporter also saw is
+existing, correct UI (a genuine, separate affordance for the exited
+state) that briefly showed before close-on-exit deleted the block out
+from under it.
+
+**Fix:** `lifecycle.rs` now also checks `Block.parentoref` at spawn time
+(via `self.wstore`, already available) and force-disables `close_on_exit`
+for any block with a non-empty parent, regardless of what
+`effective_close_on_exit`'s meta/controller-type default would otherwise
+say. A block with a parent is a sub-block — an agent's composer-drawer
+shell OR a `PtyShellCreate`-spawned headless shell — never an independent
+top-level pane a generic "delete + prune from layout" saga is safe to
+apply to. A block with no parent (the `Terminal` widget, opened directly
+in a tab) is unaffected and still closes as designed.
+
+This also **retroactively simplifies §10's "known, accepted limitation"**
+about `PtyShellCreate` blocks: that section reasoned the saga would just
+*fail* for those (wrong `tab_id`) and leave a harmless orphaned row. That
+reasoning happened to be correct for THAT specific case, but was
+incidental, not principled — this fix now excludes ALL parented blocks
+deliberately, on the actually-correct signal (`parentoref`), not by
+accident of one call site's placeholder tab_id.
+
+**Tests:** the §10 test that spawned via `PtyShellCreate` (always
+parented) was actually testing the WRONG case — passing only because it
+used a test-local fake hook that doesn't care about correctness, not
+because closing a parented block was ever right. Split into two:
+- `ptyshell_create_does_not_close_the_parented_shell_pane_after_exit` —
+  asserts the hook does NOT fire for a `PtyShellCreate`-spawned (always
+  parented) block.
+- `shell_pane_with_no_parent_closes_itself_after_exit` — asserts it DOES
+  fire for a genuinely parent-less block, driven directly via
+  `resync_controller`/`send_input` (not the `/api/v1/ptyshell/*` HTTP
+  family, which can only ever produce parented blocks). Writing this test
+  surfaced one more real thing worth recording: with no real terminal
+  emulator attached (no xterm.js, no WS client), `cmd.exe`'s startup
+  `ESC[6n` cursor-position query is never answered and the shell hangs
+  forever — invisible in production (xterm.js answers it automatically
+  over the WS path; `answer_conpty_handshake_if_seen` answers it for the
+  `/api/v1/ptyshell/*` family) but real when driving a PTY directly with
+  nothing on the other end. The test answers it manually (`ESC[1;1R`,
+  a Cursor Position Report) before proceeding, matching what a real
+  terminal emulator would send.
+
+Re-verified: full `ptyshell_*` suite (6 tests, run together in one
+process) plus the new parent-less test (run individually, same
+`OnceLock` constraint as its siblings) both passing, and the full
+non-ignored suite (3352 passed, 0 failed) — all re-run after this fix.
