@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# node:22-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
+# node:24-slim ships a 'node' user at UID 1000. Rename it to 'agent' for clarity
 # rather than creating a second UID-1000 user (useradd --non-unique is fragile).
 RUN usermod -l agent -d /home/agent -m node \
     && groupmod -n agent node
