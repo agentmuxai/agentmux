@@ -65,6 +65,17 @@ if [ -z "$APPIMAGETOOL" ]; then
     fi
 fi
 
+# --- 0. Wipe the whole AppDir first (ReAgent P1, PR #3236) — the original
+#        script did `rm -rf "$APPDIR"` before staging anything, which this
+#        refactor initially dropped: stage-linux-runtime.sh only wipes its
+#        own $STAGING_ROOT/usr, never the AppDir's top-level content
+#        (assets/linux/, install-linux-desktop.sh,
+#        install-userns-apparmor-fix.sh, agentmux.desktop, agentmux.png,
+#        .DirIcon — all populated via `cp`, i.e. overwrite-only). Without
+#        this, a removed/renamed source file would silently leave a stale
+#        copy in every subsequent local build's shipped AppImage. ---
+rm -rf "$APPDIR"
+
 # --- 1-6b. Shared runtime staging (binaries, CEF libs, frontend, schema,
 #           VERSION marker) — extracted into stage-linux-runtime.sh so
 #           build-deb-linux.sh and build-tarball-linux.sh ship the identical
