@@ -1004,8 +1004,9 @@ impl Controller for ShellController {
         // reader cleanup hits the identical descendant-held-descriptor case
         // and already establishes the fix: reap the child first
         // (unconditional, not gated on any reader/flusher), then bound the
-        // reader/flusher wait with a timeout that `abort()`s on expiry
-        // rather than waiting forever.
+        // reader/flusher wait with a timeout rather than waiting forever —
+        // see the timeout's own comment below for why expiry does NOT
+        // `abort()` here, unlike `persistent.rs`'s version of this bound.
         tokio::spawn(async move {
             // Reap the child (blocking OS call) on its own — depends only
             // on the direct child exiting, never on PTY EOF. Clones
