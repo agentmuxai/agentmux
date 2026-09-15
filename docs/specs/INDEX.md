@@ -249,6 +249,7 @@ partial list.
 | [`SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22`](SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) | SPEC: `FleetBulkStop` reaches cross-channel targets; LAN/WAN deliberately deferred |
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
 | [`SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24`](SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md) | SPEC: Global Memory "system" tier — an AgentMux-controlled, highest-priority entry |
+| [`SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15`](SPEC_GLOBAL_MEMORY_UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md) | Spec: Global Memory — unify "system" and "ordinary" into one Memory list (postmortem + refactor plan) |
 | [`SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17`](SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md) | SPEC: External-link routing + single robust "Restore" recovery |
 | [`SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16`](SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md) | SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle |
 | [`SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27`](SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md) | Spec: Opt-in isolated auth for `task dev` testing |
