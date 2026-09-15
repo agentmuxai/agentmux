@@ -61,7 +61,7 @@ IFS=',' read -r -a FORMATS <<< "$FORMAT"
 for f in "${FORMATS[@]}"; do
     case "$f" in
         appimage|deb|rpm|tarball) ;;
-        *) echo "ERROR: unknown format '$f' in --format=$FORMAT (supported: appimage, deb, tarball)" >&2; exit 1 ;;
+        *) echo "ERROR: unknown format '$f' in --format=$FORMAT (supported: appimage, deb, rpm, tarball)" >&2; exit 1 ;;
     esac
 done
 

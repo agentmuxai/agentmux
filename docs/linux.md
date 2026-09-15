@@ -64,6 +64,19 @@ sudo bash install-userns-apparmor-fix.sh <path-to-a-file-containing-the-profile>
 AGENTMUX_UNSAFE_NOSANDBOX=1 ./AgentMux_*.AppImage
 ```
 
+**`.deb`/`.rpm` installs are covered too** (as of
+[`SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md`](docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md)
+Phase 1) — the generated profile includes a stanza for their fixed
+`/opt/agentmux/bin/agentmux-cef` install path, and the helper script ships
+alongside the binary there.
+
+**The portable `.tar.gz` is NOT covered.** It has no fixed install path by
+design (extract anywhere) — a static AppArmor profile fundamentally can't
+name a location that doesn't exist yet. "Fix it now" fails gracefully with
+an error (re-shows the dialog rather than crashing or claiming false
+success) if you hit this restriction using the tarball. Use the AppImage or
+`.deb`/`.rpm` instead, or fall back to `AGENTMUX_UNSAFE_NOSANDBOX=1`.
+
 Full design: [`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md`](docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md).
 
 ## Log access

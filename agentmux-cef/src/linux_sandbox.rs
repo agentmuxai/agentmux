@@ -29,8 +29,10 @@
 pub const APPARMOR_PROFILE_INSTALL_PATH: &str = "/etc/apparmor.d/agentmux-userns";
 
 /// Build the AppArmor profile text granting the `userns` rule to AgentMux's
-/// CEF host binary, covering both the common case (AppRun's extract-once
-/// cache) and the FUSE-mount fallback (extraction failed / not yet run).
+/// CEF host binary, covering the common case (AppRun's extract-once
+/// cache), the FUSE-mount fallback (extraction failed / not yet run), and
+/// (as of docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
+/// Phase 1) the fixed install path used by the `.deb`/`.rpm` packages.
 ///
 /// The version-segment wildcard (`extracted/*/`) is the load-bearing part —
 /// the extract-once cache path embeds the running AgentMux version
@@ -38,6 +40,14 @@ pub const APPARMOR_PROFILE_INSTALL_PATH: &str = "/etc/apparmor.d/agentmux-userns
 /// every update. Without the wildcard, this profile would need reinstalling
 /// after every single AgentMux upgrade, defeating the entire point of a
 /// one-time fix. See spec §1.3.
+///
+/// **Does NOT cover the portable `.tar.gz`** — that format has no fixed
+/// install path by design (extract anywhere), so a static AppArmor profile
+/// fundamentally cannot name its binary's location in advance. A user on
+/// an AppArmor-restricted system who hits this with the tarball needs to
+/// use the AppImage or `.deb`/`.rpm` instead, or fall back to
+/// `AGENTMUX_UNSAFE_NOSANDBOX=1` — documented in docs/linux.md rather than
+/// silently unhandled.
 pub fn build_apparmor_profile() -> String {
     format!(
         "# Installed by AgentMux's one-time sandbox-fix helper.\n\
@@ -55,6 +65,16 @@ pub fn build_apparmor_profile() -> String {
          # verify this matches the pinned appimagetool version's actual\n\
          # naming before relying on this stanza alone.\n\
          profile agentmux-userns-fuse /tmp/.mount_AgentMu*/usr/bin/agentmux-cef flags=(unconfined) {{\n\
+         \x20 userns,\n\
+         }}\n\
+         \n\
+         # .deb/.rpm install path (fixed, not user-chosen — see\n\
+         # scripts/build-deb-linux.sh / build-rpm-linux.sh's /opt/agentmux\n\
+         # layout). No version-wildcard needed: package upgrades replace\n\
+         # the files at this same fixed path rather than adding a new\n\
+         # version-suffixed directory the way the AppImage's extract cache\n\
+         # does.\n\
+         profile agentmux-userns-installed /opt/agentmux/bin/agentmux-cef flags=(unconfined) {{\n\
          \x20 userns,\n\
          }}\n"
     )
@@ -456,9 +476,19 @@ mod tests {
     }
 
     #[test]
-    fn apparmor_profile_grants_userns_in_both_stanzas() {
+    fn apparmor_profile_covers_deb_rpm_install_path() {
+        // docs/specs/SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md
+        // Phase 1 — the .deb/.rpm install path (scripts/build-deb-linux.sh,
+        // build-rpm-linux.sh). No version wildcard: package upgrades
+        // replace files at this same fixed path.
         let profile = build_apparmor_profile();
-        assert_eq!(profile.matches("userns,").count(), 2);
+        assert!(profile.contains("/opt/agentmux/bin/agentmux-cef"));
+    }
+
+    #[test]
+    fn apparmor_profile_grants_userns_in_all_stanzas() {
+        let profile = build_apparmor_profile();
+        assert_eq!(profile.matches("userns,").count(), 3);
     }
 
     #[test]
