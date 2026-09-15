@@ -56,7 +56,7 @@ pub enum RpcId {
 }
 
 impl RpcId {
-    fn from_value(value: &Value) -> Result<Self, AppServerError> {
+    pub(crate) fn from_value(value: &Value) -> Result<Self, AppServerError> {
         match value {
             Value::Number(number) if number.is_i64() || number.is_u64() => {
                 Ok(Self::Number(number.to_string()))
@@ -320,6 +320,25 @@ impl AppServerTransport {
         result: Result<Value, ServerResponseError>,
         write_timeout: Duration,
     ) -> Result<(), AppServerError> {
+        self.respond_tracked(id, result, write_timeout, &WriteOutcomeTracker::new())
+            .await
+    }
+
+    /// Same as `respond`, but also reports via `outcome` whether it would
+    /// be safe to retry after a non-success result — including a caller
+    /// whose own future is cancelled while this is still awaiting the
+    /// write-confirmation ack, which never produces a return value at all
+    /// (see `WriteOutcomeTracker`, `write_value_tracked`). A caller that
+    /// mistakes "timed out/cancelled waiting for confirmation" for "never
+    /// sent" and retries risks a second, duplicate response for the same
+    /// id (ReAgent P1, PR #3212 6th review).
+    pub async fn respond_tracked(
+        &self,
+        id: RpcId,
+        result: Result<Value, ServerResponseError>,
+        write_timeout: Duration,
+        outcome: &WriteOutcomeTracker,
+    ) -> Result<(), AppServerError> {
         let mut frame = Map::new();
         frame.insert("id".to_string(), id.to_value());
         match result {
@@ -334,9 +353,12 @@ impl AppServerTransport {
                 );
             }
         }
-        tokio::time::timeout(write_timeout, self.write_value(Value::Object(frame)))
-            .await
-            .map_err(|_| AppServerError::Timeout(write_timeout))?
+        tokio::time::timeout(
+            write_timeout,
+            self.write_value_tracked(Value::Object(frame), outcome),
+        )
+        .await
+        .map_err(|_| AppServerError::Timeout(write_timeout))?
     }
 
     pub async fn initialize(&self, timeout: Duration) -> Result<Value, AppServerError> {
@@ -396,6 +418,20 @@ impl AppServerTransport {
     }
 
     async fn write_value(&self, value: Value) -> Result<(), AppServerError> {
+        self.write_value_tracked(value, &WriteOutcomeTracker::new())
+            .await
+    }
+
+    /// See `WriteOutcomeTracker`. `outcome` moves to `OutcomeUnconfirmed`
+    /// the instant the frame is handed to `run_writer` — before awaiting
+    /// its write-confirmation ack — and to `ConfirmedUndelivered` if that
+    /// ack later reports a genuine failure, rather than staying stuck at
+    /// "unconfirmed" forever for an outcome that in fact became known.
+    async fn write_value_tracked(
+        &self,
+        value: Value,
+        outcome: &WriteOutcomeTracker,
+    ) -> Result<(), AppServerError> {
         if let Some(error) = self.failure() {
             return Err(error);
         }
@@ -421,7 +457,61 @@ impl AppServerTransport {
             })
             .await
             .map_err(|_| AppServerError::Closed)?;
-        written_rx.await.unwrap_or(Err(AppServerError::Closed))
+        // From here on the frame is irrevocably queued for writing by
+        // run_writer, independent of `written_rx` — dropping this future
+        // (a timeout or cancellation) cannot un-send it, so from this
+        // point a caller must not treat "didn't observe a confirmed
+        // outcome" the same as "never sent."
+        outcome.mark_queued();
+        let result = written_rx.await.unwrap_or(Err(AppServerError::Closed));
+        if result.is_err() {
+            // The writer itself confirmed delivery failed — genuinely
+            // never sent after all, so it's safe to retry again.
+            outcome.mark_confirmed_undelivered();
+        }
+        result
+    }
+}
+
+/// Tracks, for a single tracked outbound write, whether retrying after a
+/// non-success outcome risks sending the same frame twice. A plain
+/// success/failure `Result` isn't enough for this: once a frame is handed
+/// to `run_writer` it will be delivered independent of anything that
+/// happens afterward to the caller's future, including that future being
+/// dropped/cancelled before it ever observes an outcome — a case a Result
+/// alone can't represent, but which a caller's own `Drop` glue can still
+/// consult here (ReAgent P1, PR #3212 6th review).
+#[derive(Debug)]
+pub struct WriteOutcomeTracker(AtomicU8);
+
+impl WriteOutcomeTracker {
+    const NOT_QUEUED: u8 = 0;
+    const OUTCOME_UNCONFIRMED: u8 = 1;
+    const CONFIRMED_UNDELIVERED: u8 = 2;
+
+    pub fn new() -> Self {
+        Self(AtomicU8::new(Self::NOT_QUEUED))
+    }
+
+    fn mark_queued(&self) {
+        self.0.store(Self::OUTCOME_UNCONFIRMED, Ordering::Release);
+    }
+
+    fn mark_confirmed_undelivered(&self) {
+        self.0
+            .store(Self::CONFIRMED_UNDELIVERED, Ordering::Release);
+    }
+
+    /// True if the frame was never queued, or was queued and its delivery
+    /// is now confirmed to have failed — in both cases nothing was, or
+    /// ever will be, delivered, so sending again cannot produce a
+    /// duplicate. False once queued but unconfirmed, which also covers a
+    /// confirmed success (obviously never safe to retry either).
+    pub fn safe_to_retry(&self) -> bool {
+        matches!(
+            self.0.load(Ordering::Acquire),
+            Self::NOT_QUEUED | Self::CONFIRMED_UNDELIVERED
+        )
     }
 }
 
@@ -1382,5 +1472,95 @@ mod tests {
             std::mem::forget(temp);
             binary
         })
+    }
+
+    /// ReAgent P1, PR #3212 (6th review): a failure/timeout/cancellation
+    /// while `write_value_tracked` is still awaiting the failure() check
+    /// or the `outbound_tx.send(...)` step itself means the frame was
+    /// never handed to `run_writer` at all -- genuinely safe to retry.
+    #[tokio::test]
+    async fn write_outcome_tracker_stays_safe_to_retry_when_the_write_never_starts() {
+        let (client_io, _server_io) = duplex(4096);
+        let (client_reader, client_writer) = tokio::io::split(client_io);
+        let transport =
+            AppServerTransport::new(client_reader, client_writer, AppServerLimits::default());
+        fail_transport(&transport.shared, AppServerError::Closed);
+
+        let tracker = WriteOutcomeTracker::new();
+        let result = transport
+            .write_value_tracked(json!({"x": 1}), &tracker)
+            .await;
+        assert!(result.is_err());
+        assert!(tracker.safe_to_retry());
+    }
+
+    /// See write_outcome_tracker_stays_safe_to_retry_when_the_write_never_starts
+    /// -- once the peer is fully gone, run_writer's actual write fails and
+    /// reports that failure back through the confirmation ack, so the
+    /// caller learns for certain the frame was never delivered and it
+    /// becomes safe to retry again.
+    #[tokio::test]
+    async fn write_outcome_tracker_becomes_safe_to_retry_on_a_confirmed_write_failure() {
+        let (client_io, server_io) = duplex(4096);
+        drop(server_io);
+        let (client_reader, client_writer) = tokio::io::split(client_io);
+        let transport =
+            AppServerTransport::new(client_reader, client_writer, AppServerLimits::default());
+
+        let tracker = WriteOutcomeTracker::new();
+        let result = transport
+            .write_value_tracked(json!({"x": 1}), &tracker)
+            .await;
+        assert!(result.is_err(), "the write should fail once the peer is gone");
+        assert!(
+            tracker.safe_to_retry(),
+            "a confirmed write failure means the frame was genuinely never delivered"
+        );
+    }
+
+    /// ReAgent P1, PR #3212 (6th review): once the frame is handed to
+    /// run_writer, it will be delivered independent of anything that
+    /// happens to this call afterward. A caller whose future is
+    /// cancelled while still waiting on the confirmation ack must not
+    /// treat that the same as "never sent" -- a 1-byte duplex buffer with
+    /// nothing reading the other side guarantees the write stays stuck
+    /// there deterministically, rather than racing a timing window.
+    #[tokio::test]
+    async fn write_outcome_tracker_stays_unconfirmed_when_cancelled_after_queueing() {
+        let (client_io, _server_io) = duplex(1);
+        let (client_reader, client_writer) = tokio::io::split(client_io);
+        let transport = Arc::new(AppServerTransport::new(
+            client_reader,
+            client_writer,
+            AppServerLimits::default(),
+        ));
+        let tracker = Arc::new(WriteOutcomeTracker::new());
+
+        let task_transport = transport.clone();
+        let task_tracker = tracker.clone();
+        let handle = tokio::spawn(async move {
+            task_transport
+                .write_value_tracked(json!({"x": 1}), &task_tracker)
+                .await
+        });
+
+        for _ in 0..100 {
+            if !tracker.safe_to_retry() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            !tracker.safe_to_retry(),
+            "the frame should already be queued (unconfirmed) while the write is stuck"
+        );
+
+        handle.abort();
+        let _ = handle.await;
+
+        assert!(
+            !tracker.safe_to_retry(),
+            "a cancelled write whose outcome was never confirmed must stay unsafe to retry"
+        );
     }
 }
