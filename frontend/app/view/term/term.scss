@@ -282,6 +282,35 @@
         flex-shrink: 0; // a normal-flow row in this flex column now
     }
 
+    // Selection ring for the WHOLE pane (header + tab strip + content) —
+    // docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
+    // 2026_09_15.md. Same fix, same cause, as .agent-pane-stack's own
+    // (agent-view.scss) — block.scss's `.block-mask` can only ring the
+    // nested, switch-scoped <Block> below (`.term-pane-stack-content`'s
+    // own child), not this outer, persistent shell the header/strip were
+    // hoisted into. Painted as an absolute overlay pseudo-element, same
+    // technique `.block-mask` uses, so it never affects this flex column's
+    // own box size. Mirrors `.block-mask`'s three states exactly: dim by
+    // default, accent when focused, transparent when this is the only
+    // pane in the tab (`isAlone`, term.tsx).
+    &::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border: 2px solid var(--border-color);
+        border-radius: var(--block-border-radius);
+        z-index: var(--zindex-block-mask-inner);
+    }
+
+    &.term-pane-stack-focused::after {
+        border-color: var(--accent-color);
+    }
+
+    &.term-pane-stack-alone::after {
+        border-color: transparent;
+    }
+
     // Spans the strip AND the terminal — the positioned ancestor for the
     // background-image layer and the agent-runtime badge that TermPaneChrome
     // renders (both used to sit inside `.view-term` back when that contained
@@ -336,5 +365,18 @@
         min-height: 0;
         position: relative;
         display: flex;
+
+        // Once .term-pane-stack's own ::after ring (above) covers the
+        // whole pane, the nested <Block>'s own .block-mask would draw a
+        // SECOND ring around just this content sub-region — a redundant
+        // seam right below the header/strip. Neutralize its border only
+        // (not `display` — .block-mask also drives the drag-resize
+        // dimming overlay, which must keep working here). `!important` to
+        // beat `.block-focused .block-mask`'s own un-`!important`d rule
+        // regardless of source order — see .agent-pane-stack-content's
+        // identical comment (agent-view.scss) for the full reasoning.
+        .block-mask {
+            border-color: transparent !important;
+        }
     }
 }

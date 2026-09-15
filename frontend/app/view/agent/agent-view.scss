@@ -80,12 +80,60 @@
         // its own content height so it can't be stretched or compressed
         // by .agent-pane-stack's flex-column sizing.
     }
+
+    // Selection ring for the WHOLE pane (header + progress bar + content) —
+    // docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
+    // 2026_09_15.md. block.scss's `.block-mask` can only ring the nested,
+    // switch-scoped <Block> below (`.agent-pane-stack-content`'s own child)
+    // — it has no way to reach the header/progress-bar row that's hoisted
+    // OUTSIDE that `<Block>` by this component. Painted as an absolute
+    // overlay pseudo-element, the same technique `.block-mask` itself uses
+    // (block.scss), so it never affects this flex column's own box size —
+    // a real `border` here would shift every child by the border width.
+    // Mirrors `.block-mask`'s own three states (block.scss:242-334)
+    // exactly: dim by default, accent when focused, transparent when this
+    // is the only pane in the tab (`isAlone`, agent-view.tsx) since a
+    // single-pane tab's focus state carries no signal to show.
+    &::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border: 2px solid var(--border-color);
+        border-radius: var(--block-border-radius);
+        z-index: var(--zindex-block-mask-inner);
+    }
+
+    &.agent-pane-stack-focused::after {
+        border-color: var(--accent-color);
+    }
+
+    &.agent-pane-stack-alone::after {
+        border-color: transparent;
+    }
 }
 
 .agent-pane-stack-content {
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
+
+    // Once .agent-pane-stack's own ::after ring (above) covers the whole
+    // pane, the nested <Block>'s own .block-mask (block.scss, shared by
+    // every pane type) would draw a SECOND ring around just this
+    // content sub-region — a redundant seam right where the header ends.
+    // Neutralize its border only, here — scoped to this container so
+    // every other pane type (which has no outer ring to begin with) is
+    // untouched — without touching `display` or anything else on
+    // .block-mask, since it also drives the drag-resize dimming overlay
+    // (`.show-block-mask`/`.block-mask-inner`, block.scss) which must
+    // keep working here exactly as it does everywhere else. `!important`
+    // to beat `.block-focused .block-mask`'s own un-`!important`d rule
+    // regardless of source order — CSS always lets `!important` win over
+    // a non-`!important` declaration irrespective of specificity.
+    .block-mask {
+        border-color: transparent !important;
+    }
 
     // Floats over the content instead of reserving its own row —
     // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md. Originally: with one
@@ -264,9 +312,17 @@
 // strip.
 .agent-pane-progress-bar-slot {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
+    // Inset by .agent-pane-stack's own ::after ring's border width (2px,
+    // above) rather than sitting flush at 0 — otherwise the bar's fill
+    // paints directly over the new top/left/right ring instead of nesting
+    // inside it (docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_
+    // HOISTED_HEADER_2026_09_15.md). Still overlays the header's own top
+    // pixels with no reserved layout space — only the offset from the ring
+    // itself is new, the original no-layout-shift design (SPEC_AGENT_PANE_
+    // PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md) is otherwise unchanged.
+    top: 2px;
+    left: 2px;
+    right: 2px;
     height: 3px;
     overflow: hidden;
     pointer-events: none;

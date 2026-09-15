@@ -451,6 +451,16 @@ const TermPaneChrome = (props: {
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
+    // Selection ring for the WHOLE pane (header + tab strip + content) — same
+    // fix as AgentPaneChrome's (agent-view.tsx), same underlying cause: see
+    // docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
+    // 2026_09_15.md, which flagged this as the same latent gap in
+    // TermPaneChrome, confirmed live. Mirrors BlockFrame_Default_Component's
+    // own `isFocused`/`isAlone` reads (blockframe.tsx) exactly, including
+    // the "single pane in the tab, focus carries no signal" suppression.
+    const isFocused = () => nodeModel.isFocused();
+    const isAlone = () => nodeModel.numLeafs() <= 1;
+
     // Tracks the CURRENTLY ACTIVE member, not the anchor — getWaveObjectAtom
     // inside a memo (not useWaveObjectValue), the reactive-oref pattern
     // established in #3134 for exactly this kind of switch-surviving reader.
@@ -658,6 +668,10 @@ const TermPaneChrome = (props: {
     return (
         <div
             class="term-pane-stack"
+            classList={{
+                "term-pane-stack-focused": isFocused() && !isAlone(),
+                "term-pane-stack-alone": isAlone(),
+            }}
             // Keeps this pane reachable by the CEF browser API's
             // `[data-blockid]` subtree scoping (UIQuery/UIClick/screenshot
             // clip) now that chrome sits OUTSIDE the nested `.block` that

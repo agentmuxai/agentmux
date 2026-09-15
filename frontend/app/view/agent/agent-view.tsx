@@ -371,6 +371,19 @@ export const AgentPaneChrome = (props: {
     // (layout/lib/types.ts).
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
+    // Selection ring for the WHOLE pane (header + progress bar + content) —
+    // see docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
+    // 2026_09_15.md. .block-mask (blockframe.tsx/block.scss) only paints a
+    // ring around the nested, switch-scoped <Block> below — it can't cover
+    // this outer, persistent shell once chrome is hoisted out of it. Mirrors
+    // BlockFrame_Default_Component's own `isFocused`/`isAlone` reads
+    // (blockframe.tsx) exactly, including the same "single pane in the tab
+    // means focus carries no signal, suppress the ring" rule — without
+    // isAlone, a single-agent-pane tab would show a permanently-lit ring
+    // since it's effectively always the focused pane.
+    const isFocused = () => nodeModel.isFocused();
+    const isAlone = () => nodeModel.numLeafs() <= 1;
+
     // Block-scoped reads (agentId/isHistoryTab/zoom) must track the
     // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
     // ViewModel instance first rendered this chrome) — getWaveObjectAtom
@@ -785,6 +798,10 @@ export const AgentPaneChrome = (props: {
         // it resolves to the wider root that actually contains everything.
         <div
             class="agent-pane-stack"
+            classList={{
+                "agent-pane-stack-focused": isFocused() && !isAlone(),
+                "agent-pane-stack-alone": isAlone(),
+            }}
             data-blockid={activeBlockId()}
             // codex P2 on this PR: the hoisted header is a SIBLING above the
             // nested `.block`, so clicks/focus on it no longer bubble to the
