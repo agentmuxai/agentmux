@@ -567,6 +567,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/memory/history", get(handle_agent_memory_history))
         .route("/api/v1/agent/memory/diff", get(handle_agent_memory_diff))
         .route("/api/v1/agent/memory/revert", post(handle_agent_memory_revert))
+        // Global Memory (agent-facing) — SPEC_AGENT_FACING_GLOBAL_MEMORY_
+        // API_2026_09_15.md. Unlike the agent/memory/* routes above (each
+        // agent's own private native memory), these touch a single,
+        // shared, workspace-wide list every agent inherits at launch. Same
+        // trust model as every other route in this block: `agent_id` comes
+        // from agentmux-mcp's trusted env, never forgeable from an agent's
+        // own PTY. Never exposes or accepts a system-tier (`is_system`)
+        // entry — see `global_memory_write_impl`'s own doc comment.
+        .route("/api/v1/agent/globalmemory/write", post(handle_agent_globalmemory_write))
+        .route("/api/v1/agent/globalmemory/list", get(handle_agent_globalmemory_list))
+        .route("/api/v1/agent/globalmemory/read", get(handle_agent_globalmemory_read))
+        .route("/api/v1/agent/globalmemory/remove", post(handle_agent_globalmemory_remove))
         .route("/api/v1/agent/preset/list", get(handle_agent_preset_list))
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
@@ -2191,6 +2203,91 @@ async fn handle_agent_memory_revert(
     Json(req): Json<AgentMemoryRevertRequest>,
 ) -> impl IntoResponse {
     app_api_response(app_api::memory_revert_impl(&state, &req.agent_id, &req.filename, &req.target_version_id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryWriteProvenanceReq {
+    source: String,
+    // Same "default() on a bare Value yields Null, not {}" trap as
+    // AgentMemoryWriteProvenanceReq above — see that struct's own comment.
+    #[serde(default = "default_agent_globalmemory_write_detail")]
+    detail: serde_json::Value,
+}
+
+fn default_agent_globalmemory_write_detail() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryWriteRequest {
+    agent_id: String,
+    #[serde(default)]
+    id: Option<String>,
+    name: String,
+    content: String,
+    #[serde(default)]
+    provenance: Option<AgentGlobalMemoryWriteProvenanceReq>,
+}
+
+/// `POST /api/v1/agent/globalmemory/write` — create a new ordinary Global
+/// Memory entry, or update an existing one by `id`. Never reaches a
+/// system-tier row either way — see `global_memory_write_impl`'s own doc
+/// comment for the full invariant. Backs the `GlobalMemoryWrite` MCP tool.
+async fn handle_agent_globalmemory_write(
+    State(state): State<AppState>,
+    Json(req): Json<AgentGlobalMemoryWriteRequest>,
+) -> impl IntoResponse {
+    let mut detail_str = String::new();
+    let provenance = if let Some(p) = req.provenance.as_ref() {
+        detail_str = p.detail.to_string();
+        Some(app_api::GlobalMemoryWriteProvenance { source: &p.source, detail: &detail_str })
+    } else {
+        None
+    };
+    app_api_response(app_api::global_memory_write_impl(
+        &state,
+        &req.agent_id,
+        req.id.as_deref(),
+        &req.name,
+        &req.content,
+        provenance,
+    ))
+}
+
+/// `GET /api/v1/agent/globalmemory/list` — ordinary (non-system) Global
+/// Memory entries, summary only (id/name/updated_at, no content). Backs the
+/// `GlobalMemoryList` MCP tool.
+async fn handle_agent_globalmemory_list(State(state): State<AppState>) -> impl IntoResponse {
+    app_api_response(app_api::global_memory_list_impl(&state))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryReadQuery {
+    id: String,
+}
+
+/// `GET /api/v1/agent/globalmemory/read?id=<id>` — full content of one
+/// ordinary Global Memory entry. Backs the `GlobalMemoryRead` MCP tool.
+async fn handle_agent_globalmemory_read(
+    State(state): State<AppState>,
+    Query(q): Query<AgentGlobalMemoryReadQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::global_memory_read_impl(&state, &q.id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentGlobalMemoryRemoveRequest {
+    id: String,
+}
+
+/// `POST /api/v1/agent/globalmemory/remove` — demote a Global Memory entry
+/// (clears `is_global`; the bundle row itself survives, same as the Armory
+/// UI's own "Remove" button). Backs the `GlobalMemoryRemove` MCP tool.
+async fn handle_agent_globalmemory_remove(
+    State(state): State<AppState>,
+    Json(req): Json<AgentGlobalMemoryRemoveRequest>,
+) -> impl IntoResponse {
+    app_api_response(app_api::global_memory_remove_impl(&state, &req.id))
 }
 
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary

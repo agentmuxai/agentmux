@@ -1079,6 +1079,192 @@ pub(crate) fn memory_write_impl(
     Ok(())
 }
 
+// ---- Global Memory (agent-facing) — SPEC_AGENT_FACING_GLOBAL_MEMORY_API_
+// 2026_09_15.md Phase 1. Unlike native memory above (per-agent, filesystem-
+// backed), Global Memory is a pure `db_bundles` row an agent can read/write
+// through here for the FIRST time — previously only reachable via the
+// authenticated WebSocket RPC channel the frontend uses
+// (`agent_handlers/bundle.rs`'s `upsertmemory`), which `agentmux-mcp`
+// cannot reach at all. Every function here calls the SAME
+// `Store::bundle_upsert`/`bundle_get`/`bundle_list_global` the human-facing
+// Armory editor already uses — no new storage-layer write path, no new way
+// to touch a row this app didn't already know how to touch.
+//
+// The one invariant every function below shares: NONE of them ever read or
+// set `is_system` from caller input, and none of them accept/return a
+// system-tier row. This is enforced twice, independently, on purpose:
+// `Store::bundle_upsert` itself already refuses to touch an existing
+// `is_system=1` row (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md), and
+// separately, the code below never even constructs a request/response that
+// could carry `is_system=true` in the first place. A future refactor would
+// have to break BOTH independently to let an agent reach the system tier
+// through this surface.
+
+/// Caller-supplied provenance for a `globalmemory.write` call — same shape
+/// as `MemoryWriteProvenance` above; kept as a distinct type since callers
+/// are conceptually different (an agent writing to a workspace-wide list
+/// every other agent inherits, not its own private memory) even though the
+/// wire shape is identical.
+pub(crate) struct GlobalMemoryWriteProvenance<'a> {
+    pub source: &'a str,
+    pub detail: &'a str,
+}
+
+/// Creates a new ordinary Global Memory entry, or updates an existing one
+/// by `id`. Backs the `GlobalMemoryWrite` MCP tool.
+pub(crate) fn global_memory_write_impl(
+    state: &AppState,
+    agent_id: &str,
+    id: Option<&str>,
+    name: &str,
+    content: &str,
+    provenance: Option<GlobalMemoryWriteProvenance<'_>>,
+) -> Result<serde_json::Value, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("globalmemory.write: name is required".to_string());
+    }
+    // Generous but bounded — Global Memory entries are meant to be readable
+    // instructions text, not arbitrary file storage (memory.write's own
+    // 10MB cap is for markdown notes files; this is an order of magnitude
+    // tighter since every agent's launch has to parse and inject this).
+    const MAX: usize = 1024 * 1024;
+    if content.len() > MAX {
+        return Err(format!("globalmemory.write: content too large ({} bytes, max {MAX})", content.len()));
+    }
+
+    let now = agentmux_common::time::now_ms();
+    let is_new = id.map(|v| v.is_empty()).unwrap_or(true);
+    let bundle = match id {
+        Some(existing_id) if !existing_id.is_empty() => {
+            let mut existing = state.id_store.bundle_get(existing_id)
+                .map_err(|e| format!("globalmemory.write: {e}"))?
+                .ok_or_else(|| format!("globalmemory.write: not found id={existing_id}"))?;
+            // Belt-and-suspenders with bundle_upsert's own guard (see this
+            // section's top-of-block comment) — refuse here too, before
+            // even attempting the write, so the error message is specific
+            // to this API rather than bundle_upsert's generic one.
+            if existing.is_system {
+                return Err(
+                    "globalmemory.write: cannot modify a system Global Memory entry through this API"
+                        .to_string(),
+                );
+            }
+            existing.name = name.to_string();
+            existing.instructions = content.to_string();
+            existing.is_global = true;
+            existing.updated_at = now;
+            existing
+        }
+        _ => Bundle {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: content.to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            is_system: false,
+            created_at: now,
+            updated_at: now,
+        },
+    };
+
+    state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.write: {e}"))?;
+
+    // New entries sort LAST, matching the Armory UI's own "+ New section"
+    // behavior (global-bundle-model.ts's saveEdit) — without this, a fresh
+    // bundle_id defaults to sort_order=0 and could land ambiguously
+    // interleaved with any other 0-sort_order row instead of visibly
+    // appended at the end of the order the operator/agent expects.
+    if is_new {
+        let ordinary_ids: Vec<String> = state.id_store.bundle_list_global()
+            .map_err(|e| format!("globalmemory.write: {e}"))?
+            .into_iter()
+            .filter(|b| !b.is_system && b.id != bundle.id)
+            .map(|b| b.id)
+            .chain(std::iter::once(bundle.id.clone()))
+            .collect();
+        if let Err(e) = state.id_store.bundle_reorder(&ordinary_ids) {
+            tracing::warn!(agent_id, bundle_id = %bundle.id, error = %e, "globalmemory.write: append-to-order failed (non-fatal)");
+        }
+    }
+
+    let (source, detail) = match &provenance {
+        Some(p) => (p.source, p.detail),
+        None => ("agent_inferred", "{}"),
+    };
+    let source_detail = if detail.is_empty() { "{}" } else { detail };
+    if let Err(e) = state.id_store.bundle_version_insert(&bundle.id, &bundle.name, &bundle.instructions, source, source_detail) {
+        tracing::warn!(agent_id, bundle_id = %bundle.id, error = %e, "globalmemory.write: version insert failed (non-fatal)");
+    }
+
+    state.broker.publish(crate::backend::wps::WaveEvent {
+        event: "memories:changed".to_string(),
+        scopes: vec![], sender: String::new(), persist: 0, data: None,
+    });
+    tracing::info!(agent_id, bundle_id = %bundle.id, name = %bundle.name, "globalmemory.write");
+    Ok(json!({ "id": bundle.id, "name": bundle.name }))
+}
+
+/// Ordinary (non-system) Global Memory entries only — id/name/updated_at,
+/// no content (mirrors `memory_list_impl`'s summary shape). The `is_system`
+/// filter is structural here, not just a response projection. Backs the
+/// `GlobalMemoryList` MCP tool.
+pub(crate) fn global_memory_list_impl(state: &AppState) -> Result<serde_json::Value, String> {
+    let entries: Vec<_> = state.id_store.bundle_list_global()
+        .map_err(|e| format!("globalmemory.list: {e}"))?
+        .into_iter()
+        .filter(|b| !b.is_system)
+        .map(|b| json!({ "id": b.id, "name": b.name, "updated_at": b.updated_at }))
+        .collect();
+    Ok(json!({ "entries": entries }))
+}
+
+/// Full content of one ordinary Global Memory entry by id. Refuses a
+/// system-tier id, same reasoning as write. Backs the `GlobalMemoryRead`
+/// MCP tool.
+pub(crate) fn global_memory_read_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
+    let bundle = state.id_store.bundle_get(id)
+        .map_err(|e| format!("globalmemory.read: {e}"))?
+        .ok_or_else(|| format!("globalmemory.read: not found id={id}"))?;
+    if bundle.is_system {
+        return Err("globalmemory.read: cannot read a system Global Memory entry through this API".to_string());
+    }
+    if !bundle.is_global {
+        return Err(format!("globalmemory.read: {id} is not a Global Memory entry"));
+    }
+    Ok(json!({ "id": bundle.id, "name": bundle.name, "content": bundle.instructions }))
+}
+
+/// Demotes a Global Memory entry (clears `is_global`) — matches the Armory
+/// UI's own "Remove" semantics: the bundle row itself survives (still
+/// available in the Bundles tab), only its Global Memory membership is
+/// cleared. Refuses a system-tier id. Backs the `GlobalMemoryRemove` MCP
+/// tool.
+pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<serde_json::Value, String> {
+    let mut bundle = state.id_store.bundle_get(id)
+        .map_err(|e| format!("globalmemory.remove: {e}"))?
+        .ok_or_else(|| format!("globalmemory.remove: not found id={id}"))?;
+    if bundle.is_system {
+        return Err("globalmemory.remove: cannot remove a system Global Memory entry through this API".to_string());
+    }
+    bundle.is_global = false;
+    bundle.updated_at = agentmux_common::time::now_ms();
+    state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
+    state.broker.publish(crate::backend::wps::WaveEvent {
+        event: "memories:changed".to_string(),
+        scopes: vec![], sender: String::new(), persist: 0, data: None,
+    });
+    Ok(json!({ "ok": true }))
+}
+
 pub(crate) fn memory_history_impl(
     state: &AppState,
     agent_id: &str,
