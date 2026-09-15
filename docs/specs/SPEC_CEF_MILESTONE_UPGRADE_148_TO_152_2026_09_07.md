@@ -317,6 +317,72 @@ size cross-checked against the zip entry). **Deliberately not published**
 an actual 152 release is "a repo-owner call," same as bumping the pins;
 no platform has published one yet. Full trail on #3108.
 
+**Update 2026-09-15 — published, and (later the same day) all three
+platforms.** Korp published `cef-windows-x86_64-152.0.7977.83`; Clare
+published `cef-macos-arm64-152.0.7977.83-codecs` (H.264 playback
+human-verified); Opaz found and fixed Linux's own `use_static_angle`
+regression (same class as Windows's, #3172) before publishing
+`cef-linux-x86_64-152.0.7977.83-codecs` (#3229). #3204 (Phase C mechanism)
+merged the same day. Full detail on #3108.
+
+**2026-09-15 (Korp) — Phase E completed: collapsed `cef_win`/`cef_unix`
+back to one dependency, bumped `release.yml`'s three pins.** This spec's
+own exit condition for the staged split ("once Phase D lands working 152
+builds for macOS and Linux too, collapse back into a single
+`[dependencies]` entry") was reachable the moment all three platforms
+above had a published release — bumping the runtime pins *without* this
+collapse first would have shipped a real runtime/binding mismatch on
+Linux/macOS (152 runtime DLL/framework, 148-linked Rust code — the exact
+failure class this whole investigation exists to prevent), and bumping
+Windows alone is mechanically blocked by `cef-runtime-pins`'s own
+milestone-consistency gate. Neither path shipped safely without the
+collapse landing first.
+
+- `agentmux-cef/Cargo.toml`: removed the target-gated `cef_win`/`cef_unix`
+  tables; one `cef = "152"` entry for every platform, per this spec's §4
+  originally-proposed exit path.
+- `agentmux-cef/src/lib.rs`: removed the `extern crate cef_win/cef_unix as
+  cef` aliasing — no longer needed once there's one dependency key named
+  plain `cef` (Rust's 2018+ edition auto-extern-prelude resolves it
+  directly).
+- Root `Cargo.toml`'s `[patch.crates-io]`: repointed at
+  `AgentU-asaf/cef-rs@agentmux/152-begin-window-drag` +
+  `AgentU-asaf/cef-rs#5`'s `links` rename (verified content: both changes
+  present, checked directly against the git commit) — via
+  `GenericAgentX-asaf/cef-rs`, same fork-of-a-fork pattern already used for
+  the Windows-only interim state, since `AgentU-asaf/cef-rs#4`/`#5` are
+  still unmerged (no push access on that repo from any platform agent so
+  far). The `agentmux/152-begin-window-drag` commit is Korp's own prior
+  work (2026-09-10, same investigation) — same mechanical field-append as
+  the existing 148 patch, same struct size delta, not a new derivation.
+- `scripts/verify-cef-version.sh`: was made to look up the `cef_win`
+  dependency key specifically during the staged-rollout mechanism
+  (#3204) — left unfixed, this would have silently gone warn-only
+  (`could not resolve cef_win's version — skipping check`) after the
+  collapse, defeating the exact hard gate this whole effort depends on.
+  Caught before landing; now looks up plain `cef`. Re-tested against the
+  real Windows 152 build directory: passes correctly.
+- `release.yml`: all three `cef-runtime-pins` tags bumped to the published
+  152 releases above.
+- Verified: `cargo check -p agentmux-cef --target x86_64-pc-windows-msvc`
+  and full `cargo check --workspace --tests` both clean (zero errors, same
+  60 pre-existing warnings). `cargo test -p agentmux-cef` — 403 passed, 0
+  failed.
+
+**Not independently verified on macOS/Linux from this exact change** — no
+toolchain for either here. The collapse is symmetric (same `cef`
+dependency, same patched fork, same as pre-split 148-era behavior for
+those two platforms — only Windows's own resolution actually changes,
+from stock 152 to the patched-fork 152 used here), but per this doc's own
+established practice, a claim of equivalence is not the same as a real
+compile check. **Asking Clare (macOS) and Opaz (Linux) to run
+`cargo check -p agentmux-cef` on their own boxes against this change**
+before/alongside merge — Linux in particular actually exercises
+`begin_window_drag` via `--features patched-libcef`, so it's the one
+platform where "the binding compiles" isn't sufficient on its own; a real
+`task dev` drag-window smoke test there would close the loop the same way
+Korp's Windows `GFX HW` screenshot did for the runtime-pin question.
+
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
 ---

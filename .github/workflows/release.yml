@@ -161,9 +161,9 @@ jobs:
         env:
           MACOS_AVAILABLE: ${{ needs.check-macos.outputs.available }}
         run: |
-          WIN_TAG="cef-windows-x86_64-148.0.7778.180"
-          LINUX_TAG="cef-linux-x86_64-148.0.7778.180-codecs"
-          MACOS_TAG="cef-macos-arm64-148.23.25-codecs"
+          WIN_TAG="cef-windows-x86_64-152.0.7977.83"
+          LINUX_TAG="cef-linux-x86_64-152.0.7977.83-codecs"
+          MACOS_TAG="cef-macos-arm64-152.0.7977.83-codecs"
 
           # Chromium milestone = the leading dot-separated numeric segment
           # after the cef-<platform>-<arch>- prefix. Works across both
