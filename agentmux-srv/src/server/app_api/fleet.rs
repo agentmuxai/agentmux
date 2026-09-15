@@ -258,14 +258,14 @@ pub(crate) async fn fleet_bulk_stop_impl(
                 Ok(()) => {
                     state.reactive_handler.log_fleet_action_audit(
                         None, &target_agent, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                        true, None, &request_id,
+                        true, None, &request_id, None,
                     );
                     result.succeeded.push(block_id);
                 }
                 Err(e) => {
                     state.reactive_handler.log_fleet_action_audit(
                         None, &target_agent, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
-                        false, Some(&e), &request_id,
+                        false, Some(&e), &request_id, None,
                     );
                     batch_failures += 1;
                     result.failed.push(FleetActionFailure { id: block_id, error: e });

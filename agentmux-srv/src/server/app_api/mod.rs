@@ -44,7 +44,10 @@ mod agent_define;
 /// vendor-base-url validation `agent.define` already uses, instead of
 /// duplicating it.
 pub(crate) use agent_define::validate_vendor_base_url;
-mod pane;
+// pub(crate): `server/mod.rs`'s `POST /api/v1/agent/pane/close` handler (the
+// `ClosePane` MCP tool's backing route) calls `pane::handle_close_pane`
+// directly, same as `fleet`'s exposure just below.
+pub(crate) mod pane;
 mod blockfile;
 pub(crate) mod session;
 mod identity;
