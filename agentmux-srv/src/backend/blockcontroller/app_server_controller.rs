@@ -9,7 +9,7 @@
 //! block output publication, and shutdown. Codex remains opt-in until the
 //! provider registry flips its controller type.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -37,6 +37,7 @@ struct AppServerInner {
     status_version: i32,
     process: Option<Arc<AppServerProcess>>,
     session: Option<Arc<CodexAppServerSession>>,
+    pending_messages: VecDeque<String>,
 }
 
 /// Controller for one isolated `codex app-server --listen stdio://` child.
@@ -70,6 +71,7 @@ impl AppServerController {
                 status_version: 0,
                 process: None,
                 session: None,
+                pending_messages: VecDeque::new(),
             })),
             broker,
             event_bus,
@@ -85,8 +87,9 @@ impl AppServerController {
     }
 
     fn set_status(&self, status: &str) {
-        self.inner.lock().unwrap().proc_status = status.to_string();
-        self.inner.lock().unwrap().status_version += 1;
+        let mut inner = self.inner.lock().unwrap();
+        inner.proc_status = status.to_string();
+        inner.status_version += 1;
         self.publish_status();
     }
 
@@ -205,14 +208,7 @@ impl AppServerController {
         });
     }
 
-    pub fn send_message(&self, message: String) -> Result<(), String> {
-        let session = self
-            .inner
-            .lock()
-            .unwrap()
-            .session
-            .clone()
-            .ok_or_else(|| "Codex App Server is not initialized".to_string())?;
+    fn spawn_turn(&self, session: Arc<CodexAppServerSession>, message: String) {
         let health = self.health_monitor.clone();
         let weak = self.self_ref.lock().unwrap().clone();
         health.set_active_turn(true);
@@ -226,6 +222,23 @@ impl AppServerController {
                 }
             }
         });
+    }
+
+    pub fn send_message(&self, message: String) -> Result<(), String> {
+        let session = {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.session.clone() {
+                Some(session) => Some(session),
+                None if inner.process.is_some() => {
+                    inner.pending_messages.push_back(message.clone());
+                    None
+                }
+                None => return Err("Codex App Server is not initialized".to_string()),
+            }
+        };
+        if let Some(session) = session {
+            self.spawn_turn(session, message);
+        }
         Ok(())
     }
 
@@ -318,6 +331,16 @@ impl Controller for AppServerController {
             }
             controller.inner.lock().unwrap().session = Some(session.clone());
             controller.set_status(STATUS_RUNNING);
+            let pending_messages = controller
+                .inner
+                .lock()
+                .unwrap()
+                .pending_messages
+                .drain(..)
+                .collect::<Vec<_>>();
+            for message in pending_messages {
+                controller.spawn_turn(session.clone(), message);
+            }
             controller.spawn_event_loop(process_for_task, session);
         });
         Ok(())
