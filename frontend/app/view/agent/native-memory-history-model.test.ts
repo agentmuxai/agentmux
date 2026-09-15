@@ -140,3 +140,81 @@ describe("NativeMemoryHistoryModel diff request staleness", () => {
         expect(model.diffTextAtom()).toBeNull();
     });
 });
+
+describe("NativeMemoryHistoryModel current content", () => {
+    const versions = [meta("v2-newest"), meta("v1-oldest")];
+    let dispose: (() => void) | undefined;
+
+    afterEach(() => {
+        dispose?.();
+        dispose = undefined;
+        vi.clearAllMocks();
+    });
+
+    function makeModel(): NativeMemoryHistoryModel {
+        vi.mocked(RpcApi.NativeMemoryHistoryCommand).mockResolvedValue({ versions });
+        let model!: NativeMemoryHistoryModel;
+        createRoot((d) => {
+            dispose = d;
+            model = new NativeMemoryHistoryModel("agent-1", "MEMORY.md");
+        });
+        return model;
+    }
+
+    it("starts with contentAtom null (loading) and fetches content on construction", async () => {
+        vi.mocked(RpcApi.NativeMemoryReadFileCommand).mockResolvedValue({ content: "# hello" });
+        const model = makeModel();
+        expect(model.contentAtom()).toBeNull();
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(RpcApi.NativeMemoryReadFileCommand).toHaveBeenCalledWith(expect.anything(), {
+            agent_id: "agent-1",
+            filename: "MEMORY.md",
+        });
+        expect(model.contentAtom()).toBe("# hello");
+    });
+
+    it("distinguishes a genuinely empty file (empty string) from still-loading (null)", async () => {
+        vi.mocked(RpcApi.NativeMemoryReadFileCommand).mockResolvedValue({ content: "" });
+        const model = makeModel();
+        expect(model.contentAtom()).toBeNull();
+
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(model.contentAtom()).toBe("");
+        expect(model.contentAtom()).not.toBeNull();
+    });
+
+    it("records a content-fetch failure in contentErrorAtom, distinct from the history error", async () => {
+        vi.mocked(RpcApi.NativeMemoryReadFileCommand).mockRejectedValue(new Error("disk gone"));
+        const model = makeModel();
+
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(model.contentAtom()).toBeNull();
+        expect(model.contentErrorAtom()).toMatch(/disk gone/);
+        expect(model.errorAtom()).toBeNull();
+    });
+
+    it("refreshes contentAtom with the reverted content after a successful revert", async () => {
+        vi.mocked(RpcApi.NativeMemoryReadFileCommand)
+            .mockResolvedValueOnce({ content: "old content" })
+            .mockResolvedValueOnce({ content: "reverted content" });
+        vi.mocked(RpcApi.NativeMemoryRevertCommand).mockResolvedValue({ version: meta("v3-revert") });
+
+        const model = makeModel();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(model.contentAtom()).toBe("old content");
+
+        const reverted: string[] = [];
+        model.onReverted = (content) => reverted.push(content);
+
+        await model.revertTo("v1-oldest");
+
+        expect(model.contentAtom()).toBe("reverted content");
+        expect(reverted).toEqual(["reverted content"]);
+    });
+});
