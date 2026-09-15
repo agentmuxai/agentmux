@@ -4235,3 +4235,85 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
 
     blockcontroller::delete_controller("test-toplevel-shell");
 }
+
+/// Codex P1 on PR #3230: a process exit is not by itself grounds to close
+/// the pane — the child also dies when the controller is deliberately
+/// REPLACED. `resync_controller`'s force path (the terminal's own refresh
+/// action, `forcerestart: true`) calls `stop_for_replace`, killing this
+/// child, then registers a replacement for the same block. The old wait
+/// task still carries `close_on_exit == true`, so without the
+/// still-the-current-controller check it would reap that killed child and
+/// delete the pane — taking the freshly registered replacement with it —
+/// instead of completing the restart.
+///
+/// Same real-PTY caveats and process-global `OnceLock` caveat as the
+/// sibling tests above; run individually
+/// (`cargo test -p agentmux-srv --bin agentmux-srv
+/// force_restart_does_not_close_the_pane -- --ignored --nocapture`).
+#[tokio::test]
+#[ignore]
+async fn force_restart_does_not_close_the_pane_via_the_old_controllers_exit() {
+    let state = test_state();
+
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("term"));
+    meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    #[cfg(windows)]
+    {
+        meta.insert(blockcontroller::META_KEY_CMD.to_string(), serde_json::json!("cmd.exe"));
+        meta.insert("cmd:interactive".to_string(), serde_json::json!(true));
+    }
+    let mut block = crate::backend::obj::Block {
+        oid: "test-restart-shell".to_string(),
+        parentoref: "tab:test-restart-tab".to_string(),
+        meta,
+        ..Default::default()
+    };
+    state.wstore.insert(&mut block).expect("insert block");
+
+    let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let closed_for_handler = closed.clone();
+    blockcontroller::set_close_on_exit_handler(std::sync::Arc::new(
+        move |tab_id: String, block_id: String| {
+            *closed_for_handler.lock().unwrap() = Some((tab_id, block_id));
+        },
+    ));
+
+    let start = |force: bool| {
+        blockcontroller::resync_controller(
+            &block,
+            "test-restart-tab",
+            None,
+            force,
+            true,
+            Some(state.broker.clone()),
+            Some(state.event_bus.clone()),
+            Some(state.wstore.clone()),
+            Some(state.filestore.clone()),
+            state.wstore.shared_agent_registry(),
+            state.boot_id.clone(),
+        )
+    };
+
+    start(false).expect("initial resync/start");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Force-restart: kills this child and registers a replacement — the
+    // exact sequence the terminal's refresh action drives.
+    start(true).expect("force restart");
+
+    // Well past the old child's reap + the (0ms default) close delay.
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    assert!(
+        closed.lock().unwrap().is_none(),
+        "a force-restart must NOT close the pane — the old controller's child \
+         dying is a replacement, not a natural exit"
+    );
+
+    blockcontroller::delete_controller("test-restart-shell");
+}
