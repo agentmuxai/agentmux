@@ -102,6 +102,10 @@ pub enum CodexAppServerEvent {
         thread_id: String,
         status: Value,
     },
+    ServerRequestResolved {
+        thread_id: String,
+        request_id: RpcId,
+    },
     UnknownNotification {
         method: String,
         params: Value,
@@ -816,6 +820,28 @@ impl CodexAppServerSession {
                 let status = params.get("status").cloned().unwrap_or(Value::Null);
                 Ok(CodexAppServerEvent::ThreadStatusChanged { thread_id, status })
             }
+            // The App Server can resolve/cancel an individual pending
+            // request on its own (e.g. superseded by a newer one, or the
+            // item it concerned went away) without ending the whole turn.
+            // Previously only turn/completed or a thread transition ever
+            // cleared pending_requests, so a request resolved this way
+            // stayed in pending_server_requests() and answerable via
+            // respond_server_request until the turn ended (ReAgent P2,
+            // PR #3212). Removes only this one entry, not the whole map.
+            "serverRequest/resolved" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                ensure_thread_scope(&state, &thread_id)?;
+                let request_id = RpcId::from_value(params.get("requestId").ok_or_else(|| {
+                    CodexAppServerProtocolError::Transport(AppServerError::Protocol(
+                        "serverRequest/resolved notification is missing requestId".to_string(),
+                    ))
+                })?)?;
+                state.pending_requests.remove(&request_id);
+                Ok(CodexAppServerEvent::ServerRequestResolved {
+                    thread_id,
+                    request_id,
+                })
+            }
             _ => {
                 let raw = json!({ "method": method, "params": params });
                 if state.raw_unknown_events.len() == MAX_RAW_EVENTS {
@@ -1191,6 +1217,54 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(session.snapshot().raw_unknown_events.len(), MAX_RAW_EVENTS);
+    }
+
+    /// ReAgent P2, PR #3212: only turn/completed or a thread transition ever
+    /// cleared pending_requests -- an individual request the App Server
+    /// resolves/cancels on its own (serverRequest/resolved, real in the
+    /// pinned 0.154.0 schema) stayed answerable via respond_server_request
+    /// until the whole turn ended. Removes only the resolved entry, not
+    /// every pending request for the turn.
+    #[tokio::test]
+    async fn server_request_resolved_clears_only_that_one_pending_request() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("resolved-me".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "a"}),
+            })
+            .unwrap();
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("still-pending".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "b"}),
+            })
+            .unwrap();
+
+        let event = session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "serverRequest/resolved".to_string(),
+                params: json!({"threadId": "thread-1", "requestId": "resolved-me"}),
+            })
+            .unwrap();
+        assert_eq!(
+            event,
+            CodexAppServerEvent::ServerRequestResolved {
+                thread_id: "thread-1".to_string(),
+                request_id: RpcId::String("resolved-me".to_string()),
+            }
+        );
+
+        let remaining = session.pending_server_requests();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, RpcId::String("still-pending".to_string()));
     }
 
     /// ReAgent P1, PR #3210: the `turn/start` response and a `turn/completed`

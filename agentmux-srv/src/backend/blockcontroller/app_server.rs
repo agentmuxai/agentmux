@@ -56,7 +56,7 @@ pub enum RpcId {
 }
 
 impl RpcId {
-    fn from_value(value: &Value) -> Result<Self, AppServerError> {
+    pub(crate) fn from_value(value: &Value) -> Result<Self, AppServerError> {
         match value {
             Value::Number(number) if number.is_i64() || number.is_u64() => {
                 Ok(Self::Number(number.to_string()))
