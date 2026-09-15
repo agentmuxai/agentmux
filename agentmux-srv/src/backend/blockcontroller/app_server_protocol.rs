@@ -167,6 +167,18 @@ struct SessionState {
     phase: SessionPhase,
     items: HashMap<String, ItemSnapshot>,
     raw_unknown_events: VecDeque<Value>,
+    /// The most recently `turn/completed`-notified turn id. `start_turn`
+    /// checks this after its own `turn/start` response resolves — the
+    /// response and the completion notification arrive on independent
+    /// channels (the request/response oneshot vs. run_reader's
+    /// notification stream), so a `turn/completed` for the SAME turn can
+    /// be applied before `start_turn`'s continuation resumes. Without this
+    /// check, `start_turn`'s unconditional post-await write would resurrect
+    /// an already-terminal turn as `Running`, permanently stuck (ReAgent
+    /// P1, PR #3210). One id is enough, not a growing set: only one turn is
+    /// ever active at a time, so at most one termination can be "pending
+    /// recognition" by a not-yet-resumed `start_turn` call.
+    last_terminated_turn_id: Option<String>,
 }
 
 impl CodexAppServerSession {
@@ -225,10 +237,20 @@ impl CodexAppServerSession {
         if resumed_id != requested_id {
             return Err(CodexAppServerProtocolError::ResumeMissingThread);
         }
+        // The 0.154.0 contract can resume a thread that has a turn already
+        // `inProgress` (ThreadResumeResponse's `thread.turns`, populated on
+        // resume specifically) — unconditionally clearing turn_id/phase
+        // here silently dropped that live turn state instead of deriving
+        // it from what the response actually reports (ReAgent P1, PR #3210).
+        let in_progress_turn_id = extract_in_progress_turn_id(&result);
         let mut state = self.state.lock().unwrap();
         state.thread_id = Some(resumed_id.clone());
-        state.turn_id = None;
-        state.phase = SessionPhase::Idle;
+        state.turn_id = in_progress_turn_id.clone();
+        state.phase = if in_progress_turn_id.is_some() {
+            SessionPhase::Running
+        } else {
+            SessionPhase::Idle
+        };
         state.items.clear();
         Ok(resumed_id)
     }
@@ -268,6 +290,13 @@ impl CodexAppServerSession {
             .ok_or(CodexAppServerProtocolError::MissingObjectField("turn"))?;
         let turn_id = string_field(turn.get("id"), "turn.id")?;
         let mut state = self.state.lock().unwrap();
+        if state.last_terminated_turn_id.as_deref() == Some(turn_id.as_str()) {
+            // A `turn/completed` notification for THIS turn already landed
+            // (on the independent notification channel) while we were
+            // awaiting this same turn's `turn/start` response. The turn is
+            // already terminal — don't resurrect it as Running.
+            return Ok(turn_id);
+        }
         state.turn_id = Some(turn_id.clone());
         state.phase = SessionPhase::Running;
         Ok(turn_id)
@@ -303,10 +332,19 @@ impl CodexAppServerSession {
                     .and_then(Value::as_object)
                     .ok_or(CodexAppServerProtocolError::MissingObjectField("thread"))?;
                 let thread_id = string_field(thread.get("id"), "thread.id")?;
+                // Only reset turn state for a GENUINELY new thread. If this
+                // notification is for the thread we already have loaded, a
+                // turn may already be active on it (e.g. this notification
+                // was delayed and arrives after `start_turn` already ran) —
+                // resetting unconditionally would wipe that live state out
+                // from under it (ReAgent P1, PR #3210).
+                let is_new_thread = state.thread_id.as_deref() != Some(thread_id.as_str());
                 state.thread_id = Some(thread_id.clone());
-                state.turn_id = None;
-                state.phase = SessionPhase::Idle;
-                state.items.clear();
+                if is_new_thread {
+                    state.turn_id = None;
+                    state.phase = SessionPhase::Idle;
+                    state.items.clear();
+                }
                 Ok(CodexAppServerEvent::ThreadStarted { thread_id })
             }
             "turn/started" => {
@@ -416,6 +454,7 @@ impl CodexAppServerSession {
                 }
                 let status = string_field(turn.get("status"), "turn.status")?;
                 state.turn_id = None;
+                state.last_terminated_turn_id = Some(turn_id.clone());
                 state.phase = if status == "completed" {
                     SessionPhase::Completed
                 } else {
@@ -454,6 +493,24 @@ fn extract_thread_id(result: &Value) -> Result<String, CodexAppServerProtocolErr
         .and_then(Value::as_object)
         .ok_or(CodexAppServerProtocolError::MissingObjectField("thread"))?;
     string_field(thread.get("id"), "thread.id")
+}
+
+/// The id of whichever turn in `thread.turns` (a `ThreadResumeResponse`
+/// field, populated on `thread/resume`) has `status: "inProgress"`, if any.
+/// `TurnStatus`'s only other values (`completed`/`interrupted`/`failed`)
+/// are all terminal, so at most one entry can ever match. Malformed/missing
+/// shapes intentionally fall through to `None` rather than erroring — this
+/// is best-effort derivation of pre-existing state, not a required field.
+fn extract_in_progress_turn_id(result: &Value) -> Option<String> {
+    result
+        .get("thread")?
+        .get("turns")?
+        .as_array()?
+        .iter()
+        .find(|turn| turn.get("status").and_then(Value::as_str) == Some("inProgress"))?
+        .get("id")?
+        .as_str()
+        .map(str::to_string)
 }
 
 fn string_field(
@@ -680,5 +737,211 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(session.snapshot().raw_unknown_events.len(), MAX_RAW_EVENTS);
+    }
+
+    /// ReAgent P1, PR #3210: the `turn/start` response and a `turn/completed`
+    /// notification for the SAME turn arrive on independent channels (the
+    /// request/response oneshot vs. run_reader's notification stream), so
+    /// the notification can be applied before `start_turn`'s own
+    /// continuation resumes. Before the fix, `start_turn`'s unconditional
+    /// post-await write would resurrect the already-terminal turn as
+    /// `Running`, permanently stuck (every later `start_turn` call would
+    /// see a phantom `TurnAlreadyActive`).
+    #[tokio::test]
+    async fn a_turn_completed_notification_that_lands_before_the_turn_start_response_is_not_overwritten(
+    ) {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _start: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(br#"{"id":1,"result":{"thread":{"id":"thread-1"}}}
+"#)
+                .await
+                .unwrap();
+            let _turn: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            // Completion notification written and processed BEFORE the
+            // turn/start response, on purpose.
+            server_writer
+                .write_all(
+                    b"{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-1\",\"turn\":{\"id\":\"turn-1\",\"status\":\"completed\"}}}\n",
+                )
+                .await
+                .unwrap();
+            server_writer
+                .write_all(br#"{"id":2,"result":{"turn":{"id":"turn-1"}}}
+"#)
+                .await
+                .unwrap();
+        });
+
+        session
+            .start_thread(ThreadStartOptions::default(), Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        let session_for_turn = session.clone();
+        let start_turn_task = tokio::spawn(async move {
+            session_for_turn
+                .start_turn("hello".to_string(), Duration::from_secs(1))
+                .await
+        });
+
+        // Drain and apply the notification BEFORE start_turn's own response
+        // resolves — the reader processes frames in wire order, so this
+        // happens-before the response gets processed.
+        let notification = session.transport.next_incoming().await.unwrap();
+        session.apply_incoming(notification).unwrap();
+        assert_eq!(session.snapshot().phase, SessionPhase::Completed);
+
+        let turn_id = start_turn_task.await.unwrap().unwrap();
+        assert_eq!(turn_id, "turn-1", "start_turn still reports success to its own caller");
+
+        let snapshot = session.snapshot();
+        assert_eq!(
+            snapshot.phase,
+            SessionPhase::Completed,
+            "a turn/completed that landed first must not be overwritten back to Running"
+        );
+        assert!(snapshot.turn_id.is_none());
+
+        server.await.unwrap();
+    }
+
+    /// ReAgent P1, PR #3210: `resume_thread` used to unconditionally clear
+    /// turn_id/phase/items, silently dropping a turn the 0.154.0 contract
+    /// reports as still `inProgress` in `ThreadResumeResponse.thread.turns`.
+    #[tokio::test]
+    async fn resume_thread_derives_an_in_progress_turn_instead_of_dropping_it() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _request: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(
+                    br#"{"id":1,"result":{"thread":{"id":"thread-1","turns":[{"id":"turn-old","status":"completed"},{"id":"turn-1","status":"inProgress"}]}}}
+"#,
+                )
+                .await
+                .unwrap();
+        });
+
+        session
+            .resume_thread("thread-1".to_string(), None, None, Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.phase, SessionPhase::Running);
+        assert_eq!(snapshot.turn_id.as_deref(), Some("turn-1"));
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn resume_thread_with_no_in_progress_turn_still_resets_to_idle() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _request: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(
+                    br#"{"id":1,"result":{"thread":{"id":"thread-1","turns":[{"id":"turn-old","status":"completed"}]}}}
+"#,
+                )
+                .await
+                .unwrap();
+        });
+
+        session
+            .resume_thread("thread-1".to_string(), None, None, Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.phase, SessionPhase::Idle);
+        assert!(snapshot.turn_id.is_none());
+
+        server.await.unwrap();
+    }
+
+    /// ReAgent P1, PR #3210: a delayed/redundant `thread/started` for a
+    /// thread that's already loaded (and already has an active turn) must
+    /// not wipe that turn state — only a genuinely NEW thread id should
+    /// reset it.
+    #[tokio::test]
+    async fn a_redundant_thread_started_for_the_same_thread_does_not_wipe_an_active_turn() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _start: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(br#"{"id":1,"result":{"thread":{"id":"thread-1"}}}
+"#)
+                .await
+                .unwrap();
+            let _turn: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(br#"{"id":2,"result":{"turn":{"id":"turn-1"}}}
+"#)
+                .await
+                .unwrap();
+        });
+
+        session
+            .start_thread(ThreadStartOptions::default(), Duration::from_secs(1))
+            .await
+            .unwrap();
+        session
+            .start_turn("hello".to_string(), Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert_eq!(session.snapshot().phase, SessionPhase::Running);
+
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "thread/started".to_string(),
+                params: json!({"thread": {"id": "thread-1"}}),
+            })
+            .unwrap();
+
+        let snapshot = session.snapshot();
+        assert_eq!(
+            snapshot.phase,
+            SessionPhase::Running,
+            "a redundant thread/started for the SAME thread must not wipe the active turn"
+        );
+        assert_eq!(snapshot.turn_id.as_deref(), Some("turn-1"));
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_thread_started_for_a_genuinely_new_thread_still_resets_turn_state() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+            state.phase = SessionPhase::Running;
+        }
+
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "thread/started".to_string(),
+                params: json!({"thread": {"id": "thread-2"}}),
+            })
+            .unwrap();
+
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.thread_id.as_deref(), Some("thread-2"));
+        assert_eq!(snapshot.phase, SessionPhase::Idle);
+        assert!(snapshot.turn_id.is_none());
     }
 }
