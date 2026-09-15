@@ -311,6 +311,19 @@ impl AppServerController {
         Ok(())
     }
 
+    /// Clear a dead process/session so a later `start()` (resync) doesn't see
+    /// its own stale `process.is_some()` guard and wrongly no-op instead of
+    /// respawning. ReAgent P1 on PR #3215's third review: `start()`'s own
+    /// initialize/thread-setup failure branches set STATUS_DONE and shut the
+    /// process down without this, unlike the analogous EOF path in
+    /// `spawn_event_loop` — a handshake failure permanently bricked the block
+    /// with no recovery short of replacing the controller entirely.
+    fn clear_process_and_session(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.process = None;
+        inner.session = None;
+    }
+
     fn stop_process(&self) {
         let process = self.inner.lock().unwrap().process.clone();
         let weak = self.self_ref.lock().unwrap().clone();
@@ -370,6 +383,7 @@ impl Controller for AppServerController {
             {
                 tracing::warn!(block_id = %controller.block_id, error = %error, "Codex App Server initialize failed");
                 controller.set_status(STATUS_DONE);
+                controller.clear_process_and_session();
                 let _ = process_for_task.shutdown(Duration::from_secs(1)).await;
                 return;
             }
@@ -405,6 +419,7 @@ impl Controller for AppServerController {
                 Err(error) => {
                     tracing::warn!(block_id = %controller.block_id, error = %error, "Codex App Server thread setup failed");
                     controller.set_status(STATUS_DONE);
+                    controller.clear_process_and_session();
                     let _ = process_for_task.shutdown(Duration::from_secs(1)).await;
                     return;
                 }
@@ -803,6 +818,49 @@ mod tests {
         assert!(
             second_turn_active,
             "the requeued message's turn never became active — it was drained but never actually sent"
+        );
+
+        controller.stop(true, STATUS_DONE).unwrap();
+    }
+
+    /// ReAgent P1 on PR #3215's third review: a handshake failure (here,
+    /// the child dying before `initialize` completes) must not permanently
+    /// brick the block. `start()`'s own guard (`process.is_some()`) means a
+    /// stale process/session left behind by a failed handshake makes every
+    /// later resync a silent no-op instead of a real respawn.
+    #[tokio::test]
+    async fn a_failed_handshake_clears_state_so_a_later_start_can_actually_respawn() {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("exit-before-init"), None, false)
+            .unwrap();
+
+        let reached_done = wait_until(
+            || controller.get_runtime_status().shellprocstatus == STATUS_DONE,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(reached_done, "controller never reached STATUS_DONE after the failed handshake");
+        assert!(
+            controller.inner.lock().unwrap().process.is_none(),
+            "a failed handshake must clear the dead process, not leave start()'s guard permanently tripped"
+        );
+        assert!(controller.inner.lock().unwrap().session.is_none());
+
+        // If the bug were still present, this would silently no-op (the old
+        // `process.is_some()` guard still passing) instead of actually
+        // spawning a new child — and the assertions below would time out.
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+        let respawned_session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            respawned_session_ready,
+            "start() after a failed handshake never respawned — the block is permanently bricked"
         );
 
         controller.stop(true, STATUS_DONE).unwrap();
