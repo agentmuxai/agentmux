@@ -721,3 +721,38 @@ on the timeout, not vacuously. That check was deliberate: two earlier
 tests in this effort (§11's `parentoref: String::new()`, §10's
 parented-block case) passed under both broken and fixed logic and gave
 false confidence.
+
+## 15. Review round: a force-restart must not close the pane
+
+Codex raised a P1 on PR #3230 that §10-14 all missed, and it is real:
+**a process exit is not by itself grounds to close the pane.** The child
+also dies when the controller is deliberately *replaced*.
+`resync_controller`'s force path — which the terminal's own refresh
+action drives (`forcerestart: true`) — calls `stop_for_replace` to kill
+the current child, then registers a replacement controller for the same
+block. The OLD controller's wait task is still in flight and still
+carries `close_on_exit == true`, so it would reap that killed child and
+fire the delete-block saga, destroying the pane *and the freshly
+registered replacement* instead of completing the restart. The
+`close_on_exit_delay_ms` window (when explicitly configured) widens the
+same hazard: restarting an exited shell during it must cancel the close.
+
+**Fix:** before closing — and, for the delayed case, *after* the sleep,
+not before — verify that this controller is still the one registered for
+the block, via `Arc::ptr_eq` on its `inner`. Registry identity covers the
+whole replace sequence: during it the old entry is removed
+(`remove_controller_entry_only`) and a new one registered, so the lookup
+finds either nothing or a different controller — both correctly skip. A
+natural exit leaves this controller registered and matching, so the close
+proceeds.
+
+**Test:** `force_restart_does_not_close_the_pane_via_the_old_controllers_exit`
+— starts a real shell, force-restarts it, and asserts the close hook never
+fires. Verified to genuinely catch the bug: with the guard disabled it
+fails on that assertion. (Third time in this effort that the
+negative-check mattered; see §14's note.)
+
+ReAgent's P2 in the same round — a comment still describing the pre-§12/§13
+world (10s drain paid by closing panes, 2s delay stacked on top) — is also
+corrected; for a closing pane the drain is now skipped entirely and the
+delay defaults to 0.

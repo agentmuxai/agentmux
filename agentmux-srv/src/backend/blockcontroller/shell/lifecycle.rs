@@ -1138,6 +1138,10 @@ impl Controller for ShellController {
             // close-on-exit trigger.
             let block_id_for_close = block_id_wait.clone();
             let tab_id_for_close = tab_id_wait.clone();
+            // Identity of THIS controller instance, for the
+            // still-the-current-controller check at close time — see the
+            // trigger below.
+            let inner_for_close = Arc::clone(&inner_wait);
 
             // Entire body below is UNCHANGED from before this fix, still
             // inside its own spawn_blocking — registry::remove (among
@@ -1198,22 +1202,18 @@ impl Controller for ShellController {
             // published and `run_lock` is released above — closing the
             // pane doesn't need to block or gate either of those.
             //
-            // KNOWN pre-existing latency, not introduced by this PR: this
-            // whole point is only reached after the flusher-drain wait
-            // above resolves — which, live-tested during this PR on
-            // Windows, hits the full 10s `FLUSHER_DRAIN_TIMEOUT` on
-            // essentially every ordinary `cmd.exe` exit (see the comment
-            // above). So `close_on_exit_delay_ms`'s 2s default is added
-            // ON TOP of that already-existing ~10s gap between the process
-            // actually exiting and `STATUS_DONE` being published — the
-            // same gap every other STATUS_DONE-driven UI feedback (a
-            // pane's "done" icon, `PtyShellStatus`'s `running: false`)
-            // already has today, close-on-exit doesn't make it worse.
-            // Worth its own follow-up (see §10's closing note in the
-            // spec) — out of scope here, since `FLUSHER_DRAIN_TIMEOUT`'s
-            // value and ordering are established, separately-reviewed
-            // infrastructure (see its own multi-round-review comments
-            // above) this PR isn't the place to relitigate.
+            // Reached promptly after the child is reaped: for a CLOSING
+            // pane the flusher-drain wait above is skipped outright (§13),
+            // so none of `FLUSHER_DRAIN_TIMEOUT` is paid here, and
+            // `close_on_exit_delay_ms` defaults to 0. A pane that is NOT
+            // closing still takes the full ordered drain wait — now
+            // bounded at 1s rather than the original 10s (§12), because
+            // that ceiling turned out to be reached on essentially every
+            // ordinary exit on Windows (ConPTY's console host outlives
+            // the direct child, so the read loop never sees EOF) and it
+            // gates `STATUS_DONE` publication, i.e. every
+            // STATUS_DONE-driven affordance — a pane's "done" icon,
+            // `PtyShellStatus`'s `running: false` — not just this one.
             //
             // NOT gated on the flusher-drain outcome just logged above.
             // An earlier version of this code skipped closing whenever the
@@ -1236,6 +1236,50 @@ impl Controller for ShellController {
             if close_on_exit {
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(close_on_exit_delay_ms)).await;
+                    // Only close if THIS controller is still the one
+                    // registered for the block (Codex P1 on PR #3230).
+                    //
+                    // A process exit is not by itself evidence that the
+                    // pane should close — the child also dies when the
+                    // controller is deliberately replaced. `resync_controller`'s
+                    // force-restart path (the terminal's own refresh
+                    // action, `forcerestart: true`) calls
+                    // `stop_for_replace`, which kills this child, then
+                    // registers a REPLACEMENT controller for the same
+                    // block. This wait task belongs to the OLD controller
+                    // and still carries `close_on_exit == true`, so
+                    // without this check reaping that killed child would
+                    // delete the pane — and with it the freshly
+                    // registered replacement — instead of completing the
+                    // restart. The delay above widens the same window for
+                    // an explicitly-configured `cmd:closeonexitdelay`:
+                    // restarting an exited shell during it must cancel the
+                    // close, which re-checking AFTER the sleep is what
+                    // makes true.
+                    //
+                    // Registry identity is the discriminator, and it
+                    // covers the whole replace sequence: during it the old
+                    // entry is removed (`remove_controller_entry_only`)
+                    // and a new one registered, so this lookup finds
+                    // either nothing or a DIFFERENT controller — both
+                    // correctly skip. A natural exit leaves this
+                    // controller registered and untouched, so it matches
+                    // and the close proceeds.
+                    let still_current = super::super::get_controller(&block_id_for_close)
+                        .and_then(|ctrl| {
+                            ctrl.as_any()
+                                .downcast_ref::<ShellController>()
+                                .map(|sc| Arc::ptr_eq(&sc.inner, &inner_for_close))
+                        })
+                        .unwrap_or(false);
+                    if !still_current {
+                        tracing::info!(
+                            block_id = %block_id_for_close,
+                            "close-on-exit: controller was replaced or removed since this \
+                             process exited (restart in flight?) — skipping pane close"
+                        );
+                        return;
+                    }
                     super::super::close_on_exit(tab_id_for_close, block_id_for_close);
                 });
             }
