@@ -392,7 +392,12 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 10;
 ///        changed, when, or by which agent, unlike native memory which has
 ///        had this since v24. Opened specifically because Global Memory is
 ///        about to gain a write path an agent (not just a human at the
-///        Armory UI) can reach.
+///        Armory UI) can reach. `written_by` is a TRUSTED identity column
+///        (an agent's real `AGENTMUX_AGENT_ID`, or `"armory-ui"`),
+///        deliberately separate from the caller-describable `source`/
+///        `source_detail` pair — an agent could otherwise claim
+///        `source: "human"` with nothing to contradict it (codex P2, PR
+///        #3237, caught before this table ever shipped).
 pub const OBJECT_SCHEMA_VERSION: i64 = 35;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
@@ -914,6 +919,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             parent_version_id  TEXT,
             source             TEXT NOT NULL DEFAULT 'agent_inferred',
             source_detail      TEXT NOT NULL DEFAULT '{}',
+            written_by         TEXT NOT NULL DEFAULT '',
             created_at         INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_bundle_versions_lookup
@@ -1447,6 +1453,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             parent_version_id  TEXT,
             source             TEXT NOT NULL DEFAULT 'agent_inferred',
             source_detail      TEXT NOT NULL DEFAULT '{}',
+            written_by         TEXT NOT NULL DEFAULT '',
             created_at         INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ss_bundle_versions_lookup
@@ -1829,6 +1836,7 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             parent_version_id  TEXT,
             source             TEXT NOT NULL DEFAULT 'agent_inferred',
             source_detail      TEXT NOT NULL DEFAULT '{}',
+            written_by         TEXT NOT NULL DEFAULT '',
             created_at         INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ids_bundle_versions_lookup

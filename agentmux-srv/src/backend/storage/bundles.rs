@@ -14,6 +14,7 @@
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use super::bundle_versions::{bundle_version_insert_tx, BundleVersion};
 use super::error::StoreError;
 use super::store::Store;
 
@@ -265,6 +266,111 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    /// Same as `bundle_upsert`, but when `memory.is_global` is true, also
+    /// appends a `db_bundle_versions` row for it — atomically, in the SAME
+    /// transaction as the `db_bundles` write, not as two separate calls.
+    /// codex P2, PR #3237: two separate lock/transaction acquisitions (the
+    /// original shape — call `bundle_upsert`, then separately call
+    /// `bundle_version_insert`) let a concurrent writer interleave between
+    /// them: writer A upserts, writer B upserts AND versions, then A's own
+    /// (now-stale) version-insert lands last — the history would then claim
+    /// A's content is current while the live row actually holds B's. One
+    /// transaction makes that interleaving impossible.
+    ///
+    /// `written_by` is the caller's own TRUSTED identity (an agent's real
+    /// `AGENTMUX_AGENT_ID`, or `"armory-ui"` for the human-facing Armory
+    /// editor) — see `BundleVersion::written_by`'s own doc comment for why
+    /// this is a separate field from `source`/`source_detail`. Returns
+    /// `None` (no version recorded) when `memory.is_global` is false —
+    /// versioning is scoped to Global Memory specifically, matching this
+    /// table's whole purpose; a private, per-agent bundle upsert still
+    /// writes normally but has nothing to audit here.
+    ///
+    /// Shares `bundle_upsert`'s exact guard (refuses an existing
+    /// `is_system=1` row) and exact `db_bundles` SQL — kept as a literal
+    /// duplicate rather than having one call the other, since `self.conn`
+    /// is a plain (non-reentrant) `Mutex`: calling `bundle_upsert` (which
+    /// takes its own lock) from inside a transaction already holding that
+    /// same lock would deadlock.
+    pub fn bundle_upsert_with_version(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<Option<BundleVersion>, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing_is_system: Option<i64> = tx
+            .query_row(
+                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if existing_is_system == Some(1) {
+            return Err(StoreError::Other(
+                "cannot modify a system Global Memory entry via the generic bundle upsert path"
+                    .to_string(),
+            ));
+        }
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = excluded.is_global,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.is_blank as i64,
+                memory.is_global as i64,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        let version = if memory.is_global {
+            Some(bundle_version_insert_tx(
+                &tx,
+                &memory.id,
+                &memory.name,
+                &memory.instructions,
+                source,
+                source_detail,
+                written_by,
+            )?)
+        } else {
+            None
+        };
+
+        tx.commit()?;
+        Ok(version)
     }
 
     /// The ONLY path that can write `is_system=1`. Refuses the mirror-image
