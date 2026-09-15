@@ -694,16 +694,43 @@ mod tests {
     /// `rearm_if_still_subscribed()` only ever touches degraded state on a
     /// path that actually reaches `watch()` — `clear_degraded` on success,
     /// `mark_degraded` on failure. Returning early, as it must for an
-    /// unsubscribed target, leaves the flag untouched. So marking the
-    /// target degraded *after* the unsubscribe and finding it still marked
-    /// afterward proves `watch()` was never called — deterministic,
-    /// unaffected by anything else running, and portable.
+    /// unsubscribed target, leaves the entry untouched. So the target is
+    /// marked degraded with a sentinel reason *after* the unsubscribe, and
+    /// the assertion is that the reason is still exactly that sentinel:
+    /// deterministic, unaffected by anything else running, and portable.
+    ///
+    /// **The REASON, not just the presence of a degraded entry** (Codex P2
+    /// on #3235, fixed here). Asserting only `is_degraded()` conflated two
+    /// different outcomes, because `mark_degraded` is also what runs when
+    /// `watch()` FAILS — so a bypassed guard whose `watch()` call errored
+    /// (permissions, resource exhaustion, an unavailable backend) left the
+    /// flag set and passed the test, which is precisely the
+    /// passes-under-broken-logic failure mode #3235 set out to remove.
+    /// Comparing the reason separates all three cases: sentinel intact =
+    /// returned early; entry gone = `watch()` succeeded; any other string =
+    /// `watch()` failed. The last two both mean the guard was bypassed.
+    ///
+    /// The `watcher.is_some()` precondition closes the remaining vacuous
+    /// path — a pool whose watcher failed to construct returns early at a
+    /// *different* guard, so the probe would hold for a reason unrelated to
+    /// what this test checks.
     #[tokio::test]
     async fn sweep_does_not_resurrect_a_target_unsubscribed_after_being_snapshotted() {
         let pool = FsWatchPool::new();
         let dir = std::env::temp_dir().join("agentmux_fs_watch_pool_sweep_race_test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+
+        // A watcher that failed to construct makes `rearm_if_still_subscribed()`
+        // return early at its `inner.watcher` guard regardless of the
+        // targets re-check this test is about — which would pass the probe
+        // below vacuously. `FsWatchPool::new()` documents `watcher: None` as
+        // reachable, so assert it explicitly rather than silently skipping.
+        assert!(
+            pool.inner.lock().unwrap().watcher.is_some(),
+            "precondition: the pool must have a live watcher, or the stale-rearm \
+             path short-circuits before the re-check this test exercises"
+        );
 
         let sub = pool.subscribe_dir(&dir);
         // Captured now, exactly as sweep()'s own snapshot phase would —
@@ -717,15 +744,24 @@ mod tests {
 
         // Mark degraded AFTER the unsubscribe, which clears the flag for a
         // target it drops. This is the probe — see the doc comment: only a
-        // call that reaches `watch()` touches this flag again.
-        pool.health.mark_degraded(target.clone(), "probe for test".to_string());
+        // call that reaches `watch()` touches this entry again, and the
+        // REASON distinguishes which way it went.
+        const PROBE_REASON: &str = "probe sentinel — must survive a correctly-guarded stale rearm";
+        pool.health.mark_degraded(target.clone(), PROBE_REASON.to_string());
 
         // sweep()'s per-target action, called directly with the stale
         // (now-unsubscribed) target — the exact call sweep()'s loop would
         // have made had it reached this target after losing the race.
         pool.rearm_if_still_subscribed(target.clone());
 
-        let still_degraded = pool.health.is_degraded(&target);
+        // The REASON, not merely the presence of a degraded entry — see the
+        // doc comment for why the boolean alone is not a sufficient probe.
+        let reason_after = pool
+            .health
+            .snapshot()
+            .into_iter()
+            .find(|(p, _)| p == &target)
+            .map(|(_, reason)| reason);
         let still_untracked = !pool.inner.lock().unwrap().targets.contains_key(&target);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -736,13 +772,17 @@ mod tests {
              unsubscribe — otherwise this test isn't exercising the stale-rearm \
              path at all"
         );
-        assert!(
-            still_degraded,
+        assert_eq!(
+            reason_after.as_deref(),
+            Some(PROBE_REASON),
             "rearm_if_still_subscribed() reached watch() for a target that was \
-             unsubscribed after being snapshotted — it cleared the degraded flag, \
-             which only happens on the path that calls watch(). That re-establishes \
-             a native watch nobody tracks, orphaning the handle pair with nothing \
-             left to ever unwatch() it"
+             unsubscribed after being snapshotted. The degraded reason is the probe: \
+             it is still `{PROBE_REASON}` only if the function returned early without \
+             touching health state. `None` means watch() SUCCEEDED (clear_degraded); \
+             any other string means watch() FAILED (mark_degraded overwrote the \
+             reason with the backend error). Either way the guard was bypassed and a \
+             native watch nobody tracks was re-established, orphaning the handle pair \
+             with nothing left to ever unwatch() it"
         );
     }
 }
