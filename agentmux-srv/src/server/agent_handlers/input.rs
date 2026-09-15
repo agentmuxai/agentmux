@@ -478,6 +478,19 @@ pub async fn run_agent_turn(
 
     // App Server owns a persistent thread/turn process and has its own typed
     // protocol path. Keep it ahead of the legacy stream-json branches.
+    //
+    // KNOWN GAP (ReAgent P1, PR #3215, tracked for a follow-up PR, not fixed
+    // here): env_vars above (including this turn's freshly-resolved identity
+    // bindings from inject_identity_env_async) is computed but never reaches
+    // this branch — send_message carries no env, and the App Server child was
+    // already spawned earlier using only command_from_meta's cmd:env snapshot.
+    // Unlike the subprocess/persistent controllers, this isn't a missing
+    // plumbing call: env vars are fixed at process exec() time, so an
+    // already-running App Server process cannot pick up a per-turn identity
+    // change at all without being torn down and respawned. Deciding when to
+    // force that respawn (e.g. on every identity-binding change vs. only
+    // between turns) is a real design question, not a mechanical fix, so it's
+    // deliberately left for a follow-up PR rather than rushed in here.
     if let Some(app_server_ctrl) =
         ctrl.as_any()
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()

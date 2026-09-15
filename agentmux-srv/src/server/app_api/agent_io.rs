@@ -247,7 +247,18 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Dispatch to persistent or subprocess controller
                 let mut session_id = None;
-                if let Some(persistent_ctrl) = ctrl
+                // App Server owns a persistent thread/turn process and has its own
+                // typed protocol path — mirrors the websocket agentinput dispatch in
+                // agent_handlers/input.rs, which was already updated for this
+                // controller type. Without this branch, an app-server-backed agent
+                // opened via agent.open could never receive a turn via agent.send
+                // (ReAgent P1, PR #3215).
+                if let Some(app_server_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
+                {
+                    app_server_ctrl.send_message(cmd.message)?;
+                } else if let Some(persistent_ctrl) = ctrl
                     .as_any()
                     .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
                 {

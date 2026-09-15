@@ -181,6 +181,16 @@ impl AppServerController {
         let weak = self.self_ref.lock().unwrap().clone();
         tokio::spawn(async move {
             while let Some(incoming) = process.transport.next_incoming().await {
+                // KNOWN GAP (ReAgent P1, PR #3215, tracked for a follow-up PR, not
+                // fixed here): frontend/app/view/agent/providers/codex-translator.ts
+                // (selected for outputFormat "codex-json") only understands the
+                // dotted `codex exec --json` event shapes (e.g. `item.completed`) —
+                // it has no branch for either envelope type below, so this frame is
+                // persisted/broadcast but never rendered in the pane. Fixing this is
+                // a frontend rendering-pipeline change (needs its own dev-server
+                // verification per this repo's UI-change policy), not a mechanical
+                // backend patch, so it's deliberately left for a follow-up PR rather
+                // than rushed in alongside this one's already-large fix history.
                 let frame = match &incoming {
                     AppServerIncoming::Notification { method, params } => {
                         serde_json::json!({"type":"codex_app_server","method":method,"params":params})
