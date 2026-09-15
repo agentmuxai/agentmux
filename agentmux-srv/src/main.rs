@@ -96,6 +96,11 @@ async fn main() {
     // messages instead of having them dropped on a PTY fallback they reject.
     bootstrap::install_agent_turn_delivery(&state);
 
+    // Now that AppState exists, wire up close-on-exit so a shell pane can
+    // actually close itself when its process exits — see
+    // `bootstrap::install_close_on_exit_handler`'s doc comment.
+    bootstrap::install_close_on_exit_handler(&state);
+
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
