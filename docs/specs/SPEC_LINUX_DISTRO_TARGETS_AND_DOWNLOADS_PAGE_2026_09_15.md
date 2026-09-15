@@ -48,10 +48,21 @@ direct read of the current build/release pipeline and landing-page code
 | Platform | Formats produced | Arch | Built by |
 |---|---|---|---|
 | Windows | Portable ZIP, Inno Setup installer (`.exe`), MSIX | x64 only | `build-windows.yml` |
-| macOS | Signed + notarized `.dmg` | arm64 (Apple Silicon) + x64 (Intel) | `build-macos.yml` |
+| macOS | Signed + notarized `.dmg` | **arm64 (Apple Silicon) only** | `build-macos.yml`, `macos-latest` runner |
 | **Linux** | **AppImage only** | **x86_64 only** | `build-linux.yml`, `ubuntu-22.04` |
 
-Windows ships 3 formats; macOS ships 2 architectures of one format; **Linux
+**Correction (Codex review, PR #3234):** an earlier revision of this table
+claimed macOS also ships an Intel x64 `.dmg`. That was wrong — verified by
+direct inspection of `build-macos.yml` (a single `macos-latest` arm64 job,
+resolving only `cef-macos-arm64-*` CEF releases and globbing only
+`AgentMux_*_arm64.dmg`) and `scripts/package-macos.sh` (`ARCH="arm64"`
+hardcoded). **This is the same scaffolded-but-unproduced pattern §1.4
+describes for Linux `.deb`** — `Download.tsx`'s `Assets` type and
+`DownloadButton.tsx`'s fallback chain both already have an `x64` macOS slot
+that nothing has ever populated. Worth noting as a second instance of the
+same gap, not a one-off: this codebase's landing-page types appear to get
+built ahead of the CI work that would fill them, more than once. Windows
+ships 3 formats; macOS ships 1 architecture of one format; **Linux
 ships exactly one format, one architecture** — the narrowest of the three by
 a wide margin, and the one the ask is specifically about.
 
@@ -136,19 +147,34 @@ that front since the plumbing already half-exists (§1.4).
 
 ## 2. Widening Linux package targets
 
-### 2.1 Recommended approach: repackage the existing staged tree with `fpm`, don't build per-format
+### 2.1 Recommended approach: repackage a staged tree with `fpm` — but the *real* staged tree, not raw `dist/`
 
 [`fpm`](https://github.com/jordansissel/fpm) (a well-established Ruby CLI,
 `gem install fpm`, pure-Ruby + `dpkg`/`rpmbuild`/`pacman` tooling as backends)
 converts one staged directory into `.deb`, `.rpm`, `.pacman`, and other
-formats via `-t <format>` with no format-specific build step — it consumes
-exactly the kind of "here's a directory, here's what should own which
-files" input `build-appimage-linux.sh` already assembles for AppImage
-packaging. This avoids the alternative (hand-rolling `dpkg-deb`/`rpmbuild`
-control-file plumbing per format, each with its own dependency-declaration
-syntax) for formats that don't need anything format-specific about how
-AgentMux itself is laid out. Land format-by-format so each is independently
-revertable if CI proves unstable for it (§2.3's phase table).
+formats via `-t <format>` with no format-specific build step. This avoids the
+alternative (hand-rolling `dpkg-deb`/`rpmbuild` control-file plumbing per
+format, each with its own dependency-declaration syntax) for formats that
+don't need anything format-specific about how AgentMux itself is laid out.
+Land format-by-format so each is independently revertable if CI proves
+unstable for it (§2.3's phase table).
+
+**Correction (Codex review, PR #3234):** an earlier revision of this section
+said `fpm`/`tar` could run directly over `dist/`, the flat directory
+`bundle:linux` populates. That's wrong, confirmed by reading
+`scripts/build-appimage-linux.sh` directly: `dist/` is raw build output, not
+a runnable layout. The actual AppImage runtime input is
+**`build/AgentMux.AppDir`** — a separate directory the script wipes and
+reassembles on every run, relocating `dist/cef/agentmux-cef` →
+`AppDir/usr/bin/agentmux-cef`, the launcher, `target/release/agentmux-mcp`,
+`agentmux-srv-{version}-linux.x64`, CEF's `.so`/`.pak`/locale files, the
+bundled frontend, plus `AppRun`, the `.desktop` entry, icons, and the
+install/AppArmor helper scripts (see the script's own header comment for the
+full expected layout) — running `fpm`/`tar` over `dist/` instead would ship
+packages missing files and carrying build-tree-relative paths that don't
+resolve outside the checkout. **Any new format must consume
+`build/AgentMux.AppDir` (or a factored-out equivalent staging step), not
+`dist/`** — see the revised §2.5 file list.
 
 ### 2.2 What's genuinely new work vs. what's already solved
 
@@ -156,7 +182,7 @@ revertable if CI proves unstable for it (§2.3's phase table).
 |---|---|
 | Compiling AgentMux for Linux | **Already solved** — unchanged, one compile per run regardless of how many package formats it feeds (§1.3) |
 | CEF/patched-`libcef.so` provisioning | **Already solved** — unchanged, x86_64 only (see §2.4 for the arm64 gap) |
-| Staging the runtime tree (`dist/`) | **Already solved** — the exact input `fpm` needs |
+| Staging a runnable tree | **Already solved, but it's `build/AgentMux.AppDir`, not `dist/`** (§2.1 correction) — the AppImage script's staging steps need factoring out into something reusable, not literally reused as-is (that step is currently interleaved with AppImage-specific work like the `.DirIcon` fix and the CEF-patch gate) |
 | `.deb`/`.rpm`/`.pacman` packaging | **New** — `fpm` invocations, one per format, in `build-linux.yml` after the existing AppImage step |
 | `.tar.gz` portable archive | **New but trivial** — `tar czf` over the same staged tree, no tool dependency at all; matches Windows' "portable ZIP" and waveterm's `.zip` |
 | Landing-page plumbing (`fetch-release.mjs` categorization, checksums, S3 mirroring) | **Mostly already solved for `.deb`** (§1.4); needs the same few lines added for `.rpm`/`.pacman`/`.tar.gz` |
@@ -190,8 +216,9 @@ it into this spec's Phase 1-3 and discovering the blocker mid-implementation.
 
 | File | Repo | Action |
 |---|---|---|
-| `.github/workflows/build-linux.yml` | agentmux | **Modify** — add `fpm`-based `.deb` (Phase 1), `.rpm` (Phase 2), `.pacman` (Phase 3) packaging steps after the existing AppImage step; add a `tar czf` step (Phase 1) for `.tar.gz`; `actions/upload-artifact` + release-upload for each new asset, mirroring the existing AppImage upload pattern |
-| `scripts/build-appimage-linux.sh` or a new `scripts/build-linux-packages.sh` | agentmux | **Modify or create** — factor out the "given a staged `dist/` tree, produce format X" step per new format; keep the existing AppImage script's own logic untouched, don't risk regressing the one format that already works |
+| `.github/workflows/build-linux.yml` | agentmux | **Modify** — add `fpm`-based `.deb` (Phase 1), `.rpm` (Phase 2), `.pacman` (Phase 3) packaging steps after the existing AppImage step; add a `tar czf` step (Phase 1) for `.tar.gz`; `actions/upload-artifact` for each new asset, mirroring the existing AppImage upload pattern |
+| `.github/workflows/release.yml` | agentmux | **Modify — required, not optional (Codex P1, PR #3234).** Its `publish` job's asset-flattening step (`find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" \)`, line ~338) is an **explicit extension allowlist** — a new format uploaded by `build-linux.yml` but not added to this `find` is silently excluded from the actual GitHub Release (and therefore from the landing-page deploy, which reads the Release's assets — `SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md` §6). Without this change, Phase 1 would ship `.deb`/`.tar.gz` as nightly-artifact-only, visible nowhere a real user downloads from. Add each new extension to this `find` in the same PR as the `build-linux.yml` change that starts producing it. |
+| `scripts/build-appimage-linux.sh`, and a new shared staging script (e.g. `scripts/stage-linux-appdir.sh`) | agentmux | **Modify + create** — factor the AppDir assembly steps (§2.1 correction) out of `build-appimage-linux.sh` into something a new `scripts/build-<format>-linux.sh` per format can also call; keep the existing AppImage script's own AppImage-specific logic (the `.DirIcon` real-file fix, the CEF-patch release gate, `appimagetool` invocation) where it is — don't risk regressing the one format that already works while extracting the shared part |
 | `Taskfile.yml` | agentmux | **Modify** — new `task package:linux:deb` / `:rpm` (and `:tarball`) local-build tasks, mirroring `package:linux`'s existing per-build-channel isolation conventions (`SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md`) so local testing doesn't require CI |
 | `docs/linux.md` | agentmux | **Modify** — correct the stale `agentmuxai/agentmux-builder` reference (§1.4); document each new format's install/run instructions once shipped |
 | `agentmux-landing/scripts/fetch-release.mjs` | agentmux-landing | **Modify** — add `.rpm`/`.pacman`/`.tar.gz` to `UNVERSIONED_NAMES` and `CONTENT_TYPES`, and a categorization branch per format in the asset loop (mirrors the existing, already-working `.deb` branch) |
