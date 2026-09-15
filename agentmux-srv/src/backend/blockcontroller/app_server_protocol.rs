@@ -18,6 +18,7 @@ use thiserror::Error;
 
 use super::app_server::{
     AppServerError, AppServerIncoming, AppServerTransport, RpcId, ServerResponseError,
+    WriteOutcomeTracker,
 };
 
 const MAX_RAW_EVENTS: usize = 128;
@@ -555,24 +556,36 @@ impl CodexAppServerSession {
             .ok_or(CodexAppServerProtocolError::UnknownServerRequest)?;
 
         // RestoreOnDrop reinserts the removed entry (if still scoped to the
-        // active thread/turn) whenever it is dropped still armed — which
-        // covers an explicit transport-write failure below AND this
-        // future being dropped/cancelled while still suspended at the
-        // `.await` (e.g. a caller-side select!/timeout racing the write).
-        // A plain check-then-await-then-reinsert-on-Err only runs that
-        // reinsert code if the future resolves; drop the future mid-await
-        // instead and Rust never runs it at all, silently stranding the
-        // entry with no response ever sent and no error surfaced to
-        // anyone (ReAgent P1, PR #3212 5th review). Folding the ordinary
-        // failure path into the same Drop impl means both cases are
-        // handled by one piece of logic instead of two copies of it.
+        // active thread/turn AND the frame was never actually queued for
+        // delivery) whenever it is dropped still armed — which covers an
+        // explicit transport-write failure below AND this future being
+        // dropped/cancelled while still suspended at the `.await` (e.g. a
+        // caller-side select!/timeout racing the write). A plain
+        // check-then-await-then-reinsert-on-Err only runs that reinsert
+        // code if the future resolves; drop the future mid-await instead
+        // and Rust never runs it at all, silently stranding the entry with
+        // no response ever sent and no error surfaced to anyone (ReAgent
+        // P1, PR #3212 5th review). Folding the ordinary failure path into
+        // the same Drop impl means both cases are handled by one piece of
+        // logic instead of two copies of it.
         struct RestoreOnDrop<'a> {
             state: &'a Mutex<SessionState>,
             id: RpcId,
             pending: Option<PendingServerRequest>,
+            // See WriteOutcomeTracker. A transport-level timeout/
+            // cancellation while waiting on the write-confirmation ack
+            // does not mean the frame was never sent — it may already be
+            // irrevocably queued for delivery — so reinserting on any
+            // non-success outcome (as a bare Result would suggest) risks
+            // a subsequent retry sending a second, duplicate response for
+            // the same id (ReAgent P1, PR #3212 6th review).
+            outcome: WriteOutcomeTracker,
         }
         impl Drop for RestoreOnDrop<'_> {
             fn drop(&mut self) {
+                if !self.outcome.safe_to_retry() {
+                    return;
+                }
                 let Some(pending) = self.pending.take() else {
                     return;
                 };
@@ -597,16 +610,16 @@ impl CodexAppServerSession {
             }
         }
 
-        let mut guard = RestoreOnDrop {
+        let guard = RestoreOnDrop {
             state: &self.state,
             id: id.clone(),
             pending: Some(pending),
+            outcome: WriteOutcomeTracker::new(),
         };
-        let outcome = self.transport.respond(id.clone(), result, timeout).await;
-        if outcome.is_ok() {
-            // Consumed successfully — nothing left to restore.
-            guard.pending = None;
-        }
+        let outcome = self
+            .transport
+            .respond_tracked(id.clone(), result, timeout, &guard.outcome)
+            .await;
         outcome.map_err(Into::into)
     }
 
@@ -1931,8 +1944,22 @@ mod tests {
     /// buffer with nothing reading the other side guarantees the write
     /// stays suspended, so aborting the task deterministically exercises
     /// the drop-mid-await path rather than racing a timing window.
+    ///
+    /// Superseded by the 6th review's WriteOutcomeTracker (see
+    /// app_server.rs): by the time the write is stuck on this 1-byte
+    /// buffer, the frame has already been handed to run_writer, which will
+    /// deliver it regardless of the cancellation below -- so the correct
+    /// behavior is now the opposite of what this test originally asserted:
+    /// the entry must NOT be reinserted, or a retry could send a second,
+    /// duplicate response for the same id. The pre-queue case (cancelled
+    /// before the frame is ever handed to the writer, still genuinely safe
+    /// to retry) is covered directly at the transport level by
+    /// write_outcome_tracker_stays_safe_to_retry_when_the_write_never_starts
+    /// in app_server.rs, since reaching it deterministically from here
+    /// would require blocking the transport's internal outbound queue,
+    /// which this layer has no access to.
     #[tokio::test]
-    async fn a_cancelled_respond_future_reinserts_the_pending_entry() {
+    async fn a_respond_future_cancelled_after_the_write_is_queued_does_not_reinsert() {
         let (client, _server) = duplex(1);
         let (client_reader, client_writer) = tokio::io::split(client);
         let transport = Arc::new(AppServerTransport::new(
@@ -1985,10 +2012,10 @@ mod tests {
         handle.abort();
         let _ = handle.await;
 
-        assert_eq!(
-            session.pending_server_requests().len(),
-            1,
-            "cancelling the respond future must reinsert the pending entry, not lose it silently"
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "the frame was already queued for delivery before cancellation -- reinserting now \
+             would risk a retry sending a second, duplicate response for the same id"
         );
     }
 }
