@@ -401,6 +401,42 @@ impl Controller for ShellController {
         // deliberately does not fall back to global settings.
         let agent_id_for_jekt: Option<String> = resolve_agent_id_for_jekt(&block_meta);
 
+        // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10-11):
+        // resolved from `block_meta` now, while it's still in scope, for
+        // the wait/cleanup task below to act on once the process actually
+        // exits. See `effective_close_on_exit`'s own doc comment for the
+        // per-controller-type default. (`should_close_on_exit_force` is
+        // deliberately NOT read here — see its own doc comment for why no
+        // call site uses it.)
+        //
+        // Forced off for a SUB-block — a block whose `parentoref` names
+        // another BLOCK (`block:<id>`): an agent's composer-drawer shell
+        // (`AgentShellSubblock.tsx`, via `createsubblock`) or a
+        // `PtyShellCreate`-spawned headless shell. Those are not
+        // independent panes, and closing one via
+        // `sagas::delete_block::run` leaves the parent's own
+        // `term:shellsubblockid` pointer dangling (a field that saga knows
+        // nothing about), after which the drawer's own "attach or create"
+        // logic silently recreates a fresh shell — reproducing the
+        // original respawn loop by a different route (§11).
+        //
+        // A TOP-LEVEL pane's `parentoref` names its owning TAB
+        // (`tab:<id>`, set by `wcore::block`/`persist_subscriber`) — NOT
+        // empty. Checking `!parentoref.is_empty()` here (as the first cut
+        // of §11 did) therefore disabled close-on-exit for *every* pane,
+        // including the plain `Terminal` widget this feature exists for —
+        // the regression the reporter hit as "still hangs" (§12). Match
+        // on the `block:` prefix specifically, the same discriminator
+        // `websocket.rs`'s `strip_prefix("block:")` already uses.
+        let is_sub_block = self
+            .wstore
+            .as_ref()
+            .and_then(|store| store.get::<obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| b.parentoref.starts_with("block:"))
+            .unwrap_or(false);
+        let close_on_exit = Self::effective_close_on_exit(&block_meta, &self.controller_type) && !is_sub_block;
+        let close_on_exit_delay_ms = Self::close_on_exit_delay_ms(&block_meta);
+
         // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
         // Computed here (before spawn) rather than after so the commit-aware admission
         // gate below can use it; also reused post-spawn to set `inner.is_agent_pane`.
@@ -971,6 +1007,7 @@ impl Controller for ShellController {
         // Spawn wait task (monitors process exit)
         let inner_wait = Arc::clone(&self.inner);
         let block_id_wait = self.block_id.clone();
+        let tab_id_wait = self.tab_id.clone();
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
@@ -1055,30 +1092,56 @@ impl Controller for ShellController {
             // loop keep running independently in the background, still
             // persisting and broadcasting whatever the descendant produces
             // next, and exit naturally once the PTY genuinely reaches EOF.
-            match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    tracing::warn!(
-                        block_id = %block_id_wait,
-                        error = %e,
-                        "PTY output flusher task panicked or was cancelled before completing; \
-                         proceeding with pane teardown anyway — some trailing output may be missing"
-                    );
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        block_id = %block_id_wait,
-                        timeout = ?FLUSHER_DRAIN_TIMEOUT,
-                        "PTY output flusher did not finish draining within the timeout after \
-                         process exit (a background descendant still holding the PTY open?) — \
-                         proceeding with pane teardown without waiting further; leaving the \
-                         flusher and its PTY read loop running detached in the background \
-                         rather than aborting them, so no output produced after this point is \
-                         silently lost — some trailing output as of teardown time may still be \
-                         missing"
-                    );
+            //
+            // Skipped entirely when this pane is about to close on exit
+            // (§13): the whole point of the wait is to order trailing
+            // output BEFORE clients observe `STATUS_DONE`, and there is no
+            // client left to order it for once the block is deleted a
+            // moment later. On Windows this wait is reached at its full
+            // ceiling on every ordinary exit (§12), so skipping it here is
+            // the difference between a pane that closes the instant its
+            // shell exits and one that visibly lingers a second first.
+            // The flusher is detached either way — exactly as it would be
+            // on timeout — so nothing it produces later is lost any more
+            // than it already would be.
+            if close_on_exit {
+                drop(flusher_handle);
+            } else {
+                match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            error = %e,
+                            "PTY output flusher task panicked or was cancelled before completing; \
+                             proceeding with pane teardown anyway — some trailing output may be missing"
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            block_id = %block_id_wait,
+                            timeout = ?FLUSHER_DRAIN_TIMEOUT,
+                            "PTY output flusher did not finish draining within the timeout after \
+                             process exit (a background descendant still holding the PTY open?) — \
+                             proceeding with pane teardown without waiting further; leaving the \
+                             flusher and its PTY read loop running detached in the background \
+                             rather than aborting them, so no output produced after this point is \
+                             silently lost — some trailing output as of teardown time may still be \
+                             missing"
+                        );
+                    }
                 }
             }
+
+            // Cloned before the inner `spawn_blocking` below moves
+            // `block_id_wait` — still needed after it completes, for the
+            // close-on-exit trigger.
+            let block_id_for_close = block_id_wait.clone();
+            let tab_id_for_close = tab_id_wait.clone();
+            // Identity of THIS controller instance, for the
+            // still-the-current-controller check at close time — see the
+            // trigger below.
+            let inner_for_close = Arc::clone(&inner_wait);
 
             // Entire body below is UNCHANGED from before this fix, still
             // inside its own spawn_blocking — registry::remove (among
@@ -1133,6 +1196,93 @@ impl Controller for ShellController {
             })
             .await
             .expect("PTY wait/cleanup task panicked");
+
+            // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md
+            // §10): fire-and-forget, deliberately AFTER STATUS_DONE is
+            // published and `run_lock` is released above — closing the
+            // pane doesn't need to block or gate either of those.
+            //
+            // Reached promptly after the child is reaped: for a CLOSING
+            // pane the flusher-drain wait above is skipped outright (§13),
+            // so none of `FLUSHER_DRAIN_TIMEOUT` is paid here, and
+            // `close_on_exit_delay_ms` defaults to 0. A pane that is NOT
+            // closing still takes the full ordered drain wait — now
+            // bounded at 1s rather than the original 10s (§12), because
+            // that ceiling turned out to be reached on essentially every
+            // ordinary exit on Windows (ConPTY's console host outlives
+            // the direct child, so the read loop never sees EOF) and it
+            // gates `STATUS_DONE` publication, i.e. every
+            // STATUS_DONE-driven affordance — a pane's "done" icon,
+            // `PtyShellStatus`'s `running: false` — not just this one.
+            //
+            // NOT gated on the flusher-drain outcome just logged above.
+            // An earlier version of this code skipped closing whenever the
+            // flusher timed out, reasoning that a still-live background
+            // descendant might have more output coming. Live-tested on
+            // Windows (this PR) and found to backfire completely: the
+            // 10s `FLUSHER_DRAIN_TIMEOUT` was hit on essentially EVERY
+            // plain `cmd.exe` exit, not as a rare edge case — ConPTY's own
+            // console-host process routinely outlives the direct child by
+            // design, so gating on this made close-on-exit silently never
+            // fire on the one platform this was tested on. Simply closing
+            // regardless matches what actually happens next either way:
+            // the flusher and its read loop are ALREADY left running
+            // detached in the background (see the comment above), so any
+            // genuinely-still-arriving trailing output keeps being
+            // persisted to the block's file exactly as it would if the
+            // pane stayed open — closing the pane just stops anyone from
+            // looking at it, the same as closing any other terminal app's
+            // window while a background job still has an open handle.
+            if close_on_exit {
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(close_on_exit_delay_ms)).await;
+                    // Only close if THIS controller is still the one
+                    // registered for the block (Codex P1 on PR #3230).
+                    //
+                    // A process exit is not by itself evidence that the
+                    // pane should close — the child also dies when the
+                    // controller is deliberately replaced. `resync_controller`'s
+                    // force-restart path (the terminal's own refresh
+                    // action, `forcerestart: true`) calls
+                    // `stop_for_replace`, which kills this child, then
+                    // registers a REPLACEMENT controller for the same
+                    // block. This wait task belongs to the OLD controller
+                    // and still carries `close_on_exit == true`, so
+                    // without this check reaping that killed child would
+                    // delete the pane — and with it the freshly
+                    // registered replacement — instead of completing the
+                    // restart. The delay above widens the same window for
+                    // an explicitly-configured `cmd:closeonexitdelay`:
+                    // restarting an exited shell during it must cancel the
+                    // close, which re-checking AFTER the sleep is what
+                    // makes true.
+                    //
+                    // Registry identity is the discriminator, and it
+                    // covers the whole replace sequence: during it the old
+                    // entry is removed (`remove_controller_entry_only`)
+                    // and a new one registered, so this lookup finds
+                    // either nothing or a DIFFERENT controller — both
+                    // correctly skip. A natural exit leaves this
+                    // controller registered and untouched, so it matches
+                    // and the close proceeds.
+                    let still_current = super::super::get_controller(&block_id_for_close)
+                        .and_then(|ctrl| {
+                            ctrl.as_any()
+                                .downcast_ref::<ShellController>()
+                                .map(|sc| Arc::ptr_eq(&sc.inner, &inner_for_close))
+                        })
+                        .unwrap_or(false);
+                    if !still_current {
+                        tracing::info!(
+                            block_id = %block_id_for_close,
+                            "close-on-exit: controller was replaced or removed since this \
+                             process exited (restart in flight?) — skipping pane close"
+                        );
+                        return;
+                    }
+                    super::super::close_on_exit(tab_id_for_close, block_id_for_close);
+                });
+            }
         });
 
         // Return immediately — PTY tasks run in background
