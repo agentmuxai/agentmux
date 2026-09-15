@@ -74,10 +74,65 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_secs(3600));
         }
     }
+
+    // Both remaining modes complete a `thread/start` round-trip so the
+    // controller reaches a live session, then diverge — used by
+    // app_server_controller.rs's own tests (as opposed to the transport-level
+    // tests above, which never get this far).
+    if mode == "exit-after-thread-start" || mode == "ready-for-turn" {
+        let thread_start = lines.next().transpose().unwrap().unwrap_or_default();
+        let thread_request_id = request_id(&thread_start).unwrap_or_else(|| {
+            eprintln!("thread/start request missing an id: {thread_start}");
+            std::process::exit(28);
+        });
+        stdout
+            .write_all(
+                format!(
+                    "{{\"id\":{thread_request_id},\"result\":{{\"thread\":{{\"id\":\"fixture-thread\"}}}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        stdout.flush().unwrap();
+
+        if mode == "exit-after-thread-start" {
+            eprintln!("fake server crashing after thread/start");
+            std::process::exit(42);
+        }
+
+        // mode == "ready-for-turn": also complete one `turn/start` round-trip,
+        // then idle — simulating a turn that is still in progress server-side
+        // when the client attempts to start a second one.
+        let turn_start = lines.next().transpose().unwrap().unwrap_or_default();
+        let turn_request_id = request_id(&turn_start).unwrap_or_else(|| {
+            eprintln!("turn/start request missing an id: {turn_start}");
+            std::process::exit(29);
+        });
+        stdout
+            .write_all(
+                format!(
+                    "{{\"id\":{turn_request_id},\"result\":{{\"turn\":{{\"id\":\"fixture-turn\"}}}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        stdout.flush().unwrap();
+    }
+
     for line in lines {
         if line.is_err() {
             std::process::exit(26);
         }
     }
     eprintln!("fake server observed EOF");
+}
+
+/// Extract the bare `"id":<n>` value from a JSON-RPC request line. Deliberately
+/// not a real JSON parse — this fixture intentionally uses only std (see the
+/// header comment) and every request this fixture handles has `id` as a
+/// top-level unsigned integer field.
+fn request_id(line: &str) -> Option<&str> {
+    let after = line.split("\"id\":").nth(1)?;
+    let digits = after.split(|c: char| !c.is_ascii_digit()).next()?;
+    (!digits.is_empty()).then_some(digits)
 }

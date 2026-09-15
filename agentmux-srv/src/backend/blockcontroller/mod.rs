@@ -415,6 +415,8 @@ pub enum AgentDelivery {
 ///   `{type:"user",…}` line on the live stdin, which steers the agent mid-turn.
 /// - **ACP** agents receive the message as a `session/prompt` (the ACP controller's
 ///   `send_input` already wraps raw input that way).
+/// - **App Server** (Codex) agents have no PTY either: the message is queued/dispatched
+///   as a `turn/start` request via [`app_server_controller::AppServerController::send_message`].
 /// - Everything else (shell/term PTY agents, one-shot subprocess agents) is reported
 ///   as [`AgentDelivery::Pty`] so the caller uses keystroke injection — preserving
 ///   today's behavior.
@@ -436,6 +438,14 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 
     if ctrl.controller_type() == BLOCK_CONTROLLER_ACP {
         ctrl.send_input(BlockInputUnion::data(message.as_bytes().to_vec()), None)?;
+        return Ok(AgentDelivery::Structured);
+    }
+
+    if let Some(app_server_ctrl) = ctrl
+        .as_any()
+        .downcast_ref::<app_server_controller::AppServerController>()
+    {
+        app_server_ctrl.send_message(message.to_string())?;
         return Ok(AgentDelivery::Structured);
     }
 
@@ -1213,6 +1223,39 @@ mod tests {
             err.contains("does not accept raw input"),
             "expected the raw-input refusal, got {err:?}",
         );
+    }
+
+    // ── App Server agents have no PTY either ─────────────────────────────────
+    // ReAgent P1 on PR #3215: `deliver_agent_message` only special-cased
+    // Persistent and ACP, so an App Server block fell through to the PTY
+    // branch — the same class of bug as the subprocess case above, just for a
+    // controller that didn't exist yet when that fix landed.
+
+    #[test]
+    fn deliver_agent_message_routes_to_the_app_server_controller_not_pty() {
+        let block_id = "block-jekt-app-server-delivery";
+        register_controller(
+            block_id,
+            Arc::new(app_server_controller::AppServerController::new(
+                "tab-jekt".to_string(),
+                block_id.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )),
+        );
+
+        let err = deliver_agent_message(block_id, "hello from another agent")
+            .expect_err("controller has no process yet, so send_message must fail — the point is that it was called at all");
+
+        assert!(
+            err.contains("not initialized"),
+            "expected AppServerController::send_message's own error (proving the \
+             Structured route was taken), got {err:?}",
+        );
+
+        remove_controller_entry_only(block_id);
     }
 
     /// Controllers that DO have a structured channel must keep the behavior they

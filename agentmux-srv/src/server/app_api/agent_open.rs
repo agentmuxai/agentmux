@@ -42,6 +42,30 @@ fn agent_open_lock(agent_id: &str) -> Arc<tokio::sync::Mutex<()>> {
 /// already be impossible by the time an agent reaches spawn (rejected at
 /// `agent.define`), but this stays defensive rather than trusting that
 /// write-time validation is the only thing that can ever set this field.
+/// Resolve the CLI argv for spawning `provider`'s process under `controller_type`
+/// (the string form: `"persistent"` / `"subprocess"` / `"acp"` / `"app-server"`).
+/// Pure — no I/O — so it's directly unit-testable without the full async
+/// spawn-time harness this is called from.
+///
+/// ReAgent P1 on PR #3215: this used to only branch on `"persistent"`, so an
+/// `"app-server"` controller silently fell back to `provider.launch_args` —
+/// Codex's one-shot `exec --json` args — instead of `provider.app_server`'s
+/// `--listen stdio://` args. The spawned child would never complete the App
+/// Server handshake once the provider registry flips a provider's controller
+/// type to `AppServer`.
+fn resolve_cli_args(provider: &providers::ProviderConfig, controller_type: &str) -> Vec<String> {
+    let args: &[&str] = match controller_type {
+        "persistent" => provider.persistent_launch_args.unwrap_or(provider.launch_args),
+        "app-server" => provider
+            .app_server
+            .as_ref()
+            .map(|app_server| app_server.launch_args)
+            .unwrap_or(provider.launch_args),
+        _ => provider.launch_args,
+    };
+    args.iter().map(|s| s.to_string()).collect()
+}
+
 fn resolve_vendor_env_override(
     provider: &providers::ProviderConfig,
     agent: &AgentDefinition,
@@ -129,6 +153,57 @@ mod resolve_vendor_env_override_tests {
         let provider = providers::get_provider("codex").unwrap();
         let agent = base_agent("https://my-proxy.example.com");
         assert!(resolve_vendor_env_override(provider, &agent).is_none());
+    }
+}
+
+#[cfg(test)]
+mod resolve_cli_args_tests {
+    use super::*;
+
+    #[test]
+    fn persistent_controller_uses_persistent_launch_args() {
+        let provider = providers::get_provider("claude").unwrap();
+        assert_eq!(
+            resolve_cli_args(provider, "persistent"),
+            provider.persistent_launch_args.unwrap().to_vec()
+        );
+    }
+
+    #[test]
+    fn subprocess_controller_uses_the_default_launch_args() {
+        let provider = providers::get_provider("codex").unwrap();
+        assert_eq!(resolve_cli_args(provider, "subprocess"), provider.launch_args.to_vec());
+    }
+
+    /// ReAgent P1 on PR #3215: this is the bug fix. Before it, an
+    /// `"app-server"` controller_type fell into the `else` branch and got
+    /// Codex's one-shot `exec --json` args — the App Server child would spawn
+    /// but never see `--listen stdio://`, so it never speaks the App Server
+    /// protocol and the handshake in `AppServerController::start` hangs until
+    /// `INITIALIZE_TIMEOUT`.
+    #[test]
+    fn app_server_controller_uses_the_app_server_launch_args_not_the_one_shot_ones() {
+        let provider = providers::get_provider("codex").unwrap();
+        let app_server_args = provider.app_server.as_ref().unwrap().launch_args.to_vec();
+
+        let resolved = resolve_cli_args(provider, "app-server");
+
+        assert_eq!(resolved, app_server_args);
+        assert_ne!(
+            resolved,
+            provider.launch_args.to_vec(),
+            "must not silently fall back to the one-shot exec args"
+        );
+    }
+
+    /// Defensive: a provider with no `app_server` config (everything except
+    /// Codex today) must not panic if `controller_type` is somehow
+    /// `"app-server"` for it — fall back to the ordinary launch args instead.
+    #[test]
+    fn app_server_controller_type_falls_back_gracefully_for_a_provider_without_one() {
+        let provider = providers::get_provider("claude").unwrap();
+        assert!(provider.app_server.is_none());
+        assert_eq!(resolve_cli_args(provider, "app-server"), provider.launch_args.to_vec());
     }
 }
 
@@ -316,14 +391,7 @@ pub(crate) async fn open_agent_impl(
                 } else {
                     controller_type
                 };
-                let is_persistent = controller_type == "persistent";
-                let mut cli_args: Vec<String> = if is_persistent {
-                    provider.persistent_launch_args
-                        .unwrap_or(provider.launch_args)
-                        .iter().map(|s| s.to_string()).collect()
-                } else {
-                    provider.launch_args.iter().map(|s| s.to_string()).collect()
-                };
+                let mut cli_args = resolve_cli_args(&provider, controller_type);
                 // Append definition-level flags (e.g. --model <value>) stored in provider_flags.
                 if !agent.provider_flags.is_empty() {
                     cli_args.extend(agent.provider_flags.split_whitespace().map(str::to_string));
@@ -422,7 +490,7 @@ pub(crate) async fn open_agent_impl(
                 // inheriting it (codex P2 on PR #2345).
                 env_vars.insert("MUXBUS_AGENT_ID".to_string(), json!(routing_id));
                 // Exit delay only for subprocess
-                if !is_persistent {
+                if controller_type != "persistent" {
                     env_vars.insert("CLAUDE_CODE_EXIT_AFTER_STOP_DELAY".to_string(), json!("30000"));
                 }
 
