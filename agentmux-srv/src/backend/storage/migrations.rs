@@ -885,9 +885,14 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- v18: per-agent HMAC-SHA256 signing key for host-tier jekt sender
         -- verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2).
         -- hmac_key is base64-encoded, 32 random bytes, minted on first use
-        -- (agent_jekt_key_ensure) and never rotated automatically. Local to
-        -- this instance's data dir only — not synced anywhere, not the same
-        -- secret as any Armory/GitHub credential.
+        -- (agent_jekt_key_ensure). As of
+        -- SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md, a key past
+        -- JEKT_KEY_TTL_SECS (24h) old is rotated the next time
+        -- agent_jekt_key_ensure runs for it (that agent's next spawn) — not
+        -- invalidated in place, so no expires_at column is needed; TTL is
+        -- computed from created_at at read time. Local to this instance's
+        -- data dir only — not synced anywhere, not the same secret as any
+        -- Armory/GitHub credential.
         CREATE TABLE IF NOT EXISTS db_agent_jekt_keys (
             agent_id   TEXT PRIMARY KEY,
             hmac_key   TEXT NOT NULL,
@@ -898,8 +903,15 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- verification (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1).
         -- public_key is not secret (distributed to LAN peers on demand);
         -- private_key is base64, 32-byte seed, minted on first use
-        -- (agent_lan_key_ensure) and never rotated automatically. Same
-        -- local-to-this-instance-only guarantee as db_agent_jekt_keys.
+        -- (agent_lan_key_ensure) and never rotated automatically — and,
+        -- unlike db_agent_jekt_keys, deliberately NOT given a TTL by
+        -- SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §4: rotating a LAN
+        -- key would desync it from any peer's permanent
+        -- db_lan_peer_pubkey_pins trust-on-first-use pin of the OLD key,
+        -- turning every future signature into an unconditional forced-
+        -- sensitive 'mismatch' for that peer with no re-pin mechanism to
+        -- recover. Same local-to-this-instance-only guarantee as
+        -- db_agent_jekt_keys otherwise.
         CREATE TABLE IF NOT EXISTS db_agent_lan_keys (
             agent_id    TEXT PRIMARY KEY,
             public_key  TEXT NOT NULL,
