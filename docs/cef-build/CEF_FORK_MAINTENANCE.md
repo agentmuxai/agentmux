@@ -397,6 +397,16 @@ ancestry test could not have said anything.
 5. **Build all three platforms from that one commit** — record the commit SHA.
 6. **Verify the built artifacts** (§7), per platform.
 7. **Cut three tags and update the pins together** (§8).
+8. **Update `agentmuxai/cef`'s default branch to `<new-ms>`.** GitHub's
+   compare view (and anyone cloning without specifying a branch) otherwise
+   keeps pointing at whatever was default before — currently `master`,
+   which tracks upstream's own trunk and has never been the branch this
+   fork's builds actually come from (confirmed 2026-09-15: zero references
+   to it anywhere in this repo's build docs or CI). Repo Settings → General
+   → Default branch. **Needs repo admin, not just write access** — an
+   agent with only `WRITE` permission on `agentmuxai/cef` will get a 404
+   attempting this via the API (confirmed the same day); a human with
+   admin needs to do it.
 
 ---
 
@@ -569,3 +579,8 @@ mechanical instead of a convention.
       patch (`agentmux_process_requirement`, `rwhv_background_opaque_check`)
 - [ ] §7.3 functional checks pass per platform
 - [ ] All three pins bumped together (P2)
+
+**After updating the pins:**
+- [ ] `agentmuxai/cef`'s default branch switched to `<new-ms>` (§6 step 8) —
+      needs a human with repo admin; flag it explicitly rather than
+      silently leaving the old milestone as default.
