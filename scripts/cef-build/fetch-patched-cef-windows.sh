@@ -30,15 +30,16 @@
 set -uo pipefail
 
 # Pin explicitly, don't resolve "latest" -- must match the CEF major linked in
-# Cargo.lock (currently 148, see scripts/verify-cef-version.sh). Bump this
+# Cargo.lock (currently 152, see scripts/verify-cef-version.sh). Bump this
 # when a new patched build is cut per build-patched-cef-windows.md's
 # "Package + upload as a GitHub release" section.
+# Codex P1 on PR #3231: this was still pinned to 148 after agentmux-cef's
+# Cargo 152 collapse landed -- `task dev`/`task package` on a machine with no
+# existing ~/cef-build tree would auto-fetch the WRONG runtime and fail
+# Taskfile.yml's version guard.
 RELEASE_REPO="agentmuxai/cef"
-RELEASE_TAG="cef-windows-x86_64-148.0.7778.180"
-ASSET_PATTERN="cef-windows-x86_64-148.0.7778.180.zip"
-# The asset's zip root -- see the release's own package step in
-# build-patched-cef-windows.md.
-ZIP_ROOT_DIR="cef_windows_x86_64"
+RELEASE_TAG="cef-windows-x86_64-152.0.7977.83"
+ASSET_PATTERN="cef-windows-x86_64-152.0.7977.83.zip"
 
 target_dir="${1:?usage: fetch-patched-cef-windows.sh <target-dir>}"
 
@@ -87,11 +88,21 @@ if ! pwsh -NoProfile -Command "Expand-Archive -Path '$zip_path_win' -Destination
   exit 1
 fi
 
-src_dir="$extract_dir/$ZIP_ROOT_DIR"
-if [ ! -d "$src_dir" ]; then
-  echo "fetch-patched-cef-windows: expected $ZIP_ROOT_DIR/ not found inside archive -- release layout may have changed" >&2
+# Codex P1 on PR #3231: don't assume a fixed wrapper directory name inside
+# the zip -- the 148 release was packaged with a `cef_windows_x86_64/` root
+# (this script's old ZIP_ROOT_DIR), but the 152 release
+# (docs/cef-build/build-patched-cef-windows.md §7's Compress-Archive
+# invocation) has the files at the zip's top level instead, with no wrapper
+# directory at all. Search for libcef.dll and use its own containing
+# directory, matching the already-robust technique
+# .github/workflows/build-windows.yml's CI download step uses for the same
+# ambiguity.
+libcef_found="$(find "$extract_dir" -iname 'libcef.dll' -print -quit)"
+if [ -z "$libcef_found" ]; then
+  echo "fetch-patched-cef-windows: libcef.dll not found anywhere inside the extracted archive -- release layout may have changed" >&2
   exit 1
 fi
+src_dir="$(dirname "$libcef_found")"
 
 mkdir -p "$target_dir"
 cp -rf "$src_dir/." "$target_dir/"
