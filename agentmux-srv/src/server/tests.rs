@@ -3981,9 +3981,15 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
 
     // Poll until the controller actually reports done — shell teardown
     // latency varies by machine/OS, same as the round-trip test above.
+    // Budgeted generously (was 40x250ms=10s, uncomfortably tight): STATUS_DONE
+    // isn't published until the wait/cleanup task's flusher-drain wait
+    // resolves, and that hits its full 10s `FLUSHER_DRAIN_TIMEOUT` on
+    // essentially every ordinary `cmd.exe` exit on Windows (discovered live
+    // while adding `ptyshell_shell_pane_closes_itself_after_exit` — see its
+    // own comment, and the close-on-exit trigger's comment in lifecycle.rs).
     let mut done = false;
-    for _ in 0..40 {
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let (_, status_json) = post_json(
             &app,
             "/api/v1/ptyshell/status",
@@ -4022,4 +4028,210 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
 
     blockcontroller::delete_controller(&first_shell_id);
     blockcontroller::delete_controller(&second_shell_id);
+}
+
+/// Regression test for close-on-exit's PARENT exclusion
+/// (`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §11): a
+/// `PtyShellCreate`-spawned block is always a SUB-block (`parentoref`
+/// points at the agent block that owns it) — an agent's composer-drawer
+/// shell or a headless agent-driven shell, not an independent top-level
+/// pane. Closing one of these via `sagas::delete_block::run` leaves the
+/// parent's own `term:shellsubblockid` pointer dangling (unrelated to,
+/// and untouched by, that generic saga), and the drawer's own "attach or
+/// create" logic then silently recreates a fresh shell moments later —
+/// reproducing the original respawn loop via a different path, with EXTRA
+/// latency, not fixing anything. Live-tested and confirmed exactly this
+/// regression before this exclusion was added (§11's own writeup).
+///
+/// Installs a LOCAL close-on-exit handler directly via
+/// `blockcontroller::set_close_on_exit_handler`, bypassing
+/// `bootstrap::install_close_on_exit_handler` (needs a full saga-capable
+/// `AppState` — `main.rs`'s real boot sequence, not `test_state()`). This
+/// verifies `lifecycle.rs`'s decision logic specifically — that it does
+/// NOT call the hook at all for a parented block — independent of
+/// `sagas::delete_block::run`'s own separately-tested correctness.
+/// See `shell_pane_with_no_parent_closes_itself_after_exit` (below) for
+/// the positive case (a real top-level pane DOES close).
+///
+/// `set_close_on_exit_handler`'s `OnceLock` is PROCESS-global and can only
+/// be set once — once this test installs its handler, it stays installed
+/// for the rest of this test binary's life. Like this file's other
+/// real-PTY tests, run this one individually
+/// (`cargo test -p agentmux-srv --bin agentmux-srv
+/// ptyshell_create_does_not_close_the_parented_shell_pane_after_exit --
+/// --ignored --nocapture`), not as part of a bulk `--ignored` run alongside
+/// some future test that also wants to install its own handler.
+#[tokio::test]
+#[ignore]
+async fn ptyshell_create_does_not_close_the_parented_shell_pane_after_exit() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "test-agent-block".to_string(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    // Sanity: this block really is parented — the property the exclusion
+    // is keyed on.
+    let shell_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    assert_eq!(shell_block.parentoref, "block:test-agent-block");
+
+    let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let closed_for_handler = closed.clone();
+    blockcontroller::set_close_on_exit_handler(std::sync::Arc::new(
+        move |tab_id: String, block_id: String| {
+            *closed_for_handler.lock().unwrap() = Some((tab_id, block_id));
+        },
+    ));
+
+    // Give the PTY a moment to spawn its shell before typing into it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "test-agent-block", "text": "exit\r\n" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["written"], serde_json::json!(true), "input write failed: {json:?}");
+
+    // Budget generously — see the sibling test's comment on why (the
+    // wait/cleanup task's flusher-drain wait routinely eats the full 10s
+    // `FLUSHER_DRAIN_TIMEOUT` on Windows before the close-on-exit decision
+    // is even reached).
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    assert!(
+        closed.lock().unwrap().is_none(),
+        "close-on-exit must NOT fire for a parented (sub-block) shell pane"
+    );
+
+    blockcontroller::delete_controller(&shell_id);
+}
+
+/// Regression test for close-on-exit's positive case
+/// (`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §10): a real
+/// top-level pane (no `parentoref` — the `Terminal` widget, opened
+/// directly in a tab, matching how the WS `ControllerResyncCommand` path
+/// creates one) DOES close itself once its shell exits. Drives the
+/// controller directly via `blockcontroller::resync_controller` +
+/// `send_input` (not the `/api/v1/ptyshell/*` HTTP family, which always
+/// creates a PARENTED sub-block — see the sibling test above) to get a
+/// genuinely parent-less block with a REAL tab id, matching what a plain
+/// Terminal pane looks like in production.
+///
+/// Same process-global `OnceLock` caveat as the sibling test — run this
+/// one individually too
+/// (`cargo test -p agentmux-srv --bin agentmux-srv
+/// shell_pane_with_no_parent_closes_itself_after_exit -- --ignored
+/// --nocapture`).
+#[tokio::test]
+#[ignore]
+async fn shell_pane_with_no_parent_closes_itself_after_exit() {
+    let state = test_state();
+
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert("view".to_string(), serde_json::json!("term"));
+    meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    #[cfg(windows)]
+    {
+        meta.insert(blockcontroller::META_KEY_CMD.to_string(), serde_json::json!("cmd.exe"));
+        meta.insert("cmd:interactive".to_string(), serde_json::json!(true));
+    }
+    let mut block = crate::backend::obj::Block {
+        oid: "test-toplevel-shell".to_string(),
+        // A REAL top-level pane is parented to its TAB, not to nothing —
+        // `wcore::block` / `persist_subscriber` both write
+        // `format!("tab:{tab_id}")`. An earlier version of this test used
+        // `String::new()` here, which never occurs in production and let a
+        // `!parentoref.is_empty()` bug ship that disabled close-on-exit
+        // for every real pane (§12). Keep this realistic.
+        parentoref: "tab:test-real-tab-1".to_string(),
+        meta,
+        ..Default::default()
+    };
+    state.wstore.insert(&mut block).expect("insert block");
+
+    let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let closed_for_handler = closed.clone();
+    blockcontroller::set_close_on_exit_handler(std::sync::Arc::new(
+        move |tab_id: String, block_id: String| {
+            *closed_for_handler.lock().unwrap() = Some((tab_id, block_id));
+        },
+    ));
+
+    let registry = state.wstore.shared_agent_registry();
+    blockcontroller::resync_controller(
+        &block,
+        "test-real-tab-1",
+        None,
+        false,
+        true,
+        Some(state.broker.clone()),
+        Some(state.event_bus.clone()),
+        Some(state.wstore.clone()),
+        Some(state.filestore.clone()),
+        registry,
+        state.boot_id.clone(),
+    )
+    .expect("resync/start shell");
+
+    // Give the PTY a moment to spawn its shell before typing into it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // cmd.exe queries cursor position (`ESC[6n`, Device Status Report) on
+    // interactive startup and blocks waiting for a reply — normally
+    // answered automatically by a real terminal emulator (xterm.js, over
+    // the WS path a genuine Terminal pane uses) or by
+    // `answer_conpty_handshake_if_seen` (the `/api/v1/ptyshell/*` HTTP
+    // family's own answer for the same query, since those callers have no
+    // frontend attached either). This test has neither, so it answers the
+    // query itself the same way: `ESC[1;1R`, a Cursor Position Report.
+    blockcontroller::send_input(
+        "test-toplevel-shell",
+        blockcontroller::BlockInputUnion::data(b"\x1b[1;1R".to_vec()),
+        None,
+    )
+    .expect("answer cursor-position query");
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    blockcontroller::send_input(
+        "test-toplevel-shell",
+        blockcontroller::BlockInputUnion::data(b"exit\r\n".to_vec()),
+        None,
+    )
+    .expect("send exit");
+
+    // Budget generously — see the sibling test's comment on why
+    // (flusher-drain-timeout on Windows).
+    let mut fired = None;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if let Some(v) = closed.lock().unwrap().clone() {
+            fired = Some(v);
+            break;
+        }
+    }
+    let (fired_tab_id, fired_block_id) =
+        fired.expect("close-on-exit handler should have fired for a parent-less shell pane");
+    assert_eq!(fired_tab_id, "test-real-tab-1");
+    assert_eq!(fired_block_id, "test-toplevel-shell");
+
+    blockcontroller::delete_controller("test-toplevel-shell");
 }

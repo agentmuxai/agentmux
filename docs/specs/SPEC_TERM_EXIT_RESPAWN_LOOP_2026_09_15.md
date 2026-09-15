@@ -1,9 +1,13 @@
 # SPEC: Typing `exit` in a terminal pane doesn't close it — instead the shell respawns and appears to loop
 
 **Date:** 2026-09-15
-**Status:** implemented (§4b's respawn loop — see §7; §4a, close-on-exit
-being dead code, is a separate, pre-existing gap deliberately left open —
-also see §7)
+**Status:** implemented (§4b's respawn loop, §7-9 — shipped separately in
+PR #3225; §4a's close-on-exit, §10-14. §11-12 and §14 correct real
+regressions found by live retest — read §12 before §11: it supersedes
+§11's guess about which pane was involved, and adds the 10s
+`FLUSHER_DRAIN_TIMEOUT` half of the reported "hang". §13 takes the close
+from ~4s to immediate; §14 is why the pane still didn't visually
+disappear until the layout bridge gained an arm for it.)
 **Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
 `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
 
@@ -348,3 +352,372 @@ not just `COMMENTED`) — one real P1, one real P2:
 Re-verified after these fixes: `cargo check -p agentmux-srv` clean, full
 non-ignored suite (3350 passed), and the `ptyshell_*` suite including
 real-PTY `#[ignore]`d tests — all with no regressions.
+
+## 10. §4a implemented: close-on-exit
+
+Live-tested the §7-9 fix in a real dev build and confirmed the loop is
+gone, but the pane still didn't close — it just went quiet, which reads as
+"hung" from the outside (no visual feedback, nothing to interact with).
+This closes that gap: `should_close_on_exit`/`should_close_on_exit_force`/
+`close_on_exit_delay_ms` (`shell/controller.rs`) were fully implemented but
+never called from anywhere (§4a) — now they are.
+
+**The missing piece was capability, not logic.** The actual close action
+(`sagas::delete_block::run` — delete the block, prune it from the owning
+Tab's layout tree, notify the frontend both directions, all pre-existing
+and already tested) needs a full `AppState`. `ShellController`'s wait/
+cleanup task, deep in `backend::blockcontroller`, only has the individual
+`Store`/`EventBus`/`Broker` pieces it was constructed with — no `AppState`
+handle, and threading one through every `ShellController::new`/
+`resync_controller` call site would invert the module dependency direction
+for a much larger change than this warranted.
+
+**Fix:** mirrored `crate::broker::process::set_global`/`global`'s exact
+shape (`blockcontroller::set_close_on_exit_handler`/`close_on_exit`, a
+process-wide `OnceLock<Arc<dyn Fn(String, String) + Send + Sync>>`), same
+pattern `install_agent_turn_delivery` already established for this exact
+class of problem. `bootstrap::install_close_on_exit_handler` wires it up
+right after `AppState` is built in `main.rs`, capturing a cloned
+`AppState` (it's `#[derive(Clone)]`) into a closure that `tokio::spawn`s
+the actual saga call. `shell/lifecycle.rs`'s wait/cleanup task computes
+`effective_close_on_exit`/`close_on_exit_delay_ms` from `block_meta` at
+spawn time, and after its existing STATUS_DONE-publish/run_lock-release
+cleanup, fires a delayed, fire-and-forget call to the installed handler.
+
+**Default, not just opt-in:** `effective_close_on_exit(meta, controller_type)`
+defaults unset `cmd:closeonexit` to `true` for `BLOCK_CONTROLLER_SHELL`
+(the `Terminal` widget and an agent's composer-drawer shell both use this
+controller type) — matching the plain expectation "typing `exit` closes
+the pane" that most terminal apps default to, and directly answering the
+original bug report's second half. Defaults to `false` for
+`BLOCK_CONTROLLER_CMD` (one-shot, non-interactive command execution) —
+that pane exists specifically to show output/exit code after the command
+finishes, and auto-closing it would hide exactly the information it's for.
+An explicit `cmd:closeonexit` in meta always overrides either default.
+
+**`close_on_exit_force` ends up unused, deliberately, not by oversight.**
+Two attempts at giving it a real meaning during this PR both failed on
+contact with reality — see `should_close_on_exit_force`'s own doc comment
+in `controller.rs` for the full account (exit-code granularity is lossy
+across platforms; a flusher-drain-timeout-based interpretation was
+implemented, live-tested, and reverted after discovering it made
+close-on-exit almost never fire — see the next finding). Left in place
+(re-marked `#[allow(dead_code)]`, honestly) as a parsed-and-tested meta
+getter available for a future distinction, not wired to anything today.
+
+**Real finding, not a corner case: `FLUSHER_DRAIN_TIMEOUT` (10s) is hit on
+essentially every ordinary `cmd.exe` exit on Windows.** Discovered by
+writing this feature's own regression test — the close-on-exit trigger
+consistently failed to fire within what looked like a generous budget,
+traced (via temporary `eprintln!` instrumentation, `tokio::spawn`'s
+`JoinHandle::is_finished()`, and bisecting sleep duration/gating) to the
+wait/cleanup task's pre-existing flusher-drain wait
+(`lifecycle.rs`, `agentmux-srv/src/backend/blockcontroller/shell/pty.rs:79`)
+genuinely taking its full 10-second timeout, not occasionally but nearly
+every time — ConPTY's own console-host process routinely outlives the
+direct child by design, matching that code's own "(a background descendant
+still holding the PTY open?)" hypothesis in its warning log. Two
+consequences:
+- An earlier version of this fix **skipped** closing when the flusher
+  timed out (reasoning: a still-live descendant might have more output
+  coming). Live-testing showed this made close-on-exit fire almost never
+  on Windows — reverted to closing unconditionally on `close_on_exit`
+  alone. This is safe: the flusher and its read loop are already left
+  running detached regardless (pre-existing behavior, `lifecycle.rs`'s own
+  comment), so any genuinely-still-arriving trailing output keeps being
+  persisted to the block's file the same as if the pane stayed open —
+  closing just stops anyone from looking at it.
+- **`STATUS_DONE` itself — not just close-on-exit — is delayed by up to
+  this same ~10s on Windows**, since its publish happens after the same
+  flusher-drain wait. This is pre-existing, not introduced by this PR
+  (verified: the §7-9 regression test's own poll loop was already
+  budgeted right at this edge, ~10.7s observed completion against a 10.5s
+  budget, passing only by a hair — widened defensively as part of this
+  work). This plausibly explains PART of why the original bug felt like a
+  "hang" independent of the loop or the missing close — any UI relying on
+  `shellprocstatus`/`PtyShellStatus.running` for exit feedback would sit
+  showing "running" for up to 10 real seconds after the shell actually
+  exited. **Not fixed here** — `FLUSHER_DRAIN_TIMEOUT`'s value and
+  ordering are established, separately-reviewed infrastructure (see its
+  own multi-round-review comments in `lifecycle.rs`), and reducing it or
+  decoupling `STATUS_DONE` from the flusher wait is a real, additional
+  change this PR didn't make room for. Worth its own follow-up.
+
+**Known, accepted limitation: doesn't actually close a PtyShellCreate
+(agent-shared) headless shell in practice**, even though the trigger fires
+correctly for one. `sagas::delete_block::run` requires the block's real
+`tab_id` (it validates the block is actually IN that tab before deleting
+anything); `ShellController.tab_id` for a `PtyShellCreate`-spawned block is
+literally the string `"ptyshell"` — a tracing/scoping placeholder
+(`try_attach_to_existing_shell`'s own comment: `"ptyshell", // headless —
+no real tab; only used for tracing/scoping."`), not a real Tab id, since
+these are headless sub-blocks that were never part of any Tab's layout
+tree in the first place (see §7's original investigation, "PtyShellCreate's
+`server/mod.rs`... rollback" finding). The saga call will fail its own
+tab-id-mismatch precondition and log a warning; the (already-invisible,
+never-rendered-as-its-own-pane) block row just lingers, same as it always
+did before this PR — not a regression, not user-visible, but also not a
+real close. A genuine fix needs `ShellController.tab_id` to carry the
+REAL owning tab for a ptyshell-spawned block (there may not be one — these
+are agent-pane sub-blocks, not top-level Tab leaves — see §7's
+`META_KEY_SHELL_SUBBLOCK_ID` discussion), which is a different, larger
+change than this PR's scope. Verified via a dedicated regression test
+(`ptyshell_shell_pane_closes_itself_after_exit`, `server/tests.rs`) that
+installs a test-local close-on-exit handler directly — it checks the
+TRIGGER fires with the right `(tab_id, block_id)`, not that the downstream
+saga succeeds for this specific case, which is exactly this known gap.
+
+**Tests:**
+- `shell::tests::test_effective_close_on_exit_default_by_controller_type` /
+  `test_effective_close_on_exit_explicit_meta_always_wins` — pure unit
+  tests, no PTY, always run in CI.
+- `server::tests::ptyshell_shell_pane_closes_itself_after_exit` — real-PTY,
+  `#[ignore]`d like this file's other real-PTY tests (run individually;
+  also installs a process-global `OnceLock` handler that, once set, stays
+  set for the rest of the test binary's life — see its own doc comment).
+  Verified passing alongside the rest of the `ptyshell_*` suite run
+  together in one process (6 passed), and the full non-ignored suite
+  (3352 passed, 0 failed) — both re-run after these changes.
+
+## 11. §10's close-on-exit broke the agent composer-drawer shell — found live, fixed
+
+Rebuilt and shipped §10 to a live dev instance for the reporter to retest.
+Report back: "still hangs," then "after a couple seconds the pane changes
+to the in-progress pulsating brain," then "the pane header has the 'shell
+exited, refresh' icon." That sequence, plus srv logs showing a SECOND
+`ControllerResync`/spawn/exit cycle appearing ~16s after the first exit,
+diagnosed to: the pane under test was an agent pane's composer-drawer
+shell (`AgentShellSubblock.tsx`), not a plain top-level `Terminal` widget
+— confirmed via `blockcontroller::obj::Block.parentoref` being non-empty
+for this shell's block (`block:<agent_block_id>`).
+
+**Root cause:** §10's `effective_close_on_exit` didn't distinguish a
+top-level pane from a SUB-block. `sagas::delete_block::run` doesn't know
+about `META_KEY_SHELL_SUBBLOCK_ID` — that pointer lives on the PARENT
+agent block's own meta and is entirely unrelated to, and untouched by,
+the generic delete-block saga. So close-on-exit's saga call deleted the
+drawer's shell block correctly, but left the parent's
+`term:shellsubblockid` pointing at now-nothing. `AgentShellSubblock.tsx`'s
+own "attach or create" logic (mount-time, or on next observation that its
+pointed-to block is gone) then did exactly what it's designed to do for
+a genuinely-missing shell: silently create a fresh one — the BrainSpinner
+is that recreate's own loading state (per its doc comment,
+`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md`, "masks the
+drawer from mount until... the terminal is constructed"). Net effect: the
+original bug, reproduced via a slower path — respawn instead of a tight
+loop, but still not "closed," and now with §10's delay stacked in front
+of it too. The "shell exited, refresh" icon the reporter also saw is
+existing, correct UI (a genuine, separate affordance for the exited
+state) that briefly showed before close-on-exit deleted the block out
+from under it.
+
+**Fix:** `lifecycle.rs` now also checks `Block.parentoref` at spawn time
+(via `self.wstore`, already available) and force-disables `close_on_exit`
+for any block with a non-empty parent, regardless of what
+`effective_close_on_exit`'s meta/controller-type default would otherwise
+say. A block with a parent is a sub-block — an agent's composer-drawer
+shell OR a `PtyShellCreate`-spawned headless shell — never an independent
+top-level pane a generic "delete + prune from layout" saga is safe to
+apply to. A block with no parent (the `Terminal` widget, opened directly
+in a tab) is unaffected and still closes as designed.
+
+This also **retroactively simplifies §10's "known, accepted limitation"**
+about `PtyShellCreate` blocks: that section reasoned the saga would just
+*fail* for those (wrong `tab_id`) and leave a harmless orphaned row. That
+reasoning happened to be correct for THAT specific case, but was
+incidental, not principled — this fix now excludes ALL parented blocks
+deliberately, on the actually-correct signal (`parentoref`), not by
+accident of one call site's placeholder tab_id.
+
+**Tests:** the §10 test that spawned via `PtyShellCreate` (always
+parented) was actually testing the WRONG case — passing only because it
+used a test-local fake hook that doesn't care about correctness, not
+because closing a parented block was ever right. Split into two:
+- `ptyshell_create_does_not_close_the_parented_shell_pane_after_exit` —
+  asserts the hook does NOT fire for a `PtyShellCreate`-spawned (always
+  parented) block.
+- `shell_pane_with_no_parent_closes_itself_after_exit` — asserts it DOES
+  fire for a genuinely parent-less block, driven directly via
+  `resync_controller`/`send_input` (not the `/api/v1/ptyshell/*` HTTP
+  family, which can only ever produce parented blocks). Writing this test
+  surfaced one more real thing worth recording: with no real terminal
+  emulator attached (no xterm.js, no WS client), `cmd.exe`'s startup
+  `ESC[6n` cursor-position query is never answered and the shell hangs
+  forever — invisible in production (xterm.js answers it automatically
+  over the WS path; `answer_conpty_handshake_if_seen` answers it for the
+  `/api/v1/ptyshell/*` family) but real when driving a PTY directly with
+  nothing on the other end. The test answers it manually (`ESC[1;1R`,
+  a Cursor Position Report) before proceeding, matching what a real
+  terminal emulator would send.
+
+Re-verified: full `ptyshell_*` suite (6 tests, run together in one
+process) plus the new parent-less test (run individually, same
+`OnceLock` constraint as its siblings) both passing, and the full
+non-ignored suite (3352 passed, 0 failed) — all re-run after this fix.
+
+## 12. §11's exclusion was keyed on the wrong field — and the real 10s hang
+
+Reporter retested §11 and said "still hangs" a third time. Rather than
+iterate on the symptom again, this round queried the live dev instance's
+own SQLite store for the block that had actually just exited:
+
+```json
+{"oid":"d2743404-…","version":4,
+ "meta":{"view":"term","controller":"shell","cmd:cwd":"C:/Users/asafe",
+         "term:osc_title":"C:\Program Files\PowerShell\7\pwsh.EXE"},
+ "parentoref":"tab:2f65a023-…"}
+```
+
+Two facts fell out of that one record, both of which invalidate earlier
+guesses in this document:
+
+**(a) The pane was never the agent composer-drawer shell.** It is a plain
+top-level `Terminal` widget (`view:"term"`, parented to a TAB), running
+pwsh. §11 inferred "composer-drawer" from the reporter's "pulsating brain"
+description and built its fix around that; the store says otherwise.
+§11's exclusion is still correct *as an exclusion* — a genuine sub-block
+must not be closed this way — but it was never what this reporter was
+hitting.
+
+**(b) §11's exclusion was keyed on the wrong field, and disabled
+close-on-exit for EVERY pane.** It tested `!parentoref.is_empty()` as a
+proxy for "is a sub-block." But a top-level pane's `parentoref` is
+`tab:<tab_id>` (`wcore::block`, `persist_subscriber`) — non-empty. Only a
+sub-block uses `block:<block_id>` (`server/mod.rs`'s `PtyShellCreate`,
+`websocket.rs`'s `createsubblock`). So the check matched every pane in
+existence and turned the whole feature off — exactly the "still hangs"
+the reporter saw. Fixed to `parentoref.starts_with("block:")`, the same
+discriminator `websocket.rs:1172` already uses via `strip_prefix("block:")`.
+
+**Why the §11 test didn't catch it:** `shell_pane_with_no_parent_closes_itself_after_exit`
+constructed its "top-level" block with `parentoref: String::new()` — a
+value that never occurs in production. It passed under both the broken and
+the fixed logic, which is precisely why it gave false confidence. The test
+now uses a realistic `tab:<id>` parent, and fails against the §11 code.
+
+**The other half: `FLUSHER_DRAIN_TIMEOUT` was 10s of dead UI on every
+exit.** Independent of the above, srv logs showed a flat ten-second gap
+between `process exited` and any subsequent activity, every single time:
+
+```
+13:51:34  process exited
+13:51:44  PTY output flusher did not finish draining within the timeout
+```
+
+`STATUS_DONE` is published only after that drain wait, so for ten seconds
+after `exit` the pane could not react at all — no exited-state icon, no
+close, nothing. That is a hang by any reasonable definition, and it was
+pre-existing, unrelated to close-on-exit, and affects every
+`STATUS_DONE`-driven affordance (the pane's own exited icon,
+`PtyShellStatus`'s `running:false`).
+
+The bound was sized (correctly, for its stated purpose) as a generous
+ceiling over a flush that takes milliseconds — `PTY_COALESCE_WINDOW` is
+20ms. What nobody had measured is how often it is actually *reached*: on
+Windows, essentially always, because ConPTY's console-host process
+outlives the direct child and holds the PTY open, so the read loop never
+sees EOF. Waiting the full ceiling buys nothing there (the flusher cannot
+finish until an EOF that may never arrive — which is why expiry detaches
+rather than aborts) while costing the entire ceiling in dead UI time.
+Reduced 10s → 1s: still ~50x headroom over the legitimate case, 10x less
+user-visible cost in the pathological one, and no behavioral change
+otherwise (expiry still detaches; late output is still never lost).
+
+Measured effect, same test, same machine: 13.09s → **4.06s** end to end.
+
+**Verified:** `shell_pane_with_no_parent_closes_itself_after_exit` (now
+with a realistic `tab:` parent) passes; the sub-block exclusion test still
+passes; full `ptyshell_*` suite (6) passes; full non-ignored suite (3352
+passed, 0 failed).
+
+## 13. Closing immediately
+
+With §12 in, the reporter confirmed the pane finally closes — "now it
+exits after about 3-5 seconds. can it exit immediately?" It can. That
+residual was two deliberate waits stacked in front of a pane that is
+about to be deleted:
+
+**`close_on_exit_delay_ms`: 2000 → 0.** This knob predates any caller —
+it was dead code until §10 wired close-on-exit up, and its 2000 was
+carried over unexamined at that point. The stated intent ("leave the pane
+showing its final output before closing it") doesn't survive contact with
+the actual moment it fires: a shell you just typed `exit` into has already
+shown you whatever it was going to show, so the pause reads as lag rather
+than as a chance to read anything. Still honored when set explicitly via
+`cmd:closeonexitdelay` for a pane that genuinely wants a beat.
+
+**The flusher drain wait is skipped entirely when the pane is closing.**
+§12 cut `FLUSHER_DRAIN_TIMEOUT` 10s → 1s, but on Windows that 1s is still
+paid on every exit (ConPTY, §12). The wait exists to order trailing output
+*before* clients observe `STATUS_DONE` — and there is no client left to
+order it for when the block is deleted a moment later. So when
+`close_on_exit` is true the handle is simply dropped, which detaches the
+flusher exactly as a timeout would have; nothing it produces afterward is
+lost any more than it already would have been. Panes that stay open are
+untouched and still get the full ordered wait.
+
+Measured, same test/machine across the three rounds:
+
+| | end-to-end |
+|---|---|
+| §11 (broken — never closed) | — |
+| §12 (10s→1s drain, 2s delay) | 13.09s → 4.06s |
+| §13 (drain skipped, delay 0) | **1.56s** |
+
+and ~1s of that final figure is the test's own fixed setup sleeps plus its
+500ms poll granularity, not close latency — the close itself is now below
+what that test can resolve.
+
+**Verified:** full `ptyshell_*` real-PTY suite (6) passes, full
+non-ignored suite (3352 passed, 0 failed).
+
+## 14. Why the pane still didn't disappear: a missing bridge arm
+
+§13 made the close fire instantly, and the reporter confirmed the timing —
+but the pane still didn't go away; it turned into the pulsating loading
+spinner. Querying the dev instance's store showed the backend had done
+its entire job correctly:
+
+```
+db_block:  agent, swarm, sysinfo          <- terminal block deleted
+layout rootnode: those three only         <- its node pruned (saga step 2)
+pendingbackendactions: [{delete, 19770516-...}]   <- queued (step 2b), UNCONSUMED
+```
+
+That queued entry was from an *earlier* round and had never been picked
+up — the tell. The frontend keeps its own in-memory `LayoutModel` copy of
+the tree; the saga's step 2b queues a `delete` action to tell it to prune
+too. `onBackendUpdate` → `processPendingBackendActions`
+(`frontend/layout/lib/layoutPersistence.ts`) handles that queue correctly
+— but it only runs when the frontend receives a **LayoutState**
+`waveobj:update`, and no such update was ever broadcast.
+
+**Root cause:** `server/wave_obj_bridge.rs` translates reducer events into
+frontend `waveobj:update` broadcasts, and it had no arm for
+`Event::LayoutBackendActionsQueued` (nor `LayoutNodeDeleted`). So the
+queue was written to SQLite and its event published on the internal bus,
+but nothing told any connected frontend the LayoutState had changed. The
+block's data went `null` via `waveobj:delete`, its leaf survived, and a
+leaf pointing at a null block renders as a permanent loading spinner.
+
+**Why this was invisible until now.** `pendingbackendactions`' only
+producer was tear-off/redock, and that gesture creates a NEW window —
+whose fresh `LayoutModel` reads the queue once at construction
+(`initializeFromWaveObject`, line 42). The queue therefore never needed a
+live push to work. Close-on-exit is the first producer that queues an
+action for an **already-open** window, which is the case that was never
+wired.
+
+**Fix:** bridge `LayoutBackendActionsQueued` → `emit_layout_for_tab`.
+Race-free for exactly the reason the neighbouring granular-events comment
+gives: the sole dispatcher
+(`service::reducer_helpers::queue_layout_actions_via_reducer`) applies
+every emitted event to the store synchronously *before* `publish_events`,
+so the bridge's LayoutState re-read cannot observe pre-event state.
+
+**Test:** `wave_obj_bridge::tests::test_backend_actions_queued_broadcasts_layout_update`.
+Verified to genuinely catch the bug — with the new arm disabled it fails
+on the timeout, not vacuously. That check was deliberate: two earlier
+tests in this effort (§11's `parentoref: String::new()`, §10's
+parented-block case) passed under both broken and fixed logic and gave
+false confidence.
