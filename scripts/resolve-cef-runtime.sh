@@ -49,6 +49,45 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Codex P1 on PR #3231: this script's candidates were validated by file
+# PRESENCE only (libcef.so + icudtl.dat exist) — never by version. A
+# pre-existing local ~/cef-build tree from before a CEF milestone bump (e.g.
+# still on 148 after agentmux-cef/Cargo.toml moved to 152) would be silently
+# accepted, producing a runtime/binding-version mismatch bundle. Same
+# technique scripts/verify-angle-libs.sh already uses for binary inspection
+# (`grep -a` for a plain-text marker) — CEF's own version string is embedded
+# in libcef.so as readable bytes; confirmed directly against a real built
+# libcef.dll (Windows, same underlying Chromium build) before writing this.
+# Warns rather than hard-fails, matching this script's own established
+# philosophy for the cargo-cache/BeginWindowDrag provenance warning above —
+# a local dev workflow gets unblocked with a loud, actionable message; CI's
+# scripts/verify-cef-version.sh remains the hard gate for anything shipped.
+expected_cef_major() {
+    local metadata pkg_id full
+    metadata="$(cargo metadata --manifest-path "$REPO_ROOT/Cargo.toml" --filter-platform x86_64-unknown-linux-gnu --format-version 1 2>/dev/null)" || return 1
+    pkg_id="$(printf '%s' "$metadata" | jq -r '
+        .resolve.nodes[] | select(.id | startswith("path+file://") and contains("/agentmux-cef#"))
+        | .deps[] | select(.name == "cef") | .pkg
+    ' 2>/dev/null)"
+    [ -n "$pkg_id" ] || return 1
+    full="$(printf '%s' "$metadata" | jq -r --arg pkg "$pkg_id" '.packages[] | select(.id == $pkg) | .version' 2>/dev/null)"
+    printf '%s' "$full" | sed -n 's/^\([0-9][0-9]*\).*/\1/p'
+}
+
+check_version() {
+    local dir="$1" expected_major actual_major
+    expected_major="$(expected_cef_major)" || return 0
+    [ -n "$expected_major" ] || return 0
+    actual_major="$(grep -a -o "^${expected_major}\.[0-9]*\.[0-9]*" "$dir/libcef.so" 2>/dev/null | head -1 | cut -d. -f1)"
+    if [ -z "$actual_major" ]; then
+        echo "WARNING: could not confirm libcef.so at $dir is CEF ${expected_major}.x" >&2
+        echo "         (expected the version string embedded in the binary; found none matching)." >&2
+        echo "         If this is a stale pre-upgrade build, task bundle:linux will ship a" >&2
+        echo "         runtime/binding mismatch. Rebuild per docs/cef-build/build-patched-libcef.md" >&2
+        echo "         if in doubt." >&2
+    fi
+}
+
 # `validate_dir <dir>` — print to stdout and exit 0 if `<dir>` has libcef.so +
 # icudtl.dat. Returns 1 (no output) if either file is missing.
 # When the directory provides both files, emit a diagnostic keyed on <kind>:
@@ -82,6 +121,7 @@ validate_dir() {
             echo "INFO: libcef.so at $dir is ${size_mb} MB — an unstripped build; the AppImage" >&2
             echo "      packager strips it to ~260 MB at bundle time (expected, not a problem)." >&2
         fi
+        check_version "$dir"
     fi
     echo "$dir"
     return 0
