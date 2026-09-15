@@ -123,15 +123,26 @@ impl SplashState {
     /// the dismiss condition is met. Driven by the compositor's frame callbacks
     /// (which also pace the ~60 fps pulse).
     fn draw(&mut self, qh: &QueueHandle<Self>) {
-        // Drain all pending startup events before rendering (non-blocking).
+        // Drain all pending startup events before rendering (non-blocking),
+        // as one batch — `StageList::apply_tick` defers a same-tick
+        // Begin+End pair to the next call so every row gets at least one
+        // "running" frame before it can complete, instead of snapping
+        // straight to its final value.
+        let mut fresh = Vec::new();
         while let Ok(event) = self.startup_rx.try_recv() {
-            self.stage_list.apply(event);
+            fresh.push(event);
         }
+        self.stage_list.apply_tick(fresh);
 
         let now = Instant::now();
         // Begin the fade-out the first time the dismiss condition holds; tear
         // down once it completes.
         if self.fade_start.is_none() && self.should_dismiss() {
+            // Any row still open at this instant (no matching End ever
+            // arrived) gets a definite outcome now instead of staying
+            // visually "running" for the rest of the fade — see
+            // splash_core::StageTimeline::finalize_running.
+            self.stage_list.finalize_running(now);
             self.fade_start = Some(now);
         }
         let window_alpha = fade_alpha(self.fade_start, now);

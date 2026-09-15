@@ -120,10 +120,16 @@ pub(super) fn run(
     let mut buf = vec![0u8; w as usize * h as usize * 4];
 
     loop {
-        // Drain all pending startup events before rendering (non-blocking).
+        // Drain all pending startup events before rendering (non-blocking),
+        // as one batch — `StageList::apply_tick` defers a same-tick
+        // Begin+End pair to the next call so every row gets at least one
+        // "running" frame before it can complete, instead of snapping
+        // straight to its final value.
+        let mut fresh = Vec::new();
         while let Ok(event) = startup_rx.try_recv() {
-            stage_list.apply(event);
+            fresh.push(event);
         }
+        stage_list.apply_tick(fresh);
 
         let now = Instant::now();
         let elapsed = now.duration_since(start);
@@ -134,6 +140,11 @@ pub(super) fn run(
                 break; // opaque depth-24: can't alpha-fade, dismiss now
             }
             if fade_start.is_none() {
+                // Any row still open at this instant (no matching End ever
+                // arrived) gets a definite outcome now instead of staying
+                // visually "running" for the rest of the fade — see
+                // splash_core::StageTimeline::finalize_running.
+                stage_list.finalize_running(now);
                 fade_start = Some(now);
             }
         }
