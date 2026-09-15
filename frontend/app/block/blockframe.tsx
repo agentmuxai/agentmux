@@ -727,6 +727,63 @@ function ConnStatusOverlay({
     );
 }
 
+/**
+ * The same per-block/tab border-color resolution `BlockMask` (below) paints
+ * onto `.block-mask` — extracted so hoisted pane chrome (AgentPaneChrome,
+ * TermPaneChrome) can paint the IDENTICAL color onto its own outer selection
+ * ring instead of hardcoding `--accent-color`. Without this, a pane's
+ * `frame:activebordercolor`/`frame:hue` (agent identity color seeded at
+ * launch, SPEC_AGENT_COLOR_2026_08_08.md, or an explicit "Pane Color" picker
+ * choice) or tab-level `bg:bordercolor`/`bg:activebordercolor` would still
+ * compute correctly here but never reach the new outer ring that replaced
+ * `.block-mask` as the visible perimeter once chrome was hoisted outside it
+ * (codex P2, reagent P2, PR #3226). Returns `undefined` when nothing
+ * overrides the default — callers fall back to their own default (accent
+ * when focused, the dim border color otherwise) via `var(--x, <default>)`.
+ */
+export function computeFocusRingBorderColor(
+    isFocused: boolean,
+    blockMeta: Block["meta"] | undefined,
+    tabMeta: Record<string, unknown> | undefined,
+): string | undefined {
+    if (isFocused) {
+        const tabActiveBorderColor = tabMeta?.["bg:activebordercolor"] as string | undefined;
+        if (tabActiveBorderColor) {
+            return tabActiveBorderColor;
+        }
+        // frame:activebordercolor is a passive default (per-agent identity
+        // color, seeded once at launch — see SPEC_AGENT_COLOR_2026_08_08.md);
+        // frame:hue is an explicit user choice from the pane-header "Pane
+        // Color" picker (pane-color-menu.ts's setHue). The explicit choice
+        // must win whenever it's present, or picking a hue on an agent pane
+        // would have no visible effect (reagent P1, PR #2477) — hue is
+        // therefore checked LAST. Clearing the hue picker sets frame:hue to
+        // `null` (not delete), which correctly falls through here
+        // (typeof null !== "number") back to the agent's default color
+        // rather than to no color at all.
+        if (blockMeta?.["frame:activebordercolor"]) {
+            return blockMeta["frame:activebordercolor"] as string;
+        }
+        const hue = blockMeta?.["frame:hue"];
+        if (typeof hue === "number") {
+            return hueToActiveBorder(hue);
+        }
+        return undefined;
+    }
+    const tabBorderColor = tabMeta?.["bg:bordercolor"] as string | undefined;
+    if (tabBorderColor) {
+        return tabBorderColor;
+    }
+    if (blockMeta?.["frame:bordercolor"]) {
+        return blockMeta["frame:bordercolor"] as string;
+    }
+    const hue = blockMeta?.["frame:hue"];
+    if (typeof hue === "number") {
+        return hueToBorder(hue);
+    }
+    return undefined;
+}
+
 function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const isFocused = () => nodeModel.isFocused();
     const blockNum = () => nodeModel.blockNum();
@@ -735,47 +792,8 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
-        const style: JSX.CSSProperties = {};
-        const bd = blockData();
-        if (isFocused()) {
-            const tabData = atoms.tabAtom();
-            const tabActiveBorderColor = tabData?.meta?.["bg:activebordercolor"];
-            if (tabActiveBorderColor) {
-                style["border-color"] = tabActiveBorderColor;
-            }
-            // frame:activebordercolor is a passive default (per-agent
-            // identity color, seeded once at launch — see
-            // SPEC_AGENT_COLOR_2026_08_08.md); frame:hue is an explicit
-            // user choice from the pane-header "Pane Color" picker
-            // (pane-color-menu.ts's setHue). The explicit choice must win
-            // whenever it's present, or picking a hue on an agent pane
-            // would have no visible effect (reagent P1, PR #2477) — hue
-            // is therefore checked LAST. Clearing the hue picker sets
-            // frame:hue to `null` (not delete), which correctly falls
-            // through here (typeof null !== "number") back to the
-            // agent's default color rather than to no color at all.
-            if (bd?.meta?.["frame:activebordercolor"]) {
-                style["border-color"] = bd.meta["frame:activebordercolor"];
-            }
-            const hue = bd?.meta?.["frame:hue"];
-            if (typeof hue === "number") {
-                style["border-color"] = hueToActiveBorder(hue);
-            }
-        } else {
-            const tabData = atoms.tabAtom();
-            const tabBorderColor = tabData?.meta?.["bg:bordercolor"];
-            if (tabBorderColor) {
-                style["border-color"] = tabBorderColor;
-            }
-            if (bd?.meta?.["frame:bordercolor"]) {
-                style["border-color"] = bd.meta["frame:bordercolor"];
-            }
-            const hue = bd?.meta?.["frame:hue"];
-            if (typeof hue === "number") {
-                style["border-color"] = hueToBorder(hue);
-            }
-        }
-        return style;
+        const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta, atoms.tabAtom()?.meta);
+        return color ? { "border-color": color } : {};
     });
 
     const showBlockMask = () => isLayoutMode() && showOverlayBlockNums();
