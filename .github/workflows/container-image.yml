@@ -30,6 +30,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Node 24
+        # Pins the Node version used to run `npm view` below — previously
+        # unpinned and drifting with whatever ubuntu-latest happened to ship.
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Set up QEMU (arm64 cross-compilation)
         uses: docker/setup-qemu-action@v3
 
