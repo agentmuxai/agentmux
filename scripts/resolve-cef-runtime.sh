@@ -78,7 +78,7 @@ check_version() {
     local dir="$1" expected_major actual_major
     expected_major="$(expected_cef_major)" || return 0
     [ -n "$expected_major" ] || return 0
-    actual_major="$(grep -a -o "^${expected_major}\.[0-9]*\.[0-9]*" "$dir/libcef.so" 2>/dev/null | head -1 | cut -d. -f1)"
+    actual_major="$(grep -a -o "${expected_major}\.[0-9]*\.[0-9]*" "$dir/libcef.so" 2>/dev/null | head -1 | cut -d. -f1)"
     if [ -z "$actual_major" ]; then
         echo "WARNING: could not confirm libcef.so at $dir is CEF ${expected_major}.x" >&2
         echo "         (expected the version string embedded in the binary; found none matching)." >&2
