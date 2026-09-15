@@ -30,7 +30,7 @@ mod x11;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use crate::splash_core::StageTimeline;
+use crate::splash_core::{trunc, StageTimeline};
 use crate::startup_events::{StartupEvent, StartupStatus};
 
 // ── Shared look (matches splash_mac.rs / splash.rs) ─────────────────────────
@@ -150,7 +150,20 @@ impl StageList {
                 None => s.started_at.elapsed().as_millis() as u64,
             };
             // "ok  Saga recovery       42ms"
-            out.push(format!("{pfx}{:<18}{:>5}ms", s.label, ms));
+            //
+            // Truncated to the SAME width as the `{:<N}` padding below, not
+            // just an unbounded min-width pad: `label` is `s.label`, a
+            // fixed, short, engineer-chosen string, so this rarely bites —
+            // but `sub.label` below is a migration's free-text
+            // `description()` (since PR #3223, real ones up to 48-90 chars),
+            // and this card is only ~29 chars wide at GLYPH_W=10px
+            // (CARD_W=312px). An unclamped label pushes the whole duration
+            // column off the visible card edge — the label consumes the row
+            // before the live duration is even drawn, so the feature this
+            // PR adds would be invisible on Linux specifically (codex P2 on
+            // #3223). `splash_core::trunc` is the same char-safe truncation
+            // Windows/macOS already apply to their own stage/sub labels.
+            out.push(format!("{pfx}{:<18}{:>5}ms", trunc(s.label, 18), ms));
             if out.len() >= STAGE_MAX_LINES {
                 break;
             }
@@ -160,7 +173,7 @@ impl StageList {
                     Some((ms, ..)) => *ms,
                     None => sub.started_at.elapsed().as_millis() as u64,
                 };
-                out.push(format!("   >{:<16}{:>5}ms", sub.label, sub_ms));
+                out.push(format!("   >{:<16}{:>5}ms", trunc(&sub.label, 16), sub_ms));
                 if out.len() >= STAGE_MAX_LINES {
                     break;
                 }
