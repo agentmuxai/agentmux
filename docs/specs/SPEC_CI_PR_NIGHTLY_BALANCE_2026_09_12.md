@@ -18,7 +18,7 @@ The full nightly suite may be run manually for a high-risk change, but it is not
 
 The original June 2026 design separated CEF-free PR checks from the CEF-heavy nightly suite. On 2026-06-23, the fast workflow was intentionally changed to nightly-only (`99dec9ef6`, PR #1717). On 2026-07-01, PR #1885 added `ci-pr.yml` with `cargo check --workspace --tests` and `cargo test --workspace` on every PR after test-build regressions #1823 and #1876 reached `main`.
 
-That addition duplicated the overnight workload instead of replacing it. The current Windows PR job now spends most of its budget compiling/testing CEF-dependent code and frequently reaches the 20-minute timeout, while the nightly suite continues to run the same work. The incident report recommends profiling and moving the slowest tests back to nightly.
+That addition duplicated the overnight workload instead of replacing it. The Windows PR job spent most of its budget compiling/testing CEF-dependent code and frequently reached the 20-minute timeout, while the nightly suite continued to run the same work. The incident report recommended profiling and moving the slowest tests back to nightly — since done: PR #3201 raised the PR-lane timeout while this was diagnosed, and PR #3221 scoped `ci-pr.yml` to the CEF-free crates below, so the PR lane no longer builds `agentmux-cef` at all. This section is kept as the historical rationale for that decision, not a description of a still-open problem.
 
 The goal is not “fewer tests.” The goal is to put the right tests at the right feedback boundary.
 
