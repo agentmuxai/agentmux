@@ -54,6 +54,12 @@ use crate::backend::wps::{Broker as WpsBroker, WaveEvent};
 /// events the old `.chain()`-based discovery relied on.
 pub const EVENT_STATUS_CHANGED: &str = "processbroker:status-changed";
 
+/// WPS event name for "`list()`/`list_agent_panes()` membership may have
+/// changed" — published whenever `blockcontroller::register_controller` or
+/// `delete_controller` runs. Unscoped (no `block:<id>` — see
+/// `emit_tracked_blocks_changed`'s doc comment for why).
+pub const EVENT_TRACKED_BLOCKS_CHANGED: &str = "processbroker:tracked-blocks-changed";
+
 /// Coarse "is it alive" question, normalized from `BlockControllerRuntimeStatus`'s
 /// `turn_active`/`shellprocstatus`/`shellprocexitcode` fields into one enum —
 /// the Pod-phase-equivalent signal in the Kubernetes phase/status/probe
@@ -329,6 +335,38 @@ impl ProcessBroker {
             sender: String::new(),
             persist: 0,
             data: serde_json::to_value(status).ok(),
+        });
+    }
+
+    /// Announce that `list()`/`list_agent_panes()` membership may have
+    /// changed — i.e. `blockcontroller::register_controller`/
+    /// `delete_controller` just ran. Unscoped (no `block:<id>`, unlike
+    /// `emit_changed` above): this is "recompute your list," not a status
+    /// update for one already-known block, so there is no single block
+    /// scope to attach it to.
+    ///
+    /// Exists because `agent.tracked-blocks`'s only data source
+    /// (`CONTROLLER_REGISTRY`) never announced its own writes — Swarm's
+    /// `agent.tracked-blocks` list was refreshed only by two *different*,
+    /// independently-timed mechanisms standing in as proxies
+    /// (`process_tracker`'s 2s poll-and-diff loop, and `reactive`'s own
+    /// registration events), neither directly coupled to when a controller
+    /// actually got registered or removed. That gap let restored agent
+    /// panes' controllers register successfully (confirmed via
+    /// `resync_controller`'s own logging) while Swarm's client-side list —
+    /// fetched once at mount, refreshed only by those two proxies — stayed
+    /// stale indefinitely for any block whose proxy signal didn't happen to
+    /// fire. See docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
+    pub fn emit_tracked_blocks_changed(&self) {
+        let Some(ref broker) = self.wps_broker else {
+            return;
+        };
+        broker.publish(WaveEvent {
+            event: EVENT_TRACKED_BLOCKS_CHANGED.to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data: None,
         });
     }
 }
