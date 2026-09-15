@@ -3395,11 +3395,11 @@ async fn post_json(app: &Router, uri: &str, body: serde_json::Value) -> (StatusC
 /// (e.g. `ptyshell_create_input_read_stop_round_trips_through_a_real_pty`
 /// right below, `backend::container`'s Docker-gated test) from the start.
 /// The gap was invisible before: `ci-pr.yml`'s Windows leg previously timed
-/// out compiling `agentmux-cef` long before the test suite got this far
-/// (see `SPEC_CI_PR_NIGHTLY_BALANCE`-motivated PR that scoped the PR lane to
-/// CEF-free crates). Once that fix let the suite actually reach this test,
-/// it hung for 7+ minutes on GitHub-hosted `windows-latest` runners
-/// specifically — passes instantly (0.11s) on a local Windows machine,
+/// out compiling `agentmux-cef` long before the test suite got this far.
+/// Once this PR scoped that job to the CEF-free crates and let the suite
+/// actually reach this test, it hung for 7+ minutes on GitHub-hosted
+/// `windows-latest` runners specifically — passes instantly (0.11s) on a
+/// local Windows machine,
 /// never observed to hang on the (non-blocking) ubuntu-latest leg either.
 /// Likely ConPTY needing a real interactive console session that a
 /// GH-hosted Windows runner's non-interactive session doesn't provide, but
