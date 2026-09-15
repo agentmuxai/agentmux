@@ -1009,6 +1009,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     &cmd.tabid,
                     cmd.rtopts,
                     cmd.forcerestart,
+                    true,
                     Some(broker),
                     Some(event_bus),
                     Some(wstore),
