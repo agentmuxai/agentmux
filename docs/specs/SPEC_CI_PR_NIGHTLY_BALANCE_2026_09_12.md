@@ -1,9 +1,9 @@
 # SPEC — Balanced PR and nightly test lanes
 
-- **Status:** Proposed
-- **Date:** 2026-09-12
-- **Scope:** GitHub Actions validation for pull requests and `main`
-- **Related:** [`SPEC_CI_TEST_RUNNER_2026_06_22.md`](SPEC_CI_TEST_RUNNER_2026_06_22.md), [`SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md`](SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md), [`INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md`](../incident/INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md)
+**Status:** proposed
+**Date:** 2026-09-12
+**Scope:** GitHub Actions validation for pull requests and `main`
+**Related:** [`SPEC_CI_TEST_RUNNER_2026_06_22.md`](SPEC_CI_TEST_RUNNER_2026_06_22.md), [`SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md`](SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md), [`INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md`](../incident/INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md)
 
 ## 1. Decision
 
