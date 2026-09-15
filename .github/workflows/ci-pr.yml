@@ -92,16 +92,25 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'windows-latest' }}
-    # PR-lane budget: target under 10 min, soft ceiling 15 min. This job no
-    # longer builds agentmux-cef (see the workflow header comment), so the
-    # previous ~13-20 min CEF-inclusive baseline (docs/incident/
-    # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md) no longer
-    # applies here — measured at ~4 min cold-cache locally. 15 min still
-    # bounds a genuine runner-pool hang (that incident's root cause, separate
-    # from the CEF-scope issue this split fixes) to a fraction of GitHub's
-    # 360-minute default rather than hours. Revisit if representative runs
-    # land close to this ceiling.
-    timeout-minutes: 15
+    # PR-lane budget: target under 10 min once caches are warm, generous
+    # room for a cold one. This job no longer builds agentmux-cef (see the
+    # workflow header comment), so the previous ~13-20 min CEF-inclusive
+    # baseline (docs/incident/INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_
+    # BACKLOG.md) no longer applies here. Locally, a cold `target/` but WARM
+    # `~/.cargo/registry` (dependencies already downloaded from earlier work
+    # in this same session) measured ~4 min. The first real CI run under
+    # this job (2026-09-15, genuinely cold on both — no rust-cache hit at
+    # all) needed ~11 min for compile+test, then `check-rpc-bindings.sh`'s
+    # own separate `cargo test -p agentmux-srv export_bindings` invocation
+    # (a second relink of an already-large test binary) pushed it past 15
+    # min before finishing — that redundant-relink cost wasn't part of the
+    # local measurement above. 20 min leaves real headroom for a cold run
+    # while still bounding a genuine runner-pool hang (this incident's root
+    # cause, separate from the CEF-scope issue this split fixes) to well
+    # under GitHub's 360-minute default. Subsequent runs should be much
+    # faster once Swatinem/rust-cache has an actual hit to restore — revisit
+    # if warm-cache runs still land close to this ceiling.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
