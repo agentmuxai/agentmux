@@ -20,7 +20,7 @@
 // block is gone from this view entirely (per that spec's §3 — the user did
 // not want it here).
 
-import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { For, onCleanup, Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { GlobalBundleViewModel, NEW_SECTION_ID } from "./global-bundle-model";
@@ -118,7 +118,7 @@ function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boole
                     disabled={model.savingAtom() || !model.draftSystemNameAtom().trim()}
                     onClick={() => void model.saveSystemEdit()}
                 >
-                    {model.savingAtom() ? "Saving…" : props.isNew ? "Add system entry" : "Save"}
+                    {model.savingAtom() ? "Saving…" : props.isNew ? "Add Memory" : "Save"}
                 </button>
             </div>
         </div>
@@ -128,14 +128,6 @@ function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boole
 export const GlobalBundleManager = (): JSX.Element => {
     const model = new GlobalBundleViewModel();
     onCleanup(() => model.dispose());
-
-    const [promoteValue, setPromoteValue] = createSignal("");
-
-    const handlePromote = (id: string) => {
-        if (!id) return;
-        void model.promote(id);
-        setPromoteValue("");
-    };
 
     return (
         <div class="global-bundle">
@@ -219,7 +211,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                                                 </button>
                                                 <button
                                                     class="global-bundle-btn global-bundle-btn-danger"
-                                                    title="Delete this system entry"
+                                                    title="Delete this Memory"
                                                     onClick={() => void model.removeSystem(section.id)}
                                                 >
                                                     Remove
@@ -251,7 +243,7 @@ export const GlobalBundleManager = (): JSX.Element => {
 
                 <Show when={model.systemSectionsAtom().length === 0 && model.editingSystemIdAtom() === null}>
                     <button class="global-bundle-add-row" onClick={() => model.startNewSystem()}>
-                        + Add Global Memory system entry
+                        + Add Memory
                     </button>
                 </Show>
 
@@ -329,27 +321,13 @@ export const GlobalBundleManager = (): JSX.Element => {
                 </Show>
             </div>
 
-            <div class="global-bundle-add-bar">
-                <button
-                    class="global-bundle-add-row"
-                    disabled={model.editingIdAtom() === NEW_SECTION_ID}
-                    onClick={() => model.startNew()}
-                >
-                    + New section
-                </button>
-                <Show when={model.candidatesAtom().length > 0}>
-                    <select
-                        class="global-bundle-promote-select"
-                        value={promoteValue()}
-                        onChange={(e) => handlePromote(e.currentTarget.value)}
-                    >
-                        <option value="">Promote existing bundle…</option>
-                        <For each={model.candidatesAtom()}>
-                            {(c) => <option value={c.id}>{c.name}</option>}
-                        </For>
-                    </select>
-                </Show>
-            </div>
+            <button
+                class="global-bundle-add-row"
+                disabled={model.editingIdAtom() === NEW_SECTION_ID}
+                onClick={() => model.startNew()}
+            >
+                + New section
+            </button>
 
             <div class="global-bundle-preview">
                 <button

@@ -230,14 +230,10 @@ code.global-bundle-file-label {
 // ── Add row ──────────────────────────────────────────────────────────────────
 // Shrunk from a bordered "add bar" to a single small affordance —
 // SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md §3. Reused for both
-// "+ New section" and (when there are zero system entries) "+ Add Global
-// Memory system entry".
-
-.global-bundle-add-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-}
+// "+ New section" and (when there are zero system entries) "+ Add Memory".
+// The "Promote existing bundle" dropdown that used to sit alongside these
+// (and the wrapping `.global-bundle-add-bar` flex row it needed) was removed
+// outright per direct request — not merely decluttered.
 
 .global-bundle-add-row {
     align-self: flex-start;
@@ -257,16 +253,6 @@ code.global-bundle-file-label {
         opacity: 0.5;
         cursor: default;
     }
-}
-
-.global-bundle-promote-select {
-    padding: var(--space-1) var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--main-text-color);
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    cursor: default;
 }
 
 // ── Combined preview ─────────────────────────────────────────────────────────
