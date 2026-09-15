@@ -153,7 +153,23 @@ jobs:
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
       # in the same CEF-free scope.
+      #
+      # CARGO_BUILD_JOBS=2 on ubuntu only: unthrottled parallel linking of
+      # agentmux-srv's test binary (large — the whole bin target plus
+      # #[cfg(test)] code) alongside the other four packages' test binaries
+      # reproducibly killed this step with no error text (exit 101,
+      # immediately after the last compile warning, before any test ever
+      # ran) on 2026-09-15 across three separate CI runs — the signature of
+      # a linker OOM-kill on ubuntu-latest's more constrained memory, not a
+      # real code failure. Non-blocking either way (continue-on-error
+      # above), but throttling avoids masking a REAL failure behind this
+      # noise. Windows didn't reproduce it, so left unthrottled there.
       - name: cargo test (CEF-free crates)
+        env:
+          # GitHub-hosted runners are 4-vCPU; matches default parallelism
+          # on windows (unthrottled there since it didn't reproduce the OOM
+          # below) without leaving the var unset-vs-empty ambiguous.
+          CARGO_BUILD_JOBS: ${{ matrix.os == 'ubuntu-latest' && '2' || '4' }}
         run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -- --test-threads=1
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
