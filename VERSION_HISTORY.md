@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.56.0 — 2026-09-15
+
+- feat(mcp): ClosePane — close your own pane, or any pane by block_id (fleet tier)
+- feat(cef): target-gate cef crate for staged 152 rollout (Phase C mechanism)
+- perf(srv): coalesce PTY output before broadcasting — cuts renderer/GPU CPU during active agent output
+- fix(ci): scope PR-lane compile/test to CEF-free crates
+- fix(launcher): unify splash-screen timeline logic across platforms, fix count-up + frozen-row bugs
+- feat(srv,launcher): show real per-migration progress on the splash screen instead of a silent clock
+- fix(ptyshell): don't respawn a pane's shell that already exited
+- feat(codex): add App Server thread and account lifecycle
+- fix(pane): restore full-perimeter selection ring on hoisted agent/terminal pane chrome
+- refactor(armory): declutter Global Memory pane into a unified file list
+- fix(cef-build): use_static_angle=false for Linux CEF 152 — silent GPU regression
+- feat(cef): collapse to CEF 152 on all platforms, bump release pins
+
 ## 0.55.43 — 2026-09-14
 
 - feat(jekt): 24h TTL / lazy rotation for the host-tier signing key
