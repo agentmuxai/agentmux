@@ -10,7 +10,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms } from "@/store/global";
-import { gateTargetTabId, tabSwitching } from "@/store/tab-reveal";
+import { gateTargetTabId, scheduleRevealLift, tabSwitching } from "@/store/tab-reveal";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -43,16 +43,39 @@ function WorkspaceElem(): JSX.Element {
     // animate with — so skip calling startViewTransition at all when the
     // user prefers reduced motion, same as the code this replaced did for
     // its own animation.
+    //
+    // Reveal-gate resync (reagent P1 on PR #3239): `document.
+    // startViewTransition()`'s update callback is NOT guaranteed to run
+    // synchronously with the call — the browser queues it (spec: a task on
+    // the DOM manipulation task source), so `setDisplayTabId` can land an
+    // unbounded-but-usually-short interval after `tabId()` itself flips.
+    // Meanwhile `tab-actions.ts`'s `scheduleRevealLift()` starts its OWN
+    // settle-detector clock the moment `tabId()` flips, independent of
+    // `displayTabId()`. If that clock decides "settled" (80ms of no long
+    // tasks) before `displayTabId()` has caught up, the gate can lift while
+    // the destination tab is still content-visibility:hidden — so its
+    // eventual real first paint, once content-visibility DOES flip, happens
+    // completely unmasked, reintroducing the exact FOUC the gate exists to
+    // prevent. Fix: re-arm the settle detector (idempotent — see
+    // scheduleRevealLift's own doc comment, "a second call... resets the
+    // detector") right when displayTabId actually catches up, so the clock
+    // is always anchored to the real content-visibility flip, not to
+    // whenever the RPC happened to resolve. Only if a gate is already
+    // active (`tabSwitching()`) — never arms a NEW gate for a switch
+    // nothing else decided to gate (e.g. backend-driven switches that
+    // bypass setActiveTab entirely, per that file's own comment).
     const [displayTabId, setDisplayTabId] = createSignal(tabId());
     createEffect(() => {
         const next = tabId();
         if (next === displayTabId()) return;
-        if (!prefersReducedMotion() && typeof document.startViewTransition === "function") {
-            document.startViewTransition(() => {
-                setDisplayTabId(next);
-            });
-        } else {
+        const apply = () => {
             setDisplayTabId(next);
+            if (tabSwitching()) scheduleRevealLift();
+        };
+        if (!prefersReducedMotion() && typeof document.startViewTransition === "function") {
+            document.startViewTransition(apply);
+        } else {
+            apply();
         }
     });
 
