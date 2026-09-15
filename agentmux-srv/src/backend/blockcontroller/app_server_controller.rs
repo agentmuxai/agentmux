@@ -233,14 +233,28 @@ impl AppServerController {
                 _ => 1,
             };
             if let Some(controller) = weak.as_ref().and_then(Weak::upgrade) {
-                controller.health_monitor.set_exited(exit_code);
-                {
-                    let mut inner = controller.inner.lock().unwrap();
+                // Only report/clear state for OUR OWN process. stop_process()
+                // (from stop() or a signal-triggered kill) synchronously takes
+                // inner.process out and can be followed by a resync's start()
+                // installing a brand-new one, all before this event loop's own
+                // process notices EOF (which can take up to the shutdown grace
+                // period). Without this check, that stale EOF firing here would
+                // wipe out the new, live process/session and stamp STATUS_DONE
+                // with the OLD process's exit code over an actually-running
+                // block (ReAgent P0, PR #3215).
+                let mut inner = controller.inner.lock().unwrap();
+                let is_still_ours = inner
+                    .process
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &process));
+                if is_still_ours {
                     inner.process = None;
                     inner.session = None;
                     inner.proc_exit_code = exit_code;
+                    drop(inner);
+                    controller.health_monitor.set_exited(exit_code);
+                    controller.set_status(STATUS_DONE);
                 }
-                controller.set_status(STATUS_DONE);
             }
         });
     }
@@ -969,6 +983,79 @@ mod tests {
             STATUS_DONE,
             "a signal-triggered kill must update proc_status the same way stop() does -- \
              nothing else updates it for this path"
+        );
+    }
+
+    /// ReAgent P0, PR #3215 (re-review): spawn_event_loop's EOF/reap branch
+    /// unconditionally overwrote inner.process/session/proc_exit_code and
+    /// forced STATUS_DONE, without checking it was still reaping ITS OWN
+    /// process. stop_process() (from stop()/a signal-triggered kill)
+    /// synchronously takes inner.process out -- possibly followed by a
+    /// resync's start() installing a brand-new one -- well before the OLD
+    /// event loop notices its own process's EOF, which can take up to the
+    /// shutdown grace period. When that stale EOF finally fired, it wiped
+    /// out the new, live process/session and stamped STATUS_DONE with the
+    /// OLD exit code over an actually-running block.
+    #[tokio::test]
+    async fn a_stale_event_loop_does_not_clobber_a_respawned_process() {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+        let session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(session_ready, "controller session was never established");
+        let old_process = controller.inner.lock().unwrap().process.clone().unwrap();
+
+        // Simulates stop()/a signal-triggered kill: takes inner.process out
+        // synchronously and starts the real (2s-timeout) shutdown in the
+        // background -- exactly what stop_process() does.
+        controller.stop_process();
+
+        // Respawn immediately, well before the old process's real OS-level
+        // kill + EOF can complete. This is the race window.
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+        let respawned = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            respawned,
+            "the respawn immediately after stop_process() never installed a new session"
+        );
+        let new_process_ptr =
+            Arc::as_ptr(controller.inner.lock().unwrap().process.as_ref().unwrap());
+
+        // Wait for the OLD process to actually finish exiting at the OS
+        // level -- the old event loop awaits this same call internally, so
+        // once this resolves its post-await reap logic is about to run (or
+        // already has). A bounded number of scheduling turns afterward lets
+        // it actually complete before asserting.
+        let _ = old_process.wait_for_exit().await;
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+
+        assert_ne!(
+            controller.get_runtime_status().shellprocstatus,
+            STATUS_DONE,
+            "the stale old event loop must not stamp STATUS_DONE over the respawned process"
+        );
+        let inner = controller.inner.lock().unwrap();
+        assert!(
+            inner.session.is_some(),
+            "the stale old event loop must not clear the respawned session"
+        );
+        assert_eq!(
+            Arc::as_ptr(inner.process.as_ref().unwrap()),
+            new_process_ptr,
+            "inner.process must still be the respawned process, not cleared by the stale old event loop"
         );
     }
 }
