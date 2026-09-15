@@ -68,7 +68,8 @@
     },
     "experimental_comparison": {
         "generation_command": "codex app-server generate-json-schema --experimental --out <temporary-directory>",
-        "bundle_sha256": "7b9e7d385fffe8d428cc5490b56ce9c393bd3ed7bc7ccd730956387e723ec05",
+        "bundle_sha256": null,
+        "bundle_sha256_note": "ReAgent P1: the committed value was a 63-character string, not a valid 64-character SHA-256 digest, and doesn't verify against the bundle described below. The generating bundle was produced in a temporary directory during a one-off comparison run and never persisted, so the correct digest can't be recovered -- set to null rather than left wrong or guessed. Regenerate via generation_command above and recompute if this comparison is repeated.",
         "bundle_bytes": 723247,
         "required_by_agentmux": [],
         "experimental_only_client_requests": [
