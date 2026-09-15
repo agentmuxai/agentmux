@@ -206,3 +206,47 @@
         background: color-mix(in srgb, var(--error-color) 8%, transparent);
     }
 }
+
+.native-memory-content-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.native-memory-content-label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
+
+.native-memory-content-loading,
+.native-memory-content-empty {
+    margin: 0;
+    padding: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    font-style: italic;
+}
+
+// Same pattern as .global-bundle-machine-config-content — `resize: vertical`
+// needs an explicit starting `height`, not just `max-height`; `min-height`/
+// `max-height` bound the drag range. Markdown's own root sets `height: 100%;
+// overflow: hidden`, so the resize handle lives on this wrapper instead.
+.native-memory-content-preview {
+    height: 240px;
+    min-height: 120px;
+    max-height: 600px;
+    overflow: hidden;
+    resize: vertical;
+    padding: var(--space-2);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    font-size: 11px;
+}
+
+// Compound selector needed to beat the base `.content { overflow: scroll }`
+// rule in markdown.scss — see .global-bundle-machine-config-markdown-content
+// for the full rationale (same fix, PR #3199).
+.content.native-memory-content-markdown-content {
+    overflow: auto;
+}
