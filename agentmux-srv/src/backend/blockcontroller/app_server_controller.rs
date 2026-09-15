@@ -15,8 +15,10 @@ use std::time::Duration;
 
 use tokio::process::Command;
 
-use super::app_server::{AppServerIncoming, AppServerLimits, AppServerProcess};
-use super::app_server_protocol::{CodexAppServerEvent, CodexAppServerSession, ThreadStartOptions};
+use super::app_server::{AppServerExit, AppServerIncoming, AppServerLimits, AppServerProcess};
+use super::app_server_protocol::{
+    CodexAppServerEvent, CodexAppServerProtocolError, CodexAppServerSession, ThreadStartOptions,
+};
 use super::core;
 use super::health::TurnActivityTracker;
 use super::{
@@ -87,9 +89,18 @@ impl AppServerController {
     }
 
     fn set_status(&self, status: &str) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.proc_status = status.to_string();
-        inner.status_version += 1;
+        // Scoped: `publish_status` -> `get_runtime_status` re-locks `self.inner`.
+        // Holding this guard across that call deadlocks (std::sync::Mutex isn't
+        // reentrant) — masked in the existing unit tests because they all
+        // construct the controller with `broker: None`, which short-circuits
+        // `publish_status` before it ever re-locks. Any real controller (always
+        // built with `Some(broker)`) would hang the instant `start()` calls
+        // `set_status(STATUS_RUNNING)`.
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.proc_status = status.to_string();
+            inner.status_version += 1;
+        }
         self.publish_status();
     }
 
@@ -201,8 +212,25 @@ impl AppServerController {
                     }
                 }
             }
+            // The transport closed (EOF/crash/shutdown). Reap the child for its
+            // real exit status instead of hardcoding one, and clear the process/
+            // session so a subsequent `start()` (resync) doesn't see a stale
+            // `process.is_some()` and wrongly no-op on a controller that is, from
+            // here on, actually done.
+            let exit_code = match process.wait_for_exit().await {
+                Ok(AppServerExit::Clean { code, .. })
+                | Ok(AppServerExit::BeforeInitialize { code, .. })
+                | Ok(AppServerExit::NonZero { code, .. }) => code.unwrap_or(1),
+                _ => 1,
+            };
             if let Some(controller) = weak.as_ref().and_then(Weak::upgrade) {
-                controller.health_monitor.set_exited(1);
+                controller.health_monitor.set_exited(exit_code);
+                {
+                    let mut inner = controller.inner.lock().unwrap();
+                    inner.process = None;
+                    inner.session = None;
+                    inner.proc_exit_code = exit_code;
+                }
                 controller.set_status(STATUS_DONE);
             }
         });
@@ -215,10 +243,27 @@ impl AppServerController {
         self.set_status(STATUS_RUNNING);
         tokio::spawn(async move {
             if let Err(error) = session.start_turn(message, OPERATION_TIMEOUT).await {
-                health.set_active_turn(false);
+                // `TurnAlreadyActive` means a DIFFERENT turn is still running —
+                // this attempt (queued via `send_message`, which already returned
+                // `Ok` to its caller) was rejected, but the original turn and the
+                // process behind it are still very much alive. Treating that the
+                // same as a real failure marked a live controller STATUS_DONE and
+                // health inactive out from under its own running turn.
+                let turn_already_active =
+                    matches!(error, CodexAppServerProtocolError::TurnAlreadyActive(_));
+                if !turn_already_active {
+                    health.set_active_turn(false);
+                }
                 if let Some(controller) = weak.and_then(|weak| Weak::upgrade(&weak)) {
-                    controller.set_status(STATUS_DONE);
-                    tracing::warn!(block_id = %controller.block_id, error = %error, "Codex App Server turn failed to start");
+                    if !turn_already_active {
+                        controller.set_status(STATUS_DONE);
+                    }
+                    tracing::warn!(
+                        block_id = %controller.block_id,
+                        error = %error,
+                        turn_already_active,
+                        "Codex App Server turn failed to start"
+                    );
                 }
             }
         });
@@ -244,9 +289,28 @@ impl AppServerController {
 
     fn stop_process(&self) {
         let process = self.inner.lock().unwrap().process.clone();
+        let weak = self.self_ref.lock().unwrap().clone();
         if let Some(process) = process {
             tokio::spawn(async move {
-                let _ = process.shutdown(Duration::from_secs(2)).await;
+                let exit = process.shutdown(Duration::from_secs(2)).await;
+                // Clear process/session immediately instead of waiting for the
+                // event loop to separately observe the resulting EOF — without
+                // this, get_runtime_status/send_message report a live process
+                // for up to the 2s shutdown grace period (or longer) after a
+                // caller-initiated stop already asked it to go away.
+                let exit_code = match exit {
+                    Ok(AppServerExit::Clean { code, .. })
+                    | Ok(AppServerExit::BeforeInitialize { code, .. })
+                    | Ok(AppServerExit::NonZero { code, .. }) => code.unwrap_or(0),
+                    _ => 0,
+                };
+                if let Some(controller) = weak.and_then(|weak| Weak::upgrade(&weak)) {
+                    controller.health_monitor.set_exited(exit_code);
+                    let mut inner = controller.inner.lock().unwrap();
+                    inner.process = None;
+                    inner.session = None;
+                    inner.proc_exit_code = exit_code;
+                }
             });
         }
     }
@@ -441,5 +505,192 @@ mod tests {
             .send_input(BlockInputUnion::data(b"hello".to_vec()), None)
             .unwrap_err();
         assert!(error.contains("not initialized"));
+    }
+
+    // ── Regression coverage for ReAgent's PR #3215 review ────────────────────
+    // Four bugs: (1) `spawn_turn`'s error path couldn't tell "a second turn
+    // was rejected because one is already running" from "the process is
+    // actually dead", (2) `spawn_event_loop`'s EOF branch never reaped the
+    // child or cleared stale process/session state, (3) `deliver_agent_message`
+    // had no route to this controller at all (covered in blockcontroller/mod.rs's
+    // own tests), (4) `agent_open.rs`'s cli_args selection never looked at
+    // `provider.app_server` (covered in agent_open.rs's own tests). Plus one
+    // deadlock this investigation found independently: `set_status` re-locks
+    // its own mutex from inside the guard it's still holding, masked in every
+    // pre-existing test here because they all use `broker: None`.
+
+    fn controller_with_broker() -> (Arc<AppServerController>, Arc<wps::Broker>) {
+        let broker = Arc::new(wps::Broker::new());
+        let controller = Arc::new(AppServerController::new(
+            "tab-1".to_string(),
+            "block-1".to_string(),
+            Some(broker.clone()),
+            None,
+            None,
+            None,
+        ));
+        controller.set_self_ref();
+        (controller, broker)
+    }
+
+    #[test]
+    fn set_status_with_a_broker_does_not_deadlock_locking_its_own_mutex() {
+        let (controller, _broker) = controller_with_broker();
+        let for_thread = controller.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for_thread.stop(false, STATUS_DONE).unwrap();
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(2)).expect(
+            "set_status must not deadlock re-locking its own mutex once a broker is configured \
+             — every production controller has one",
+        );
+        assert_eq!(controller.get_runtime_status().shellprocstatus, STATUS_DONE);
+    }
+
+    fn fake_server_binary() -> &'static std::path::PathBuf {
+        static BINARY: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        BINARY.get_or_init(|| {
+            let temp = tempfile::tempdir().expect("create fake server build dir");
+            let mut binary = temp.path().join("fake-app-server-ctrl");
+            if cfg!(windows) {
+                binary.set_extension("exe");
+            }
+            let source = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("fixtures")
+                .join("fake_app_server.rs");
+            let output = std::process::Command::new("rustc")
+                .arg("--edition=2021")
+                .arg(source)
+                .arg("-o")
+                .arg(&binary)
+                .output()
+                .expect("run rustc for fake App Server");
+            assert!(
+                output.status.success(),
+                "fake App Server compilation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            std::mem::forget(temp);
+            binary
+        })
+    }
+
+    fn app_server_meta(mode: &str) -> MetaMapType {
+        let mut meta = MetaMapType::new();
+        meta.insert(
+            "cmd".to_string(),
+            serde_json::json!(fake_server_binary().to_string_lossy()),
+        );
+        meta.insert(
+            "cmd:env".to_string(),
+            serde_json::json!({"AGENTMUX_FAKE_APP_SERVER_MODE": mode}),
+        );
+        meta
+    }
+
+    async fn wait_until(predicate: impl Fn() -> bool, timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if predicate() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_event_loop_reaps_the_process_and_clears_stale_state_on_exit() {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("exit-after-thread-start"), None, false)
+            .unwrap();
+
+        let reached_done = wait_until(
+            || controller.get_runtime_status().shellprocstatus == STATUS_DONE,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            reached_done,
+            "controller never reached STATUS_DONE after the fake server exited"
+        );
+
+        let status = controller.get_runtime_status();
+        assert_eq!(
+            status.shellprocexitcode, 42,
+            "must report the process's real exit code instead of a hardcoded stale one"
+        );
+        assert!(!status.turn_active);
+
+        let error = controller
+            .send_message("too late".to_string())
+            .unwrap_err();
+        assert!(
+            error.contains("not initialized"),
+            "process/session must be cleared on exit so a post-exit message is rejected \
+             instead of silently accepted by a session bound to a dead transport, got {error:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_message_while_a_turn_is_active_does_not_kill_the_controller() {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+
+        // `start()` only completes the handshake/thread setup — it does not
+        // start a turn on its own. Wait for the session to actually exist
+        // before sending the first message.
+        let session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(session_ready, "controller session was never established");
+
+        controller
+            .send_message("first message".to_string())
+            .unwrap();
+
+        let turn_active =
+            wait_until(|| controller.health_monitor.is_active_turn(), Duration::from_secs(5))
+                .await;
+        assert!(turn_active, "first turn never became active");
+        assert_eq!(controller.get_runtime_status().shellprocstatus, STATUS_RUNNING);
+
+        // `start_turn`'s `TurnAlreadyActive` check is local (state.turn_id is
+        // already Some from the first turn) — this never touches the network,
+        // so no fixture response is needed for it to fire.
+        controller
+            .send_message("second message while the first turn is still running".to_string())
+            .unwrap();
+
+        // Give the rejected turn's spawned task a moment to run (and, pre-fix,
+        // wrongly tear down the controller out from under the live first turn).
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        assert!(
+            controller.health_monitor.is_active_turn(),
+            "the ORIGINAL turn is still active; a rejected second turn must not clear that"
+        );
+        assert_eq!(
+            controller.get_runtime_status().shellprocstatus,
+            STATUS_RUNNING,
+            "a rejected second turn must not mark a live controller done"
+        );
+
+        // Cleanup: this fixture mode idles forever rather than exiting on its
+        // own, and the event loop task holds its own Arc<AppServerProcess> for
+        // as long as it's reading — `kill_on_drop` never fires without an
+        // explicit stop, which would otherwise leak the child for the rest of
+        // this test binary's run.
+        controller.stop(true, STATUS_DONE).unwrap();
     }
 }
