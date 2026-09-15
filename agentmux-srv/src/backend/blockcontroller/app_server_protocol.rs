@@ -25,6 +25,12 @@ pub enum SessionPhase {
     Idle,
     Running,
     Completed,
+    /// The turn ended via `TurnStatus::interrupted` (user cancellation) —
+    /// deliberately distinct from `Failed`, which was collapsing an
+    /// expected cancellation with a genuine provider/execution failure
+    /// (ReAgent P1, PR #3210). Consumers care about the difference: a
+    /// cancelled turn isn't an error to surface the same way.
+    Interrupted,
     Failed,
 }
 
@@ -179,6 +185,14 @@ struct SessionState {
     /// ever active at a time, so at most one termination can be "pending
     /// recognition" by a not-yet-resumed `start_turn` call.
     last_terminated_turn_id: Option<String>,
+    /// Reserved atomically under the same lock as the `turn_id.is_some()`
+    /// check, before the `turn/start` request is even sent. Without this,
+    /// two concurrent `start_turn` calls both observe `turn_id == None`
+    /// and both release the lock before either gets a response/notification
+    /// back — nothing was reserved under the lock, so both send `turn/start`
+    /// (ReAgent P1, PR #3210). Cleared once the response (or an error)
+    /// resolves.
+    turn_starting: bool,
 }
 
 impl CodexAppServerSession {
@@ -261,35 +275,61 @@ impl CodexAppServerSession {
         timeout: Duration,
     ) -> Result<String, CodexAppServerProtocolError> {
         let thread_id = {
-            let state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap();
             if let Some(turn_id) = &state.turn_id {
                 return Err(CodexAppServerProtocolError::TurnAlreadyActive(
                     turn_id.clone(),
                 ));
             }
-            state
+            if state.turn_starting {
+                // A different start_turn call already reserved the slot and
+                // hasn't gotten its response/error back yet — reject this
+                // one the same way an already-active turn would be
+                // rejected, rather than also sending a second turn/start.
+                return Err(CodexAppServerProtocolError::TurnAlreadyActive(
+                    "(turn start already in flight)".to_string(),
+                ));
+            }
+            let thread_id = state
                 .thread_id
                 .clone()
-                .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?
+                .ok_or(CodexAppServerProtocolError::ThreadNotLoaded)?;
+            // Reserved under the SAME lock as the checks above, before the
+            // request is even sent — this is what makes the check-then-act
+            // atomic. Without it, two concurrent callers could both observe
+            // turn_id == None and turn_starting == false before either
+            // released the lock, and both would send turn/start (ReAgent
+            // P1, PR #3210).
+            state.turn_starting = true;
+            thread_id
         };
-        let result = self
-            .transport
-            .request(
-                "turn/start",
-                serde_json::to_value(TurnStartParams {
-                    thread_id,
-                    input: vec![TextUserInput { kind: "text", text }],
-                })
-                .map_err(|error| AppServerError::Protocol(error.to_string()))?,
-                timeout,
-            )
-            .await?;
-        let turn = result
-            .get("turn")
-            .and_then(Value::as_object)
-            .ok_or(CodexAppServerProtocolError::MissingObjectField("turn"))?;
-        let turn_id = string_field(turn.get("id"), "turn.id")?;
+
+        // Scoped so the fallible network round-trip is entirely separate
+        // from the state updates before/after it.
+        let turn_id_result: Result<String, CodexAppServerProtocolError> = async {
+            let result = self
+                .transport
+                .request(
+                    "turn/start",
+                    serde_json::to_value(TurnStartParams {
+                        thread_id,
+                        input: vec![TextUserInput { kind: "text", text }],
+                    })
+                    .map_err(|error| AppServerError::Protocol(error.to_string()))?,
+                    timeout,
+                )
+                .await?;
+            let turn = result
+                .get("turn")
+                .and_then(Value::as_object)
+                .ok_or(CodexAppServerProtocolError::MissingObjectField("turn"))?;
+            string_field(turn.get("id"), "turn.id")
+        }
+        .await;
+
         let mut state = self.state.lock().unwrap();
+        state.turn_starting = false;
+        let turn_id = turn_id_result?;
         if state.last_terminated_turn_id.as_deref() == Some(turn_id.as_str()) {
             // A `turn/completed` notification for THIS turn already landed
             // (on the independent notification channel) while we were
@@ -455,10 +495,17 @@ impl CodexAppServerSession {
                 let status = string_field(turn.get("status"), "turn.status")?;
                 state.turn_id = None;
                 state.last_terminated_turn_id = Some(turn_id.clone());
-                state.phase = if status == "completed" {
-                    SessionPhase::Completed
-                } else {
-                    SessionPhase::Failed
+                // TurnStatus's terminal values: "completed", "interrupted"
+                // (user cancellation), "failed". Collapsing "interrupted"
+                // into Failed hid an expected cancellation behind the same
+                // signal as a genuine provider/execution failure (ReAgent
+                // P1, PR #3210). Anything else unrecognized still maps to
+                // Failed rather than erroring — this notification has
+                // already been accepted; the phase is best-effort.
+                state.phase = match status.as_str() {
+                    "completed" => SessionPhase::Completed,
+                    "interrupted" => SessionPhase::Interrupted,
+                    _ => SessionPhase::Failed,
                 };
                 Ok(CodexAppServerEvent::TurnCompleted {
                     thread_id,
@@ -943,5 +990,131 @@ mod tests {
         assert_eq!(snapshot.thread_id.as_deref(), Some("thread-2"));
         assert_eq!(snapshot.phase, SessionPhase::Idle);
         assert!(snapshot.turn_id.is_none());
+    }
+
+    /// ReAgent P1, PR #3210 (2nd review): collapsing "interrupted" (user
+    /// cancellation) into the same `Failed` phase as a genuine
+    /// provider/execution error hid an expected outcome behind an error
+    /// signal.
+    #[tokio::test]
+    async fn turn_completed_with_interrupted_status_maps_to_its_own_phase() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+            state.phase = SessionPhase::Running;
+        }
+
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "turn/completed".to_string(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "turn": {"id": "turn-1", "status": "interrupted"},
+                }),
+            })
+            .unwrap();
+
+        let snapshot = session.snapshot();
+        assert_eq!(
+            snapshot.phase,
+            SessionPhase::Interrupted,
+            "an interrupted (cancelled) turn must not read the same as a genuine failure"
+        );
+        assert!(snapshot.turn_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn turn_completed_with_a_genuine_failure_still_maps_to_failed() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+            state.phase = SessionPhase::Running;
+        }
+
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "turn/completed".to_string(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "turn": {"id": "turn-1", "status": "failed"},
+                }),
+            })
+            .unwrap();
+
+        assert_eq!(session.snapshot().phase, SessionPhase::Failed);
+    }
+
+    /// ReAgent P1, PR #3210 (2nd review): start_turn's check-then-act
+    /// (read turn_id, release the lock, THEN await the request) wasn't
+    /// atomic — nothing was reserved under the lock, so two concurrent
+    /// calls before either got a response could both observe turn_id ==
+    /// None and both send turn/start. `tokio::join!` polls its futures in
+    /// argument order on their first poll; neither future reaches an
+    /// `.await` point before the synchronous turn_starting check/set, so
+    /// this is deterministic, not timing-dependent: the first call's
+    /// synchronous prefix runs to completion (reserving the slot) before
+    /// the second call's synchronous prefix ever runs.
+    #[tokio::test]
+    async fn concurrent_start_turn_calls_do_not_both_send_turn_start() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _start: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(br#"{"id":1,"result":{"thread":{"id":"thread-1"}}}
+"#)
+                .await
+                .unwrap();
+
+            // Exactly one turn/start line — if the fix regressed, a second
+            // concurrent call would send a second one here.
+            let turn: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(turn["method"], "turn/start");
+            server_writer
+                .write_all(br#"{"id":2,"result":{"turn":{"id":"turn-1"}}}
+"#)
+                .await
+                .unwrap();
+
+            // Confirm nothing further arrives — a regression would send a
+            // second turn/start request here.
+            let extra = tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await;
+            assert!(
+                extra.is_err(),
+                "a second concurrent start_turn call must be rejected locally, not also sent over the wire"
+            );
+        });
+
+        session
+            .start_thread(ThreadStartOptions::default(), Duration::from_secs(1))
+            .await
+            .unwrap();
+
+        let session_a = session.clone();
+        let session_b = session.clone();
+        let (result_a, result_b) = tokio::join!(
+            session_a.start_turn("hello".to_string(), Duration::from_secs(1)),
+            session_b.start_turn("world".to_string(), Duration::from_secs(1)),
+        );
+
+        let results = [result_a, result_b];
+        let ok_count = results.iter().filter(|r| r.is_ok()).count();
+        let rejected_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(CodexAppServerProtocolError::TurnAlreadyActive(_))))
+            .count();
+        assert_eq!(ok_count, 1, "exactly one of the two concurrent calls should succeed");
+        assert_eq!(
+            rejected_count, 1,
+            "the other must be rejected with TurnAlreadyActive, not also sent over the wire"
+        );
+
+        server.await.unwrap();
     }
 }
