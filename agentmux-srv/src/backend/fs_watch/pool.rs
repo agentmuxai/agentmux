@@ -678,69 +678,71 @@ mod tests {
     /// real `unsubscribe()` runs — deterministically reproducing "sweep
     /// already decided to process this target, then it was removed before
     /// the action ran" without needing to win any race at all.
-    /// Repeatedly calling `rearm_if_still_subscribed()` on the SAME target
-    /// does not by itself amplify a leak here — each call's own `unwatch()`
-    /// cleans up the *previous* call's watch, so a tight loop on one path is
-    /// self-cleaning regardless of whether the re-check exists (confirmed
-    /// empirically writing this test — a single-shot before/after diff on
-    /// one target is too small to reliably separate from handle-count
-    /// noise, and looping the same target doesn't accumulate). The actual
-    /// damage from a missing re-check is a *one-time* orphaned resurrection
-    /// with no future subscriber left to ever `unwatch()` it again — so
-    /// this amplifies by repeating the whole subscribe -> degrade ->
-    /// unsubscribe -> single-stale-rearm sequence across many DISTINCT
-    /// targets instead, each contributing at most one orphaned handle pair
-    /// if the bug is present, summing to a clearly measurable total.
-    #[cfg(target_os = "windows")]
+    /// **Asserts the guard directly, not via OS handle counts.** An earlier
+    /// version of this test measured `process_handle_count()` across 200
+    /// rounds and asserted the total grew by less than half that. The
+    /// measurement is process-GLOBAL, so in a full `cargo test` run the
+    /// ~3400 other tests executing in parallel contribute their own file,
+    /// socket and thread churn to the same window — it failed in CI and
+    /// locally at `grew_by=103` against a threshold of 100 while passing in
+    /// isolation, i.e. it was measuring the test suite, not the code under
+    /// test. (It also had to be `#[cfg(target_os = "windows")]`, since
+    /// `process_handle_count` is Windows-only, so two of three platforms
+    /// got no protection at all.)
+    ///
+    /// The guard's observable signature is used instead:
+    /// `rearm_if_still_subscribed()` only ever touches degraded state on a
+    /// path that actually reaches `watch()` — `clear_degraded` on success,
+    /// `mark_degraded` on failure. Returning early, as it must for an
+    /// unsubscribed target, leaves the flag untouched. So marking the
+    /// target degraded *after* the unsubscribe and finding it still marked
+    /// afterward proves `watch()` was never called — deterministic,
+    /// unaffected by anything else running, and portable.
     #[tokio::test]
     async fn sweep_does_not_resurrect_a_target_unsubscribed_after_being_snapshotted() {
         let pool = FsWatchPool::new();
-        let base = std::env::temp_dir().join("agentmux_fs_watch_pool_sweep_race_test");
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        let dir = std::env::temp_dir().join("agentmux_fs_watch_pool_sweep_race_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
 
-        let pid = std::process::id();
-        let before = crate::backend::sysinfo::process_handle_count(pid)
-            .expect("own handle count must be queryable");
+        let sub = pool.subscribe_dir(&dir);
+        // Captured now, exactly as sweep()'s own snapshot phase would —
+        // before the real unsubscribe() below runs.
+        let target = sub.watch_target.clone();
 
-        const ROUNDS: u32 = 200;
-        for i in 0..ROUNDS {
-            let dir = base.join(i.to_string());
-            std::fs::create_dir_all(&dir).unwrap();
+        // The real teardown — exactly what a concurrent unsubscribe() does,
+        // landing (for this test) strictly *after* the target was
+        // "snapshotted" above but strictly *before* the re-arm action below.
+        pool.unsubscribe(sub);
 
-            let sub = pool.subscribe_dir(&dir);
-            // Captured now, exactly as sweep()'s own snapshot phase would —
-            // before the real unsubscribe() below runs.
-            let target = sub.watch_target.clone();
-            pool.health.mark_degraded(target.clone(), "simulated for test".to_string());
+        // Mark degraded AFTER the unsubscribe, which clears the flag for a
+        // target it drops. This is the probe — see the doc comment: only a
+        // call that reaches `watch()` touches this flag again.
+        pool.health.mark_degraded(target.clone(), "probe for test".to_string());
 
-            // The real teardown — exactly what a concurrent unsubscribe()
-            // does, landing (for this test) strictly *after* the target was
-            // "snapshotted" above but strictly *before* the re-arm action
-            // below.
-            pool.unsubscribe(sub);
+        // sweep()'s per-target action, called directly with the stale
+        // (now-unsubscribed) target — the exact call sweep()'s loop would
+        // have made had it reached this target after losing the race.
+        pool.rearm_if_still_subscribed(target.clone());
 
-            // sweep()'s per-target action, called directly with the stale
-            // (now-unsubscribed) target — the exact call sweep()'s loop
-            // would have made had it reached this target after losing the
-            // race.
-            pool.rearm_if_still_subscribed(target);
-        }
+        let still_degraded = pool.health.is_degraded(&target);
+        let still_untracked = !pool.inner.lock().unwrap().targets.contains_key(&target);
 
-        let after = crate::backend::sysinfo::process_handle_count(pid)
-            .expect("own handle count must be queryable");
-        let grew_by = after.saturating_sub(before);
-
-        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&dir);
 
         assert!(
-            grew_by < ROUNDS / 2,
-            "handle count grew by {grew_by} over {ROUNDS} distinct \
-             subscribe -> unsubscribe -> stale-rearm rounds (before={before}, \
-             after={after}) — rearm_if_still_subscribed() must not \
-             re-establish a watch for a target that was unsubscribed after \
-             being snapshotted; doing so orphans the handle pair with \
-             nothing left to ever unwatch() it"
+            still_untracked,
+            "precondition: the target must still be absent from `targets` after \
+             unsubscribe — otherwise this test isn't exercising the stale-rearm \
+             path at all"
+        );
+        assert!(
+            still_degraded,
+            "rearm_if_still_subscribed() reached watch() for a target that was \
+             unsubscribed after being snapshotted — it cleared the degraded flag, \
+             which only happens on the path that calls watch(). That re-establishes \
+             a native watch nobody tracks, orphaning the handle pair with nothing \
+             left to ever unwatch() it"
         );
     }
 }
