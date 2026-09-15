@@ -23,6 +23,22 @@ export interface PaneRectSync {
 }
 
 /**
+ * True if `el` (or an ancestor) is currently `content-visibility: hidden` —
+ * i.e. sitting inside an inactive workspace tab (workspace.tsx, PR #3239).
+ * Such an element's own `getBoundingClientRect()` keeps returning its
+ * last-known real size rather than collapsing to zero — see the call site's
+ * comment for why that matters specifically for native browser panes.
+ */
+function isInsideHiddenTabContent(el: HTMLElement): boolean {
+    let node: HTMLElement | null = el;
+    while (node) {
+        if (getComputedStyle(node).contentVisibility === "hidden") return true;
+        node = node.parentElement;
+    }
+    return false;
+}
+
+/**
  * Syncs the native browser-pane HWND's position/size to this pane's
  * placeholder div, and owns pane creation. A native browser-pane HWND
  * can't be moved by CSS, so this polls (ResizeObserver + a safety-net
@@ -90,7 +106,20 @@ export function usePaneRectSync(params: {
 
     const syncPosition = () => {
         if (!placeholderRef() || !paneCreated() || model.closed) return;
-        const rect = paneRect();
+        // Inside an inactive workspace tab (content-visibility:hidden since
+        // PR #3239 — workspace.tsx), the placeholder's getBoundingClientRect()
+        // keeps returning its last-known REAL size — unlike the display:none
+        // this replaced, which zeroed it, content-visibility:hidden does not
+        // collapse a descendant with an explicit (non-content-derived) size.
+        // Without this check, the safety-net interval below (every 200ms,
+        // unconditional on visibility) keeps pushing that stale non-zero rect
+        // to the host, which keeps the native browser-pane HWND/surface sized
+        // and composited — invisible to any DOM-level fix (content-visibility,
+        // pointer-events), since native panes composite ABOVE the DOM
+        // entirely, independent of it. codex P1 on PR #3239.
+        const rect = isInsideHiddenTabContent(placeholderRef()!)
+            ? { x: 0, y: 0, width: 0, height: 0 }
+            : paneRect();
         if (
             lastSentRect &&
             lastSentRect.x === rect.x &&
