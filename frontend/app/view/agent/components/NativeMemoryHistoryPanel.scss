@@ -228,7 +228,7 @@
     font-style: italic;
 }
 
-// Same pattern as .global-bundle-machine-config-content — `resize: vertical`
+// Same pattern as .global-bundle-file-content — `resize: vertical`
 // needs an explicit starting `height`, not just `max-height`; `min-height`/
 // `max-height` bound the drag range. Markdown's own root sets `height: 100%;
 // overflow: hidden`, so the resize handle lives on this wrapper instead.
@@ -245,7 +245,7 @@
 }
 
 // Compound selector needed to beat the base `.content { overflow: scroll }`
-// rule in markdown.scss — see .global-bundle-machine-config-markdown-content
+// rule in markdown.scss — see .global-bundle-file-markdown-content
 // for the full rationale (same fix, PR #3199).
 .content.native-memory-content-markdown-content {
     overflow: auto;

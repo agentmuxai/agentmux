@@ -10,6 +10,15 @@
 //
 // Context-free: owns its own GlobalBundleViewModel and drives off the
 // bundle_* RPCs. Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
+//
+// Layout restructured per docs/specs/SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_
+// 2026_09_15.md: the Claude Code reference file, system-tier entries, and
+// ordinary sections used to each render with their own divergent chrome, and
+// none of them showed their content outside an "Edit" click. They now share
+// one `.global-bundle-file` row shape (label, then an always-visible
+// markdown preview) in a single list, and the "applies to" filename-mapping
+// block is gone from this view entirely (per that spec's §3 — the user did
+// not want it here).
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
@@ -72,7 +81,7 @@ function SectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }):
 function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX.Element {
     const { model } = props;
     return (
-        <div class="global-bundle-editor global-bundle-editor-system">
+        <div class="global-bundle-editor">
             <label class="global-bundle-field">
                 <span class="global-bundle-field-label">Name</span>
                 <input
@@ -131,58 +140,35 @@ export const GlobalBundleManager = (): JSX.Element => {
     return (
         <div class="global-bundle">
             <p class="global-bundle-intro">
-                Inherited by every agent at launch — composed into its startup file (e.g.{" "}
-                <code>CLAUDE.md</code>) in order.
+                Every agent inherits this at launch — takes effect after a restart.
             </p>
-
-            <div class="global-bundle-restart-note">Takes effect on next agent restart.</div>
 
             <Show when={model.errorAtom()}>
                 <div class="global-bundle-error">{model.errorAtom()}</div>
             </Show>
 
-            {/* Read-only reference display of the CLAUDE.md in the isolated
-                provider config dir a default spawned agent actually launches
-                with (CLAUDE_CONFIG_DIR). NOT part of AgentMux's own Global
-                Memory composition (that's <agent working_directory>/CLAUDE.md,
-                a per-agent path already previewed accurately above via the
-                "Combined preview"). See
-                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7.
-
-                The sibling "Claude Code — host CLI config" block (~/.claude)
-                was removed 2026-09-01
-                (SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md): once
-                REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md
-                proved by experiment that a spawned agent never reads the host
-                file, surfacing it here was noise that invited the misreading
-                that editing it would change agent behaviour. */}
-            {/* Single <Show>: this used to be nested, the outer gating the
-                whole section on `globalConfig || hostConfig` and the inner
-                picking out this one block. With the host block gone both
-                conditions collapsed to the same atom, leaving the inner one
-                unreachable-when-false (ReAgent P2, PR #2900). The callback
-                form supplies the non-null accessor the body needs. */}
-            <Show when={model.claudeGlobalConfigAtom()}>
-                {(cfg) => (
-                    <div class="global-bundle-external-files">
-                        <p class="global-bundle-external-files-heading">
-                            Claude Code provider config — reference only, not part of Global Memory.
-                        </p>
-
-                        <div class="global-bundle-machine-config">
-                            <div class="global-bundle-machine-config-header">
-                                <span
-                                    class="global-bundle-machine-config-badge"
-                                    title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
+            <div class="global-bundle-files">
+                {/* Read-only reference display of the CLAUDE.md in the
+                    isolated config dir a default spawned agent actually
+                    launches with (CLAUDE_CONFIG_DIR). NOT part of AgentMux's
+                    own Global Memory composition (that's <agent
+                    working_directory>/CLAUDE.md, previewed accurately below
+                    via "Combined preview"). See
+                    docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7. */}
+                <Show when={model.claudeGlobalConfigAtom()}>
+                    {(cfg) => (
+                        <div class="global-bundle-file global-bundle-file-readonly">
+                            <div class="global-bundle-file-header">
+                                <code
+                                    class="global-bundle-file-label"
+                                    title="Claude Code — shared provider config. Used by default spawned agents; identity-bound agents use a separate dir, not shown here."
                                 >
-                                    Claude Code — shared provider config
-                                </span>
-                                <code class="global-bundle-machine-config-path">{cfg().path}</code>
+                                    {cfg().path}
+                                </code>
                             </div>
-                            <p class="global-bundle-machine-config-caption">Used by default spawned agents.</p>
                             <Show
                                 when={cfg().exists}
-                                fallback={<p class="global-bundle-machine-config-empty">No file at this path yet.</p>}
+                                fallback={<p class="global-bundle-file-empty">No file at this path yet.</p>}
                             >
                                 {/* The resize handle lives on this wrapper, not on
                                     <Markdown> itself — Markdown's own root sets
@@ -193,59 +179,62 @@ export const GlobalBundleManager = (): JSX.Element => {
                                     handles its own internal scrolling
                                     (nativeScrollbar: a plain CSS scrollbar is
                                     plenty for a reference-only preview panel). */}
-                                <div class="global-bundle-machine-config-content">
+                                <div class="global-bundle-file-content">
                                     <Markdown
                                         text={cfg().content}
                                         scrollable={true}
                                         nativeScrollbar={true}
-                                        contentClass="global-bundle-machine-config-markdown-content"
+                                        contentClass="global-bundle-file-markdown-content"
                                     />
                                 </div>
                             </Show>
                         </div>
-                    </div>
-                )}
-            </Show>
+                    )}
+                </Show>
 
-            {/* System tier — pinned above ordinary sections, always injected
-                first with override wording. No move up/down: position is
-                fixed server-side regardless of what a reorder call sends.
-                See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */}
-            <div class="global-bundle-sections global-bundle-sections-system">
+                {/* System tier — pinned above ordinary sections, always
+                    injected first with override wording. No move up/down:
+                    position is fixed server-side regardless of what a
+                    reorder call sends. See
+                    docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */}
                 <For each={model.systemSectionsAtom()}>
                     {(section) => (
                         <div
-                            class="global-bundle-section global-bundle-section-system"
+                            class="global-bundle-file global-bundle-file-system"
                             classList={{ "is-editing": model.editingSystemIdAtom() === section.id }}
                         >
                             <Show
                                 when={model.editingSystemIdAtom() === section.id}
                                 fallback={
-                                    <div class="global-bundle-section-row">
-                                        <div class="global-bundle-section-main">
-                                            <span class="global-bundle-system-badge" title="AgentMux-controlled, highest priority">
-                                                AgentMux
-                                            </span>
-                                            <span class="global-bundle-section-name">
-                                                {section.name}
-                                            </span>
+                                    <>
+                                        <div class="global-bundle-file-header">
+                                            <span class="global-bundle-file-system-tag">AgentMux</span>
+                                            <span class="global-bundle-file-label">{section.name}</span>
+                                            <div class="global-bundle-file-actions">
+                                                <button
+                                                    class="global-bundle-btn"
+                                                    onClick={() => model.startEditSystem(section)}
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    class="global-bundle-btn global-bundle-btn-danger"
+                                                    title="Delete this system entry"
+                                                    onClick={() => void model.removeSystem(section.id)}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div class="global-bundle-section-actions">
-                                            <button
-                                                class="global-bundle-btn"
-                                                onClick={() => model.startEditSystem(section)}
-                                            >
-                                                Edit
-                                            </button>
-                                            <button
-                                                class="global-bundle-btn global-bundle-btn-danger"
-                                                title="Delete this system entry"
-                                                onClick={() => void model.removeSystem(section.id)}
-                                            >
-                                                Remove
-                                            </button>
+                                        <div class="global-bundle-file-content">
+                                            <Markdown
+                                                text={section.instructions || "(empty)"}
+                                                scrollable={true}
+                                                nativeScrollbar={true}
+                                                contentClass="global-bundle-file-markdown-content"
+                                            />
                                         </div>
-                                    </div>
+                                    </>
                                 }
                             >
                                 <SystemSectionEditor model={model} isNew={false} />
@@ -255,74 +244,70 @@ export const GlobalBundleManager = (): JSX.Element => {
                 </For>
 
                 <Show when={model.editingSystemIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-bundle-section global-bundle-section-system is-editing">
+                    <div class="global-bundle-file global-bundle-file-system is-editing">
                         <SystemSectionEditor model={model} isNew={true} />
                     </div>
                 </Show>
 
                 <Show when={model.systemSectionsAtom().length === 0 && model.editingSystemIdAtom() === null}>
-                    <button
-                        class="global-bundle-btn global-bundle-btn-system-add"
-                        onClick={() => model.startNewSystem()}
-                    >
+                    <button class="global-bundle-add-row" onClick={() => model.startNewSystem()}>
                         + Add AgentMux system entry
                     </button>
                 </Show>
-            </div>
 
-            <div class="global-bundle-sections">
                 <For each={model.ordinarySectionsAtom()}>
                     {(section, i) => (
                         <div
-                            class="global-bundle-section"
+                            class="global-bundle-file"
                             classList={{ "is-editing": model.editingIdAtom() === section.id }}
                         >
                             <Show
                                 when={model.editingIdAtom() === section.id}
                                 fallback={
-                                    <div class="global-bundle-section-row">
-                                        <div class="global-bundle-section-main">
-                                            <span class="global-bundle-section-name">
-                                                {section.name}
-                                            </span>
-                                            <Show when={section.description}>
-                                                <span class="global-bundle-section-desc">
-                                                    {section.description}
-                                                </span>
-                                            </Show>
+                                    <>
+                                        <div class="global-bundle-file-header">
+                                            <span class="global-bundle-file-label">{section.name}</span>
+                                            <div class="global-bundle-file-actions">
+                                                <button
+                                                    class="global-bundle-icon-btn"
+                                                    title="Move up"
+                                                    disabled={i() === 0}
+                                                    onClick={() => void model.move(section.id, -1)}
+                                                >
+                                                    ↑
+                                                </button>
+                                                <button
+                                                    class="global-bundle-icon-btn"
+                                                    title="Move down"
+                                                    disabled={i() === model.ordinarySectionsAtom().length - 1}
+                                                    onClick={() => void model.move(section.id, 1)}
+                                                >
+                                                    ↓
+                                                </button>
+                                                <button
+                                                    class="global-bundle-btn"
+                                                    onClick={() => model.startEdit(section)}
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    class="global-bundle-btn global-bundle-btn-danger"
+                                                    title="Remove from the global bundles (keeps the bundle)"
+                                                    onClick={() => void model.remove(section.id)}
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
                                         </div>
-                                        <div class="global-bundle-section-actions">
-                                            <button
-                                                class="global-bundle-icon-btn"
-                                                title="Move up"
-                                                disabled={i() === 0}
-                                                onClick={() => void model.move(section.id, -1)}
-                                            >
-                                                ↑
-                                            </button>
-                                            <button
-                                                class="global-bundle-icon-btn"
-                                                title="Move down"
-                                                disabled={i() === model.ordinarySectionsAtom().length - 1}
-                                                onClick={() => void model.move(section.id, 1)}
-                                            >
-                                                ↓
-                                            </button>
-                                            <button
-                                                class="global-bundle-btn"
-                                                onClick={() => model.startEdit(section)}
-                                            >
-                                                Edit
-                                            </button>
-                                            <button
-                                                class="global-bundle-btn global-bundle-btn-danger"
-                                                title="Remove from the global bundles (keeps the bundle)"
-                                                onClick={() => void model.remove(section.id)}
-                                            >
-                                                Remove
-                                            </button>
+                                        <div class="global-bundle-file-content">
+                                            <Markdown
+                                                text={section.instructions || "(empty)"}
+                                                scrollable={true}
+                                                nativeScrollbar={true}
+                                                contentClass="global-bundle-file-markdown-content"
+                                            />
                                         </div>
-                                    </div>
+                                    </>
                                 }
                             >
                                 <SectionEditor model={model} isNew={false} />
@@ -334,7 +319,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                 {/* New-section draft renders at the END — saveEdit appends it
                     to the order, so its draft position matches where it lands. */}
                 <Show when={model.editingIdAtom() === NEW_SECTION_ID}>
-                    <div class="global-bundle-section is-editing">
+                    <div class="global-bundle-file is-editing">
                         <SectionEditor model={model} isNew={true} />
                     </div>
                 </Show>
@@ -346,7 +331,7 @@ export const GlobalBundleManager = (): JSX.Element => {
 
             <div class="global-bundle-add-bar">
                 <button
-                    class="global-bundle-btn global-bundle-btn-primary"
+                    class="global-bundle-add-row"
                     disabled={model.editingIdAtom() === NEW_SECTION_ID}
                     onClick={() => model.startNew()}
                 >
@@ -366,32 +351,6 @@ export const GlobalBundleManager = (): JSX.Element => {
                 </Show>
             </div>
 
-            {/* Same content lands in every one of these files (it doesn't
-                diverge per provider) — this is visibility into WHERE it
-                lands, not N separate previews. See
-                docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4. */}
-            <div class="global-bundle-applies-to">
-                <span class="global-bundle-applies-to-label">Applies to:</span>
-                <For each={model.filenameGroupsAtom()}>
-                    {(group) => (
-                        <span
-                            class="global-bundle-applies-to-chip"
-                            title={group.providerNames.join(", ")}
-                        >
-                            <code>{group.filename}</code>
-                        </span>
-                    )}
-                </For>
-                <Show when={model.noFileProvidersAtom().length > 0}>
-                    <span
-                        class="global-bundle-applies-to-chip global-bundle-applies-to-chip-warning"
-                        title={`${model.noFileProvidersAtom().join(", ")}: no confirmed startup-instructions file yet — see SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2`}
-                    >
-                        not yet applied to: {model.noFileProvidersAtom().join(", ")}
-                    </span>
-                </Show>
-            </div>
-
             <div class="global-bundle-preview">
                 <button
                     class="global-bundle-preview-toggle"
@@ -400,9 +359,9 @@ export const GlobalBundleManager = (): JSX.Element => {
                     {model.showPreviewAtom() ? "▾" : "▸"} Combined preview
                 </button>
                 <Show when={model.showPreviewAtom()}>
-                    {/* See the matching comment on the Claude Code provider-config
-                        block above — same reason this is a wrapper div, not a
-                        class applied directly to <Markdown>. */}
+                    {/* See the matching comment on the file-list preview
+                        blocks above — same reason this is a wrapper div, not
+                        a class applied directly to <Markdown>. */}
                     <div class="global-bundle-preview-content">
                         <Markdown
                             text={model.previewAtom() || "(empty)"}
