@@ -1171,7 +1171,8 @@ fn broadcast_meta_update(
 /// Shared by both the top-level reuse check and the "lost the atomic
 /// claim" fallback in `handle_pty_shell_create`: resync `id`'s controller
 /// and reply, or return `None` if `id` doesn't resolve to a real block
-/// (stale pointer) so the caller falls through to creating a fresh one.
+/// (stale pointer), OR if its shell has already exited, so the caller
+/// falls through to creating a fresh one.
 async fn try_attach_to_existing_shell(
     state: &AppState,
     agent_block_id: &str,
@@ -1198,6 +1199,21 @@ async fn try_attach_to_existing_shell(
         "ptyshell",
         None,
         false,
+        // respawn_if_done=false: don't resurrect a shell that already
+        // exited (e.g. the human typed `exit`). The unconditional-respawn
+        // default is correct for crash/backend-restart recovery
+        // (`TermResyncHandler` on the WS path) but wrong here: every
+        // subsequent `PtyShellCreate` against this same pane-shell pointer
+        // would otherwise silently respawn it again, each respawn
+        // appending a fresh shell-startup banner to the pane's
+        // append-only `term` scrollback — indistinguishable from the
+        // exited shell's output looping forever. Checked inside
+        // `resync_controller` itself (one status read, not a separate
+        // check-then-call here) so a shell that exits in the gap between
+        // an earlier check and this call can't slip through and get
+        // respawned anyway (Codex P2 on PR #3225) — see that parameter's
+        // own doc comment.
+        false,
         Some(Arc::clone(&state.broker)),
         Some(Arc::clone(&state.event_bus)),
         Some(Arc::clone(&state.wstore)),
@@ -1205,6 +1221,70 @@ async fn try_attach_to_existing_shell(
         registry,
         state.boot_id.clone(),
     ) {
+        if e == blockcontroller::RESYNC_ERR_ALREADY_EXITED {
+            // Treating an exited shell like a stale pointer (return
+            // `None`) reuses the existing "create a fresh one" fallback in
+            // both callers instead of inventing a new response shape.
+            //
+            // Also clear the now-stale pointer on the agent's own block:
+            // without this, two concurrent `PtyShellCreate` calls against
+            // the same exited pane would both fall through to
+            // `handle_pty_shell_create`'s atomic-claim transaction, both
+            // read the SAME still-set dead pointer, both take the "lost
+            // the race, reuse THEIRS" branch pointing at that same dead
+            // id, both find it exited too, and both independently execute
+            // the non-transactional "vanished, create for real" fallback —
+            // leaving one orphaned live controller and two callers holding
+            // different shell_ids for what's supposed to be one pane's one
+            // shell (Codex P2 on PR #3225). Clearing the pointer first
+            // makes the already-correct atomic claim transaction see
+            // "unclaimed" instead of "claimed by a dead id," so its
+            // existing single-writer serialization (documented on that
+            // transaction) resolves concurrent callers to one winner the
+            // normal way.
+            //
+            // GUARDED, not unconditional (ReAgent P1 on this PR, round 2):
+            // `resync_controller`'s STATUS_DONE read above happens outside
+            // any lock — a concurrent resync with `respawn_if_done=true`
+            // (e.g. the WS `ControllerResyncCommand`/`TermResyncHandler`
+            // path, which always revives a `STATUS_DONE` controller in
+            // place) can respawn THIS SAME shell in the gap between that
+            // read and this clear. Nulling the pointer unconditionally
+            // would then wipe a pointer that's valid again, orphaning a
+            // live, correctly-pointed shell — exactly the one-shell-per-
+            // pane invariant this PR exists to protect. Re-read the parent
+            // fresh and only clear if its pointer still names `id`, the
+            // same compare-before-clear pattern this file already uses a
+            // few hundred lines down for the identical class of race (see
+            // the `parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID) ==
+            // Some(child_id.as_str())` guard in the spawn-failure rollback
+            // path). Not fully transactional (same as that existing
+            // pattern) — a failed/skipped clear just costs one more round
+            // trip through the fallback chain, not correctness.
+            if let Ok(mut parent) = state.wstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
+                if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
+                    parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
+                    if state.wstore.update(&mut parent).is_ok() {
+                        state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                            eventtype: "waveobj:update".to_string(),
+                            oref: format!("block:{agent_block_id}"),
+                            data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                                updatetype: "update".into(),
+                                otype: "block".into(),
+                                oid: agent_block_id.to_string(),
+                                obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                            }).unwrap_or_default()),
+                        });
+                    }
+                }
+            }
+            tracing::info!(
+                block_id = %id,
+                parent_id = %agent_block_id,
+                "ptyshell.create: pane's shell already exited, not respawning — falling through to a fresh shell"
+            );
+            return None;
+        }
         return Some(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1258,8 +1338,11 @@ async fn handle_pty_shell_create(
         if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &id).await {
             return resp;
         }
-        // Stale pointer (the block was deleted some other way) — fall
-        // through to creating a fresh one, same as if none existed.
+        // `None` here means either a stale pointer (the block was deleted
+        // some other way — rare) or, as of this PR, the pane's shell
+        // having already exited (the common case this PR fixes — see
+        // `try_attach_to_existing_shell`'s own doc comment). Either way,
+        // fall through to creating a fresh one, same as if none existed.
     }
 
     let child_id = uuid::Uuid::new_v4().to_string();
@@ -1404,9 +1487,23 @@ async fn handle_pty_shell_create(
             if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &winner_id).await {
                 return resp;
             }
-            // Winner's block vanished between the transaction and now
-            // (exceedingly unlikely — e.g. it was deleted out from under
-            // us). `block` above was only ever prepared in memory: the
+            // Winner's block vanished between the transaction and now, OR
+            // (as of this PR) resolved to a shell that had already exited.
+            // Both stay exceedingly unlikely to land HERE specifically:
+            // `try_attach_to_existing_shell` now clears the parent's
+            // pointer itself the moment it finds an exited shell (see its
+            // own comment on the `RESYNC_ERR_ALREADY_EXITED` branch), so
+            // the common "human typed `exit`, then something calls
+            // PtyShellCreate again" case is intercepted one level up — the
+            // CLAIM transaction above reads the pointer as already-cleared
+            // and takes the plain `Ok(None)` fresh-insert path, never
+            // reaching this branch at all. Getting here for an exited
+            // shell specifically requires a genuine concurrent-call race
+            // (two callers both observe the stale pointer before either
+            // one's clear commits) — same rarity class as the pre-existing
+            // deleted-out-from-under-us case this comment originally
+            // described, not the common case. `block` above was only ever
+            // prepared in memory: the
             // `with_tx` closure's `tx.insert` never ran for it (that only
             // happens in the `Ok(None)` arm, when WE win the claim), so it
             // has no backing row. Falling through with it as-is would send
@@ -1494,6 +1591,7 @@ async fn handle_pty_shell_create(
         "ptyshell", // headless — no real tab; only used for tracing/scoping.
         rt_opts_json,
         false,
+        true, // respawn_if_done — irrelevant here, this block is always freshly inserted (STATUS_INIT), never STATUS_DONE
         Some(Arc::clone(&state.broker)),
         Some(Arc::clone(&state.event_bus)),
         Some(Arc::clone(&state.wstore)),

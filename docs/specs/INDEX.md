@@ -58,6 +58,7 @@ See also:
 | [SPEC_PERSISTENT_SHELL_NODE_2026_06_11](SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md) | Long-lived shell nodes (persistent PTY) |
 | [SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | Stop / teardown for persistent shells |
 | [SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29](SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) | Input-latency spec |
+| [SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15](SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md) | `exit` doesn't close the pane — dead close-on-exit code + `resync_controller` respawns a `STATUS_DONE` shell |
 
 ## Browser Pane
 
@@ -305,6 +306,7 @@ partial list.
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
 | [`SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30`](SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md) | SPEC: Remove the terminal Stage-1 RAF write-coalescer (double-rAF) |
+| [`SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15`](SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md) | SPEC: Typing `exit` in a terminal pane doesn't close it — instead the shell respawns and appears to loop |
 | [`SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07`](SPEC_TERM_PANE_TAB_STRIP_TRAILING_BLUR_2026_09_07.md) | SPEC: Frosted-glass backdrop for the terminal pane tab strip |
 | [`SPEC_THEME_PICKER_AND_MIDNIGHT_AGENT_BG`](SPEC_THEME_PICKER_AND_MIDNIGHT_AGENT_BG.md) | Theme picker in hamburger menu + midnight agent-pane black background |
 | [`SPEC_TOKEN_STATS_NUMBER_FORMATTING_2026_08_02`](SPEC_TOKEN_STATS_NUMBER_FORMATTING_2026_08_02.md) | Plan: consolidate duplicated display-formatting utilities into `frontend/util/` |

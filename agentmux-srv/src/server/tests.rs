@@ -3926,3 +3926,100 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     // identical cleanup note on the other real-spawn tests in this file.
     blockcontroller::delete_controller(&shell_id);
 }
+
+/// Regression test for the "typing `exit` loops the pane" bug
+/// (`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md`): once a pane's
+/// shell has actually exited, `PtyShellCreate` must NOT silently respawn it
+/// in place — `try_attach_to_existing_shell` used to call
+/// `resync_controller` unconditionally, which respawns any `STATUS_DONE`
+/// controller, so every later `PtyShellCreate` against the same pane kept
+/// resurrecting the same block and appending a fresh shell-startup banner
+/// to its already-`exit`-terminated, append-only `term` scrollback —
+/// visually indistinguishable from the exited shell's own output looping.
+/// The fix: treat an exited shell like a stale pointer and fall through to
+/// creating a genuinely fresh shell block instead.
+///
+/// `#[ignore]` for the same reason as the other real-PTY tests in this
+/// file (see `ptyshell_create_input_read_stop_round_trips_through_a_real_pty`'s
+/// doc comment) — spawns a real, interactive shell process, which hangs on
+/// GitHub-hosted `windows-latest` runners. Run manually with: `cargo test
+/// -p agentmux-srv --bin agentmux-srv
+/// ptyshell_create_does_not_respawn_a_shell_that_already_exited --
+/// --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "test-agent-block".to_string(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let first_shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    // Give the PTY a moment to spawn its shell before typing into it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": first_shell_id, "agent_block_id": "test-agent-block", "text": "exit\r\n" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["written"], serde_json::json!(true), "input write failed: {json:?}");
+
+    // Poll until the controller actually reports done — shell teardown
+    // latency varies by machine/OS, same as the round-trip test above.
+    let mut done = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let (_, status_json) = post_json(
+            &app,
+            "/api/v1/ptyshell/status",
+            serde_json::json!({ "shell_id": first_shell_id, "agent_block_id": "test-agent-block" }),
+        )
+        .await;
+        if status_json["running"] == serde_json::json!(false) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done, "expected the shell to report not-running after `exit`");
+
+    // The pane's one shell already exited — a subsequent PtyShellCreate
+    // must create a fresh shell, not respawn the dead one in place.
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "test-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let second_shell_id = json["shell_id"].as_str().unwrap().to_string();
+    assert_ne!(
+        second_shell_id, first_shell_id,
+        "PtyShellCreate must not silently respawn an already-exited shell in the same block"
+    );
+
+    // The pane's pointer must now follow the fresh shell, not the dead one.
+    let agent_block: crate::backend::obj::Block =
+        state.wstore.must_get("test-agent-block").expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some(second_shell_id.as_str())
+    );
+
+    blockcontroller::delete_controller(&first_shell_id);
+    blockcontroller::delete_controller(&second_shell_id);
+}
