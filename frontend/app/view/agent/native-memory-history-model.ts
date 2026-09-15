@@ -96,6 +96,20 @@ export class NativeMemoryHistoryModel {
     errorAtom: Accessor<string | null> = this._error[0];
     private setError = this._error[1];
 
+    /** The file's current (live) content — `null` means still loading, an
+     *  empty string means the file genuinely has no content. Mirrors
+     *  `AgentNativeMemoryModel.contentAtom`'s own convention so both
+     *  surfaces agree on what "no value yet" looks like. */
+    private _content = createSignal<string | null>(null);
+    contentAtom: Accessor<string | null> = this._content[0];
+    private setContent = this._content[1];
+
+    /** Separate from `errorAtom` so a caller can tell a content-fetch
+     *  failure apart from a history-fetch failure. */
+    private _contentError = createSignal<string | null>(null);
+    contentErrorAtom: Accessor<string | null> = this._contentError[0];
+    private setContentError = this._contentError[1];
+
     /** Up to two version ids selected for comparison, oldest-first once both are set. */
     private _diffSelection = createSignal<string[]>([]);
     diffSelectionAtom: Accessor<string[]> = this._diffSelection[0];
@@ -130,6 +144,23 @@ export class NativeMemoryHistoryModel {
         this.agentId = agentId;
         this.filename = filename;
         void this.loadHistory();
+        void this.loadContent();
+    }
+
+    /** Fetch the file's current content. Mirrors
+     *  `AgentNativeMemoryModel.selectFile()`'s own read_file call — same
+     *  RPC, same agent_id/filename already available on this model. */
+    async loadContent(): Promise<void> {
+        this.setContentError(null);
+        try {
+            const res = await RpcApi.NativeMemoryReadFileCommand(TabRpcClient, {
+                agent_id: this.agentId,
+                filename: this.filename,
+            });
+            this.setContent(res.content);
+        } catch (e) {
+            this.setContentError(`Failed to load content: ${(e as Error).message ?? e}`);
+        }
     }
 
     async loadHistory(): Promise<void> {
@@ -217,16 +248,14 @@ export class NativeMemoryHistoryModel {
             });
             this.clearDiffSelection();
             await this.loadHistory();
-            const reverted = this.versionsAtom().find((v) => v.id === versionId);
-            if (reverted && this.onReverted) {
-                // Fetch the reverted content directly rather than trusting
-                // any cached copy — read_file is cheap and this only fires
-                // on an explicit user action, not a hot path.
-                const read = await RpcApi.NativeMemoryReadFileCommand(TabRpcClient, {
-                    agent_id: this.agentId,
-                    filename: this.filename,
-                });
-                this.onReverted(read.content);
+            // Refresh this model's own content view (now always present,
+            // not just when a caller supplies onReverted) and forward it to
+            // the caller for its own separate content view, if any (e.g.
+            // AgentNativeMemoryModal's contentAtom in the Stash "content"
+            // sub-view, which this history panel doesn't own).
+            await this.loadContent();
+            if (this.onReverted) {
+                this.onReverted(this.contentAtom() ?? "");
             }
         } catch (e) {
             this.setError(`Revert failed: ${(e as Error).message ?? e}`);
