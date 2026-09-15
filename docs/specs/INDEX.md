@@ -576,6 +576,7 @@ partial list.
 | [`SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24`](SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24.md) | Spec: Launch Modal Plain-Language Rewrite |
 | [`SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18`](SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md) | SPEC: Launch Modal — Profile Section + New Identity/Memory Modals |
 | [`SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`](SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md) | SPEC: Launch Modal — State Machine Hardening |
+| [`SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15`](SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md) | Widening Linux Package Targets + a Dedicated Downloads Page |
 | [`SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23`](SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md) | SPEC: Linux Sandbox — Recover From AppArmor's Unprivileged-Userns Restriction |
 | [`SPEC_LINUX_SPLASH_POLISH_2026_06_20`](SPEC_LINUX_SPLASH_POLISH_2026_06_20.md) | SPEC: Linux splash polish (fade-out, multi-monitor centering, rounded corners) |
 | [`SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20`](SPEC_LINUX_SPLASH_SESSION_AWARE_2026_06_20.md) | SPEC: Session-aware Linux startup splash (X11 + Wayland) |
