@@ -211,6 +211,15 @@ pub struct ThreadForkOptions {
     pub exclude_turns: Option<bool>,
 }
 
+/// A thread/list cwd filter: either a single path or a set of paths, per the
+/// pinned schema's `ThreadListCwdFilter` (`string | string[]`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum ThreadListCwdFilter {
+    Single(String),
+    Many(Vec<String>),
+}
+
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadListOptions {
@@ -219,7 +228,7 @@ pub struct ThreadListOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<Value>,
+    pub cwd: Option<ThreadListCwdFilter>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -229,7 +238,7 @@ pub struct ThreadListOptions {
 /// Login choices accepted by the pinned App Server schema. API keys are kept
 /// in this typed request only and are never included in protocol events/logs.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
 pub enum AccountLoginOptions {
     #[serde(rename = "chatgptDeviceCode")]
     ChatgptDeviceCode,
@@ -2542,6 +2551,61 @@ mod tests {
             session.pending_server_requests().is_empty(),
             "the frame was already queued for delivery before cancellation -- reinserting now \
              would risk a retry sending a second, duplicate response for the same id"
+        );
+    }
+
+    /// AccountLoginOptions lacked `rename_all_fields = "camelCase"`, so
+    /// ApiKey and Chatgpt fields serialized as api_key/app_brand/etc
+    /// instead of the pinned schema's apiKey/appBrand/etc -- API-key login
+    /// was guaranteed to fail against the real App Server despite passing
+    /// every existing test, since none of them inspected the serialized
+    /// JSON shape.
+    #[test]
+    fn account_login_options_serialize_with_camel_case_fields() {
+        assert_eq!(
+            serde_json::to_value(AccountLoginOptions::ApiKey {
+                api_key: "sk-test".to_string()
+            })
+            .unwrap(),
+            json!({"type": "apiKey", "apiKey": "sk-test"})
+        );
+        assert_eq!(
+            serde_json::to_value(AccountLoginOptions::Chatgpt {
+                app_brand: Some("codex".to_string()),
+                codex_streamlined_login: Some(true),
+                use_hosted_login_success_page: Some(false),
+            })
+            .unwrap(),
+            json!({
+                "type": "chatgpt",
+                "appBrand": "codex",
+                "codexStreamlinedLogin": true,
+                "useHostedLoginSuccessPage": false,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(AccountLoginOptions::ChatgptDeviceCode).unwrap(),
+            json!({"type": "chatgptDeviceCode"})
+        );
+    }
+
+    /// The pinned schema's ThreadListCwdFilter is `string | string[]`, not
+    /// an arbitrary JSON value -- typed as the actual union instead of a
+    /// bare `Value` so a caller can't hand it something the App Server
+    /// will reject.
+    #[test]
+    fn thread_list_cwd_filter_serializes_as_the_schema_s_string_or_array_union() {
+        assert_eq!(
+            serde_json::to_value(ThreadListCwdFilter::Single("C:\\work".to_string())).unwrap(),
+            json!("C:\\work")
+        );
+        assert_eq!(
+            serde_json::to_value(ThreadListCwdFilter::Many(vec![
+                "C:\\work".to_string(),
+                "C:\\other".to_string()
+            ]))
+            .unwrap(),
+            json!(["C:\\work", "C:\\other"])
         );
     }
 }
