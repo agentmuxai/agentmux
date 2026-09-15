@@ -32,7 +32,7 @@ import {
     type NodeModel,
 } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { BlockFrame_Header } from "@/app/block/blockframe";
+import { BlockFrame_Header, computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -451,10 +451,27 @@ const TermPaneChrome = (props: {
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
 
+    // Selection ring for the WHOLE pane (header + tab strip + content) — same
+    // fix as AgentPaneChrome's (agent-view.tsx), same underlying cause: see
+    // docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
+    // 2026_09_15.md, which flagged this as the same latent gap in
+    // TermPaneChrome, confirmed live. Mirrors BlockFrame_Default_Component's
+    // own `isFocused`/`isAlone` reads (blockframe.tsx) exactly, including
+    // the "single pane in the tab, focus carries no signal" suppression.
+    const isFocused = () => nodeModel.isFocused();
+    const isAlone = () => nodeModel.numLeafs() <= 1;
+
     // Tracks the CURRENTLY ACTIVE member, not the anchor — getWaveObjectAtom
     // inside a memo (not useWaveObjectValue), the reactive-oref pattern
     // established in #3134 for exactly this kind of switch-surviving reader.
     const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+
+    // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
+    // `.block-mask` — reused so a custom `frame:activebordercolor`/
+    // `frame:hue`/`bg:bordercolor` still shows up on the outer ring below
+    // (codex P2, PR #3226) instead of always falling back to the plain
+    // accent/dim colors.
+    const ringBorderColor = createMemo(() => computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, atoms.tabAtom()?.meta));
 
     interface TermTab {
         blockId: string;
@@ -658,6 +675,15 @@ const TermPaneChrome = (props: {
     return (
         <div
             class="term-pane-stack"
+            classList={{
+                "term-pane-stack-focused": isFocused() && !isAlone(),
+                // Only alone+focused suppresses the ring to transparent —
+                // matches .pane-alone .block-mask's own nesting under
+                // .block-focused (block.scss): alone-but-UNfocused still
+                // gets the ordinary dim border (reagent P2, PR #3226).
+                "term-pane-stack-focused-alone": isFocused() && isAlone(),
+            }}
+            style={{ "--pane-ring-color": ringBorderColor() }}
             // Keeps this pane reachable by the CEF browser API's
             // `[data-blockid]` subtree scoping (UIQuery/UIClick/screenshot
             // clip) now that chrome sits OUTSIDE the nested `.block` that
