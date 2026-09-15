@@ -35,6 +35,9 @@ use std::sync::mpsc::Receiver;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use crate::splash_core::{
+    format_ms, format_running, hold_duration, reconcile, trunc, StageEntry, StageTimeline, SubEntry,
+};
 use crate::startup_events::{StartupEvent, StartupStatus};
 
 // The brain logo (transparent PNG). NSImage decodes it natively at runtime.
@@ -83,13 +86,16 @@ const FADE_OUT: f64 = 0.16; // seconds
 // ── Startup-stage telemetry panel ───────────────────────────────────────────
 // Renders StartupEvent stage/sub-item timing live, between the brain and the
 // footer — the macOS counterpart of splash.rs's (Windows) software-blitted
-// panel and splash_linux's StageList. Deliberately a separate, self-contained
-// implementation rather than sharing Windows'/Linux's code: consolidating all
-// three into one shared module is a real cleanup opportunity (flagged in
-// SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md §B.4.3) but
-// doing it in this PR would mean editing two already-working splashes I
-// cannot build or run to verify — safer to add macOS purely additively here
-// and do the consolidation as its own reviewable follow-up.
+// panel and splash_linux's StageList. The row model, event application
+// (with same-tick count-up deferral), frozen-row finalization, duration
+// formatting, and total/other reconciliation now live in `splash_core`,
+// shared with both siblings — see that module's doc comment for why this
+// consolidation (flagged as a follow-up since
+// SPEC_MACOS_LAUNCH_SPEED_AND_SPLASH_TELEMETRY_2026_07_02.md §B.4.3, and
+// still not done as of
+// docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md's
+// audit) happened now. Only the NSTextField layout below (native retained-
+// mode rows, label-width/indent constants) stays macOS-specific.
 //
 // Uses native NSTextField rows (retained-mode) instead of a software glyph
 // blitter — matches the existing footer's implementation, and setStringValue:
@@ -131,158 +137,9 @@ const STATUS_ERR_R: f64 = 0xCC as f64 / 255.0;
 const STATUS_ERR_G: f64 = 0x44 as f64 / 255.0;
 const STATUS_ERR_B: f64 = 0x44 as f64 / 255.0;
 
-struct SubRow {
-    id: String,
-    label: String,
-    started_at: Instant,
-    done: Option<(u64, StartupStatus, Option<String>)>,
-}
-
-struct StageRow {
-    stage: &'static str,
-    label: &'static str,
-    started_at: Instant,
-    done: Option<(u64, StartupStatus, Option<String>)>,
-    subs: Vec<SubRow>,
-}
-
-/// Identifies which row a `Begin` event created, so `run_until_dismissed`'s
-/// drain loop can recognize when a matching `End` arrives for a row that was
-/// *itself* created in this same drain pass — see the count-up note there.
-#[derive(PartialEq)]
-enum BeginKey {
-    Stage(&'static str),
-    Sub(&'static str, String),
-}
-
-/// Same state machine as splash.rs's (Windows) `apply_event` /
-/// splash_linux's `StageList::apply` — see the module doc above for why this
-/// isn't shared code yet.
-fn apply_event(stages: &mut Vec<StageRow>, ev: StartupEvent) {
-    match ev {
-        StartupEvent::StageBegin { stage, label } => {
-            stages.push(StageRow {
-                stage,
-                label,
-                started_at: Instant::now(),
-                done: None,
-                subs: Vec::new(),
-            });
-        }
-        StartupEvent::StageEnd { stage, duration_ms, status, detail } => {
-            if let Some(row) = stages.iter_mut().rev().find(|r| r.stage == stage) {
-                row.done = Some((duration_ms, status, detail));
-            }
-        }
-        StartupEvent::SubBegin { stage, id, label } => {
-            if let Some(row) = stages.iter_mut().rev().find(|r| r.stage == stage) {
-                row.subs.push(SubRow {
-                    id,
-                    label,
-                    started_at: Instant::now(),
-                    done: None,
-                });
-            }
-        }
-        StartupEvent::SubEnd { stage, id, duration_ms, status, detail } => {
-            if let Some(row) = stages.iter_mut().rev().find(|r| r.stage == stage) {
-                if let Some(sub) = row.subs.iter_mut().rev().find(|s| s.id == id) {
-                    sub.done = Some((duration_ms, status, detail));
-                }
-            }
-        }
-    }
-}
-
-/// Applies one tick's worth of already-fetched events to `stages`. Returns
-/// `true` if anything changed. Pulled out of `run_until_dismissed` as a pure
-/// function (taking a plain `Vec<StartupEvent>` instead of draining
-/// `self.startup_rx` directly) so the deferral logic is unit-testable
-/// without a live splash window.
-///
-/// A row is created `done: None` on Begin and only shows a live "running"
-/// time once a render happens before its End is applied (`flatten_rows`). If
-/// a step finishes fast enough that both its Begin and End are already
-/// queued by the time a tick drains, they'd otherwise be applied back-to-back
-/// in this same pass — the row is created already-done and no "running"
-/// frame is ever painted, so it just snaps to its final value instead of
-/// visibly counting up (docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md
-/// §2). Fix: apply anything deferred from the *previous* tick first
-/// (guaranteeing its row spent at least one tick — and one render, since
-/// `run_until_dismissed` always redraws while `ready_at.is_none()` — in the
-/// "running" state), then apply this tick's fresh events, holding back any
-/// End whose matching Begin was *also* seen in this same batch rather than
-/// applying it immediately.
-fn apply_tick(
-    stages: &mut Vec<StageRow>,
-    deferred: &mut Vec<StartupEvent>,
-    fresh: Vec<StartupEvent>,
-) -> bool {
-    let mut changed = false;
-    for ev in deferred.drain(..) {
-        apply_event(stages, ev);
-        changed = true;
-    }
-    let mut began_this_tick: Vec<BeginKey> = Vec::new();
-    for ev in fresh {
-        let defer = match &ev {
-            StartupEvent::StageEnd { stage, .. } => {
-                began_this_tick.contains(&BeginKey::Stage(stage))
-            }
-            StartupEvent::SubEnd { stage, id, .. } => {
-                began_this_tick.contains(&BeginKey::Sub(stage, id.clone()))
-            }
-            _ => false,
-        };
-        if defer {
-            deferred.push(ev);
-            continue;
-        }
-        match &ev {
-            StartupEvent::StageBegin { stage, .. } => {
-                began_this_tick.push(BeginKey::Stage(stage));
-            }
-            StartupEvent::SubBegin { stage, id, .. } => {
-                began_this_tick.push(BeginKey::Sub(stage, id.clone()));
-            }
-            _ => {}
-        }
-        apply_event(stages, ev);
-        changed = true;
-    }
-    changed
-}
-
-fn trunc(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max {
-        s.to_string()
-    } else {
-        chars[..max].iter().collect::<String>() + ".."
-    }
-}
-
-fn format_ms(ms: u64) -> String {
-    if ms >= 10_000 {
-        format!("{:.0}s", ms as f64 / 1000.0)
-    } else if ms >= 1_000 {
-        format!("{:.1}s", ms as f64 / 1000.0)
-    } else {
-        format!("{}ms", ms)
-    }
-}
-
-fn format_running(started_at: Instant) -> String {
-    let s = started_at.elapsed().as_secs_f32();
-    if s >= 10.0 {
-        format!("> {:.0}s", s)
-    } else {
-        format!("> {:.1}s", s)
-    }
-}
-
 /// One flattened display row: (indent, label, time_text, label_color,
-/// time_color) — computed fresh each tick from the current `Vec<StageRow>`.
+/// time_color) — computed fresh each tick from the current
+/// `[StageEntry]` (shared model, `splash_core`).
 struct FlatRow {
     indented: bool,
     label: String,
@@ -291,7 +148,7 @@ struct FlatRow {
     time_color: (f64, f64, f64),
 }
 
-fn flatten_rows(stages: &[StageRow], total_ms: Option<u64>) -> Vec<FlatRow> {
+fn flatten_rows(stages: &[StageEntry], total_ms: Option<u64>) -> Vec<FlatRow> {
     let mut out = Vec::new();
     for stage in stages {
         if out.len() >= MAX_STAGE_ROWS {
@@ -343,23 +200,10 @@ fn flatten_rows(stages: &[StageRow], total_ms: Option<u64>) -> Vec<FlatRow> {
         }
     }
     if let Some(ms) = total_ms {
-        // "other" — the gap between `total` (a wall-clock stopwatch running
-        // from splash-window creation to first-paint-detected) and the sum
-        // of top-level stage durations. Only completed (`done`) stages are
-        // summed: they're already exclusive of each other (a stage's own
-        // duration already covers whatever its subs took), and an
-        // undone stage would inflate the sum with an ever-changing partial
-        // count. Any residual is genuinely uncovered by any instrumented
-        // stage — e.g. cef_init-end -> first-paint, or process-spawn
-        // scheduling gaps between stages — not a double-count or a bug; see
-        // docs/analysis/ANALYSIS_SPLASH_SCREEN_TIMING_2026_07_20.md §5.
-        // saturating_sub guards the (should-be-impossible, but not worth a
-        // panic over) case where accounted time exceeds total_ms.
-        let accounted_ms: u64 = stages
-            .iter()
-            .filter_map(|s| s.done.as_ref().map(|(dur, _, _)| *dur))
-            .sum();
-        let other_ms = ms.saturating_sub(accounted_ms);
+        // "other" / "total" — reconciled identically on every platform now
+        // via `splash_core::reconcile`; see its doc comment for why `other`
+        // is real, uncovered time and not a bug.
+        let (_accounted, other_ms) = reconcile(stages, ms);
         // "total" is the existing, higher-priority row: only add "other"
         // when there's room for both, so a nearly-full panel still shows the
         // total rather than silently dropping it for the new row.
@@ -677,19 +521,19 @@ impl Splash {
     /// at `path`. Lets us eyeball footer + stage-panel layout without Screen
     /// Recording permission. Offscreen `cacheDisplayInRect:` only.
     pub fn dump_png(&self, path: &str) {
-        let mut stages: Vec<StageRow> = Vec::new();
+        let mut timeline = StageTimeline::new();
         for _ in 0..60 {
             unsafe {
                 CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.016, 0);
             }
-            let mut changed = false;
+            let mut fresh = Vec::new();
             while let Ok(ev) = self.startup_rx.try_recv() {
-                apply_event(&mut stages, ev);
-                changed = true;
+                fresh.push(ev);
             }
+            let changed = timeline.apply_tick(fresh);
             if changed {
                 unsafe {
-                    self.update_stage_fields(&stages, None);
+                    self.update_stage_fields(&timeline.stages, None);
                 }
             }
             std::thread::sleep(Duration::from_millis(8));
@@ -703,7 +547,7 @@ impl Splash {
     /// pool — show()'s explicit pool has already drained by the time this
     /// runs, and this loop's manual `pump_app_events` (unlike a real
     /// `-[NSApplication run]`) doesn't establish a per-iteration pool itself.
-    unsafe fn update_stage_fields(&self, stages: &[StageRow], total_ms: Option<u64>) {
+    unsafe fn update_stage_fields(&self, stages: &[StageEntry], total_ms: Option<u64>) {
         let pool = send(class(b"NSAutoreleasePool\0"), sel(b"alloc\0"));
         let pool = send(pool, sel(b"init\0"));
 
@@ -757,22 +601,21 @@ impl Splash {
     /// Pump the splash runloop on the main thread: animate the brain pulse,
     /// drain startup events into the stage panel, and once the host signals
     /// first paint (ready-file appears) — or the safety timeout elapses —
-    /// hold on the completed timeline for AGENTMUX_SPLASH_HOLD_MS (mirrors
-    /// splash.rs's Windows hold, default 3000ms / capped at 1000ms for very
-    /// fast starts), then fade the whole splash out and order it away. Then
+    /// hold on the completed timeline for `splash_core::hold_duration`
+    /// (env `AGENTMUX_SPLASH_HOLD_MS`, default 2000ms / capped at 1000ms
+    /// for very fast starts — the actual shipped default on every
+    /// platform now, corrected here from a stale comment that claimed
+    /// 3000ms, which nothing has ever actually defaulted to), then fade
+    /// the whole splash out and order it away. Then
     /// keep the runloop turning (so the removal flushes) until the
     /// supervisor thread exits the process.
     pub fn run_until_dismissed(self) {
         let start = Instant::now();
         let mut fade_start: Option<Instant> = None;
         let mut ready_at: Option<Instant> = None;
-        let mut hold_duration = Duration::ZERO;
+        let mut hold_for = Duration::ZERO;
         let mut total_ms: u64 = 0;
-        let mut stages: Vec<StageRow> = Vec::new();
-        // Events held back from a tick where their matching Begin *also*
-        // landed, applied at the start of the next tick instead — see the
-        // count-up note in the drain loop below.
-        let mut deferred: Vec<StartupEvent> = Vec::new();
+        let mut timeline = StageTimeline::new();
 
         loop {
             // NSApp event pump (not bare CFRunLoop) so a reopen Apple Event that
@@ -783,13 +626,13 @@ impl Splash {
             }
 
             // Drain pending startup events (non-blocking) into the stage
-            // list. See `apply_tick`'s doc comment for why this isn't a
-            // plain "apply everything as it arrives" drain.
+            // list. See `StageTimeline::apply_tick`'s doc comment for why
+            // this isn't a plain "apply everything as it arrives" drain.
             let mut fresh = Vec::new();
             while let Ok(ev) = self.startup_rx.try_recv() {
                 fresh.push(ev);
             }
-            let mut changed = apply_tick(&mut stages, &mut deferred, fresh);
+            let mut changed = timeline.apply_tick(fresh);
 
             let t = start.elapsed().as_secs_f64();
 
@@ -806,20 +649,22 @@ impl Splash {
             }
 
             // Detect first-paint (or timeout): capture total elapsed and
-            // compute the hold duration once, same convention as Windows'
-            // AGENTMUX_SPLASH_HOLD_MS handling.
+            // compute the hold duration once, via the same shared function
+            // Windows/Linux now use too (`splash_core::hold_duration`).
             if ready_at.is_none()
                 && (self.ready_file.exists() || start.elapsed() > DISMISS_TIMEOUT)
             {
                 ready_at = Some(Instant::now());
                 let _ = std::fs::remove_file(&self.ready_file);
                 total_ms = start.elapsed().as_millis() as u64;
-                let hold_ms = std::env::var("AGENTMUX_SPLASH_HOLD_MS")
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(2000);
-                let hold_ms = if total_ms < 500 { hold_ms.min(1000) } else { hold_ms };
-                hold_duration = Duration::from_millis(hold_ms);
+                hold_for = hold_duration(total_ms);
+                // Any row still open at this instant (no matching End ever
+                // arrived) gets a definite outcome now instead of staying
+                // visually "running" for the whole hold + fade — the
+                // frozen-row defect this splash had too, despite already
+                // having the count-up fix; see
+                // `StageTimeline::finalize_running`'s doc comment.
+                timeline.finalize_running(Instant::now());
                 changed = true; // force one final refresh showing the "total:" row
             }
 
@@ -829,13 +674,13 @@ impl Splash {
             if changed || ready_at.is_none() {
                 let total_for_display = ready_at.map(|_| total_ms);
                 unsafe {
-                    self.update_stage_fields(&stages, total_for_display);
+                    self.update_stage_fields(&timeline.stages, total_for_display);
                 }
             }
 
             // Start the fade once the hold has elapsed.
             if let Some(r0) = ready_at {
-                if fade_start.is_none() && r0.elapsed() >= hold_duration {
+                if fade_start.is_none() && r0.elapsed() >= hold_for {
                     fade_start = Some(Instant::now());
                 }
             }
@@ -1248,8 +1093,14 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
 mod tests {
     use super::*;
 
-    fn done_stage(stage: &'static str, label: &'static str, ms: u64) -> StageRow {
-        StageRow {
+    // The event-application/count-up-deferral/finalize logic these tests
+    // used to exercise directly (`apply_tick`, `StageRow`/`SubRow`) now
+    // lives in `splash_core` with its own equivalent test coverage — see
+    // that module. What's left here is macOS-specific: `flatten_rows`'
+    // own row layout and total/other priority.
+
+    fn done_stage(stage: &'static str, label: &'static str, ms: u64) -> StageEntry {
+        StageEntry {
             stage,
             label,
             started_at: Instant::now(),
@@ -1258,8 +1109,8 @@ mod tests {
         }
     }
 
-    fn running_stage(stage: &'static str, label: &'static str) -> StageRow {
-        StageRow {
+    fn running_stage(stage: &'static str, label: &'static str) -> StageEntry {
+        StageEntry {
             stage,
             label,
             started_at: Instant::now(),
@@ -1331,7 +1182,7 @@ mod tests {
         // shrink "other" incorrectly. accounted_ms must come from top-level
         // stages only.
         let mut migrations = done_stage("migrations", "Migrations", 250);
-        migrations.subs.push(SubRow {
+        migrations.subs.push(SubEntry {
             id: "001".into(),
             label: "001_init".into(),
             started_at: Instant::now(),
@@ -1349,7 +1200,7 @@ mod tests {
         // MAX_STAGE_ROWS(12) - 1 stage rows leaves exactly one slot: "total"
         // must win that slot over "other" per the priority documented at
         // the call site.
-        let stages: Vec<StageRow> = (0..MAX_STAGE_ROWS - 1)
+        let stages: Vec<StageEntry> = (0..MAX_STAGE_ROWS - 1)
             .map(|i| {
                 let label: &'static str = Box::leak(format!("s{i}").into_boxed_str());
                 let stage: &'static str = label;
@@ -1362,138 +1213,4 @@ mod tests {
         assert!(total_row_text(&rows).is_some());
     }
 
-    fn stage_row<'a>(stages: &'a [StageRow], stage: &str) -> &'a StageRow {
-        stages.iter().find(|s| s.stage == stage).unwrap()
-    }
-
-    #[test]
-    fn a_same_tick_begin_and_end_pair_is_deferred_not_snapped_done() {
-        // The count-up bug: if a step's Begin and End are both already
-        // queued by the time a tick drains, applying both immediately would
-        // create the row already-done — no "running" frame ever painted.
-        let mut stages = Vec::new();
-        let mut deferred = Vec::new();
-        let fresh = vec![
-            StartupEvent::StageBegin { stage: "prep", label: "Prep" },
-            StartupEvent::StageEnd {
-                stage: "prep",
-                duration_ms: 5,
-                status: StartupStatus::Ok,
-                detail: None,
-            },
-        ];
-        let changed = apply_tick(&mut stages, &mut deferred, fresh);
-        assert!(changed);
-        // Begin applied, End held back — row exists but is still "running".
-        assert_eq!(stages.len(), 1);
-        assert!(stage_row(&stages, "prep").done.is_none());
-        assert_eq!(deferred.len(), 1);
-    }
-
-    #[test]
-    fn the_deferred_end_applies_on_the_next_tick() {
-        let mut stages = Vec::new();
-        let mut deferred = Vec::new();
-        apply_tick(
-            &mut stages,
-            &mut deferred,
-            vec![
-                StartupEvent::StageBegin { stage: "prep", label: "Prep" },
-                StartupEvent::StageEnd {
-                    stage: "prep",
-                    duration_ms: 5,
-                    status: StartupStatus::Ok,
-                    detail: None,
-                },
-            ],
-        );
-        // Next tick: nothing fresh, just the deferred End flushing in.
-        let changed = apply_tick(&mut stages, &mut deferred, Vec::new());
-        assert!(changed);
-        assert!(deferred.is_empty());
-        assert_eq!(stage_row(&stages, "prep").done.as_ref().unwrap().0, 5);
-    }
-
-    #[test]
-    fn a_begin_and_end_landing_in_different_ticks_is_never_deferred() {
-        // The common/expected case (step genuinely takes longer than one
-        // tick) must not be held back an *extra* tick on top of that.
-        let mut stages = Vec::new();
-        let mut deferred = Vec::new();
-        apply_tick(
-            &mut stages,
-            &mut deferred,
-            vec![StartupEvent::StageBegin { stage: "host", label: "Host" }],
-        );
-        assert!(deferred.is_empty());
-        assert!(stage_row(&stages, "host").done.is_none());
-
-        let changed = apply_tick(
-            &mut stages,
-            &mut deferred,
-            vec![StartupEvent::StageEnd {
-                stage: "host",
-                duration_ms: 40,
-                status: StartupStatus::Ok,
-                detail: None,
-            }],
-        );
-        assert!(changed);
-        assert!(deferred.is_empty());
-        assert_eq!(stage_row(&stages, "host").done.as_ref().unwrap().0, 40);
-    }
-
-    #[test]
-    fn a_same_tick_sub_begin_and_end_pair_is_deferred_too() {
-        let mut stages = vec![running_stage("migrations", "Migrations")];
-        let mut deferred = Vec::new();
-        let fresh = vec![
-            StartupEvent::SubBegin {
-                stage: "migrations",
-                id: "001".into(),
-                label: "001_init".into(),
-            },
-            StartupEvent::SubEnd {
-                stage: "migrations",
-                id: "001".into(),
-                duration_ms: 3,
-                status: StartupStatus::Ok,
-                detail: None,
-            },
-        ];
-        apply_tick(&mut stages, &mut deferred, fresh);
-        let sub = &stage_row(&stages, "migrations").subs[0];
-        assert!(sub.done.is_none());
-        assert_eq!(deferred.len(), 1);
-    }
-
-    #[test]
-    fn unrelated_deferred_and_fresh_events_do_not_interfere() {
-        // A deferred End from a previous tick and a brand-new, unrelated
-        // same-tick Begin+End pair in this tick must each be judged on their
-        // own — the deferred flush must not seed `began_this_tick`.
-        let mut stages = Vec::new();
-        let mut deferred = vec![StartupEvent::StageEnd {
-            stage: "prep",
-            duration_ms: 5,
-            status: StartupStatus::Ok,
-            detail: None,
-        }];
-        stages.push(running_stage("prep", "Prep"));
-        let fresh = vec![
-            StartupEvent::StageBegin { stage: "migrations", label: "Migrations" },
-            StartupEvent::StageEnd {
-                stage: "migrations",
-                duration_ms: 2,
-                status: StartupStatus::Ok,
-                detail: None,
-            },
-        ];
-        apply_tick(&mut stages, &mut deferred, fresh);
-        // "prep"'s deferred End flushed in this tick.
-        assert_eq!(stage_row(&stages, "prep").done.as_ref().unwrap().0, 5);
-        // "migrations" is new-and-fast this tick — its own End is deferred.
-        assert!(stage_row(&stages, "migrations").done.is_none());
-        assert_eq!(deferred.len(), 1);
-    }
 }
