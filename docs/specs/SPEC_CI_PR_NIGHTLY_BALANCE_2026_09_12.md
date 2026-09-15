@@ -29,7 +29,10 @@ The goal is not “fewer tests.” The goal is to put the right tests at the rig
 The PR lane MUST include:
 
 - Rust compile/test coverage for the CEF-free crates that contain most application logic:
-  `agentmux-common`, `agentmux-srv`, and `agentmux-launcher`.
+  `agentmux-common`, `agentmux-srv`, `agentmux-launcher`, `agentmux-bashwrap`, and `agentmux-mcp`.
+  The last two are independent workspace members not pulled in transitively by the other
+  three, so they need their own explicit listing or they get no PR-lane compile/test gate
+  at all.
 - `cargo check --tests` for those same CEF-free packages, so `#[cfg(test)]` constructors and platform-gated test code compile before merge.
 - Serial Rust execution (`--test-threads=1`) until the documented process-global test isolation issues are removed.
 - Frontend typechecking and Vitest.
