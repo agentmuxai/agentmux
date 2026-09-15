@@ -293,9 +293,10 @@ all addressed in the same PR:
   create it for real" fallback — leaving one orphaned live controller and
   two callers holding different `shell_id`s for what's supposed to be one
   pane's one shell. Mitigated by having `try_attach_to_existing_shell`
-  clear the parent's stale pointer (`META_KEY_SHELL_SUBBLOCK_ID` → null,
-  via `broadcast_meta_update`) as soon as it detects
-  `RESYNC_ERR_ALREADY_EXITED`, before returning `None`. This makes the
+  clear the parent's stale pointer (`META_KEY_SHELL_SUBBLOCK_ID` → null)
+  as soon as it detects `RESYNC_ERR_ALREADY_EXITED`, before returning
+  `None`. (Round 2, §9, tightened this from an unconditional clear to a
+  guarded compare-before-clear — see there.) This makes the
   already-correct, already-serialized (`with_tx`'s single-connection-lock)
   atomic claim transaction see "unclaimed" instead of "claimed by a dead
   id," so it resolves concurrent callers to one winner the same way it
@@ -309,3 +310,41 @@ all addressed in the same PR:
 Verified: full non-ignored `agentmux-srv` suite (3350 passed) and the
 `ptyshell_*` suite including real-PTY `#[ignore]`d tests, both re-run after
 these changes with no regressions.
+
+## 9. Round 2: ReAgent found a real bug in §8's own fix
+
+ReAgent re-reviewed after §8 landed and requested changes (`CHANGES_REQUESTED`,
+not just `COMMENTED`) — one real P1, one real P2:
+
+- **P1: the §8 pointer-clear was itself unconditional, with no compare
+  before clearing.** `resync_controller`'s `STATUS_DONE` read
+  (`respawn_if_done=false` path) happens outside any lock. A concurrent
+  resync against the SAME block with `respawn_if_done=true` — the WS
+  `ControllerResyncCommand`/`TermResyncHandler` path, which always revives
+  a `STATUS_DONE` controller unconditionally — can respawn this exact
+  shell in the gap between that status read and `try_attach_to_existing_shell`'s
+  pointer-clear. The clear then unconditionally nulled `term:shellsubblockid`
+  regardless of whether it still pointed at the (now dead-but-possibly-
+  revived) `id` — wiping a pointer that had become valid again, orphaning a
+  live, correctly-pointed shell. Exactly the one-shell-per-pane invariant
+  this whole PR exists to protect, broken by its own mitigation for a
+  different race. Fixed: `must_get` the parent fresh immediately before
+  clearing and only clear if `parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID)`
+  still equals `id` — the same compare-before-clear pattern already used a
+  few hundred lines down in this file's spawn-failure rollback path
+  (`parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID) == Some(child_id.as_str())`
+  before removing). Not fully transactional (neither is the precedent it
+  mirrors) — closes the specific "unconditional null" defect ReAgent
+  flagged, not a claim of eliminating every possible race at this layer.
+- **P2: a second, earlier occurrence of the same stale comment.** The P2
+  from round 1 (§8) fixed the "exceedingly unlikely" comment on the
+  atomic-claim transaction's `Ok(Some(winner_id))` branch; this round
+  caught an *earlier* comment in the same function — the top-level reuse
+  check's fallthrough ("Stale pointer (the block was deleted some other
+  way) — fall through...") — that has the identical problem (now also
+  covers the common exited-shell case) and was missed in round 1. Updated
+  to say so explicitly.
+
+Re-verified after these fixes: `cargo check -p agentmux-srv` clean, full
+non-ignored suite (3350 passed), and the `ptyshell_*` suite including
+real-PTY `#[ignore]`d tests — all with no regressions.
