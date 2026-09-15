@@ -562,6 +562,7 @@ pub async fn spawn_srv(
     let host_reg_secret_for_estart = host_reg_secret.clone();
     let started_at_for_estart = started_at.clone();
     let pid_for_log = pid;
+    let sink_for_migrations = sink.clone();
     tokio::spawn(async move {
         let mut reader = BufReader::new(stderr).lines();
         let mut estart_sent = false;
@@ -593,6 +594,21 @@ pub async fn spawn_srv(
             } else if line.starts_with("AGENTMUXSRV-MIGRATING") {
                 crate::log(&format!("[srv {} migrating] {}", pid_for_log, line));
                 let _ = migration_tx.send(()).await;
+            } else if let Some(b) = agentmux_common::srv_stderr::parse_migration_begin_line(&line) {
+                // Sub-row against the already-open "backend" stage — a
+                // migration is not a separate top-level stage, it happens
+                // entirely inside that one. See
+                // docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md
+                // §2.1/§4 Phase 3.1.
+                sink_for_migrations.sub_begin("backend", b.id, b.description);
+            } else if let Some(e) = agentmux_common::srv_stderr::parse_migration_end_line(&line) {
+                sink_for_migrations.sub_end(
+                    "backend",
+                    e.id,
+                    e.duration_ms,
+                    crate::startup_events::StartupStatus::Ok,
+                    None,
+                );
             } else if line.starts_with("AGENTMUXSRV-EVENT:") {
                 crate::log(&format!("[srv {} event] {}", pid_for_log, line));
                 // Phase B.2 will forward these to subscribers.

@@ -1,11 +1,19 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Migration runner — invoked by `agentmux-srv migrate`.
+//! Migration runner — invoked by `agentmux-srv migrate` (a CLI subcommand,
+//! and the now-dead `agentmux-launcher::srv_spawner::run_migrate` subprocess
+//! path) and, separately, in-process at every srv boot via
+//! `run_pending_migrations`.
 //!
-//! Progress events are emitted as newline-delimited JSON to stdout so the
-//! launcher's splash screen can show "Updating your data…" while migrations
-//! run.  Failures are written to `<home>/logs/migration-error.log`; the
+//! Both paths report the SAME per-migration begin/done progress
+//! (`ApplyProgress`) but over different channels: the CLI path emits
+//! newline-delimited JSON to stdout (read by the dead subprocess path, kept
+//! for that reason); `run_pending_migrations` emits `agentmux_common::
+//! srv_stderr`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` lines to stderr — the
+//! real, in-process boot path's own protocol, so the launcher's splash
+//! screen can show live per-migration sub-rows instead of a silent clock.
+//! Failures are written to `<home>/logs/migration-error.log`; the
 //! process exits non-zero so the launcher can surface the error rather than
 //! booting with a half-migrated data dir.
 
@@ -267,7 +275,32 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
         None => return Err("run_pending_migrations: cannot resolve global shared root".to_string()),
     };
 
-    apply_pending(REGISTRY, &home, &shared_store_path, data_dir, None).map(|o| o.applied)
+    // Per-migration BEGIN/END stderr lines, inside the AGENTMUXSRV-MIGRATING
+    // window `bootstrap.rs` already opens. Without this, srv's launcher-
+    // supervised splash shows a bare, silently-running "Backend startup"
+    // clock for the whole migration batch — up to 30 minutes
+    // (MIGRATION_LOCK_WAIT) — with no indication anything unusual is
+    // happening inside it. See
+    // docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md
+    // §2.1. Unlike `run_migrate_command`'s stdout JSON (read by the
+    // now-dead subprocess path), this goes to STDERR — the channel every
+    // real daemon-boot marker (ESTART, MIGRATING, MIGRATION-FAILED) already
+    // uses — via `agentmux_common::srv_stderr`, which both real consumers
+    // (the launcher and, in `task dev:standalone`, the CEF host sidecar)
+    // already parse the rest of this protocol from. A supervisor that
+    // doesn't recognize these two new lines yet (neither did until this
+    // change) just logs them like any other stderr line — same fallback
+    // that already existed for a hypothetical unknown line before this.
+    let progress = ApplyProgress {
+        on_start: &|id, description| {
+            eprintln!("{}", agentmux_common::srv_stderr::migration_begin_line(id, description));
+        },
+        on_done: &|id, ms| {
+            eprintln!("{}", agentmux_common::srv_stderr::migration_end_line(id, ms));
+        },
+    };
+
+    apply_pending(REGISTRY, &home, &shared_store_path, data_dir, Some(&progress)).map(|o| o.applied)
 }
 
 // ── Cross-process migration lock (Phase 3, F6) ────────────────────────────────
@@ -357,8 +390,12 @@ fn pending_of<'r>(
         .collect()
 }
 
-/// Per-migration progress hooks for the CLI's NDJSON lines. The daemon passes
-/// `None` and relies on the `tracing` lines `apply_pending` always emits.
+/// Per-migration progress hooks. Two real implementations: the CLI's NDJSON
+/// stdout lines (`run_migrate_command`), and — since this PR —
+/// `run_pending_migrations`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` stderr
+/// lines, which the launcher turns into live splash sub-rows. Both also
+/// still get the unconditional `tracing` lines `apply_pending` emits
+/// regardless of whether a progress hook is passed at all.
 pub(super) struct ApplyProgress<'a> {
     pub on_start: &'a dyn Fn(&str, &str),
     pub on_done: &'a dyn Fn(&str, u64),
