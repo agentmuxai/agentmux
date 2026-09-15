@@ -16,9 +16,13 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use thiserror::Error;
 
-use super::app_server::{AppServerError, AppServerIncoming, AppServerTransport};
+use super::app_server::{
+    AppServerError, AppServerIncoming, AppServerTransport, RpcId, ServerResponseError,
+    WriteOutcomeTracker,
+};
 
 const MAX_RAW_EVENTS: usize = 128;
+const MAX_PENDING_SERVER_REQUESTS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionPhase {
@@ -98,10 +102,34 @@ pub enum CodexAppServerEvent {
         thread_id: String,
         status: Value,
     },
+    ServerRequestResolved {
+        thread_id: String,
+        request_id: RpcId,
+    },
     UnknownNotification {
         method: String,
         params: Value,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerRequestKind {
+    CommandApproval,
+    FileChangeApproval,
+    PermissionsApproval,
+    UserInput,
+    McpElicitation,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingServerRequest {
+    pub id: RpcId,
+    pub kind: ServerRequestKind,
+    pub method: String,
+    pub params: Value,
+    pub thread_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub item_id: Option<String>,
 }
 
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -126,6 +154,14 @@ pub enum CodexAppServerProtocolError {
     TurnAlreadyActive(String),
     #[error("resume response did not identify the requested thread")]
     ResumeMissingThread,
+    #[error("unsupported or unsafe App Server request method: {0}")]
+    UnsupportedServerRequest(String),
+    #[error("no pending App Server request matches id")]
+    UnknownServerRequest,
+    #[error("App Server request id is already pending")]
+    DuplicateServerRequest,
+    #[error("too many App Server requests are pending a decision (max {0})")]
+    TooManyPendingRequests(usize),
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -195,6 +231,7 @@ struct SessionState {
     /// (ReAgent P1, PR #3210). Cleared once the response (or an error)
     /// resolves.
     turn_starting: bool,
+    pending_requests: HashMap<RpcId, PendingServerRequest>,
 }
 
 impl CodexAppServerSession {
@@ -225,6 +262,10 @@ impl CodexAppServerSession {
         state.turn_id = None;
         state.phase = SessionPhase::Idle;
         state.items.clear();
+        // A pending approval queued under a prior thread/turn must not
+        // remain answerable once that context is gone (ReAgent P1, PR
+        // #3212) -- only turn/completed cleared this before.
+        state.pending_requests.clear();
         Ok(thread_id)
     }
 
@@ -268,6 +309,9 @@ impl CodexAppServerSession {
             SessionPhase::Idle
         };
         state.items.clear();
+        // Same as start_thread: a pending approval from a prior thread/turn
+        // must not survive into this one (ReAgent P1, PR #3212).
+        state.pending_requests.clear();
         Ok(resumed_id)
     }
 
@@ -403,6 +447,196 @@ impl CodexAppServerSession {
         Ok((thread_id, turn_id))
     }
 
+    /// Validate and queue a server request for an explicit UI/policy decision.
+    /// No request is approved implicitly.
+    pub fn accept_server_request(
+        &self,
+        incoming: AppServerIncoming,
+    ) -> Result<PendingServerRequest, CodexAppServerProtocolError> {
+        let AppServerIncoming::Request { id, method, params } = incoming else {
+            return Err(CodexAppServerProtocolError::UnsupportedServerRequest(
+                "notifications cannot be queued as requests".to_string(),
+            ));
+        };
+        let kind = match method.as_str() {
+            "item/commandExecution/requestApproval" => ServerRequestKind::CommandApproval,
+            "item/fileChange/requestApproval" => ServerRequestKind::FileChangeApproval,
+            "item/permissions/requestApproval" => ServerRequestKind::PermissionsApproval,
+            "item/tool/requestUserInput" => ServerRequestKind::UserInput,
+            "mcpServer/elicitation/request" => ServerRequestKind::McpElicitation,
+            _ => {
+                return Err(CodexAppServerProtocolError::UnsupportedServerRequest(
+                    method,
+                ))
+            }
+        };
+        // Every kind except McpElicitation is item-scoped and MUST carry a
+        // threadId/turnId — silently treating an omitted field the same as
+        // "no scope claimed" (rather than erroring) contradicted this API's
+        // own "scoped to active thread/turn" fail-closed claim: a
+        // malformed/unexpected request missing these fields would have been
+        // queued unconditionally instead of rejected (ReAgent P1, PR #3212).
+        // McpElicitation genuinely has no thread/turn context (see its own
+        // test fixture), so it alone stays optional.
+        let (thread_id, turn_id) = if kind == ServerRequestKind::McpElicitation {
+            (
+                params.get("threadId").and_then(Value::as_str).map(str::to_string),
+                params.get("turnId").and_then(Value::as_str).map(str::to_string),
+            )
+        } else {
+            (
+                Some(string_field(params.get("threadId"), "threadId")?),
+                Some(string_field(params.get("turnId"), "turnId")?),
+            )
+        };
+        let item_id = params
+            .get("itemId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let mut state = self.state.lock().unwrap();
+        if state.pending_requests.contains_key(&id) {
+            return Err(CodexAppServerProtocolError::DuplicateServerRequest);
+        }
+        if state.pending_requests.len() >= MAX_PENDING_SERVER_REQUESTS {
+            return Err(CodexAppServerProtocolError::TooManyPendingRequests(
+                MAX_PENDING_SERVER_REQUESTS,
+            ));
+        }
+        // Strict, not the notification-reconciliation ensure_thread_scope/
+        // ensure_scopes: those trivially pass when state.thread_id/turn_id
+        // is None, which is correct for a notification establishing state
+        // (e.g. the first thread/started) but wrong here — a request
+        // claiming a threadId/turnId while no thread/turn is actually
+        // active must be rejected, not queued as if it were in scope
+        // (ReAgent P1, PR #3212 3rd review). Matched on both fields
+        // together, not two independent `if let Some`s: a request with
+        // turnId but no threadId is a real, distinct case (McpElicitation
+        // may carry either field alone) and must still validate the turn
+        // it claims — two independent checks silently skip it whenever
+        // thread_id is None, whatever turn_id says (ReAgent P1, PR #3212
+        // 4th review).
+        match (&thread_id, &turn_id) {
+            (Some(thread), Some(turn)) => ensure_active_scopes(&state, thread, turn)?,
+            (Some(thread), None) => ensure_active_thread_scope(&state, thread)?,
+            (None, Some(turn)) => ensure_active_turn_scope(&state, turn)?,
+            (None, None) => {}
+        }
+        let pending = PendingServerRequest {
+            id: id.clone(),
+            kind,
+            method,
+            params,
+            thread_id,
+            turn_id,
+            item_id,
+        };
+        state.pending_requests.insert(id, pending.clone());
+        Ok(pending)
+    }
+
+    /// Send a decision for a queued request. The request remains pending if the
+    /// transport write fails, allowing a retry; successful responses consume it.
+    pub async fn respond_server_request(
+        &self,
+        id: &RpcId,
+        result: Result<Value, ServerResponseError>,
+        timeout: Duration,
+    ) -> Result<(), CodexAppServerProtocolError> {
+        // Removed atomically (check-and-take in one lock acquisition)
+        // rather than checked-then-removed-later — the old
+        // check-then-await-then-remove sequence let two concurrent calls
+        // for the same id both pass the membership check before either
+        // removed it, so both would send a JSON-RPC response for the same
+        // id and both report success (ReAgent P2, PR #3212). Re-inserted
+        // below on a transport failure so the documented retry-on-failure
+        // behavior is preserved — only one caller can ever be "holding" the
+        // entry between the take and a possible reinsert.
+        let pending = self
+            .state
+            .lock()
+            .unwrap()
+            .pending_requests
+            .remove(id)
+            .ok_or(CodexAppServerProtocolError::UnknownServerRequest)?;
+
+        // RestoreOnDrop reinserts the removed entry (if still scoped to the
+        // active thread/turn AND the frame was never actually queued for
+        // delivery) whenever it is dropped still armed — which covers an
+        // explicit transport-write failure below AND this future being
+        // dropped/cancelled while still suspended at the `.await` (e.g. a
+        // caller-side select!/timeout racing the write). A plain
+        // check-then-await-then-reinsert-on-Err only runs that reinsert
+        // code if the future resolves; drop the future mid-await instead
+        // and Rust never runs it at all, silently stranding the entry with
+        // no response ever sent and no error surfaced to anyone (ReAgent
+        // P1, PR #3212 5th review). Folding the ordinary failure path into
+        // the same Drop impl means both cases are handled by one piece of
+        // logic instead of two copies of it.
+        struct RestoreOnDrop<'a> {
+            state: &'a Mutex<SessionState>,
+            id: RpcId,
+            pending: Option<PendingServerRequest>,
+            // See WriteOutcomeTracker. A transport-level timeout/
+            // cancellation while waiting on the write-confirmation ack
+            // does not mean the frame was never sent — it may already be
+            // irrevocably queued for delivery — so reinserting on any
+            // non-success outcome (as a bare Result would suggest) risks
+            // a subsequent retry sending a second, duplicate response for
+            // the same id (ReAgent P1, PR #3212 6th review).
+            outcome: WriteOutcomeTracker,
+        }
+        impl Drop for RestoreOnDrop<'_> {
+            fn drop(&mut self) {
+                if !self.outcome.safe_to_retry() {
+                    return;
+                }
+                let Some(pending) = self.pending.take() else {
+                    return;
+                };
+                let mut state = self.state.lock().unwrap();
+                // Matched on both fields together, not `(None, _) =>
+                // true`: a pending entry with turn_id but no thread_id is
+                // still turn-scoped and must not be resurrected once that
+                // turn has ended, whatever thread_id says (ReAgent P1,
+                // PR #3212 4th review).
+                let still_current = match (&pending.thread_id, &pending.turn_id) {
+                    (Some(thread), Some(turn)) => {
+                        state.thread_id.as_deref() == Some(thread.as_str())
+                            && state.turn_id.as_deref() == Some(turn.as_str())
+                    }
+                    (Some(thread), None) => state.thread_id.as_deref() == Some(thread.as_str()),
+                    (None, Some(turn)) => state.turn_id.as_deref() == Some(turn.as_str()),
+                    (None, None) => true,
+                };
+                if still_current {
+                    state.pending_requests.insert(self.id.clone(), pending);
+                }
+            }
+        }
+
+        let guard = RestoreOnDrop {
+            state: &self.state,
+            id: id.clone(),
+            pending: Some(pending),
+            outcome: WriteOutcomeTracker::new(),
+        };
+        let outcome = self
+            .transport
+            .respond_tracked(id.clone(), result, timeout, &guard.outcome)
+            .await;
+        outcome.map_err(Into::into)
+    }
+
+    pub fn pending_server_requests(&self) -> Vec<PendingServerRequest> {
+        self.state
+            .lock()
+            .unwrap()
+            .pending_requests
+            .values()
+            .cloned()
+            .collect()
+    }
+
     pub fn snapshot(&self) -> SessionSnapshot {
         let state = self.state.lock().unwrap();
         SessionSnapshot {
@@ -445,6 +679,11 @@ impl CodexAppServerSession {
                     state.turn_id = None;
                     state.phase = SessionPhase::Idle;
                     state.items.clear();
+                    // Same as start_thread/resume_thread: a pending
+                    // approval from the previous thread must not remain
+                    // answerable once it's been replaced (ReAgent P1, PR
+                    // #3212).
+                    state.pending_requests.clear();
                 }
                 Ok(CodexAppServerEvent::ThreadStarted { thread_id })
             }
@@ -568,6 +807,7 @@ impl CodexAppServerSession {
                     "interrupted" => SessionPhase::Interrupted,
                     _ => SessionPhase::Failed,
                 };
+                state.pending_requests.clear();
                 Ok(CodexAppServerEvent::TurnCompleted {
                     thread_id,
                     turn_id,
@@ -579,6 +819,28 @@ impl CodexAppServerSession {
                 ensure_thread_scope(&state, &thread_id)?;
                 let status = params.get("status").cloned().unwrap_or(Value::Null);
                 Ok(CodexAppServerEvent::ThreadStatusChanged { thread_id, status })
+            }
+            // The App Server can resolve/cancel an individual pending
+            // request on its own (e.g. superseded by a newer one, or the
+            // item it concerned went away) without ending the whole turn.
+            // Previously only turn/completed or a thread transition ever
+            // cleared pending_requests, so a request resolved this way
+            // stayed in pending_server_requests() and answerable via
+            // respond_server_request until the turn ended (ReAgent P2,
+            // PR #3212). Removes only this one entry, not the whole map.
+            "serverRequest/resolved" => {
+                let thread_id = string_field(params.get("threadId"), "threadId")?;
+                ensure_thread_scope(&state, &thread_id)?;
+                let request_id = RpcId::from_value(params.get("requestId").ok_or_else(|| {
+                    CodexAppServerProtocolError::Transport(AppServerError::Protocol(
+                        "serverRequest/resolved notification is missing requestId".to_string(),
+                    ))
+                })?)?;
+                state.pending_requests.remove(&request_id);
+                Ok(CodexAppServerEvent::ServerRequestResolved {
+                    thread_id,
+                    request_id,
+                })
             }
             _ => {
                 let raw = json!({ "method": method, "params": params });
@@ -661,6 +923,52 @@ fn ensure_scopes(
         }
     }
     Ok(())
+}
+
+/// Unlike ensure_thread_scope, fails closed when no thread is active — a
+/// server request claiming a threadId must be scoped to a *real, active*
+/// thread, not merely "no conflicting thread claimed yet" the way an
+/// incoming notification establishing state is allowed to be.
+fn ensure_active_thread_scope(
+    state: &SessionState,
+    actual: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    match &state.thread_id {
+        Some(expected) if expected == actual => Ok(()),
+        Some(expected) => Err(CodexAppServerProtocolError::ThreadScopeMismatch {
+            expected: expected.clone(),
+            actual: actual.to_string(),
+        }),
+        None => Err(CodexAppServerProtocolError::ThreadNotLoaded),
+    }
+}
+
+/// See ensure_active_thread_scope — fails closed when no turn is active.
+fn ensure_active_scopes(
+    state: &SessionState,
+    thread_id: &str,
+    turn_id: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    ensure_active_thread_scope(state, thread_id)?;
+    ensure_active_turn_scope(state, turn_id)
+}
+
+/// See ensure_active_thread_scope — fails closed when no turn is active.
+/// Split out from ensure_active_scopes so a turn can be validated on its
+/// own when a request carries a turnId without a threadId (ReAgent P1,
+/// PR #3212 4th review).
+fn ensure_active_turn_scope(
+    state: &SessionState,
+    actual: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    match &state.turn_id {
+        Some(expected) if expected == actual => Ok(()),
+        Some(expected) => Err(CodexAppServerProtocolError::TurnScopeMismatch {
+            expected: expected.clone(),
+            actual: actual.to_string(),
+        }),
+        None => Err(CodexAppServerProtocolError::TurnNotActive),
+    }
 }
 
 #[cfg(test)]
@@ -909,6 +1217,54 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(session.snapshot().raw_unknown_events.len(), MAX_RAW_EVENTS);
+    }
+
+    /// ReAgent P2, PR #3212: only turn/completed or a thread transition ever
+    /// cleared pending_requests -- an individual request the App Server
+    /// resolves/cancels on its own (serverRequest/resolved, real in the
+    /// pinned 0.154.0 schema) stayed answerable via respond_server_request
+    /// until the whole turn ended. Removes only the resolved entry, not
+    /// every pending request for the turn.
+    #[tokio::test]
+    async fn server_request_resolved_clears_only_that_one_pending_request() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("resolved-me".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "a"}),
+            })
+            .unwrap();
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("still-pending".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "b"}),
+            })
+            .unwrap();
+
+        let event = session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "serverRequest/resolved".to_string(),
+                params: json!({"threadId": "thread-1", "requestId": "resolved-me"}),
+            })
+            .unwrap();
+        assert_eq!(
+            event,
+            CodexAppServerEvent::ServerRequestResolved {
+                thread_id: "thread-1".to_string(),
+                request_id: RpcId::String("resolved-me".to_string()),
+            }
+        );
+
+        let remaining = session.pending_server_requests();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, RpcId::String("still-pending".to_string()));
     }
 
     /// ReAgent P1, PR #3210: the `turn/start` response and a `turn/completed`
@@ -1241,5 +1597,499 @@ mod tests {
         );
 
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn routes_supported_requests_without_auto_approval_and_scopes_them() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        for (id, method) in [
+            ("command", "item/commandExecution/requestApproval"),
+            ("file", "item/fileChange/requestApproval"),
+            ("permissions", "item/permissions/requestApproval"),
+            ("input", "item/tool/requestUserInput"),
+        ] {
+            let pending = session
+                .accept_server_request(AppServerIncoming::Request {
+                    id: RpcId::String(id.to_string()),
+                    method: method.to_string(),
+                    params: json!({"threadId":"thread-1","turnId":"turn-1","itemId":id}),
+                })
+                .unwrap();
+            assert_eq!(pending.method, method);
+        }
+        let mcp = session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("mcp".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message":"confirm","mode":"form","requestedSchema":{}}),
+            })
+            .unwrap();
+        assert_eq!(mcp.kind, ServerRequestKind::McpElicitation);
+        assert_eq!(session.pending_server_requests().len(), 5);
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("unknown".to_string()),
+                method: "future/request".to_string(),
+                params: json!({})
+            }),
+            Err(CodexAppServerProtocolError::UnsupportedServerRequest(_))
+        ));
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("cross".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId":"thread-2","turnId":"turn-1","itemId":"x"})
+            }),
+            Err(CodexAppServerProtocolError::ThreadScopeMismatch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_duplicate_or_unknown_decisions_and_clears_on_turn_completion() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        let incoming = AppServerIncoming::Request {
+            id: id.clone(),
+            method: "item/tool/requestUserInput".to_string(),
+            params: json!({"threadId":"thread-1","turnId":"turn-1","itemId":"item-1"}),
+        };
+        session.accept_server_request(incoming.clone()).unwrap();
+        assert!(matches!(
+            session.accept_server_request(incoming),
+            Err(CodexAppServerProtocolError::DuplicateServerRequest)
+        ));
+        assert!(matches!(
+            session
+                .respond_server_request(
+                    &RpcId::String("missing".to_string()),
+                    Ok(json!({})),
+                    Duration::from_millis(10)
+                )
+                .await,
+            Err(CodexAppServerProtocolError::UnknownServerRequest)
+        ));
+        session
+            .apply_incoming(AppServerIncoming::Notification {
+                method: "turn/completed".to_string(),
+                params: json!({"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}),
+            })
+            .unwrap();
+        assert!(session.pending_server_requests().is_empty());
+    }
+
+    /// ReAgent P1, PR #3212 (2nd review): item-scoped kinds (everything
+    /// except McpElicitation) must require threadId/turnId rather than
+    /// silently treating an omitted field as "no scope claimed" -- that
+    /// contradicted this API's own "scoped to active thread/turn"
+    /// fail-closed claim.
+    #[tokio::test]
+    async fn an_item_scoped_request_missing_thread_id_is_rejected_not_silently_queued() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("no-scope".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"itemId": "item-1"}),
+            }),
+            Err(CodexAppServerProtocolError::MissingStringField("threadId"))
+        ));
+        assert!(session.pending_server_requests().is_empty());
+
+        // McpElicitation alone stays exempt -- it genuinely has no
+        // thread/turn context.
+        let mcp = session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("mcp".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            })
+            .unwrap();
+        assert!(mcp.thread_id.is_none());
+    }
+
+    /// ReAgent P1, PR #3212 (2nd review): a pending approval queued under a
+    /// prior thread/turn must not remain answerable after that thread has
+    /// been replaced -- only turn/completed cleared pending_requests
+    /// before; start_thread, resume_thread, and a genuinely-new
+    /// thread/started notification did not.
+    #[tokio::test]
+    async fn thread_transitions_clear_stale_pending_requests() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _start: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(br#"{"id":1,"result":{"thread":{"id":"thread-2"}}}
+"#)
+                .await
+                .unwrap();
+        });
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("stale".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            })
+            .unwrap();
+        assert_eq!(session.pending_server_requests().len(), 1);
+
+        session
+            .start_thread(ThreadStartOptions::default(), Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "start_thread must clear pending requests queued under the previous thread"
+        );
+
+        server.await.unwrap();
+    }
+
+    /// ReAgent P2, PR #3212 (2nd review): respond_server_request checked
+    /// pending_requests membership, then awaited the transport write,
+    /// THEN removed the entry -- two concurrent calls for the same id
+    /// could both pass the membership check before either removed it, so
+    /// both would send a response and both report success. Now removed
+    /// atomically up front; deterministic via tokio::join! the same way
+    /// the concurrent-start_turn test is (neither future reaches an
+    /// await point before the synchronous remove).
+    #[tokio::test]
+    async fn concurrent_respond_calls_for_the_same_id_do_not_both_succeed() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            // Exactly one respond frame should be written.
+            let _line = lines.next_line().await.unwrap().unwrap();
+            server_writer.write_all(b"ignored\n").await.ok();
+            let extra = tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await;
+            assert!(extra.is_err(), "a second concurrent respond call must not also write a response");
+        });
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            })
+            .unwrap();
+
+        let session_a = session.clone();
+        let session_b = session.clone();
+        let id_a = id.clone();
+        let id_b = id.clone();
+        let (result_a, result_b) = tokio::join!(
+            session_a.respond_server_request(&id_a, Ok(json!({"approved": true})), Duration::from_secs(1)),
+            session_b.respond_server_request(&id_b, Ok(json!({"approved": true})), Duration::from_secs(1)),
+        );
+        let results = [result_a, result_b];
+        let ok_count = results.iter().filter(|r| r.is_ok()).count();
+        let unknown_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(CodexAppServerProtocolError::UnknownServerRequest)))
+            .count();
+        assert_eq!(ok_count, 1, "exactly one of the two concurrent respond calls should succeed");
+        assert_eq!(unknown_count, 1, "the other must see it already gone, not also send a response");
+
+        server.abort();
+    }
+
+    /// ReAgent P1, PR #3212 (3rd review): before any turn had started (or
+    /// after turn/completed cleared turn_id back to None), a request
+    /// claiming an arbitrary/stale turnId passed the old ensure_scopes
+    /// check trivially, since that helper only compares when state.turn_id
+    /// is Some. accept_server_request must fail closed when there is no
+    /// active thread/turn to scope the request to, not merely skip the
+    /// check.
+    #[tokio::test]
+    async fn a_request_claiming_a_thread_or_turn_is_rejected_when_none_is_active() {
+        let (session, _reader, _writer) = session();
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("no-thread".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            }),
+            Err(CodexAppServerProtocolError::ThreadNotLoaded)
+        ));
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("no-turn".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            }),
+            Err(CodexAppServerProtocolError::TurnNotActive)
+        ));
+        assert!(session.pending_server_requests().is_empty());
+    }
+
+    /// ReAgent P1, PR #3212 (3rd review): respond_server_request's
+    /// failure-path reinsert didn't check whether the thread/turn context
+    /// was still current, so a stale approval could be resurrected into a
+    /// brand-new session/turn after a transition raced the in-flight
+    /// transport write.
+    #[tokio::test]
+    async fn a_failed_respond_is_not_resurrected_after_the_turn_it_was_queued_under_ends() {
+        let (session, server_reader, server_writer) = session();
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            })
+            .unwrap();
+
+        // Drop the entire peer side of the transport so the write inside
+        // respond_server_request fails, standing in for "the transport
+        // write raced a state transition and lost" without a timing-
+        // dependent sleep.
+        drop(server_reader);
+        drop(server_writer);
+
+        // Simulate the turn ending while that write is in flight: clear
+        // pending_requests and the active turn the same way turn/completed
+        // does.
+        session.state.lock().unwrap().pending_requests.clear();
+        session.state.lock().unwrap().turn_id = None;
+
+        let result = session
+            .respond_server_request(&id, Ok(json!({"approved": true})), Duration::from_secs(1))
+            .await;
+        assert!(result.is_err(), "the write should fail once the transport is closed");
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "a stale approval must not be resurrected once its turn has ended"
+        );
+    }
+
+    /// ReAgent P2, PR #3212 (3rd review): pending_requests had no size cap,
+    /// so a buggy or adversarial App Server could grow it unboundedly by
+    /// sending validly-scoped approval requests.
+    #[tokio::test]
+    async fn accept_server_request_rejects_once_the_pending_cap_is_reached() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        for i in 0..MAX_PENDING_SERVER_REQUESTS {
+            session
+                .accept_server_request(AppServerIncoming::Request {
+                    id: RpcId::String(format!("mcp-{i}")),
+                    method: "mcpServer/elicitation/request".to_string(),
+                    params: json!({"message": "confirm"}),
+                })
+                .unwrap();
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("one-too-many".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            }),
+            Err(CodexAppServerProtocolError::TooManyPendingRequests(
+                MAX_PENDING_SERVER_REQUESTS
+            ))
+        ));
+    }
+
+    /// ReAgent P1, PR #3212 (4th review): a request carrying turnId but no
+    /// threadId (McpElicitation may supply either field alone) fell through
+    /// both `if let Some(thread) = &thread_id` and the `(Some, Some)` tuple
+    /// match untouched, so a claimed-but-stale turnId was never validated
+    /// and the request was queued unconditionally. Same asymmetry mirrored
+    /// in respond_server_request's reinsert-on-failure check.
+    #[tokio::test]
+    async fn a_turn_only_request_is_still_scoped_to_the_active_turn() {
+        let (session, _reader, _writer) = session();
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("turn-only-no-turn".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-1"}),
+            }),
+            Err(CodexAppServerProtocolError::TurnNotActive)
+        ));
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.turn_id = Some("turn-1".to_string());
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("turn-only-stale".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-stale"}),
+            }),
+            Err(CodexAppServerProtocolError::TurnScopeMismatch { .. })
+        ));
+        assert!(session.pending_server_requests().is_empty());
+
+        let pending = session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("turn-only-current".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-1"}),
+            })
+            .unwrap();
+        assert_eq!(pending.turn_id.as_deref(), Some("turn-1"));
+    }
+
+    /// See a_turn_only_request_is_still_scoped_to_the_active_turn -- the
+    /// same asymmetry existed on the reinsert side: a pending entry with
+    /// turn_id but no thread_id was unconditionally resurrected on a
+    /// transport-write failure (`(None, _) => true`) regardless of
+    /// whether that turn was still active.
+    #[tokio::test]
+    async fn a_failed_turn_only_respond_is_not_resurrected_after_its_turn_ends() {
+        let (session, server_reader, server_writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("turn-only".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"turnId": "turn-1"}),
+            })
+            .unwrap();
+
+        drop(server_reader);
+        drop(server_writer);
+        session.state.lock().unwrap().pending_requests.clear();
+        session.state.lock().unwrap().turn_id = None;
+
+        let result = session
+            .respond_server_request(&id, Ok(json!({"approved": true})), Duration::from_secs(1))
+            .await;
+        assert!(result.is_err(), "the write should fail once the transport is closed");
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "a stale turn-only approval must not be resurrected once its turn has ended"
+        );
+    }
+
+    /// ReAgent P1, PR #3212 (5th review): respond_server_request removed the
+    /// pending entry synchronously, then awaited the transport write. If
+    /// the calling future were dropped/cancelled while suspended at that
+    /// await (a caller-side select!/timeout racing the write), Rust never
+    /// runs code after an await point that's never resumed -- neither the
+    /// success path nor the old failure-path reinsert would run, silently
+    /// stranding the entry with no response ever sent. A 1-byte duplex
+    /// buffer with nothing reading the other side guarantees the write
+    /// stays suspended, so aborting the task deterministically exercises
+    /// the drop-mid-await path rather than racing a timing window.
+    ///
+    /// Superseded by the 6th review's WriteOutcomeTracker (see
+    /// app_server.rs): by the time the write is stuck on this 1-byte
+    /// buffer, the frame has already been handed to run_writer, which will
+    /// deliver it regardless of the cancellation below -- so the correct
+    /// behavior is now the opposite of what this test originally asserted:
+    /// the entry must NOT be reinserted, or a retry could send a second,
+    /// duplicate response for the same id. The pre-queue case (cancelled
+    /// before the frame is ever handed to the writer, still genuinely safe
+    /// to retry) is covered directly at the transport level by
+    /// write_outcome_tracker_stays_safe_to_retry_when_the_write_never_starts
+    /// in app_server.rs, since reaching it deterministically from here
+    /// would require blocking the transport's internal outbound queue,
+    /// which this layer has no access to.
+    #[tokio::test]
+    async fn a_respond_future_cancelled_after_the_write_is_queued_does_not_reinsert() {
+        let (client, _server) = duplex(1);
+        let (client_reader, client_writer) = tokio::io::split(client);
+        let transport = Arc::new(AppServerTransport::new(
+            client_reader,
+            client_writer,
+            Default::default(),
+        ));
+        let session = Arc::new(CodexAppServerSession::new(transport));
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            })
+            .unwrap();
+
+        let task_session = session.clone();
+        let task_id = id.clone();
+        let handle = tokio::spawn(async move {
+            task_session
+                .respond_server_request(
+                    &task_id,
+                    Ok(json!({"approved": true})),
+                    Duration::from_secs(30),
+                )
+                .await
+        });
+
+        // The synchronous remove() runs on the task's first poll, before
+        // it ever reaches the write's await point -- give it a bounded
+        // number of scheduling turns to get there rather than assuming
+        // one yield is always enough.
+        for _ in 0..100 {
+            if session.pending_server_requests().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "the entry should already be removed while the write is in flight"
+        );
+
+        handle.abort();
+        let _ = handle.await;
+
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "the frame was already queued for delivery before cancellation -- reinserting now \
+             would risk a retry sending a second, duplicate response for the same id"
+        );
     }
 }
