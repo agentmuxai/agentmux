@@ -938,4 +938,37 @@ mod tests {
 
         controller.stop(true, STATUS_DONE).unwrap();
     }
+
+    /// ReAgent P2, PR #3215 (re-review): the send_input SIGINT/SIGTERM
+    /// status-update fix (flagged in three prior review rounds) had no
+    /// dedicated regression test, unlike every other fix in this file.
+    /// stop_process() alone only clears inner.process/session once the
+    /// spawned shutdown task completes; without the explicit
+    /// set_status(STATUS_DONE) call, get_runtime_status kept reporting the
+    /// pre-signal status forever after a signal-triggered kill.
+    #[tokio::test]
+    async fn send_input_with_a_kill_signal_updates_status_to_done() {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+        let session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(session_ready, "controller session was never established");
+        assert_eq!(controller.get_runtime_status().shellprocstatus, STATUS_RUNNING);
+
+        controller
+            .send_input(BlockInputUnion::signal("SIGTERM"), None)
+            .unwrap();
+
+        assert_eq!(
+            controller.get_runtime_status().shellprocstatus,
+            STATUS_DONE,
+            "a signal-triggered kill must update proc_status the same way stop() does -- \
+             nothing else updates it for this path"
+        );
+    }
 }
