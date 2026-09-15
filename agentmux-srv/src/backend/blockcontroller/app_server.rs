@@ -19,8 +19,8 @@ use thiserror::Error;
 use tokio::io::{
     AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
 };
-use tokio::process::{Child, Command};
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
+use tokio::process::Command;
+use tokio::sync::{mpsc, oneshot, watch, Mutex as AsyncMutex};
 
 const INITIALIZING: u8 = 1;
 const INITIALIZED: u8 = 2;
@@ -173,6 +173,7 @@ enum Outbound {
 pub struct AppServerTransport {
     outbound_tx: mpsc::Sender<Outbound>,
     incoming_rx: AsyncMutex<mpsc::Receiver<AppServerIncoming>>,
+    reader_task: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
     shared: Arc<SharedState>,
     next_request_id: AtomicU64,
     initialize_state: AtomicU8,
@@ -196,7 +197,7 @@ impl AppServerTransport {
         let (incoming_tx, incoming_rx) = mpsc::channel(limits.inbound_queue_capacity.max(1));
 
         tokio::spawn(run_writer(writer, outbound_rx, shared.clone()));
-        tokio::spawn(run_reader(
+        let reader_task = tokio::spawn(run_reader(
             reader,
             incoming_tx,
             shared.clone(),
@@ -206,6 +207,7 @@ impl AppServerTransport {
         Self {
             outbound_tx,
             incoming_rx: AsyncMutex::new(incoming_rx),
+            reader_task: AsyncMutex::new(Some(reader_task)),
             shared,
             next_request_id: AtomicU64::new(1),
             initialize_state: AtomicU8::new(0),
@@ -224,6 +226,21 @@ impl AppServerTransport {
 
     pub async fn next_incoming(&self) -> Option<AppServerIncoming> {
         self.incoming_rx.lock().await.recv().await
+    }
+
+    /// Wait for `run_reader` to finish processing whatever was already
+    /// buffered on stdout. The reader terminates on its own shortly after
+    /// the child's stdout pipe closes (EOF on process exit), but a caller
+    /// classifying the exit right after `Child::wait()` returns can race
+    /// ahead of it: `child.wait()` only reports the OS-level exit, not
+    /// whether the reader has finished parsing the final bytes. Without
+    /// this, a malformed/oversized final frame can be misclassified as
+    /// `UnexpectedEof`/`NonZero`/`BeforeInitialize` instead of
+    /// `ProtocolViolation`, because `self.failure()` hadn't been set yet.
+    async fn wait_for_reader_to_finish(&self) {
+        if let Some(task) = self.reader_task.lock().await.take() {
+            let _ = task.await;
+        }
     }
 
     pub async fn request(
@@ -655,7 +672,20 @@ impl StderrTail {
 
 pub struct AppServerProcess {
     pub transport: AppServerTransport,
-    child: AsyncMutex<Option<Child>>,
+    // A single dedicated reaper task (spawned once, below) owns `Child`
+    // exclusively for its whole lifetime and is the only thing that ever
+    // calls `child.wait()`. This exists because `wait_for_exit()` and
+    // `shutdown()` can legitimately run concurrently (one waiting
+    // passively for natural exit, the other trying to force-stop) and both
+    // need to observe the same exit — but `Child::wait()`/`Child::kill()`
+    // both require `&mut Child`, so whichever call took the lock first
+    // used to block the other for as long as the child kept running,
+    // including `shutdown()`'s own force-kill step (ReAgent P1, PR #3209).
+    // `watch` (not `Notify`/`oneshot`) specifically because it's safe for
+    // any number of callers to subscribe at any time, including after the
+    // child has already exited — a late subscriber just sees the value
+    // that's already there instead of missing a wakeup that already fired.
+    exit_status: watch::Receiver<Option<Result<ExitStatus, String>>>,
     stderr_tail: Arc<Mutex<StderrTail>>,
     stderr_task: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
     shutdown_requested: AtomicBool,
@@ -706,9 +736,22 @@ impl AppServerProcess {
 
         // Both stdout and stderr readers exist before initialize can write.
         let transport = AppServerTransport::new(stdout, stdin, limits);
+
+        let (exit_tx, exit_rx) = watch::channel(None);
+        tokio::spawn(async move {
+            let result = child
+                .wait()
+                .await
+                .map_err(|error| error.to_string());
+            // `child` (and its `kill_on_drop`) drops here, after it has
+            // already exited — a no-op, not a race with anyone else, since
+            // this task is the only place that ever touches `Child`.
+            let _ = exit_tx.send(Some(result));
+        });
+
         Ok(Self {
             transport,
-            child: AsyncMutex::new(Some(child)),
+            exit_status: exit_rx,
             stderr_tail,
             stderr_task: AsyncMutex::new(Some(stderr_task)),
             shutdown_requested: AtomicBool::new(false),
@@ -733,16 +776,24 @@ impl AppServerProcess {
         Ok(process)
     }
 
+    /// Await the reaper task's exit status. Race-free for any number of
+    /// concurrent/late callers — see `exit_status`'s doc comment on why
+    /// this exists instead of each caller calling `Child::wait()` itself.
+    async fn await_exit(&self) -> Result<ExitStatus, AppServerError> {
+        let mut rx = self.exit_status.clone();
+        loop {
+            if let Some(result) = rx.borrow().clone() {
+                return result.map_err(AppServerError::Io);
+            }
+            if rx.changed().await.is_err() {
+                return Err(AppServerError::Closed);
+            }
+        }
+    }
+
     pub async fn wait_for_exit(&self) -> Result<AppServerExit, AppServerError> {
-        let status = {
-            let mut child = self.child.lock().await;
-            let child = child.as_mut().ok_or(AppServerError::Closed)?;
-            child
-                .wait()
-                .await
-                .map_err(|error| AppServerError::Io(error.to_string()))?
-        };
-        self.child.lock().await.take();
+        let status = self.await_exit().await?;
+        self.transport.wait_for_reader_to_finish().await;
         self.finish_stderr().await;
         Ok(self.classify_exit(status))
     }
@@ -750,22 +801,27 @@ impl AppServerProcess {
     pub async fn shutdown(&self, timeout: Duration) -> Result<AppServerExit, AppServerError> {
         self.shutdown_requested.store(true, Ordering::Release);
         let _ = self.transport.shutdown(timeout).await;
-        let status = {
-            let mut child = self.child.lock().await;
-            let child = child.as_mut().ok_or(AppServerError::Closed)?;
-            match tokio::time::timeout(timeout, child.wait()).await {
-                Ok(result) => Some(result.map_err(|error| AppServerError::Io(error.to_string()))?),
-                Err(_) => {
-                    child
-                        .kill()
-                        .await
-                        .map_err(|error| AppServerError::Io(error.to_string()))?;
-                    let _ = child.wait().await;
-                    None
+        let status = match tokio::time::timeout(timeout, self.await_exit()).await {
+            Ok(result) => Some(result?),
+            Err(_) => {
+                // Force-kill by pid rather than `Child::kill()` — the
+                // reaper task spawned in `spawn()` owns the `Child` value
+                // exclusively for its whole lifetime (that's what fixes the
+                // concurrent-shutdown deadlock this replaces), so nothing
+                // outside that task can get `&mut Child` to call `.kill()`
+                // on it. `kill_pid` needs only the raw pid, not the handle.
+                if let Some(pid) = self.pid {
+                    let _ = agentmux_common::process::kill_pid(pid);
                 }
+                // The kill above makes the reaper's own wait() return
+                // shortly; discard the resulting status like the pre-fix
+                // code did (`ForcedAfterTimeout` below reports the timeout,
+                // not whatever exit code a killed process happens to have).
+                let _ = self.await_exit().await;
+                None
             }
         };
-        self.child.lock().await.take();
+        self.transport.wait_for_reader_to_finish().await;
         self.finish_stderr().await;
         match status {
             Some(status) => Ok(self.classify_exit(status)),
@@ -1079,6 +1135,64 @@ mod tests {
             }
             other => panic!("expected clean exit, got {other:?}"),
         }
+    }
+
+    /// ReAgent P1, PR #3209: `wait_for_exit()` used to hold the `AsyncMutex`
+    /// guarding `child` for the entire duration of `Child::wait()`, so a
+    /// concurrent `shutdown()` (e.g. spawn_event_loop's passive EOF-wait
+    /// racing a caller-initiated stop) could never acquire that same lock
+    /// to run its own force-kill step — it would just block on the lock
+    /// forever, defeating shutdown's own timeout entirely. Every assertion
+    /// here is wrapped in a bounded `tokio::time::timeout` specifically so
+    /// a regression fails this test in seconds instead of hanging the
+    /// whole suite.
+    #[tokio::test]
+    async fn shutdown_can_force_kill_while_wait_for_exit_is_concurrently_awaiting() {
+        let process = Arc::new(
+            AppServerProcess::spawn(fake_command("ignores-shutdown"), AppServerLimits::default())
+                .expect("spawn fake App Server"),
+        );
+        process
+            .transport
+            .initialize(Duration::from_secs(2))
+            .await
+            .expect("initialize");
+
+        // Starts waiting BEFORE shutdown() is called, mirroring the real
+        // race: something else already passively waiting when a stop comes in.
+        let waiter_process = process.clone();
+        let waiter = tokio::spawn(async move { waiter_process.wait_for_exit().await });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let shutdown_result = tokio::time::timeout(
+            Duration::from_secs(5),
+            process.shutdown(Duration::from_millis(200)),
+        )
+        .await
+        .expect("shutdown() must not hang waiting on the same lock wait_for_exit() holds")
+        .unwrap();
+        assert!(
+            matches!(shutdown_result, AppServerExit::ForcedAfterTimeout { .. }),
+            "expected a forced kill after the 200ms grace period (this fixture ignores \
+             graceful shutdown by design), got {shutdown_result:?}"
+        );
+
+        // The waiter and shutdown() don't necessarily agree on the exit
+        // CLASSIFICATION — shutdown() knows it forced the kill and reports
+        // that deliberately (discarding the real exit code); wait_for_exit()
+        // is a passive observer that just sees the killed process's actual
+        // (non-zero) exit code and classifies it normally. What matters
+        // here is that it resolves at all, promptly, instead of hanging —
+        // that's the deadlock this fix removes.
+        let waiter_result = tokio::time::timeout(Duration::from_secs(5), waiter)
+            .await
+            .expect("the concurrent wait_for_exit() must resolve once shutdown() kills the process")
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(waiter_result, AppServerExit::NonZero { .. }),
+            "expected the killed process's real non-zero exit to surface here, got {waiter_result:?}"
+        );
     }
 
     #[tokio::test]
