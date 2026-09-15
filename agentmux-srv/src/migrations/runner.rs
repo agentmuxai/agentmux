@@ -390,8 +390,12 @@ fn pending_of<'r>(
         .collect()
 }
 
-/// Per-migration progress hooks for the CLI's NDJSON lines. The daemon passes
-/// `None` and relies on the `tracing` lines `apply_pending` always emits.
+/// Per-migration progress hooks. Two real implementations: the CLI's NDJSON
+/// stdout lines (`run_migrate_command`), and — since this PR —
+/// `run_pending_migrations`'s `AGENTMUXSRV-MIGRATION-BEGIN`/`-END` stderr
+/// lines, which the launcher turns into live splash sub-rows. Both also
+/// still get the unconditional `tracing` lines `apply_pending` emits
+/// regardless of whether a progress hook is passed at all.
 pub(super) struct ApplyProgress<'a> {
     pub on_start: &'a dyn Fn(&str, &str),
     pub on_done: &'a dyn Fn(&str, u64),
