@@ -30,7 +30,10 @@
 # zero `angle::`/`rx::` symbols, so Linux is not that case either. This is
 # the identical bug Korp found and fixed for Windows in args-windows.gn
 # (#3172) — that fix does not cover Linux; the `is_linux || is_win || is_mac`
-# gate means each platform's args file needs the same line independently.
+# gate means each platform must be checked independently, not that each
+# needs this same line — Linux and Windows both need it, but macOS must
+# leave `use_static_angle` unset (see args-darwin.gn) since it statically
+# links a real ANGLE into the framework binary already.
 # See docs/specs/SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md's Phase D
 # section for the full investigation across all three platforms.
 use_static_angle=false
