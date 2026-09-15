@@ -11,8 +11,9 @@ use super::*;
 // Struct fields / meta helpers / status constants used by the tests but not part
 // of the crate-public flat surface.
 use super::super::{
-    BlockInputUnion, Controller, META_KEY_CMD_CLOSE_ON_EXIT_DELAY, META_KEY_CMD_RUN_ONCE,
-    META_KEY_CMD_RUN_ON_START, META_KEY_CONNECTION, META_KEY_CMD_CLEAR_ON_START, STATUS_DONE,
+    BlockInputUnion, Controller, META_KEY_CMD_CLOSE_ON_EXIT, META_KEY_CMD_CLOSE_ON_EXIT_DELAY,
+    META_KEY_CMD_RUN_ONCE, META_KEY_CMD_RUN_ON_START, META_KEY_CONNECTION,
+    META_KEY_CMD_CLEAR_ON_START, BLOCK_CONTROLLER_CMD, BLOCK_CONTROLLER_SHELL, STATUS_DONE,
     STATUS_INIT,
 };
 use crate::backend::obj::{self, MetaMapType};
@@ -378,13 +379,50 @@ use std::sync::Arc;
     #[test]
     fn test_close_on_exit_delay() {
         let mut meta = MetaMapType::new();
-        assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 2000); // default
+        // Default 0 — close immediately (§13). Was 2000 while the knob had
+        // no caller at all; the pause read as lag once it was actually wired up.
+        assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 0);
 
         meta.insert(
             META_KEY_CMD_CLOSE_ON_EXIT_DELAY.to_string(),
             serde_json::json!(5000),
         );
         assert_eq!(ShellController::close_on_exit_delay_ms(&meta), 5000);
+    }
+
+    #[test]
+    fn test_effective_close_on_exit_default_by_controller_type() {
+        // Regression test for SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10:
+        // unset `cmd:closeonexit` must default to true for an interactive
+        // shell (Terminal widget / agent composer-drawer shell) but false
+        // for a one-shot "cmd" pane, which exists to show its output/exit
+        // code after the command finishes.
+        let meta = MetaMapType::new();
+        assert!(
+            ShellController::effective_close_on_exit(&meta, BLOCK_CONTROLLER_SHELL),
+            "an interactive shell pane should default to closing on exit"
+        );
+        assert!(
+            !ShellController::effective_close_on_exit(&meta, BLOCK_CONTROLLER_CMD),
+            "a one-shot cmd pane should default to NOT closing on exit"
+        );
+    }
+
+    #[test]
+    fn test_effective_close_on_exit_explicit_meta_always_wins() {
+        let mut meta_false = MetaMapType::new();
+        meta_false.insert(META_KEY_CMD_CLOSE_ON_EXIT.to_string(), serde_json::json!(false));
+        assert!(
+            !ShellController::effective_close_on_exit(&meta_false, BLOCK_CONTROLLER_SHELL),
+            "an explicit false must override the shell-controller default of true"
+        );
+
+        let mut meta_true = MetaMapType::new();
+        meta_true.insert(META_KEY_CMD_CLOSE_ON_EXIT.to_string(), serde_json::json!(true));
+        assert!(
+            ShellController::effective_close_on_exit(&meta_true, BLOCK_CONTROLLER_CMD),
+            "an explicit true must override the cmd-controller default of false"
+        );
     }
 
     #[test]

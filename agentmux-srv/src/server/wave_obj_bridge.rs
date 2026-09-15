@@ -467,6 +467,32 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         Event::LayoutCleared { tab_id, .. } | Event::LayoutTreeReplaced { tab_id, .. } => {
             emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
         }
+        // Without this, a backend-queued layout action reaches a frontend
+        // ONLY if that frontend happens to construct its `LayoutModel`
+        // afterward — `initializeFromWaveObject` reads
+        // `pendingbackendactions` once at init
+        // (`frontend/layout/lib/layoutPersistence.ts`). That was invisible
+        // for as long as the queue's only producer was tear-off/redock,
+        // which creates a NEW window (hence a fresh model) as part of the
+        // same gesture. Close-on-exit is the first producer that queues an
+        // action for an ALREADY-OPEN window, and there the queue simply
+        // sat in SQLite unread: the block row was deleted and the
+        // backend's own tree pruned, but the frontend kept its leaf,
+        // rendering a pane whose block resolves to null (a permanent
+        // loading spinner) instead of closing. `onBackendUpdate`'s
+        // `processPendingBackendActions` call already handles the queue
+        // correctly — it just never heard that the queue had changed. See
+        // docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §14.
+        //
+        // Race-free for the reason the granular-events note below gives:
+        // the ONLY dispatcher of `LayoutQueueBackendActions` is
+        // `service::reducer_helpers::queue_layout_actions_via_reducer`,
+        // which applies every emitted event to the store synchronously
+        // before calling `publish_events`, so this re-read of LayoutState
+        // cannot observe pre-event state.
+        Event::LayoutBackendActionsQueued { tab_id, .. } => {
+            emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutBackendActionsQueued").await;
+        }
         // The 7 granular structural events (LayoutNodeMoved/…/InsertedAtIndex)
         // are persisted by the subscriber (they carry `new_tree`), but are
         // deliberately NOT bridged here. `emit_layout_for_tab` re-reads
@@ -708,6 +734,61 @@ mod tests {
         assert_eq!(
             second.get("data").and_then(|d| d.get("updatetype")).and_then(|v| v.as_str()),
             Some("delete"),
+        );
+    }
+
+    /// SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §14: queueing a backend
+    /// layout action must broadcast the owning tab's LayoutState, or the
+    /// queue reaches a frontend only if that frontend happens to build its
+    /// `LayoutModel` afterward (`initializeFromWaveObject` reads
+    /// `pendingbackendactions` once, at init). Tear-off/redock hid this for
+    /// years by always creating a new window; close-on-exit is the first
+    /// producer that queues for an already-open one, and without this arm
+    /// the pane never closed — it rendered a leaf whose block was already
+    /// deleted, i.e. a permanent loading spinner.
+    #[tokio::test]
+    async fn test_backend_actions_queued_broadcasts_layout_update() {
+        use crate::backend::obj::LayoutState;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let event_bus = Arc::new(EventBus::new());
+
+        let tab_id = "66666666-6666-6666-6666-666666666666";
+        let layout_id = "77777777-7777-7777-7777-777777777777";
+        let mut layout = LayoutState {
+            oid: layout_id.to_string(),
+            version: 1,
+            ..Default::default()
+        };
+        wstore.insert(&mut layout).unwrap();
+        let mut tab = test_tab(tab_id);
+        tab.layoutstate = layout_id.to_string();
+        wstore.insert(&mut tab).unwrap();
+
+        let mut receivers = event_bus.register_ws("test-conn", "test-tab");
+
+        dispatch_event(
+            Event::LayoutBackendActionsQueued {
+                tab_id: tab_id.to_string(),
+                actions: serde_json::json!([{ "actiontype": "delete", "blockid": "dead-block" }]),
+                correlation_id: String::new(),
+                version: 1,
+            },
+            Arc::clone(&wstore),
+            Arc::clone(&event_bus),
+        )
+        .await;
+
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out — LayoutBackendActionsQueued must bridge to a LayoutState update")
+            .expect("priority channel closed");
+        assert_eq!(frame.get("eventtype").and_then(|v| v.as_str()), Some("waveobj:update"));
+        assert_eq!(
+            frame.get("oref").and_then(|v| v.as_str()),
+            Some(format!("layout:{layout_id}").as_str()),
+            "must broadcast the owning tab's LayoutState, got: {frame}"
         );
     }
 }

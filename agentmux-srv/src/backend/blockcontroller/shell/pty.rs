@@ -76,7 +76,30 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// drop on timeout detaches the flusher (and transitively its read loop)
 /// to keep running independently in the background instead, so nothing
 /// produced after teardown gives up waiting is silently lost.
-pub(super) const FLUSHER_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+///
+/// **1s, reduced from 10s (2026-09-15,
+/// `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §12).** The
+/// reasoning above is unchanged and still correct — what changed is a
+/// measurement of how often the ceiling is actually hit. On Windows this
+/// bound is reached on *essentially every ordinary shell exit*, not as the
+/// rare stuck-descendant case it was sized for: ConPTY's own console-host
+/// process routinely outlives the direct child and holds the PTY open, so
+/// the read loop never sees EOF and the flusher never resolves on its own.
+/// Because `STATUS_DONE` is published only after this wait, every `exit`
+/// left the pane visibly inert for the full ceiling — the user-reported
+/// "terminal hangs when I type exit," reproduced in srv logs as a flat 10s
+/// gap between `process exited` and any further activity.
+///
+/// Waiting longer buys nothing in that case (the flusher cannot finish
+/// until an EOF that may never come — which is exactly why expiry detaches
+/// rather than aborts), while costing the full ceiling of dead UI time on
+/// every single exit. 1s keeps ~50x headroom over the legitimate case this
+/// bound exists for (a final flush is bounded by `PTY_COALESCE_WINDOW`'s
+/// 20ms plus one FileStore write and broadcast) and cuts the pathological
+/// case's user-visible cost by 10x. Nothing else about the behavior
+/// changes: expiry still detaches the flusher and its read loop to keep
+/// running in the background, so late output is still never lost.
+pub(super) const FLUSHER_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Detect the best available interactive shell on Windows.
 ///
