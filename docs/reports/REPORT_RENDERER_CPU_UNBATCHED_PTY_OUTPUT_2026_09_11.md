@@ -286,3 +286,62 @@ across the call.
 `block_in_place` specifically (panics on a current-thread runtime);
 `spawn_blocking` has none. Reverted to plain `#[tokio::test]`.
 `cargo test -p agentmux-srv -- --test-threads=1`: 3332 passed, 0 failed.
+
+## 10. Third review round — STATUS_DONE could publish before the flusher finished (reagentx P1, PR #3206)
+
+Before §6's fix, the PTY read loop flushed every chunk synchronously
+inline, so by the time it observed PTY EOF (closely tracking child exit),
+all output was already committed to FileStore and broadcast — no explicit
+join was needed; the ordering fell out of the code being synchronous.
+Splitting the flush into a separately spawned, coalescing async task (§6)
+removed that implicit guarantee without replacing it: the wait task
+(`spawn_blocking`, watches `child.wait()`, then sets `STATUS_DONE` and
+publishes the final controller status) had no synchronization at all
+against the flusher's `JoinHandle` — it was spawned and dropped. A
+fast-exiting command's trailing output (its final coalesced batch, up to
+`PTY_COALESCE_WINDOW` after the process itself already exited) could still
+be in flight — not yet in FileStore, not yet broadcast — at the exact
+moment a client observed `STATUS_DONE`, which it had never been able to
+observe before this PR's own refactor.
+
+**Fix:** captured the flusher's `JoinHandle` (`flusher_handle`) at its
+`tokio::spawn` call site, and changed the wait task from a bare
+`tokio::task::spawn_blocking(move || { ... })` into an outer `tokio::spawn`
+async task that `flusher_handle.await`s first (logging and proceeding
+anyway on panic/cancellation, rather than hanging pane teardown on a dead
+flusher), then runs the entire original wait-task body — unchanged —
+inside its own inner `spawn_blocking`. That inner wrap matters as much as
+the await itself: `child.wait()` is a blocking OS call, and the cleanup
+that follows it (`registry::remove`, among others) does its own
+synchronous file I/O — none of that belonged on an async worker either,
+and a first draft of this fix that only wrapped `child.wait()` alone while
+leaving the rest of the body inline would have reintroduced exactly the
+§8-#2 bug class one call site over. Caught by re-reading the edited state
+before it was ever run, not by a reviewer.
+
+**Verification:**
+
+- `cargo check -p agentmux-srv --tests`: clean (pre-existing warnings only).
+- New test, `awaiting_the_flusher_join_handle_observes_every_broadcast_first`:
+  spawns `run_pty_output_flusher` via `tokio::spawn` (mirroring the
+  production call site exactly, not calling it inline), sends one chunk
+  from a second task after a real delay (so the flusher genuinely waits on
+  the channel rather than finding everything pre-queued the way the two
+  existing coalescing tests deliberately do for their own determinism),
+  closes the channel, then asserts that by the time `flusher_handle.await`
+  returns the trailing batch is already in FileStore and already broadcast
+  — no extra yield needed. This pins the exact tokio guarantee the wait
+  task's fix depends on. The wait task itself spawns a real PTY and child
+  process end-to-end and isn't practical to drive directly from a unit
+  test; this is the closest practical proxy, consistent with this report's
+  own §5/§7 stance of being explicit about what is and isn't covered short
+  of live verification.
+- `cargo test -p agentmux-srv pty_output_flusher_tests`: 7 passed (the 6
+  from §8/§9 plus the new one).
+- `cargo test -p agentmux-srv backend::blockcontroller::shell:: --
+  --test-threads=1`: 62 passed, including `test_shell_controller_start_stop`
+  and `test_shell_controller_force_start`, which exercise the real
+  `start()` path (real PTY, real wait task) this round's restructuring
+  touched most directly.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
+  7 ignored — no regressions.

@@ -923,7 +923,11 @@ impl Controller for ShellController {
         // instead of once per (up to 4KB) PTY read. A standalone fn (not
         // inlined into the spawn) so it can be driven directly in tests
         // with a synthetic channel, no real PTY required.
-        tokio::spawn(run_pty_output_flusher(
+        //
+        // Handle kept (reagentx P1 on PR #3206, third round): the wait
+        // task below must await this before publishing STATUS_DONE — see
+        // its own comment for why.
+        let flusher_handle = tokio::spawn(run_pty_output_flusher(
             pty_rx,
             broker_flush,
             block_id_flush,
@@ -970,73 +974,112 @@ impl Controller for ShellController {
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
         let run_lock = Arc::clone(&self.run_lock);
-        tokio::task::spawn_blocking(move || {
-            let mut child = child;
+        // Async outer task, not a bare spawn_blocking (reagentx P1 on PR
+        // #3206, third round): before this fix, the read loop flushed
+        // every chunk SYNCHRONOUSLY inline, so by the time it observed PTY
+        // EOF (closely tracking child exit) all output was already
+        // committed to FileStore and broadcast — no explicit join needed,
+        // the ordering fell out of the code being synchronous. Now the
+        // read loop only drops the channel sender on EOF; the flusher (its
+        // `JoinHandle` above) still has to notice the closed channel,
+        // drain its accumulation loop, and complete an async
+        // `spawn_blocking` flush — up to `PTY_COALESCE_WINDOW` plus
+        // queueing behind other panes' flushes — with nothing previously
+        // synchronizing that completion against this task. A fast-exiting
+        // command's trailing output could be missing from FileStore / not
+        // yet broadcast at the moment clients observe `STATUS_DONE`,
+        // widening a race that used to be negligible into a real one.
+        //
+        // Fixed by awaiting `flusher_handle` before any of the existing
+        // cleanup/status-publish logic runs — moved into its own inner
+        // `spawn_blocking` below, UNCHANGED from before, so none of its
+        // own synchronous work (`registry::remove`'s file write, etc.)
+        // newly runs on an async worker either.
+        tokio::spawn(async move {
+            if let Err(e) = flusher_handle.await {
+                tracing::warn!(
+                    block_id = %block_id_wait,
+                    error = %e,
+                    "PTY output flusher task panicked or was cancelled before completing; \
+                     proceeding with pane teardown anyway — some trailing output may be missing"
+                );
+            }
 
-            // Wait for child to exit (blocking)
-            let exit_status = child.wait();
-            let exit_code = match exit_status {
-                Ok(status) => {
-                    if status.success() {
-                        0
-                    } else {
-                        // portable-pty ExitStatus doesn't expose raw code on all platforms
-                        1
+            // Entire body below is UNCHANGED from before this fix, still
+            // inside its own spawn_blocking — child.wait() is a blocking OS
+            // call, and registry::remove (among others here) does its own
+            // synchronous file I/O, so none of it belongs on an async
+            // worker either.
+            tokio::task::spawn_blocking(move || {
+                let mut child = child;
+
+                // Wait for child to exit (blocking)
+                let exit_status = child.wait();
+                let exit_code = match exit_status {
+                    Ok(status) => {
+                        if status.success() {
+                            0
+                        } else {
+                            // portable-pty ExitStatus doesn't expose raw code on all platforms
+                            1
+                        }
                     }
-                }
-                Err(e) => {
-                    tracing::warn!("wait error for block {}: {}", block_id_wait, e);
-                    -1
-                }
-            };
-
-            tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
-
-            // Unregister PID from per-pane metrics
-            super::super::pidregistry::unregister(&block_id_wait);
-
-            // Deregister from jekt — removes the agent_id → block_id mapping so
-            // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
-            crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
-
-            // Also remove from cross-instance file registry and cloud subscriber.
-            if let Some(ref agent_id) = agent_id_wait {
-                let data_dir = crate::backend::base::get_wave_data_dir();
-                crate::backend::reactive::registry::remove(&data_dir, agent_id);
-                crate::backend::reactive::registry::remove_shared_from_env(agent_id);
-                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                    sub.remove_agent(agent_id);
-                }
-            }
-
-            // Update inner state
-            {
-                let mut inner = inner_wait.lock().unwrap();
-                inner.proc_exit_code = exit_code;
-                ShellController::set_status(&mut inner, STATUS_DONE);
-                inner.input_tx = None;
-            }
-
-            // Publish done status
-            if let Some(ref broker) = broker_wait {
-                let status = {
-                    let inner = inner_wait.lock().unwrap();
-                    BlockControllerRuntimeStatus {
-                        blockid: block_id_wait.clone(),
-                        version: inner.status_version,
-                        shellprocstatus: inner.proc_status.clone(),
-                        shellprocconnname: inner.conn_name.clone(),
-                        shellprocexitcode: inner.proc_exit_code,
-                        spawn_ts_ms: inner.spawn_ts_ms,
-                        is_agent_pane: inner.is_agent_pane,
-                        turn_active: false,
+                    Err(e) => {
+                        tracing::warn!("wait error for block {}: {}", block_id_wait, e);
+                        -1
                     }
                 };
-                super::super::publish_controller_status(broker, &status);
-            }
 
-            // Release run lock
-            run_lock.store(false, Ordering::SeqCst);
+                tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
+
+                // Unregister PID from per-pane metrics
+                super::super::pidregistry::unregister(&block_id_wait);
+
+                // Deregister from jekt — removes the agent_id → block_id mapping so
+                // subsequent jekt attempts fall back to MessageBus rather than a dead PTY.
+                crate::backend::reactive::get_global_handler().unregister_block(&block_id_wait);
+
+                // Also remove from cross-instance file registry and cloud subscriber.
+                if let Some(ref agent_id) = agent_id_wait {
+                    let data_dir = crate::backend::base::get_wave_data_dir();
+                    crate::backend::reactive::registry::remove(&data_dir, agent_id);
+                    crate::backend::reactive::registry::remove_shared_from_env(agent_id);
+                    if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                        sub.remove_agent(agent_id);
+                    }
+                }
+
+                // Update inner state
+                {
+                    let mut inner = inner_wait.lock().unwrap();
+                    inner.proc_exit_code = exit_code;
+                    ShellController::set_status(&mut inner, STATUS_DONE);
+                    inner.input_tx = None;
+                }
+
+                // Publish done status
+                if let Some(ref broker) = broker_wait {
+                    let status = {
+                        let inner = inner_wait.lock().unwrap();
+                        BlockControllerRuntimeStatus {
+                            blockid: block_id_wait.clone(),
+                            version: inner.status_version,
+                            shellprocstatus: inner.proc_status.clone(),
+                            shellprocconnname: inner.conn_name.clone(),
+                            shellprocexitcode: inner.proc_exit_code,
+                            spawn_ts_ms: inner.spawn_ts_ms,
+                            is_agent_pane: inner.is_agent_pane,
+                            turn_active: false,
+                        }
+                    };
+                    super::super::publish_controller_status(broker, &status);
+                }
+
+                // Release run lock
+                run_lock.store(false, Ordering::SeqCst);
+            })
+            .await
+            .expect("PTY wait/cleanup task panicked");
         });
 
         // Return immediately — PTY tasks run in background
@@ -1710,5 +1753,68 @@ mod pty_output_flusher_tests {
         // flusher must not panic or hang when there is nothing to flush to.
         let (_tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
         run_pty_output_flusher(rx, None, "block-1".to_string(), None, false).await;
+    }
+
+    /// Pins the exact ordering guarantee the round-3 fix (reagentx P1:
+    /// STATUS_DONE could publish before the flusher's final batch was
+    /// broadcast) relies on: awaiting the `JoinHandle` returned by
+    /// `tokio::spawn(run_pty_output_flusher(...))` — exactly what the wait
+    /// task now does, before its own cleanup/status-publish logic — only
+    /// returns once every batch, including one forced out by the channel
+    /// closing, has actually been broadcast. The wait task itself spawns a
+    /// real PTY + child process and isn't practical to drive from a unit
+    /// test; this pins the one guarantee that fix leans on, against this
+    /// crate's own flusher function.
+    #[tokio::test]
+    async fn awaiting_the_flusher_join_handle_observes_every_broadcast_first() {
+        let (broker, events) = broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let (tx, rx) = tokio::sync::mpsc::channel(PTY_CHANNEL_CAPACITY);
+
+        let flusher_handle = tokio::spawn(run_pty_output_flusher(
+            rx,
+            Some(Arc::new(broker)),
+            "block-1".to_string(),
+            Some(fs.clone()),
+            false,
+        ));
+
+        // Sent on a delay from a separate task, standing in for the real PTY
+        // read loop's own separate blocking thread — proves the ordering
+        // holds even when the flusher genuinely has to wait on the channel,
+        // not just the pre-queued-before-first-poll shortcut the coalescing
+        // tests above deliberately use for their own determinism.
+        let sender = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            tx.send(PtyReadChunk {
+                data: b"trailing output".to_vec(),
+                osc_events: Vec::new(),
+            })
+            .await
+            .unwrap();
+            // Dropping `tx` here closes the channel — the same signal the
+            // real read loop sends by dropping `pty_tx` on PTY EOF — which
+            // is what lets the flusher's final accumulation loop unstick
+            // and return.
+        });
+        sender.await.expect("sender task should not panic");
+
+        flusher_handle.await.expect("flusher task should not panic");
+
+        // The property under test: by the time the join handle above has
+        // returned, the trailing batch must already be visible — both in
+        // FileStore and as a broadcast — with no extra yield/sleep needed to
+        // "catch up" to it. This is the exact sequencing the wait task now
+        // depends on before it publishes STATUS_DONE.
+        assert_eq!(
+            events.lock().unwrap().len(),
+            1,
+            "flusher_handle.await must not return until the final batch was broadcast"
+        );
+        let data = fs
+            .read_file("block-1", "term")
+            .expect("read_file ok")
+            .expect("data present");
+        assert_eq!(data, b"trailing output");
     }
 }
