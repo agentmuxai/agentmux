@@ -553,35 +553,61 @@ impl CodexAppServerSession {
             .pending_requests
             .remove(id)
             .ok_or(CodexAppServerProtocolError::UnknownServerRequest)?;
-        if let Err(error) = self.transport.respond(id.clone(), result, timeout).await {
-            // Only resurrect the entry if the thread/turn it was queued
-            // under is still the active one. If start_thread/resume_thread/
-            // a new thread/started/turn/completed moved the session on
-            // while this write was in flight, blindly reinserting would
-            // make a now-invalidated approval answerable again in the new
-            // session/turn context (ReAgent P1, PR #3212 3rd review).
-            let mut state = self.state.lock().unwrap();
-            // Matched on both fields together, not `(None, _) => true`: a
-            // pending entry with turn_id but no thread_id is still
-            // turn-scoped and must not be resurrected once that turn has
-            // ended, whatever thread_id says (ReAgent P1, PR #3212 4th
-            // review — the same asymmetry as accept_server_request's
-            // check, mirrored here).
-            let still_current = match (&pending.thread_id, &pending.turn_id) {
-                (Some(thread), Some(turn)) => {
-                    state.thread_id.as_deref() == Some(thread.as_str())
-                        && state.turn_id.as_deref() == Some(turn.as_str())
-                }
-                (Some(thread), None) => state.thread_id.as_deref() == Some(thread.as_str()),
-                (None, Some(turn)) => state.turn_id.as_deref() == Some(turn.as_str()),
-                (None, None) => true,
-            };
-            if still_current {
-                state.pending_requests.insert(id.clone(), pending);
-            }
-            return Err(error.into());
+
+        // RestoreOnDrop reinserts the removed entry (if still scoped to the
+        // active thread/turn) whenever it is dropped still armed — which
+        // covers an explicit transport-write failure below AND this
+        // future being dropped/cancelled while still suspended at the
+        // `.await` (e.g. a caller-side select!/timeout racing the write).
+        // A plain check-then-await-then-reinsert-on-Err only runs that
+        // reinsert code if the future resolves; drop the future mid-await
+        // instead and Rust never runs it at all, silently stranding the
+        // entry with no response ever sent and no error surfaced to
+        // anyone (ReAgent P1, PR #3212 5th review). Folding the ordinary
+        // failure path into the same Drop impl means both cases are
+        // handled by one piece of logic instead of two copies of it.
+        struct RestoreOnDrop<'a> {
+            state: &'a Mutex<SessionState>,
+            id: RpcId,
+            pending: Option<PendingServerRequest>,
         }
-        Ok(())
+        impl Drop for RestoreOnDrop<'_> {
+            fn drop(&mut self) {
+                let Some(pending) = self.pending.take() else {
+                    return;
+                };
+                let mut state = self.state.lock().unwrap();
+                // Matched on both fields together, not `(None, _) =>
+                // true`: a pending entry with turn_id but no thread_id is
+                // still turn-scoped and must not be resurrected once that
+                // turn has ended, whatever thread_id says (ReAgent P1,
+                // PR #3212 4th review).
+                let still_current = match (&pending.thread_id, &pending.turn_id) {
+                    (Some(thread), Some(turn)) => {
+                        state.thread_id.as_deref() == Some(thread.as_str())
+                            && state.turn_id.as_deref() == Some(turn.as_str())
+                    }
+                    (Some(thread), None) => state.thread_id.as_deref() == Some(thread.as_str()),
+                    (None, Some(turn)) => state.turn_id.as_deref() == Some(turn.as_str()),
+                    (None, None) => true,
+                };
+                if still_current {
+                    state.pending_requests.insert(self.id.clone(), pending);
+                }
+            }
+        }
+
+        let mut guard = RestoreOnDrop {
+            state: &self.state,
+            id: id.clone(),
+            pending: Some(pending),
+        };
+        let outcome = self.transport.respond(id.clone(), result, timeout).await;
+        if outcome.is_ok() {
+            // Consumed successfully — nothing left to restore.
+            guard.pending = None;
+        }
+        outcome.map_err(Into::into)
     }
 
     pub fn pending_server_requests(&self) -> Vec<PendingServerRequest> {
@@ -1892,6 +1918,77 @@ mod tests {
         assert!(
             session.pending_server_requests().is_empty(),
             "a stale turn-only approval must not be resurrected once its turn has ended"
+        );
+    }
+
+    /// ReAgent P1, PR #3212 (5th review): respond_server_request removed the
+    /// pending entry synchronously, then awaited the transport write. If
+    /// the calling future were dropped/cancelled while suspended at that
+    /// await (a caller-side select!/timeout racing the write), Rust never
+    /// runs code after an await point that's never resumed -- neither the
+    /// success path nor the old failure-path reinsert would run, silently
+    /// stranding the entry with no response ever sent. A 1-byte duplex
+    /// buffer with nothing reading the other side guarantees the write
+    /// stays suspended, so aborting the task deterministically exercises
+    /// the drop-mid-await path rather than racing a timing window.
+    #[tokio::test]
+    async fn a_cancelled_respond_future_reinserts_the_pending_entry() {
+        let (client, _server) = duplex(1);
+        let (client_reader, client_writer) = tokio::io::split(client);
+        let transport = Arc::new(AppServerTransport::new(
+            client_reader,
+            client_writer,
+            Default::default(),
+        ));
+        let session = Arc::new(CodexAppServerSession::new(transport));
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            })
+            .unwrap();
+
+        let task_session = session.clone();
+        let task_id = id.clone();
+        let handle = tokio::spawn(async move {
+            task_session
+                .respond_server_request(
+                    &task_id,
+                    Ok(json!({"approved": true})),
+                    Duration::from_secs(30),
+                )
+                .await
+        });
+
+        // The synchronous remove() runs on the task's first poll, before
+        // it ever reaches the write's await point -- give it a bounded
+        // number of scheduling turns to get there rather than assuming
+        // one yield is always enough.
+        for _ in 0..100 {
+            if session.pending_server_requests().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "the entry should already be removed while the write is in flight"
+        );
+
+        handle.abort();
+        let _ = handle.await;
+
+        assert_eq!(
+            session.pending_server_requests().len(),
+            1,
+            "cancelling the respond future must reinsert the pending entry, not lose it silently"
         );
     }
 }
