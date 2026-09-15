@@ -275,6 +275,18 @@ pub(crate) const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+pub(crate) const CLOSE_PANE_TOOL: &str = r#"{
+  "name": "ClosePane",
+  "description": "Close a pane. With no arguments, closes YOUR OWN pane (identity verified server-side, same mechanism as UIClick — there is no way to spoof this as a different pane). Pass block_id to close ANY pane instead — including one that is unresponsive/unclickable (e.g. a pane stuck in a broken render state) — with no ownership check on the target: this is a fleet-level action, logged to the audit trail with your own verified identity as the source, same posture as FleetBulkStop. Get a target block_id from Layout. Closing a pane only removes it from the layout; the underlying agent's conversation history is not deleted.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "block_id": { "type": "string", "description": "Target pane to close (from Layout). Omit to close your own pane." },
+      "reason": { "type": "string", "description": "Optional note recorded in the audit log — most useful when closing another agent's pane." }
+    }
+  }
+}"#;
+
 // Deliberately NOT part of the ui_handlers.rs signed-identity/pane-ownership
 // scheme UIScreenshot/UIClick/UIQuery use. Authorization here is by
 // `CaptureTier` (what is being captured), not by pane ownership.
