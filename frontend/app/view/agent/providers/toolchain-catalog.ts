@@ -43,8 +43,16 @@ export interface CoreTool {
     /** Per-platform CLI command override — takes precedence over `cliCommand`. */
     cliCommandByPlatform?: Partial<Record<Platform, string>>;
     label: string;
-    /** Font Awesome (solid) icon name, rendered as `fa-solid fa-<icon>`. */
+    /** Font Awesome (solid) icon name, rendered as `fa-solid fa-<icon>`.
+     *  Always required — the guaranteed fallback for tools with no brand
+     *  glyph (see `brandIcon`). */
     icon: string;
+    /** Font Awesome *brands* icon name (rendered as `fa-brands fa-<icon>`),
+     *  preferred over `icon` when present — see `rowIconClass`. Omit for a
+     *  tool with no official mark in Font Awesome's bundled brand set
+     *  (e.g. `uv`); it then falls back to `icon` as before.
+     *  SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §6. */
+    brandIcon?: string;
     /** Recommended minimum version (warn-only — never blocks). */
     minVersion?: string;
     /** Optional — a missing optional tool shows an info pill, not a warning. */
@@ -74,6 +82,17 @@ export function cliCommandForPlatform(tool: CoreTool, plat: Platform): string {
 }
 
 /**
+ * Font Awesome class for a tool's row icon — prefers the real brand mark
+ * (`fa-brands fa-<brandIcon>`) when one exists, falling back to the
+ * generic solid glyph (`fa-solid fa-<icon>`) otherwise (e.g. `uv`, which
+ * has no icon in Font Awesome's bundled brand set).
+ * SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §6.
+ */
+export function rowIconClass(icon: string, brandIcon?: string): string {
+    return brandIcon ? `fa-brands fa-${brandIcon}` : `fa-solid fa-${icon}`;
+}
+
+/**
  * The current OS as a `Platform`. Single implementation — was previously
  * duplicated as a local `platformKey()` in toolchain-view.tsx.
  */
@@ -93,6 +112,7 @@ export const CORE_TOOLS: CoreTool[] = [
         cliCommand: "node",
         label: "Node.js",
         icon: "cube",
+        brandIcon: "node-js",
         minVersion: "18",
         description: "JavaScript runtime — required to install & run the npm-based agent CLIs.",
         docsUrl: "https://nodejs.org/",
@@ -110,6 +130,7 @@ export const CORE_TOOLS: CoreTool[] = [
         cliCommand: "npm",
         label: "npm",
         icon: "box",
+        brandIcon: "npm",
         description: "Node package manager — ships with Node.js; installs the agent CLIs.",
         docsUrl: "https://docs.npmjs.com/",
         installUrls: { windows: NODE_DOWNLOAD, macos: NODE_DOWNLOAD, linux: NODE_DOWNLOAD },
@@ -133,6 +154,7 @@ export const CORE_TOOLS: CoreTool[] = [
         cliCommand: "git",
         label: "Git",
         icon: "code-branch",
+        brandIcon: "git-alt",
         minVersion: "2.23",
         description: "Version control — used by Claude/OpenClaw for project context.",
         docsUrl: "https://git-scm.com/",
@@ -154,6 +176,7 @@ export const CORE_TOOLS: CoreTool[] = [
         cliCommand: "docker",
         label: "Docker",
         icon: "box-open",
+        brandIcon: "docker",
         optional: true,
         description: "Container runtime — only needed for container-mode agents.",
         docsUrl: "https://docs.docker.com/get-docker/",
@@ -175,6 +198,7 @@ export const CORE_TOOLS: CoreTool[] = [
         cliCommandByPlatform: { windows: "python" },
         label: "Python",
         icon: "snake",
+        brandIcon: "python",
         minVersion: "3.10",
         description: "Required runtime for ComfyUI, JupyterLab, MLflow, and other AI tools.",
         docsUrl: "https://www.python.org/downloads/",

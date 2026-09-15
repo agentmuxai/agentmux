@@ -56,6 +56,7 @@ mod splash_font;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod splash_text;
 mod splash_config;
+mod splash_core;
 mod splash_info;
 mod startup_events;
 // srv hang-while-alive detection plugs into srv recycle-on-exit

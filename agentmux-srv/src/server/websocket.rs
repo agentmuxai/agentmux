@@ -1022,12 +1022,44 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // controllerinput → route keyboard input / signals / resize to block controller
+    //
+    // Drops input for a block currently under an active PtyShell agent lock
+    // (`term:agentlockuntil`, docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md
+    // §10.3) rather than forwarding it — Codex P1 on PR #3194: the
+    // frontend's own gate (`AgentShellSubblock.tsx` dropping its
+    // `sendDataHandler` calls while locked) is necessarily eventually-
+    // consistent — it reacts to a WS-pushed meta value, not something
+    // synchronous with the backend's own state — so a human keystroke
+    // already in flight when the lock is set could otherwise still reach
+    // `send_input` and interleave with the agent's own write, exactly the
+    // collision the lease exists to prevent. This check, made at the
+    // moment this handler actually runs against the backend's own current
+    // state, is the real enforcement; the frontend gate is the UX layer
+    // that keeps it from happening in the first place, not the
+    // correctness boundary.
+    let wstore_ci = state.wstore.clone();
     engine.register_handler(
         COMMAND_CONTROLLER_INPUT,
-        Box::new(|data, _ctx| {
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_ci.clone();
             Box::pin(async move {
                 let cmd: CommandBlockInputData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerinput: {e}"))?;
+                let locked = wstore
+                    .get::<Block>(&cmd.blockid)
+                    .ok()
+                    .flatten()
+                    .and_then(|b| {
+                        b.meta
+                            .get(crate::server::META_KEY_AGENT_LOCK_UNTIL)
+                            .and_then(|v| v.as_i64())
+                    })
+                    .map(|until| until > agentmux_common::time::now_ms())
+                    .unwrap_or(false);
+                if locked {
+                    tracing::debug!(block_id = %cmd.blockid, "controllerinput: dropped — agent lock active");
+                    return Ok(None);
+                }
                 let input = parse_block_input(&cmd)?;
                 blockcontroller::send_input(&cmd.blockid, input, cmd.seq)?;
                 Ok(None)
@@ -1779,6 +1811,88 @@ fn parse_block_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Codex P1 on PR #3194: the frontend's own lock gate
+    /// (`AgentShellSubblock.tsx` dropping `sendDataHandler` while
+    /// `term:agentlockuntil` is in the future) is necessarily eventually-
+    /// consistent — it reacts to a WS-pushed meta value, not something
+    /// synchronous with the backend's own state — so a human keystroke
+    /// already in flight could otherwise still reach `send_input` and
+    /// interleave with an agent's own write. `controllerinput` must reject
+    /// it itself, checked against the backend's own current state at the
+    /// moment it actually runs.
+    ///
+    /// Distinguishes "silently dropped by the lock gate" from "attempted
+    /// and failed for lack of a live controller" by the response's `error`
+    /// field: a target block here has no real controller registered at
+    /// all, so an UNLOCKED call reaches `blockcontroller::send_input` and
+    /// gets a real `"no controller for block"` error back — proving the
+    /// call path is live. A LOCKED call must short-circuit before that
+    /// point, returning cleanly with no error.
+    #[tokio::test]
+    async fn controllerinput_is_dropped_while_an_agent_lock_is_active() {
+        use crate::backend::rpc::engine::WshRpcEngine;
+        use crate::backend::rpc_types::RpcMessage;
+        use crate::server::tests::test_state;
+
+        let state = test_state();
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register_handlers(&engine, state.clone(), "test-conn".to_string());
+
+        async fn send_input(
+            engine: &std::sync::Arc<WshRpcEngine>,
+            output_rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+            block_id: &str,
+        ) -> RpcMessage {
+            engine.handle_message(RpcMessage {
+                command: COMMAND_CONTROLLER_INPUT.to_string(),
+                reqid: uuid::Uuid::new_v4().to_string(),
+                data: Some(serde_json::json!({ "blockid": block_id, "inputdata64": "eQ==" })), // "y"
+                ..Default::default()
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+                .await
+                .expect("handler should respond within 2s")
+                .expect("response channel should not close")
+        }
+
+        // Locked target: no live controller registered, but the check must
+        // never reach that far.
+        let mut locked_block = crate::backend::obj::Block {
+            oid: "locked-shell".to_string(),
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert(
+                    "term:agentlockuntil".to_string(),
+                    serde_json::json!(agentmux_common::time::now_ms() + 60_000),
+                );
+                m
+            },
+            ..Default::default()
+        };
+        state.wstore.insert(&mut locked_block).unwrap();
+        let resp = send_input(&engine, &mut output_rx, "locked-shell").await;
+        assert!(
+            resp.error.is_empty(),
+            "a locked target must be silently dropped, not reach send_input at all: {}",
+            resp.error
+        );
+
+        // Unlocked target (no lock meta at all) — proves the call path
+        // above is genuinely live: it must reach `send_input` and get a
+        // real "no controller" error, not silently succeed.
+        let mut unlocked_block = crate::backend::obj::Block {
+            oid: "unlocked-shell".to_string(),
+            ..Default::default()
+        };
+        state.wstore.insert(&mut unlocked_block).unwrap();
+        let resp = send_input(&engine, &mut output_rx, "unlocked-shell").await;
+        assert!(
+            resp.error.contains("no controller"),
+            "an unlocked target must reach send_input for real: {}",
+            resp.error
+        );
+    }
 
     fn rpc_event(block_id: &str) -> serde_json::Value {
         json!({

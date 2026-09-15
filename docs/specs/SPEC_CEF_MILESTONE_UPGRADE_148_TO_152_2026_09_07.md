@@ -145,12 +145,39 @@ table. Symptom in the shipped app: GPU process dies at init
 (`eglGetProcAddress not found`), falls back to neither hardware nor
 SwiftShader — GPU fully off, not degraded. Fixed for Windows in
 `scripts/cef-build/args-windows.gn` (`use_static_angle=false`, with the
-full investigation notes inline there). **The gating condition
-(`is_linux || is_win || is_mac`) covers all three platforms — `args.gn`
-(Linux) and `args-darwin.gn` (macOS) do not yet have this line and should
-be checked before either platform's 152 build is treated as complete.**
-A clean compile on those platforms gives no signal either way — this has
-to be checked for directly (export-table check, not just build success).
+full investigation notes inline there).
+
+**Correction (2026-09-10, Clare, via cross-host jekt — confirmed
+cross-machine delivery works in the process) — `use_static_angle`'s
+correct value is platform-specific; this is NOT a blanket
+`use_static_angle=false`-everywhere fix.** The gating condition
+(`is_linux || is_win || is_mac`) does mean all three platforms produce
+the same 0-byte-class stub `libEGL`/`libGLESv2` in `out/` when
+`use_static_angle` resolves `true` — but macOS checked this directly on
+152 and found the OPPOSITE conclusion from Windows: macOS does not bundle
+those files at all, and the real ANGLE implementation is statically
+linked directly into the framework binary instead. Confirmed via export
+symbols: `DisplayMtl`/`rx::`/`angle::` are present in the framework
+binary (79/7352/4597 occurrences respectively) — and were ALSO present in
+the old 148 build's separate `libGLESv2.dylib`, meaning macOS's existing
+`args-darwin.gn` (which does not set `use_static_angle` at all) is
+already correct and working, not silently broken the way Windows was.
+**Setting `use_static_angle=false` on macOS would undo a working
+configuration, not fix a broken one — do not copy the Windows fix into
+`args-darwin.gn`.** Linux has not been checked yet as of this writing.
+**Codex P2 on #3189: checking only `libGLESv2.so`/`libEGL.so` is not
+sufficient** — if Linux also statically links ANGLE (like macOS, into
+`libcef.so` rather than a separate library), those files legitimately
+won't export real symbols even in a correctly configured static build,
+and concluding "broken, needs `use_static_angle=false`" from that alone
+would repeat the macOS mistake in the opposite direction. Check both
+candidates — real ANGLE symbols in `libGLESv2.so`/`libEGL.so` (dynamic
+case) OR in `libcef.so` itself (static case, same `angle::`/`rx::`-family
+symbols Clare checked on macOS) — and only call it broken if neither
+binary has them, ideally confirmed with a live GPU runtime smoke test too,
+not export tables alone. A clean compile gives no signal either way on
+any of the three platforms, and neither does file size alone (the
+Windows stub and the Windows real file differ by only 8%, see above).
 
 **2026-09-10 — a second, unrelated Windows-only compile bug also found**
 (not yet fixed, not blocking): `cef/libcef_dll/bootstrap/installer/installer_bootstrap_helpers_unittest.cc`
@@ -207,6 +234,88 @@ did not RE-RUN in an incremental rebuild; the 148 tree's `.air` dates from
 2026-06-02. Both milestones default to `angle_enable_metal=true`. Documented in
 `docs/cef-build/build-patched-framework-macos.md` with a compile-based check,
 because the download reports success regardless of whether the compiler works.
+
+**Update 2026-09-11 — Phase C `links` blocker (found 2026-09-10, above) is
+root-caused and fixed (Opaz); Linux Phase D completes; macOS/Windows/Linux
+all now have a 152 build.** Full detail lives on issue #3108's comment
+thread, not duplicated here — summary for continuity: Cargo's
+one-`links`-value-per-graph rule (confirmed by Korp 2026-09-10) is worked
+around by renaming the fork's `cef-dll-sys` `links` value to
+`cef_dll_wrapper_agentmux` (`AgentU-asaf/cef-rs#4`/`#5`, unmerged as of
+this writing), which lets `cef_win`/`cef_unix` coexist. The actual §4
+staging mechanism, built against that fix, is `agentmuxai/agentmux#3204`
+("Phase C mechanism," draft as of this writing). Linux Phase D also
+finished this day (build, §5 carry-set gate, H.264 codec playback, ANGLE
+check) — all three platforms have now built CEF 152 at least once. A
+structural gap in `cef-verify-patches.sh`'s differential-compile check was
+also found and confirmed on two platforms: under `use_thin_lto=true`
+(Linux, Windows; macOS's `args-darwin.gn` doesn't set it), an isolated
+single-TU recompile produces LLVM bitcode, not the machine code actually
+linked into the shipped binary via the whole-program ThinLTO backend pass
+— that check needs a different mechanism on those two platforms. Not yet
+fixed as of this writing.
+
+**Update 2026-09-15 (Korp) — Phase C mechanism verified compiling on real
+Windows; the one specific gap blocking #3204 is closed.** ReAgent's P1 on
+that PR ("actual compilation of Windows-specific `cef::` call sites [was]
+never verified" — everyone up to that point had only run `cargo metadata`
+or checked non-Windows platforms) is now answered: checked out #3204 on a
+real Windows box with the full MSVC/CMake/Ninja toolchain and ran
+`cargo check -p agentmux-cef --target x86_64-pc-windows-msvc` and the
+exact `cargo check --workspace --tests` `ci-pr.yml`'s required Windows leg
+runs. Both clean — zero errors, and the warning count (60) exactly matches
+`main` rebuilt on the same machine, so the `cef_win`/`cef_unix` split
+introduces no regressions. CI's own windows-latest run on #3204 shows
+`CANCELLED`, not a pass, so this was the first real Windows compile signal
+that PR had gotten. Posted as a third independent-platform confirmation
+(after Clare's macOS, Opaz's Linux) on `AgentU-asaf/cef-rs#4`/`#5` too.
+**Remaining, unchanged by this:** #3204's `[patch.crates-io]` still points
+at a personal fork pending `AgentU-asaf/cef-rs#4` merging (no reviews on
+it as of this writing — a trivial, well-verified one-line rename with
+nothing blocking it but review bandwidth); and separately, actually
+cutting a released Windows CEF 152 runtime build and updating
+`release.yml`'s `WIN_TAG` (Phase D's local build exists — 2026-09-10,
+above — but was never published) remains unclaimed work, distinct from
+and not blocked by the mechanism PR. See #3108 for the live cross-platform
+rollup.
+
+**Update 2026-09-15 (Korp) — Windows Phase E: release artifact built,
+packaged, and verified; not published.** The Sept 10 build (above) was
+still on disk (`Release_GN_152`) — re-verified fresh rather than rebuilt:
+boots clean via `cefsimple.exe`; `cef_version.h` confirms a genuine
+`152.0.7977.83` build. **ANGLE re-verified via the actual symbol-export
+gate, not file size** (codex P2 on #3224 caught an earlier revision of
+this note leaning on size alone, which this spec's own Sept 10 section
+above already warned isn't reliable) — `scripts/verify-angle-libs.sh`
+against both the build directory and the extracted packaged zip: clean
+pass on both, genuine `eglGetProcAddress`/`glGetString` exports present.
+
+**Provenance, corrected (codex P2 on #3224):** `cef_version.h`'s
+`CEF_COMMIT_HASH=79460ebecaa5...` is a **Chromium** commit (confirmed:
+`git log -1` in the `chromium/src` tree resolves it to the official
+"Incrementing VERSION to 152.0.7977.83" branch-cut commit) — not our
+`agentmuxai/cef` fork's own commit, contrary to how an earlier revision of
+this note (and Opaz's 2026-09-11 Linux comment, which this echoed) read
+it. The actual fork-side provenance is whatever the `cef` clone's HEAD was
+at build time: `2817bfb6f85142a76bf5e33499079f22e42d8af2`, on the
+`7977-drag-rightclick-and-transparency` feature branch — **that** commit
+is this specific artifact's real provenance, and is what a release should
+target, not `agentmuxai/7977`'s later, fuller integration-branch tip
+(`fe7c8a3c2`). The ancestor-check reasoning below still stands as evidence
+the artifact would be *functionally identical* to one built from
+`fe7c8a3c2` (worth recording for context) — but per codex's correct
+objection, that's a claim about equivalence, not a license to name a later
+commit as the provenance of an already-built binary: confirmed via `git
+merge-base --is-ancestor` that `2817bfb6f` is an ancestor of
+`agentmuxai/7977`'s current tip, and that the one integration-branch
+commit not reachable from it (`agentmux_process_requirement`, macOS-only,
+touches only `base/apple/`) cannot affect a Windows binary either way.
+Packaged per `docs/cef-build/build-patched-cef-windows.md` §7:
+`cef-windows-x86_64-152.0.7977.83.zip` (194 MB, 455 entries, libcef.dll
+size cross-checked against the zip entry). **Deliberately not published**
+— per Opaz's 2026-09-11 comment on #3108, being the first platform to cut
+an actual 152 release is "a repo-owner call," same as bumping the pins;
+no platform has published one yet. Full trail on #3108.
 
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
@@ -510,14 +619,36 @@ Each platform is a distinct OS/toolchain and cannot be cross-built with the curr
 **Total build cost: 9–18 machine-hours across three machines**, plus the ~100 GB checkout on each. The three are fully independent and should run in parallel on three machines — see §6.
 
 > **2026-09-10 — before treating any platform's build as done, read the
-> `use_static_angle=false` finding in this doc's top status block.** A
-> clean, zero-error compile is not sufficient evidence — the GPU regression
-> it describes produces no build failure on any of the three platforms.
-> Windows is fixed (`scripts/cef-build/args-windows.gn`); Linux/macOS need
-> the equivalent line added to `args.gn`/`args-darwin.gn` and verified via
-> an export-table check (`dumpbin`/`nm`/`objdump` on the built
-> `libGLESv2.so`/`.dylib` — look for real symbols like `glGetString`, not
-> just file size), not a `strings` search and not build success alone.
+> `use_static_angle` finding in this doc's top status block, including the
+> 2026-09-10 (Clare) correction.** A clean, zero-error compile is not
+> sufficient evidence — the GPU regression it describes produces no build
+> failure on any of the three platforms. **This is NOT a one-line fix to
+> copy to every platform's args file — `use_static_angle`'s correct value
+> differs per platform.** Windows needs `use_static_angle=false`
+> (`scripts/cef-build/args-windows.gn`, confirmed the existing config was
+> broken). macOS confirmed the opposite: its existing `args-darwin.gn`
+> (no `use_static_angle` override at all) is already correct — ANGLE is
+> statically linked into the framework binary there, verified by export
+> symbols, and setting the flag to `false` would undo a working config,
+> not fix a broken one. Linux has not been checked yet — **and, per Codex
+> P2 on #3189, checking only `libGLESv2.so` is not sufficient on its own,
+> for exactly the reason the macOS correction above describes.** If Linux
+> also turns out to statically link ANGLE (like macOS, into `libcef.so`
+> rather than a separate library), `libGLESv2.so` legitimately won't
+> export `glGetString` even in a CORRECTLY configured static build — that
+> file is a placeholder by design in that configuration, not evidence of
+> brokenness. Checking only `libGLESv2.so` and concluding "must set
+> `use_static_angle=false`" on a false negative would repeat the exact
+> macOS mistake this correction exists to prevent, in the other direction.
+> Check BOTH candidates before concluding anything: `glGetString`/
+> `eglGetProcAddress` in `libGLESv2.so`/`libEGL.so` (the dynamic-ANGLE
+> case, like Windows) OR the same real ANGLE symbols
+> (`angle::`/`rx::`-prefixed, same families Clare checked on macOS) inside
+> `libcef.so` itself (the static-ANGLE case, like macOS) — only treat it
+> as actually broken if NEITHER binary has real ANGLE code, ideally
+> confirmed with a live GPU runtime smoke test either way, not export
+> tables alone. `dumpbin`/`nm`/`objdump` for the export-table half; not a
+> `strings` search, and not build success alone.
 
 ### Phase E — Distribution
 Cut a GitHub Release per platform on `agentmuxai/cef` (manual `gh release create`; this is by documented convention a deliberate step separate from any source PR), then update consumers in *this* repo:

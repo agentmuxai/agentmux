@@ -30,6 +30,7 @@ mod x11;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
+use crate::splash_core::{trunc, StageTimeline};
 use crate::startup_events::{StartupEvent, StartupStatus};
 
 // ── Shared look (matches splash_mac.rs / splash.rs) ─────────────────────────
@@ -95,98 +96,84 @@ pub(crate) const CARD_W: i32 = BRAIN_W + PADDING * 2;
 pub(crate) const CARD_H: i32 = BRAIN_H + PADDING * 2 + STAGE_H + FOOTER_H;
 
 // ── Startup telemetry stage list ─────────────────────────────────────────────
-
-struct StageEntry {
-    stage: &'static str,
-    label: &'static str,
-    started_at: Instant,
-    duration_ms: Option<u64>,
-    status: StartupStatus,
-    subs: Vec<SubEntry>,
-}
-
-struct SubEntry {
-    id: String,
-    label: String,
-    started_at: Instant,
-    duration_ms: Option<u64>,
-}
+// Row model, event application (with same-tick count-up deferral), and the
+// frozen-row finalizer now live in `splash_core`, shared with `splash.rs`
+// (Windows) and `splash_mac.rs` (macOS) — see that module's doc comment.
+// Only this band's own line-formatting stays here: Linux's tight
+// `STAGE_MAX_LINES` (4, vs. the other two platforms' 12) makes the
+// mac/Windows "other: Xms" / "total: Xms" reconciliation rows a poor fit —
+// they'd frequently crowd out real stage content in a 4-line budget — so
+// that part of the mac/Windows parity work is deliberately not ported here;
+// see docs/reports/REPORT_SPLASH_SCREEN_ARCHITECTURE_RETHINK_2026_09_14.md.
 
 /// Accumulates startup events and emits rendered text lines for the stage band.
 pub(super) struct StageList {
-    stages: Vec<StageEntry>,
+    timeline: StageTimeline,
 }
 
 impl StageList {
     pub(super) fn new() -> Self {
-        Self { stages: vec![] }
+        Self { timeline: StageTimeline::new() }
     }
 
-    pub(super) fn apply(&mut self, event: StartupEvent) {
-        match event {
-            StartupEvent::StageBegin { stage, label } => {
-                self.stages.push(StageEntry {
-                    stage,
-                    label,
-                    started_at: Instant::now(),
-                    duration_ms: None,
-                    status: StartupStatus::Ok,
-                    subs: vec![],
-                });
-            }
-            StartupEvent::StageEnd { stage, duration_ms, status, .. } => {
-                if let Some(e) = self.stages.iter_mut().rev().find(|e| e.stage == stage) {
-                    e.duration_ms = Some(duration_ms);
-                    e.status = status;
-                }
-            }
-            StartupEvent::SubBegin { stage, id, label } => {
-                if let Some(e) = self.stages.iter_mut().rev().find(|e| e.stage == stage) {
-                    e.subs.push(SubEntry {
-                        id,
-                        label,
-                        started_at: Instant::now(),
-                        duration_ms: None,
-                    });
-                }
-            }
-            StartupEvent::SubEnd { stage, id, duration_ms, .. } => {
-                if let Some(e) = self.stages.iter_mut().rev().find(|e| e.stage == stage) {
-                    if let Some(s) = e.subs.iter_mut().find(|s| s.id == id) {
-                        s.duration_ms = Some(duration_ms);
-                    }
-                }
-            }
-        }
+    /// Batch-apply one tick's worth of freshly-drained events. Must be
+    /// called with a whole batch, not one event at a time — see
+    /// `StageTimeline::apply_tick`'s doc comment: the same-tick count-up
+    /// deferral only recognizes a Begin+End pair as "same tick" when both
+    /// arrive in the same call.
+    pub(super) fn apply_tick(&mut self, fresh: Vec<StartupEvent>) -> bool {
+        self.timeline.apply_tick(fresh)
+    }
+
+    /// Call once, at the instant dismiss becomes eligible (fade about to
+    /// start), so a row with no matching End — e.g. the host stage if the
+    /// splash times out before the host ever reports it — freezes with a
+    /// definite outcome instead of staying visually "running" for the rest
+    /// of the fade. See `StageTimeline::finalize_running`'s doc comment.
+    pub(super) fn finalize_running(&mut self, at: Instant) {
+        self.timeline.finalize_running(at);
     }
 
     /// Up to `STAGE_MAX_LINES` formatted lines for the stage band.
     pub(super) fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for s in &self.stages {
-            let pfx = match s.duration_ms {
+        for s in &self.timeline.stages {
+            let pfx = match &s.done {
                 None => ">> ",
-                Some(_) => match s.status {
+                Some((_, status, _)) => match status {
                     StartupStatus::Ok => "ok ",
                     _ => "!! ",
                 },
             };
-            let ms = match s.duration_ms {
-                Some(ms) => ms,
+            let ms = match &s.done {
+                Some((ms, ..)) => *ms,
                 None => s.started_at.elapsed().as_millis() as u64,
             };
             // "ok  Saga recovery       42ms"
-            out.push(format!("{pfx}{:<18}{:>5}ms", s.label, ms));
+            //
+            // Truncated to the SAME width as the `{:<N}` padding below, not
+            // just an unbounded min-width pad: `label` is `s.label`, a
+            // fixed, short, engineer-chosen string, so this rarely bites —
+            // but `sub.label` below is a migration's free-text
+            // `description()` (since PR #3223, real ones up to 48-90 chars),
+            // and this card is only ~29 chars wide at GLYPH_W=10px
+            // (CARD_W=312px). An unclamped label pushes the whole duration
+            // column off the visible card edge — the label consumes the row
+            // before the live duration is even drawn, so the feature this
+            // PR adds would be invisible on Linux specifically (codex P2 on
+            // #3223). `splash_core::trunc` is the same char-safe truncation
+            // Windows/macOS already apply to their own stage/sub labels.
+            out.push(format!("{pfx}{:<18}{:>5}ms", trunc(s.label, 18), ms));
             if out.len() >= STAGE_MAX_LINES {
                 break;
             }
             // Show the last sub-item (e.g. most recent migration).
             if let Some(sub) = s.subs.last() {
-                let sub_ms = match sub.duration_ms {
-                    Some(ms) => ms,
+                let sub_ms = match &sub.done {
+                    Some((ms, ..)) => *ms,
                     None => sub.started_at.elapsed().as_millis() as u64,
                 };
-                out.push(format!("   >{:<16}{:>5}ms", sub.label, sub_ms));
+                out.push(format!("   >{:<16}{:>5}ms", trunc(&sub.label, 16), sub_ms));
                 if out.len() >= STAGE_MAX_LINES {
                     break;
                 }

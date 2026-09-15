@@ -22,7 +22,7 @@ mod introspect;
 pub(crate) mod layout_helpers;
 mod misc;
 mod object;
-mod object_helpers;
+pub(crate) mod object_helpers;
 mod reducer_helpers;
 pub(crate) mod session_restore;
 mod tab_lifecycle;

@@ -648,3 +648,24 @@
         pointer-events: none;
     }
 }
+
+// Shown while an agent is actively driving this shell (PtyShellInput/
+// PtyShellResize) — see docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md.
+// A small corner badge, not a full-screen overlay: the whole point of the
+// visible-shell feature is that the human can WATCH the agent work, so this
+// must never obscure the live output — only explain why their own keystrokes
+// aren't landing right now. `pointer-events: none` — purely informational,
+// never intercepts a click.
+.agent-shell-agentlock-badge {
+    position: absolute;
+    top: var(--space-1);
+    right: var(--space-1);
+    z-index: 2;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background-color: rgb(from var(--warning-color) r g b / 0.85);
+    color: var(--block-bg-color);
+    font-size: 10px;
+    font-family: var(--font-family, sans-serif);
+    pointer-events: none;
+}

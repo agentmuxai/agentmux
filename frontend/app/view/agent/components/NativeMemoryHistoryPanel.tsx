@@ -20,6 +20,7 @@
  */
 
 import { For, Show, createSignal, onCleanup, type JSX } from "solid-js";
+import { Markdown } from "@/app/element/markdown";
 import { NativeMemoryHistoryModel, sourceLabel, sourceWarning } from "../native-memory-history-model";
 import "./NativeMemoryHistoryPanel.scss";
 
@@ -59,6 +60,42 @@ export const NativeMemoryHistoryPanel = (props: NativeMemoryHistoryPanelProps): 
 
     return (
         <div class="native-memory-history">
+            <div class="native-memory-content-section">
+                <div class="native-memory-content-label">Current content</div>
+                <Show when={model.contentErrorAtom()}>
+                    <div class="native-memory-history-error">{model.contentErrorAtom()}</div>
+                </Show>
+                {/* codex P2 on PR #3218: contentLoadingAtom is tracked
+                    separately from `contentAtom() === null` — the latter is
+                    also true after a failed fetch, and gating the "Loading…"
+                    fallback on it alone made a completed failure look like a
+                    still-pending request forever. */}
+                <Show when={model.contentLoadingAtom()}>
+                    <div class="native-memory-content-loading">Loading…</div>
+                </Show>
+                <Show when={!model.contentLoadingAtom() && model.contentAtom() !== null}>
+                    <Show
+                        when={model.contentAtom() !== ""}
+                        fallback={<p class="native-memory-content-empty">Empty.</p>}
+                    >
+                        {/* The resize handle lives on this wrapper, not on
+                            <Markdown> itself — Markdown's own root sets
+                            `height: 100%; overflow: hidden`, which would
+                            fight a resize/height override applied directly
+                            to it. See global-bundle.scss's identical
+                            pattern (PR #3199). */}
+                        <div class="native-memory-content-preview">
+                            <Markdown
+                                text={model.contentAtom() ?? ""}
+                                scrollable={true}
+                                nativeScrollbar={true}
+                                contentClass="native-memory-content-markdown-content"
+                            />
+                        </div>
+                    </Show>
+                </Show>
+            </div>
+
             <Show when={model.errorAtom()}>
                 <div class="native-memory-history-error">{model.errorAtom()}</div>
             </Show>

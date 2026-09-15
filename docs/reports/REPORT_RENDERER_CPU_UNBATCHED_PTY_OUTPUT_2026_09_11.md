@@ -1,0 +1,455 @@
+# Report: renderer/GPU-helper CPU during active agent output — RCA and fix
+
+**Date:** 2026-09-11
+**Trigger:** repo owner, live: *"figure out why the agentmux helper takes up
+so much CPU. we can feel the slowdown."*
+**Status:** Active — RCA complete, fix implemented and unit-verified (§6-7). Live production CPU comparison deliberately deferred — see §7.
+**Method:** Live measurement on the affected machine (this is not doc
+archaeology or a synthetic repro) — `ps`/`top` for real-time CPU, macOS
+`sample` for a stack-level profile of the hot process, `muxspect` for live
+pane state, then a direct read of the current PTY read path on `main`.
+
+---
+
+## 1. Symptom
+
+`AgentMux Helper (Renderer)` and `AgentMux Helper (GPU)` — CEF helper
+processes belonging to a long-running installed AgentMux window (channel
+`local-clare06219-734214c7f-20260906t141543`, up 4+ days) — were observed
+consuming sustained, user-perceptible CPU. Confirmed real via four
+consecutive live `top -pid` reads, ~1s apart:
+
+```
+PID    COMMAND          %CPU
+39396  AgentMux Helper  0.0
+39396  AgentMux Helper  27.7
+39396  AgentMux Helper  18.3
+39396  AgentMux Helper  18.4
+
+39391  AgentMux Helper  0.0
+39391  AgentMux Helper  17.8
+39391  AgentMux Helper  16.0
+39391  AgentMux Helper  16.4
+```
+
+Bursty — roughly once-per-second peaks, not a flat 100%-of-one-core spin —
+but real and sustained over the whole observation window, not a one-off
+transient.
+
+## 2. What the CPU is actually doing (profiled, not guessed)
+
+`sample`d PID 39396 (the renderer) for 15 seconds at 1ms resolution. The
+"sort by top of stack" breakdown — which function each thread was inside at
+the moment of each sample — was overwhelmingly:
+
+| Frame | Samples (of ~253k total) |
+|---|---|
+| `mach_msg2_trap` | 176,807 |
+| `kevent64` | 50,192 |
+| `__workq_kernreturn` | 12,719 |
+| `read` | 12,697 |
+| every actual "doing work" frame (memmove, memset, CEF-internal) | single/double digits each |
+
+This is the signature of **many small, frequent wakeups and IPC round-trips**
+— threads constantly blocking on `mach_msg`/`kevent`/`read` and getting woken
+again — not a single hot function spinning. If this were a stuck computation
+or a busy-loop bug, one or a few frames would dominate the "doing work"
+column instead. They don't; that column is nearly empty by comparison to the
+wakeup frames.
+
+## 3. What was live on this window at the time
+
+`muxspect list` against this exact instance showed two agent panes, **both
+`turn_active: true`** at the moment of investigation — one of them this very
+investigating session. This machine has run multiple concurrent, long-lived
+agent sessions (confirmed separately via `ps`: at least three resumed
+`claude` processes) producing continuous, high-volume terminal/build output
+(cargo builds, git operations, test suites, log tails) for hours in this
+window.
+
+## 4. Root cause
+
+`agentmux-srv/src/backend/blockcontroller/shell/lifecycle.rs`'s PTY output
+read loop (the thread that owns each pane's PTY):
+
+```rust
+let mut buf = [0u8; PTY_READ_BUF_SIZE];   // PTY_READ_BUF_SIZE = 4096, pty.rs:12
+loop {
+    match reader.read(&mut buf) {
+        Ok(0) => break,
+        Ok(n) => {
+            // ... OSC extraction ...
+            handle_append_block_file(broker, &block_id_read, "term", chunk, ...);
+            //  ^ file-store write AND live WebSocket broadcast to the
+            //    renderer, unconditionally, on EVERY read() return.
+            for ev in &osc_events { wps::publish_block_activity(...); }
+            if let Some(ref mut t) = translator {
+                accumulate_and_translate(...);   // agent-pane JSON-stream path
+            }
+        }
+        Err(_) => break,
+    }
+}
+```
+
+**There is no batching or coalescing between consecutive reads.** `read()`
+returns as soon as the OS has *any* data ready, up to 4KB — it does not wait
+to fill the buffer. A fast producer (exactly what `cargo build`, `git log`,
+or a verbose test run is) causes the OS to deliver output across many
+separate `read()` returns in quick succession, and **every single one**
+triggers the full downstream pipeline: a disk write, a live WebSocket
+broadcast to the renderer, OSC extraction, and — for agent panes — a
+JSON-stream-translation pass.
+
+Each of those broadcasts is individually cheap. The *rate* is not: a burst
+of output that could be delivered as one or two renderer updates instead
+generates dozens of small ones, each carrying its own IPC round-trip
+(browser process → renderer, `mach_msg` under the hood) and its own paint /
+xterm.js write. That matches §2's profile exactly — CPU dominated by wakeup
+and IPC-wait frames, not by any single expensive operation — and matches §3:
+it only shows up as *user-perceptible* when a pane is actively streaming
+fast, which two panes on this exact window were doing at the time.
+
+This is not a stuck process, a leak, or an infinite loop. It is the
+aggregate cost of firing one full render update per 4KB PTY chunk instead of
+coalescing a burst into fewer, larger ones — paid continuously by every
+agent/terminal pane that is actively producing fast output, which on a
+machine running several long, verbose agent sessions concurrently is close
+to constant.
+
+## 5. What this report does NOT claim
+
+No direct browser-side (DevTools/CEF) profile correlating individual
+WebSocket message timestamps to the observed CPU bursts was taken — this
+agent's shell has no screen access on this machine (established earlier this
+session; see memory `macos-agent-shell-verification-limits`). §2–§4 are
+strong, convergent circumstantial evidence — a live measurement, a stack
+profile, live pane state, and a direct code read that all point the same
+way — not a single smoking-gun trace. A human with DevTools access could
+tighten this further by watching the WS message rate during a live `cargo
+build` in an agent pane against the same CPU counters.
+
+This report also does not claim every renderer/GPU CPU cost on this machine
+traces to this one path — only that it is a real, evidenced, and structural
+contributor, consistent with everything measured.
+
+## 6. Fix — implemented
+
+`agentmux-srv/src/backend/blockcontroller/shell/lifecycle.rs`: the PTY
+read loop's blocking `read()` semantics are completely untouched (this file
+supports both Unix and Windows PTYs, and that boundary is not something to
+risk getting subtly platform-wrong). Instead, the loop now sends each
+already-OSC-cleaned chunk through a **bounded** `mpsc::channel` (capacity
+`PTY_CHANNEL_CAPACITY` = 128, via `blocking_send` from the read loop's
+own blocking thread — see §7's review-round fixes for why this matters) to
+a new, standalone async fn, `run_pty_output_flusher`, which:
+
+- waits for the first chunk of a new batch, then opportunistically drains
+  any more that are already queued (or arrive within `PTY_COALESCE_WINDOW`
+  = 20ms) into the same batch;
+- stops early, regardless of the time window, once the batch reaches
+  `PTY_COALESCE_MAX_BYTES` (64 × the 4KB single-read size = 256KiB) — bounds
+  both broadcast latency and memory during a sustained fast burst (`yes`
+  piped into a shell pane);
+- flushes the whole batch through one call to `flush_pty_batch` (the file
+  write, WebSocket broadcast, OSC-activity publish, and agent-translation
+  step that used to run once per raw read, now once per batch);
+- flushes any final partial batch when the channel closes (PTY EOF/error)
+  rather than dropping it.
+
+Content is unaffected — same bytes, same order, just batched into fewer
+calls; scrollback persistence, OSC title extraction, and the agent
+JSON-stream translator all see identical input to before.
+
+## 7. Verification
+
+**Done:**
+
+- `cargo test -p agentmux-srv`: 3280 passed, 0 failed — no regression in
+  the existing PTY/lifecycle/scrollback/OSC/translation test coverage.
+- Five new tests directly exercise the new logic (not just the surrounding
+  code), against a real in-memory `FileStore` and a real `wps::Broker` with
+  a recording `WpsClient` so broadcast *count* — not just final content —
+  is observable:
+  - `flush_pty_batch_writes_and_broadcasts_one_call` / `..._is_a_no_op_for_empty_input`
+    — the single-batch flush primitive in isolation.
+  - `rapid_chunks_coalesce_into_far_fewer_broadcasts_with_no_data_loss` —
+    50 chunks sent back-to-back (deterministic, not timing-dependent: every
+    chunk is queued before the flusher is ever polled) collapsed into
+    **exactly 1 broadcast**, verified stable across 8 repeated local runs
+    before asserting on the exact count rather than a loose bound. Final
+    content, and the concatenation of every individual broadcast payload in
+    delivery order, both reconstruct the exact original byte stream.
+  - `byte_cap_forces_a_flush_before_the_channel_closes` — 80 × 4KB chunks
+    (over the 256KiB cap) forced ≥2 broadcasts rather than growing one
+    batch unboundedly, with no data loss.
+  - `no_broker_is_a_clean_no_op` — mirrors the read loop's own
+    `broker.is_some()` gate.
+
+**Deliberately not done, and why:** a live before/after CPU comparison
+against the actual production instance (§1-3's evidence) would mean
+building and swapping in this binary on the shared AgentMux window this
+investigation was run from — restarting it, which tears down every open
+pane, including the sessions that were actively `turn_active: true` at the
+time of the original measurement. That is a real, visible, disruptive
+action on shared state, not something to do unasked mid-investigation.
+Left for the repo owner to trigger deliberately (a `task package:macos`
+build + manual swap, or simply picking this fix up in the next normal
+release) rather than done silently here.
+
+## 8. Review round — two real gaps in the first cut (reagentx P1 x2, PR #3206)
+
+Both caught before merge, both would have undermined the fix under the
+exact load scenario it targets (several busy panes streaming at once):
+
+1. **The channel itself was unbounded.** `PTY_COALESCE_MAX_BYTES` only
+   bounds the batch currently being assembled — nothing bounded chunks
+   still queued in the channel if the flusher fell behind the read rate
+   (slow disk, lock contention, several busy panes at once). A sustained
+   fast producer (`yes`, a large `cat`) could have grown queued memory
+   without limit — the exact failure mode §4's fix was supposed to close,
+   reintroduced one layer up.
+
+   Fixed: bounded `mpsc::channel(PTY_CHANNEL_CAPACITY = 128)`. The read
+   loop's send moved from `send` to `blocking_send` (correct because that
+   closure runs on a `spawn_blocking` thread, not async — a bounded
+   channel's plain `send` is itself async). `blocking_send` blocks the
+   calling thread once the channel is full, propagating real backpressure
+   to the PTY read rate and, via the kernel's own PTY buffer, to the child
+   process itself.
+
+2. **`flush_pty_batch` ran synchronously inside a plain `tokio::spawn`
+   task.** It does blocking SQLite I/O and takes `std::sync::Mutex`
+   locks — previously safe inside `spawn_blocking`, now running directly
+   on a Tokio async worker thread. With several streaming panes at once,
+   slow disk or lock contention could occupy every worker and delay
+   WebSocket/input/RPC tasks unrelated to the pane that's actually slow.
+
+   Fixed: wrapped the flush call in `tokio::task::block_in_place` rather
+   than `spawn_blocking` — the latter needs `'static + Send` ownership of
+   everything the closure touches, and `flush_pty_batch` borrows `&mut
+   line_buf` / `translator.as_mut()` from the flusher's own stack;
+   `block_in_place` runs inline on the current thread with no such
+   transfer, while telling the runtime to spin up a replacement worker so
+   other tasks aren't starved. Requires a multi-thread runtime —
+   `agentmux-srv`'s `#[tokio::main]` is one by default.
+
+**Verification, this round:**
+
+- New test, `blocking_send_backpressures_once_the_channel_is_full`: fills
+  a capacity-1 channel, confirms a second `blocking_send` from a real
+  background thread (mirroring the production call shape — a genuine OS
+  thread, not an async task) stays blocked while the channel is full, then
+  completes once drained. Stable across 6 repeated local runs before
+  trusting the timing-based negative assertion.
+- The two existing end-to-end coalescing tests needed
+  `#[tokio::test(flavor = "multi_thread")]` — plain `#[tokio::test]`
+  defaults to a current-thread runtime, which panics on
+  `block_in_place`. This is a test-harness-only requirement; production
+  is unaffected, since `#[tokio::main]` already defaults multi-thread.
+  Caught immediately by the test suite itself the moment `block_in_place`
+  was added — exactly the way it's supposed to work.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3332 passed, 0 failed.
+
+## 9. Second review round — `block_in_place` itself was the wrong tool (reagentx P1, PR #3206)
+
+`block_in_place`, added in §8 specifically to avoid `spawn_blocking`'s
+`'static + Send` ownership requirement, was flagged as risking worker-thread
+growth under this fix's own target scenario (many panes, each flushing
+every ~20ms, concurrently, on a long-running process).
+
+Checked the claim against the actual mechanism rather than taking it on
+either side's word — read the vendored `tokio` 1.52.3 source directly
+(`runtime/scheduler/multi_thread/worker.rs`). `block_in_place`'s own
+replacement-worker path is `runtime::spawn_blocking(move || run(worker))` —
+it draws on the *same* shared `spawn_blocking` pool internally, so "unbounded
+growth" distinct from that pool doesn't hold literally. What does hold: using
+`block_in_place` here drew on that shared pool **twice** per flush (once for
+the replacement worker, once implicitly for the original thread continuing
+to run) for work `spawn_blocking` alone covers with one call — and tokio's
+own docs name `block_in_place`'s one genuine advantage over `spawn_blocking`
+as protecting other concurrent work *in the same task* (e.g. across a
+`join!`). This flusher task does nothing else concurrently, so that
+advantage never applied here — `spawn_blocking` was strictly the better fit,
+and the extra indirection was pure waste under exactly the high-throughput,
+many-panes scenario this whole fix targets.
+
+**Fix:** switched to `spawn_blocking`, solving the original ownership
+problem properly instead of routing around it — `batch`/`batch_osc` are
+freshly built every iteration (cheap to move), and `line_buf`/`translator`
+(the only state the flush mutates) are moved into the closure and handed
+back out via the `JoinHandle`'s return value, rather than kept borrowed
+across the call.
+
+**Verification:** the two coalescing tests no longer need
+`#[tokio::test(flavor = "multi_thread")]` — that requirement came from
+`block_in_place` specifically (panics on a current-thread runtime);
+`spawn_blocking` has none. Reverted to plain `#[tokio::test]`.
+`cargo test -p agentmux-srv -- --test-threads=1`: 3332 passed, 0 failed.
+
+## 10. Third review round — STATUS_DONE could publish before the flusher finished (reagentx P1, PR #3206)
+
+Before §6's fix, the PTY read loop flushed every chunk synchronously
+inline, so by the time it observed PTY EOF (closely tracking child exit),
+all output was already committed to FileStore and broadcast — no explicit
+join was needed; the ordering fell out of the code being synchronous.
+Splitting the flush into a separately spawned, coalescing async task (§6)
+removed that implicit guarantee without replacing it: the wait task
+(`spawn_blocking`, watches `child.wait()`, then sets `STATUS_DONE` and
+publishes the final controller status) had no synchronization at all
+against the flusher's `JoinHandle` — it was spawned and dropped. A
+fast-exiting command's trailing output (its final coalesced batch, up to
+`PTY_COALESCE_WINDOW` after the process itself already exited) could still
+be in flight — not yet in FileStore, not yet broadcast — at the exact
+moment a client observed `STATUS_DONE`, which it had never been able to
+observe before this PR's own refactor.
+
+**Fix:** captured the flusher's `JoinHandle` (`flusher_handle`) at its
+`tokio::spawn` call site, and changed the wait task from a bare
+`tokio::task::spawn_blocking(move || { ... })` into an outer `tokio::spawn`
+async task that `flusher_handle.await`s first (logging and proceeding
+anyway on panic/cancellation, rather than hanging pane teardown on a dead
+flusher), then runs the entire original wait-task body — unchanged —
+inside its own inner `spawn_blocking`. That inner wrap matters as much as
+the await itself: `child.wait()` is a blocking OS call, and the cleanup
+that follows it (`registry::remove`, among others) does its own
+synchronous file I/O — none of that belonged on an async worker either,
+and a first draft of this fix that only wrapped `child.wait()` alone while
+leaving the rest of the body inline would have reintroduced exactly the
+§8-#2 bug class one call site over. Caught by re-reading the edited state
+before it was ever run, not by a reviewer.
+
+**Verification:**
+
+- `cargo check -p agentmux-srv --tests`: clean (pre-existing warnings only).
+- New test, `awaiting_the_flusher_join_handle_observes_every_broadcast_first`:
+  spawns `run_pty_output_flusher` via `tokio::spawn` (mirroring the
+  production call site exactly, not calling it inline), sends one chunk
+  from a second task after a real delay (so the flusher genuinely waits on
+  the channel rather than finding everything pre-queued the way the two
+  existing coalescing tests deliberately do for their own determinism),
+  closes the channel, then asserts that by the time `flusher_handle.await`
+  returns the trailing batch is already in FileStore and already broadcast
+  — no extra yield needed. This pins the exact tokio guarantee the wait
+  task's fix depends on. The wait task itself spawns a real PTY and child
+  process end-to-end and isn't practical to drive directly from a unit
+  test; this is the closest practical proxy, consistent with this report's
+  own §5/§7 stance of being explicit about what is and isn't covered short
+  of live verification.
+- `cargo test -p agentmux-srv pty_output_flusher_tests`: 7 passed (the 6
+  from §8/§9 plus the new one).
+- `cargo test -p agentmux-srv backend::blockcontroller::shell:: --
+  --test-threads=1`: 62 passed, including `test_shell_controller_start_stop`
+  and `test_shell_controller_force_start`, which exercise the real
+  `start()` path (real PTY, real wait task) this round's restructuring
+  touched most directly.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
+  7 ignored — no regressions.
+
+## 11. Same round, caught on this fix itself before merge — reaping the child must not depend on PTY EOF (codex P1, PR #3206)
+
+§10's fix (`flusher_handle.await` before the wait task's cleanup) introduced
+a new failure mode of its own: if a background descendant inherits the PTY
+slave fd and keeps it open after the direct child (the shell) exits — e.g.
+it ignores SIGHUP — the read loop's `read()` may never observe EOF. `pty_tx`
+is then never dropped, the flusher's channel never closes, and
+`flusher_handle` never resolves on its own. Awaiting it *before* `child.wait()`
+meant that scenario would hang child reaping itself, and everything
+downstream of it — `STATUS_DONE`, pidregistry/reactive/registry
+deregistration, and `run_lock` release — for as long as that descendant kept
+running. The pane would report `running` forever and could never restart.
+
+This is the identical descendant-held-descriptor hazard
+`agentmux-srv/src/backend/blockcontroller/persistent.rs`'s stdout/stderr
+reader cleanup already solves, for the exact same reason (a CLI's own
+background descendant can inherit its stdout pipe). That code establishes
+the fix this one now mirrors: reap the child first, unconditionally, never
+gated on a reader/flusher task; then bound the reader/flusher wait with
+`tokio::time::timeout`, and `abort()` — not just stop awaiting — on expiry,
+so a stuck task doesn't keep running in the background able to write
+trailing output after cleanup already happened.
+
+**Fix:** moved `child.wait()` into its own `spawn_blocking`, run first and
+unconditionally. Only after it resolves does the wait task
+`tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle)` — on success,
+proceed as before; on the flusher panicking/being cancelled, log and
+proceed (unchanged from §10); on timeout, log a distinct warning and
+`abort()` the flusher before proceeding. `FLUSHER_DRAIN_TIMEOUT = 10s`
+(`pty.rs`), chosen to match `persistent.rs`'s identical stdout-reader bound
+exactly — generous enough that ordinary flushing (bounded by the 20ms
+`PTY_COALESCE_WINDOW`) never trips it, but a hard ceiling so a genuinely
+stuck descendant can't hang pane teardown indefinitely.
+
+**Verification:**
+
+- `cargo check -p agentmux-srv --tests`: one compile error on the first
+  attempt (`block_id_wait` moved into the new child-reap closure, then used
+  again afterward) — fixed by cloning it into that closure instead of
+  moving the outer binding. Clean after.
+- No new dedicated test for the abort-on-timeout branch itself: like the
+  wait task as a whole (see §10's own note), this requires a real PTY and a
+  real lingering child process to exercise end-to-end, and — unlike §10's
+  property, which a synthetic channel could stand in for — the failure mode
+  here is specifically about *real* PTY fd-holding semantics, which a
+  synthetic `mpsc` channel can't reproduce. `persistent.rs`'s own identical
+  pattern has no dedicated test for its abort-on-timeout branch either, for
+  the same reason.
+- `cargo test -p agentmux-srv pty_output_flusher_tests`: 7 passed (unchanged
+  from §10 — this round didn't touch `run_pty_output_flusher` itself).
+- `cargo test -p agentmux-srv backend::blockcontroller:: -- --test-threads=1`:
+  261 passed, including `persistent.rs`'s own test modules (whose pattern
+  this fix now mirrors) and all of `blockcontroller::shell::tests`.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
+  7 ignored — no regressions.
+
+## 12. Same round, on §11's own fix — `abort()` on timeout didn't do what it claimed (reagentx P1, PR #3206)
+
+§11 claimed to mirror `persistent.rs`'s abort-on-timeout pattern; reagentx
+pointed out the mirroring was only superficial and the `abort()` call was
+actively counterproductive. The distinction: `persistent.rs`'s stdout
+reader is a *single* async task that both reads and processes each
+line — aborting that one task's `JoinHandle` genuinely stops the read,
+because tokio's cooperative cancellation can interrupt an async task at its
+next `.await`. This PR's PTY pipeline is split into two separate tasks: the
+raw read loop (`spawn_blocking`, a genuinely blocking OS-level
+`reader.read()` call, no `.await` anywhere in it) and the flusher
+(`run_pty_output_flusher`, the async consumer whose `JoinHandle` §11
+captured and aborted). Aborting the flusher does nothing to the read
+loop — a `spawn_blocking` task that has already started running cannot be
+interrupted by `abort()` at all (this is documented tokio behavior, not
+specific to this code). So on timeout, §11's fix left the read-loop thread
+running exactly as long either way — the "leak" it was reaching for was
+never actually reclaimed — while ADDING a real regression: with the
+receiver dropped (the aborted flusher owned `pty_rx`), every subsequent
+`blocking_send` in the read loop finds the channel closed and is silently
+discarded (the code already does `let _ = pty_tx.blocking_send(...)`), so
+any further output from a still-live descendant was permanently and
+silently lost from that point on, with no log marking the loss.
+
+**Fix:** removed the `abort()` call entirely. On timeout, `flusher_handle`
+is simply allowed to drop (it's owned by the `tokio::time::timeout` future,
+which drops it on expiry) — dropping a `JoinHandle` without calling
+`abort()` first detaches the task rather than cancelling it, so the flusher
+(and transitively the read loop feeding it) keeps running independently in
+the background, continuing to persist and broadcast whatever the
+descendant produces, until the PTY genuinely reaches EOF on its own. This
+accepts trading a guaranteed resource bound (which the abort version never
+actually delivered) for correctness: nothing produced after the timeout is
+silently dropped. The underlying OS thread genuinely does keep running for
+as long as something holds the PTY open — an inherent limitation of raw
+blocking PTY reads not being cancellable via tokio, orthogonal to what this
+round's fix was scoped to solve (ordering of `STATUS_DONE` relative to
+trailing output), not a new problem this fix introduces.
+
+**Verification:**
+
+- `cargo check -p agentmux-srv --tests`: clean.
+- No test changes — this fix only removes an `abort()` call and updates
+  its surrounding comments/doc comment; the resource-leak/data-loss
+  distinction it corrects requires a real PTY and a real lingering
+  descendant to observe end-to-end, same reasoning as §11's own
+  no-new-test note.
+- `cargo test -p agentmux-srv backend::blockcontroller:: -- --test-threads=1`:
+  261 passed.
+- `cargo test -p agentmux-srv -- --test-threads=1`: 3333 passed, 0 failed,
+  7 ignored — no regressions.

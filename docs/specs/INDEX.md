@@ -250,6 +250,7 @@ partial list.
 | [`SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17`](SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md) | SPEC: External-link routing + single robust "Restore" recovery |
 | [`SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16`](SPEC_INJECT_AT_TOOL_BOUNDARY_2026_06_16.md) | SPEC: Deliver a queued message mid-turn (at the next tool-call boundary) instead of waiting for idle |
 | [`SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27`](SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md) | Spec: Opt-in isolated auth for `task dev` testing |
+| [`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14`](SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md) | SPEC: 24h TTL / rotation for the host-tier jekt signing key |
 | [`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14`](SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md) | SPEC — Relax TIER=sensitive for cryptographically-verified WAN jekts |
 | [`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16`](SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md) | Spec — Pane Minimize as a Locked State (redesign) |
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
@@ -297,6 +298,7 @@ partial list.
 | [`SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19`](SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19.md) | SPEC: eager per-dispatch naming + two-bucket swarm row model |
 | [`SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06`](SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06.md) | SPEC — Swarm Row Auto-Linger Countdown on Completion |
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
+| [`SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10`](SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md) | SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons |
 | [`SPEC_TAB_COLOR_DESATURATION_2026_08_13`](SPEC_TAB_COLOR_DESATURATION_2026_08_13.md) | Spec: Desaturate tab colors, keep agent pane border colors as-is |
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
 | [`SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04`](SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) | Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs) |
@@ -370,6 +372,7 @@ partial list.
 | [`SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01`](SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md) | Spec: Drop the "Claude Code — host CLI config" block from Armory Global Memory |
 | [`SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30`](SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md) | Spec: Armory rail — merge "Global Memory" + "Personal Memory" into one "Memory" tab |
 | [`SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01`](SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md) | Spec: Armory → Memory → Personal — browse by agent block, not a dropdown |
+| [`SPEC_ARMORY_PERSONAL_MEMORY_CONTENT_VIEW_2026_09_11`](SPEC_ARMORY_PERSONAL_MEMORY_CONTENT_VIEW_2026_09_11.md) | Spec: Armory Personal Memory — Content View |
 | [`SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04`](SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04.md) | Spec: Armory → Memory → Personal — file tiles, not a dropdown |
 | [`SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02`](SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md) | Spec: find/filter and sort for Armory → Memory → Personal |
 | [`SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02`](SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) | Spec: reactive updates across the Armory |
@@ -396,6 +399,7 @@ partial list.
 | [`SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03`](SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md) | SPEC — In-app (no-shell) Claude OAuth login, revived, at all three auth surfaces |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
 | [`SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31`](SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md) | Spec: Stop the isolated Claude Code config dir from falling back to the host's `~/.claude/CLAUDE.md` |
+| [`SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10`](SPEC_JEKT_DEFERRED_DELIVERY_NO_MIDTURN_INTERRUPT_2026_09_10.md) | SPEC: Defer jekt / inter-agent message delivery until a safe turn boundary — never truncate an in-progress explanation |
 | [`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15`](SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) | SPEC: LAN-tier Ed25519 jekt signing |
 | [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
 | [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |

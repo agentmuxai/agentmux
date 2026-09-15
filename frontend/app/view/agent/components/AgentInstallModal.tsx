@@ -88,6 +88,11 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     let terminal: Terminal | null = null;
     let fitAddon: FitAddon | null = null;
     let resizeObserver: ResizeObserver | null = null;
+    // Details wrapper around the terminal (SPEC_SYSTEM_TOOL_INSTALL_DETAILS_
+    // AUTOSCROLL_2026_09_10.md §5) — defaults open (see the JSX below for
+    // why this differs from SystemToolInstallInline's default-closed
+    // panel), but still individually collapsible.
+    let detailsRef: HTMLDetailsElement | undefined;
     let startedAt = 0;
     let tickHandle: ReturnType<typeof setInterval> | null = null;
     // Hoisted so onCleanup can cancel the pending copy-on-select
@@ -325,6 +330,21 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         resizeObserver = new ResizeObserver(() => tryFit());
         resizeObserver.observe(termRef);
         terminal.writeln("\x1b[90m# Click \"Install now\" to begin.\x1b[0m");
+
+        // Re-fit when the Details panel around the terminal opens. A closed
+        // <details> doesn't lay out its children, so FitAddon can't size
+        // correctly until the container has real dimensions — the same
+        // "no layout while hidden" problem SystemToolInstallInline.tsx's
+        // scroll-sync solves for scrollTop, hitting xterm's sizing here
+        // instead. The existing ResizeObserver above may or may not fire
+        // reliably on a <details> open transition depending on how the
+        // browser handles that layout change, so don't rely on it alone.
+        const detailsEl = detailsRef;
+        if (detailsEl) {
+            const onToggle = () => { if (detailsEl.open) tryFit(); };
+            detailsEl.addEventListener("toggle", onToggle);
+            onCleanup(() => detailsEl.removeEventListener("toggle", onToggle));
+        }
     });
 
     onCleanup(() => {
@@ -397,8 +417,22 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         <span class="agent-install-modal-fail">✗</span> Failed
                     </Show>
                 </p>
+                <Show when={phase() === "installing"}>
+                    <div class="install-progress" aria-hidden="true">
+                        <div class="install-progress-bar" />
+                    </div>
+                </Show>
             </header>
             <div class="modal-panel-body agent-install-modal-body">
+                {/* Defaults OPEN, unlike SystemToolInstallInline's Details
+                    panel — this modal's entire visible body is the
+                    terminal, so collapsing it by default would leave a
+                    user who opened "Install X" staring at a bare progress
+                    bar with nothing else visible. Still individually
+                    collapsible if a user wants the compact view.
+                    SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md §5. */}
+                <details class="agent-install-modal-details" open ref={detailsRef}>
+                <summary>Details</summary>
                 <div
                     class="agent-install-modal-term"
                     ref={termRef}
@@ -458,6 +492,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                         );
                     }}
                 />
+                </details>
                 <Show when={error()}>
                     <ErrorBanner error={error()} />
                 </Show>

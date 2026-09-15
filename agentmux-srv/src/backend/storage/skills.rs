@@ -547,23 +547,31 @@ impl Store {
         Ok(rows)
     }
 
-    /// The first existing GLOBAL row matching `(name, skill_type)`, for the
+    /// The first existing GLOBAL row matching `name` alone, for the
     /// migration's first-wins dedup among global skills that aren't a
     /// recognized starter (those converge on `starter_skill_id` instead —
     /// see `skill_seed::starter_skill_trigger_for_name`).
-    pub(crate) fn skill_find_global_by_name_and_type(
-        &self,
-        name: &str,
-        skill_type: &str,
-    ) -> Result<Option<Skill>, StoreError> {
+    ///
+    /// Name-only, not `(name, skill_type)` — matching `idx_ids_skills_global_name`
+    /// (`IDENTITY_STORE_SCHEMA_VERSION` v8, `SPEC_DURABLE_BINDINGS_2026_09_10.md`
+    /// §5.4, Codex P1 on PR #3183): a `(name, skill_type)`-scoped re-query
+    /// would miss the actual winner whenever two channels' carries collide on
+    /// name but not type — the insert that failed did so because of the
+    /// name-only constraint, so the re-query must match the constraint that
+    /// actually fired, or it finds nothing, falls through to the
+    /// unrelated-PK-collision branch, and mints a fresh id whose insert
+    /// SILENTLY no-ops against the same name constraint (`INSERT OR IGNORE`),
+    /// leaving a local ref rewritten to an id the identity store never
+    /// actually holds — the skill vanishes the moment reads redirect there.
+    pub(crate) fn skill_find_global_by_name(&self, name: &str) -> Result<Option<Skill>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, trigger, skill_type, description, content, is_global, created_at, updated_at
              FROM db_skills
-             WHERE is_global = 1 AND name = ?1 AND skill_type = ?2
+             WHERE is_global = 1 AND name = ?1
              LIMIT 1",
         )?;
-        let result = stmt.query_row(params![name, skill_type], |row| {
+        let result = stmt.query_row(params![name], |row| {
             Ok(Skill {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -590,26 +598,44 @@ impl Store {
     /// row would name an id that no longer resolves anywhere once catalog
     /// reads redirect to the identity store (Phase 2's whole point).
     ///
-    /// `UPDATE ... WHERE skill_id = old_id`, not delete-then-insert: simpler,
-    /// and the PK `(agent_id, skill_id)`/`(bundle_id, skill_id)` only
-    /// collides if this exact owner already independently held a ref to
-    /// `new_id` too — vanishingly unlikely for real UUIDs, and `OR IGNORE`
-    /// makes that case a no-op (keep the existing ref) rather than an error.
-    /// Returns the number of ref rows actually repointed (0 if none named
-    /// `old_id`, distinct from "the call itself no-oped").
+    /// INSERT-survivor-then-DELETE-old, not a blind `UPDATE`: the PK
+    /// `(agent_id, skill_id)`/`(bundle_id, skill_id)` collides whenever this
+    /// exact owner already independently held a ref to `new_id` too — not
+    /// vanishingly unlikely once two DIFFERENT catalog rows (not just two
+    /// copies of the same one) can converge onto one survivor, which is
+    /// exactly what `m0033_narrow_skill_global_uniqueness_index`'s dedup
+    /// does (an owner can easily have bound BOTH of two same-name,
+    /// different-`skill_type` skills before the collision was discovered).
+    /// A plain `UPDATE OR IGNORE` left that case's old-id row untouched
+    /// (documented at the time as an acceptable no-op — ReAgent P1, PR
+    /// #3181, round 2) — but a caller that then deletes the OLD catalog row
+    /// (as `m0033` does, right after this rewrite) turns that "no-op" into a
+    /// permanently dangling ref pointing at an id nothing resolves anymore,
+    /// even within the current channel (Codex P2, PR #3183). Insert-then-
+    /// delete instead: `INSERT OR IGNORE` the survivor binding for every
+    /// owner who held `old_id` (already-bound owners no-op harmlessly, same
+    /// as before), then unconditionally `DELETE` every `old_id` row — so the
+    /// owner ends up bound to the survivor either way, never left pointing
+    /// at a name that's about to stop existing. Returns the number of
+    /// `old_id` ref rows resolved (0 if none named `old_id`, distinct from
+    /// "the call itself no-oped").
     pub(crate) fn skill_rewrite_ref_id(&self, old_id: &str, new_id: &str) -> Result<usize, StoreError> {
         if old_id == new_id {
             return Ok(0);
         }
         let conn = self.conn.lock().unwrap();
-        let agent = conn.execute(
-            "UPDATE OR IGNORE db_agent_skills_ref SET skill_id = ?2 WHERE skill_id = ?1",
+        conn.execute(
+            "INSERT OR IGNORE INTO db_agent_skills_ref (agent_id, skill_id)
+                SELECT agent_id, ?2 FROM db_agent_skills_ref WHERE skill_id = ?1",
             params![old_id, new_id],
         )?;
-        let bundle = conn.execute(
-            "UPDATE OR IGNORE db_bundle_skills_ref SET skill_id = ?2 WHERE skill_id = ?1",
+        let agent = conn.execute("DELETE FROM db_agent_skills_ref WHERE skill_id = ?1", params![old_id])?;
+        conn.execute(
+            "INSERT OR IGNORE INTO db_bundle_skills_ref (bundle_id, skill_id)
+                SELECT bundle_id, ?2 FROM db_bundle_skills_ref WHERE skill_id = ?1",
             params![old_id, new_id],
         )?;
+        let bundle = conn.execute("DELETE FROM db_bundle_skills_ref WHERE skill_id = ?1", params![old_id])?;
         Ok(agent + bundle)
     }
 
@@ -1230,5 +1256,185 @@ mod bundle_ref_tests {
         assert!(!store.bundle_skill_is_accessible_to(&store, "bundle-1", "skill-private").unwrap());
         store.bundle_skill_bind(&store, &store, "bundle-1", "skill-private").unwrap();
         assert!(store.bundle_skill_is_accessible_to(&store, "bundle-1", "skill-private").unwrap());
+    }
+}
+
+#[cfg(test)]
+mod rewrite_ref_id_and_delete_ordering_tests {
+    use super::*;
+    use crate::backend::storage::bundles::Bundle;
+
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
+    }
+
+    fn skill(id: &str, name: &str, is_global: bool) -> Skill {
+        Skill {
+            id: id.to_string(),
+            name: name.to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: "content".to_string(),
+            is_global,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
+
+    fn insert_agent(store: &Store, id: &str) {
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute("INSERT INTO db_agents (id, name, provider) VALUES (?1, 'A', 'claude')", params![id])
+            .unwrap();
+    }
+
+    fn insert_bundle(store: &Store, id: &str) {
+        store
+            .bundle_upsert(&Bundle {
+                id: id.to_string(),
+                name: format!("Bundle {id}"),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "claude".to_string(),
+                model: "anthropic".to_string(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".to_string(),
+                context_files: "[]".to_string(),
+                mcp_servers: "[]".to_string(),
+                skills: "[]".to_string(),
+                sort_order: 0,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_000,
+                is_system: false,
+            })
+            .unwrap();
+    }
+
+    fn raw_bind_agent(store: &Store, agent_id: &str, skill_id: &str) {
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES (?1, ?2)",
+                params![agent_id, skill_id],
+            )
+            .unwrap();
+    }
+
+    fn raw_bind_bundle(store: &Store, bundle_id: &str, skill_id: &str) {
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES (?1, ?2)",
+                params![bundle_id, skill_id],
+            )
+            .unwrap();
+    }
+
+    /// Codex P2, PR #3183: when an owner already holds a ref to BOTH the
+    /// loser id and the survivor id (e.g. an agent independently bound two
+    /// same-name-different-type skills before `m0033` discovered the
+    /// collision), the old `UPDATE OR IGNORE` left the loser's ref row
+    /// untouched — a caller that then deletes the loser catalog row (as
+    /// `m0033` does) turns that into a permanently dangling ref. The fixed
+    /// insert-then-delete version must leave the owner bound to ONLY the
+    /// survivor.
+    #[test]
+    fn rewrite_resolves_a_ref_row_even_when_the_owner_already_holds_the_survivor_too() {
+        let store = make_store();
+        insert_agent(&store, "agent-1");
+        raw_bind_agent(&store, "agent-1", "loser-id");
+        raw_bind_agent(&store, "agent-1", "survivor-id");
+
+        let rewritten = store.skill_rewrite_ref_id("loser-id", "survivor-id").unwrap();
+        assert_eq!(rewritten, 1, "the loser ref row must be resolved (deleted, since the survivor was already bound)");
+
+        assert!(store.skill_is_bound_to("agent-1", "survivor-id").unwrap());
+        assert!(
+            !store.skill_is_bound_to("agent-1", "loser-id").unwrap(),
+            "no ref may still name the loser id after the rewrite — that id is about to be deleted from the catalog"
+        );
+    }
+
+    /// Same scenario, bundle-level ref table.
+    #[test]
+    fn rewrite_resolves_a_bundle_ref_row_even_when_the_bundle_already_holds_the_survivor_too() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        raw_bind_bundle(&store, "bundle-1", "loser-id");
+        raw_bind_bundle(&store, "bundle-1", "survivor-id");
+
+        let rewritten = store.skill_rewrite_ref_id("loser-id", "survivor-id").unwrap();
+        assert_eq!(rewritten, 1);
+
+        assert!(store.bundle_skill_is_bound_to("bundle-1", "survivor-id").unwrap());
+        assert!(!store.bundle_skill_is_bound_to("bundle-1", "loser-id").unwrap());
+    }
+
+    /// The ordinary case (no pre-existing survivor ref) must still behave
+    /// like a plain rename.
+    #[test]
+    fn rewrite_behaves_like_a_plain_rename_when_the_owner_has_no_prior_survivor_ref() {
+        let store = make_store();
+        insert_agent(&store, "agent-1");
+        raw_bind_agent(&store, "agent-1", "old-id");
+
+        let rewritten = store.skill_rewrite_ref_id("old-id", "new-id").unwrap();
+        assert_eq!(rewritten, 1);
+        assert!(store.skill_is_bound_to("agent-1", "new-id").unwrap());
+        assert!(!store.skill_is_bound_to("agent-1", "old-id").unwrap());
+    }
+
+    /// Codex P1, PR #3183: `managed_delete` (via `skill_delete`) must delete
+    /// the catalog row BEFORE purging refs, not after — so a catalog-delete
+    /// failure never leaves a private row's refs already gone (which would
+    /// make it permanently inaccessible and un-retryable, since the ordinary
+    /// delete RPC's own pre-check depends on the very ref this would have
+    /// already destroyed). Forces a real SQL error the same way
+    /// `managed_upsert_unique_compensates_by_deleting_the_catalog_row_when_the_bind_fails`
+    /// does (`managed.rs`'s own test) — dropping the catalog table, since
+    /// `DELETE ... WHERE id = ?` on a missing row is not itself an error.
+    #[test]
+    fn skill_delete_leaves_refs_intact_when_the_catalog_delete_itself_fails() {
+        let store = make_store();
+        insert_agent(&store, "agent-1");
+        store
+            .skill_upsert_unique(&store, "agent-1", &skill("private-1", "Deploy", false), true)
+            .unwrap();
+        assert!(store.skill_is_bound_to("agent-1", "private-1").unwrap());
+
+        store.conn().lock().unwrap().execute_batch("DROP TABLE db_skills;").unwrap();
+
+        let result = store.skill_delete(&store, "private-1");
+        assert!(result.is_err(), "the catalog delete must fail now that its table is gone");
+
+        // Re-create db_skills (empty) so the ref-table read below works —
+        // the point being verified is that the ref row was NEVER purged in
+        // the first place, i.e. the failure above happened before any ref
+        // mutation, not that the schema self-heals.
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE db_skills (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL, trigger TEXT NOT NULL DEFAULT '',
+                    skill_type TEXT NOT NULL DEFAULT 'prompt', description TEXT NOT NULL DEFAULT '',
+                    content TEXT NOT NULL DEFAULT '', is_global INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0
+                );",
+            )
+            .unwrap();
+        assert!(
+            store.skill_is_bound_to("agent-1", "private-1").unwrap(),
+            "the ref row must still exist — a failed catalog delete must never strand a row with its bindings already purged"
+        );
     }
 }

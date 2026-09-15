@@ -13,6 +13,13 @@
 //! returned over any RPC. This is what makes the resulting signature mean
 //! something: only the agent it claims to be from ever held the key needed
 //! to produce it.
+//!
+//! As of docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md, a key
+//! past `JEKT_KEY_TTL_SECS` old is rotated the next time `agent_jekt_key_ensure`
+//! is called for it (i.e. at that agent's next spawn) — see that spec for
+//! why this is lazy-at-next-mint rather than invalidating a live key.
+//! `agent_jekt_key_load` (the verification-read path) is deliberately
+//! unaffected: it has no concept of "too old," only "matches" or "doesn't."
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use rusqlite::params;
@@ -23,6 +30,11 @@ use super::store::Store;
 fn now_secs() -> i64 {
     agentmux_common::time::now_secs()
 }
+
+/// A key older than this is rotated at its agent's next spawn (the next
+/// `agent_jekt_key_ensure` call), not invalidated in place — see
+/// docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §2.
+const JEKT_KEY_TTL_SECS: i64 = 24 * 60 * 60;
 
 /// 32 bytes of randomness via two v4 UUIDs — avoids adding a `rand`/`getrandom`
 /// dependency; `uuid`'s v4 generation is already CSPRNG-backed and `uuid` is
@@ -55,16 +67,61 @@ impl Store {
         }
     }
 
+    /// Load this agent's signing key together with its mint/last-rotation
+    /// time, if one has already been minted.
+    fn agent_jekt_key_load_with_created_at(&self, agent_id: &str) -> Result<Option<(Vec<u8>, i64)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT hmac_key, created_at FROM db_agent_jekt_keys WHERE agent_id = ?1")?;
+        match stmt.query_row(params![agent_id], |row| {
+            let encoded: String = row.get(0)?;
+            let created_at: i64 = row.get(1)?;
+            Ok((encoded, created_at))
+        }) {
+            Ok((encoded, created_at)) => {
+                let bytes = BASE64.decode(&encoded).map_err(|e| {
+                    StoreError::Other(format!("agent_jekt_key: stored key is not valid base64: {e}"))
+                })?;
+                Ok(Some((bytes, created_at)))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Return this agent's signing key, minting and persisting a fresh
     /// random one on first use. Race-safe under concurrent first-use: the
     /// insert is `OR IGNORE`, and the winning row (whichever call actually
     /// landed first) is always what gets read back and returned, so two
     /// concurrent callers for the same never-before-seen agent_id agree on
     /// one key instead of each minting and using a different one.
+    ///
+    /// A key older than `JEKT_KEY_TTL_SECS` is rotated here rather than
+    /// returned as-is — see docs/specs/SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md.
     pub fn agent_jekt_key_ensure(&self, agent_id: &str) -> Result<Vec<u8>, StoreError> {
         let key = agent_id.to_lowercase();
-        if let Some(existing) = self.agent_jekt_key_load(&key)? {
-            return Ok(existing);
+        if let Some((existing, created_at)) = self.agent_jekt_key_load_with_created_at(&key)? {
+            if now_secs() - created_at < JEKT_KEY_TTL_SECS {
+                return Ok(existing);
+            }
+            let conn = self.conn.lock().unwrap();
+            let fresh = random_key_bytes();
+            let encoded = BASE64.encode(fresh);
+            // Guarded on the stale created_at we just read so two
+            // concurrent rotators for the same overdue agent_id agree on
+            // one winner instead of each minting a different key — same
+            // "re-read regardless of whether our own write won" shape as
+            // the first-mint path below.
+            conn.execute(
+                "UPDATE db_agent_jekt_keys SET hmac_key = ?1, created_at = ?2 \
+                 WHERE agent_id = ?3 AND created_at = ?4",
+                params![encoded, now_secs(), key, created_at],
+            )?;
+            let mut stmt = conn.prepare("SELECT hmac_key FROM db_agent_jekt_keys WHERE agent_id = ?1")?;
+            let winning: String = stmt.query_row(params![key], |row| row.get(0))?;
+            return BASE64
+                .decode(&winning)
+                .map_err(|e| StoreError::Other(format!("agent_jekt_key: stored key is not valid base64: {e}")));
         }
         let conn = self.conn.lock().unwrap();
         let fresh = random_key_bytes();
@@ -128,5 +185,58 @@ mod tests {
         let minted = store.agent_jekt_key_ensure("agentx").unwrap();
         let loaded = store.agent_jekt_key_load("agentx").unwrap().unwrap();
         assert_eq!(minted, loaded);
+    }
+
+    /// Backdates the stored `created_at` for `agent_id` directly via SQL —
+    /// simulates "this key was minted a while ago" without sleeping in a
+    /// test.
+    fn backdate(store: &Store, agent_id: &str, age_secs: i64) {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE db_agent_jekt_keys SET created_at = ?1 WHERE agent_id = ?2",
+            params![now_secs() - age_secs, agent_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn ensure_does_not_rotate_before_ttl_expiry() {
+        let store = object_store();
+        let first = store.agent_jekt_key_ensure("agentx").unwrap();
+        backdate(&store, "agentx", JEKT_KEY_TTL_SECS - 60);
+        let second = store.agent_jekt_key_ensure("agentx").unwrap();
+        assert_eq!(first, second, "a key under the TTL must be returned unchanged");
+    }
+
+    #[test]
+    fn ensure_rotates_key_after_ttl_expiry() {
+        let store = object_store();
+        let first = store.agent_jekt_key_ensure("agentx").unwrap();
+        backdate(&store, "agentx", JEKT_KEY_TTL_SECS + 60);
+        let second = store.agent_jekt_key_ensure("agentx").unwrap();
+        assert_ne!(first, second, "a key past the TTL must be rotated to a fresh one");
+        assert_eq!(second.len(), 32);
+    }
+
+    #[test]
+    fn rotation_is_reflected_by_load_not_just_ensure() {
+        let store = object_store();
+        let first = store.agent_jekt_key_ensure("agentx").unwrap();
+        backdate(&store, "agentx", JEKT_KEY_TTL_SECS + 60);
+        let rotated = store.agent_jekt_key_ensure("agentx").unwrap();
+        let loaded = store.agent_jekt_key_load("agentx").unwrap().unwrap();
+        assert_eq!(loaded, rotated);
+        assert_ne!(loaded, first, "load must see the rotated key, not the original");
+    }
+
+    #[test]
+    fn other_agents_keys_are_unaffected_by_one_agents_rotation() {
+        let store = object_store();
+        let a_before = store.agent_jekt_key_ensure("agentx").unwrap();
+        let b = store.agent_jekt_key_ensure("agenty").unwrap();
+        backdate(&store, "agentx", JEKT_KEY_TTL_SECS + 60);
+        let a_after = store.agent_jekt_key_ensure("agentx").unwrap();
+        assert_ne!(a_before, a_after);
+        assert_eq!(b, store.agent_jekt_key_load("agenty").unwrap().unwrap());
     }
 }

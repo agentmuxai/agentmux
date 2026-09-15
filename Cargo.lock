@@ -21,7 +21,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-bashwrap"
-version = "0.55.41"
+version = "0.55.43"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -42,7 +42,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.55.41"
+version = "0.55.43"
 dependencies = [
  "agentmux-common",
  "ash",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.55.41"
+version = "0.55.43"
 dependencies = [
  "base64",
  "dirs 5.0.1",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.55.41"
+version = "0.55.43"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-mcp"
-version = "0.55.41"
+version = "0.55.43"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.55.41"
+version = "0.55.43"
 dependencies = [
  "agentmux-common",
  "async-stream",

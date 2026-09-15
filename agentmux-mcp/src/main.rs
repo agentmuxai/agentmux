@@ -765,7 +765,11 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellInputRequest { shell_id: shell_id.to_string(), text: text.to_string() })
+                .json(&PtyShellInputRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                    text: text.to_string(),
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -814,7 +818,12 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellResizeRequest { shell_id: shell_id.to_string(), rows, cols })
+                .json(&PtyShellResizeRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                    rows,
+                    cols,
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -856,7 +865,11 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellReadRequest { shell_id: shell_id.to_string(), tail_lines })
+                .json(&PtyShellReadRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                    tail_lines,
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -891,7 +904,10 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellStatusRequest { shell_id: shell_id.to_string() })
+                .json(&PtyShellStatusRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -930,7 +946,10 @@ async fn call_tool(
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&PtyShellStopRequest { shell_id: shell_id.to_string() })
+                .json(&PtyShellStopRequest {
+                    shell_id: shell_id.to_string(),
+                    agent_block_id: block_id.to_string(),
+                })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -945,10 +964,10 @@ async fn call_tool(
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
-            Ok(if result.stopped {
-                format!("stopped shell {shell_id}")
+            Ok(if result.released {
+                format!("released the agent lock on shell {shell_id} (the shell itself keeps running)")
             } else {
-                format!("shell {shell_id} was not running (unknown or already stopped)")
+                format!("shell {shell_id}: no active agent lock to release (unrecognized id, not yours, or already unlocked)")
             })
         }
         "OpenEditor" => {
@@ -1153,7 +1172,34 @@ async fn call_tool(
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
             if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                Ok(format!("Message sent to {to}"))
+                // `success: true` spans two very different outcomes and the old
+                // message conflated them, which made agent-to-agent delivery
+                // unfalsifiable from the sender side: a name that exists on no
+                // machine anywhere reported exactly the same string as a
+                // message injected into a live conversation. Verified against a
+                // running srv — `SendMessage(to="definitely-not-a-real-agent-xyz123")`
+                // returned "Message sent to ...", and the server log showed
+                // "cloud relay: queued for WAN delivery" for it, identical to a
+                // real remote agent.
+                //
+                // The response already carries the distinction: the handler sets
+                // `block_id` to the receiving block on local/host delivery
+                // (backend/reactive/handler.rs), while the cloud-relay path
+                // leaves it `None` because no receiver has seen the message yet
+                // (server/reactive.rs, `try_cloud_relay` — "Queued is not
+                // delivered"). Report which one happened.
+                if result.get("block_id").and_then(|v| v.as_str()).is_some() {
+                    Ok(format!("Delivered to {to} — injected into their conversation."))
+                } else {
+                    Ok(format!(
+                        "QUEUED for {to} via the cloud relay — NOT yet delivered. \
+                         The relay accepted it; their AgentMux picks it up on its next \
+                         sync, which never happens if that instance is offline. You get \
+                         this same result for an agent name that does not exist anywhere, \
+                         so check the spelling against DiscoverAgents if you expected \
+                         local delivery."
+                    ))
+                }
             } else {
                 let err = result
                     .get("error")

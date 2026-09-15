@@ -77,18 +77,26 @@ vi.mock("@/app/store/global", async () => {
 });
 
 // TermWrap is the real xterm.js + PTY wrapper — mocked entirely so tests
-// assert on WHAT it was constructed with (specifically: fontSize), not on
-// real terminal rendering.
-const termWrapInstances: Array<{ fontSize: number; loaded: boolean; terminal: any }> = [];
+// assert on WHAT it was constructed with (specifically: fontSize and, for
+// the agent-lock tests, the sendDataHandler closure), not on real terminal
+// rendering.
+const termWrapInstances: Array<{ fontSize: number; loaded: boolean; terminal: any; sendDataHandler: (data: string) => void }> = [];
 
 vi.mock("@/app/view/term/termwrap", () => {
     class FakeTermWrap {
         fontSize: number;
         terminal = { options: { fontSize: 0 } };
         loaded = false;
-        constructor(_id: string, _container: HTMLElement, options: { fontSize: number }) {
+        sendDataHandler: (data: string) => void;
+        constructor(
+            _id: string,
+            _container: HTMLElement,
+            options: { fontSize: number },
+            waveOptions: { sendDataHandler: (data: string) => void }
+        ) {
             this.fontSize = options.fontSize;
             this.terminal.options.fontSize = options.fontSize;
+            this.sendDataHandler = waveOptions.sendDataHandler;
             termWrapInstances.push(this as any);
         }
         async init() {
@@ -324,5 +332,82 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
         const [, set] = blockDataSignals.get(oref)!;
         set({ value: { meta: { "term:zoom": 2.0 } }, loading: false });
         await waitFor(() => expect(termWrapInstances[0].terminal.options.fontSize).toBe(26));
+    });
+});
+
+describe("AgentShellSubblock — agent lock (SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md)", () => {
+    it("drops human keystrokes while term:agentlockuntil is in the future", async () => {
+        const { sendWSCommand } = await import("@/app/store/ws");
+        const existingId = "locked-sub-block";
+        const oref = `block:${existingId}`;
+        queueSeedMeta(oref, { "term:agentlockuntil": Date.now() + 60_000 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        termWrapInstances[0].sendDataHandler("y");
+        expect(sendWSCommand).not.toHaveBeenCalled();
+    });
+
+    it("forwards human keystrokes once term:agentlockuntil has passed", async () => {
+        const { sendWSCommand } = await import("@/app/store/ws");
+        const existingId = "expired-lock-sub-block";
+        const oref = `block:${existingId}`;
+        // Already in the past — no need to wait for the component's own
+        // periodic re-check to observe this; `agentLockedUntil() > nowTick()`
+        // is already false the instant it's read.
+        queueSeedMeta(oref, { "term:agentlockuntil": Date.now() - 1000 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        termWrapInstances[0].sendDataHandler("y");
+        expect(sendWSCommand).toHaveBeenCalledWith(
+            expect.objectContaining({ wscommand: "blockinput", blockid: existingId })
+        );
+    });
+
+    it("shows the agent-lock badge only while locked, un-mounting once a live update clears it", async () => {
+        const existingId = "live-unlock-sub-block";
+        const oref = `block:${existingId}`;
+        queueSeedMeta(oref, { "term:agentlockuntil": Date.now() + 60_000 });
+
+        const { container } = render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(container.querySelector(".agent-shell-agentlock-badge")).not.toBeNull();
+
+        // Simulate the backend's own lock-release (PtyShellStop, or the
+        // lease simply expiring and getting cleared) landing as a live meta
+        // update — same delivery path `term:zoom` live-updates already use.
+        const [, set] = blockDataSignals.get(oref)!;
+        set({ value: { meta: {} }, loading: false });
+        await waitFor(() => expect(container.querySelector(".agent-shell-agentlock-badge")).toBeNull());
     });
 });
