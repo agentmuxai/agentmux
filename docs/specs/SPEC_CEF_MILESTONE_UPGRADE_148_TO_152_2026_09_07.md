@@ -235,6 +235,88 @@ did not RE-RUN in an incremental rebuild; the 148 tree's `.air` dates from
 `docs/cef-build/build-patched-framework-macos.md` with a compile-based check,
 because the download reports success regardless of whether the compiler works.
 
+**Update 2026-09-11 — Phase C `links` blocker (found 2026-09-10, above) is
+root-caused and fixed (Opaz); Linux Phase D completes; macOS/Windows/Linux
+all now have a 152 build.** Full detail lives on issue #3108's comment
+thread, not duplicated here — summary for continuity: Cargo's
+one-`links`-value-per-graph rule (confirmed by Korp 2026-09-10) is worked
+around by renaming the fork's `cef-dll-sys` `links` value to
+`cef_dll_wrapper_agentmux` (`AgentU-asaf/cef-rs#4`/`#5`, unmerged as of
+this writing), which lets `cef_win`/`cef_unix` coexist. The actual §4
+staging mechanism, built against that fix, is `agentmuxai/agentmux#3204`
+("Phase C mechanism," draft as of this writing). Linux Phase D also
+finished this day (build, §5 carry-set gate, H.264 codec playback, ANGLE
+check) — all three platforms have now built CEF 152 at least once. A
+structural gap in `cef-verify-patches.sh`'s differential-compile check was
+also found and confirmed on two platforms: under `use_thin_lto=true`
+(Linux, Windows; macOS's `args-darwin.gn` doesn't set it), an isolated
+single-TU recompile produces LLVM bitcode, not the machine code actually
+linked into the shipped binary via the whole-program ThinLTO backend pass
+— that check needs a different mechanism on those two platforms. Not yet
+fixed as of this writing.
+
+**Update 2026-09-15 (Korp) — Phase C mechanism verified compiling on real
+Windows; the one specific gap blocking #3204 is closed.** ReAgent's P1 on
+that PR ("actual compilation of Windows-specific `cef::` call sites [was]
+never verified" — everyone up to that point had only run `cargo metadata`
+or checked non-Windows platforms) is now answered: checked out #3204 on a
+real Windows box with the full MSVC/CMake/Ninja toolchain and ran
+`cargo check -p agentmux-cef --target x86_64-pc-windows-msvc` and the
+exact `cargo check --workspace --tests` `ci-pr.yml`'s required Windows leg
+runs. Both clean — zero errors, and the warning count (60) exactly matches
+`main` rebuilt on the same machine, so the `cef_win`/`cef_unix` split
+introduces no regressions. CI's own windows-latest run on #3204 shows
+`CANCELLED`, not a pass, so this was the first real Windows compile signal
+that PR had gotten. Posted as a third independent-platform confirmation
+(after Clare's macOS, Opaz's Linux) on `AgentU-asaf/cef-rs#4`/`#5` too.
+**Remaining, unchanged by this:** #3204's `[patch.crates-io]` still points
+at a personal fork pending `AgentU-asaf/cef-rs#4` merging (no reviews on
+it as of this writing — a trivial, well-verified one-line rename with
+nothing blocking it but review bandwidth); and separately, actually
+cutting a released Windows CEF 152 runtime build and updating
+`release.yml`'s `WIN_TAG` (Phase D's local build exists — 2026-09-10,
+above — but was never published) remains unclaimed work, distinct from
+and not blocked by the mechanism PR. See #3108 for the live cross-platform
+rollup.
+
+**Update 2026-09-15 (Korp) — Windows Phase E: release artifact built,
+packaged, and verified; not published.** The Sept 10 build (above) was
+still on disk (`Release_GN_152`) — re-verified fresh rather than rebuilt:
+boots clean via `cefsimple.exe`; `cef_version.h` confirms a genuine
+`152.0.7977.83` build. **ANGLE re-verified via the actual symbol-export
+gate, not file size** (codex P2 on #3224 caught an earlier revision of
+this note leaning on size alone, which this spec's own Sept 10 section
+above already warned isn't reliable) — `scripts/verify-angle-libs.sh`
+against both the build directory and the extracted packaged zip: clean
+pass on both, genuine `eglGetProcAddress`/`glGetString` exports present.
+
+**Provenance, corrected (codex P2 on #3224):** `cef_version.h`'s
+`CEF_COMMIT_HASH=79460ebecaa5...` is a **Chromium** commit (confirmed:
+`git log -1` in the `chromium/src` tree resolves it to the official
+"Incrementing VERSION to 152.0.7977.83" branch-cut commit) — not our
+`agentmuxai/cef` fork's own commit, contrary to how an earlier revision of
+this note (and Opaz's 2026-09-11 Linux comment, which this echoed) read
+it. The actual fork-side provenance is whatever the `cef` clone's HEAD was
+at build time: `2817bfb6f85142a76bf5e33499079f22e42d8af2`, on the
+`7977-drag-rightclick-and-transparency` feature branch — **that** commit
+is this specific artifact's real provenance, and is what a release should
+target, not `agentmuxai/7977`'s later, fuller integration-branch tip
+(`fe7c8a3c2`). The ancestor-check reasoning below still stands as evidence
+the artifact would be *functionally identical* to one built from
+`fe7c8a3c2` (worth recording for context) — but per codex's correct
+objection, that's a claim about equivalence, not a license to name a later
+commit as the provenance of an already-built binary: confirmed via `git
+merge-base --is-ancestor` that `2817bfb6f` is an ancestor of
+`agentmuxai/7977`'s current tip, and that the one integration-branch
+commit not reachable from it (`agentmux_process_requirement`, macOS-only,
+touches only `base/apple/`) cannot affect a Windows binary either way.
+Packaged per `docs/cef-build/build-patched-cef-windows.md` §7:
+`cef-windows-x86_64-152.0.7977.83.zip` (194 MB, 455 entries, libcef.dll
+size cross-checked against the zip entry). **Deliberately not published**
+— per Opaz's 2026-09-11 comment on #3108, being the first platform to cut
+an actual 152 release is "a repo-owner call," same as bumping the pins;
+no platform has published one yet. Full trail on #3108.
+
 **Priority:** Medium-high — no active breakage, but we are four Chromium milestones behind and the gap grows by one milestone roughly every four weeks.
 
 ---
