@@ -202,7 +202,7 @@ fn detect_cli(name: &str) -> CliDetectionResult {
 // .github/workflows/container-image.yml `claude_version` default — enforced by
 // frontend/app/view/agent/providers/pin-consistency.test.ts.
 const CLAUDE_VERSION: &str = "2.1.263";
-const CODEX_VERSION: &str = "0.153.4";
+const CODEX_VERSION: &str = "0.154.0";
 const GEMINI_VERSION: &str = "0.58.0";
 
 fn get_provider_install_dir(data_dir: &str, provider: &str) -> Result<std::path::PathBuf, String> {

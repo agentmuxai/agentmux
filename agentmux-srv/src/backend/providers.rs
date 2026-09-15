@@ -24,6 +24,25 @@ pub enum ControllerType {
     /// Agent Client Protocol (ACP): JSON-RPC 2.0 over stdio.
     /// Sessions are managed by the protocol — no resume flags needed.
     Acp,
+    /// Provider-specific App Server protocol over a persistent JSONL stdio
+    /// transport. Protocol semantics are selected by [`AppServerKind`].
+    AppServer,
+}
+
+/// Protocol spoken by a provider-neutral App Server controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppServerKind {
+    Codex,
+}
+
+/// Optional App Server capability advertised by a provider. Presence does not
+/// select the controller: `controller_type` remains the rollout switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppServerConfig {
+    pub kind: AppServerKind,
+    pub launch_args: &'static [&'static str],
+    pub fallback_controller: ControllerType,
+    pub fallback_output_format: &'static str,
 }
 
 // ─── ProviderConfig ──────────────────────────────────────────────────────────
@@ -38,6 +57,10 @@ pub struct ProviderConfig {
     pub cli_command: &'static str,
     /// Whether the provider keeps a persistent subprocess or spawns per turn.
     pub controller_type: ControllerType,
+    /// Rich-client App Server capability, when the provider exposes one.
+    /// Kept separate from `controller_type` so the transport can land behind a
+    /// disabled-by-default rollout gate.
+    pub app_server: Option<AppServerConfig>,
     /// Complete CLI args for a single-turn (subprocess) invocation.
     /// The user prompt is written to the process's stdin.
     pub launch_args: &'static [&'static str],
@@ -182,6 +205,7 @@ impl ProviderConfig {
             ControllerType::Persistent => "persistent",
             ControllerType::Subprocess => "subprocess",
             ControllerType::Acp => "acp",
+            ControllerType::AppServer => "app-server",
         }
     }
 
@@ -218,6 +242,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // controller's ControlChannel auto-allows ordinary tools to preserve today's
     // yolo UX; only AskUserQuestion is surfaced to the user.
     controller_type: ControllerType::Persistent,
+    app_server: None,
     launch_args: &[
         "-p",
         "--output-format",
@@ -286,6 +311,12 @@ static CODEX: ProviderConfig = ProviderConfig {
     id: "codex",
     cli_command: "codex",
     controller_type: ControllerType::Subprocess,
+    app_server: Some(AppServerConfig {
+        kind: AppServerKind::Codex,
+        launch_args: &["app-server", "--listen", "stdio://"],
+        fallback_controller: ControllerType::Subprocess,
+        fallback_output_format: "codex-json",
+    }),
     // exec subcommand runs non-interactively; --json emits NDJSON events; - reads prompt from stdin
     launch_args: &[
         "exec",
@@ -305,7 +336,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@openai/codex",
-    pinned_version: "0.153.4",
+    pinned_version: "0.154.0",
     base_url_env_var: None,
     supported_vendors: &["openai"],
     // Confirmed: SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md §10.2 —
@@ -322,6 +353,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     id: "gemini",
     cli_command: "gemini",
     controller_type: ControllerType::Subprocess,
+    app_server: None,
     // --output-format stream-json: NDJSON events; --yolo: auto-approve all tools;
     // -p "": enable headless/non-interactive mode (prompt comes from stdin)
     launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
@@ -357,6 +389,7 @@ static QWEN: ProviderConfig = ProviderConfig {
     id: "qwen",
     cli_command: "qwen",
     controller_type: ControllerType::Subprocess,
+    app_server: None,
     // -p: non-interactive; --output-format stream-json: NDJSON events;
     // --yolo: auto-approve all tools. Mirrors GEMINI (its upstream).
     launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
@@ -401,6 +434,7 @@ static KIMI: ProviderConfig = ProviderConfig {
     id: "kimi",
     cli_command: "kimi",
     controller_type: ControllerType::Subprocess,
+    app_server: None,
     launch_args: &[
         "--print",
         "--output-format",
@@ -456,6 +490,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     // Verified against docs.openclaw.ai/cli/acp + GitHub README.
     cli_command: "openclaw",
     controller_type: ControllerType::Acp,
+    app_server: None,
     launch_args: &["acp"],
     persistent_launch_args: None,
     // ACP handles sessions natively — no resume flag or session ID parsing needed
@@ -493,6 +528,7 @@ static PI: ProviderConfig = ProviderConfig {
     id: "pi",
     cli_command: "pi",
     controller_type: ControllerType::Acp,
+    app_server: None,
     launch_args: &["--json"],
     persistent_launch_args: None,
     resume_flag: None,
@@ -535,6 +571,7 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     id: "muxcode",
     cli_command: "muxcode",
     controller_type: ControllerType::Subprocess,
+    app_server: None,
     // muxcode emits NDJSON unconditionally; no --output-format flag exists.
     // The `run` subcommand is explicit even though it is Commander's default,
     // so the invocation is unambiguous: `muxcode run -p "<prompt>"`.
@@ -572,6 +609,7 @@ static COPILOT: ProviderConfig = ProviderConfig {
     id: "copilot",
     cli_command: "copilot",
     controller_type: ControllerType::Acp,
+    app_server: None,
     launch_args: &["--acp"],
     persistent_launch_args: None,
     resume_flag: None,
@@ -633,6 +671,7 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     id: "antigravity",
     cli_command: "agy",
     controller_type: ControllerType::Subprocess,
+    app_server: None,
     launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
     persistent_launch_args: None,
     resume_flag: Some("-r"),
@@ -1022,6 +1061,24 @@ mod tests {
         assert!(p.resume_flag.is_none());
         assert_eq!(p.controller_type, ControllerType::Subprocess);
         assert_eq!(p.resume_strategy_str(), "codex-exec");
+    }
+
+    #[test]
+    fn codex_advertises_app_server_without_enabling_it() {
+        let p = get_provider("codex").unwrap();
+        let app_server = p.app_server.expect("Codex App Server capability");
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(app_server.kind, AppServerKind::Codex);
+        assert_eq!(
+            app_server.launch_args,
+            &["app-server", "--listen", "stdio://"]
+        );
+        assert_eq!(
+            app_server.fallback_controller,
+            ControllerType::Subprocess
+        );
+        assert_eq!(app_server.fallback_output_format, "codex-json");
+        assert_eq!(p.auth_config_dir_env_var, "CODEX_HOME");
     }
 
     #[test]

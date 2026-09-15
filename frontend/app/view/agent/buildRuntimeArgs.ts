@@ -34,9 +34,8 @@ const PERMISSION_STRIP = new Set([
 // Default codex model. The Claude-named `ModelChoice` (opus/sonnet/haiku) does
 // not apply to codex, and codex 0.116.0's baked default (gpt-5.3-codex) was
 // rejected for ChatGPT-account auth. gpt-5.5 remains valid — re-verified
-// 2026-09-06 against OpenAI's own Codex model docs when the CLI pin bumped to
-// 0.153.4 (SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md): gpt-5.5 is
-// explicitly still supported for ChatGPT sign-in auth, described there as the
+// 2026-09-12 against OpenAI's Codex model docs when the CLI pin bumped to
+// 0.154.0. It is still supported for ChatGPT sign-in auth and described as the
 // "previous-generation flagship" (gpt-6-astra is newer but in a staged,
 // limited-org rollout as of that date, so gpt-5.5 stays the safer default).
 // Per-provider model selection is a follow-up — see

@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000012"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll create the fixture with a tiny patch now."}}
+{"type":"item.started","item":{"id":"item_1","type":"file_change","changes":[{"path":"C:\\fixture-workspace\\fixture.txt","kind":"add"}],"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"file_change","changes":[{"path":"C:\\fixture-workspace\\fixture.txt","kind":"add"}],"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"fixture-file-done"}}
+{"type":"turn.completed","usage":{"input_tokens":28104,"cached_input_tokens":27392,"cache_write_input_tokens":0,"output_tokens":57,"reasoning_output_tokens":0}}
