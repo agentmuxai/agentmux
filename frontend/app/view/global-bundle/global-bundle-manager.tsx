@@ -90,7 +90,7 @@ function SystemSectionEditor(props: { model: GlobalBundleViewModel; isNew: boole
                     value={model.draftSystemNameAtom()}
                     onInput={(e) => model.setDraftSystemName(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="e.g. AgentMux Policy"
+                    placeholder="e.g. Global Memory Policy"
                 />
             </label>
             <label class="global-bundle-field">
@@ -208,7 +208,7 @@ export const GlobalBundleManager = (): JSX.Element => {
                                 fallback={
                                     <>
                                         <div class="global-bundle-file-header">
-                                            <span class="global-bundle-file-system-tag">AgentMux</span>
+                                            <span class="global-bundle-file-system-tag">Global Memory</span>
                                             <span class="global-bundle-file-label">{section.name}</span>
                                             <div class="global-bundle-file-actions">
                                                 <button
@@ -251,7 +251,7 @@ export const GlobalBundleManager = (): JSX.Element => {
 
                 <Show when={model.systemSectionsAtom().length === 0 && model.editingSystemIdAtom() === null}>
                     <button class="global-bundle-add-row" onClick={() => model.startNewSystem()}>
-                        + Add AgentMux system entry
+                        + Add Global Memory system entry
                     </button>
                 </Show>
 
