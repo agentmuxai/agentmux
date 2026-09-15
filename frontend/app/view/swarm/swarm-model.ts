@@ -1052,6 +1052,9 @@ export class SwarmViewModel implements ViewModel {
     private unsubs: (() => void)[] = [];
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
     private blockUnsubs: (() => void)[] = [];
+    // The id set subscribeToBlockStatuses was last actually rebuilt for —
+    // see loadTrackedBlocks's use of this (codex P2 on PR #3219).
+    private lastSubscribedBlockIds: Set<string> = new Set();
 
     // Backend broadcasts one subagent:spawned/subagent:completed event per
     // subagent file (see subagent_watcher.rs's process_jsonl_change) — a
@@ -1073,6 +1076,12 @@ export class SwarmViewModel implements ViewModel {
     // bursts (e.g. several jobs firing close together).
     private loadCronsDebounceTimer: ReturnType<typeof setTimeout> | undefined;
     private static readonly LOAD_CRONS_DEBOUNCE_MS = 150;
+
+    // Bounded self-healing safety net for trackedBlockIdsAtom — see the
+    // comment at this timer's setInterval call site (in the constructor)
+    // for why it exists alongside the five event-based refresh triggers.
+    private trackedBlocksPollTimer: ReturnType<typeof setInterval> | undefined;
+    private static readonly TRACKED_BLOCKS_POLL_MS = 12_000;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
@@ -1244,6 +1253,34 @@ export class SwarmViewModel implements ViewModel {
         });
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
 
+        // Authoritative signal, in addition to the four above: published
+        // directly from blockcontroller::register_controller/delete_controller
+        // — the exact functions that determine what agent.tracked-blocks
+        // returns — rather than from a structurally different, independently-
+        // timed mechanism standing in as a proxy for it. The four events
+        // above are process_tracker's 2s poll-and-diff loop and the separate
+        // `reactive` registration map; neither is guaranteed to fire in step
+        // with a controller actually (de)registering, which is how a
+        // restored agent's controller could register successfully server-side
+        // while this list stayed stale client-side indefinitely. See
+        // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
+        const unsubTrackedBlocksChanged = waveEventSubscribe({
+            eventType: "processbroker:tracked-blocks-changed",
+            handler: () => void this.loadTrackedBlocks(),
+        });
+        if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
+
+        // Bounded self-healing safety net: re-poll regardless of whether any
+        // of the five event-based triggers above actually fired. Deliberately
+        // redundant with them — its only job is to guarantee this list can't
+        // go stale forever from a gap in event wiring not yet discovered, the
+        // same class of bug this poll is itself a response to. Cheap: the RPC
+        // is a HashMap clone + Vec filter server-side, not a per-block probe.
+        this.trackedBlocksPollTimer = setInterval(
+            () => void this.loadTrackedBlocks(),
+            SwarmViewModel.TRACKED_BLOCKS_POLL_MS,
+        );
+
         // term:osc_title / term:ambient_summary meta changes — force re-read
         // of block meta. The block atom in WOS updates reactively, so the
         // memo in the view already reacts; no explicit handler needed here
@@ -1282,7 +1319,22 @@ export class SwarmViewModel implements ViewModel {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
             const ids: string[] = block_ids ?? [];
             this.setTrackedBlockIds(ids);
-            this.subscribeToBlockStatuses(ids);
+            // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
+            // rebuilds every per-block status subscription (each unsub/sub
+            // flushes its own WPS eventsub command) plus issues a fresh
+            // GetControllerStatus per block — necessary when membership
+            // actually changed, pure overhead when it didn't. With the
+            // safety-net poll below calling this every
+            // TRACKED_BLOCKS_POLL_MS regardless of whether anything changed,
+            // skip the rebuild unless the id SET (not order — server-side
+            // ordering can legitimately shift without membership changing)
+            // actually differs from what's already subscribed.
+            const changed =
+                ids.length !== this.lastSubscribedBlockIds.size || ids.some((id) => !this.lastSubscribedBlockIds.has(id));
+            if (changed) {
+                this.lastSubscribedBlockIds = new Set(ids);
+                this.subscribeToBlockStatuses(ids);
+            }
         } catch {
             // silent — safe default is empty tree
         }
@@ -1952,6 +2004,10 @@ export class SwarmViewModel implements ViewModel {
         if (this.loadCronsDebounceTimer !== undefined) {
             clearTimeout(this.loadCronsDebounceTimer);
             this.loadCronsDebounceTimer = undefined;
+        }
+        if (this.trackedBlocksPollTimer !== undefined) {
+            clearInterval(this.trackedBlocksPollTimer);
+            this.trackedBlocksPollTimer = undefined;
         }
         for (const detail of this.dispatchDetailCache.values()) detail.dispose();
         this.dispatchDetailCache.clear();

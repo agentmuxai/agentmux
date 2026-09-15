@@ -296,6 +296,22 @@ pub fn register_controller(block_id: &str, controller: Arc<dyn Controller>) {
         let _ = old.stop(true, STATUS_DONE);
     }
     registry.insert(block_id.to_string(), controller);
+    drop(registry);
+    notify_tracked_blocks_changed();
+}
+
+/// Announce a `CONTROLLER_REGISTRY` membership change to the Process Broker,
+/// if one is running (never set in most unit tests). See
+/// `ProcessBroker::emit_tracked_blocks_changed`'s doc comment for why this
+/// exists: `agent.tracked-blocks` reads this registry directly, but nothing
+/// used to tell a subscriber when a write here changed what that read would
+/// return — Swarm's client-side list depended on two unrelated, independently-
+/// timed events instead, and went stale whenever neither happened to fire for
+/// a given block. See docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
+fn notify_tracked_blocks_changed() {
+    if let Some(broker) = crate::broker::process::global() {
+        broker.emit_tracked_blocks_changed();
+    }
 }
 
 /// Remove a controller from `CONTROLLER_REGISTRY` only — does NOT touch the
@@ -335,6 +351,7 @@ pub fn delete_controller(block_id: &str) {
     // already won't list it — see ProcessBroker::forget's doc comment).
     if let Some(broker) = crate::broker::process::global() {
         broker.forget(block_id);
+        broker.emit_tracked_blocks_changed();
     }
 }
 
@@ -585,7 +602,17 @@ pub fn resync_controller(
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            // codex P2 on PR #3219: ShellController::new starts with
+            // is_agent_pane: false and start() only sets it (synchronously,
+            // before returning — shell/lifecycle.rs's start()) after actually
+            // spawning. register_controller's notification above therefore
+            // fired before list_agent_panes()'s is_agent() filter would have
+            // included this block; notify again now that start() has run so
+            // the classified state gets an authoritative announcement too,
+            // instead of depending solely on a proxy event or the poll.
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_SUBPROCESS => {
             let ctrl = subprocess::SubprocessController::new(
@@ -601,7 +628,9 @@ pub fn resync_controller(
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_PERSISTENT => {
             let ctrl = persistent::PersistentSubprocessController::new(
@@ -615,7 +644,9 @@ pub fn resync_controller(
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_ACP => {
             let ctrl = acp::AcpController::new(
@@ -628,7 +659,9 @@ pub fn resync_controller(
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_TSUNAMI => {
             // Tsunami controller deferred to later phase
