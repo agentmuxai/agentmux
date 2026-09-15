@@ -1,8 +1,9 @@
 # SPEC: Typing `exit` in a terminal pane doesn't close it — instead the shell respawns and appears to loop
 
 **Date:** 2026-09-15
-**Status:** Fixed (§4b's respawn loop — see §7). §4a (close-on-exit is dead
-code) is a separate, pre-existing gap, deliberately left open — see §7.
+**Status:** implemented (§4b's respawn loop — see §7; §4a, close-on-exit
+being dead code, is a separate, pre-existing gap deliberately left open —
+also see §7)
 **Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
 `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
 
@@ -251,3 +252,60 @@ if the "3 page feeds" still reproduce after this fix ships, that confirms
 they were a symptom of the respawn loop's repeated banner injection (and
 should disappear), rather than an independent bug — worth a quick manual
 recheck once this lands.
+
+## 8. Review follow-ups (PR #3225)
+
+Automated review on the PR surfaced three real gaps in the original §7 fix,
+all addressed in the same PR:
+
+- **ReAgent P2:** the "winner's block vanished... (exceedingly unlikely)"
+  comment on the atomic-claim transaction's `Ok(Some(winner_id))` branch
+  (`server/mod.rs`, near the fallback insert) became misleading once §7's
+  fix made an exited shell take the exact same `None`-return path as a
+  genuinely vanished block — exited shells are common (that's the whole
+  point of this fix), not rare. Resolved as a side effect of the codex
+  fix below: since `try_attach_to_existing_shell` now clears the stale
+  pointer itself the moment it detects `RESYNC_ERR_ALREADY_EXITED`, the
+  common "retry after exit" case is intercepted one level up (the claim
+  transaction sees an already-cleared pointer and takes the plain
+  `Ok(None)` path), so this branch is reached for an exited shell only
+  under the same rare concurrent-race conditions as the original
+  vanished-block case. Comment updated to explain why, not just reworded.
+- **Codex P2 (line 1196, TOCTOU):** the original §7 fix checked
+  `get_controller(id).get_runtime_status()` in `try_attach_to_existing_shell`
+  itself, then called `resync_controller` separately — a shell that
+  exited in the gap between those two calls would be caught by
+  `resync_controller`'s OWN unconditional-respawn STATUS_DONE branch,
+  respawning it anyway. Fixed by giving `resync_controller` a new
+  `respawn_if_done: bool` parameter (threaded through all 9 call sites;
+  `true` everywhere except this one, preserving existing behavior for
+  crash/backend-restart recovery on the WS `ControllerResyncCommand`
+  path). When `false` and the controller is `STATUS_DONE`,
+  `resync_controller` returns `Err(RESYNC_ERR_ALREADY_EXITED)` (a new
+  sentinel constant) instead of respawning — a single status read inside
+  the function makes the decision, not two independent reads racing each
+  other.
+- **Codex P2 (line 1202, concurrent double-create):** two `PtyShellCreate`
+  calls racing after the same shell exited would both see `None` from
+  `try_attach_to_existing_shell`, both hit the atomic-claim transaction's
+  `Ok(Some(winner_id))` branch (both reading the same still-set dead
+  pointer), and both independently run the non-transactional "vanished,
+  create it for real" fallback — leaving one orphaned live controller and
+  two callers holding different `shell_id`s for what's supposed to be one
+  pane's one shell. Mitigated by having `try_attach_to_existing_shell`
+  clear the parent's stale pointer (`META_KEY_SHELL_SUBBLOCK_ID` → null,
+  via `broadcast_meta_update`) as soon as it detects
+  `RESYNC_ERR_ALREADY_EXITED`, before returning `None`. This makes the
+  already-correct, already-serialized (`with_tx`'s single-connection-lock)
+  atomic claim transaction see "unclaimed" instead of "claimed by a dead
+  id," so it resolves concurrent callers to one winner the same way it
+  already does for a genuinely-never-claimed pointer. Best-effort (a
+  failed clear costs an extra round trip through the same fallback chain,
+  not correctness in the common case) — not a from-scratch fix of the
+  pre-existing "two concurrent callers both reach the non-transactional
+  vanished-block fallback" limitation for a truly adversarial interleaving
+  (same residual rarity class as before this PR, not made worse).
+
+Verified: full non-ignored `agentmux-srv` suite (3350 passed) and the
+`ptyshell_*` suite including real-PTY `#[ignore]`d tests, both re-run after
+these changes with no regressions.
