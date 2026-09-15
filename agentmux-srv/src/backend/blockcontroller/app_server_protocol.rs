@@ -21,6 +21,7 @@ use super::app_server::{
 };
 
 const MAX_RAW_EVENTS: usize = 128;
+const MAX_PENDING_SERVER_REQUESTS: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionPhase {
@@ -154,6 +155,8 @@ pub enum CodexAppServerProtocolError {
     UnknownServerRequest,
     #[error("App Server request id is already pending")]
     DuplicateServerRequest,
+    #[error("too many App Server requests are pending a decision (max {0})")]
+    TooManyPendingRequests(usize),
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -489,11 +492,23 @@ impl CodexAppServerSession {
         if state.pending_requests.contains_key(&id) {
             return Err(CodexAppServerProtocolError::DuplicateServerRequest);
         }
+        if state.pending_requests.len() >= MAX_PENDING_SERVER_REQUESTS {
+            return Err(CodexAppServerProtocolError::TooManyPendingRequests(
+                MAX_PENDING_SERVER_REQUESTS,
+            ));
+        }
+        // Strict, not the notification-reconciliation ensure_thread_scope/
+        // ensure_scopes: those trivially pass when state.thread_id/turn_id
+        // is None, which is correct for a notification establishing state
+        // (e.g. the first thread/started) but wrong here — a request
+        // claiming a threadId/turnId while no thread/turn is actually
+        // active must be rejected, not queued as if it were in scope
+        // (ReAgent P1, PR #3212 3rd review).
         if let Some(thread) = &thread_id {
-            ensure_thread_scope(&state, thread)?;
+            ensure_active_thread_scope(&state, thread)?;
         }
         if let (Some(thread), Some(turn)) = (&thread_id, &turn_id) {
-            ensure_scopes(&state, thread, turn)?;
+            ensure_active_scopes(&state, thread, turn)?;
         }
         let pending = PendingServerRequest {
             id: id.clone(),
@@ -533,7 +548,24 @@ impl CodexAppServerSession {
             .remove(id)
             .ok_or(CodexAppServerProtocolError::UnknownServerRequest)?;
         if let Err(error) = self.transport.respond(id.clone(), result, timeout).await {
-            self.state.lock().unwrap().pending_requests.insert(id.clone(), pending);
+            // Only resurrect the entry if the thread/turn it was queued
+            // under is still the active one. If start_thread/resume_thread/
+            // a new thread/started/turn/completed moved the session on
+            // while this write was in flight, blindly reinserting would
+            // make a now-invalidated approval answerable again in the new
+            // session/turn context (ReAgent P1, PR #3212 3rd review).
+            let mut state = self.state.lock().unwrap();
+            let still_current = match (&pending.thread_id, &pending.turn_id) {
+                (Some(thread), Some(turn)) => {
+                    state.thread_id.as_deref() == Some(thread.as_str())
+                        && state.turn_id.as_deref() == Some(turn.as_str())
+                }
+                (Some(thread), None) => state.thread_id.as_deref() == Some(thread.as_str()),
+                (None, _) => true,
+            };
+            if still_current {
+                state.pending_requests.insert(id.clone(), pending);
+            }
             return Err(error.into());
         }
         Ok(())
@@ -813,6 +845,41 @@ fn ensure_scopes(
         }
     }
     Ok(())
+}
+
+/// Unlike ensure_thread_scope, fails closed when no thread is active — a
+/// server request claiming a threadId must be scoped to a *real, active*
+/// thread, not merely "no conflicting thread claimed yet" the way an
+/// incoming notification establishing state is allowed to be.
+fn ensure_active_thread_scope(
+    state: &SessionState,
+    actual: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    match &state.thread_id {
+        Some(expected) if expected == actual => Ok(()),
+        Some(expected) => Err(CodexAppServerProtocolError::ThreadScopeMismatch {
+            expected: expected.clone(),
+            actual: actual.to_string(),
+        }),
+        None => Err(CodexAppServerProtocolError::ThreadNotLoaded),
+    }
+}
+
+/// See ensure_active_thread_scope — fails closed when no turn is active.
+fn ensure_active_scopes(
+    state: &SessionState,
+    thread_id: &str,
+    turn_id: &str,
+) -> Result<(), CodexAppServerProtocolError> {
+    ensure_active_thread_scope(state, thread_id)?;
+    match &state.turn_id {
+        Some(expected) if expected == turn_id => Ok(()),
+        Some(expected) => Err(CodexAppServerProtocolError::TurnScopeMismatch {
+            expected: expected.clone(),
+            actual: turn_id.to_string(),
+        }),
+        None => Err(CodexAppServerProtocolError::TurnNotActive),
+    }
 }
 
 #[cfg(test)]
@@ -1613,5 +1680,116 @@ mod tests {
         assert_eq!(unknown_count, 1, "the other must see it already gone, not also send a response");
 
         server.abort();
+    }
+
+    /// ReAgent P1, PR #3212 (3rd review): before any turn had started (or
+    /// after turn/completed cleared turn_id back to None), a request
+    /// claiming an arbitrary/stale turnId passed the old ensure_scopes
+    /// check trivially, since that helper only compares when state.turn_id
+    /// is Some. accept_server_request must fail closed when there is no
+    /// active thread/turn to scope the request to, not merely skip the
+    /// check.
+    #[tokio::test]
+    async fn a_request_claiming_a_thread_or_turn_is_rejected_when_none_is_active() {
+        let (session, _reader, _writer) = session();
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("no-thread".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            }),
+            Err(CodexAppServerProtocolError::ThreadNotLoaded)
+        ));
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("no-turn".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            }),
+            Err(CodexAppServerProtocolError::TurnNotActive)
+        ));
+        assert!(session.pending_server_requests().is_empty());
+    }
+
+    /// ReAgent P1, PR #3212 (3rd review): respond_server_request's
+    /// failure-path reinsert didn't check whether the thread/turn context
+    /// was still current, so a stale approval could be resurrected into a
+    /// brand-new session/turn after a transition raced the in-flight
+    /// transport write.
+    #[tokio::test]
+    async fn a_failed_respond_is_not_resurrected_after_the_turn_it_was_queued_under_ends() {
+        let (session, server_reader, server_writer) = session();
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"threadId": "thread-1", "turnId": "turn-1", "itemId": "x"}),
+            })
+            .unwrap();
+
+        // Drop the entire peer side of the transport so the write inside
+        // respond_server_request fails, standing in for "the transport
+        // write raced a state transition and lost" without a timing-
+        // dependent sleep.
+        drop(server_reader);
+        drop(server_writer);
+
+        // Simulate the turn ending while that write is in flight: clear
+        // pending_requests and the active turn the same way turn/completed
+        // does.
+        session.state.lock().unwrap().pending_requests.clear();
+        session.state.lock().unwrap().turn_id = None;
+
+        let result = session
+            .respond_server_request(&id, Ok(json!({"approved": true})), Duration::from_secs(1))
+            .await;
+        assert!(result.is_err(), "the write should fail once the transport is closed");
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "a stale approval must not be resurrected once its turn has ended"
+        );
+    }
+
+    /// ReAgent P2, PR #3212 (3rd review): pending_requests had no size cap,
+    /// so a buggy or adversarial App Server could grow it unboundedly by
+    /// sending validly-scoped approval requests.
+    #[tokio::test]
+    async fn accept_server_request_rejects_once_the_pending_cap_is_reached() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        for i in 0..MAX_PENDING_SERVER_REQUESTS {
+            session
+                .accept_server_request(AppServerIncoming::Request {
+                    id: RpcId::String(format!("mcp-{i}")),
+                    method: "mcpServer/elicitation/request".to_string(),
+                    params: json!({"message": "confirm"}),
+                })
+                .unwrap();
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("one-too-many".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            }),
+            Err(CodexAppServerProtocolError::TooManyPendingRequests(
+                MAX_PENDING_SERVER_REQUESTS
+            ))
+        ));
     }
 }
