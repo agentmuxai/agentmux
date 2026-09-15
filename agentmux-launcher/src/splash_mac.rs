@@ -36,7 +36,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use crate::splash_core::{
-    format_ms, format_running, hold_duration, reconcile, trunc, StageEntry, StageTimeline, SubEntry,
+    format_ms, format_running, hold_duration, reconcile, trunc, StageEntry, StageTimeline,
 };
 use crate::startup_events::{StartupEvent, StartupStatus};
 
@@ -154,8 +154,19 @@ fn flatten_rows(stages: &[StageEntry], total_ms: Option<u64>) -> Vec<FlatRow> {
         if out.len() >= MAX_STAGE_ROWS {
             break;
         }
+        // Colored by status, not unconditionally "done" green — a
+        // `finalize_running`-produced Warn/interrupted outcome (no matching
+        // End ever arrived) must not render indistinguishably from a real
+        // success (codex P2 on PR #3222).
         let (time_text, time_color) = match &stage.done {
-            Some((ms, _status, _detail)) => (format_ms(*ms), (TIME_DONE_R, TIME_DONE_G, TIME_DONE_B)),
+            Some((ms, status, _detail)) => {
+                let color = match status {
+                    StartupStatus::Ok => (TIME_DONE_R, TIME_DONE_G, TIME_DONE_B),
+                    StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
+                    StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
+                };
+                (format_ms(*ms), color)
+            }
             None => (format_running(stage.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
         };
         out.push(FlatRow {
@@ -1092,6 +1103,7 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::splash_core::SubEntry;
 
     // The event-application/count-up-deferral/finalize logic these tests
     // used to exercise directly (`apply_tick`, `StageRow`/`SubRow`) now

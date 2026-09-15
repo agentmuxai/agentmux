@@ -179,7 +179,23 @@ impl StageTimeline {
     /// dismissed" is itself a real warning-worthy condition, not a third
     /// rendering concept every platform's color table would need a new arm
     /// for.
+    ///
+    /// Flushes `self.deferred` first, as genuine completions — NOT as
+    /// abandoned/interrupted work. An entry sitting in `deferred` is a real
+    /// `End` that already arrived; it was only held back one tick so its
+    /// row got at least one "running" paint first (`apply_tick`'s deferral).
+    /// If readiness is detected in that exact same tick, finalizing before
+    /// flushing would discard the row's true, already-known outcome and
+    /// replace it with a synthetic "interrupted" one — wrong, and worse on
+    /// Windows than elsewhere: its dismiss path calls this once and then
+    /// freezes the summary for the whole hold + fade with no further
+    /// `apply_tick` call, so the wrong value would be the only one the user
+    /// ever sees (codex P1 / reagent P1 on PR #3222).
     pub fn finalize_running(&mut self, at: Instant) {
+        let deferred = std::mem::take(&mut self.deferred);
+        for ev in deferred {
+            self.apply_one(ev);
+        }
         for stage in &mut self.stages {
             if stage.done.is_none() {
                 let ms = at.saturating_duration_since(stage.started_at).as_millis() as u64;
@@ -359,6 +375,23 @@ mod tests {
         tl.finalize_running(Instant::now());
 
         assert!(tl.stages[0].subs[0].done.is_some(), "an orphaned sub-row must be finalized, not left running forever");
+    }
+
+    #[test]
+    fn finalize_running_flushes_a_same_tick_deferral_as_the_real_completion_not_as_interrupted() {
+        // codex P1 / reagent P1 on PR #3222: readiness detected in the exact
+        // same tick a fast stage's Begin+End were deferred (same-tick count-up
+        // fix) must not discard that real, already-known completion and
+        // replace it with a synthetic "interrupted" Warn outcome.
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("prep"), end("prep", 7)]);
+        assert!(tl.stages[0].done.is_none(), "precondition: the End is deferred, not yet applied");
+
+        tl.finalize_running(Instant::now());
+
+        let (ms, status, _) = tl.stages[0].done.as_ref().expect("must be completed one way or another");
+        assert_eq!(*ms, 7, "the row's TRUE duration must survive, not a synthetic elapsed-since-start value");
+        assert_eq!(*status, StartupStatus::Ok, "a real completion must not be downgraded to Warn/interrupted");
     }
 
     #[test]

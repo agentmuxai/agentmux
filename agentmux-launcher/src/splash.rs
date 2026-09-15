@@ -299,10 +299,25 @@ unsafe fn run_splash(
         while let Ok(ev) = events_rx.try_recv() {
             fresh.push(ev);
         }
-        timeline.apply_tick(fresh);
+        let deferred_this_tick = timeline.apply_tick(fresh);
 
         // Check for dismiss signal from CEF host's on_load_end.
         if WaitForSingleObject(dismiss_ev, 0) == WAIT_OBJECT_0 {
+            // If this same tick's apply_tick just deferred a same-tick
+            // Begin+End pair (the count-up fix), paint that "running" frame
+            // now, before doing anything else — otherwise the inner drain
+            // loop below would flush the deferred End (via its own
+            // apply_tick call, which always flushes deferred entries first)
+            // and go straight to the frozen/held summary without that row
+            // ever having been painted as running at all, for a fast final
+            // stage that happens to complete in the exact tick dismiss also
+            // fires. (codex P2 on PR #3222.)
+            if deferred_this_tick {
+                let brain_alpha = brain_pulse_alpha(start.elapsed().as_secs_f32());
+                composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring);
+                push_layered(hwnd, mem_dc, 255);
+            }
+
             // Drain any final events that arrived at the same time. The
             // dismiss signal (a synchronous Win32 SetEvent) and the last
             // stage-end command (an async message queued on the CEF host
@@ -355,13 +370,7 @@ unsafe fn run_splash(
         }
 
         // Animate brain alpha: fade-in over 200 ms, then sine pulse.
-        let t = start.elapsed().as_secs_f32();
-        let brain_alpha: u8 = if t < 0.2 {
-            (t / 0.2 * 220.0) as u8
-        } else {
-            let pulse = (((t - 0.2) * std::f32::consts::TAU * 1.1).sin() + 1.0) * 0.5;
-            (160.0 + pulse * 60.0) as u8
-        };
+        let brain_alpha = brain_pulse_alpha(start.elapsed().as_secs_f32());
 
         composite(dib_pixels, brain_alpha, &timeline.stages, None, &footer, restoring);
         push_layered(hwnd, mem_dc, 255);
@@ -510,11 +519,19 @@ fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, res
         let label = trunc(stage.label, LABEL_MAX_CHARS);
         draw_text(dib, SPLASH_W, SPLASH_H, x_label, y, &label, STAGE_COLOR, 1.0, true);
 
-        // Time (right-aligned).
-        if let Some((ms, _status, _detail)) = &stage.done {
+        // Time (right-aligned). Colored by status, not unconditionally
+        // "done" green — a `finalize_running`-produced Warn/interrupted
+        // outcome (no matching End ever arrived) must not render
+        // indistinguishably from a real success (codex P2 on PR #3222).
+        if let Some((ms, status, _detail)) = &stage.done {
             let t = format_ms(*ms);
             let tx = x_time_right - text_width(&t);
-            draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, TIME_DONE_COLOR, 1.0, true);
+            let color = match status {
+                StartupStatus::Ok => TIME_DONE_COLOR,
+                StartupStatus::Warn => STATUS_WARN_COLOR,
+                StartupStatus::Error => STATUS_ERR_COLOR,
+            };
+            draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, color, 1.0, true);
         } else {
             let t = format_running(stage.started_at);
             let tx = x_time_right - text_width(&t);
@@ -585,6 +602,19 @@ fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, res
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Brain-logo pulse alpha for elapsed seconds since the splash appeared:
+/// fade-in over 200ms, then a sine pulse. Shared by the normal per-tick
+/// paint and the one-extra-frame paint before a same-tick dismiss race (see
+/// the count-up note in `run_splash`'s loop) so both compute it identically.
+fn brain_pulse_alpha(t: f32) -> u8 {
+    if t < 0.2 {
+        (t / 0.2 * 220.0) as u8
+    } else {
+        let pulse = (((t - 0.2) * std::f32::consts::TAU * 1.1).sin() + 1.0) * 0.5;
+        (160.0 + pulse * 60.0) as u8
+    }
+}
 
 unsafe fn push_layered(hwnd: HWND, mem_dc: HDC, source_alpha: u8) {
     let mut sz = SIZE { cx: SPLASH_W, cy: SPLASH_H };
