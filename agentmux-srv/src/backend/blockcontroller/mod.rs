@@ -13,6 +13,7 @@
 
 pub mod acp;
 pub mod app_server;
+pub mod app_server_controller;
 pub mod app_server_protocol;
 pub mod core;
 pub mod health;
@@ -33,9 +34,9 @@ use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 
 use super::eventbus::EventBus;
+use super::obj::{Block, MetaMapType, TermSize};
 use super::storage::filestore::FileStore;
 use super::storage::store::Store;
-use super::obj::{Block, MetaMapType, TermSize};
 use super::wps::Broker;
 
 // ---- Controller status constants (match Go) ----
@@ -294,11 +295,7 @@ static CONTROLLER_REGISTRY: std::sync::LazyLock<RwLock<HashMap<String, Arc<dyn C
 
 /// Get a controller by block ID.
 pub fn get_controller(block_id: &str) -> Option<Arc<dyn Controller>> {
-    CONTROLLER_REGISTRY
-        .read()
-        .unwrap()
-        .get(block_id)
-        .cloned()
+    CONTROLLER_REGISTRY.read().unwrap().get(block_id).cloned()
 }
 
 /// Register a controller, stopping any previous one for the same block.
@@ -428,6 +425,8 @@ pub enum AgentDelivery {
 ///   `{type:"user",…}` line on the live stdin, which steers the agent mid-turn.
 /// - **ACP** agents receive the message as a `session/prompt` (the ACP controller's
 ///   `send_input` already wraps raw input that way).
+/// - **App Server** (Codex) agents have no PTY either: the message is queued/dispatched
+///   as a `turn/start` request via [`app_server_controller::AppServerController::send_message`].
 /// - Everything else (shell/term PTY agents, one-shot subprocess agents) is reported
 ///   as [`AgentDelivery::Pty`] so the caller uses keystroke injection — preserving
 ///   today's behavior.
@@ -436,8 +435,8 @@ pub enum AgentDelivery {
 /// keystrokes silently fail to reach a persistent stream-json agent (it rejects raw
 /// input). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md §6 (Phase 3).
 pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDelivery, String> {
-    let ctrl = get_controller(block_id)
-        .ok_or_else(|| format!("no controller for block {block_id}"))?;
+    let ctrl =
+        get_controller(block_id).ok_or_else(|| format!("no controller for block {block_id}"))?;
 
     if let Some(persistent_ctrl) = ctrl
         .as_any()
@@ -449,6 +448,14 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 
     if ctrl.controller_type() == BLOCK_CONTROLLER_ACP {
         ctrl.send_input(BlockInputUnion::data(message.as_bytes().to_vec()), None)?;
+        return Ok(AgentDelivery::Structured);
+    }
+
+    if let Some(app_server_ctrl) = ctrl
+        .as_any()
+        .downcast_ref::<app_server_controller::AppServerController>()
+    {
+        app_server_ctrl.send_message(message.to_string())?;
         return Ok(AgentDelivery::Structured);
     }
 
@@ -479,7 +486,9 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 /// in-flight turn is the lesser harm against running a container agent on a
 /// controller that cannot do per-turn `docker exec` at all.
 fn is_runtime_config_only_replace(existing_type: &str, target_type: &str, force: bool) -> bool {
-    force && existing_type == BLOCK_CONTROLLER_PERSISTENT && target_type == BLOCK_CONTROLLER_PERSISTENT
+    force
+        && existing_type == BLOCK_CONTROLLER_PERSISTENT
+        && target_type == BLOCK_CONTROLLER_PERSISTENT
 }
 
 /// `respawn_if_done`: when the existing controller's status is
@@ -525,15 +534,16 @@ pub fn resync_controller(
     // per-turn docker exec. Persistent is incompatible. Override any stale "persistent"
     // value that may have been written before this invariant was enforced at creation time.
     let agent_mode = super::obj::meta_get_string(block_meta, "agentMode", "");
-    let controller_type = if agent_mode == "container" && controller_type == BLOCK_CONTROLLER_PERSISTENT {
-        tracing::warn!(
-            block_id = %block_id,
-            "container agent has persistent controller in meta — overriding to subprocess"
-        );
-        BLOCK_CONTROLLER_SUBPROCESS.to_string()
-    } else {
-        controller_type
-    };
+    let controller_type =
+        if agent_mode == "container" && controller_type == BLOCK_CONTROLLER_PERSISTENT {
+            tracing::warn!(
+                block_id = %block_id,
+                "container agent has persistent controller in meta — overriding to subprocess"
+            );
+            BLOCK_CONTROLLER_SUBPROCESS.to_string()
+        } else {
+            controller_type
+        };
 
     tracing::info!(
         block_id = %block_id,
@@ -552,8 +562,7 @@ pub fn resync_controller(
         } else {
             let status = ctrl.get_runtime_status();
             // Check if connection changed
-            let new_conn =
-                super::obj::meta_get_string(block_meta, META_KEY_CONNECTION, "local");
+            let new_conn = super::obj::meta_get_string(block_meta, META_KEY_CONNECTION, "local");
             status.shellprocconnname != new_conn
         };
 
@@ -583,7 +592,9 @@ pub fn resync_controller(
         // a block would have deferred and silently kept the persistent
         // controller — the exact incompatibility that override exists to
         // correct, and the opposite of what this comment claims.
-        if needs_replace && is_runtime_config_only_replace(ctrl.controller_type(), &controller_type, force) {
+        if needs_replace
+            && is_runtime_config_only_replace(ctrl.controller_type(), &controller_type, force)
+        {
             if let Some(p) = ctrl
                 .as_any()
                 .downcast_ref::<persistent::PersistentSubprocessController>()
@@ -697,6 +708,20 @@ pub fn resync_controller(
             let result = ctrl.start(block_meta.clone(), rt_opts, force);
             notify_tracked_blocks_changed();
             result
+        }
+        BLOCK_CONTROLLER_APP_SERVER => {
+            let ctrl = app_server_controller::AppServerController::new(
+                tab_id.to_string(),
+                block_id.to_string(),
+                broker,
+                event_bus,
+                wstore,
+                filestore,
+            );
+            let ctrl = Arc::new(ctrl);
+            ctrl.set_self_ref();
+            register_controller(block_id, ctrl.clone());
+            ctrl.start(block_meta.clone(), rt_opts, force)
         }
         BLOCK_CONTROLLER_TSUNAMI => {
             // Tsunami controller deferred to later phase
@@ -812,15 +837,24 @@ mod tests {
     }
 
     impl Controller for CountingController {
-        fn start(&self, _: MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+        fn start(
+            &self,
+            _: MetaMapType,
+            _: Option<serde_json::Value>,
+            _: bool,
+        ) -> Result<(), String> {
             Ok(())
         }
         fn stop(&self, _graceful: bool, _new_status: &str) -> Result<(), String> {
-            self.stop_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.stop_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
         fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
-            BlockControllerRuntimeStatus { blockid: self.block_id.clone(), ..Default::default() }
+            BlockControllerRuntimeStatus {
+                blockid: self.block_id.clone(),
+                ..Default::default()
+            }
         }
         fn send_input(&self, _: BlockInputUnion, _: Option<u64>) -> Result<(), String> {
             Ok(())
@@ -844,14 +878,21 @@ mod tests {
     struct OverridingCountingController(CountingController);
 
     impl Controller for OverridingCountingController {
-        fn start(&self, m: MetaMapType, o: Option<serde_json::Value>, f: bool) -> Result<(), String> {
+        fn start(
+            &self,
+            m: MetaMapType,
+            o: Option<serde_json::Value>,
+            f: bool,
+        ) -> Result<(), String> {
             self.0.start(m, o, f)
         }
         fn stop(&self, g: bool, s: &str) -> Result<(), String> {
             self.0.stop(g, s)
         }
         fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
-            self.0.stop_for_replace_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.0
+                .stop_for_replace_calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let _ = new_status;
             Ok(())
         }
@@ -883,12 +924,18 @@ mod tests {
     fn remove_controller_entry_only_removes_the_registry_entry_without_calling_stop() {
         let block_id = "block-remove-entry-only";
         let ctrl = Arc::new(CountingController::new(block_id, "stub"));
-        CONTROLLER_REGISTRY.write().unwrap().insert(block_id.to_string(), ctrl.clone());
+        CONTROLLER_REGISTRY
+            .write()
+            .unwrap()
+            .insert(block_id.to_string(), ctrl.clone());
         assert!(get_controller(block_id).is_some());
 
         remove_controller_entry_only(block_id);
 
-        assert!(get_controller(block_id).is_none(), "controller must be gone from the registry");
+        assert!(
+            get_controller(block_id).is_none(),
+            "controller must be gone from the registry"
+        );
         assert_eq!(
             ctrl.stop_calls.load(std::sync::atomic::Ordering::SeqCst),
             0,
@@ -901,7 +948,9 @@ mod tests {
         use crate::backend::obj::Block;
 
         let block_id = "block-resync-replace-uses-stop-for-replace";
-        let old = Arc::new(OverridingCountingController(CountingController::new(block_id, "old-type")));
+        let old = Arc::new(OverridingCountingController(CountingController::new(
+            block_id, "old-type",
+        )));
         register_controller(block_id, old.clone());
         assert!(get_controller(block_id).is_some());
 
@@ -909,15 +958,28 @@ mod tests {
         // replacement construction doesn't open a real PTY — controller_type
         // "shell" != old's "old-type" forces needs_replace=true.
         let mut meta = MetaMapType::new();
-        meta.insert(META_KEY_CONTROLLER.to_string(), serde_json::Value::String("shell".to_string()));
-        meta.insert(META_KEY_CMD_RUN_ON_START.to_string(), serde_json::Value::Bool(false));
-        let block = Block { oid: block_id.to_string(), version: 1, meta, ..Default::default() };
+        meta.insert(
+            META_KEY_CONTROLLER.to_string(),
+            serde_json::Value::String("shell".to_string()),
+        );
+        meta.insert(
+            META_KEY_CMD_RUN_ON_START.to_string(),
+            serde_json::Value::Bool(false),
+        );
+        let block = Block {
+            oid: block_id.to_string(),
+            version: 1,
+            meta,
+            ..Default::default()
+        };
 
         let result = resync_controller(&block, "tab-1", None, false, true, None, None, None, None, None, Arc::from("test-boot"));
         assert!(result.is_ok(), "resync_controller failed: {result:?}");
 
         assert_eq!(
-            old.0.stop_for_replace_calls.load(std::sync::atomic::Ordering::SeqCst),
+            old.0
+                .stop_for_replace_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
             1,
             "the OLD controller's stop_for_replace should have fired exactly once"
         );
@@ -977,7 +1039,10 @@ mod tests {
 
     #[test]
     fn test_block_input_union_resize() {
-        let size = TermSize { rows: 40, cols: 120 };
+        let size = TermSize {
+            rows: 40,
+            cols: 120,
+        };
         let input = BlockInputUnion::resize(size.clone());
         assert!(input.input_data.is_none());
         assert!(input.sig_name.is_none());
@@ -1088,7 +1153,11 @@ mod tests {
             "block:block-persist-test",
             1,
         );
-        assert_eq!(history.len(), 1, "publish must persist at least the latest event");
+        assert_eq!(
+            history.len(),
+            1,
+            "publish must persist at least the latest event"
+        );
         let replayed: BlockControllerRuntimeStatus =
             serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
         assert_eq!(replayed.blockid, "block-persist-test");
@@ -1143,13 +1212,49 @@ mod tests {
         let ctrl = subprocess_controller("block-jekt-subprocess-refusal");
 
         let err = ctrl
-            .send_input(BlockInputUnion::data(b"hello from another agent".to_vec()), None)
+            .send_input(
+                BlockInputUnion::data(b"hello from another agent".to_vec()),
+                None,
+            )
             .expect_err("subprocess controllers take turns, not keystrokes");
 
         assert!(
             err.contains("does not accept raw input"),
             "expected the raw-input refusal, got {err:?}",
         );
+    }
+
+    // ── App Server agents have no PTY either ─────────────────────────────────
+    // ReAgent P1 on PR #3215: `deliver_agent_message` only special-cased
+    // Persistent and ACP, so an App Server block fell through to the PTY
+    // branch — the same class of bug as the subprocess case above, just for a
+    // controller that didn't exist yet when that fix landed.
+
+    #[test]
+    fn deliver_agent_message_routes_to_the_app_server_controller_not_pty() {
+        let block_id = "block-jekt-app-server-delivery";
+        register_controller(
+            block_id,
+            Arc::new(app_server_controller::AppServerController::new(
+                "tab-jekt".to_string(),
+                block_id.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )),
+        );
+
+        let err = deliver_agent_message(block_id, "hello from another agent")
+            .expect_err("controller has no process yet, so send_message must fail — the point is that it was called at all");
+
+        assert!(
+            err.contains("not initialized"),
+            "expected AppServerController::send_message's own error (proving the \
+             Structured route was taken), got {err:?}",
+        );
+
+        remove_controller_entry_only(block_id);
     }
 
     /// Controllers that DO have a structured channel must keep the behavior they

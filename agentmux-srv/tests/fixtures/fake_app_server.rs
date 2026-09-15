@@ -74,10 +74,97 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_secs(3600));
         }
     }
+
+    // All three remaining modes complete a `thread/start` round-trip so the
+    // controller reaches a live session, then diverge — used by
+    // app_server_controller.rs's own tests (as opposed to the transport-level
+    // tests above, which never get this far).
+    if mode == "exit-after-thread-start" || mode == "ready-for-turn" || mode == "requeue-after-turn-completes" {
+        let thread_start = lines.next().transpose().unwrap().unwrap_or_default();
+        let thread_request_id = request_id(&thread_start).unwrap_or_else(|| {
+            eprintln!("thread/start request missing an id: {thread_start}");
+            std::process::exit(28);
+        });
+        stdout
+            .write_all(
+                format!(
+                    "{{\"id\":{thread_request_id},\"result\":{{\"thread\":{{\"id\":\"fixture-thread\"}}}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        stdout.flush().unwrap();
+
+        if mode == "exit-after-thread-start" {
+            eprintln!("fake server crashing after thread/start");
+            std::process::exit(42);
+        }
+
+        // mode == "ready-for-turn" or "requeue-after-turn-completes": also
+        // complete one `turn/start` round-trip, then diverge again.
+        let turn_start = lines.next().transpose().unwrap().unwrap_or_default();
+        let turn_request_id = request_id(&turn_start).unwrap_or_else(|| {
+            eprintln!("turn/start request missing an id: {turn_start}");
+            std::process::exit(29);
+        });
+        stdout
+            .write_all(
+                format!(
+                    "{{\"id\":{turn_request_id},\"result\":{{\"turn\":{{\"id\":\"fixture-turn-1\"}}}}}}\n"
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        stdout.flush().unwrap();
+
+        if mode == "requeue-after-turn-completes" {
+            // Give the test time to observe the first turn as active and send
+            // a second message (which must be queued locally — see
+            // AppServerController::spawn_turn) before this notification makes
+            // the client consider the first turn done. Without this delay the
+            // ordering between "test sends message 2" and "this notification
+            // arrives" would be a race, and the test wouldn't reliably
+            // exercise the requeue path it's meant to cover.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            stdout
+                .write_all(
+                    b"{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread\",\"turn\":{\"id\":\"fixture-turn-1\",\"status\":\"completed\"}}}\n",
+                )
+                .unwrap();
+            stdout.flush().unwrap();
+
+            // The requeued second message triggers a second `turn/start`.
+            let second_turn_start = lines.next().transpose().unwrap().unwrap_or_default();
+            let second_turn_request_id = request_id(&second_turn_start).unwrap_or_else(|| {
+                eprintln!("second turn/start request missing an id: {second_turn_start}");
+                std::process::exit(30);
+            });
+            stdout
+                .write_all(
+                    format!(
+                        "{{\"id\":{second_turn_request_id},\"result\":{{\"turn\":{{\"id\":\"fixture-turn-2\"}}}}}}\n"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            stdout.flush().unwrap();
+        }
+    }
+
     for line in lines {
         if line.is_err() {
             std::process::exit(26);
         }
     }
     eprintln!("fake server observed EOF");
+}
+
+/// Extract the bare `"id":<n>` value from a JSON-RPC request line. Deliberately
+/// not a real JSON parse — this fixture intentionally uses only std (see the
+/// header comment) and every request this fixture handles has `id` as a
+/// top-level unsigned integer field.
+fn request_id(line: &str) -> Option<&str> {
+    let after = line.split("\"id\":").nth(1)?;
+    let digits = after.split(|c: char| !c.is_ascii_digit()).next()?;
+    (!digits.is_empty()).then_some(digits)
 }

@@ -804,7 +804,12 @@ impl StderrTail {
 }
 
 pub struct AppServerProcess {
-    pub transport: AppServerTransport,
+    // Arc, not a bare AppServerTransport: the controller runtime hands this
+    // same transport to both its own event-loop task and the
+    // CodexAppServerSession it constructs, which itself requires
+    // Arc<AppServerTransport> so it can be shared across the caller and its
+    // own notification-reading task.
+    pub transport: Arc<AppServerTransport>,
     // A single dedicated reaper task (spawned once, below) owns `Child`
     // exclusively for its whole lifetime and is the only thing that ever
     // calls `child.wait()`. This exists because `wait_for_exit()` and
@@ -868,7 +873,7 @@ impl AppServerProcess {
         });
 
         // Both stdout and stderr readers exist before initialize can write.
-        let transport = AppServerTransport::new(stdout, stdin, limits);
+        let transport = Arc::new(AppServerTransport::new(stdout, stdin, limits));
 
         let (exit_tx, exit_rx) = watch::channel(None);
         tokio::spawn(async move {
