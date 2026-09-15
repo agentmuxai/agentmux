@@ -10,18 +10,43 @@ name: CI (PR) — compile tests + run
 # (incl. reagent) read diffs — they do not compile or run the suite. Nothing ran
 # on the PR.
 #
-# This runs the same compile-and-test on EVERY PR, so the gate is at merge time.
+# This runs a compile-and-test gate on EVERY PR, so the break is caught at
+# merge time — but scoped to the CEF-free crates only (SPEC_CI_PR_NIGHTLY_
+# BALANCE_2026_09_12.md), not the full workspace. Between 2026-07-01 (PR #1885
+# added `cargo check --workspace --tests` + `cargo test --workspace` here) and
+# 2026-09, this job's Windows leg increasingly spent its ENTIRE 20-minute
+# budget just compiling agentmux-cef (the CEF C++ build via cef-dll-sys's
+# build.rs) before any test even ran — direct measurement on 2026-09-15 showed
+# compile alone taking ~19 of the 20 minutes. That's not the runner-pool
+# flakiness INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md
+# documents (which this job's timeout-minutes and ci.yml's concurrency groups
+# already mitigate) — it's this job duplicating the nightly workflow's full
+# CEF-inclusive build on every PR, on a budget too small to finish it. The
+# fix is the lane split the spec above lays out: PR gets fast CEF-free
+# coverage, nightly (ci-nightly-build.yml, already running
+# `cargo build --release --workspace` + `cargo test --workspace` daily) keeps
+# the full CEF-inclusive safety net.
 #
-# Scope: `cargo check --workspace --tests` compiles `#[cfg(test)]` code too — the
-# exact step that catches a missing-field / cfg-gated test break — then
-# `cargo test --workspace` catches stale-assertion breaks. Windows is the
-# REQUIRED leg (primary platform; catches cfg-gated breaks); ubuntu is
-# non-blocking (continue-on-error) until greened. Standard GitHub-hosted runners
-# only (free on public repos).
+# Scope: `cargo check --tests` (+ `cargo test`) against agentmux-common,
+# agentmux-srv, agentmux-launcher, agentmux-bashwrap, and agentmux-mcp —
+# every workspace member EXCEPT agentmux-cef. The first four still catch a
+# missing-field / cfg-gated test break the same way the old workspace-wide
+# check did (#1823 was a Windows `cfg` break in agentmux-cef specifically,
+# which nightly now owns catching); agentmux-bashwrap and agentmux-mcp are
+# independent workspace members not pulled in transitively by the other
+# three, so they need their own explicit `-p` or they'd get no PR-lane gate
+# at all. Windows is the REQUIRED leg (primary platform); ubuntu is
+# non-blocking (continue-on-error) until greened. Standard GitHub-hosted
+# runners only (free on public repos).
 #
 # NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
 # "check --tests + test (windows-latest)" and "vitest" as required status checks
-# in branch protection.
+# in branch protection. Job/check names are unchanged from before this split
+# specifically so an existing branch-protection rule referencing them by name
+# keeps working — renaming to something like "PR fast: ..." (SPEC_CI_PR_
+# NIGHTLY_BALANCE_2026_09_12.md §6's SHOULD) would silently orphan that rule
+# until someone with admin access updates it, which isn't verifiable from a
+# code change alone.
 #
 # --test-threads=1 mirrors the nightly (process-shared in-memory FileStore + a
 # focus-flag global flake under parallel runs; serial is deterministic).
@@ -65,23 +90,21 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'windows-latest' }}
-    # Normal baseline is ~13 min (see docs/incident/
-    # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md). Without this,
-    # a hung GitHub-hosted runner occupies the REQUIRED check for GitHub's
-    # default of 360 minutes before being reaped -- that incident hit this
-    # exact ceiling twice. 20 min gives headroom over the baseline while
-    # bounding a hang to tens of minutes instead of hours.
-    timeout-minutes: 20
+    # PR-lane budget (SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md §3.3): target
+    # under 10 min, soft ceiling 15 min. This job no longer builds
+    # agentmux-cef (see the workflow header comment), so the previous ~13-20
+    # min CEF-inclusive baseline (docs/incident/
+    # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md) no longer
+    # applies here — 15 min still bounds a genuine runner-pool hang (that
+    # incident's root cause, separate from the CEF-scope issue this split
+    # fixes) to a fraction of GitHub's 360-minute default rather than hours.
+    # Revisit if representative runs land close to this ceiling.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      # cef-dll-sys builds CEF's C wrapper with CMake + Ninja (runs in build.rs,
-      # so `cargo check` triggers it too).
-      - name: Install Ninja (Windows — CMake ships with VS)
-        if: matrix.os == 'windows-latest'
-        run: choco install ninja -y
-      - name: Install build deps (Linux — CEF + launcher Wayland/GTK)
+      - name: Install build deps (Linux — launcher Wayland toolkit)
         if: matrix.os == 'ubuntu-latest'
         # The runner image ships a google-chrome apt source we do not use — none
         # of the packages below come from it. When Google serves a corrupt index
@@ -99,18 +122,22 @@ jobs:
         run: |
           sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get update || echo "apt-get update reported errors; continuing (install is the real gate)"
-          sudo apt-get install -y ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
+          sudo apt-get install -y libwayland-dev libxkbcommon-dev
 
       - uses: Swatinem/rust-cache@v2
 
-      # Compiles the WHOLE workspace including `#[cfg(test)]` code — the gate that
-      # would have caught #1823 (Windows cfg) and #1876 (missing fields).
-      - name: cargo check --workspace --tests
-        run: cargo check --workspace --tests
+      # CEF-free crates only — see the workflow header comment for why
+      # agentmux-cef is excluded. Still compiles `#[cfg(test)]` code for
+      # everything it does cover, the same gate that would have caught #1876
+      # (missing fields); #1823 was a Windows `cfg` break in agentmux-cef
+      # itself, which nightly (ci-nightly-build.yml) now owns catching.
+      - name: cargo check --tests (CEF-free crates)
+        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp
 
-      # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations).
-      - name: cargo test --workspace
-        run: cargo test --workspace -- --test-threads=1
+      # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
+      # in the same CEF-free scope.
+      - name: cargo test (CEF-free crates)
+        run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -- --test-threads=1
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
       # types by ts-rs. This turns the audit's "keep in sync with the

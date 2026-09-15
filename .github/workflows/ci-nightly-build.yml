@@ -51,6 +51,15 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md's contributing
+    # cause #1 (no timeout-minutes -> a hung runner occupies the job for
+    # GitHub's 360-minute default) was fixed on ci-pr.yml but explicitly
+    # flagged there as "not yet addressed" for this workflow. This full
+    # cross-platform build+test (CEF included) legitimately needs more room
+    # than the PR lane's 15 min — 60 min is generous headroom over a
+    # from-scratch CEF build+test on any of the three platforms while still
+    # bounding a hang to a fraction of the 360-minute default.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
