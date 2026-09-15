@@ -110,6 +110,19 @@ export class NativeMemoryHistoryModel {
     contentErrorAtom: Accessor<string | null> = this._contentError[0];
     private setContentError = this._contentError[1];
 
+    /** True only while a content fetch is actually in flight — distinct
+     *  from `contentAtom() === null`, which also describes "fetch failed,
+     *  nothing to show" and must not keep rendering a loading state. */
+    private _contentLoading = createSignal<boolean>(true);
+    contentLoadingAtom: Accessor<boolean> = this._contentLoading[0];
+    private setContentLoading = this._contentLoading[1];
+
+    /* codex P2 on PR #3218: the constructor's initial loadContent() and a
+     * revert-triggered loadContent() can both be in flight at once; without
+     * a request-id guard (mirroring latestDiffRequestId above) the older
+     * response can resolve second and clobber the newer one. */
+    private latestContentRequestId = 0;
+
     /** Up to two version ids selected for comparison, oldest-first once both are set. */
     private _diffSelection = createSignal<string[]>([]);
     diffSelectionAtom: Accessor<string[]> = this._diffSelection[0];
@@ -149,17 +162,29 @@ export class NativeMemoryHistoryModel {
 
     /** Fetch the file's current content. Mirrors
      *  `AgentNativeMemoryModel.selectFile()`'s own read_file call — same
-     *  RPC, same agent_id/filename already available on this model. */
-    async loadContent(): Promise<void> {
+     *  RPC, same agent_id/filename already available on this model.
+     *  Returns whether THIS call's result was the one actually applied —
+     *  `false` on a stale (superseded) or failed response, so a caller like
+     *  `revertTo` can tell "the content shown now truly reflects this
+     *  call" apart from "some load happened but this one didn't win". */
+    async loadContent(): Promise<boolean> {
+        const requestId = ++this.latestContentRequestId;
+        this.setContentLoading(true);
         this.setContentError(null);
         try {
             const res = await RpcApi.NativeMemoryReadFileCommand(TabRpcClient, {
                 agent_id: this.agentId,
                 filename: this.filename,
             });
+            if (requestId !== this.latestContentRequestId) return false;
             this.setContent(res.content);
+            this.setContentLoading(false);
+            return true;
         } catch (e) {
+            if (requestId !== this.latestContentRequestId) return false;
             this.setContentError(`Failed to load content: ${(e as Error).message ?? e}`);
+            this.setContentLoading(false);
+            return false;
         }
     }
 
@@ -252,9 +277,16 @@ export class NativeMemoryHistoryModel {
             // not just when a caller supplies onReverted) and forward it to
             // the caller for its own separate content view, if any (e.g.
             // AgentNativeMemoryModal's contentAtom in the Stash "content"
-            // sub-view, which this history panel doesn't own).
-            await this.loadContent();
-            if (this.onReverted) {
+            // sub-view, which this history panel doesn't own). Only forward
+            // on a genuine, non-stale success — reagent P1 + codex P2 on PR
+            // #3218: forwarding contentAtom() unconditionally could hand the
+            // caller a stale pre-revert value (or null) if this refresh
+            // failed, silently presenting old content as if it were the
+            // freshly reverted content. The failure is still visible via
+            // this model's own contentErrorAtom, rendered right where the
+            // user is looking (the history panel they just reverted from).
+            const refreshed = await this.loadContent();
+            if (refreshed && this.onReverted) {
                 this.onReverted(this.contentAtom() ?? "");
             }
         } catch (e) {
