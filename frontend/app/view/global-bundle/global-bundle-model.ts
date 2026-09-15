@@ -147,8 +147,6 @@ export class GlobalBundleViewModel {
     systemSectionsAtom: Accessor<Bundle[]>;
     /** sectionsAtom minus systemSectionsAtom — what the ordinary editor list renders. */
     ordinarySectionsAtom: Accessor<Bundle[]>;
-    /** Non-global, non-blank bundles eligible to promote into the global bundles. */
-    candidatesAtom: Accessor<Bundle[]>;
     /** Combined startup-instructions-file preview block. */
     previewAtom: Accessor<string>;
     /** Providers grouped by resolved startup-instructions filename, e.g.
@@ -205,11 +203,6 @@ export class GlobalBundleViewModel {
         );
         this.ordinarySectionsAtom = createMemo(() =>
             this.sectionsAtom().filter((m) => !m.is_system),
-        );
-        this.candidatesAtom = createMemo(() =>
-            this.allAtom()
-                .filter((m) => !m.is_global && !m.is_blank)
-                .sort((a, b) => a.name.localeCompare(b.name)),
         );
         this.previewAtom = createMemo(() => formatGlobalBundleBlock(this.sectionsAtom()));
         this.filenameGroupsAtom = createMemo(() => groupProvidersByStartupFilename());
@@ -322,25 +315,6 @@ export class GlobalBundleViewModel {
             this.setError(`Save failed: ${(e as Error).message ?? e}`);
         } finally {
             this.setSaving(false);
-        }
-    }
-
-    /** Promote an existing non-global bundle into the global bundles, appended last. */
-    async promote(id: string): Promise<void> {
-        const bundle = this.allAtom().find((m) => m.id === id);
-        if (!bundle) return;
-        this.setError(null);
-        try {
-            await RpcApi.UpsertBundleCommand(TabRpcClient, { ...bundle, is_global: true });
-            // ordinarySectionsAtom, not sectionsAtom — the backend's reorder
-            // command silently skips is_system ids (reorderglobalbrain's own
-            // AND is_system = 0 guard), so including one here is pointless
-            // at best. reagent P1, PR #2782 (same root cause as move() below).
-            const order = [...this.ordinarySectionsAtom().map((s) => s.id), id];
-            await RpcApi.ReorderGlobalBundlesCommand(TabRpcClient, { ids: order });
-            await this.refresh();
-        } catch (e) {
-            this.setError(`Promote failed: ${(e as Error).message ?? e}`);
         }
     }
 
