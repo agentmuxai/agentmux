@@ -325,16 +325,27 @@ impl AppServerController {
     }
 
     fn stop_process(&self) {
-        let process = self.inner.lock().unwrap().process.clone();
+        // Cleared SYNCHRONOUSLY, before the async shutdown even starts —
+        // not after it completes. ReAgent P1, PR 3215 (3rd review): stop()
+        // sets the caller's new_status synchronously right after calling
+        // this, but the old version only cleared inner.process/session
+        // inside the spawned task, after up to the 2s shutdown grace
+        // period. A resync_controller call landing in that window saw the
+        // new terminal status, called start(), but start()'s
+        // process.is_some() guard was still true from the stale handle —
+        // silently no-op'd instead of respawning. Taking the process out
+        // of `inner` here (not just cloning it) means start()'s guard sees
+        // the truth immediately; the actual OS-level kill still happens in
+        // the background using this locally-owned handle.
+        let process = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.session = None;
+            inner.process.take()
+        };
         let weak = self.self_ref.lock().unwrap().clone();
         if let Some(process) = process {
             tokio::spawn(async move {
                 let exit = process.shutdown(Duration::from_secs(2)).await;
-                // Clear process/session immediately instead of waiting for the
-                // event loop to separately observe the resulting EOF — without
-                // this, get_runtime_status/send_message report a live process
-                // for up to the 2s shutdown grace period (or longer) after a
-                // caller-initiated stop already asked it to go away.
                 let exit_code = match exit {
                     Ok(AppServerExit::Clean { code, .. })
                     | Ok(AppServerExit::BeforeInitialize { code, .. })
@@ -343,10 +354,7 @@ impl AppServerController {
                 };
                 if let Some(controller) = weak.and_then(|weak| Weak::upgrade(&weak)) {
                     controller.health_monitor.set_exited(exit_code);
-                    let mut inner = controller.inner.lock().unwrap();
-                    inner.process = None;
-                    inner.session = None;
-                    inner.proc_exit_code = exit_code;
+                    controller.inner.lock().unwrap().proc_exit_code = exit_code;
                 }
             });
         }
@@ -473,6 +481,15 @@ impl Controller for AppServerController {
         if let Some(signal) = input.sig_name.as_deref() {
             if signal == "SIGINT" || signal == "SIGTERM" {
                 self.stop_process();
+                // ReAgent P1, PR 3215 (3rd review): stop_process() alone
+                // never updates inner.proc_status -- its spawned task only
+                // clears inner.process/session once the kill actually
+                // completes. Without this, get_runtime_status kept
+                // reporting the pre-signal status (e.g. "running") forever
+                // after a signal-triggered kill, since nothing else updates
+                // it for this path (unlike Controller::stop(), which
+                // already sets a caller-provided status synchronously).
+                self.set_status(STATUS_DONE);
                 return Ok(());
             }
             return Err(format!("unsupported App Server signal {signal}"));
@@ -861,6 +878,62 @@ mod tests {
         assert!(
             respawned_session_ready,
             "start() after a failed handshake never respawned — the block is permanently bricked"
+        );
+
+        controller.stop(true, STATUS_DONE).unwrap();
+    }
+
+    /// ReAgent P1, PR 3215 (3rd review): stop() sets new_status
+    /// synchronously, but the process/session used to only get cleared
+    /// once stop_process()'s spawned shutdown task finished (up to a 2s
+    /// grace period later). A resync landing in that window saw the new
+    /// terminal status, called start(), but start()'s process.is_some()
+    /// guard was still true from the stale handle -- silently no-op'd
+    /// instead of respawning. This asserts the fix synchronously, with no
+    /// wait_until/sleep at all: process/session must already be cleared
+    /// the instant stop() returns, and a start() called immediately after
+    /// (not once some background task gets around to it) must actually
+    /// respawn.
+    #[tokio::test]
+    async fn stop_clears_process_and_session_synchronously_so_an_immediate_restart_actually_respawns()
+    {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+        let session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(session_ready, "controller session was never established");
+
+        controller.stop(true, STATUS_DONE).unwrap();
+
+        // No wait_until here on purpose -- this must already be true the
+        // instant stop() returns, not eventually.
+        {
+            let inner = controller.inner.lock().unwrap();
+            assert!(
+                inner.process.is_none(),
+                "stop() must clear the process handle synchronously, not after the async shutdown completes"
+            );
+            assert!(inner.session.is_none());
+        }
+
+        // Immediately, not after any delay: a resync landing right after
+        // stop() must see a clean slate and actually respawn.
+        controller
+            .start(app_server_meta("ready-for-turn"), None, false)
+            .unwrap();
+        let respawned = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            respawned,
+            "start() called immediately after stop() never respawned -- the stale process.is_some() guard silently no-op'd"
         );
 
         controller.stop(true, STATUS_DONE).unwrap();
