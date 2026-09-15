@@ -11,21 +11,24 @@ name: CI (PR) — compile tests + run
 # on the PR.
 #
 # This runs a compile-and-test gate on EVERY PR, so the break is caught at
-# merge time — but scoped to the CEF-free crates only (SPEC_CI_PR_NIGHTLY_
-# BALANCE_2026_09_12.md), not the full workspace. Between 2026-07-01 (PR #1885
-# added `cargo check --workspace --tests` + `cargo test --workspace` here) and
-# 2026-09, this job's Windows leg increasingly spent its ENTIRE 20-minute
-# budget just compiling agentmux-cef (the CEF C++ build via cef-dll-sys's
-# build.rs) before any test even ran — direct measurement on 2026-09-15 showed
-# compile alone taking ~19 of the 20 minutes. That's not the runner-pool
+# merge time — but scoped to the CEF-free crates only, not the full
+# workspace. Between 2026-07-01 (PR #1885 added `cargo check --workspace
+# --tests` + `cargo test --workspace` here) and 2026-09, this job's Windows
+# leg increasingly spent its ENTIRE 20-minute budget just compiling
+# agentmux-cef (the CEF C++ build via cef-dll-sys's build.rs) before any test
+# even ran — direct measurement on 2026-09-15 (a fresh checkout of a PR
+# touching only a one-line version bump, no CEF-relevant code) showed compile
+# alone taking ~19 of the 20 minutes, confirmed to recur across an entire
+# open PR stack unrelated to this change. That's not the runner-pool
 # flakiness INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md
-# documents (which this job's timeout-minutes and this file's concurrency group
-# already mitigate) — it's this job duplicating the nightly workflow's full
-# CEF-inclusive build on every PR, on a budget too small to finish it. The
-# fix is the lane split the spec above lays out: PR gets fast CEF-free
-# coverage, nightly (ci-nightly-build.yml, already running
-# `cargo build --release --workspace` + `cargo test --workspace` daily) keeps
-# the full CEF-inclusive safety net.
+# documents (which this job's timeout-minutes and this file's concurrency
+# group already mitigate) — it's this job duplicating the nightly workflow's
+# full CEF-inclusive build on every PR, on a budget too small to finish it.
+# The fix: PR gets fast CEF-free coverage below; nightly (ci-nightly-
+# build.yml, already running `cargo build --release --workspace` + `cargo
+# test --workspace` daily) keeps the full CEF-inclusive safety net — no
+# coverage is lost, it just moves to the lane where a long run doesn't block
+# every PR in the repo.
 #
 # Scope: `cargo check --tests` (+ `cargo test`) against agentmux-common,
 # agentmux-srv, agentmux-launcher, agentmux-bashwrap, and agentmux-mcp —
@@ -43,10 +46,9 @@ name: CI (PR) — compile tests + run
 # "check --tests + test (windows-latest)" and "vitest" as required status checks
 # in branch protection. Job/check names are unchanged from before this split
 # specifically so an existing branch-protection rule referencing them by name
-# keeps working — renaming to something like "PR fast: ..." (SPEC_CI_PR_
-# NIGHTLY_BALANCE_2026_09_12.md §6's SHOULD) would silently orphan that rule
-# until someone with admin access updates it, which isn't verifiable from a
-# code change alone.
+# keeps working — renaming to identify the lane in the name (e.g. "PR fast: ...")
+# would silently orphan that rule until someone with admin access updates it,
+# which isn't verifiable from a code change alone.
 #
 # --test-threads=1 mirrors the nightly (process-shared in-memory FileStore + a
 # focus-flag global flake under parallel runs; serial is deterministic).
@@ -90,15 +92,15 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'windows-latest' }}
-    # PR-lane budget (SPEC_CI_PR_NIGHTLY_BALANCE_2026_09_12.md §3.3): target
-    # under 10 min, soft ceiling 15 min. This job no longer builds
-    # agentmux-cef (see the workflow header comment), so the previous ~13-20
-    # min CEF-inclusive baseline (docs/incident/
+    # PR-lane budget: target under 10 min, soft ceiling 15 min. This job no
+    # longer builds agentmux-cef (see the workflow header comment), so the
+    # previous ~13-20 min CEF-inclusive baseline (docs/incident/
     # INCIDENT_2026_09_10_CI_PR_WINDOWS_RUNNER_HANG_BACKLOG.md) no longer
-    # applies here — 15 min still bounds a genuine runner-pool hang (that
-    # incident's root cause, separate from the CEF-scope issue this split
-    # fixes) to a fraction of GitHub's 360-minute default rather than hours.
-    # Revisit if representative runs land close to this ceiling.
+    # applies here — measured at ~4 min cold-cache locally. 15 min still
+    # bounds a genuine runner-pool hang (that incident's root cause, separate
+    # from the CEF-scope issue this split fixes) to a fraction of GitHub's
+    # 360-minute default rather than hours. Revisit if representative runs
+    # land close to this ceiling.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
