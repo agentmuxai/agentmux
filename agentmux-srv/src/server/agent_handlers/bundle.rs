@@ -84,8 +84,24 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     memory.created_at = now;
                 }
                 memory.updated_at = now;
+                // bundle_upsert_with_version, not bundle_upsert — this is
+                // the actual Armory Global Memory save path (frontend's
+                // UpsertBundleCommand -> "upsertmemory"; also used by the
+                // per-agent Bundle editor, which is fine: versioning only
+                // fires when memory.is_global is true either way). Without
+                // this, a human edit through the Armory UI was invisible to
+                // db_bundle_versions entirely — only agent-originated
+                // writes through GlobalMemoryWrite recorded a version, so a
+                // future history/diff view would present a false sequence
+                // with operator edits silently missing from it (codex P2,
+                // PR #3237). "armory-ui" as written_by: this handler runs
+                // over the frontend's authenticated WebSocket connection,
+                // which has no per-request trusted AGENT identity the way
+                // the REST/MCP path does (see BundleVersion::written_by's
+                // own doc comment) — a human via the UI is the only thing
+                // this code path can honestly claim.
                 wstore
-                    .bundle_upsert(&memory)
+                    .bundle_upsert_with_version(&memory, "armory-ui", "human", "{}")
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
