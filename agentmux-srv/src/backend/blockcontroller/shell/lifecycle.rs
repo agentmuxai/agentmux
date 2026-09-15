@@ -401,14 +401,34 @@ impl Controller for ShellController {
         // deliberately does not fall back to global settings.
         let agent_id_for_jekt: Option<String> = resolve_agent_id_for_jekt(&block_meta);
 
-        // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10):
+        // Close-on-exit (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10-11):
         // resolved from `block_meta` now, while it's still in scope, for
         // the wait/cleanup task below to act on once the process actually
         // exits. See `effective_close_on_exit`'s own doc comment for the
         // per-controller-type default. (`should_close_on_exit_force` is
         // deliberately NOT read here — see its own doc comment for why no
         // call site uses it.)
-        let close_on_exit = Self::effective_close_on_exit(&block_meta, &self.controller_type);
+        //
+        // Forced off for any block with a PARENT (`parentoref` non-empty)
+        // — an agent's composer-drawer shell (`AgentShellSubblock.tsx`) or
+        // a `PtyShellCreate`-spawned headless shell, not an independent
+        // top-level pane (§11, live-tested regression: closing one of
+        // these left the parent's own `term:shellsubblockid` pointer
+        // dangling — that field is unrelated to, and not touched by, the
+        // generic `sagas::delete_block::run` this feature calls — and the
+        // drawer's own "attach or create" logic then silently recreated a
+        // fresh shell moments later, reproducing the original respawn
+        // loop via a different path with extra latency, not fixing
+        // anything). A block with NO parent is a plain top-level pane
+        // (the `Terminal` widget, opened directly in a tab) — that case
+        // is unaffected and still defaults to closing.
+        let has_parent = self
+            .wstore
+            .as_ref()
+            .and_then(|store| store.get::<obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| !b.parentoref.is_empty())
+            .unwrap_or(false);
+        let close_on_exit = Self::effective_close_on_exit(&block_meta, &self.controller_type) && !has_parent;
         let close_on_exit_delay_ms = Self::close_on_exit_delay_ms(&block_meta);
 
         // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
