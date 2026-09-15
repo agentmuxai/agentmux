@@ -290,24 +290,42 @@
     // own child), not this outer, persistent shell the header/strip were
     // hoisted into. Painted as an absolute overlay pseudo-element, same
     // technique `.block-mask` uses, so it never affects this flex column's
-    // own box size. Mirrors `.block-mask`'s three states exactly: dim by
-    // default, accent when focused, transparent when this is the only
-    // pane in the tab (`isAlone`, term.tsx).
+    // own box size. Mirrors `.block-mask`'s states exactly: dim by
+    // default, accent when focused, transparent only when both focused
+    // AND alone in the tab (`isAlone`, term.tsx — an unfocused-alone pane
+    // keeps the ordinary dim border, matching `.pane-alone .block-mask`'s
+    // own nesting under `.block-focused`). `--pane-ring-color` (set
+    // inline, term.tsx) carries a custom `frame:activebordercolor`/
+    // `frame:hue`/`bg:bordercolor` color when one applies
+    // (computeFocusRingBorderColor, blockframe.tsx — same resolution
+    // `.block-mask` itself uses), so a pane's identity/custom color still
+    // shows here instead of always falling back to plain accent/dim
+    // (codex P2, PR #3226). `will-change: transform` unconditionally, and
+    // `z-index: 50` once focused, both match `.block-mask`'s own
+    // treatment exactly — required to composite above xterm's
+    // `overflow-y:scroll` GPU-promoted layer and above in-block overlays
+    // like `.term-stickers` (`--zindex-termstickers` = 20; see this
+    // component's own doc comment on that class), the exact regression
+    // reagent P1/P2 flagged on PR #3226: this ring sits even further up
+    // the ancestor chain than `.block-mask` did, so it needs the
+    // identical treatment just as much.
     &::after {
         content: "";
         position: absolute;
         inset: 0;
         pointer-events: none;
-        border: 2px solid var(--border-color);
+        border: 2px solid var(--pane-ring-color, var(--border-color));
         border-radius: var(--block-border-radius);
         z-index: var(--zindex-block-mask-inner);
+        will-change: transform;
     }
 
     &.term-pane-stack-focused::after {
-        border-color: var(--accent-color);
+        border-color: var(--pane-ring-color, var(--accent-color));
+        z-index: 50;
     }
 
-    &.term-pane-stack-alone::after {
+    &.term-pane-stack-focused-alone::after {
         border-color: transparent;
     }
 

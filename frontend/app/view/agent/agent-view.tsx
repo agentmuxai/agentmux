@@ -46,7 +46,7 @@ import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { BlockFrame_Header } from "@/app/block/blockframe";
+import { BlockFrame_Header, computeFocusRingBorderColor } from "@/app/block/blockframe";
 import {
     closeBlockInStack,
     getLayoutModelForStaticTab,
@@ -393,6 +393,13 @@ export const AgentPaneChrome = (props: {
     const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
     const agentId = () => activeBlockData()?.meta?.["agentId"];
     const isHistoryTab = () => !!activeBlockData()?.meta?.[HISTORY_TAB_FOR_META_KEY];
+
+    // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
+    // `.block-mask` — reused so a custom `frame:activebordercolor`/
+    // `frame:hue`/`bg:bordercolor` still shows up on the OUTER ring below
+    // (codex P2, PR #3226) instead of always falling back to the plain
+    // accent/dim colors.
+    const ringBorderColor = createMemo(() => computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, atoms.tabAtom()?.meta));
 
     // Codex P1 on this PR: noHeader (agent-model.ts) suppresses
     // BlockFrame's own inline header once hoisted, but nothing was
@@ -800,8 +807,15 @@ export const AgentPaneChrome = (props: {
             class="agent-pane-stack"
             classList={{
                 "agent-pane-stack-focused": isFocused() && !isAlone(),
-                "agent-pane-stack-alone": isAlone(),
+                // Only alone+focused suppresses the ring to transparent —
+                // matches .pane-alone .block-mask's own nesting under
+                // .block-focused (block.scss): alone-but-UNfocused still
+                // gets the ordinary dim border, same as any other unfocused
+                // pane (reagent P2, PR #3226). A bare "-alone" class here
+                // would wrongly suppress that dim border too.
+                "agent-pane-stack-focused-alone": isFocused() && isAlone(),
             }}
+            style={{ "--pane-ring-color": ringBorderColor() }}
             data-blockid={activeBlockId()}
             // codex P2 on this PR: the hoisted header is a SIBLING above the
             // nested `.block`, so clicks/focus on it no longer bubble to the

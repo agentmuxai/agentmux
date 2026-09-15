@@ -32,7 +32,7 @@ import {
     type NodeModel,
 } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { BlockFrame_Header } from "@/app/block/blockframe";
+import { BlockFrame_Header, computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -466,6 +466,13 @@ const TermPaneChrome = (props: {
     // established in #3134 for exactly this kind of switch-surviving reader.
     const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
 
+    // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
+    // `.block-mask` — reused so a custom `frame:activebordercolor`/
+    // `frame:hue`/`bg:bordercolor` still shows up on the outer ring below
+    // (codex P2, PR #3226) instead of always falling back to the plain
+    // accent/dim colors.
+    const ringBorderColor = createMemo(() => computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, atoms.tabAtom()?.meta));
+
     interface TermTab {
         blockId: string;
         label: string;
@@ -670,8 +677,13 @@ const TermPaneChrome = (props: {
             class="term-pane-stack"
             classList={{
                 "term-pane-stack-focused": isFocused() && !isAlone(),
-                "term-pane-stack-alone": isAlone(),
+                // Only alone+focused suppresses the ring to transparent —
+                // matches .pane-alone .block-mask's own nesting under
+                // .block-focused (block.scss): alone-but-UNfocused still
+                // gets the ordinary dim border (reagent P2, PR #3226).
+                "term-pane-stack-focused-alone": isFocused() && isAlone(),
             }}
+            style={{ "--pane-ring-color": ringBorderColor() }}
             // Keeps this pane reachable by the CEF browser API's
             // `[data-blockid]` subtree scoping (UIQuery/UIClick/screenshot
             // clip) now that chrome sits OUTSIDE the nested `.block` that
