@@ -282,18 +282,35 @@ rollup.
 **Update 2026-09-15 (Korp) — Windows Phase E: release artifact built,
 packaged, and verified; not published.** The Sept 10 build (above) was
 still on disk (`Release_GN_152`) — re-verified fresh rather than rebuilt:
-boots clean via `cefsimple.exe`, real (non-stub) ANGLE file sizes,
-`cef_version.h` confirms a genuine `152.0.7977.83` build
-(`CEF_COMMIT_HASH=79460ebecaa5...`). Traced provenance properly: the
-build's own clone was on the `7977-drag-rightclick-and-transparency`
-feature branch specifically, not the full `7977` integration branch —
-confirmed via `git merge-base --is-ancestor` that this commit is an
-ancestor of `agentmuxai/7977`'s current tip (`fe7c8a3c2`), and that the one
-integration-branch commit not reachable from it (`agentmux_process_requirement`,
-macOS-only, touches only `base/apple/`) cannot affect a Windows binary —
-so `fe7c8a3c2` is the correct release provenance commit, not the
-feature-branch HEAD actually checked out during the build. Packaged per
-`docs/cef-build/build-patched-cef-windows.md` §7:
+boots clean via `cefsimple.exe`; `cef_version.h` confirms a genuine
+`152.0.7977.83` build. **ANGLE re-verified via the actual symbol-export
+gate, not file size** (codex P2 on #3224 caught an earlier revision of
+this note leaning on size alone, which this spec's own Sept 10 section
+above already warned isn't reliable) — `scripts/verify-angle-libs.sh`
+against both the build directory and the extracted packaged zip: clean
+pass on both, genuine `eglGetProcAddress`/`glGetString` exports present.
+
+**Provenance, corrected (codex P2 on #3224):** `cef_version.h`'s
+`CEF_COMMIT_HASH=79460ebecaa5...` is a **Chromium** commit (confirmed:
+`git log -1` in the `chromium/src` tree resolves it to the official
+"Incrementing VERSION to 152.0.7977.83" branch-cut commit) — not our
+`agentmuxai/cef` fork's own commit, contrary to how an earlier revision of
+this note (and Opaz's 2026-09-11 Linux comment, which this echoed) read
+it. The actual fork-side provenance is whatever the `cef` clone's HEAD was
+at build time: `2817bfb6f85142a76bf5e33499079f22e42d8af2`, on the
+`7977-drag-rightclick-and-transparency` feature branch — **that** commit
+is this specific artifact's real provenance, and is what a release should
+target, not `agentmuxai/7977`'s later, fuller integration-branch tip
+(`fe7c8a3c2`). The ancestor-check reasoning below still stands as evidence
+the artifact would be *functionally identical* to one built from
+`fe7c8a3c2` (worth recording for context) — but per codex's correct
+objection, that's a claim about equivalence, not a license to name a later
+commit as the provenance of an already-built binary: confirmed via `git
+merge-base --is-ancestor` that `2817bfb6f` is an ancestor of
+`agentmuxai/7977`'s current tip, and that the one integration-branch
+commit not reachable from it (`agentmux_process_requirement`, macOS-only,
+touches only `base/apple/`) cannot affect a Windows binary either way.
+Packaged per `docs/cef-build/build-patched-cef-windows.md` §7:
 `cef-windows-x86_64-152.0.7977.83.zip` (194 MB, 455 entries, libcef.dll
 size cross-checked against the zip entry). **Deliberately not published**
 — per Opaz's 2026-09-11 comment on #3108, being the first platform to cut
