@@ -291,3 +291,21 @@ a {
 ::view-transition-new(workspace-tab-content) {
     animation-duration: 120ms;
 }
+
+// Defense in depth (reagent P1 on PR #3239): workspace.tsx already skips
+// calling startViewTransition() at all when prefersReducedMotionAtom is
+// true, which is the real gate — no transition means no
+// ::view-transition-old/new pseudo-elements ever exist to animate. This is
+// a second, CSS-only backstop for the same intent: the app-wide
+// `.prefers-reduced-motion` class above only zeroes `transition-*`
+// properties, not `animation-*`, which is what a view transition's
+// pseudo-elements actually use — so it alone would NOT have suppressed
+// this. A real `prefers-reduced-motion: reduce` media query (OS-level,
+// independent of whatever drives the app's own atom/class) catches any
+// path that isn't gated in JS.
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(workspace-tab-content),
+    ::view-transition-new(workspace-tab-content) {
+        animation-duration: 1ms;
+    }
+}

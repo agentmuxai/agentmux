@@ -17,6 +17,7 @@ import type { JSX } from "solid-js";
 function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
+    const prefersReducedMotion = atoms.prefersReducedMotionAtom;
 
     // Tab container elements by tab id, for the forced-layout effect below.
     const tabEls = new Map<string, HTMLDivElement>();
@@ -32,11 +33,21 @@ function WorkspaceElem(): JSX.Element {
     // shipped in Chromium 111, well within this app's CEF baseline
     // (browserslist "Chrome >= 128"), but detected rather than assumed — a
     // missing API degrades to the plain instant swap, not a throw.
+    //
+    // Reduced-motion (reagent P1 on PR #3239): the removed opacity fade was
+    // explicitly gated on this same atom (Codex P2 on PR #1108), and that
+    // gating was accidentally dropped along with the fade itself. The
+    // app-wide `.prefers-reduced-motion` CSS override (app.scss) only zeroes
+    // `transition-*` properties, not the `animation-*` ones a view
+    // transition's `::view-transition-old/new` pseudo-elements actually
+    // animate with — so skip calling startViewTransition at all when the
+    // user prefers reduced motion, same as the code this replaced did for
+    // its own animation.
     const [displayTabId, setDisplayTabId] = createSignal(tabId());
     createEffect(() => {
         const next = tabId();
         if (next === displayTabId()) return;
-        if (typeof document.startViewTransition === "function") {
+        if (!prefersReducedMotion() && typeof document.startViewTransition === "function") {
             document.startViewTransition(() => {
                 setDisplayTabId(next);
             });
