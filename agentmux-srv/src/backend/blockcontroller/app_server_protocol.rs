@@ -254,6 +254,10 @@ impl CodexAppServerSession {
         state.turn_id = None;
         state.phase = SessionPhase::Idle;
         state.items.clear();
+        // A pending approval queued under a prior thread/turn must not
+        // remain answerable once that context is gone (ReAgent P1, PR
+        // #3212) -- only turn/completed cleared this before.
+        state.pending_requests.clear();
         Ok(thread_id)
     }
 
@@ -297,6 +301,9 @@ impl CodexAppServerSession {
             SessionPhase::Idle
         };
         state.items.clear();
+        // Same as start_thread: a pending approval from a prior thread/turn
+        // must not survive into this one (ReAgent P1, PR #3212).
+        state.pending_requests.clear();
         Ok(resumed_id)
     }
 
@@ -455,14 +462,25 @@ impl CodexAppServerSession {
                 ))
             }
         };
-        let thread_id = params
-            .get("threadId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let turn_id = params
-            .get("turnId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
+        // Every kind except McpElicitation is item-scoped and MUST carry a
+        // threadId/turnId — silently treating an omitted field the same as
+        // "no scope claimed" (rather than erroring) contradicted this API's
+        // own "scoped to active thread/turn" fail-closed claim: a
+        // malformed/unexpected request missing these fields would have been
+        // queued unconditionally instead of rejected (ReAgent P1, PR #3212).
+        // McpElicitation genuinely has no thread/turn context (see its own
+        // test fixture), so it alone stays optional.
+        let (thread_id, turn_id) = if kind == ServerRequestKind::McpElicitation {
+            (
+                params.get("threadId").and_then(Value::as_str).map(str::to_string),
+                params.get("turnId").and_then(Value::as_str).map(str::to_string),
+            )
+        } else {
+            (
+                Some(string_field(params.get("threadId"), "threadId")?),
+                Some(string_field(params.get("turnId"), "turnId")?),
+            )
+        };
         let item_id = params
             .get("itemId")
             .and_then(Value::as_str)
@@ -498,14 +516,26 @@ impl CodexAppServerSession {
         result: Result<Value, ServerResponseError>,
         timeout: Duration,
     ) -> Result<(), CodexAppServerProtocolError> {
-        {
-            let state = self.state.lock().unwrap();
-            if !state.pending_requests.contains_key(id) {
-                return Err(CodexAppServerProtocolError::UnknownServerRequest);
-            }
+        // Removed atomically (check-and-take in one lock acquisition)
+        // rather than checked-then-removed-later — the old
+        // check-then-await-then-remove sequence let two concurrent calls
+        // for the same id both pass the membership check before either
+        // removed it, so both would send a JSON-RPC response for the same
+        // id and both report success (ReAgent P2, PR #3212). Re-inserted
+        // below on a transport failure so the documented retry-on-failure
+        // behavior is preserved — only one caller can ever be "holding" the
+        // entry between the take and a possible reinsert.
+        let pending = self
+            .state
+            .lock()
+            .unwrap()
+            .pending_requests
+            .remove(id)
+            .ok_or(CodexAppServerProtocolError::UnknownServerRequest)?;
+        if let Err(error) = self.transport.respond(id.clone(), result, timeout).await {
+            self.state.lock().unwrap().pending_requests.insert(id.clone(), pending);
+            return Err(error.into());
         }
-        self.transport.respond(id.clone(), result, timeout).await?;
-        self.state.lock().unwrap().pending_requests.remove(id);
         Ok(())
     }
 
@@ -561,6 +591,11 @@ impl CodexAppServerSession {
                     state.turn_id = None;
                     state.phase = SessionPhase::Idle;
                     state.items.clear();
+                    // Same as start_thread/resume_thread: a pending
+                    // approval from the previous thread must not remain
+                    // answerable once it's been replaced (ReAgent P1, PR
+                    // #3212).
+                    state.pending_requests.clear();
                 }
                 Ok(CodexAppServerEvent::ThreadStarted { thread_id })
             }
@@ -1446,5 +1481,137 @@ mod tests {
             })
             .unwrap();
         assert!(session.pending_server_requests().is_empty());
+    }
+
+    /// ReAgent P1, PR #3212 (2nd review): item-scoped kinds (everything
+    /// except McpElicitation) must require threadId/turnId rather than
+    /// silently treating an omitted field as "no scope claimed" -- that
+    /// contradicted this API's own "scoped to active thread/turn"
+    /// fail-closed claim.
+    #[tokio::test]
+    async fn an_item_scoped_request_missing_thread_id_is_rejected_not_silently_queued() {
+        let (session, _reader, _writer) = session();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+            state.turn_id = Some("turn-1".to_string());
+        }
+        assert!(matches!(
+            session.accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("no-scope".to_string()),
+                method: "item/tool/requestUserInput".to_string(),
+                params: json!({"itemId": "item-1"}),
+            }),
+            Err(CodexAppServerProtocolError::MissingStringField("threadId"))
+        ));
+        assert!(session.pending_server_requests().is_empty());
+
+        // McpElicitation alone stays exempt -- it genuinely has no
+        // thread/turn context.
+        let mcp = session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("mcp".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            })
+            .unwrap();
+        assert!(mcp.thread_id.is_none());
+    }
+
+    /// ReAgent P1, PR #3212 (2nd review): a pending approval queued under a
+    /// prior thread/turn must not remain answerable after that thread has
+    /// been replaced -- only turn/completed cleared pending_requests
+    /// before; start_thread, resume_thread, and a genuinely-new
+    /// thread/started notification did not.
+    #[tokio::test]
+    async fn thread_transitions_clear_stale_pending_requests() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            let _start: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            server_writer
+                .write_all(br#"{"id":1,"result":{"thread":{"id":"thread-2"}}}
+"#)
+                .await
+                .unwrap();
+        });
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: RpcId::String("stale".to_string()),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            })
+            .unwrap();
+        assert_eq!(session.pending_server_requests().len(), 1);
+
+        session
+            .start_thread(ThreadStartOptions::default(), Duration::from_secs(1))
+            .await
+            .unwrap();
+        assert!(
+            session.pending_server_requests().is_empty(),
+            "start_thread must clear pending requests queued under the previous thread"
+        );
+
+        server.await.unwrap();
+    }
+
+    /// ReAgent P2, PR #3212 (2nd review): respond_server_request checked
+    /// pending_requests membership, then awaited the transport write,
+    /// THEN removed the entry -- two concurrent calls for the same id
+    /// could both pass the membership check before either removed it, so
+    /// both would send a response and both report success. Now removed
+    /// atomically up front; deterministic via tokio::join! the same way
+    /// the concurrent-start_turn test is (neither future reaches an
+    /// await point before the synchronous remove).
+    #[tokio::test]
+    async fn concurrent_respond_calls_for_the_same_id_do_not_both_succeed() {
+        let (session, server_reader, mut server_writer) = session();
+        let server = tokio::spawn(async move {
+            let mut lines = BufReader::new(server_reader).lines();
+            // Exactly one respond frame should be written.
+            let _line = lines.next_line().await.unwrap().unwrap();
+            server_writer.write_all(b"ignored\n").await.ok();
+            let extra = tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await;
+            assert!(extra.is_err(), "a second concurrent respond call must not also write a response");
+        });
+
+        {
+            let mut state = session.state.lock().unwrap();
+            state.thread_id = Some("thread-1".to_string());
+        }
+        let id = RpcId::String("approval".to_string());
+        session
+            .accept_server_request(AppServerIncoming::Request {
+                id: id.clone(),
+                method: "mcpServer/elicitation/request".to_string(),
+                params: json!({"message": "confirm"}),
+            })
+            .unwrap();
+
+        let session_a = session.clone();
+        let session_b = session.clone();
+        let id_a = id.clone();
+        let id_b = id.clone();
+        let (result_a, result_b) = tokio::join!(
+            session_a.respond_server_request(&id_a, Ok(json!({"approved": true})), Duration::from_secs(1)),
+            session_b.respond_server_request(&id_b, Ok(json!({"approved": true})), Duration::from_secs(1)),
+        );
+        let results = [result_a, result_b];
+        let ok_count = results.iter().filter(|r| r.is_ok()).count();
+        let unknown_count = results
+            .iter()
+            .filter(|r| matches!(r, Err(CodexAppServerProtocolError::UnknownServerRequest)))
+            .count();
+        assert_eq!(ok_count, 1, "exactly one of the two concurrent respond calls should succeed");
+        assert_eq!(unknown_count, 1, "the other must see it already gone, not also send a response");
+
+        server.abort();
     }
 }
