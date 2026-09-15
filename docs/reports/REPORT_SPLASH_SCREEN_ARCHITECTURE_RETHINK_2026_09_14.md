@@ -3,8 +3,12 @@
 **Date:** 2026-09-14
 **Author:** Agenty (investigation), synthesizing a fresh code audit against two
 prior docs
-**Status:** Diagnosis + proposed redesign. Nothing implemented in this pass —
-report only, per the ask.
+**Status:** active — diagnosis and redesign proposal below are unchanged from
+the original pass; Phase 1 (§4, the shared `splash_core` module, the count-up
+fix, and the frozen-row fix on all three platforms) has since shipped
+(PR #3222). Phases 3–4's remaining items (real migration sub-progress, macOS
+`paint`-stage parity, total/other on Linux, unified hold semantics) are not
+yet done — tracked as follow-up work, not re-scoped here.
 **Scope:** The native startup splash (`agentmux-launcher/src/splash.rs`
 [Windows], `splash_mac.rs` [macOS], `splash_linux/{mod,x11,wayland}.rs`
 [Linux]) and everything that feeds it (`startup_events.rs`,
