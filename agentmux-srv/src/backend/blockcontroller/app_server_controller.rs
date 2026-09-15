@@ -201,6 +201,15 @@ impl AppServerController {
                                 if matches!(event, CodexAppServerEvent::TurnCompleted { .. }) {
                                     controller.health_monitor.set_active_turn(false);
                                     controller.set_status(STATUS_RUNNING);
+                                    // Send the next queued message (if any) now that
+                                    // the turn it collided with has finished — one at
+                                    // a time, since only one turn can be active. Any
+                                    // remainder stays queued for the NEXT completion.
+                                    let next_message =
+                                        controller.inner.lock().unwrap().pending_messages.pop_front();
+                                    if let Some(next_message) = next_message {
+                                        controller.spawn_turn(session.clone(), next_message);
+                                    }
                                 }
                             }
                         }
@@ -241,6 +250,9 @@ impl AppServerController {
         let weak = self.self_ref.lock().unwrap().clone();
         health.set_active_turn(true);
         self.set_status(STATUS_RUNNING);
+        // Kept alongside `message` (which `start_turn` consumes) so a
+        // `TurnAlreadyActive` rejection can be requeued instead of lost.
+        let requeue_message = message.clone();
         tokio::spawn(async move {
             if let Err(error) = session.start_turn(message, OPERATION_TIMEOUT).await {
                 // `TurnAlreadyActive` means a DIFFERENT turn is still running —
@@ -255,7 +267,19 @@ impl AppServerController {
                     health.set_active_turn(false);
                 }
                 if let Some(controller) = weak.and_then(|weak| Weak::upgrade(&weak)) {
-                    if !turn_already_active {
+                    if turn_already_active {
+                        // ReAgent P1 on PR #3215's second review: don't just log and
+                        // drop it — `send_message` already told its caller `Ok`, so
+                        // this is the only chance to actually deliver it. Queue it
+                        // for `spawn_event_loop`'s `TurnCompleted` handler to send
+                        // once the turn that's currently active finishes.
+                        controller
+                            .inner
+                            .lock()
+                            .unwrap()
+                            .pending_messages
+                            .push_back(requeue_message);
+                    } else {
                         controller.set_status(STATUS_DONE);
                     }
                     tracing::warn!(
@@ -395,15 +419,15 @@ impl Controller for AppServerController {
             }
             controller.inner.lock().unwrap().session = Some(session.clone());
             controller.set_status(STATUS_RUNNING);
-            let pending_messages = controller
-                .inner
-                .lock()
-                .unwrap()
-                .pending_messages
-                .drain(..)
-                .collect::<Vec<_>>();
-            for message in pending_messages {
-                controller.spawn_turn(session.clone(), message);
+            // Only one turn can be active at a time — start just the first
+            // queued message now; the rest stay queued and are sent one at a
+            // time as each turn completes (spawn_event_loop's `TurnCompleted`
+            // handler). Draining and spawning all of them here concurrently
+            // meant every message but the first immediately hit
+            // `TurnAlreadyActive` and was silently lost (ReAgent P1, PR #3215).
+            let first_pending_message = controller.inner.lock().unwrap().pending_messages.pop_front();
+            if let Some(first_pending_message) = first_pending_message {
+                controller.spawn_turn(session.clone(), first_pending_message);
             }
             controller.spawn_event_loop(process_for_task, session);
         });
@@ -604,6 +628,24 @@ mod tests {
         }
     }
 
+    /// The session's own `turn_id`, straight from `CodexAppServerSession`'s
+    /// state — unlike `health_monitor.is_active_turn()` (which flips to
+    /// `true` synchronously in `spawn_turn`, BEFORE the `turn/start` request
+    /// even goes out), this only becomes `Some` once the round-trip actually
+    /// completes. Tests that need to guarantee a SECOND `send_message` hits
+    /// `start_turn`'s local `TurnAlreadyActive` check (rather than racing it
+    /// and sending its own concurrent `turn/start`) must synchronize on this,
+    /// not on `is_active_turn()`.
+    fn session_turn_id(controller: &AppServerController) -> Option<String> {
+        controller
+            .inner
+            .lock()
+            .unwrap()
+            .session
+            .as_ref()
+            .and_then(|session| session.snapshot().turn_id)
+    }
+
     #[tokio::test]
     async fn spawn_event_loop_reaps_the_process_and_clears_stale_state_on_exit() {
         let (controller, _broker) = controller_with_broker();
@@ -659,10 +701,14 @@ mod tests {
             .send_message("first message".to_string())
             .unwrap();
 
-        let turn_active =
-            wait_until(|| controller.health_monitor.is_active_turn(), Duration::from_secs(5))
-                .await;
-        assert!(turn_active, "first turn never became active");
+        // Wait for the ACTUAL turn/start round-trip to finish (not just
+        // `is_active_turn()`, which flips true before the request is even
+        // sent) so the second message below is guaranteed to hit the local
+        // `TurnAlreadyActive` check instead of racing it.
+        let turn_id_set =
+            wait_until(|| session_turn_id(&controller).is_some(), Duration::from_secs(5)).await;
+        assert!(turn_id_set, "first turn's turn/start round-trip never completed");
+        assert!(controller.health_monitor.is_active_turn());
         assert_eq!(controller.get_runtime_status().shellprocstatus, STATUS_RUNNING);
 
         // `start_turn`'s `TurnAlreadyActive` check is local (state.turn_id is
@@ -685,12 +731,80 @@ mod tests {
             STATUS_RUNNING,
             "a rejected second turn must not mark a live controller done"
         );
+        assert_eq!(
+            controller.inner.lock().unwrap().pending_messages.len(),
+            1,
+            "the rejected message must be queued, not dropped (ReAgent P1, PR #3215 2nd review)"
+        );
 
         // Cleanup: this fixture mode idles forever rather than exiting on its
         // own, and the event loop task holds its own Arc<AppServerProcess> for
         // as long as it's reading — `kill_on_drop` never fires without an
         // explicit stop, which would otherwise leak the child for the rest of
         // this test binary's run.
+        controller.stop(true, STATUS_DONE).unwrap();
+    }
+
+    /// End-to-end version of the test above: the queued message must actually
+    /// get SENT once the turn it collided with completes, not just survive in
+    /// the queue forever. ReAgent P1 on PR #3215's second review.
+    #[tokio::test]
+    async fn a_queued_message_is_sent_once_the_active_turn_completes() {
+        let (controller, _broker) = controller_with_broker();
+        controller
+            .start(app_server_meta("requeue-after-turn-completes"), None, false)
+            .unwrap();
+
+        let session_ready = wait_until(
+            || controller.inner.lock().unwrap().session.is_some(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(session_ready, "controller session was never established");
+
+        controller
+            .send_message("first message".to_string())
+            .unwrap();
+        let turn_id_set =
+            wait_until(|| session_turn_id(&controller).is_some(), Duration::from_secs(5)).await;
+        assert!(turn_id_set, "first turn's turn/start round-trip never completed");
+
+        // The fixture waits 300ms after responding to turn/start before
+        // sending turn/completed specifically so this has time to land while
+        // state.turn_id is still Some — i.e. the rejection-and-queue path,
+        // not a normal second turn started after the first already finished.
+        controller
+            .send_message("queued while turn 1 is active".to_string())
+            .unwrap();
+        let queued = wait_until(
+            || controller.inner.lock().unwrap().pending_messages.len() == 1,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(queued, "second message was not queued — test is racing the fixture's notification");
+
+        // Once turn/completed arrives, the event loop must drain the queue
+        // and start the second turn — the fixture only responds to a SECOND
+        // turn/start if the controller actually sends one.
+        let requeued_message_was_sent = wait_until(
+            || controller.inner.lock().unwrap().pending_messages.is_empty(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            requeued_message_was_sent,
+            "queued message was never drained after the active turn completed"
+        );
+        let second_turn_active = wait_until(
+            || controller.health_monitor.is_active_turn(),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(
+            second_turn_active,
+            "the requeued message's turn never became active — it was drained but never actually sent"
+        );
+
         controller.stop(true, STATUS_DONE).unwrap();
     }
 }
