@@ -8,7 +8,7 @@
 # docs/specs/SPEC_LOCAL_BUILD_VERSIONING_2026_05_28.md.
 #
 # Usage:
-#   bash scripts/package-linux.sh [--fresh] [--format=appimage|deb|tarball] [output-dir]
+#   bash scripts/package-linux.sh [--fresh] [--format=appimage|deb|rpm|tarball] [output-dir]
 #
 #   --fresh      No-op (accepted for back-compat). Every local build is now
 #                already its own isolated data dir — see CHANNEL below — so
@@ -52,7 +52,7 @@ for arg in "$@"; do
     case "$arg" in
         --fresh) FRESH=1 ;;
         --format=*) FORMAT="${arg#--format=}" ;;
-        --*) echo "ERROR: unknown flag $arg (supported: --fresh, --format=appimage|deb|tarball)" >&2; exit 1 ;;
+        --*) echo "ERROR: unknown flag $arg (supported: --fresh, --format=appimage|deb|rpm|tarball)" >&2; exit 1 ;;
         *) OUTDIR="$arg" ;;
     esac
 done
@@ -60,7 +60,7 @@ done
 IFS=',' read -r -a FORMATS <<< "$FORMAT"
 for f in "${FORMATS[@]}"; do
     case "$f" in
-        appimage|deb|tarball) ;;
+        appimage|deb|rpm|tarball) ;;
         *) echo "ERROR: unknown format '$f' in --format=$FORMAT (supported: appimage, deb, tarball)" >&2; exit 1 ;;
     esac
 done
