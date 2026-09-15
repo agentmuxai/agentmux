@@ -1052,6 +1052,9 @@ export class SwarmViewModel implements ViewModel {
     private unsubs: (() => void)[] = [];
     // Per-block controllerstatus unsubs — cleaned up when block list refreshes
     private blockUnsubs: (() => void)[] = [];
+    // The id set subscribeToBlockStatuses was last actually rebuilt for —
+    // see loadTrackedBlocks's use of this (codex P2 on PR #3219).
+    private lastSubscribedBlockIds: Set<string> = new Set();
 
     // Backend broadcasts one subagent:spawned/subagent:completed event per
     // subagent file (see subagent_watcher.rs's process_jsonl_change) — a
@@ -1316,7 +1319,22 @@ export class SwarmViewModel implements ViewModel {
             const { block_ids } = await RpcApi.AgentTrackedBlocksCommand(TabRpcClient, {});
             const ids: string[] = block_ids ?? [];
             this.setTrackedBlockIds(ids);
-            this.subscribeToBlockStatuses(ids);
+            // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
+            // rebuilds every per-block status subscription (each unsub/sub
+            // flushes its own WPS eventsub command) plus issues a fresh
+            // GetControllerStatus per block — necessary when membership
+            // actually changed, pure overhead when it didn't. With the
+            // safety-net poll below calling this every
+            // TRACKED_BLOCKS_POLL_MS regardless of whether anything changed,
+            // skip the rebuild unless the id SET (not order — server-side
+            // ordering can legitimately shift without membership changing)
+            // actually differs from what's already subscribed.
+            const changed =
+                ids.length !== this.lastSubscribedBlockIds.size || ids.some((id) => !this.lastSubscribedBlockIds.has(id));
+            if (changed) {
+                this.lastSubscribedBlockIds = new Set(ids);
+                this.subscribeToBlockStatuses(ids);
+            }
         } catch {
             // silent — safe default is empty tree
         }

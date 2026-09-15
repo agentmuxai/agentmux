@@ -602,7 +602,17 @@ pub fn resync_controller(
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            // codex P2 on PR #3219: ShellController::new starts with
+            // is_agent_pane: false and start() only sets it (synchronously,
+            // before returning — shell/lifecycle.rs's start()) after actually
+            // spawning. register_controller's notification above therefore
+            // fired before list_agent_panes()'s is_agent() filter would have
+            // included this block; notify again now that start() has run so
+            // the classified state gets an authoritative announcement too,
+            // instead of depending solely on a proxy event or the poll.
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_SUBPROCESS => {
             let ctrl = subprocess::SubprocessController::new(
@@ -618,7 +628,9 @@ pub fn resync_controller(
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_PERSISTENT => {
             let ctrl = persistent::PersistentSubprocessController::new(
@@ -632,7 +644,9 @@ pub fn resync_controller(
             let ctrl = Arc::new(ctrl);
             ctrl.set_self_ref();
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_ACP => {
             let ctrl = acp::AcpController::new(
@@ -645,7 +659,9 @@ pub fn resync_controller(
             );
             let ctrl = Arc::new(ctrl);
             register_controller(block_id, ctrl.clone());
-            ctrl.start(block_meta.clone(), rt_opts, force)
+            let result = ctrl.start(block_meta.clone(), rt_opts, force);
+            notify_tracked_blocks_changed();
+            result
         }
         BLOCK_CONTROLLER_TSUNAMI => {
             // Tsunami controller deferred to later phase
