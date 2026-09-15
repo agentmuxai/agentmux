@@ -409,26 +409,32 @@ impl Controller for ShellController {
         // deliberately NOT read here — see its own doc comment for why no
         // call site uses it.)
         //
-        // Forced off for any block with a PARENT (`parentoref` non-empty)
-        // — an agent's composer-drawer shell (`AgentShellSubblock.tsx`) or
-        // a `PtyShellCreate`-spawned headless shell, not an independent
-        // top-level pane (§11, live-tested regression: closing one of
-        // these left the parent's own `term:shellsubblockid` pointer
-        // dangling — that field is unrelated to, and not touched by, the
-        // generic `sagas::delete_block::run` this feature calls — and the
-        // drawer's own "attach or create" logic then silently recreated a
-        // fresh shell moments later, reproducing the original respawn
-        // loop via a different path with extra latency, not fixing
-        // anything). A block with NO parent is a plain top-level pane
-        // (the `Terminal` widget, opened directly in a tab) — that case
-        // is unaffected and still defaults to closing.
-        let has_parent = self
+        // Forced off for a SUB-block — a block whose `parentoref` names
+        // another BLOCK (`block:<id>`): an agent's composer-drawer shell
+        // (`AgentShellSubblock.tsx`, via `createsubblock`) or a
+        // `PtyShellCreate`-spawned headless shell. Those are not
+        // independent panes, and closing one via
+        // `sagas::delete_block::run` leaves the parent's own
+        // `term:shellsubblockid` pointer dangling (a field that saga knows
+        // nothing about), after which the drawer's own "attach or create"
+        // logic silently recreates a fresh shell — reproducing the
+        // original respawn loop by a different route (§11).
+        //
+        // A TOP-LEVEL pane's `parentoref` names its owning TAB
+        // (`tab:<id>`, set by `wcore::block`/`persist_subscriber`) — NOT
+        // empty. Checking `!parentoref.is_empty()` here (as the first cut
+        // of §11 did) therefore disabled close-on-exit for *every* pane,
+        // including the plain `Terminal` widget this feature exists for —
+        // the regression the reporter hit as "still hangs" (§12). Match
+        // on the `block:` prefix specifically, the same discriminator
+        // `websocket.rs`'s `strip_prefix("block:")` already uses.
+        let is_sub_block = self
             .wstore
             .as_ref()
             .and_then(|store| store.get::<obj::Block>(&self.block_id).ok().flatten())
-            .map(|b| !b.parentoref.is_empty())
+            .map(|b| b.parentoref.starts_with("block:"))
             .unwrap_or(false);
-        let close_on_exit = Self::effective_close_on_exit(&block_meta, &self.controller_type) && !has_parent;
+        let close_on_exit = Self::effective_close_on_exit(&block_meta, &self.controller_type) && !is_sub_block;
         let close_on_exit_delay_ms = Self::close_on_exit_delay_ms(&block_meta);
 
         // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.

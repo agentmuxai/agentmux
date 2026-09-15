@@ -4155,7 +4155,13 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
     }
     let mut block = crate::backend::obj::Block {
         oid: "test-toplevel-shell".to_string(),
-        parentoref: String::new(),
+        // A REAL top-level pane is parented to its TAB, not to nothing —
+        // `wcore::block` / `persist_subscriber` both write
+        // `format!("tab:{tab_id}")`. An earlier version of this test used
+        // `String::new()` here, which never occurs in production and let a
+        // `!parentoref.is_empty()` bug ship that disabled close-on-exit
+        // for every real pane (§12). Keep this realistic.
+        parentoref: "tab:test-real-tab-1".to_string(),
         meta,
         ..Default::default()
     };

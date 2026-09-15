@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-15
 **Status:** implemented (§4b's respawn loop, §7-9; §4a's close-on-exit,
-§10 — both halves of the original bug report are now fixed)
+§10-12. §11-12 correct two real regressions in §10 found by live retest —
+read §12 first: it supersedes §11's guess about which pane was involved,
+and adds the 10s `FLUSHER_DRAIN_TIMEOUT` half of the reported "hang")
 **Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
 `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
 
@@ -549,3 +551,78 @@ Re-verified: full `ptyshell_*` suite (6 tests, run together in one
 process) plus the new parent-less test (run individually, same
 `OnceLock` constraint as its siblings) both passing, and the full
 non-ignored suite (3352 passed, 0 failed) — all re-run after this fix.
+
+## 12. §11's exclusion was keyed on the wrong field — and the real 10s hang
+
+Reporter retested §11 and said "still hangs" a third time. Rather than
+iterate on the symptom again, this round queried the live dev instance's
+own SQLite store for the block that had actually just exited:
+
+```json
+{"oid":"d2743404-…","version":4,
+ "meta":{"view":"term","controller":"shell","cmd:cwd":"C:/Users/asafe",
+         "term:osc_title":"C:\Program Files\PowerShell\7\pwsh.EXE"},
+ "parentoref":"tab:2f65a023-…"}
+```
+
+Two facts fell out of that one record, both of which invalidate earlier
+guesses in this document:
+
+**(a) The pane was never the agent composer-drawer shell.** It is a plain
+top-level `Terminal` widget (`view:"term"`, parented to a TAB), running
+pwsh. §11 inferred "composer-drawer" from the reporter's "pulsating brain"
+description and built its fix around that; the store says otherwise.
+§11's exclusion is still correct *as an exclusion* — a genuine sub-block
+must not be closed this way — but it was never what this reporter was
+hitting.
+
+**(b) §11's exclusion was keyed on the wrong field, and disabled
+close-on-exit for EVERY pane.** It tested `!parentoref.is_empty()` as a
+proxy for "is a sub-block." But a top-level pane's `parentoref` is
+`tab:<tab_id>` (`wcore::block`, `persist_subscriber`) — non-empty. Only a
+sub-block uses `block:<block_id>` (`server/mod.rs`'s `PtyShellCreate`,
+`websocket.rs`'s `createsubblock`). So the check matched every pane in
+existence and turned the whole feature off — exactly the "still hangs"
+the reporter saw. Fixed to `parentoref.starts_with("block:")`, the same
+discriminator `websocket.rs:1172` already uses via `strip_prefix("block:")`.
+
+**Why the §11 test didn't catch it:** `shell_pane_with_no_parent_closes_itself_after_exit`
+constructed its "top-level" block with `parentoref: String::new()` — a
+value that never occurs in production. It passed under both the broken and
+the fixed logic, which is precisely why it gave false confidence. The test
+now uses a realistic `tab:<id>` parent, and fails against the §11 code.
+
+**The other half: `FLUSHER_DRAIN_TIMEOUT` was 10s of dead UI on every
+exit.** Independent of the above, srv logs showed a flat ten-second gap
+between `process exited` and any subsequent activity, every single time:
+
+```
+13:51:34  process exited
+13:51:44  PTY output flusher did not finish draining within the timeout
+```
+
+`STATUS_DONE` is published only after that drain wait, so for ten seconds
+after `exit` the pane could not react at all — no exited-state icon, no
+close, nothing. That is a hang by any reasonable definition, and it was
+pre-existing, unrelated to close-on-exit, and affects every
+`STATUS_DONE`-driven affordance (the pane's own exited icon,
+`PtyShellStatus`'s `running:false`).
+
+The bound was sized (correctly, for its stated purpose) as a generous
+ceiling over a flush that takes milliseconds — `PTY_COALESCE_WINDOW` is
+20ms. What nobody had measured is how often it is actually *reached*: on
+Windows, essentially always, because ConPTY's console-host process
+outlives the direct child and holds the PTY open, so the read loop never
+sees EOF. Waiting the full ceiling buys nothing there (the flusher cannot
+finish until an EOF that may never arrive — which is why expiry detaches
+rather than aborts) while costing the entire ceiling in dead UI time.
+Reduced 10s → 1s: still ~50x headroom over the legitimate case, 10x less
+user-visible cost in the pathological one, and no behavioral change
+otherwise (expiry still detaches; late output is still never lost).
+
+Measured effect, same test, same machine: 13.09s → **4.06s** end to end.
+
+**Verified:** `shell_pane_with_no_parent_closes_itself_after_exit` (now
+with a realistic `tab:` parent) passes; the sub-block exclusion test still
+passes; full `ptyshell_*` suite (6) passes; full non-ignored suite (3352
+passed, 0 failed).
