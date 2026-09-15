@@ -1171,13 +1171,37 @@ fn broadcast_meta_update(
 /// Shared by both the top-level reuse check and the "lost the atomic
 /// claim" fallback in `handle_pty_shell_create`: resync `id`'s controller
 /// and reply, or return `None` if `id` doesn't resolve to a real block
-/// (stale pointer) so the caller falls through to creating a fresh one.
+/// (stale pointer), OR if its shell has already exited, so the caller
+/// falls through to creating a fresh one.
 async fn try_attach_to_existing_shell(
     state: &AppState,
     agent_block_id: &str,
     id: &str,
 ) -> Option<axum::response::Response> {
     let block = state.wstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
+
+    // Don't resurrect a shell that already exited (e.g. the human typed
+    // `exit`). `resync_controller`'s STATUS_DONE branch below would
+    // otherwise call `ctrl.start()` unconditionally — correct for the
+    // crash/backend-restart recovery case it was written for
+    // (`TermResyncHandler` on the WS path), but wrong here: every
+    // subsequent `PtyShellCreate` against this same pane-shell pointer
+    // would silently respawn it again, each respawn appending a fresh
+    // shell-startup banner to the pane's append-only `term` scrollback —
+    // indistinguishable from the exited shell's output looping forever.
+    // Treating an exited shell like a stale pointer (return `None`) reuses
+    // the existing "create a fresh one" fallback in both callers instead
+    // of inventing a new response shape.
+    if let Some(ctrl) = blockcontroller::get_controller(id) {
+        if ctrl.get_runtime_status().shellprocstatus == blockcontroller::STATUS_DONE {
+            tracing::info!(
+                block_id = %id,
+                parent_id = %agent_block_id,
+                "ptyshell.create: pane's shell already exited, not respawning — falling through to a fresh shell"
+            );
+            return None;
+        }
+    }
 
     // Baseline BEFORE resync — see `answer_conpty_handshake_if_seen`'s doc
     // comment (Codex P1 on PR #3194) for why this matters: the `term` file
