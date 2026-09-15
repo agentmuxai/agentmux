@@ -22,14 +22,29 @@ if [ ! -f "$dll" ]; then
   exit 1
 fi
 
-# Expected MAJOR = resolved `cef` crate version from Cargo.lock, e.g.
-#   [[package]]
-#   name = "cef"
-#   version = "148.3.0+148.0.9"   → 148
-expected_major="$(grep -A2 '^name = "cef"$' Cargo.lock 2>/dev/null \
-  | sed -n 's/^version = "\([0-9][0-9]*\).*/\1/p' | head -1)"
+# Expected MAJOR = resolved version of Windows's specific `cef_win` alias
+# (agentmux-cef/Cargo.toml), via `cargo metadata --filter-platform`.
+#
+# NOT "grep the first 'name = \"cef\"' entry in Cargo.lock" — as of the
+# staged per-platform 152 rollout (SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_
+# 2026_09_07.md Phase C), Cargo.lock can carry TWO "cef" package entries
+# simultaneously (cef_win + macOS/Linux's cef_unix, e.g. 152.x and 148.x).
+# "First" is a lockfile-ordering accident, not a target selection — it
+# would silently validate this build's DLL against the WRONG platform's
+# resolved version, exactly the class of bug this script exists to catch.
+# --filter-platform resolves the dependency graph as Windows actually sees
+# it, so only cef_win is in scope, unambiguously.
+metadata="$(cargo metadata --filter-platform x86_64-pc-windows-msvc --format-version 1 2>/dev/null)"
+cef_win_pkg_id="$(printf '%s' "$metadata" | jq -r '
+  .resolve.nodes[] | select(.id | startswith("path+file://") and contains("/agentmux-cef#"))
+  | .deps[] | select(.name == "cef_win") | .pkg
+')"
+expected_full="$(printf '%s' "$metadata" | jq -r --arg pkg "$cef_win_pkg_id" '
+  .packages[] | select(.id == $pkg) | .version
+')"
+expected_major="$(printf '%s' "$expected_full" | sed -n 's/^\([0-9][0-9]*\).*/\1/p')"
 if [ -z "$expected_major" ]; then
-  echo "⚠ verify-cef-version: could not read 'cef' crate version from Cargo.lock — skipping check" >&2
+  echo "⚠ verify-cef-version: could not resolve cef_win's version via 'cargo metadata' — skipping check" >&2
   exit 0
 fi
 
