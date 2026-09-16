@@ -84,6 +84,14 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
         }
     };
 
+    // Prune BEFORE seeding, not after: when a release renames a manifest
+    // entry's id while keeping the same (UNIQUE) display `name`, the old
+    // id's row must be gone before the new id's INSERT is attempted, or
+    // that insert fails on the name collision with no retry — leaving the
+    // renamed entry absent until the NEXT startup happens to prune the old
+    // row first (Codex P2, PR #3244).
+    prune_entries_removed_from_manifest(wstore, &manifest);
+
     let (mut created, mut updated, mut unchanged, mut skipped_local, mut skipped_older, mut skipped_collision) =
         (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
 
@@ -128,8 +136,6 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
             manifest.version,
         );
     }
-
-    prune_entries_removed_from_manifest(wstore, &manifest);
 }
 
 /// A row for an entry AgentMux itself removed (or renamed to a new id) in a
@@ -137,9 +143,16 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
 /// it would keep being injected into every future agent indefinitely,
 /// exactly the "stale Operator Config actively misleads an agent" failure
 /// mode this whole seeding mechanism exists to prevent (Codex P2, PR #3244).
-/// Only prunes rows still owned by this seeder (`bundle_delete_system_if_
-/// owned` checks atomically) — a row a human has edited is left in place,
-/// orphaned from the manifest but not clobbered, for a human to clean up.
+/// Only prunes rows still owned by this seeder AND whose own recorded
+/// generation is <= this process's manifest version (`bundle_delete_system_
+/// if_owned` checks both atomically) — on a machine sharing store.db across
+/// multiple AgentMux builds/versions, an OLDER build's manifest simply
+/// doesn't mention an entry a NEWER build already added; without the
+/// generation gate, the older build would misread "not in my manifest" as
+/// "removed" and delete the newer build's own addition. Same "never clobber
+/// a local edit" posture as the reseed path for a human-edited row: left in
+/// place, orphaned from the manifest but not clobbered, for a human to
+/// clean up. Codex P2, PR #3244.
 fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManifest) {
     let manifest_ids: std::collections::HashSet<&str> =
         manifest.entries.iter().map(|e| e.id.as_str()).collect();
@@ -157,7 +170,7 @@ fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManif
         if manifest_ids.contains(id.as_str()) {
             continue;
         }
-        match wstore.bundle_delete_system_if_owned(&id, WRITTEN_BY) {
+        match wstore.bundle_delete_system_if_owned(&id, WRITTEN_BY, manifest.version) {
             Ok(true) => {
                 pruned += 1;
                 tracing::info!(id = %id, "operator config seed: pruned an entry no longer in the manifest");
@@ -165,7 +178,9 @@ fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManif
             Ok(false) => {
                 tracing::info!(
                     id = %id,
-                    "operator config seed: an entry is no longer in the manifest but has a local edit — leaving it in place"
+                    "operator config seed: an entry is no longer in this manifest but was left in place \
+                     (either it has a local edit, or its own generation is newer than this manifest's — \
+                     likely a different, newer AgentMux build sharing this store)"
                 );
             }
             Err(e) => {
@@ -385,6 +400,45 @@ mod tests {
         let bundle = store.bundle_get("op-old").unwrap();
         assert!(bundle.is_some(), "a human-edited entry must survive even after its manifest entry is removed");
         assert_eq!(bundle.unwrap().instructions, "a human edit worth keeping");
+    }
+
+    /// Codex P2, PR #3244: on a machine sharing store.db across two
+    /// AgentMux builds, an OLDER build's prune pass must not delete an
+    /// entry a NEWER build already added just because the older build's
+    /// own manifest doesn't mention it yet — "not in my manifest" only
+    /// means "removed" when this process's own generation has caught up to
+    /// (or passed) the row's.
+    #[test]
+    fn prune_does_not_delete_an_entry_from_a_newer_generation_it_does_not_know_about() {
+        let store = test_store();
+        // A newer AgentMux build (generation 5) seeds an entry its own
+        // manifest introduced.
+        seed_one(&store, &entry("op-new", "New Entry", "added in gen 5"), 5).unwrap();
+
+        // An older build, still on generation 3, starts up. Its own
+        // manifest has no idea "op-new" exists.
+        let older_manifest = SeedManifest { version: 3, entries: vec![] };
+        prune_entries_removed_from_manifest(&store, &older_manifest);
+
+        assert!(
+            store.bundle_get("op-new").unwrap().is_some(),
+            "an older build must not delete a newer build's own addition"
+        );
+    }
+
+    /// The mirror-image case: once a build's own manifest generation has
+    /// genuinely caught up to (or passed) an entry's generation, and that
+    /// entry is still absent from its manifest, it really was removed —
+    /// pruning must proceed.
+    #[test]
+    fn prune_still_deletes_once_this_process_generation_has_caught_up() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "added in gen 1"), 1).unwrap();
+
+        let later_manifest = SeedManifest { version: 3, entries: vec![] };
+        prune_entries_removed_from_manifest(&store, &later_manifest);
+
+        assert!(store.bundle_get("op-old").unwrap().is_none(), "a genuinely-removed entry must still be pruned");
     }
 
     /// Codex P2, PR #3244: `bundle_delete_system` removes only `db_bundles`,

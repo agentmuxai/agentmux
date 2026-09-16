@@ -1069,6 +1069,43 @@
         assert_eq!(row.instructions, "a real human edit");
     }
 
+    // ── bundle_delete_system_if_owned — PR #3244 ──────────────────────────
+
+    #[test]
+    fn delete_if_owned_deletes_a_seeder_owned_row_whose_generation_this_process_has_reached() {
+        let store = make_store();
+        store
+            .bundle_upsert_system_with_version(&mk_system("sys-1", "Policy"), "seeder", "seed", r#"{"manifest_version":1}"#)
+            .unwrap();
+        assert!(store.bundle_delete_system_if_owned("sys-1", "seeder", 3).unwrap());
+        assert!(store.bundle_get("sys-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_if_owned_leaves_a_human_edited_row_in_place() {
+        let store = make_store();
+        store
+            .bundle_upsert_system_with_version(&mk_system("sys-1", "Policy"), "seeder", "seed", r#"{"manifest_version":1}"#)
+            .unwrap();
+        store
+            .bundle_upsert_system_with_version(&mk_system("sys-1", "Policy"), "armory-ui", "human", "{}")
+            .unwrap();
+        assert!(!store.bundle_delete_system_if_owned("sys-1", "seeder", 3).unwrap());
+        assert!(store.bundle_get("sys-1").unwrap().is_some());
+    }
+
+    #[test]
+    fn delete_if_owned_does_not_delete_a_row_from_a_generation_newer_than_the_caller_knows_about() {
+        let store = make_store();
+        // A newer build seeded this row at generation 5.
+        store
+            .bundle_upsert_system_with_version(&mk_system("sys-1", "Policy"), "seeder", "seed", r#"{"manifest_version":5}"#)
+            .unwrap();
+        // An older build, still on generation 3, must not delete it.
+        assert!(!store.bundle_delete_system_if_owned("sys-1", "seeder", 3).unwrap());
+        assert!(store.bundle_get("sys-1").unwrap().is_some());
+    }
+
     #[test]
     fn generic_delete_refuses_a_system_row_dedicated_delete_only_removes_system_rows() {
         let store = make_store();
