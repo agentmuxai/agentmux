@@ -482,6 +482,12 @@ export function getOpenDefinitionMap(): Map<string, string> {
  * offer "switch to existing" — but wrong for anything that has to act on
  * all of them. Deleting an agent swept that single block and left every
  * other pane running against a now-deleted agent (codex P2 on PR #3262).
+ *
+ * Scope: THIS renderer only. `slots` is module-local, so a pane showing the
+ * same agent in another window is not listed here, and a caller sweeping on
+ * this result will miss it. Closing those needs a backend-global block query
+ * or a cross-window broadcast — until that exists, treat a result as "the
+ * panes I can see", not "all of them", and tell the user when one survives.
  */
 export function getOpenBlockIdsForDefinition(definitionId: string): string[] {
     const result: string[] = [];

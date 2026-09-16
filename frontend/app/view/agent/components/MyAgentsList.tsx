@@ -634,11 +634,43 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         // (codex P2 on PR #3262). The map's shape is right for its other
         // caller (the fork prompt just needs *a* pane to switch to); a
         // sweep needs all of them.
-        await Promise.all(
-            getOpenBlockIdsForDefinition(row.definition_id).map((blockId) =>
-                ObjectService.DeleteBlock(blockId).catch(() => {})
+        //
+        // KNOWN LIMITATION, this renderer only: `slots` is module-local, so
+        // a pane for this agent in ANOTHER window (or a floating-pane
+        // window) is not swept and keeps running against a deleted agent
+        // (codex P2, second round). Closing it needs a backend-global block
+        // query or a cross-window broadcast — real work, not a wider
+        // `filter` here — so it is called out rather than silently implied
+        // to be handled. Tracked in SPEC_AGENT_DELETE_2026_09_16.md §5.2.
+        //
+        // Failures are reported, not swallowed: the agent and its
+        // credentials are already gone by this point, so a pane that
+        // wouldn't close is a live pane attached to a deleted agent, and
+        // the user is the only one who can do anything about it.
+        const failedBlockIds = (
+            await Promise.all(
+                getOpenBlockIdsForDefinition(row.definition_id).map((blockId) =>
+                    ObjectService.DeleteBlock(blockId).then(
+                        () => null,
+                        () => blockId
+                    )
+                )
             )
-        );
+        ).filter((blockId): blockId is string => blockId !== null);
+        if (failedBlockIds.length > 0) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Agent deleted, but a pane stayed open",
+                message:
+                    `${failedBlockIds.length} pane${failedBlockIds.length === 1 ? "" : "s"} for ` +
+                    `${row.instance_name || row.definition_name} could not be closed and ` +
+                    `${failedBlockIds.length === 1 ? "is" : "are"} now running against a deleted ` +
+                    `agent. Close ${failedBlockIds.length === 1 ? "it" : "them"} manually.`,
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 12000,
+            });
+        }
         // The row itself disappears via the existing "agents:changed"
         // refetch subscription (line ~334) — no manual list mutation here.
     };

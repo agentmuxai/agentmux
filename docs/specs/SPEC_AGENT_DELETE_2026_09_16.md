@@ -460,6 +460,23 @@ mechanism (block-meta scan across open panes vs. a server-pushed list of
 affected block ids) is implementation detail; "leave a stale pane open
 referencing a deleted agent" is not an acceptable end state.
 
+**Shipped state, and the gap that remains (2026-09-16, codex P2 round 2).**
+`confirmDelete` sweeps every pane it can see via
+`getOpenBlockIdsForDefinition`, and reports any `DeleteBlock` that fails
+rather than swallowing it — the agent is already gone by then, so a pane
+that won't close is a live pane attached to a deleted agent and only the
+user can act on it.
+
+**It does NOT reach another window.** `agent-pane-state-store`'s `slots` map
+is module-local to one renderer, so a pane showing this agent in a second
+window (or a floating-pane window) survives the delete with its agent
+process still running. Closing those needs a backend-global block query or
+a cross-window broadcast, which is real work rather than a wider filter at
+the call site — so it is **deliberately deferred and recorded here**, not
+quietly implied to be handled. This is the one part of §5.2's "not an
+acceptable end state" that is still unmet; the single-window case, which is
+the overwhelmingly common one, is closed.
+
 ## 6. Data flow summary
 
 ```
@@ -513,7 +530,15 @@ referencing a deleted agent" is not an acceptable end state.
    back to the queue, cancel outright, or leave for WorkQueue's own expiry
    logic? Needs a cross-store fix at the RPC-handler layer regardless (§5.1)
    — not implementable as a one-line addition to `agent_def_delete` itself.
-   Still open.
+   **Still open, and now known to be worse than "clutter"** (codex P2,
+   2026-09-16): `work_queue_claim` only hands a targeted row to a claimant
+   with the matching id (`work_queue.rs:208`), so an OPEN row targeted at a
+   deleted agent is permanently unclaimable, and a CLAIMED one reaps back
+   into that same stuck state. The `deleteagent` handler now reaches the
+   identity store (where `db_work_queue` lives), so the mechanical blocker
+   is gone — what's missing is the repo owner's answer on WHICH of the three
+   behaviors is wanted, since each is a different promise to whoever
+   enqueued the work. Deliberately not decided unilaterally.
 4. Delete's confirm-modal copy (§4.3) is a draft — review the exact wording
    about what is and isn't deleted (bundle survives, credentials/keys don't)
    before shipping, since it's the only warning a user gets before an
