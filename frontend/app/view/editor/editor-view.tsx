@@ -531,6 +531,30 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
             // If we have a saved state for this tab, restore via setState
             // on the existing cmView (no destroy). Otherwise build fresh.
+            // Invalidate the cached snapshot when the ACTIVE tab's content was
+            // reloaded underneath us (reagent P1 on PR #3260).
+            //
+            // cmStates is only ever cleared on TabClosed, so a tab that was
+            // switched away from and back still holds the EditorState captured
+            // at that switch. On an external file change the restore branch
+            // below would put that stale buffer back and `return` — never
+            // reaching setupEditor() with the freshly-read content — which is
+            // precisely the "stale text, later save clobbers the external
+            // change" case the contentAtom dependency above exists to prevent.
+            // Repro: open A, switch to B, switch back to A, modify A on disk.
+            //
+            // Guarded on !dirty so this can never discard the user's own edits:
+            // a dirty buffer legitimately differs from the on-disk content, and
+            // _maybeReloadTabs never reloads a dirty tab anyway. Both reads are
+            // inside untrack(), so neither adds a dependency.
+            if (
+                activeTabIdForCm === activeId &&
+                cmView &&
+                !model.dirtyAtom() &&
+                cmView.state.doc.toString() !== content
+            ) {
+                cmStates.delete(activeId);
+            }
             const saved = cmStates.get(activeId);
             if (saved && cmView) {
                 cmView.setState(saved);
