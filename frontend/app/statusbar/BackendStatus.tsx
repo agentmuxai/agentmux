@@ -147,12 +147,10 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                     <span class="status-bar-popover-mono">{backendInfo().web_endpoint}</span>
                 </div>
             </Show>
-            <Show when={backendInfo()?.version}>
-                <div class="status-bar-popover-row">
-                    <span class="status-bar-popover-label">Version</span>
-                    <span>{backendInfo().version}</span>
-                </div>
-            </Show>
+            {/* No separate "Version" row here — the srv version always
+                matches the app version already shown in the Instance panel
+                (v{about().version} in the status bar's bottom-right chip),
+                since both ship from the same workspace release. */}
             <Show when={(backendInfo()?.pending_migrations ?? 0) > 0}>
                 <div class="status-bar-popover-divider" />
                 <div class="status-bar-popover-row">
