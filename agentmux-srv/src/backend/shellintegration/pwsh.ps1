@@ -110,6 +110,18 @@ function Global:muxopen {
     Write-Error "muxopen: Node unavailable or core missing at $global:AgentmuxMuxopenJs"
 }
 
+# ─── muxsh ────────────────────────────────────────────────────────────────
+# Open editor/browser panes from the terminal (no GUI). `muxsh help` for
+# usage.
+$global:AgentmuxMuxshJs = Join-Path $PSScriptRoot "..\muxsh.mjs"
+function Global:muxsh {
+    if ((Get-Command node -ErrorAction SilentlyContinue) -and (Test-Path $global:AgentmuxMuxshJs)) {
+        node $global:AgentmuxMuxshJs @args
+        return
+    }
+    Write-Error "muxsh: Node unavailable or core missing at $global:AgentmuxMuxshJs"
+}
+
 # Hook into the prompt function
 if (Test-Path Function:\prompt) {
     $global:_agentmux_original_prompt = $function:prompt

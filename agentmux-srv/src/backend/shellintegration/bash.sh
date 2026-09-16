@@ -140,6 +140,22 @@ muxopen() {
     return 1
 }
 
+# ─── muxsh ──────────────────────────────────────────────────────────────────
+# Open editor/browser panes from the terminal (no GUI). AgentMux's own
+# successor to Wave Terminal's `wsh`, scoped to the one gap that's real
+# (docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md).
+# Delegates to the shared Node core (muxsh.mjs, deployed next to this
+# rcfile). `muxsh help` for usage.
+_AGENTMUX_MUXSH_JS="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/muxsh.mjs"
+muxsh() {
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXSH_JS" ]; then
+        node "$_AGENTMUX_MUXSH_JS" "$@"
+        return
+    fi
+    echo "muxsh: Node unavailable or core missing at $_AGENTMUX_MUXSH_JS" >&2
+    return 1
+}
+
 # Append to PROMPT_COMMAND (array-safe)
 if [[ $(declare -p PROMPT_COMMAND 2>/dev/null) == "declare -a"* ]]; then
     PROMPT_COMMAND+=(_agentmux_si_prompt_command)

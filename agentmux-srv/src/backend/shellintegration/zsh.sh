@@ -133,6 +133,19 @@ muxopen() {
     return 1
 }
 
+# ─── muxsh ──────────────────────────────────────────────────────────────────
+# Open editor/browser panes from the terminal (no GUI). `muxsh help` for
+# usage.
+_AGENTMUX_MUXSH_JS="${${(%):-%x}:A:h}/../muxsh.mjs"
+muxsh() {
+    if command -v node >/dev/null 2>&1 && [ -f "$_AGENTMUX_MUXSH_JS" ]; then
+        node "$_AGENTMUX_MUXSH_JS" "$@"
+        return
+    fi
+    echo "muxsh: Node unavailable or core missing at $_AGENTMUX_MUXSH_JS" >&2
+    return 1
+}
+
 autoload -U add-zsh-hook
 add-zsh-hook precmd _agentmux_si_precmd
 add-zsh-hook chpwd  _agentmux_si_osc7
