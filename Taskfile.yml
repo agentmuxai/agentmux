@@ -144,20 +144,24 @@ tasks:
 
     package:macos:
         desc: >-
-            Package the application as a signed macOS .app + .dmg (Developer ID,
-            hardened runtime). Output to ~/Desktop by default. Notarization is
+            Build + package a LOCAL signed macOS .app + .dmg (Developer ID, hardened
+            runtime) to ~/Desktop with a per-build data-dir channel (local-<branch>-
+            <hash>-<build-id>) so the build runs as its own AgentMux instance
+            alongside a release install. Does NOT bump the version. Notarization is
             attempted via the `notarytool` keychain profile and degrades to a
             signed-only DMG if it's unavailable (see scripts/package-macos.sh and
-            docs/macos-signing.md). Set NOTARIZE=0 to skip notarization.
+            docs/macos-signing.md). Set NOTARIZE=0 to skip notarization. See
+            docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md.
         platforms: [darwin]
-        deps:
-            - build:host
-            - build:backend
-            - build:frontend
-            - copy:schema
         cmds:
-            - task: bundle
             - bash scripts/package-macos.sh {{.CLI_ARGS}}
+
+    package:release:macos:
+        desc: 'Like `task package:macos` but bakes the "stable" channel so the artifact opens the user''s real data dir. Guarded: refuses unless the tree is clean and HEAD is a merged `chore: release v*` commit (AGENTMUX_STABLE_OVERRIDE=1 to bypass). See docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md.'
+        platforms: [darwin]
+        cmds:
+            - bash scripts/guard-stable-build.sh
+            - bash -c 'RELEASE_CHANNEL=stable bash scripts/package-macos.sh {{.CLI_ARGS}}'
 
     package:linux:
         desc: 'Build + package a LOCAL portable AppImage to ~/Desktop with an ephemeral, traceable label and a per-build data-dir channel (local-<branch>-<hash>-<build-id>) so the build runs as its own AgentMux instance alongside a release install. Does NOT bump the version. Pass `-- <dir>` for an alternate output dir. See docs/specs/SPEC_LINUX_APPIMAGE_PER_BUILD_CHANNEL_2026_06_25.md.'
