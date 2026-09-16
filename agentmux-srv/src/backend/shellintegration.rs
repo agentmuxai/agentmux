@@ -30,6 +30,11 @@ const MUXSPECT_JS: &str = include_str!("shellintegration/muxspect.mjs");
 /// Deployed beside muxlog.mjs/muxspect.mjs; shell `muxopen` functions
 /// delegate here.
 const MUXOPEN_JS: &str = include_str!("shellintegration/muxopen.mjs");
+/// muxsh — open editor/browser panes from a terminal
+/// (REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md,
+/// SPEC_MUXSH_CLI_2026_09_16.md). Deployed beside its three siblings; shell
+/// `muxsh` functions delegate here.
+const MUXSH_JS: &str = include_str!("shellintegration/muxsh.mjs");
 
 /// Deployment marker: `<package version>-<content hash>`, NOT the bare
 /// package version alone (codex P2 on PR #2380). Local/dev builds routinely
@@ -53,6 +58,12 @@ fn version_marker() -> String {
     FISH_SCRIPT.hash(&mut hasher);
     MUXLOG_JS.hash(&mut hasher);
     MUXSPECT_JS.hash(&mut hasher);
+    // MUXOPEN_JS was missing here (an edit to muxopen.mjs alone never changed
+    // this marker, so a running instance never redeployed it) — fixed while
+    // adding MUXSH_JS below, same class of bug this function's own doc
+    // comment already warns about.
+    MUXOPEN_JS.hash(&mut hasher);
+    MUXSH_JS.hash(&mut hasher);
     format!("{}-{:x}", env!("CARGO_PKG_VERSION"), hasher.finish())
 }
 
@@ -142,6 +153,12 @@ pub fn deploy_scripts(wave_data_dir: &Path) {
     let muxopen_path = shell_base.join("muxopen.mjs");
     if let Err(e) = std::fs::write(&muxopen_path, MUXOPEN_JS) {
         tracing::warn!("shell integration: failed to write {}: {}", muxopen_path.display(), e);
+        all_ok = false;
+    }
+    // muxsh deploys the same way, next to its three siblings.
+    let muxsh_path = shell_base.join("muxsh.mjs");
+    if let Err(e) = std::fs::write(&muxsh_path, MUXSH_JS) {
+        tracing::warn!("shell integration: failed to write {}: {}", muxsh_path.display(), e);
         all_ok = false;
     }
 
@@ -298,10 +315,13 @@ mod tests {
         let muxlog = shell_base.join("muxlog.mjs");
         let muxspect = shell_base.join("muxspect.mjs");
         let muxopen = shell_base.join("muxopen.mjs");
+        let muxsh = shell_base.join("muxsh.mjs");
         assert!(muxlog.exists(), "muxlog.mjs should be deployed");
         assert!(muxspect.exists(), "muxspect.mjs should be deployed alongside it");
         assert!(muxopen.exists(), "muxopen.mjs should be deployed alongside them");
+        assert!(muxsh.exists(), "muxsh.mjs should be deployed alongside them");
         assert_eq!(std::fs::read_to_string(&muxspect).unwrap(), MUXSPECT_JS);
+        assert_eq!(std::fs::read_to_string(&muxsh).unwrap(), MUXSH_JS);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

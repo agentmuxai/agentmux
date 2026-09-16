@@ -117,6 +117,19 @@ function muxopen
     return 1
 end
 
+# ─── muxsh ────────────────────────────────────────────────────────────────
+# Open editor/browser panes from the terminal (no GUI). `muxsh help` for
+# usage.
+set -g _agentmux_muxsh_js (dirname (status -f))/../muxsh.mjs
+function muxsh
+    if command -q node; and test -f "$_agentmux_muxsh_js"
+        node "$_agentmux_muxsh_js" $argv
+        return
+    end
+    echo "muxsh: Node unavailable or core missing at $_agentmux_muxsh_js" >&2
+    return 1
+end
+
 function _agentmux_si_prompt --on-event fish_prompt
     _agentmux_si_osc7
     _agentmux_si_agent_env
