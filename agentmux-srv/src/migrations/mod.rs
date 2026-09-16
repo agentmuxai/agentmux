@@ -86,7 +86,9 @@ pub use runner::count_pending_migrations;
 pub use runner::doctor_report_for_instance;
 pub use runner::run_migrate_command;
 pub use runner::run_pending_migrations;
+pub use runner::try_count_pending_migrations;
 pub use runner::DoctorReport;
+pub use runner::PendingCountError;
 
 use std::path::PathBuf;
 
