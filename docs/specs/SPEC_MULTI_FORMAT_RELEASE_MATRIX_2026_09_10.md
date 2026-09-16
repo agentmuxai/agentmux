@@ -19,8 +19,10 @@ so no special access is needed to check this; and it has **no CI workflows at
 all**, so every binary is built by hand — meaning a new arch is a manual
 multi-hour Chromium build, not a CI matrix entry. Offsetting that: `patch.cfg` is
 shared across all platforms (`CEF_FORK_MAINTENANCE.md`), so an arm64 Linux build
-needs **no new patch work** — it reuses the existing `agentmux/7977-*` branches
-unchanged.
+needs no new **CEF-source** patch work — it reuses the existing `agentmux/7977-*`
+branches unchanged. **It does still need Rust-binding work**, which an earlier
+revision of this note wrongly folded into "no new patch work" (caught by Codex
+on #3278): see §3.6a.
 
 Reproduce the binary inventory (the fork is public, no auth needed):
 
@@ -121,11 +123,20 @@ pipeline:
 - **Inputs:** same portable build tree `package-installer.ps1` already
   consumes — no new binary outputs required, just a second installer wrapper
   around the existing portable artifact.
-- **Signing:** reuse whatever cert/signing path `.exe`/`.msix` already use
-  (check `build-windows.yml` signing steps) — MSI needs the same Authenticode
-  signing, not a separate cert.
-- **Risk:** low. This is the cheapest item in the whole matrix — no new arch,
-  no new CEF binary, well-trodden tooling.
+- **Signing — there is nothing to reuse (corrected, Codex on #3278).** The
+  original text here assumed an existing cert/signing path could be reused.
+  There isn't one: `build-windows.yml` has **no signing step at all** (its only
+  signing-adjacent line is `Build MSIX (unsigned — Store re-signs on ingest)`),
+  and `package-msix.ps1` only mints a `New-SelfSignedCertificate` for LOCAL
+  `-Sign` install testing. The `.exe` ships unsigned; the `.msix` relies on the
+  Store re-signing on ingest — neither is a production Authenticode path an MSI
+  could inherit. An MSI has no equivalent of the Store's re-signing, so it is
+  the first artifact that would actually require acquiring an Authenticode
+  certificate and wiring the secret + `signtool` step into CI.
+- **Risk:** low *as packaging*, but **not** the cheapest item end-to-end once
+  signing is scoped in — shipping an unsigned MSI means a SmartScreen warning
+  on every install. Treat certificate acquisition as part of phase 0, not an
+  assumed prerequisite.
 
 ### 3.2 Linux portable `.zip` ("Porteus") — packaging-only
 
@@ -223,6 +234,36 @@ Once it does:
   zip packaging at the arm64 build output instead of x64 — no new packaging
   logic, just a second axis on the existing jobs.
 
+### 3.6a Linux ARM64 also needs a Rust binding, not just the CEF binary
+
+Added after review (Codex on #3278). §2.1 and §3.6 frame the arm64 blocker as
+purely "a CEF binary doesn't exist". That is necessary but **not sufficient**,
+and the missing half is a hard compile error, not a packaging detail.
+
+`Cargo.toml`'s "CEF 152 binding patch" block documents it: upstream
+`cef-dll-sys` has no `CefWindow::BeginWindowDrag()` binding, so this repo pins
+a fork (`AgentU-asaf/cef-rs@agentmux/152-begin-window-drag`) that appends the
+`begin_window_drag` slot — **to the `linux_x86_64` binding specifically** (the
+mechanical 888 → 896 byte struct-size edit). Without that field,
+`--features patched-libcef` fails outright:
+
+```
+error[E0609]: no field `begin_window_drag` on type `_cef_window_t`
+              at agentmux-cef/src/ui_tasks.rs:215
+```
+
+So phase 5 is really two artifacts, not one:
+
+1. `cef-linux-aarch64` — the patched `libcef.so` (CEF-source side; shared
+   `patch.cfg`, no new patch work).
+2. A `linux_aarch64` binding in the `cef-rs` fork carrying the same
+   `begin_window_drag` slot, plus a `Cargo.toml` pin update to consume it.
+
+(2) is the same mechanical edit already carried for `linux_x86_64` since CEF
+146, so it is small and well-understood — but it is a distinct piece of work in
+a **different repo**, and phases 5–6 stay blocked until it exists. Scope it
+alongside the Chromium build rather than discovering it at first compile.
+
 ---
 
 ## 4. Proposed Phasing
@@ -239,8 +280,8 @@ at once rather than blocking early wins.
 | 2 | Linux `.deb` + `.rpm` (x64, via `fpm`) | No |
 | 3 | Linux `.pacman` (x64, via `makepkg`/`PKGBUILD`) | No |
 | 4 | Linux `.snap` (x64, direct-download `--dangerous` path first, Store review as a follow-up) | No |
-| 5 | `cef-linux-aarch64` fork release (own workstream, hours-long Chromium build) | — |
-| 6 | Linux ARM64 across all of §3.2–3.4's formats (reuses phase 1–4 packaging logic against the phase-5 binary) | Consumes phase 5 |
+| 5 | `cef-linux-aarch64` fork release (own workstream, hours-long Chromium build) **+ a `linux_aarch64` `cef-rs` binding, see §3.6a** | — |
+| 6 | Linux ARM64 across all of §3.2–3.4's formats **plus `.AppImage`** (reuses phase 1–4 packaging logic against the phase-5 binary) | Consumes phase 5 |
 | 7 | `cef-macos-x86_64` fork release (own workstream) | — |
 | 8 | macOS Intel `.dmg`, `package-macos.sh` parameterized, `build-macos.yml` gets an Intel job | Consumes phase 7 |
 
