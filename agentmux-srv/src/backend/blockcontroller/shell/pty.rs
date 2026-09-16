@@ -101,6 +101,25 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// running in the background, so late output is still never lost.
 pub(super) const FLUSHER_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How long to wait for the STRONG completion signal — the flusher task
+/// ending, which means the read loop saw true EOF and every byte the child
+/// produced is committed — before falling back to the bounded flush barrier.
+///
+/// Short on purpose. Where EOF works (Linux, macOS) it arrives within
+/// milliseconds of the child being reaped, so this grace is ample and the
+/// pre-barrier guarantee is kept intact. Where it never arrives at all
+/// (Windows/ConPTY — see `FLUSHER_DRAIN_TIMEOUT`) no amount of waiting helps,
+/// so anything longer is pure dead UI time.
+pub(super) const FLUSHER_EOF_GRACE: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Budget for the fallback flush barrier. Deliberately the REMAINDER of
+/// `FLUSHER_DRAIN_TIMEOUT` after `FLUSHER_EOF_GRACE`, so the two waits split
+/// one budget instead of each claiming a full one — the worst-case exit delay
+/// is unchanged from before the barrier existed, rather than doubled (ReAgent
+/// P2 on PR #3261).
+pub(super) const FLUSHER_BARRIER_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(900);
+
 /// Detect the best available interactive shell on Windows.
 ///
 /// Mirrors the original Go logic from pkg/util/shellutil/shellutil.go DetectLocalShellPath():
