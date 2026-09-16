@@ -862,9 +862,22 @@ impl Store {
     }
 
     /// Atomically deletes an `is_system=1` row ONLY if its latest version is
-    /// still owned by `seeder_identity` — the delete-side counterpart of
-    /// `bundle_reseed_system_if_owned`'s ownership check, used to prune a
-    /// row whose manifest entry AgentMux itself removed in a later release.
+    /// still owned by `seeder_identity` AND that version's own recorded
+    /// manifest generation is `<= caller_manifest_version` — the delete-side
+    /// counterpart of `bundle_reseed_system_if_owned`'s ownership check,
+    /// used to prune a row whose manifest entry AgentMux itself removed in a
+    /// later release.
+    ///
+    /// The generation gate exists for the same reason `bundle_reseed_
+    /// system_if_owned` has one: on a machine sharing `store.db` across
+    /// multiple AgentMux builds/versions, an OLDER build's own manifest
+    /// simply doesn't mention an entry a NEWER build already added — that
+    /// absence means "I don't know about this yet," not "this was removed."
+    /// Without gating on generation, an older build's prune pass would
+    /// delete a newer build's own addition on every one of its startups.
+    /// Only a row whose generation this process's OWN manifest has already
+    /// caught up to (or exceeds) is eligible for pruning at all.
+    ///
     /// A row a human has edited (`written_by` on the latest version is
     /// anything else) is left in place — same "never clobber a local edit"
     /// posture as the reseed path; an orphaned-but-human-owned entry is a
@@ -873,24 +886,36 @@ impl Store {
     /// can create an `is_system` row also records one) is conservatively
     /// treated as NOT owned by the seeder and left alone, rather than
     /// guessing. Returns `true` only when a deletion actually happened.
-    pub fn bundle_delete_system_if_owned(&self, id: &str, seeder_identity: &str) -> Result<bool, StoreError> {
+    pub fn bundle_delete_system_if_owned(
+        &self,
+        id: &str,
+        seeder_identity: &str,
+        caller_manifest_version: u32,
+    ) -> Result<bool, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         // rowid, not created_at — see bundle_reseed_system_if_owned's own
         // comment on the same ordering choice.
-        let latest_written_by: Option<String> = tx
+        let latest: Option<(String, String)> = tx
             .query_row(
-                "SELECT written_by FROM db_bundle_versions
+                "SELECT written_by, source_detail FROM db_bundle_versions
                  WHERE bundle_id = ?1
                  ORDER BY rowid DESC
                  LIMIT 1",
                 params![id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
 
-        if latest_written_by.as_deref() != Some(seeder_identity) {
+        let Some((written_by, source_detail)) = latest else {
+            return Ok(false);
+        };
+        if written_by != seeder_identity {
+            return Ok(false);
+        }
+        let row_generation = manifest_generation_from_source_detail(&source_detail);
+        if row_generation > caller_manifest_version as u64 {
             return Ok(false);
         }
 
