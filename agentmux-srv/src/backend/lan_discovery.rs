@@ -24,6 +24,16 @@ use super::eventbus::{EventBus, WSEventType};
 const SERVICE_TYPE: &str = "_agentmux._tcp.local.";
 const LAN_AGENT_CACHE_TTL_SECS: u64 = 60;
 const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
+/// How long a peer is kept after its most recent `ServiceResolved` before
+/// `get_instances()` treats it as gone. mdns-sd's own `ServiceRemoved` event
+/// is NOT used for this (see the `ServiceRemoved` arm of `handle_event`
+/// below) — live logs showed it firing on ordinary TTL churn seconds before
+/// the same peer re-resolved, and every re-resolution after a `remove()` came
+/// back with a blank TXT record, so deleting on `ServiceRemoved` permanently
+/// wiped a live peer's hostname/instance_id/version/auth_key for no real
+/// disappearance. 300s is comfortably above the observed 1-2 minute re-fire
+/// gaps while still dropping a genuinely departed peer in a reasonable time.
+const LAN_PEER_STALE_TIMEOUT_SECS: u64 = 300;
 /// How often each known LAN peer is asked for its agent-name list. Peers are
 /// few (one per machine) and the request is a single small GET, so this is
 /// cheap; it's deliberately slower than `LAN_AGENT_CACHE_TTL_SECS` because
@@ -510,6 +520,21 @@ impl LanDiscovery {
                 }
             }
 
+            // Garbage-collect entries `get_instances()` would already hide as
+            // stale. This is the only place `self.instances` actually shrinks
+            // now that `ServiceRemoved` no longer deletes (see
+            // `LAN_PEER_STALE_TIMEOUT_SECS`) — without it a genuinely departed
+            // peer would sit in the map forever and this very loop would keep
+            // polling it every cycle.
+            {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let mut instances = self.instances.write();
+                instances.retain(|_, inst| now.saturating_sub(inst.last_seen) <= LAN_PEER_STALE_TIMEOUT_SECS);
+            }
+
             // Snapshot (key, url, lan_key) so the lock is not held across any
             // await — the map is read by every inject/discovery call.
             let targets: Vec<(String, String, String)> = {
@@ -955,21 +980,29 @@ impl LanDiscovery {
                 self.broadcast_instances();
             }
             ServiceEvent::ServiceRemoved(_, fullname) => {
-                let removed = {
-                    let mut instances = self.instances.write();
-                    instances.remove(&fullname).is_some()
-                };
-                if removed {
-                    tracing::info!(fullname = %fullname, "LAN peer removed");
-                    self.broadcast_instances();
-                }
+                // Deliberately NOT deleted from `self.instances` here — see
+                // `LAN_PEER_STALE_TIMEOUT_SECS`. This event is too unreliable
+                // to trust as "the peer is actually gone": a real departure
+                // and ordinary TTL/interface churn look identical on the
+                // wire, and eagerly removing throws away last-known-good TXT
+                // fields that a post-removal re-resolution (almost always
+                // blank-TXT) can never restore. `get_instances()` prunes on
+                // `last_seen` age instead, which only advances on an actual
+                // `ServiceResolved`.
+                tracing::debug!(
+                    fullname = %fullname,
+                    "mDNS ServiceRemoved received (not acted on; peer expires via last_seen staleness instead)"
+                );
             }
             _ => {}
         }
     }
 
     fn broadcast_instances(&self) {
-        let instances: Vec<LanInstance> = self.instances.read().values().cloned().collect();
+        // Via `get_instances()`, not a raw map read, so a stale entry never
+        // reaches the frontend over the live `laninstances` event when the
+        // REST/RPC path (which calls the same method) would already hide it.
+        let instances: Vec<LanInstance> = self.get_instances();
         self.event_bus.broadcast_event(&WSEventType {
             eventtype: "laninstances".to_string(),
             oref: String::new(),
@@ -979,7 +1012,16 @@ impl LanDiscovery {
 
     /// Get current list of discovered LAN peers (excludes self).
     pub fn get_instances(&self) -> Vec<LanInstance> {
-        self.instances.read().values().cloned().collect()
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.instances
+            .read()
+            .values()
+            .filter(|inst| now.saturating_sub(inst.last_seen) <= LAN_PEER_STALE_TIMEOUT_SECS)
+            .cloned()
+            .collect()
     }
 
     /// Get peer count (excludes self).
@@ -1987,6 +2029,79 @@ mod handle_event_tests {
         assert_eq!(after_blank.version, "1.2.3", "version must survive a blank-TXT re-fire");
         assert_eq!(after_blank.auth_key, "secret", "auth_key must survive a blank-TXT re-fire");
         assert_eq!(after_blank.instance_id, "peer-1", "instance_id must survive a blank-TXT re-fire");
+    }
+
+    #[test]
+    fn service_removed_does_not_delete_a_known_peer() {
+        // The live-log failure mode this guards against: mdns-sd fires
+        // `ServiceRemoved` on ordinary TTL/interface churn, not just on a
+        // genuine peer departure. The old handler deleted the map entry on
+        // that event, so the peer's identity (hostname/version/auth_key) was
+        // gone — and every subsequent re-resolution came back blank-TXT (see
+        // the refire test above), so it could never recover. `ServiceRemoved`
+        // must be inert; only staleness (`get_instances()`'s `last_seen`
+        // check) may make a peer disappear.
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[
+                ("instance_id", "peer-1"),
+                ("hostname", "realhost"),
+                ("version", "1.2.3"),
+                ("auth_key", "secret"),
+            ],
+        );
+        let fullname = full_event.get_fullname().to_string();
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1, "peer-1 should be discovered");
+
+        discovery.handle_event(ServiceEvent::ServiceRemoved(SERVICE_TYPE.to_string(), fullname.clone()));
+
+        let after_removed = get(&discovery.get_instances(), "peer-1")
+            .expect("ServiceRemoved must not delete the peer");
+        assert_eq!(after_removed.hostname, "realhost", "hostname must survive a ServiceRemoved event");
+        assert_eq!(after_removed.version, "1.2.3", "version must survive a ServiceRemoved event");
+        assert_eq!(after_removed.auth_key, "secret", "auth_key must survive a ServiceRemoved event");
+
+        // The failure mode in full: Removed, then a blank-TXT re-resolution
+        // (the realistic post-removal shape per live logs) must still not
+        // lose the identity established by the original full resolution.
+        let blank_refire = test_service_info("peer-1", 9999, &[]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_refire));
+        let after_refire = get(&discovery.get_instances(), "peer-1")
+            .expect("peer-1 must still be present after a post-removal blank refire");
+        assert_eq!(after_refire.hostname, "realhost");
+        assert_eq!(after_refire.version, "1.2.3");
+        assert_eq!(after_refire.auth_key, "secret");
+    }
+
+    #[test]
+    fn get_instances_hides_a_peer_stale_past_the_timeout() {
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        // Backdate last_seen past the staleness window directly — waiting out
+        // LAN_PEER_STALE_TIMEOUT_SECS in a unit test isn't practical.
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(super::LAN_PEER_STALE_TIMEOUT_SECS + 1);
+            }
+        }
+
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a peer with no ServiceResolved in over LAN_PEER_STALE_TIMEOUT_SECS must not be reported"
+        );
     }
 
     #[test]
