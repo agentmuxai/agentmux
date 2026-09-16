@@ -3387,6 +3387,63 @@
         );
     }
 
+    /// ReAgent P1 round 4 on PR #3262: the same wide-match hazard the
+    /// delete paths were guarded against, on the hide ("Forget agent") and
+    /// rename paths. Both reach the registry with an id the caller may not
+    /// have checked, and a template's id is the `definition_id` of every
+    /// legacy launch record for agents launched from it — so hiding or
+    /// renaming a template would hide/rename those agents instead.
+    ///
+    /// One test for both, because they share one rule
+    /// (`Store::registry_scope_for`) and the point is that the rule holds
+    /// everywhere, not that two functions each happen to be right.
+    #[test]
+    fn hiding_or_renaming_a_template_spares_its_launches_registry_records() {
+        for op in ["hide", "rename"] {
+            let (_tmp, store, reg) = store_with_registry();
+            // `store_with_registry` seeds `def-mirror` as a template.
+            reg.upsert(&crate::registry::NamedAgentRecord {
+                schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "legacy-launch-id".to_string(),
+                    instance_name: "RealAgent".to_string(),
+                    // Pre-re-key shape: points at the TEMPLATE.
+                    definition_id: "def-mirror".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "realagent".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "0.56.1".to_string(),
+                    last_launched_by_version: "0.56.1".to_string(),
+                },
+            })
+            .unwrap();
+
+            match op {
+                "hide" => {
+                    store.instance_set_hidden("def-mirror", true).unwrap();
+                }
+                _ => {
+                    store.instance_rename("def-mirror", "Renamed").unwrap();
+                }
+            }
+
+            let left = reg.list_active().unwrap();
+            assert_eq!(
+                left.len(),
+                1,
+                "{op}: an agent launched from the template must stay visible"
+            );
+            assert_eq!(
+                left[0].data.instance_name, "RealAgent",
+                "{op}: and must keep its own name"
+            );
+        }
+    }
+
     /// ReAgent P1 round 2 on PR #3262: `instance_delete` is the same
     /// deletion as `agent_def_delete` under a second name, so it needs the
     /// same convergence. A retry after an attempt that removed the

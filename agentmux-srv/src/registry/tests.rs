@@ -127,7 +127,7 @@ fn hard_delete_for_agent_catches_a_legacy_launch_keyed_record() {
         "the instance-keyed delete leaves the legacy record behind — the bug"
     );
 
-    assert_eq!(reg.hard_delete_for_agent("agent-1").unwrap(), 1);
+    assert_eq!(reg.hard_delete_for_agent("agent-1", RecordScope::Agent).unwrap(), 1);
     assert!(reg.list_active().unwrap().is_empty());
 }
 
@@ -139,7 +139,7 @@ fn hard_delete_for_agent_also_drops_retired_records() {
     reg.upsert(&rec).unwrap();
     reg.retire("old-launch-id").unwrap();
 
-    assert_eq!(reg.hard_delete_for_agent("agent-1").unwrap(), 1);
+    assert_eq!(reg.hard_delete_for_agent("agent-1", RecordScope::Agent).unwrap(), 1);
     assert!(!reg.root().join("retired").join("old-launch-id.json").exists());
 }
 
@@ -153,7 +153,7 @@ fn hard_delete_for_agent_leaves_other_agents_alone() {
     reg.upsert(&mine).unwrap();
     reg.upsert(&theirs).unwrap();
 
-    assert_eq!(reg.hard_delete_for_agent("agent-1").unwrap(), 1);
+    assert_eq!(reg.hard_delete_for_agent("agent-1", RecordScope::Agent).unwrap(), 1);
     let left = reg.list_active().unwrap();
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].data.definition_id, "agent-2");
@@ -169,10 +169,10 @@ fn for_agent_also_matches_a_records_own_file_key() {
     // `record`'s definition_id is "claude-code" — a template, not this id.
     reg.upsert(&record("legacy-only-row", "crossver", 100)).unwrap();
 
-    assert_eq!(reg.retire_for_agent("legacy-only-row").unwrap(), 1);
+    assert_eq!(reg.retire_for_agent("legacy-only-row", RecordScope::Agent).unwrap(), 1);
     assert!(reg.root().join("retired").join("legacy-only-row.json").exists());
-    assert_eq!(reg.unretire_for_agent("legacy-only-row").unwrap(), 1);
-    assert_eq!(reg.hard_delete_for_agent("legacy-only-row").unwrap(), 1);
+    assert_eq!(reg.unretire_for_agent("legacy-only-row", RecordScope::Agent).unwrap(), 1);
+    assert_eq!(reg.hard_delete_for_agent("legacy-only-row", RecordScope::Agent).unwrap(), 1);
     assert!(reg.list_active().unwrap().is_empty());
 }
 
@@ -180,7 +180,7 @@ fn for_agent_also_matches_a_records_own_file_key() {
 fn hard_delete_for_agent_on_an_unknown_id_is_a_no_op() {
     let (_t, reg) = fresh();
     reg.upsert(&record("aaa", "demo", 100)).unwrap();
-    assert_eq!(reg.hard_delete_for_agent("never-existed").unwrap(), 0);
+    assert_eq!(reg.hard_delete_for_agent("never-existed", RecordScope::Agent).unwrap(), 0);
     assert_eq!(reg.list_active().unwrap().len(), 1);
 }
 
@@ -197,10 +197,10 @@ fn retire_for_agent_round_trips_every_record_for_one_agent() {
     reg.upsert(&current).unwrap();
     reg.upsert(&legacy).unwrap();
 
-    assert_eq!(reg.retire_for_agent("agent-1").unwrap(), 2);
+    assert_eq!(reg.retire_for_agent("agent-1", RecordScope::Agent).unwrap(), 2);
     assert!(reg.list_active().unwrap().is_empty());
 
-    assert_eq!(reg.unretire_for_agent("agent-1").unwrap(), 2);
+    assert_eq!(reg.unretire_for_agent("agent-1", RecordScope::Agent).unwrap(), 2);
     assert_eq!(reg.list_active().unwrap().len(), 2);
     assert!(
         reg.get("old-launch-id").unwrap().is_some(),
@@ -224,7 +224,7 @@ fn set_instance_name_for_agent_renames_every_record_for_that_agent() {
     reg.upsert(&legacy).unwrap();
     reg.upsert(&other).unwrap();
 
-    assert_eq!(reg.set_instance_name_for_agent("agent-1", "Renamed").unwrap(), 2);
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 2);
     let names: std::collections::BTreeSet<String> = reg
         .list_active()
         .unwrap()
@@ -237,7 +237,7 @@ fn set_instance_name_for_agent_renames_every_record_for_that_agent() {
         "both of agent-1's records move; agent-2's is untouched"
     );
     // Idempotent — a second pass has nothing left to change.
-    assert_eq!(reg.set_instance_name_for_agent("agent-1", "Renamed").unwrap(), 0);
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 0);
 }
 
 /// A record with no `instance_name` fails validation on READ, so it never
@@ -258,7 +258,7 @@ fn set_instance_name_for_agent_leaves_an_unnamed_record_invisible() {
         "precondition: an unnamed record is already invisible"
     );
 
-    assert_eq!(reg.set_instance_name_for_agent("agent-1", "Renamed").unwrap(), 0);
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 0);
     assert!(
         reg.list_active().unwrap().is_empty(),
         "renaming must not promote an invalid record into a picker row"
@@ -274,7 +274,7 @@ fn set_instance_name_for_agent_leaves_retired_records_retired() {
     reg.upsert(&rec).unwrap();
     reg.retire("agent-1").unwrap();
 
-    assert_eq!(reg.set_instance_name_for_agent("agent-1", "Renamed").unwrap(), 0);
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 0);
     assert!(reg.list_active().unwrap().is_empty());
 }
 

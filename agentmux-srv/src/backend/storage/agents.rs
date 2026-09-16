@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
 use super::store::Store;
+use crate::registry::RecordScope;
 
 /// A user-defined AI agent in the user's agent-definition catalog.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1256,26 +1257,16 @@ impl Store {
         // deleting their template — deleting `id` here removes only its own
         // row. The JSON registry mirror for the deleted row is covered by
         // `registry_def_retire` below.
-        let (rows, is_template) = {
+        let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
             // Read BEFORE the DELETE — afterwards there is no row to ask.
-            // Decides how wide the registry sweep below may match; see
-            // `purge_agent_side_effects`. A row that isn't here at all (the
-            // cross-channel case) is never a template: the global definition
-            // store only ever holds `is_seeded == 0` user agents.
-            let is_template = conn
-                .query_row(
-                    "SELECT is_template FROM db_agents WHERE id = ?1",
-                    params![id],
-                    |r| r.get::<_, i64>(0),
-                )
-                .map(|v| v != 0)
-                .unwrap_or(false);
+            // See `registry_scope_for` for what this decides and why.
+            let scope = Self::scope_for_row(&conn, id);
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             if rows > 0 {
                 purge_agent_dependents(&conn, id)?;
             }
-            (rows, is_template)
+            (rows, scope)
         };
         // Tombstone the global definition record so another channel's stale
         // SQLite can't resurrect this deleted user agent — AND so an agent
@@ -1305,8 +1296,49 @@ impl Store {
         // unconditionally makes Delete converge: the sweep is a no-op for an
         // id with no records, so there is nothing to gate on in the first
         // place.
-        self.purge_agent_side_effects(id, "agent_def_delete", is_template);
+        self.purge_agent_side_effects(id, "agent_def_delete", scope);
         Ok(rows > 0 || global_retired)
+    }
+
+    /// The [`RecordScope`] every registry operation on `id` must use.
+    ///
+    /// **Read this before adding another registry call.** The wide scope
+    /// matches records by `definition_id`, and a TEMPLATE's id is the
+    /// `definition_id` of every legacy, never-re-keyed launch record
+    /// belonging to a REAL agent launched from it — so a wide match on a
+    /// template deletes / retires / renames those agents' records along
+    /// with the template, making them vanish from the picker. ReAgent found
+    /// exactly that omission at four separate call sites on PR #3262
+    /// (`agent_def_delete`, `instance_delete`, `instance_set_hidden`,
+    /// `instance_rename`), which is why the rule lives here rather than as
+    /// a fourth hand-written `if`.
+    ///
+    /// An id with no row at all is NOT a template: the global definition
+    /// store only holds `is_seeded == 0` user agents, so a cross-channel id
+    /// is always an agent — which is what lets the delete paths still sweep
+    /// on a retry after the local row is already gone.
+    fn registry_scope_for(&self, id: &str) -> RecordScope {
+        let conn = self.conn.lock().unwrap();
+        Self::scope_for_row(&conn, id)
+    }
+
+    /// [`Self::registry_scope_for`] for a caller already holding the
+    /// connection lock — the delete paths, which must read `is_template`
+    /// in the same critical section as the DELETE that removes the row.
+    fn scope_for_row(conn: &rusqlite::Connection, id: &str) -> RecordScope {
+        let is_template = conn
+            .query_row(
+                "SELECT is_template FROM db_agents WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|v| v != 0)
+            .unwrap_or(false);
+        if is_template {
+            RecordScope::FileKeyOnly
+        } else {
+            RecordScope::Agent
+        }
     }
 
     /// Purge this store's rows keyed to a deleted agent, without touching
@@ -1331,10 +1363,9 @@ impl Store {
     /// SQLite has already committed, and neither side failing is a reason
     /// to report the delete as failed. `caller` only labels the logs.
     ///
-    /// `is_template` narrows the registry sweep to the file key — see the
-    /// branch below. It is the caller's job to determine it BEFORE deleting
-    /// the row, since afterwards there is nothing left to ask.
-    fn purge_agent_side_effects(&self, id: &str, caller: &'static str, is_template: bool) {
+    /// `scope` must come from `registry_scope_for`/`scope_for_row`, read
+    /// BEFORE the row was deleted — afterwards there is nothing left to ask.
+    fn purge_agent_side_effects(&self, id: &str, caller: &'static str, scope: RecordScope) {
         // Project-instruction observations are keyed by agent id with no
         // foreign key (they record files this agent READS, which is not a
         // relationship SQLite can enforce), so nothing else would remove
@@ -1366,12 +1397,7 @@ impl Store {
             // protection, and
             // `deleting_a_template_spares_a_legacy_launch_record_pointing_at_it`
             // pins the legacy shape that test doesn't construct).
-            let swept = if is_template {
-                reg.hard_delete(id)
-            } else {
-                reg.hard_delete_for_agent(id)
-            };
-            match swept {
+            match reg.hard_delete_for_agent(id, scope) {
                 Ok(0) => {}
                 Ok(removed) => tracing::debug!(
                     agent_def_id = %id, caller, removed,
@@ -1762,12 +1788,19 @@ impl Store {
     /// otherwise "Forget agent" silently no-ops for those. Returns `true`
     /// when either side acted.
     pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
-        let rows = {
+        // Read in the same critical section as the UPDATE, so the row can't
+        // change kind underneath the registry call below. See
+        // `registry_scope_for`: retiring a TEMPLATE with the wide scope
+        // would hide every real agent launched from it (ReAgent P1 round 4
+        // on PR #3262).
+        let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
-            conn.execute(
+            let scope = Self::scope_for_row(&conn, id);
+            let rows = conn.execute(
                 "UPDATE db_agents SET user_hidden = ?1 WHERE id = ?2 AND is_template = 0",
                 params![if hidden { 1_i64 } else { 0_i64 }, id],
-            )?
+            )?;
+            (rows, scope)
         };
         let mut registry_acted = false;
         if let Some(reg) = self.registry() {
@@ -1782,9 +1815,9 @@ impl Store {
             // no-op for an unrelated id, which is what the old
             // `exists_anywhere` pre-check was guarding against.
             let res = if hidden {
-                reg.retire_for_agent(id)
+                reg.retire_for_agent(id, scope)
             } else {
-                reg.unretire_for_agent(id)
+                reg.unretire_for_agent(id, scope)
             };
             match res {
                 Ok(moved) => registry_acted = moved > 0,
@@ -1821,18 +1854,24 @@ impl Store {
     /// Returns whether anything changed, counting the registry: a
     /// cross-channel agent has no local row to update but does have records.
     pub fn instance_rename(&self, id: &str, instance_name: &str) -> Result<bool, StoreError> {
-        let rows = {
+        // Same critical-section read as `instance_set_hidden`, for the same
+        // reason: renaming a TEMPLATE with the wide scope would rewrite
+        // `instance_name` on every real agent launched from it (ReAgent P1
+        // round 4 on PR #3262).
+        let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
+            let scope = Self::scope_for_row(&conn, id);
             let now_ms = Self::monotonic_updated_at(&conn, 0);
-            conn.execute(
+            let rows = conn.execute(
                 "UPDATE db_agents SET instance_name = ?1, updated_at = ?2
                  WHERE id = ?3 AND is_template = 0 AND instance_name <> ''",
                 params![instance_name, now_ms, id],
-            )?
+            )?;
+            (rows, scope)
         };
         let mut registry_renamed = 0usize;
         if let Some(reg) = self.registry() {
-            match reg.set_instance_name_for_agent(id, instance_name) {
+            match reg.set_instance_name_for_agent(id, scope, instance_name) {
                 Ok(n) => registry_renamed = n,
                 Err(e) => tracing::warn!(
                     agent_id = %id, error = %e,
@@ -2042,15 +2081,7 @@ impl Store {
             // `agent_def_delete_removes_only_its_own_registry_file` exists
             // to forbid. A missing row reads as "not a template" so the
             // retry path below still works.
-            let is_template = conn
-                .query_row(
-                    "SELECT is_template FROM db_agents WHERE id = ?1",
-                    params![id],
-                    |r| r.get::<_, i64>(0),
-                )
-                .map(|v| v != 0)
-                .unwrap_or(false);
-            if is_template {
+            if Self::scope_for_row(&conn, id) == RecordScope::FileKeyOnly {
                 return Ok(false);
             }
             let rows =
@@ -2073,11 +2104,11 @@ impl Store {
         // unfixed on this entry point. "The same deletion under a second
         // name" has to mean the same convergence too, not just the same
         // table list.
-        // Always `false`: the template case returned early above, because
+        // Always `Agent`: the template case returned early above, because
         // this method's contract is "never a template" — it reports no
-        // deletion for one rather than sweeping narrowly like
+        // deletion for one rather than sweeping narrowly the way
         // `agent_def_delete` does.
-        self.purge_agent_side_effects(id, "instance_delete", false);
+        self.purge_agent_side_effects(id, "instance_delete", RecordScope::Agent);
         if rows > 0 {
             // Tombstone the GLOBAL definition record too. Clearing the local
             // tables alone leaves an active record in the cross-channel

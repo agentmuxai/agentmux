@@ -29,7 +29,7 @@
 //! created while the global store couldn't be opened), and dropping those
 //! would delete real agents rather than ghosts.
 
-use crate::registry::{DefinitionStore, Registry};
+use crate::registry::{DefinitionStore, RecordScope, Registry};
 
 /// Drop active instance records whose definition is tombstoned. Returns the
 /// number of files removed. Best-effort: a tree that can't be read is
@@ -57,7 +57,7 @@ pub fn prune_tombstoned_instance_records(reg: &Registry, defs: &DefinitionStore)
         if defs.exists(&def_id) || !defs.exists_anywhere(&def_id) {
             continue;
         }
-        match reg.hard_delete_for_agent(&def_id) {
+        match reg.hard_delete_for_agent(&def_id, RecordScope::Agent) {
             Ok(n) => removed += n,
             Err(e) => tracing::warn!(
                 definition_id = %def_id,

@@ -28,6 +28,33 @@ pub enum RegistryError {
     Validation(#[from] ValidationError),
 }
 
+/// Which records an operation is allowed to touch.
+///
+/// The registry has two ways to say "this record belongs to X": the file
+/// key (`<instance_id>.json`) and the record's own `definition_id`. Since
+/// the agent-concept consolidation those are the same value for an agent —
+/// but only for records `m0026_registry_agent_id_rekey` re-keyed, and that
+/// pass no-ops once `db_agent_instances` is dropped (schema v32), so a real
+/// install still holds launch-keyed records where they differ. Matching
+/// both is what makes Delete actually remove an agent's row
+/// ([`Registry::hard_delete_for_agent`]).
+///
+/// It is also what makes a TEMPLATE dangerous: a template's id is the
+/// `definition_id` of every legacy launch record for the real agents
+/// launched from it, so a wide match would delete/retire/rename THEIR
+/// records along with the template. Hence this type rather than a `bool`
+/// or a per-call-site `if` — ReAgent found the same omission at four
+/// separate call sites on PR #3262 (rounds 3 and 4), which is a sign the
+/// decision belongs in the signature, not in each caller's memory.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RecordScope {
+    /// Only the record whose FILE KEY is this id. The correct scope for a
+    /// template: its own record, and nothing belonging to its launches.
+    FileKeyOnly,
+    /// Every record for this agent — file key or `definition_id`.
+    Agent,
+}
+
 pub struct Registry {
     root: PathBuf,
     write_lock: Mutex<()>,
@@ -115,11 +142,12 @@ impl Registry {
     pub fn set_instance_name_for_agent(
         &self,
         agent_id: &str,
+        scope: RecordScope,
         instance_name: &str,
     ) -> Result<usize, RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut renamed = 0usize;
-        for path in records_for_agent(&self.root, agent_id)? {
+        for path in records_for_agent(&self.root, agent_id, scope)? {
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
@@ -215,11 +243,15 @@ impl Registry {
     /// seen. Matching both is a strict superset of [`Self::hard_delete`],
     /// and a cross-key collision would require the same uuid to name two
     /// different agents.
-    pub fn hard_delete_for_agent(&self, agent_id: &str) -> Result<usize, RegistryError> {
+    pub fn hard_delete_for_agent(
+        &self,
+        agent_id: &str,
+        scope: RecordScope,
+    ) -> Result<usize, RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut removed = 0usize;
         for dir in [self.root.clone(), self.root.join("retired")] {
-            for path in records_for_agent(&dir, agent_id)? {
+            for path in records_for_agent(&dir, agent_id, scope)? {
                 match std::fs::remove_file(&path) {
                     Ok(()) => removed += 1,
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -236,15 +268,15 @@ impl Registry {
     /// agent' retires the NEW key while the stale file stays active, so the
     /// forgotten agent reappears" failure `m0026_registry_agent_id_rekey`'s
     /// own doc comment predicted.
-    pub fn retire_for_agent(&self, agent_id: &str) -> Result<usize, RegistryError> {
+    pub fn retire_for_agent(&self, agent_id: &str, scope: RecordScope) -> Result<usize, RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.move_for_agent(agent_id, self.root.clone(), self.root.join("retired"))
+        self.move_for_agent(agent_id, scope, self.root.clone(), self.root.join("retired"))
     }
 
     /// Inverse of [`Self::retire_for_agent`].
-    pub fn unretire_for_agent(&self, agent_id: &str) -> Result<usize, RegistryError> {
+    pub fn unretire_for_agent(&self, agent_id: &str, scope: RecordScope) -> Result<usize, RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        self.move_for_agent(agent_id, self.root.join("retired"), self.root.clone())
+        self.move_for_agent(agent_id, scope, self.root.join("retired"), self.root.clone())
     }
 
     /// Move an agent's records between the active and retired trees,
@@ -253,11 +285,12 @@ impl Registry {
     fn move_for_agent(
         &self,
         agent_id: &str,
+        scope: RecordScope,
         from_dir: PathBuf,
         to_dir: PathBuf,
     ) -> Result<usize, RegistryError> {
         let mut moved = 0usize;
-        for path in records_for_agent(&from_dir, agent_id)? {
+        for path in records_for_agent(&from_dir, agent_id, scope)? {
             let Some(name) = path.file_name() else {
                 continue;
             };
@@ -342,8 +375,19 @@ impl Registry {
 /// removing it on a guess would destroy whatever newer-schema binary
 /// authored it. The file-key match is kept so an explicitly-addressed
 /// delete still behaves like [`Registry::hard_delete`] did.
-fn records_for_agent(dir: &Path, agent_id: &str) -> Result<Vec<PathBuf>, RegistryError> {
+fn records_for_agent(
+    dir: &Path,
+    agent_id: &str,
+    scope: RecordScope,
+) -> Result<Vec<PathBuf>, RegistryError> {
     let mut out = Vec::new();
+    if scope == RecordScope::FileKeyOnly {
+        let p = dir.join(format!("{agent_id}.json"));
+        if p.is_file() {
+            out.push(p);
+        }
+        return Ok(out);
+    }
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
