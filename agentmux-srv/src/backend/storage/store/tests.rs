@@ -1018,6 +1018,57 @@
         assert!(!row.is_system);
     }
 
+    // ── bundle_upsert_system_if_changed — PR #3244 ────────────────────────
+    // Codex P2 / ReAgent P2: a no-op save from the Armory UI (operator opens
+    // a seeded entry and hits Save without changing anything) must not
+    // record a version, or it would falsely transfer ownership away from
+    // operator_config_seed's reseed logic.
+
+    #[test]
+    fn if_changed_records_a_version_for_a_brand_new_row() {
+        let store = make_store();
+        let version = store
+            .bundle_upsert_system_if_changed(&mk_system("sys-1", "Policy"), "armory-ui", "human", "{}")
+            .unwrap();
+        assert!(version.is_some(), "a brand-new row is never a no-op");
+        let row = store.bundle_get("sys-1").unwrap().unwrap();
+        assert!(row.is_system);
+    }
+
+    #[test]
+    fn if_changed_skips_the_version_for_a_byte_identical_save() {
+        let store = make_store();
+        let seeded = mk_system("sys-1", "Policy");
+        store.bundle_upsert_system_if_changed(&seeded, "agentmux-operator-config-seed", "agentmux_operator_config_seed", "{}").unwrap();
+
+        // Operator opens the entry in the Armory UI and hits Save without
+        // editing anything — same name/instructions, different (human) caller.
+        let noop_save = mk_system("sys-1", "Policy");
+        let version = store.bundle_upsert_system_if_changed(&noop_save, "armory-ui", "human", "{}").unwrap();
+        assert!(version.is_none(), "byte-identical save must not record a version");
+
+        // written_by on the latest version is still the seeder's, not "armory-ui" —
+        // the exact signal bundle_reseed_system_if_owned depends on.
+        let history = store.bundle_version_list("sys-1").unwrap();
+        assert_eq!(history.len(), 1, "no new version appended");
+        assert_eq!(history[0].written_by, "agentmux-operator-config-seed");
+    }
+
+    #[test]
+    fn if_changed_records_a_version_for_a_real_edit() {
+        let store = make_store();
+        store.bundle_upsert_system_if_changed(&mk_system("sys-1", "Policy"), "agentmux-operator-config-seed", "agentmux_operator_config_seed", "{}").unwrap();
+
+        let mut edited = mk_system("sys-1", "Policy");
+        edited.instructions = "a real human edit".to_string();
+        let version = store.bundle_upsert_system_if_changed(&edited, "armory-ui", "human", "{}").unwrap();
+        assert!(version.is_some());
+        assert_eq!(version.unwrap().written_by, "armory-ui");
+
+        let row = store.bundle_get("sys-1").unwrap().unwrap();
+        assert_eq!(row.instructions, "a real human edit");
+    }
+
     #[test]
     fn generic_delete_refuses_a_system_row_dedicated_delete_only_removes_system_rows() {
         let store = make_store();

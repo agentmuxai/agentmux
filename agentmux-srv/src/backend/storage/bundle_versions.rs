@@ -179,12 +179,15 @@ impl Store {
     }
 
     /// History for one bundle, newest first — metadata only, no content
-    /// (mirrors `agent_native_memory_version_list`). Also the lookup
-    /// `operator_config_seed::auto_seed_on_startup` uses to read a row's
-    /// latest `written_by`/`content_hash` before deciding whether it's still
-    /// safe to reseed (SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md
-    /// §3.3) — the read side of a future GlobalMemoryHistory tool remains
-    /// otherwise unbuilt (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md).
+    /// (mirrors `agent_native_memory_version_list`). Not called by the
+    /// Operator Config reseed path — `Store::bundle_reseed_system_if_owned`
+    /// (`bundles.rs`) performs its own inline `SELECT written_by,
+    /// content_hash, source_detail ... LIMIT 1` query instead, so its
+    /// ownership check and the write it gates happen in one transaction
+    /// (see that method's own doc comment for why). The read side of a
+    /// future GlobalMemoryHistory tool remains otherwise unbuilt
+    /// (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this method is
+    /// exercised directly by this file's own tests in the meantime.
     pub fn bundle_version_list(&self, bundle_id: &str) -> Result<Vec<BundleVersionSummary>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
