@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">
   <title>AgentMux four-process architecture</title>
-  <desc>agentmux-launcher (1 per channel, enforced via single-instance named-pipe lock) spawns agentmux-cef (1 per launcher) and agentmux-srv (1 per launcher, dynamic port). The host embeds Chromium 148 via CEF (1 main renderer + N renderer subprocesses, one per browser pane). The main renderer loads the SolidJS frontend, which talks to the srv sidecar over a WebSocket. Multiple AgentMux instances may run side-by-side; each gets its own complete 4-process stack keyed on data-dir channel.</desc>
+  <desc>agentmux-launcher (1 per channel, enforced via single-instance named-pipe lock) spawns agentmux-cef (1 per launcher) and agentmux-srv (1 per launcher, dynamic port). The host embeds Chromium 152 via CEF (1 main renderer + N renderer subprocesses, one per browser pane). The main renderer loads the SolidJS frontend, which talks to the srv sidecar over a WebSocket. Multiple AgentMux instances may run side-by-side; each gets its own complete 4-process stack keyed on data-dir channel.</desc>
 
   <defs>
     <style>
@@ -60,10 +60,10 @@
   <line class="ipc" x1="320" y1="95" x2="640" y2="95" marker-start="url(#arrow-ipc)" marker-end="url(#arrow-ipc)"/>
   <text class="ipc-label" x="480" y="86" text-anchor="middle">named pipe</text>
 
-  <!-- Row 2: Chromium 148 (renderer) -->
+  <!-- Row 2: Chromium 152 (renderer) -->
   <g>
     <rect class="box-alt" x="640" y="200" width="280" height="100"/>
-    <text class="title"  x="780" y="232" text-anchor="middle">Chromium 148</text>
+    <text class="title"  x="780" y="232" text-anchor="middle">Chromium 152</text>
     <text class="sub"    x="780" y="254" text-anchor="middle">CEF renderer (+ utility procs)</text>
     <text class="card-alt" x="780" y="280" text-anchor="middle">×1 main + ×N per browser pane</text>
   </g>
