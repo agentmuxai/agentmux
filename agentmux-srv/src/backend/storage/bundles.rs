@@ -101,7 +101,22 @@ pub enum BundleReseedOutcome {
     /// this row — an older AgentMux process must never downgrade a newer
     /// seed. See `bundle_reseed_system_if_owned`'s own doc comment.
     SkippedOlderGeneration,
+    /// The row doesn't exist, but a retirement tombstone (`RETIREMENT_
+    /// TOMBSTONE_SOURCE`) recorded by a newer manifest generation says it
+    /// was deliberately pruned — this caller's own (older) manifest must
+    /// not resurrect it. See `bundle_reseed_system_if_owned`'s own doc
+    /// comment.
+    SkippedRetired,
 }
+
+/// The `source` sentinel `bundle_delete_system_if_owned` stamps on the
+/// tombstone version row it appends after deleting a row — distinguishes a
+/// deliberate, generation-aware retirement (pruned because a manifest no
+/// longer lists this id) from an ordinary human delete via the Armory UI
+/// (`bundle_delete_system`, which records no version at all). `bundle_
+/// reseed_system_if_owned`'s missing-row branch checks for this sentinel
+/// specifically — see that method's own doc comment.
+const RETIREMENT_TOMBSTONE_SOURCE: &str = "operator_config_seed_retired";
 
 /// Extracts a `{"manifest_version": N}` field from a version row's
 /// `source_detail` JSON, defaulting to `0` when absent or unparseable — so a
@@ -668,14 +683,18 @@ impl Store {
     /// — a latest version written by anything else means a human (or some
     /// other writer) has claimed this row, and it is left alone.
     ///
-    /// - No existing `db_bundles` row at all -> always (re)create. This
-    ///   covers both a brand-new manifest entry and one whose row was
-    ///   deleted (`bundle_delete_system`, which removes only `db_bundles`
-    ///   and leaves the append-only `db_bundle_versions` history behind) —
-    ///   checking row existence directly, not merely "is history non-empty,"
-    ///   is what lets a deleted entry come back instead of silently staying
-    ///   absent forever once its manifest content stops changing (Codex P2,
-    ///   PR #3244).
+    /// - No existing `db_bundles` row at all -> (re)create, UNLESS the
+    ///   latest version for this id is a `RETIREMENT_TOMBSTONE_SOURCE`
+    ///   marker whose recorded generation is newer than `source_detail`'s
+    ///   own (`SkippedRetired` in that case) — see `bundle_delete_system_
+    ///   if_owned`'s own doc comment for why the tombstone exists: without
+    ///   it, an older AgentMux build (or a rollback) sharing this store.db
+    ///   would read "no row" as "never existed" and resurrect content a
+    ///   newer build's prune deliberately retired (ReAgent/Codex P2, PR
+    ///   #3244). An ordinary human delete (`bundle_delete_system`, which
+    ///   records no version at all) leaves no tombstone, so a manually
+    ///   deleted entry still comes back exactly as before — only a
+    ///   generation-aware prune leaves a tombstone behind.
     /// - Existing row, latest version's `written_by != seeder_identity` ->
     ///   `SkippedLocalEdit`, no write at all.
     /// - Existing row, latest version's `content_hash` already matches the
@@ -750,6 +769,31 @@ impl Store {
                 let target_generation = manifest_generation_from_source_detail(source_detail);
                 if target_generation < stored_generation {
                     return Ok(BundleReseedOutcome::SkippedOlderGeneration);
+                }
+            }
+        } else {
+            // No db_bundles row — but check for a retirement tombstone
+            // before assuming that means "never existed, safe to create."
+            // See this method's own doc comment and `bundle_delete_system_
+            // if_owned`'s. rowid DESC for the same reason as the row_exists
+            // branch above.
+            let tombstone: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT source, source_detail FROM db_bundle_versions
+                     WHERE bundle_id = ?1
+                     ORDER BY rowid DESC
+                     LIMIT 1",
+                    params![memory.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((last_source, last_source_detail)) = tombstone {
+                if last_source == RETIREMENT_TOMBSTONE_SOURCE {
+                    let retired_generation = manifest_generation_from_source_detail(&last_source_detail);
+                    let target_generation = manifest_generation_from_source_detail(source_detail);
+                    if target_generation < retired_generation {
+                        return Ok(BundleReseedOutcome::SkippedRetired);
+                    }
                 }
             }
         }
@@ -886,6 +930,15 @@ impl Store {
     /// can create an `is_system` row also records one) is conservatively
     /// treated as NOT owned by the seeder and left alone, rather than
     /// guessing. Returns `true` only when a deletion actually happened.
+    ///
+    /// Also appends a `RETIREMENT_TOMBSTONE_SOURCE`-marked version row in
+    /// the SAME transaction as the delete — without it, an older AgentMux
+    /// build (or a rollback to one) sharing this store.db, whose own
+    /// manifest still lists this id, would see no `db_bundles` row and
+    /// treat that as "never existed, safe to create," silently resurrecting
+    /// content this deletion deliberately retired. `bundle_reseed_system_
+    /// if_owned`'s missing-row branch checks for this tombstone before
+    /// recreating anything (ReAgent/Codex P2, PR #3244).
     pub fn bundle_delete_system_if_owned(
         &self,
         id: &str,
@@ -920,6 +973,10 @@ impl Store {
         }
 
         let rows = tx.execute("DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1", params![id])?;
+        if rows > 0 {
+            let tombstone_detail = format!(r#"{{"manifest_version":{caller_manifest_version}}}"#);
+            bundle_version_insert_tx(&tx, id, "", "", RETIREMENT_TOMBSTONE_SOURCE, &tombstone_detail, seeder_identity)?;
+        }
         tx.commit()?;
         Ok(rows > 0)
     }
