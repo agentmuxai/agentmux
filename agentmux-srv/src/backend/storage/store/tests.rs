@@ -3479,6 +3479,44 @@
         );
     }
 
+    /// ReAgent P2 on PR #3262: `registry_def_retire` was the last step in
+    /// `instance_delete` still gated on `rows > 0`. Once the dependent purge
+    /// and registry sweep went unconditional, that gate left a genuinely
+    /// incoherent outcome reachable here — a cross-channel agent's records
+    /// swept while its definition stayed ACTIVE, so `agent_def_list`'s
+    /// overlay keeps serving a definition nothing backs.
+    #[test]
+    fn instance_delete_tombstones_a_cross_channel_definition_with_no_local_row() {
+        let (_tmp, store, _reg) = store_with_registry();
+        let def_store =
+            crate::registry::DefinitionStore::open(_tmp.path().join("definitions")).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "elsewhere-agent".to_string(),
+                    name: "Elsewhere".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(Arc::new(def_store));
+        // Deliberately no local db_agents row — the cross-channel shape.
+        assert!(store.instance_get("elsewhere-agent").unwrap().is_none());
+
+        assert!(
+            store.instance_delete("elsewhere-agent").unwrap(),
+            "deleting a cross-channel agent did something, so it must say so"
+        );
+        assert!(
+            !store
+                .shared_def_registry()
+                .unwrap()
+                .exists("elsewhere-agent"),
+            "the global definition must be tombstoned, or the overlay serves it forever"
+        );
+    }
+
     /// The guard the unconditional sweep needs: a template's id can be the
     /// `definition_id` of a legacy launch record, so sweeping on one would
     /// take records belonging to agents launched from it — what
