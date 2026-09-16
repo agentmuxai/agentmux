@@ -44,7 +44,8 @@ use windows_sys::Win32::System::Threading::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::splash_core::{
-    format_ms, format_running, hold_duration, reconcile, trunc, StageEntry, StageTimeline,
+    format_ms, format_running, hold_duration, reconcile, tally_label, trunc, visible_rows,
+    RowKind, StageEntry, StageTimeline,
 };
 use crate::startup_events::{StartupEvent, StartupStatus};
 
@@ -511,69 +512,76 @@ fn draw_stages(dib: &mut [u8], stages: &[StageEntry], total_ms: Option<u64>, res
         row += 1;
     }
 
-    for stage in stages {
-        if row >= MAX_STAGE_ROWS { break; }
+    // Reserve the trailing "other"/"total" annotations' rows up front, so a
+    // full panel drops the OLDEST timeline row rather than silently losing the
+    // summary — which is what the old append-if-room ordering did.
+    let reserved = if total_ms.is_some() { 2 } else { 0 };
+    let budget = MAX_STAGE_ROWS.saturating_sub(row + reserved);
+
+    for entry in visible_rows(stages, budget) {
         let y = y0 + row as i32 * STAGE_ROW_H;
+        let sub_x = x_label + 2 * crate::splash_font::GLYPH_W as i32;
+        match entry.kind {
+            RowKind::Stage(stage) => {
+                // Stage label (left-aligned, truncated).
+                let label = trunc(stage.label, LABEL_MAX_CHARS);
+                draw_text(dib, SPLASH_W, SPLASH_H, x_label, y, &label, STAGE_COLOR, 1.0, true);
 
-        // Stage label (left-aligned, truncated).
-        let label = trunc(stage.label, LABEL_MAX_CHARS);
-        draw_text(dib, SPLASH_W, SPLASH_H, x_label, y, &label, STAGE_COLOR, 1.0, true);
+                // Time (right-aligned). Colored by status, not unconditionally
+                // "done" green — a `finalize_running`-produced Warn/interrupted
+                // outcome (no matching End ever arrived) must not render
+                // indistinguishably from a real success (codex P2 on PR #3222).
+                if let Some((ms, status, _detail)) = &stage.done {
+                    let t = format_ms(*ms);
+                    let tx = x_time_right - text_width(&t);
+                    let color = match status {
+                        StartupStatus::Ok => TIME_DONE_COLOR,
+                        StartupStatus::Warn => STATUS_WARN_COLOR,
+                        StartupStatus::Error => STATUS_ERR_COLOR,
+                    };
+                    draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, color, 1.0, true);
+                } else {
+                    let t = format_running(stage.started_at);
+                    let tx = x_time_right - text_width(&t);
+                    draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, TIME_RUN_COLOR, 1.0, true);
+                }
+            }
+            // Collapsed older sub-items. Carries no duration of its own: the
+            // per-item times it stands in for are exactly what was dropped.
+            RowKind::SubTally { done, total } => {
+                let lbl = trunc(&tally_label(done, total), SUB_LABEL_MAX_CHARS);
+                draw_text(dib, SPLASH_W, SPLASH_H, sub_x, y, &lbl, SUB_COLOR, 1.0, true);
+            }
+            RowKind::Sub(sub) => {
+                let lbl = trunc(&sub.label, SUB_LABEL_MAX_CHARS);
+                draw_text(dib, SPLASH_W, SPLASH_H, sub_x, y, &lbl, SUB_COLOR, 1.0, true);
 
-        // Time (right-aligned). Colored by status, not unconditionally
-        // "done" green — a `finalize_running`-produced Warn/interrupted
-        // outcome (no matching End ever arrived) must not render
-        // indistinguishably from a real success (codex P2 on PR #3222).
-        if let Some((ms, status, _detail)) = &stage.done {
-            let t = format_ms(*ms);
-            let tx = x_time_right - text_width(&t);
-            let color = match status {
-                StartupStatus::Ok => TIME_DONE_COLOR,
-                StartupStatus::Warn => STATUS_WARN_COLOR,
-                StartupStatus::Error => STATUS_ERR_COLOR,
-            };
-            draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, color, 1.0, true);
-        } else {
-            let t = format_running(stage.started_at);
-            let tx = x_time_right - text_width(&t);
-            draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, TIME_RUN_COLOR, 1.0, true);
+                if let Some((ms, status, _detail)) = &sub.done {
+                    let t = format_ms(*ms);
+                    // Status char right of time.
+                    let status_char = match status {
+                        StartupStatus::Ok => "+",
+                        StartupStatus::Warn => "!",
+                        StartupStatus::Error => "X",
+                    };
+                    let sc = x_time_right;
+                    let tx = sc - crate::splash_font::GLYPH_W as i32 - 2 - text_width(&t);
+                    draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, SUB_COLOR, 1.0, true);
+                    let sc_color = match status {
+                        StartupStatus::Ok => STATUS_OK_COLOR,
+                        StartupStatus::Warn => STATUS_WARN_COLOR,
+                        StartupStatus::Error => STATUS_ERR_COLOR,
+                    };
+                    draw_text(dib, SPLASH_W, SPLASH_H, sc - crate::splash_font::GLYPH_W as i32, y, status_char, sc_color, 1.0, true);
+                } else {
+                    let t = format_running(sub.started_at);
+                    let tx = x_time_right - text_width(&t);
+                    draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, TIME_RUN_COLOR, 1.0, true);
+                }
+            }
         }
 
         row += 1;
-
-        // Sub-rows (indented).
-        for sub in &stage.subs {
-            if row >= MAX_STAGE_ROWS { break; }
-            let y = y0 + row as i32 * STAGE_ROW_H;
-            let sub_x = x_label + 2 * crate::splash_font::GLYPH_W as i32;
-
-            let lbl = trunc(&sub.label, SUB_LABEL_MAX_CHARS);
-            draw_text(dib, SPLASH_W, SPLASH_H, sub_x, y, &lbl, SUB_COLOR, 1.0, true);
-
-            if let Some((ms, status, _detail)) = &sub.done {
-                let t = format_ms(*ms);
-                // Status char right of time.
-                let status_char = match status {
-                    StartupStatus::Ok => "+",
-                    StartupStatus::Warn => "!",
-                    StartupStatus::Error => "X",
-                };
-                let sc = x_time_right;
-                let tx = sc - crate::splash_font::GLYPH_W as i32 - 2 - text_width(&t);
-                draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, SUB_COLOR, 1.0, true);
-                let sc_color = match status {
-                    StartupStatus::Ok => STATUS_OK_COLOR,
-                    StartupStatus::Warn => STATUS_WARN_COLOR,
-                    StartupStatus::Error => STATUS_ERR_COLOR,
-                };
-                draw_text(dib, SPLASH_W, SPLASH_H, sc - crate::splash_font::GLYPH_W as i32, y, status_char, sc_color, 1.0, true);
-            } else {
-                let t = format_running(sub.started_at);
-                let tx = x_time_right - text_width(&t);
-                draw_text(dib, SPLASH_W, SPLASH_H, tx, y, &t, TIME_RUN_COLOR, 1.0, true);
-            }
-
-            row += 1;
-        }
     }
 
     // "other: X.Xs" / "total: X.Xs" dim annotations — shown only in hold

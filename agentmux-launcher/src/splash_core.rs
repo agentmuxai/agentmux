@@ -211,6 +211,80 @@ impl StageTimeline {
     }
 }
 
+// ── Visible rows: summarize, then keep the latest in view ────────────────────
+
+/// How many of a stage's sub-items are rendered individually. Anything older
+/// collapses into a single tally row.
+///
+/// Two, not one: the newest sub-item is usually the one still running, and
+/// seeing only it gives no sense of progress — the one just finished, with its
+/// real duration, is what tells you the batch is moving. Anything beyond that
+/// is history the user cannot act on, which is exactly the "too many detailed
+/// entries" complaint in
+/// `docs/reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md`.
+pub const SUB_DETAIL_MAX: usize = 2;
+
+/// What one rendered line stands for. Platform renderers match on this and
+/// draw it their own way (GDI text, an `NSTextField` pair, a formatted
+/// string) — the *selection* of what to draw is shared, which is the part
+/// that was wrong in three places independently.
+pub enum RowKind<'a> {
+    Stage(&'a StageEntry),
+    Sub(&'a SubEntry),
+    /// Stands in for sub-items collapsed out of the detail list.
+    /// `done` of `total` sub-items in this stage have completed.
+    SubTally { done: usize, total: usize },
+}
+
+pub struct Row<'a> {
+    pub kind: RowKind<'a>,
+    /// Sub-items and tallies are indented under their stage; stages are not.
+    pub indented: bool,
+}
+
+/// The label for a collapsed-sub-items row. Shared so all three platforms
+/// word it identically.
+pub fn tally_label(done: usize, total: usize) -> String {
+    format!("{done}/{total} done")
+}
+
+/// Flatten `stages` into at most `budget` rows: summarize each stage's older
+/// sub-items into a tally, then — if that still doesn't fit — keep the
+/// **newest** rows rather than the oldest.
+///
+/// The keep-the-newest half is the behavior change. Every platform previously
+/// iterated stages oldest-first and stopped dead at its row cap
+/// (`if row >= MAX_STAGE_ROWS { break }`), so a long sub-item burst filled the
+/// panel with the *earliest* entries and never showed the one currently
+/// running — the opposite of what a progress display is for, and the reason a
+/// slow startup looked frozen rather than busy. See the report above.
+pub fn visible_rows(stages: &[StageEntry], budget: usize) -> Vec<Row<'_>> {
+    let mut rows: Vec<Row<'_>> = Vec::new();
+    for stage in stages {
+        rows.push(Row { kind: RowKind::Stage(stage), indented: false });
+        let subs = &stage.subs;
+        if subs.len() > SUB_DETAIL_MAX {
+            let hidden = &subs[..subs.len() - SUB_DETAIL_MAX];
+            let done = hidden.iter().filter(|s| s.done.is_some()).count();
+            rows.push(Row {
+                kind: RowKind::SubTally { done, total: subs.len() },
+                indented: true,
+            });
+            for sub in &subs[subs.len() - SUB_DETAIL_MAX..] {
+                rows.push(Row { kind: RowKind::Sub(sub), indented: true });
+            }
+        } else {
+            for sub in subs {
+                rows.push(Row { kind: RowKind::Sub(sub), indented: true });
+            }
+        }
+    }
+    if rows.len() > budget {
+        rows.drain(..rows.len() - budget);
+    }
+    rows
+}
+
 // ── Formatting ───────────────────────────────────────────────────────────────
 
 pub fn format_ms(ms: u64) -> String {
@@ -427,6 +501,108 @@ mod tests {
         tl.apply_tick(vec![end("prep", 100)]);
         tl.apply_tick(vec![begin("backend")]); // still running
         assert_eq!(accounted_ms(&tl.stages), 100);
+    }
+
+    /// Builds a timeline with one stage carrying `n` sub-items, the last of
+    /// which is still running — the shape a migration batch actually has.
+    fn timeline_with_subs(n: usize) -> StageTimeline {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("backend")]);
+        tl.apply_tick(vec![]);
+        for i in 0..n {
+            let id = format!("m{i:04}");
+            tl.apply_tick(vec![StartupEvent::SubBegin {
+                stage: "backend",
+                id: id.clone(),
+                label: format!("migration {i}"),
+            }]);
+            // Every sub but the last completes.
+            if i + 1 < n {
+                tl.apply_tick(vec![StartupEvent::SubEnd {
+                    stage: "backend",
+                    id,
+                    duration_ms: 10,
+                    status: StartupStatus::Ok,
+                    detail: None,
+                }]);
+            }
+        }
+        tl.apply_tick(vec![]);
+        tl
+    }
+
+    fn labels(rows: &[Row<'_>]) -> Vec<String> {
+        rows.iter()
+            .map(|r| match &r.kind {
+                RowKind::Stage(s) => s.label.to_string(),
+                RowKind::Sub(s) => s.label.clone(),
+                RowKind::SubTally { done, total } => tally_label(*done, *total),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_short_sub_list_is_shown_in_full_with_no_tally() {
+        let tl = timeline_with_subs(2);
+        let rows = visible_rows(&tl.stages, 12);
+        assert_eq!(labels(&rows), vec!["backend", "migration 0", "migration 1"]);
+    }
+
+    #[test]
+    fn a_long_sub_list_collapses_the_older_entries_into_a_tally() {
+        // 9 subs: 8 completed + 1 running. Detail keeps the newest two, so
+        // seven are hidden and all seven of those are done.
+        let tl = timeline_with_subs(9);
+        let rows = visible_rows(&tl.stages, 12);
+        assert_eq!(
+            labels(&rows),
+            vec!["backend", "7/9 done", "migration 7", "migration 8"],
+            "older sub-items must collapse into one tally, not occupy a row each"
+        );
+    }
+
+    #[test]
+    fn the_running_sub_item_survives_summarization() {
+        // The whole point of the display: whatever is happening right now
+        // must be on screen.
+        let tl = timeline_with_subs(20);
+        let rows = visible_rows(&tl.stages, 12);
+        let running = rows
+            .iter()
+            .filter_map(|r| match &r.kind {
+                RowKind::Sub(s) if s.done.is_none() => Some(s.label.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(running, vec!["migration 19"]);
+    }
+
+    #[test]
+    fn overflow_keeps_the_newest_rows_not_the_oldest() {
+        // The defect this function exists to fix: every platform used to
+        // iterate oldest-first and stop at the cap, so the newest rows —
+        // including the running one — were the ones dropped.
+        let mut tl = StageTimeline::new();
+        for stage in ["prep", "backend", "host", "cef_init", "paint"] {
+            tl.apply_tick(vec![begin(stage)]);
+            tl.apply_tick(vec![]);
+        }
+        let rows = visible_rows(&tl.stages, 3);
+        assert_eq!(labels(&rows), vec!["host", "cef_init", "paint"]);
+    }
+
+    #[test]
+    fn a_zero_budget_yields_no_rows_rather_than_panicking() {
+        let tl = timeline_with_subs(5);
+        assert!(visible_rows(&tl.stages, 0).is_empty());
+    }
+
+    #[test]
+    fn stages_are_not_indented_but_subs_and_tallies_are() {
+        let tl = timeline_with_subs(9);
+        let rows = visible_rows(&tl.stages, 12);
+        let indents: Vec<bool> = rows.iter().map(|r| r.indented).collect();
+        assert_eq!(indents, vec![false, true, true, true]);
     }
 
     #[test]
