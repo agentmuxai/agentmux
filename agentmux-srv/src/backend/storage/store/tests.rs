@@ -3018,6 +3018,595 @@
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 0);
     }
 
+    // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.4 / §6 step 1.
+    #[test]
+    fn agent_def_delete_purges_dependent_tables_not_just_the_agent_row() {
+        let store = make_store();
+        let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: "dep-del".to_string(),
+            slug: String::new(),
+            name: "Goner".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at) VALUES ('dep-del', 'instructions', 'x', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_skills (id, agent_id, name, trigger, skill_type, description, content, created_at) VALUES ('sk1', 'dep-del', 'n', '', 'prompt', '', '', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_history (agent_id, session_date, entry, timestamp) VALUES ('dep-del', '2026-09-16', 'e', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES ('dep-del', 'sk-ref-1')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_mcp_ref (agent_id, mcp_id) VALUES ('dep-del', 'mcp-ref-1')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_credentials (agent_id, client_id, client_secret, token_endpoint, access_token, expires_at, created_at) VALUES ('dep-del', 'c', 's', 't', 'a', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_native_memory (agent_id, filename, content, metadata_type, size_bytes, updated_at, last_seen_path, last_seen_mtime_ms) VALUES ('dep-del', 'MEMORY.md', 'x', '', 1, 0, '', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_native_memory_versions (id, agent_id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at) VALUES ('ver1', 'dep-del', 'MEMORY.md', 'x', 'h', NULL, 'agent_inferred', '{}', '', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_jekt_keys (agent_id, hmac_key, created_at) VALUES ('dep-del', 'k', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_lan_keys (agent_id, public_key, private_key, created_at) VALUES ('dep-del', 'pub', 'priv', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_conversation_trust_grants (agent_id, granted_peer_agent_id, tier, granted_at) VALUES ('dep-del', 'peer-agent', 'full', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_conversation_trust_grants (agent_id, granted_peer_agent_id, tier, granted_at) VALUES ('peer-agent', 'dep-del', 'full', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_activity_summaries (definition_id, summary, updated_at) VALUES ('dep-del', 's', 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        store.agent_def_delete("dep-del").unwrap();
+
+        let conn = store.conn.lock().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_content WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_skills WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_history WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_skills_ref WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_mcp_ref WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_credentials WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_native_memory WHERE agent_id='dep-del'"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM db_agent_native_memory_versions WHERE agent_id='dep-del'"),
+            0
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_jekt_keys WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_lan_keys WHERE agent_id='dep-del'"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM db_conversation_trust_grants WHERE agent_id='dep-del' OR granted_peer_agent_id='dep-del'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM db_agent_activity_summaries WHERE definition_id='dep-del'"),
+            0
+        );
+    }
+
+    /// The confirm dialog promises the delete removes "the agent and its
+    /// credentials, skills, and activity history" — but the live
+    /// credentials, account links and native memory are in the IDENTITY
+    /// store (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`), a second physical
+    /// database `agent_def_delete` has no connection to. Its same-named
+    /// tables in the object store are the legacy copies nothing reads.
+    ///
+    /// Also pins the sqlite_master filter that lets one table list serve
+    /// both schemas: the identity store has four of the thirteen, and
+    /// deleting from the absent nine must not error.
+    #[test]
+    fn agent_dependents_purge_works_against_the_identity_store_schema() {
+        let store = Store::open_identity_store(":memory:".as_ref()).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_credentials (agent_id, client_id, client_secret, token_endpoint, access_token, expires_at, created_at) VALUES ('gone', 'c', 's', 't', 'a', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_identity_links (agent_id, account_id, provider) VALUES ('gone', 'acct', 'claude')",
+                [],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(store.agent_dependents_purge("gone").unwrap(), 2);
+
+        let conn = store.conn.lock().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_credentials WHERE agent_id='gone'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_identity_links WHERE agent_id='gone'"), 0);
+    }
+
+    /// The reported bug: "the icon on the card disappears, but the card
+    /// stays." Deleting an agent removed its definition but left its
+    /// instance-registry record active, and `listrecentsessions` builds its
+    /// rows from that registry — so the row survived with no definition to
+    /// resolve a provider (no icon) or a name from.
+    ///
+    /// Two independent gaps produced it, one per assertion below:
+    /// the mirror keyed on the *instance* id (missing any legacy
+    /// launch-keyed record), and it was skipped entirely when the local
+    /// `db_agents` DELETE matched nothing — which is every cross-channel
+    /// agent, i.e. most rows the picker shows in a fresh channel.
+    #[test]
+    fn agent_def_delete_sweeps_every_registry_record_for_the_agent() {
+        let (_tmp, store, reg) = store_with_registry();
+        let mut agent = sample_agent("ghost-agent", "ghost");
+        store.agent_def_insert(&mut agent).unwrap();
+
+        // The correctly-keyed record plus a legacy launch-keyed one, the
+        // shape `m0026_registry_agent_id_rekey` leaves behind when it
+        // no-ops (its `db_agent_instances` source table is gone).
+        for instance_id in ["ghost-agent", "legacy-launch-id"] {
+            let mut rec = crate::registry::NamedAgentRecord {
+                schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: instance_id.to_string(),
+                    instance_name: "Ghost".to_string(),
+                    definition_id: "ghost-agent".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "ghost".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "0.56.1".to_string(),
+                    last_launched_by_version: "0.56.1".to_string(),
+                },
+            };
+            rec.data.instance_id = instance_id.to_string();
+            reg.upsert(&rec).unwrap();
+        }
+
+        assert!(store.agent_def_delete("ghost-agent").unwrap());
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "a legacy launch-keyed record must go with the agent, not stay \
+             behind as an iconless \"(missing definition)\" row"
+        );
+
+        // Cross-channel: the agent lives only in the global definition
+        // store, so the local DELETE matches nothing. The registry record
+        // another channel wrote still has to go.
+        let mut rec = crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "elsewhere-launch".to_string(),
+                instance_name: "Elsewhere".to_string(),
+                definition_id: "elsewhere-agent".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "elsewhere".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        };
+        rec.data.instance_id = "elsewhere-launch".to_string();
+        reg.upsert(&rec).unwrap();
+        let def_dir = _tmp.path().join("definitions");
+        let def_store = crate::registry::DefinitionStore::open(def_dir).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "elsewhere-agent".to_string(),
+                    name: "Elsewhere".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(Arc::new(def_store));
+
+        assert!(
+            store.agent_def_delete("elsewhere-agent").unwrap(),
+            "a cross-channel agent is deletable through the global overlay"
+        );
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "the registry sweep must not be gated on the local row existing"
+        );
+    }
+
+    /// Codex P2 on PR #3262: if an earlier attempt tombstoned the
+    /// definition but left a registry record behind (or another channel
+    /// wrote a stale one afterwards), a RETRY has `rows == 0` and
+    /// `global_retired == false` — the tombstone already exists. Gating the
+    /// sweep on either would let the iconless ghost row survive every
+    /// further Delete until restart.
+    #[test]
+    fn deleting_an_already_tombstoned_agent_still_sweeps_the_registry() {
+        let (_tmp, store, reg) = store_with_registry();
+        let def_store =
+            crate::registry::DefinitionStore::open(_tmp.path().join("definitions")).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "retry-agent".to_string(),
+                    name: "Retry".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        // Definition already tombstoned by a previous attempt.
+        def_store.retire("retry-agent").unwrap();
+        store.set_def_registry(Arc::new(def_store));
+
+        // ...which failed to take this record with it.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "stale-launch".to_string(),
+                instance_name: "Retry".to_string(),
+                definition_id: "retry-agent".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "retry".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        })
+        .unwrap();
+
+        // Nothing left to report as deleted — and that must not stop the sweep.
+        assert!(!store.agent_def_delete("retry-agent").unwrap());
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "a retried Delete must still clear the ghost row's record"
+        );
+    }
+
+    /// ReAgent P1 round 3 on PR #3262. `agent_def_delete_removes_only_its_
+    /// own_registry_file` already forbids a template's deletion from taking
+    /// its launches' records — but it builds those records through
+    /// `instance_create`, which keys each one by the launch's OWN id, so the
+    /// wide `definition_id` match never sees them and the test passes either
+    /// way. The shape that actually breaks is the legacy, never-re-keyed
+    /// record, whose `definition_id` still points at the TEMPLATE. On a real
+    /// machine those are the common case (30 of 44 records on the reporting
+    /// one), so deleting a template would have silently removed unrelated
+    /// agents from the cross-channel picker.
+    #[test]
+    fn deleting_a_template_spares_a_legacy_launch_record_pointing_at_it() {
+        let (_tmp, store, reg) = store_with_registry();
+        // `store_with_registry` seeds `def-mirror` as a template. Give the
+        // template a record of its own (file-keyed) plus a legacy launch
+        // record for a real agent launched from it (definition-keyed).
+        let legacy = |instance_id: &str, name: &str| crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: instance_id.to_string(),
+                instance_name: name.to_string(),
+                definition_id: "def-mirror".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: name.to_lowercase(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        };
+        reg.upsert(&legacy("def-mirror", "Mirror")).unwrap();
+        reg.upsert(&legacy("legacy-launch-id", "RealAgent")).unwrap();
+
+        assert!(store.agent_def_delete("def-mirror").unwrap());
+
+        let left: Vec<String> = reg
+            .list_active()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.data.instance_id)
+            .collect();
+        assert_eq!(
+            left,
+            vec!["legacy-launch-id".to_string()],
+            "deleting a template takes only its own file-keyed record — an agent \
+             launched from it must not vanish from the picker"
+        );
+    }
+
+    /// ReAgent P1 round 4 on PR #3262: the same wide-match hazard the
+    /// delete paths were guarded against, on the hide ("Forget agent") and
+    /// rename paths. Both reach the registry with an id the caller may not
+    /// have checked, and a template's id is the `definition_id` of every
+    /// legacy launch record for agents launched from it — so hiding or
+    /// renaming a template would hide/rename those agents instead.
+    ///
+    /// One test for both, because they share one rule
+    /// (`Store::scope_for_row`) and the point is that the rule holds
+    /// everywhere, not that two functions each happen to be right.
+    #[test]
+    fn hiding_or_renaming_a_template_spares_its_launches_registry_records() {
+        for op in ["hide", "rename"] {
+            let (_tmp, store, reg) = store_with_registry();
+            // `store_with_registry` seeds `def-mirror` as a template.
+            reg.upsert(&crate::registry::NamedAgentRecord {
+                schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "legacy-launch-id".to_string(),
+                    instance_name: "RealAgent".to_string(),
+                    // Pre-re-key shape: points at the TEMPLATE.
+                    definition_id: "def-mirror".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "realagent".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "0.56.1".to_string(),
+                    last_launched_by_version: "0.56.1".to_string(),
+                },
+            })
+            .unwrap();
+
+            match op {
+                "hide" => {
+                    store.instance_set_hidden("def-mirror", true).unwrap();
+                }
+                _ => {
+                    store.instance_rename("def-mirror", "Renamed").unwrap();
+                }
+            }
+
+            let left = reg.list_active().unwrap();
+            assert_eq!(
+                left.len(),
+                1,
+                "{op}: an agent launched from the template must stay visible"
+            );
+            assert_eq!(
+                left[0].data.instance_name, "RealAgent",
+                "{op}: and must keep its own name"
+            );
+        }
+    }
+
+    /// ReAgent P1 round 2 on PR #3262: `instance_delete` is the same
+    /// deletion as `agent_def_delete` under a second name, so it needs the
+    /// same convergence. A retry after an attempt that removed the
+    /// `db_agents` row but failed to remove the registry file sees
+    /// `rows == 0` — gating the sweep on that left the ghost row forever.
+    #[test]
+    fn instance_delete_sweeps_the_registry_even_when_the_row_is_already_gone() {
+        let (_tmp, store, reg) = store_with_registry();
+        // No local row for this id — the state a retry finds.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "stale-launch".to_string(),
+                instance_name: "Ghost".to_string(),
+                definition_id: "already-deleted".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "ghost".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        })
+        .unwrap();
+
+        assert!(!store.instance_delete("already-deleted").unwrap());
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "a retried delete through this RPC must still clear the ghost record"
+        );
+    }
+
+    /// ReAgent P2 on PR #3262: `registry_def_retire` was the last step in
+    /// `instance_delete` still gated on `rows > 0`. Once the dependent purge
+    /// and registry sweep went unconditional, that gate left a genuinely
+    /// incoherent outcome reachable here — a cross-channel agent's records
+    /// swept while its definition stayed ACTIVE, so `agent_def_list`'s
+    /// overlay keeps serving a definition nothing backs.
+    #[test]
+    fn instance_delete_tombstones_a_cross_channel_definition_with_no_local_row() {
+        let (_tmp, store, _reg) = store_with_registry();
+        let def_store =
+            crate::registry::DefinitionStore::open(_tmp.path().join("definitions")).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "elsewhere-agent".to_string(),
+                    name: "Elsewhere".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(Arc::new(def_store));
+        // Deliberately no local db_agents row — the cross-channel shape.
+        assert!(store.instance_get("elsewhere-agent").unwrap().is_none());
+
+        assert!(
+            store.instance_delete("elsewhere-agent").unwrap(),
+            "deleting a cross-channel agent did something, so it must say so"
+        );
+        assert!(
+            !store
+                .shared_def_registry()
+                .unwrap()
+                .exists("elsewhere-agent"),
+            "the global definition must be tombstoned, or the overlay serves it forever"
+        );
+    }
+
+    /// The guard the unconditional sweep needs: a template's id can be the
+    /// `definition_id` of a legacy launch record, so sweeping on one would
+    /// take records belonging to agents launched from it — what
+    /// `agent_def_delete_removes_only_its_own_registry_file` forbids.
+    #[test]
+    fn instance_delete_refuses_a_template_and_leaves_its_launches_alone() {
+        let (_tmp, store, reg) = store_with_registry();
+        // `store_with_registry` seeds `def-mirror` as a template.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "legacy-launch-of-template".to_string(),
+                instance_name: "FromTemplate".to_string(),
+                // Pre-re-key shape: points at the TEMPLATE, not its own id.
+                definition_id: "def-mirror".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "fromtemplate".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        })
+        .unwrap();
+
+        assert!(!store.instance_delete("def-mirror").unwrap());
+        assert_eq!(
+            reg.list_active().unwrap().len(),
+            1,
+            "an agent launched from a template must survive deleting the template"
+        );
+        assert_eq!(
+            count_agents(&store, "id = 'def-mirror'"),
+            1,
+            "the template row itself is untouched"
+        );
+    }
+
+    /// Codex P1 on PR #3262: `renameagentdefinitiontitle` moves `name` /
+    /// `branch_label`, but "My Agents" rows render `instance_name` — so a
+    /// rename redisplayed the old name. `instance_rename` moves the field
+    /// the user is actually looking at, in SQLite and in EVERY registry
+    /// record (the dedup key is `(definition_id, instance_name)`, so a
+    /// partial rename splits one agent into two rows).
+    #[test]
+    fn instance_rename_moves_the_picker_visible_name_everywhere() {
+        let (_tmp, store, reg) = store_with_registry();
+        let agents_root = _tmp.path().join("agents");
+        let inst = make_named_inst("rename-me", "OldName", &agents_root);
+        store.instance_create(&inst).unwrap();
+        // A second, launch-keyed record for the same agent — the legacy
+        // shape this PR's delete fix also has to cope with.
+        let mut legacy = reg.get("rename-me").unwrap().expect("mirrored on create");
+        legacy.data.instance_id = "legacy-launch".to_string();
+        reg.upsert(&legacy).unwrap();
+
+        assert!(store.instance_rename("rename-me", "NewName").unwrap());
+
+        assert_eq!(
+            store.instance_get("rename-me").unwrap().unwrap().instance_name,
+            "NewName"
+        );
+        for rec in reg.list_active().unwrap() {
+            assert_eq!(
+                rec.data.instance_name, "NewName",
+                "record {} kept the old name — the picker would show two rows",
+                rec.data.instance_id
+            );
+        }
+    }
+
+    /// An agent that never had a named launch must not GAIN one: a non-empty
+    /// `instance_name` is what puts a row in `instance_list_named`.
+    #[test]
+    fn instance_rename_does_not_name_a_never_named_agent() {
+        let (_tmp, store, _reg) = store_with_registry();
+        let mut agent = sample_agent("unnamed-agent", "unnamed");
+        store.agent_def_insert(&mut agent).unwrap();
+
+        assert!(!store.instance_rename("unnamed-agent", "NewName").unwrap());
+        assert_eq!(
+            store.instance_get("unnamed-agent").unwrap().unwrap().instance_name,
+            "",
+            "renaming must not conjure a picker row"
+        );
+    }
+
     #[test]
     fn launching_a_template_creates_an_agent_row_for_the_launch() {
         let store = make_store();

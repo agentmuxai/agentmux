@@ -585,6 +585,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err(format!("renameagentdefinitiontitle: agent {} not found", cmd.id));
                 }
 
+                // The fields above are what the pane tab strip's `titleOf()`
+                // reads. "My Agents" rows render `instance_name` instead, so
+                // without this a rename from the picker closed its editor,
+                // refetched, and redisplayed the OLD name (codex P1 on
+                // PR #3262). See `Store::instance_rename` for why it's
+                // scoped to rows that already carry an `instance_name`.
+                //
+                // This also applies to the tab-strip rename, deliberately:
+                // since the agent-concept consolidation a fork tab and its
+                // picker row are ONE agent row, so letting the two names
+                // drift apart is the confusing outcome, not the safe one.
+                // Best-effort — the title change already landed, and a
+                // display-name mirror failing is not a failed rename.
+                if let Err(e) = wstore.instance_rename(&cmd.id, title) {
+                    tracing::warn!(
+                        agent_id = %cmd.id, error = %e,
+                        "renameagentdefinitiontitle: display name not updated; \
+                         the picker row may keep showing the old name"
+                    );
+                }
+
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
