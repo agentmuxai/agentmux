@@ -452,7 +452,7 @@
         .agent-card-slug {
             font-size: 10px;
             color: color-mix(in srgb, var(--secondary-text-color) 65%, transparent);
-            font-family: var(--termfontfamily, monospace);
+            font-family: var(--font-mono);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;

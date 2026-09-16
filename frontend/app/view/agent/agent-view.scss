@@ -429,8 +429,8 @@
     container-name: agent-pane;
     background: var(--main-bg-color);
     color: var(--main-text-color);
-    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
-    font-size: var(--termfontsize, 15px);
+    font-family: var(--font-mono);
+    font-size: var(--font-mono-size);
     line-height: 1.35;
     display: flex;
     flex-direction: column;
