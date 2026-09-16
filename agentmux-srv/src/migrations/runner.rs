@@ -505,41 +505,125 @@ pub(super) fn apply_pending(
 
 // ── Pending count (used by srv startup before migration and for ESTART) ──────
 
-/// Return the number of REGISTRY migrations that have not yet been applied.
-/// Opens stores read-write (SQLite does not have a read-only open for WAL mode);
-/// this may create `objects.db` if it does not exist. Returns 0 on any error so
-/// startup is never blocked. `data_dir` must be the wave data dir (parent of
-/// `db/`) not the db dir itself.
-pub fn count_pending_migrations(data_dir: &Path) -> usize {
-    let shared_store_path = match resolve_shared_store_path() {
-        Some(p) => p,
-        None => {
-            tracing::warn!("count_pending_migrations: could not resolve shared store path — reporting 0");
-            return 0;
+/// Why a pending count could not be determined. Distinguished from "zero
+/// pending" on purpose: a caller deciding whether the schema is current
+/// must be able to tell "nothing to do" from "I could not tell", because
+/// the safe reaction to each is opposite.
+#[derive(Debug)]
+pub enum PendingCountError {
+    /// No shared store path resolves (CI, or an env with no
+    /// `AGENTMUX_SHARED_DIR`). Global-scope migrations cannot be counted.
+    SharedStoreUnresolvable,
+    /// The shared store exists but would not open.
+    SharedStoreUnreadable { path: PathBuf, error: String },
+    /// The channel store would not open. Channel-scoped migrations cannot be
+    /// counted. Carries the global-scope count that WAS readable, so the
+    /// lenient wrapper can keep reporting it — but it is still an error,
+    /// because a partial count must not be mistaken for a complete one.
+    ChannelStoreUnreadable { path: PathBuf, error: String, global_pending: usize },
+}
+
+impl PendingCountError {
+    /// The pending count that WAS readable despite this error — the
+    /// global-scope half when only the channel store failed, otherwise none
+    /// at all.
+    ///
+    /// For callers that must not block on an unreadable store (the
+    /// `AGENTMUXSRV-MIGRATING` hint, which only sizes a timeout, and the
+    /// `ESTART` report, which runs after the migration batch). A caller
+    /// *deciding* anything on the count must handle the error instead — see
+    /// [`try_count_pending_migrations`].
+    pub fn readable_pending(&self) -> usize {
+        match self {
+            Self::ChannelStoreUnreadable { global_pending, .. } => *global_pending,
+            Self::SharedStoreUnresolvable | Self::SharedStoreUnreadable { .. } => 0,
         }
-    };
-    let shared_store = match Store::open_shared(&shared_store_path) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("count_pending_migrations: failed to open shared store at {}: {} — reporting 0", shared_store_path.display(), e);
-            return 0;
+    }
+}
+
+impl std::fmt::Display for PendingCountError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SharedStoreUnresolvable => write!(f, "could not resolve the shared store path"),
+            Self::SharedStoreUnreadable { path, error } => {
+                write!(f, "failed to open the shared store at {}: {}", path.display(), error)
+            }
+            Self::ChannelStoreUnreadable { path, error, .. } => {
+                write!(f, "failed to open the channel store at {}: {}", path.display(), error)
+            }
         }
+    }
+}
+
+/// Number of REGISTRY migrations not yet applied, or why that could not be
+/// determined.
+///
+/// Opens stores read-write (SQLite has no read-only open for WAL mode); this
+/// may create `objects.db` if it does not exist. `data_dir` must be the wave
+/// data dir (parent of `db/`), not the db dir itself.
+///
+/// WHY THIS EXISTS ALONGSIDE [`count_pending_migrations`]. That function
+/// reports `0` on every error, which is the right default for its caller:
+/// the migration run is still ahead of it, so a bad count costs nothing.
+/// It is the wrong default for a caller using the count to decide whether
+/// the schema is current — there, a transient open failure reading as
+/// "nothing pending" means proceeding against a store that may be one or
+/// many migrations behind. `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
+/// §4.1 (invariant S1b) requires that gate to fail closed, which it cannot
+/// do without a fallible check to fail closed *on*.
+pub fn try_count_pending_migrations(data_dir: &Path) -> Result<usize, PendingCountError> {
+    let shared_store_path =
+        resolve_shared_store_path().ok_or(PendingCountError::SharedStoreUnresolvable)?;
+    let shared_store = Store::open_shared(&shared_store_path).map_err(|e| {
+        PendingCountError::SharedStoreUnreadable {
+            path: shared_store_path.clone(),
+            error: e.to_string(),
+        }
+    })?;
+    let pending_in = |channel: Option<&Store>| {
+        REGISTRY
+            .iter()
+            .filter(|m| {
+                let tracking = tracking_store(m.scope(), &shared_store, channel);
+                tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
+            })
+            .count()
     };
     let channel_store_path = data_dir.join("db").join("objects.db");
-    let channel_store = match Store::open(&channel_store_path) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            tracing::warn!("count_pending_migrations: failed to open channel store at {}: {} — channel-scoped migrations will not be counted", channel_store_path.display(), e);
-            None
+    let channel_store = Store::open(&channel_store_path).map_err(|e| {
+        PendingCountError::ChannelStoreUnreadable {
+            path: channel_store_path.clone(),
+            error: e.to_string(),
+            // Global-scope migrations track in the shared store, which opened
+            // fine — that half of the count is still valid.
+            global_pending: pending_in(None),
         }
-    };
-    REGISTRY
-        .iter()
-        .filter(|m| {
-            let tracking = tracking_store(m.scope(), &shared_store, channel_store.as_ref());
-            tracking.map_or(false, |s| !s.migration_is_applied(m.id()))
-        })
-        .count()
+    })?;
+    Ok(pending_in(Some(&channel_store)))
+}
+
+/// Return the number of REGISTRY migrations that have not yet been applied,
+/// reporting 0 on any error so startup is never blocked.
+///
+/// **A `0` from this function does not mean the schema is current** — it may
+/// equally mean the stores could not be read. Callers that need to tell those
+/// apart must use [`try_count_pending_migrations`]; this one exists for the
+/// reporting path (`AGENTMUXSRV-ESTART`'s `pending_migrations:` field) where
+/// the migration run has already happened and an unreadable store is not a
+/// decision point. `data_dir` must be the wave data dir (parent of `db/`),
+/// not the db dir itself.
+pub fn count_pending_migrations(data_dir: &Path) -> usize {
+    match try_count_pending_migrations(data_dir) {
+        Ok(n) => n,
+        Err(e) => {
+            // Unchanged from before this function grew a fallible sibling:
+            // an unreadable channel store still reports the global-scope
+            // count rather than dropping to 0.
+            let fallback = e.readable_pending();
+            tracing::warn!("count_pending_migrations: {} — reporting {}", e, fallback);
+            fallback
+        }
+    }
 }
 
 // ── Error log ─────────────────────────────────────────────────────────────────
@@ -1277,6 +1361,106 @@ mod tests {
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         std::env::remove_var("AGENTMUX_INSTANCE_DIR");
         std::env::remove_var("AGENTMUX_CHANNEL");
+    }
+
+    // ── Pending count: lenient vs. fail-closed ───────────────────────────
+
+    #[test]
+    fn an_unreadable_shared_store_is_an_error_not_a_zero() {
+        // The trap this pair of functions exists to separate: a caller
+        // deciding whether the schema is current cannot act on `0`, because
+        // `0` is also what an unreadable store produces.
+        // SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15 S1b.
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        // A home with no `shared/` directory: SQLite will not create the
+        // parent, so the shared store cannot be opened.
+        let home = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
+        let data_dir = home.path().join("data");
+
+        let strict = try_count_pending_migrations(&data_dir);
+        let lenient = count_pending_migrations(&data_dir);
+        clear();
+
+        match strict {
+            Err(PendingCountError::SharedStoreUnreadable { .. }) => {}
+            Err(other) => panic!("expected SharedStoreUnreadable, got {other}"),
+            Ok(n) => panic!("an unreadable shared store must not read as {n} pending"),
+        }
+        assert_eq!(lenient, 0, "the lenient wrapper still reports 0, as it always did");
+    }
+
+    #[test]
+    fn the_lenient_wrapper_keeps_reporting_the_global_half_it_could_read() {
+        // An unreadable CHANNEL store is the partial case: global-scope
+        // migrations track in the shared store, which opened fine. The
+        // fallible check still refuses to answer (the total is incomplete);
+        // the lenient one reports the half it could read, exactly as it did
+        // before it grew a fallible sibling.
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        let home = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(home.path().join("shared")).expect("shared dir");
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", home.path());
+        // No `db/` under it, so the channel store cannot open.
+        let data_dir = home.path().join("no-such-data-dir");
+
+        let strict = try_count_pending_migrations(&data_dir);
+        let lenient = count_pending_migrations(&data_dir);
+        let global_pending = match &strict {
+            Err(PendingCountError::ChannelStoreUnreadable { global_pending, .. }) => *global_pending,
+            other => {
+                let msg = format!("precondition: expected ChannelStoreUnreadable, got {other:?}");
+                clear();
+                panic!("{msg}");
+            }
+        };
+        clear();
+
+        assert_eq!(
+            lenient, global_pending,
+            "the lenient wrapper must keep reporting the readable global-scope count"
+        );
+    }
+
+    #[test]
+    fn readable_pending_keeps_the_global_half_but_claims_nothing_otherwise() {
+        // What the non-blocking callers fall back to. A shared-store failure
+        // has no readable half at all — reporting anything but 0 there would
+        // be inventing a number.
+        assert_eq!(
+            PendingCountError::ChannelStoreUnreadable {
+                path: std::path::PathBuf::from("/tmp/objects.db"),
+                error: "locked".into(),
+                global_pending: 3,
+            }
+            .readable_pending(),
+            3
+        );
+        assert_eq!(PendingCountError::SharedStoreUnresolvable.readable_pending(), 0);
+        assert_eq!(
+            PendingCountError::SharedStoreUnreadable {
+                path: std::path::PathBuf::from("/tmp/store.db"),
+                error: "locked".into(),
+            }
+            .readable_pending(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_pending_count_error_says_which_store_and_why() {
+        // The blocking upgrade state shows this text to a human, so it has to
+        // name the store and carry the underlying reason rather than being a
+        // bare "could not count".
+        let e = PendingCountError::SharedStoreUnreadable {
+            path: std::path::PathBuf::from("/tmp/store.db"),
+            error: "disk I/O error".to_string(),
+        };
+        let msg = e.to_string();
+        assert!(msg.contains("store.db"), "{msg}");
+        assert!(msg.contains("disk I/O error"), "{msg}");
     }
 
     /// The regression test that would have caught the `ctx.home` /
