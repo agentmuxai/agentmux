@@ -748,9 +748,9 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
     }
 }
 
-/// Skip the automatic MuxBus cloud-session reconnect on non-`stable`
-/// channels. Same shape and same reasoning as [`isolated_auth_enabled`] /
-/// [`isolated_settings_enabled`] — see
+/// Skip the automatic, EAGER MuxBus cloud-session reconnect
+/// (`CloudSubscriber::init_global`, called at boot) on a randomized
+/// per-build local-package channel. See
 /// `docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md`
 /// for the incident this closes.
 ///
@@ -767,17 +767,44 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 /// local rebuild — indefinitely, since a new random channel is minted
 /// every time.
 ///
+/// **This gates ONLY the one-shot eager call at boot** — not every future
+/// MuxBus interaction on that channel. `muxbus.status` and the
+/// agent-spawn `inject_muxbus_env` injection (reagentx P0/P1 on PR #3248,
+/// round 2) instead check whether
+/// `muxbus::cloud_subscriber::get_global_subscriber()` has been
+/// initialized — `None` until either this flag let boot initialize it
+/// (stable/dev channels), or a user explicitly completes `muxbus.login`
+/// on an isolated channel, which lazily initializes it right there. That
+/// split is what makes "only prompt once the user actually enables
+/// MuxBus" true: skipping the eager boot call must not permanently wall
+/// off every other MuxBus code path on that process for its whole
+/// lifetime, or an explicit login would "succeed" while silently never
+/// opening a WebSocket (reagentx P1, round 2) and the status bar's
+/// 60-second poll would keep hitting Keychain regardless of this flag
+/// (reagentx P0, round 2).
+///
 /// Resolution order:
 /// 1. `AGENTMUX_ISOLATED_MUXBUS=1` / `=0` — explicit override, always wins.
-/// 2. Otherwise, defaults to isolated (skip the automatic reconnect) for
-///    every channel except `"stable"`. `stable` is the real release
-///    channel — the shipped app and `task dev` must keep muxbus
-///    reconnect-on-launch working exactly as before, so a real user's
-///    cloud session still resumes automatically. A local build simply
-///    starts with no MuxBus session until you explicitly `muxbus.login`
-///    inside that specific build — the same "exercise the real flow
-///    instead of silently inheriting global state" trade-off
-///    `isolated_auth_enabled`/`isolated_settings_enabled` already make.
+/// 2. Otherwise, defaults to isolated (skip the eager reconnect) for a
+///    **local package channel** — `AGENTMUX_CHANNEL` is set, isn't
+///    `"stable"`, and doesn't start with `"dev-"`. `stable` is the real
+///    release channel; `dev-<branch>[-<clone-id>]` (`RuntimeMode::Dev`'s
+///    channel format, below) is `task dev`'s **stable, per-branch**
+///    channel name — reused across every `task dev`
+///    invocation on that branch, unlike a package build's channel, which
+///    mints a brand-new random hash on literally every single build. A
+///    dev session therefore doesn't have the "never-before-seen app to
+///    Keychain every time" problem this flag exists to solve, and
+///    isolating it anyway would be a pure regression (reagentx P1 on PR
+///    #3248, round 1 + round 2: dev sessions losing automatic MuxBus
+///    reconnect, and thus WAN notifications, for the entire session).
+///    This is a **deliberate narrowing** relative to
+///    [`isolated_auth_enabled`]/[`isolated_settings_enabled`], which
+///    isolate `dev-*` too — those exist to make local testing exercise
+///    the real Armory/settings flow, a goal `dev-*`'s stability doesn't
+///    undermine the same way it undermines this flag's actual, narrower
+///    motivation (avoiding a repeat OS prompt from a randomized
+///    per-build identity).
 /// 3. If `AGENTMUX_CHANNEL` isn't set yet, stays global — conservative
 ///    default when channel context is unknown, not a guess.
 ///
@@ -804,9 +831,11 @@ pub enum IsolatedMuxbusReconnectReason {
     /// channel instead of falling back to the safe (global/reconnect)
     /// state.
     ExplicitOptOut,
-    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
+    /// No override; `AGENTMUX_CHANNEL` is set, isn't `"stable"`, and
+    /// doesn't start with `"dev-"` — a randomized local-package channel.
     ChannelDefaultIsolated,
-    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"`, starts with
+    /// `"dev-"`, or is unset entirely.
     ChannelDefaultGlobal,
 }
 
@@ -831,7 +860,9 @@ pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
         Ok(v) if v == "1" => IsolatedMuxbusReconnectReason::ExplicitOptIn,
         Ok(_) => IsolatedMuxbusReconnectReason::ExplicitOptOut,
         Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
-            Ok(ch) if ch != "stable" => IsolatedMuxbusReconnectReason::ChannelDefaultIsolated,
+            Ok(ch) if ch != "stable" && !ch.starts_with("dev-") => {
+                IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+            }
             _ => IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
         },
     }
@@ -1727,6 +1758,42 @@ mod tests {
     }
 
     #[test]
+    fn isolated_muxbus_reconnect_reason_exempts_task_dev_channels() {
+        // reagentx P1 on PR #3248 (both rounds): a `dev-<branch>` channel
+        // (RuntimeMode::Dev's channel format) must NOT be isolated by
+        // default — it's stable/per-branch, not a randomized per-build
+        // local-package channel, so it never has the "never-before-seen
+        // app to Keychain every time" problem this flag targets, and
+        // isolating it anyway silently drops automatic MuxBus reconnect
+        // (and WAN notifications) for the entire `task dev` session.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        clear_channel_env();
+        let _guard = IsolatedMuxbusReconnectGuard;
+
+        for dev_channel in ["dev-main", "dev-some-branch", "dev-some-branch-a1b2c3d4"] {
+            std::env::set_var("AGENTMUX_CHANNEL", dev_channel);
+            assert_eq!(
+                isolated_muxbus_reconnect_reason(),
+                IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
+                "dev channel {dev_channel:?} must NOT be isolated by default"
+            );
+            assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+        }
+
+        // A local-package channel (no "dev-" prefix) is still isolated —
+        // the exemption is specific to "dev-", not "anything but stable".
+        std::env::set_var("AGENTMUX_CHANNEL", "local-main-abc123-9");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+        );
+        assert!(isolated_muxbus_reconnect_reason().is_isolated());
+
+        clear_channel_env();
+    }
+
+    #[test]
     fn isolated_muxbus_reconnect_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
         // Same fail-safe rule as isolated_auth_reason's/isolated_settings_reason's
         // equivalent tests (reagentx P2 on PR #2431) — a typo'd opt-out must
@@ -1760,7 +1827,16 @@ mod tests {
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
         std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
-        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        // NOT "dev-some-branch": muxbus reconnect deliberately exempts
+        // dev-* channels (see isolated_muxbus_reconnect_reason's doc
+        // comment) while auth/settings do not — a dev channel would make
+        // this independence test's own channel-default assertions below
+        // wrong for muxbus specifically, unrelated to what this test
+        // actually checks (that the three env-var overrides don't leak
+        // into each other). A local-package-shaped channel keeps all
+        // three flags isolated by their shared channel default, so the
+        // test only exercises the override independence it's named for.
+        std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
         let _guard_a = IsolatedAuthGuard;
         let _guard_s = IsolatedSettingsGuard;
         let _guard_m = IsolatedMuxbusReconnectGuard;

@@ -1106,10 +1106,18 @@ pub fn spawn_background_subsystems(
     // macOS, a bundle identifier derived from it) into the binary, so it
     // is a never-before-seen code signature to the Keychain every single
     // time — the SAME already-`Always Allow`'d muxbus credential prompts
-    // again on every fresh local build, indefinitely. Same channel-default
-    // isolation `isolated_auth_enabled`/`isolated_settings_enabled` already
-    // apply to Armory accounts/settings.json: skip on any non-`stable`
-    // channel by default, real installs and `task dev` unaffected.
+    // again on every fresh local build, indefinitely. Unlike
+    // `isolated_auth_enabled`/`isolated_settings_enabled` (which also
+    // isolate `task dev`'s `dev-<branch>` channel), this flag deliberately
+    // exempts `dev-*` — see its own doc comment for why a per-branch-stable
+    // dev channel doesn't have the per-build-random-identity problem this
+    // one exists to solve. Skipping this eager call is also NOT permanent
+    // for the process's lifetime on an isolated channel: `muxbus.login`
+    // lazily initializes the subscriber the moment the user explicitly
+    // logs in (see `muxbus_handlers.rs`), and `muxbus.status`/
+    // `inject_muxbus_env` gate on subscriber presence rather than
+    // re-deriving this same channel check, so they start working
+    // immediately after that login with no restart required.
     let muxbus_reason = agentmux_common::isolated_muxbus_reconnect_reason();
     if cloud_subscriber_disabled_from_env() {
         tracing::info!("cloud_subscriber: init_global skipped (AGENTMUX_DISABLE_CLOUD_SUBSCRIBER)");
