@@ -693,6 +693,7 @@ partial list.
 | [`SPEC_WARDEN_WIDGET_2026-05-25`](SPEC_WARDEN_WIDGET_2026-05-25.md) | Spec: Warden Widget |
 | [`SPEC_WAVE_TS_CLEANUP_2026_04_17`](SPEC_WAVE_TS_CLEANUP_2026_04_17.md) | SPEC: wave.ts Cleanup and Modularization |
 | [`SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_2026_06_24`](SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_2026_06_24.md) | SPEC: Widget Context Menu — "Open in New Window" + "Open in Floating Pane" |
+| [`SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_PHASE_2_2026_09_16`](SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_PHASE_2_2026_09_16.md) | SPEC: Widget Context Menu — Pinned-Bar Parity + "Open in New Tab" (Phase 2) |
 | [`SPEC_WIDGET_ICON_COLORS_2026-05-26`](SPEC_WIDGET_ICON_COLORS_2026-05-26.md) | SPEC: Top-bar widget icons — theme-driven, monochrome by default |
 | [`SPEC_WIDGET_LABEL_CASING_2026-05-27`](SPEC_WIDGET_LABEL_CASING_2026-05-27.md) | Widget & Pane Label Casing — Title-Case the User-Visible Names |
 | [`SPEC_WIDGET_OPEN_IN_NEW_WINDOW_2026_04_17`](SPEC_WIDGET_OPEN_IN_NEW_WINDOW_2026_04_17.md) | SPEC: Widget "Open in New Window" Context Menu |
