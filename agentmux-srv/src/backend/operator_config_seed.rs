@@ -345,6 +345,32 @@ mod tests {
         assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 1, "no new version on no-op");
     }
 
+    /// Codex P2, PR #3244: content being unchanged must not mean the
+    /// recorded generation stays stale — a newer manifest generation whose
+    /// text happens to match what's already stored (e.g. a revert to an
+    /// earlier generation's exact wording) still needs to record that a
+    /// newer generation has now confirmed this content, or a concurrently
+    /// running build on a generation in between could later pass the
+    /// generation check against the stale recorded value and downgrade it.
+    #[test]
+    fn unchanged_content_still_advances_the_recorded_generation() {
+        let store = test_store();
+        seed_one(&store, &entry("op-1", "Operator One", "the text"), 1).unwrap();
+
+        // Generation 3's manifest text happens to be identical to
+        // generation 1's (a revert).
+        let outcome = seed_one(&store, &entry("op-1", "Operator One", "the text"), 3).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::Unchanged), "content itself really is unchanged");
+        assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 2, "the generation bump must still be recorded as a version");
+
+        // A generation-2 build, with its own different text, must not be
+        // able to downgrade generation 3's already-confirmed content just
+        // because 2 > the ORIGINAL (now-stale) recorded generation of 1.
+        let outcome = seed_one(&store, &entry("op-1", "Operator One", "generation 2's own different text"), 2).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::SkippedOlderGeneration));
+        assert_eq!(store.bundle_get("op-1").unwrap().unwrap().instructions, "the text");
+    }
+
     #[test]
     fn changed_manifest_content_overwrites_when_seeder_owns_it() {
         let store = test_store();
@@ -477,6 +503,33 @@ mod tests {
 
         assert!(store.bundle_get("op-old").unwrap().is_none(), "seeder-owned, manifest-removed entry must be pruned");
         assert!(store.bundle_get("op-new").unwrap().is_some(), "entries still in the manifest are untouched");
+    }
+
+    /// ReAgent P1, PR #3244: the delete-side mirror of `unrecorded_edit_
+    /// from_an_unversioned_writer_is_never_overwritten` — a compatible-
+    /// schema OLDER build's unversioned write leaves `written_by` stale at
+    /// the seeder's identity in `db_bundle_versions`, even though the live
+    /// row is now a human's edit. Pruning must notice the live content
+    /// doesn't match what that stale version claims and refuse to delete —
+    /// deleting an unrecorded edit is strictly worse than overwriting one.
+    #[test]
+    fn prune_does_not_delete_an_unrecorded_edit_from_an_unversioned_writer() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "seeded content"), 1).unwrap();
+
+        // Simulate an older build's unversioned write path.
+        let mut edited = store.bundle_get("op-old").unwrap().unwrap();
+        edited.instructions = "edited by an older, unversioned build".to_string();
+        store.bundle_upsert_system(&edited).unwrap();
+
+        // This release's manifest no longer mentions "op-old" — an
+        // ordinary prune would otherwise delete it outright.
+        let manifest = SeedManifest { version: 2, entries: vec![] };
+        prune_entries_removed_from_manifest(&store, &manifest);
+
+        let bundle = store.bundle_get("op-old").unwrap();
+        assert!(bundle.is_some(), "an unrecorded edit must never be deleted");
+        assert_eq!(bundle.unwrap().instructions, "edited by an older, unversioned build");
     }
 
     /// The same "never clobber a local edit" guarantee applies to pruning:
