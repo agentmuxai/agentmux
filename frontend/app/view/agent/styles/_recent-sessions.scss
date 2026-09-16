@@ -104,30 +104,37 @@
 
     .agent-recent-sessions-row {
         margin: 0;
-        // Anchors .agent-recent-sessions-menu-toggle AND .agent-row-menu
-        // below (both absolutely positioned) — see their own comments.
+        // Anchors .agent-recent-sessions-menu-toggle, .agent-row-menu and
+        // .agent-fork-prompt below (all absolutely positioned) — see their
+        // own comments.
         position: relative;
         transition: filter 0.15s ease, opacity 0.15s ease;
     }
 
-    // Spotlight effect while a row's menu is open: every OTHER tile blurs
-    // and dims (and stops accepting clicks, so you can't accidentally act
-    // on a dimmed row while one menu is open). `.agent-recent-sessions-list`
-    // is a CSS GRID (see above) — an in-flow menu panel growing one tile's
-    // height would otherwise resize that whole grid row and visibly shove
-    // every tile sharing it downward, which is exactly what .agent-row-menu
-    // below being taken out of flow (position: absolute) avoids; this
+    // Spotlight effect while a row is EXPANDED — its actions menu, rename
+    // input, or duplicate/fork prompt showing. Every OTHER tile blurs and
+    // dims (and stops accepting clicks, so you can't act on a dimmed row
+    // by accident). `.agent-recent-sessions-list` is a CSS GRID (see
+    // above) — an in-flow panel growing one tile's height would resize
+    // that whole grid row and visibly shove every tile sharing it
+    // downward, which is what taking BOTH `.agent-row-menu` and
+    // `.agent-fork-prompt` out of flow (position: absolute) avoids; this
     // blur rule is the second half of the same request.
-    .agent-recent-sessions-list.has-open-row-menu .agent-recent-sessions-row:not(.has-open-menu) {
+    //
+    // Keyed on "expanded", not "menu open": Rename and Duplicate close the
+    // menu on their way to opening a panel, so keying on the menu dropped
+    // the row out of the spotlight at exactly that moment.
+    .agent-recent-sessions-list.has-expanded-row .agent-recent-sessions-row:not(.is-expanded) {
         filter: blur(2px);
         opacity: 0.55;
         pointer-events: none;
     }
 
-    // The open row itself stays sharp and rises above its now-blurred
-    // neighbors so .agent-row-menu (overlaid, not pushed into flow) never
-    // renders underneath an adjacent tile.
-    .agent-recent-sessions-row.has-open-menu {
+    // The expanded row stays sharp and rises above its now-blurred
+    // neighbours so its overlaid panel never renders underneath an
+    // adjacent tile — and so the panel keeps pointer events while those
+    // neighbours have them switched off.
+    .agent-recent-sessions-row.is-expanded {
         z-index: 5;
     }
 
@@ -387,15 +394,35 @@
         }
     }
 
-    // Fork prompt — inline block below the row button
+    // Rename / Duplicate / fork prompt — overlaid below the row button,
+    // NOT in flow. Same treatment as `.agent-row-menu` above and for the
+    // same two reasons: `.agent-recent-sessions-list` is a CSS grid, so an
+    // in-flow panel growing one tile's height shoves every tile sharing
+    // that grid row downward; and the panel floats over rows the spotlight
+    // has blurred, which needs an opaque backdrop rather than the
+    // deliberately-translucent app background tokens.
+    //
+    // This used to be in flow, which is why clicking Rename or Duplicate
+    // "reverted to the offset behavior" — the menu overlaid, then the panel
+    // it opened pushed instead.
     .agent-fork-prompt {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 1;
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
         padding: var(--space-2) 10px;
         border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
         border-top: none;
-        background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+        // Keeps the accent tint that distinguishes this from the actions
+        // menu, but mixed into an OPAQUE base (`--modal-bg-color`) instead
+        // of `transparent` — see `.agent-row-menu`'s own note on why the
+        // panel-/main-bg tokens are the wrong choice for a floating layer.
+        background: color-mix(in srgb, var(--accent-color) 6%, var(--modal-bg-color));
+        box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
     }
 
     .agent-fork-prompt-msg {
