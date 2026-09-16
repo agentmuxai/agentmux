@@ -49,7 +49,7 @@ Two properties of that contract cause the symptom:
 
 ### 2a. Editor — `giveFocus()` is a stub
 
-`frontend/app/view/editor/editor-model.ts:1237`:
+`frontend/app/view/editor/editor-model.ts:1210`:
 
 ```ts
 giveFocus(): boolean {
@@ -81,11 +81,28 @@ may not be populated yet, since the xterm instance is constructed during view
 mount. The call returns `false`, focus goes to the dummy input, and nothing ever
 tries again. Same visible symptom, different cause: **a race, not a stub.**
 
-### 2c. For reference
+### 2c. It is worse than editor+terminal — the agent pane is a stub too
 
-`agent-model.ts:930` and `browser-model.ts:711` both implement `giveFocus()`, so
-the contract itself works — which is why this reads as an editor/terminal
-problem rather than a focus-system problem.
+An earlier revision of this spec claimed `agent-model.ts:930` and
+`browser-model.ts:711` both implement `giveFocus()`, and used that to argue the
+contract itself was sound. **That was wrong** (reagent P1), and the correction
+matters because it changes the diagnosis rather than just a detail:
+
+| View | `giveFocus()` | Status |
+|---|---|---|
+| Editor (`editor-model.ts:1210`) | `return false` | **stub** |
+| Agent (`agent-model.ts:930`) | `return false` | **stub — identical** |
+| Terminal (`termViewModel.ts:504`) | focuses xterm when it exists | implemented, **races mount** |
+| Browser (`browser-model.ts:711`) | real implementation, with guards | works |
+
+So **three of four pane types do not reliably take the caret**, and two are
+outright stubs. Only the browser pane genuinely implements the contract.
+
+That makes the shared-layer fix (§3 Option B) the clear choice rather than a
+judgement call: patching per-view would mean writing the same readiness logic
+three times, and the next view added would default to the same silent failure.
+It also means the acceptance criteria in §7 should cover the agent pane, even
+though the original request named only editor and terminal.
 
 ## 3. Design options
 
@@ -128,9 +145,12 @@ correct, so it can land immediately while B is agreed.
 - **In:** editor panes, terminal panes, on pane *creation*.
 - **Probably in:** focusing an existing pane (tab switch, `openOrFocusPaneByView`)
   — same call sites, same fix; needs an explicit decision, see Q2.
-- **Out:** agent and browser panes (already implement `giveFocus()`); changing
-  which pane is *selected* on creation — selection already works, this is only
-  about where the caret goes.
+- **Also affected, per §2c:** the agent pane's `giveFocus()` is the same stub as
+  the editor's. Not in the original request, but it falls out of the shared fix
+  for free and should not be left as the one stub still standing.
+- **Out:** the browser pane (genuinely implements the contract); changing which
+  pane is *selected* on creation — selection already works, this is only about
+  where the caret goes.
 
 ## 5. Constraints — when NOT to take focus
 
