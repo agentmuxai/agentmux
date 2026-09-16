@@ -38,7 +38,7 @@ export function TerminalSection(): JSX.Element {
                         class="setting-text"
                         type="text"
                         value={(s()["term:fontfamily"] as string) ?? ""}
-                        placeholder="JetBrains Mono, monospace"
+                        placeholder="Hack, Consolas, monospace"
                         onBlur={(e) => set("term:fontfamily", e.currentTarget.value)}
                     />
                 }

@@ -336,7 +336,7 @@
     --leading-loose:  1.65;
 
     --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --font-mono: "Hack", "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    --font-mono: "Hack", Consolas, Menlo, monospace;
 
     // Composite text roles (use when a component just wants "body text"
     // without picking a specific size/weight/leading combo).
