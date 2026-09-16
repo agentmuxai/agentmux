@@ -1010,6 +1010,10 @@ impl Controller for ShellController {
         let tab_id_wait = self.tab_id.clone();
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
+        // For the flusher-drain skip decision below (see
+        // `should_skip_flusher_drain`) — a drawer shell is a sub-block, and
+        // its consumer discards it on a clean exit.
+        let is_sub_block_wait = is_sub_block;
         // For the agent-lease release below: clearing the `term:agentlockuntil`
         // meta copy (not just the in-memory registry) needs both, since that
         // is what the frontend's own gate reads.
@@ -1098,18 +1102,16 @@ impl Controller for ShellController {
             // persisting and broadcasting whatever the descendant produces
             // next, and exit naturally once the PTY genuinely reaches EOF.
             //
-            // Skipped entirely when this pane is about to close on exit
-            // (§13): the whole point of the wait is to order trailing
-            // output BEFORE clients observe `STATUS_DONE`, and there is no
-            // client left to order it for once the block is deleted a
-            // moment later. On Windows this wait is reached at its full
-            // ceiling on every ordinary exit (§12), so skipping it here is
-            // the difference between a pane that closes the instant its
+            // Skipped entirely when nothing will be left to read the
+            // trailing output — see `should_skip_flusher_drain` for which
+            // cases those are and why. On Windows this wait is reached at
+            // its full ceiling on every ordinary exit (§12), so the skip is
+            // the difference between a surface that reacts the instant its
             // shell exits and one that visibly lingers a second first.
             // The flusher is detached either way — exactly as it would be
             // on timeout — so nothing it produces later is lost any more
             // than it already would be.
-            if close_on_exit {
+            if should_skip_flusher_drain(close_on_exit, is_sub_block_wait, exit_code) {
                 drop(flusher_handle);
             } else {
                 match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
@@ -1713,6 +1715,47 @@ mod agent_id_for_jekt_tests {
     }
 }
 
+/// Should the wait/cleanup task skip its bounded wait for the output flusher
+/// to drain before publishing `STATUS_DONE`?
+///
+/// The wait exists to order trailing output BEFORE clients observe
+/// `STATUS_DONE`. It is worth paying only when some client will still be
+/// there to read that output — and on Windows it is not a cheap wait: ConPTY's
+/// console host outlives the direct child, so the read loop never sees EOF and
+/// this hits its full `FLUSHER_DRAIN_TIMEOUT` ceiling on essentially every
+/// ordinary exit (see that constant's own doc comment, and §12 of
+/// SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md). That is a full second of dead
+/// UI between the human pressing Enter on `exit` and anything happening.
+///
+/// Two cases have no reader left, and each is skipped for the same reason:
+///
+/// - **`close_on_exit`** — the pane is deleted moments later (§13). The
+///   original skip.
+/// - **A sub-block that exited CLEANLY** — the agent pane's shell drawer.
+///   Its only consumer collapses and deletes the sub-block on a clean exit
+///   (`AgentShellSubblock.tsx` → `shell-exit-collapse.ts`,
+///   SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md), so ordering
+///   trailing output before a `STATUS_DONE` nobody will render buys nothing
+///   and costs the same visible second.
+///
+/// A sub-block that exited NON-ZERO is deliberately NOT skipped: the drawer
+/// stays open on a crash precisely so the human can read what went wrong
+/// (§5 of that spec), so there IS a reader and the ordering still matters.
+/// That is also why this keys on the exit code rather than on "is a
+/// sub-block" alone — the two halves of the drawer's own exit policy have to
+/// agree, and a blanket sub-block skip would silently disagree with it.
+///
+/// Skipping never loses output: the flusher is detached either way (exactly
+/// as it is on timeout) and keeps persisting and broadcasting whatever
+/// arrives later.
+pub(super) fn should_skip_flusher_drain(
+    close_on_exit: bool,
+    is_sub_block: bool,
+    exit_code: i32,
+) -> bool {
+    close_on_exit || (is_sub_block && exit_code == 0)
+}
+
 /// Release `block_id`'s PtyShell agent lease — both copies — but ONLY if
 /// `inner` still identifies the controller currently registered for that
 /// block. Returns whether it released.
@@ -1755,6 +1798,52 @@ pub(super) fn release_lease_if_current(
     }
     super::super::agent_lock::release_and_clear_meta(block_id, wstore, event_bus);
     true
+}
+
+#[cfg(test)]
+mod flusher_drain_skip_tests {
+    use super::should_skip_flusher_drain;
+
+    /// The original §13 skip: the pane is deleted moments later, so there is
+    /// no client left to order trailing output for.
+    #[test]
+    fn a_pane_closing_on_exit_skips_regardless_of_exit_code() {
+        assert!(should_skip_flusher_drain(true, false, 0));
+        assert!(should_skip_flusher_drain(true, false, 1));
+        assert!(should_skip_flusher_drain(true, true, 137));
+    }
+
+    /// The agent pane's shell drawer. Its consumer collapses and DELETES the
+    /// sub-block on a clean exit, so the wait would order output before a
+    /// `STATUS_DONE` nobody renders — at the cost of a visible second on
+    /// Windows, where this wait always runs to its full ceiling.
+    #[test]
+    fn a_cleanly_exited_sub_block_skips() {
+        assert!(should_skip_flusher_drain(false, true, 0));
+    }
+
+    /// The crash case, and the reason this keys on the exit code rather than
+    /// on "is a sub-block" alone: the drawer deliberately STAYS OPEN on a
+    /// non-zero exit so the human can read what went wrong
+    /// (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md §5). There
+    /// is a reader, so the ordering still has to be paid for.
+    #[test]
+    fn a_sub_block_that_crashed_still_waits() {
+        assert!(!should_skip_flusher_drain(false, true, 1));
+        assert!(!should_skip_flusher_drain(false, true, 137));
+        // -1 is this file's "wait() itself errored" sentinel — unknown, not
+        // clean, so it must not be treated as discardable either.
+        assert!(!should_skip_flusher_drain(false, true, -1));
+    }
+
+    /// A top-level pane that does NOT close on exit — a `cmd` controller
+    /// showing its output and exit code after finishing. The human reads that
+    /// pane; nothing is discarded. Unchanged behaviour.
+    #[test]
+    fn a_top_level_pane_that_stays_open_still_waits() {
+        assert!(!should_skip_flusher_drain(false, false, 0));
+        assert!(!should_skip_flusher_drain(false, false, 1));
+    }
 }
 
 #[cfg(test)]
