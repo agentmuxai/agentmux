@@ -714,8 +714,7 @@ async fn handle_incoming_text(
                         if !data64.is_empty() {
                             match base64::engine::general_purpose::STANDARD.decode(data64) {
                                 Ok(data) => {
-                                    let input = blockcontroller::BlockInputUnion::data(data);
-                                    if let Err(e) = blockcontroller::send_input(block_id, input, None) {
+                                    if let Err(e) = dispatch_blockinput(block_id, data) {
                                         tracing::debug!("ws: blockinput error: {}", e);
                                     }
                                 }
@@ -1048,8 +1047,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // (#1782). This handler carries the Stop button's SIGINT and
     // `usePtyWidth`'s debounced resizes (which burst while a pane is being
     // dragged); it is NOT the keystroke path — those go through the
-    // `blockinput` arm below, which has no lease check at all (see
-    // `agent_lock`'s "Known gap" note). See also
+    // `blockinput` arm below, which has the same lock check via
+    // `dispatch_blockinput` (closed 2026-09-16, previously `agent_lock`'s
+    // documented "Known gap" — see its module doc history). See also
     // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md.
     engine.register_handler(
         COMMAND_CONTROLLER_INPUT,
@@ -1785,6 +1785,29 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
 
 /// Parse a CommandBlockInputData into a BlockInputUnion.
+/// Route a decoded `blockinput` payload — the actual human-keystroke path
+/// (`termViewModel.ts`'s `blockinput` WS command, used by both the
+/// standalone Terminal widget and an agent pane's composer-drawer shell) —
+/// to its block's controller.
+///
+/// Mirrors `controllerinput`'s own lock check above: drops the input
+/// outright while `block_id` is under an active PtyShell agent lease,
+/// rather than forwarding it. This was `agent_lock`'s documented "Known
+/// gap" — `blockinput`, not `controllerinput`, is where a human's real
+/// keystrokes actually travel, and until now nothing server-side stopped
+/// one from interleaving with an agent's own `PtyShellInput` write into the
+/// same PTY. The frontend's `agentLocked()` gate is still the primary UX
+/// layer (stops it before it's even sent), but it is eventually consistent;
+/// this is the synchronous backstop against this handler's own state.
+fn dispatch_blockinput(block_id: &str, data: Vec<u8>) -> Result<(), String> {
+    if blockcontroller::agent_lock::is_locked(block_id) {
+        tracing::debug!(block_id = %block_id, "blockinput: dropped — agent lock active");
+        return Ok(());
+    }
+    let input = blockcontroller::BlockInputUnion::data(data);
+    blockcontroller::send_input(block_id, input, None)
+}
+
 fn parse_block_input(
     cmd: &CommandBlockInputData,
 ) -> Result<blockcontroller::BlockInputUnion, String> {
@@ -1912,6 +1935,48 @@ mod tests {
         );
 
         blockcontroller::agent_lock::release("ci-locked-shell");
+    }
+
+    /// Regression test for the gap `agent_lock`'s own module doc calls out
+    /// by name ("Known gap this does NOT close"): unlike `controllerinput`
+    /// above (Stop/SIGINT/resize), `blockinput` is the ACTUAL human-keystroke
+    /// path (`termViewModel.ts`, both the standalone Terminal widget and an
+    /// agent pane's composer-drawer shell) and had no lease check at all —
+    /// the frontend's own `agentLocked()` gate was the only thing standing
+    /// between a human keystroke and an agent's own `PtyShellInput` write
+    /// landing in the same PTY, and that gate is eventually consistent (it
+    /// reacts to a WS-pushed meta value), not synchronous with this
+    /// handler's own state. A keystroke slipping through that window
+    /// interleaves at the byte level with whatever the agent is mid-write
+    /// to — vim's cursor-addressed alternate-screen redraw does not degrade
+    /// gracefully under that; it renders as a visibly garbled pane, not a
+    /// hang. This is exactly what corrupted a live pane during a vim
+    /// investigation on 2026-09-16.
+    ///
+    /// Same "no controller registered" trick as the `controllerinput` test
+    /// above: a LOCKED call must short-circuit before ever reaching
+    /// `blockcontroller::send_input`, returning `Ok(())` with no error even
+    /// though no controller exists for this block id. An UNLOCKED call DOES
+    /// reach `send_input` and gets back a real `"no controller for block"`
+    /// error — proving the call path is live, not merely never exercised.
+    #[test]
+    fn blockinput_is_dropped_while_an_agent_lock_is_active() {
+        let locked_id = "ws-blockinput-lock-test-locked";
+        blockcontroller::agent_lock::lock_until(locked_id, agentmux_common::time::now_ms() + 60_000);
+        let result = dispatch_blockinput(locked_id, b"y".to_vec());
+        assert!(
+            result.is_ok(),
+            "a locked blockinput call must be dropped cleanly, not forwarded to send_input: {result:?}"
+        );
+        blockcontroller::agent_lock::release(locked_id);
+
+        let unlocked_id = "ws-blockinput-lock-test-unlocked";
+        let result = dispatch_blockinput(unlocked_id, b"y".to_vec());
+        assert_eq!(
+            result,
+            Err(format!("no controller for block {unlocked_id}")),
+            "an unlocked blockinput call must still reach send_input for real"
+        );
     }
 
     /// The lease must stop dropping input the moment it lapses, with nobody
