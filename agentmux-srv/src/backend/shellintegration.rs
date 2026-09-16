@@ -35,6 +35,12 @@ const MUXOPEN_JS: &str = include_str!("shellintegration/muxopen.mjs");
 /// SPEC_MUXSH_CLI_2026_09_16.md). Deployed beside its three siblings; shell
 /// `muxsh` functions delegate here.
 const MUXSH_JS: &str = include_str!("shellintegration/muxsh.mjs");
+/// Shared auth-env-read + authenticated-fetch plumbing every core above
+/// (except muxlog, which does no REST calls) imports via a relative
+/// `./lib/muxclient.mjs` — so it must be deployed at `<shell>/lib/`, not
+/// flat beside its callers. See
+/// docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §2.8.
+const MUXCLIENT_JS: &str = include_str!("shellintegration/lib/muxclient.mjs");
 
 /// Deployment marker: `<package version>-<content hash>`, NOT the bare
 /// package version alone (codex P2 on PR #2380). Local/dev builds routinely
@@ -64,6 +70,7 @@ fn version_marker() -> String {
     // comment already warns about.
     MUXOPEN_JS.hash(&mut hasher);
     MUXSH_JS.hash(&mut hasher);
+    MUXCLIENT_JS.hash(&mut hasher);
     format!("{}-{:x}", env!("CARGO_PKG_VERSION"), hasher.finish())
 }
 
@@ -160,6 +167,20 @@ pub fn deploy_scripts(wave_data_dir: &Path) {
     if let Err(e) = std::fs::write(&muxsh_path, MUXSH_JS) {
         tracing::warn!("shell integration: failed to write {}: {}", muxsh_path.display(), e);
         all_ok = false;
+    }
+    // muxclient.mjs is imported via a relative `./lib/muxclient.mjs` from
+    // muxspect/muxopen/muxsh, so it must land in its own lib/ subdirectory,
+    // not flat beside them.
+    let lib_dir = shell_base.join("lib");
+    if let Err(e) = std::fs::create_dir_all(&lib_dir) {
+        tracing::warn!("shell integration: failed to create {}: {}", lib_dir.display(), e);
+        all_ok = false;
+    } else {
+        let muxclient_path = lib_dir.join("muxclient.mjs");
+        if let Err(e) = std::fs::write(&muxclient_path, MUXCLIENT_JS) {
+            tracing::warn!("shell integration: failed to write {}: {}", muxclient_path.display(), e);
+            all_ok = false;
+        }
     }
 
     // Write version marker only if all scripts deployed successfully
@@ -316,12 +337,18 @@ mod tests {
         let muxspect = shell_base.join("muxspect.mjs");
         let muxopen = shell_base.join("muxopen.mjs");
         let muxsh = shell_base.join("muxsh.mjs");
+        let muxclient = shell_base.join("lib").join("muxclient.mjs");
         assert!(muxlog.exists(), "muxlog.mjs should be deployed");
         assert!(muxspect.exists(), "muxspect.mjs should be deployed alongside it");
         assert!(muxopen.exists(), "muxopen.mjs should be deployed alongside them");
         assert!(muxsh.exists(), "muxsh.mjs should be deployed alongside them");
+        assert!(
+            muxclient.exists(),
+            "lib/muxclient.mjs should be deployed — muxspect/muxopen/muxsh import it via a relative path"
+        );
         assert_eq!(std::fs::read_to_string(&muxspect).unwrap(), MUXSPECT_JS);
         assert_eq!(std::fs::read_to_string(&muxsh).unwrap(), MUXSH_JS);
+        assert_eq!(std::fs::read_to_string(&muxclient).unwrap(), MUXCLIENT_JS);
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

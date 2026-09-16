@@ -1,0 +1,33 @@
+{
+  "$schema": "informal — see docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §2.8",
+  "description": "Source of truth for Agent App API routes that a muxsh-family Node CLI binds to. Checked, on the Rust side, against the real rpc_types struct's serde field names (agentmux-srv/src/backend/rpc_types/block.rs's CommandPaneOpenData/PaneOpenResult, test in that same file), and, on the Node side, against what each muxsh subcommand's buildRequestBody() actually emits (muxsh.contract.test.mjs). A route entry here is a claim: 'this is the real, current field set' — both tests fail if either side drifts from it.",
+  "routes": {
+    "pane.open": {
+      "method": "POST",
+      "path": "/api/v1/pane/open",
+      "rustRequestStruct": "agentmux_srv::backend::rpc_types::block::CommandPaneOpenData",
+      "rustResponseStruct": "agentmux_srv::backend::rpc_types::block::PaneOpenResult",
+      "requestFields": [
+        "view",
+        "file",
+        "url",
+        "cwd",
+        "title",
+        "tab_id",
+        "split_direction",
+        "split_reference_block_id",
+        "focus",
+        "tree_expanded",
+        "floating",
+        "meta",
+        "skip_placement",
+        "reuse_editor_pane"
+      ],
+      "responseFields": ["block_id", "tab_id", "view", "created"],
+      "usedBy": [
+        "muxsh open (view=editor)",
+        "muxsh web (view=browser)"
+      ]
+    }
+  }
+}

@@ -30,6 +30,8 @@
 
 import { pathToFileURL } from "node:url";
 
+import { agentmuxFetch, readAgentmuxEnv } from "./lib/muxclient.mjs";
+
 const HELP = `muxsh — open editor/browser panes from the terminal (no GUI required)
 
 usage:
@@ -180,8 +182,7 @@ async function main() {
     }
     if (parsed.error) fail(`${parsed.error}\n\n${HELP}`);
 
-    const url = process.env.AGENTMUX_LOCAL_URL;
-    const authKey = process.env.AGENTMUX_AUTH_KEY;
+    const { url, authKey } = readAgentmuxEnv();
     if (!url || !authKey) {
         fail(
             "AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY not set — run from a pane " +
@@ -189,12 +190,11 @@ async function main() {
         );
     }
 
-    let resp;
+    let result;
     try {
-        resp = await fetch(`${url.replace(/\/$/, "")}/api/v1/pane/open`, {
+        result = await agentmuxFetch(url, authKey, "/api/v1/pane/open", {
             method: "POST",
-            headers: { "X-AuthKey": authKey, "Content-Type": "application/json" },
-            body: JSON.stringify(buildRequestBody(parsed, process.env)),
+            body: buildRequestBody(parsed, process.env),
         });
     } catch (e) {
         fail(`cannot reach ${url}: ${e.message ?? e}`, 2);
@@ -202,16 +202,16 @@ async function main() {
 
     let body;
     try {
-        body = await resp.json();
+        body = await result.resp.json();
     } catch {
         body = {};
     }
 
-    if (!resp.ok) {
-        const hint = resp.status === 404
+    if (!result.ok) {
+        const hint = result.status === 404
             ? " (HTTP 404 — this AgentMux instance may predate /api/v1/pane/open)"
             : "";
-        fail(`${body.error ?? `HTTP ${resp.status}`}${hint}`, 2);
+        fail(`${body.error ?? `HTTP ${result.status}`}${hint}`, 2);
     }
 
     console.log(renderResult(body));
