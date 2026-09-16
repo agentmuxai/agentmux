@@ -370,6 +370,21 @@
     --font-sans-size: 14px;
     --font-mono-size: 12px;
 
+    // Agent-pane body size. Deliberately 15px and NOT --font-mono-size:
+    // SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md sets a larger
+    // readability default for agent-pane text than the app's general 12px
+    // mono size, and `.agent-view` is the root container every agent pane
+    // inherits from.
+    //
+    // This previously reached the same 15px through `var(--termfontsize, 15px)`
+    // — a variable that was never defined, so the fallback was always what
+    // applied. Collapsing it onto --font-mono-size during the PR #3252
+    // consolidation silently shrank every agent pane by 20% (reagent P1 /
+    // codex P1). Unlike the font-FAMILY fallbacks, which genuinely disagreed
+    // across call sites, both size call sites already agreed on 15px — there
+    // was no inconsistency to fix, only a name to give it.
+    --font-agent-size: 15px;
+
     // Composite text roles (use when a component just wants "body text"
     // without picking a specific size/weight/leading combo).
     --text-body:    var(--font-weight-normal) var(--text-md)   / var(--leading-normal) var(--font-sans);
