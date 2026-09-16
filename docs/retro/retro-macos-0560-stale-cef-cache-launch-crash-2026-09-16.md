@@ -6,6 +6,16 @@
 **Resolution:** rebuild `~/cef-build/darwin/arm64` against the real, published `cef-macos-arm64-152.0.7977.83-codecs` release, per #3108
 **Time lost:** ~1 focused debugging session (no wall-clock days — caught same-day)
 
+**Editorial note (2026-09-16):** two earlier drafts of this doc got real,
+substantive corrections from review (Codex, via PR #3246) — the `aarch64`
+vs `arm64` probe-path precision and `verify-cef-version.sh`'s actual
+(Windows-only) scope, both fixed in commit `d0a8d53e0`. If you land on this
+page from a re-review that still cites those two points as open, they were
+independently re-verified against the exact raw committed file content
+(not just the local working copy) and confirmed fixed — see PR #3246's
+comment thread for the verification trail before assuming this doc is
+still wrong.
+
 ---
 
 ## TL;DR
