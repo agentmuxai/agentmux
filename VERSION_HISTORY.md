@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.56.3 — 2026-09-16
+
+- feat(widgets): right-click a widget now offers Open in New Window / Floating Pane / New Tab everywhere, including the pinned bar
+- feat(agent-picker): rubbery poof + reflow animation on My Agents row delete
+- feat(shell): muxsh view/edit/pane-list/run/config/agent — the rest of the Phase 2b collection
+- fix(agent-pane): pin auth/Compact sides in the composer strip so they stop swapping across the row-count boundary
+
 ## 0.56.2 — 2026-09-16
 
 - fix(term): take the per-keystroke SQLite read off the input path; release a shell's agent lease when it exits
