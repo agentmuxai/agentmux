@@ -498,7 +498,17 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
     const isMenuOpen = (definitionId: string): boolean => openMenuId() === definitionId;
     const toggleMenu = (definitionId: string): void => {
-        setOpenMenuId((prev) => (prev === definitionId ? null : definitionId));
+        setOpenMenuId((prev) => {
+            if (prev === definitionId) return null;
+            // The menu and the inline panels all render at `top: 100%` of
+            // the same row, so two open at once would overlap. They are
+            // alternatives — reopening the chevron drops a half-typed
+            // rename/duplicate name, which is the predictable reading of
+            // "go back to the menu".
+            setRenameState(definitionId, null);
+            setForkState(definitionId, { kind: "idle" });
+            return definitionId;
+        });
     };
     const closeMenu = (definitionId: string): void => {
         setOpenMenuId((prev) => (prev === definitionId ? null : prev));
@@ -592,6 +602,32 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             });
         }
     };
+
+    /**
+     * A row is "expanded" while ANY of its inline panels is showing — the
+     * actions menu, the rename input, or the fork/duplicate prompt.
+     *
+     * The spotlight (blur every other row) and the overlay positioning are
+     * keyed to this rather than to the menu alone. Keying them to the menu
+     * meant clicking Rename or Duplicate — which closes the menu on its way
+     * to opening a panel — dropped the row out of the effect, so the
+     * neighbours un-blurred and the panel went back to pushing them down.
+     *
+     * A plain accessor, not a `createMemo`: a memo evaluates eagerly at
+     * creation, and `renameStates` is declared below this point, so it
+     * would be read inside its own temporal dead zone.
+     */
+    const isRowExpanded = (definitionId: string): boolean =>
+        isMenuOpen(definitionId) ||
+        getRenameState(definitionId) !== null ||
+        getForkState(definitionId).kind !== "idle";
+    const anyRowExpanded = (): boolean =>
+        openMenuId() !== null ||
+        renameStates().size > 0 ||
+        // `setForkState(id, {kind: "idle"})` leaves the entry in place
+        // rather than deleting it, so size alone would stay true forever
+        // after the first fork prompt was cancelled.
+        [...forkStates().values()].some((s) => s.kind !== "idle");
 
     // View History — delegates to the parent; see onViewHistory's own doc
     // comment on MyAgentsListProps for why this can't be self-contained.
@@ -797,7 +833,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     </Show>
                 }
             >
-                <ul class="agent-recent-sessions-list" classList={{ "has-open-row-menu": openMenuId() !== null }}>
+                <ul class="agent-recent-sessions-list" classList={{ "has-expanded-row": anyRowExpanded() }}>
                     <For each={sortedRows()}>
                         {(row) => {
                             const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
@@ -806,7 +842,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                             return (
                                 <li
                                     class="agent-recent-sessions-row"
-                                    classList={{ "has-open-menu": isMenuOpen(row.definition_id) }}
+                                    classList={{ "is-expanded": isRowExpanded(row.definition_id) }}
                                 >
                                     <button
                                         type="button"
