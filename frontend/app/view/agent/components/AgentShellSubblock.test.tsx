@@ -26,21 +26,35 @@ import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockDataSignals, seedData, wpsHandlers } = vi.hoisted(() => {
+const { blockDataSignals, seedData, wpsHandlers, wpsPersisted } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
     const wpsHandlers = new Map<string, Array<(event: any) => void>>();
-    return { blockDataSignals, seedData, wpsHandlers };
+    const wpsPersisted = new Map<string, Record<string, unknown>>();
+    return { blockDataSignals, seedData, wpsHandlers, wpsPersisted };
 });
 
 // Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
 // scope and prove the component isn't listening to everything. Honours
 // unsubscribe, so the "stops listening on unmount" behaviour is observable
 // rather than assumed.
+//
+// Crucially it also models `persist: 1` REPLAY: `controllerstatus` is
+// published persisted specifically so a new subscriber is handed the current
+// status synchronously as part of subscribing (wps.ts's `replay_to_route`).
+// The first version of this mock only delivered events a test emitted AFTER
+// mount, which made the replay path — where ReAgent found a P0 — structurally
+// invisible to all 12 tests. `queuePersistedStatus` puts an event in that
+// replay slot instead.
 vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
         const key = `${opts.eventType}|${opts.scope}`;
         wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
+        const persisted = wpsPersisted.get(key);
+        if (persisted !== undefined) {
+            // Synchronously, inside subscribe — exactly how the broker does it.
+            opts.handler({ data: persisted });
+        }
         return () => {
             wpsHandlers.set(key, (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler));
         };
@@ -149,6 +163,12 @@ function resolveSeedFetch(oref: string) {
     set({ value: meta ? { meta } : null, loading: false });
 }
 
+/** The status the broker will replay synchronously to the NEXT subscriber for
+ *  `blockId` — the `persist: 1` behaviour, not a post-mount emission. */
+function queuePersistedStatus(blockId: string, data: Record<string, unknown>) {
+    wpsPersisted.set(`controllerstatus|block:${blockId}`, data);
+}
+
 /** Emit a `controllerstatus` event to whoever subscribed for `blockId`. */
 function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
     for (const handler of wpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
@@ -160,6 +180,7 @@ beforeEach(() => {
     blockDataSignals.clear();
     seedData.clear();
     wpsHandlers.clear();
+    wpsPersisted.clear();
     termWrapInstances.length = 0;
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
@@ -441,6 +462,9 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
     async function mountAttached(subBlockId: string, onShellExited = vi.fn()) {
         const oref = `block:${subBlockId}`;
         queueSeedMeta(oref, {});
+        // A live shell's own current status, replayed on subscribe — the
+        // ordinary state of affairs for a drawer open onto a running shell.
+        queuePersistedStatus(subBlockId, { shellprocstatus: "running" });
         render(() => (
             <AgentShellSubblock
                 parentBlockId="parent-1"
@@ -518,5 +542,77 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
         cleanup();
         emitControllerStatus("unmounting-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
         expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /**
+     * ReAgent P0 on PR #3253, and the reason this file's wps mock now models
+     * replay at all.
+     *
+     * An agent drives the shared drawer shell (a first-class case, spec §3.3)
+     * and it exits cleanly while the drawer is CLOSED. Nothing is mounted, so
+     * nothing collapses and `term:shellsubblockid` still points at the dead
+     * block. The human then opens the drawer *to read what the agent did* —
+     * and the broker replays that persisted `done` synchronously as part of
+     * this component's very first subscribe.
+     *
+     * Acting on it would collapse the drawer they just opened AND delete the
+     * sub-block, taking its persisted `term` file with it: the output isn't
+     * hidden behind a collapsed drawer (reopenable), it is destroyed. Strictly
+     * worse than the bug this feature fixes.
+     */
+    it("ignores an exit REPLAYED at subscribe time — the shell was already gone before this mount", async () => {
+        const onShellExited = vi.fn();
+        const subBlockId = "already-exited-shell";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        queuePersistedStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+                onShellExited={onShellExited}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /** The live case must still work when the replay is the shell's RUNNING
+     *  status — i.e. a drawer opened onto a healthy shell, which then exits.
+     *  Without this, "ignore replays" could be implemented as "ignore the
+     *  first event", which would break the ordinary path. */
+    it("still collapses when a replayed running status is followed by a live exit", async () => {
+        const { onShellExited } = await mountAttached("live-then-exits");
+        emitControllerStatus("live-then-exits", { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /** A shell that starts up and exits entirely within this mount: both
+     *  statuses arrive live, no replay involved. */
+    it("collapses on an exit that follows a live running status", async () => {
+        const onShellExited = vi.fn();
+        const subBlockId = "starts-then-exits";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+                onShellExited={onShellExited}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        emitControllerStatus(subBlockId, { shellprocstatus: "running" });
+        emitControllerStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
     });
 });

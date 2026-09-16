@@ -1178,15 +1178,20 @@ const AgentPresentationView = ({
     const handleShellExited = () => {
         const exitedId = shellSubBlockIdRef;
         shellSubBlockIdRef = undefined;
-        collapseDrawerOnShellExit({
+        void collapseDrawerOnShellExit({
             parentBlockId: model.blockId,
             exitedSubBlockId: exitedId,
             clearTermWrite: () => setTermWrite(null),
             collapseDrawer: () => paneModel.dispatchPane({ type: "DetailsCollapse" }, "system"),
             setMeta: (args) =>
-                void RpcApi.SetMetaCommand(TabRpcClient, { oref: args.oref, meta: args.meta as any }),
-            deleteSubBlock: (args) => void RpcApi.DeleteSubBlockCommand(TabRpcClient, args),
+                RpcApi.SetMetaCommand(TabRpcClient, { oref: args.oref, meta: args.meta as any }),
+            deleteSubBlock: (args) => RpcApi.DeleteSubBlockCommand(TabRpcClient, args),
             makeORef: WOS.makeORef,
+        }).catch((err) => {
+            // Best-effort teardown: the drawer has already collapsed (that
+            // part is synchronous, above), so a failed RPC costs a leaked
+            // sub-block, not a stuck UI.
+            console.warn("[agent-view] shell-exit teardown failed:", err);
         });
     };
 

@@ -7,9 +7,10 @@
 `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` (close-on-exit for
 top-level panes, and §11's deliberate exclusion of sub-blocks — read that
 before implementing this),
-`docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md` (the drawer shell
-itself),
-`docs/specs/SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md` (where it renders),
+`docs/specs/SPEC_AGENT_SHELL_BELOW_COMPOSER_2026_08_08.md` (where the drawer
+shell renders),
+`docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md` (its mount
+sequence — the zoom seed the exit subscription now sits alongside),
 `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell
 attach/reuse and the agent lease that shares this same shell).
 
@@ -202,11 +203,58 @@ sub-block exclusion intact.
   delegates.
 
 **Tests, each falsified** (break the source, confirm the specific test
-fails, restore): seven in `AgentShellSubblock.test.tsx` covering clean exit,
-omitted exit code, non-zero exit, `running` status, a different block's
-event, repeated publishes, and unsubscribe-on-unmount; five in
-`shell-exit-collapse.test.ts` asserting the three effects separately plus
-the no-sub-block-id case.
+fails, restore): ten in `AgentShellSubblock.test.tsx`, six in
+`shell-exit-collapse.test.ts`.
 
 **Not verified on a running build.** The whole path is unit-tested but has
 never been exercised against a real PTY in a real drawer.
+
+## 7. Three things review caught that §3's design did not
+
+All three were live in the first pushed revision. Recording them because
+each is a property of *this subsystem*, not a slip peculiar to this PR.
+
+**7.1 (P0) A replayed exit is not an exit.** `controllerstatus` is published
+with `persist: 1` specifically so a new subscriber is handed the CURRENT
+status synchronously as part of subscribing (`blockcontroller/mod.rs`,
+`wps.rs`'s `replay_to_route`). §3.1 hand-waved this as "handle both" and the
+implementation did not. The failure it produced was worse than the bug this
+spec exists to fix: an agent's shell exits while the drawer is closed (§3.3's
+supported case), the human opens the drawer *to read what the agent did*, the
+broker replays that old `done` at subscribe time, and the drawer collapses
+and deletes the sub-block — destroying its persisted `term` file. Not hidden
+behind a collapsed drawer; gone.
+
+Fixed by requiring the shell to have been observed ALIVE first: a live exit
+is always preceded by the `running` status the shell published while running
+(itself replayed, for a shell that is running). No `running` seen ⇒ the shell
+was already over before this mount ⇒ not ours to collapse; the attach path
+handles it (7.2).
+
+**None of the original twelve tests could have caught this**, because the
+`waveEventSubscribe` mock only delivered events a test emitted after mount —
+the replay slot didn't exist in the harness, so the entire code path was
+structurally invisible. The mock now delivers a queued status synchronously
+inside `subscribe`, like the broker.
+
+**7.2 (P2) Reattaching to an exited shell used to silently revive it.** The
+drawer's attach path calls `ControllerResyncCommand`, whose handler passed
+`respawn_if_done: true` — correct for its original caller (`term.tsx`'s
+crash-recovery `TermResyncHandler`), wrong for a caller that is only asking
+whether the shell is still alive. Reopening after an exit resurrected the
+dead controller in place and appended a fresh banner to the block's
+append-only `term` file: the respawn-loop symptom
+`SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §7 fixed on the `PtyShellCreate`
+side, still open on this one. Added a `norespawn` flag to the resync command
+(default `false` — every existing caller unchanged) and the drawer sets it,
+so an exited shell surfaces as `RESYNC_ERR_ALREADY_EXITED` and takes the same
+fall-through as a vanished one: a genuinely fresh shell, clean scrollback,
+dead block deleted rather than orphaned.
+
+**7.3 (P2) The teardown RPCs had to be ordered.** `DeleteSubBlockCommand`
+read-modify-writes the parent to drop the child from `subblockids`. Fired
+concurrently with the pointer clear, it can read a pre-clear snapshot and
+write it back afterwards, RESTORING the dead pointer — leaving the pane
+pointing at a deleted block. They are now awaited in order. The UI half
+(collapse) still runs first and synchronously: it needs no round trip, and
+the drawer should go the instant the shell does.

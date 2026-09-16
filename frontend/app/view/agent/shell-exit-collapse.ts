@@ -36,18 +36,32 @@ export interface ShellExitCollapseOptions {
     clearTermWrite: () => void;
     /** Dispatch `DetailsCollapse` on the pane model. */
     collapseDrawer: () => void;
-    setMeta: (args: { oref: string; meta: Record<string, unknown> }) => void;
-    deleteSubBlock: (args: { blockid: string }) => void;
+    setMeta: (args: { oref: string; meta: Record<string, unknown> }) => Promise<unknown>;
+    deleteSubBlock: (args: { blockid: string }) => Promise<unknown>;
     makeORef: (otype: string, oid: string) => string;
 }
 
-export function collapseDrawerOnShellExit(opts: ShellExitCollapseOptions): void {
+/**
+ * The two RPCs are AWAITED IN ORDER, not fired concurrently (Codex P2 on PR
+ * #3253). The server engine spawns each request independently, and
+ * `DeleteSubBlockCommand` read-modify-writes the parent to drop the child
+ * from `subblockids` — so if its read lands before `SetMetaCommand` clears
+ * `term:shellsubblockid` but its write lands after, it writes its stale
+ * snapshot back and RESTORES the dead pointer. The pane would then point at a
+ * deleted block, sending the next drawer open through the stale-reference
+ * recovery path for no reason.
+ *
+ * The UI half (`clearTermWrite`/`collapseDrawer`) runs first and
+ * synchronously: it needs no round trip, and the human should see the drawer
+ * go the instant their shell does.
+ */
+export async function collapseDrawerOnShellExit(opts: ShellExitCollapseOptions): Promise<void> {
     opts.clearTermWrite();
     opts.collapseDrawer();
     if (!opts.exitedSubBlockId) return;
-    opts.setMeta({
+    await opts.setMeta({
         oref: opts.makeORef("block", opts.parentBlockId),
         meta: { "term:shellsubblockid": null },
     });
-    opts.deleteSubBlock({ blockid: opts.exitedSubBlockId });
+    await opts.deleteSubBlock({ blockid: opts.exitedSubBlockId });
 }
