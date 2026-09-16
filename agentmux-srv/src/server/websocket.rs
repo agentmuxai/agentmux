@@ -1784,7 +1784,6 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 }
 
 
-/// Parse a CommandBlockInputData into a BlockInputUnion.
 /// Route a decoded `blockinput` payload — the actual human-keystroke path
 /// (`termViewModel.ts`'s `blockinput` WS command, used by both the
 /// standalone Terminal widget and an agent pane's composer-drawer shell) —
@@ -1808,6 +1807,7 @@ fn dispatch_blockinput(block_id: &str, data: Vec<u8>) -> Result<(), String> {
     blockcontroller::send_input(block_id, input, None)
 }
 
+/// Parse a CommandBlockInputData into a BlockInputUnion.
 fn parse_block_input(
     cmd: &CommandBlockInputData,
 ) -> Result<blockcontroller::BlockInputUnion, String> {
