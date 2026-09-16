@@ -1,7 +1,7 @@
 # Analysis: Cross-Pane Input Delay Has Returned — Root Cause on the Ingress Path
 
 **Date:** 2026-09-15
-**Status:** Partially retracted, then implemented at the corrected scope.
+**Status:** implemented at the corrected scope, with §2 partially retracted.
 **§2's severity claim was wrong and is struck — see §2a.** `controllerinput`
 is NOT the keystroke path, so the blocking `Store` read this report found
 does not explain the reported cross-pane typing lag, and that lag remains

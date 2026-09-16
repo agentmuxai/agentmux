@@ -138,6 +138,59 @@ pub fn release(block_id: &str) -> bool {
     }
 }
 
+/// Release the lease AND clear the `term:agentlockuntil` meta copy the
+/// frontend gates on, broadcasting the update so it takes effect now.
+///
+/// Releasing only the in-memory copy is not enough on any path where the
+/// point is to give the human their keyboard back. Codex P1 / ReAgent P1 on
+/// PR #3249, and they're right: `AgentShellSubblock.tsx`'s `agentLocked()`
+/// derives its gate purely from that meta value, and the `blockinput` WS
+/// command those keystrokes travel on has no server-side lease check at all
+/// (see the "Known gap" note above). So the frontend gate is in practice
+/// the *only* thing suppressing a human's keystrokes — and clearing memory
+/// alone would leave them swallowed for the rest of the 4s window, which is
+/// precisely the "typed `exit`, nothing happened" case this is meant to fix.
+///
+/// Best-effort on the meta half (logs and continues), authoritative on the
+/// memory half. Mirrors `core::persist_session_id`'s established
+/// update-then-broadcast shape; no-ops on the meta half when `wstore` is
+/// `None`, as unit tests that don't wire a store expect.
+pub fn release_and_clear_meta(
+    block_id: &str,
+    wstore: &Option<std::sync::Arc<crate::backend::storage::store::Store>>,
+    event_bus: &Option<std::sync::Arc<crate::backend::eventbus::EventBus>>,
+) -> bool {
+    let was_locked = release(block_id);
+
+    let Some(store) = wstore else { return was_locked };
+    let oref_str = format!("block:{block_id}");
+    let mut meta_update = crate::backend::obj::MetaMapType::new();
+    meta_update.insert(
+        crate::server::META_KEY_AGENT_LOCK_UNTIL.to_string(),
+        serde_json::Value::Null,
+    );
+    if let Err(e) = crate::server::service::update_object_meta(store, &oref_str, &meta_update) {
+        tracing::warn!(block_id = %block_id, error = %e, "agent_lock: failed to clear lease meta");
+        return was_locked;
+    }
+    let Some(event_bus) = event_bus else { return was_locked };
+    if let Ok(updated) = store.must_get::<crate::backend::obj::Block>(block_id) {
+        let data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+            updatetype: "update".into(),
+            otype: "block".into(),
+            oid: block_id.to_string(),
+            obj: Some(crate::backend::obj::wave_obj_to_value(&updated)),
+        })
+        .ok();
+        event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+            eventtype: "waveobj:update".to_string(),
+            oref: oref_str,
+            data,
+        });
+    }
+    was_locked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,6 +279,51 @@ mod tests {
         assert!(is_locked(&leased));
         assert!(!is_locked(&other));
         release(&leased);
+    }
+
+    /// `release` alone clears only the copy `controllerinput` reads. The
+    /// copy that actually gates a human's keystrokes is the
+    /// `term:agentlockuntil` meta `AgentShellSubblock.tsx` reads — keystrokes
+    /// travel on `blockinput`, which has no server-side check — so releasing
+    /// without clearing meta leaves the human's input swallowed client-side
+    /// for the rest of the window. Codex P1 / ReAgent P1 on PR #3249.
+    #[test]
+    fn release_and_clear_meta_clears_the_copy_the_frontend_gates_on() {
+        use crate::backend::obj::Block;
+
+        let store = std::sync::Arc::new(
+            crate::backend::storage::store::Store::open_in_memory().expect("store"),
+        );
+        // A real UUID, not a readable label: `update_object_meta` parses the
+        // oref and rejects a non-UUID oid outright ("invalid object id"). A
+        // label would make this test pass for the wrong reason — the meta
+        // write would fail, `release_and_clear_meta` would log and move on,
+        // and the assertion below would be measuring nothing.
+        let block_id = uuid::Uuid::new_v4().to_string();
+        let mut block = Block {
+            oid: block_id.clone(),
+            meta: {
+                let mut m = crate::backend::obj::MetaMapType::new();
+                m.insert(
+                    crate::server::META_KEY_AGENT_LOCK_UNTIL.to_string(),
+                    serde_json::json!(agentmux_common::time::now_ms() + 60_000),
+                );
+                m
+            },
+            ..Default::default()
+        };
+        store.insert(&mut block).expect("insert");
+        lock_until(&block_id, agentmux_common::time::now_ms() + 60_000);
+
+        assert!(release_and_clear_meta(&block_id, &Some(store.clone()), &None));
+
+        assert!(!is_locked(&block_id), "the in-memory copy must be released");
+        let after: Block = store.must_get(&block_id).expect("block still exists");
+        let meta_val = after.meta.get(crate::server::META_KEY_AGENT_LOCK_UNTIL);
+        assert!(
+            meta_val.is_none() || meta_val == Some(&serde_json::Value::Null),
+            "the meta copy the frontend gates on must be cleared, got {meta_val:?}"
+        );
     }
 
     /// Re-leasing while a lease is live extends it rather than stacking —

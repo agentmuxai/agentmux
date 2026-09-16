@@ -1010,6 +1010,11 @@ impl Controller for ShellController {
         let tab_id_wait = self.tab_id.clone();
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
+        // For the agent-lease release below: clearing the `term:agentlockuntil`
+        // meta copy (not just the in-memory registry) needs both, since that
+        // is what the frontend's own gate reads.
+        let wstore_wait = self.wstore.clone();
+        let event_bus_wait = self.event_bus.clone();
         let run_lock = Arc::clone(&self.run_lock);
         // Async outer task, not a bare spawn_blocking (reagentx P1 on PR
         // #3206, third round): before this fix, the read loop flushed
@@ -1180,7 +1185,33 @@ impl Controller for ShellController {
                 // typing `exit` in a shell an agent was using must not have
                 // their following keystrokes swallowed by a lease for a PTY
                 // that is already gone.
-                super::super::agent_lock::release(&block_id_wait);
+                //
+                // Guarded on this task still belonging to the REGISTERED
+                // controller, the same `Arc::ptr_eq` identity check the
+                // close-on-exit trigger below already uses, and for the same
+                // reason (Codex P1 / ReAgent P1 on PR #3249): a force-restart
+                // (`resync_controller` → `stop_for_replace`) kills this child
+                // and registers a REPLACEMENT controller for the same
+                // block_id. This wait task belongs to the OLD one. Without
+                // the guard it would fire afterwards and clear a lease the
+                // agent had legitimately taken on the NEW shell, letting
+                // human input race the agent's writes on a pane that never
+                // stopped being driven. Leases are keyed by block_id, so a
+                // stale task cannot tell its own lease from its successor's —
+                // controller identity is what distinguishes them.
+                //
+                // Check-then-act, like its precedent: a replacement
+                // registered in the window between this check and the remove
+                // would still lose its lease. Same residual race the
+                // close-on-exit guard accepts, and self-correcting here — the
+                // agent's next write re-takes the lease, since
+                // `lock_shell_for_agent` runs before every one.
+                release_lease_if_current(
+                    &block_id_wait,
+                    &inner_wait,
+                    &wstore_wait,
+                    &event_bus_wait,
+                );
 
                 // Update inner state
                 {
@@ -1679,6 +1710,129 @@ mod agent_id_for_jekt_tests {
         let this_blocks_meta = MetaMapType::new();
         assert_eq!(resolve_agent_id_for_jekt(&other_blocks_meta), Some("agenty".to_string()));
         assert_eq!(resolve_agent_id_for_jekt(&this_blocks_meta), None);
+    }
+}
+
+/// Release `block_id`'s PtyShell agent lease — both copies — but ONLY if
+/// `inner` still identifies the controller currently registered for that
+/// block. Returns whether it released.
+///
+/// The guard is the same `Arc::ptr_eq` controller-identity check the
+/// close-on-exit trigger uses, for the same reason (Codex P1 / ReAgent P1 on
+/// PR #3249): a force-restart (`resync_controller` → `stop_for_replace`)
+/// kills this child and registers a REPLACEMENT controller under the same
+/// block_id. The killed child's wait/cleanup task belongs to the OLD
+/// controller; without this check it fires afterwards and clears a lease the
+/// agent legitimately took on the NEW shell, letting human input race the
+/// agent's writes on a pane that never stopped being driven. Leases are keyed
+/// by block_id alone, so a stale task cannot tell its own lease from its
+/// successor's — controller identity is what distinguishes them.
+///
+/// Check-then-act, like its precedent: a replacement registered in the window
+/// between the check and the remove would still lose its lease. Same residual
+/// race the close-on-exit guard accepts, and self-correcting here, since
+/// `lock_shell_for_agent` re-takes the lease before every agent write.
+pub(super) fn release_lease_if_current(
+    block_id: &str,
+    inner: &Arc<std::sync::Mutex<super::controller::ShellControllerInner>>,
+    wstore: &Option<Arc<crate::backend::storage::store::Store>>,
+    event_bus: &Option<Arc<crate::backend::eventbus::EventBus>>,
+) -> bool {
+    let is_current = super::super::get_controller(block_id)
+        .and_then(|ctrl| {
+            ctrl.as_any()
+                .downcast_ref::<ShellController>()
+                .map(|sc| Arc::ptr_eq(&sc.inner, inner))
+        })
+        .unwrap_or(false);
+    if !is_current {
+        tracing::info!(
+            block_id = %block_id,
+            "agent lease: controller was replaced since this process exited \
+             (restart in flight?) — leaving the successor's lease alone"
+        );
+        return false;
+    }
+    super::super::agent_lock::release_and_clear_meta(block_id, wstore, event_bus);
+    true
+}
+
+#[cfg(test)]
+mod agent_lease_release_tests {
+    use super::*;
+    use crate::backend::blockcontroller::agent_lock;
+
+    fn controller_for(block_id: &str) -> Arc<ShellController> {
+        Arc::new(ShellController::new(
+            "shell".to_string(),
+            "tab-lease".to_string(),
+            block_id.to_string(),
+            None,
+            None,
+            None,
+            None,
+        ))
+    }
+
+    /// The natural case: this task's own controller is still the registered
+    /// one (a human typed `exit`), so the lease goes.
+    #[test]
+    fn releases_when_this_task_still_owns_the_controller() {
+        let block_id = "lease-guard-current";
+        let ctrl = controller_for(block_id);
+        let inner = Arc::clone(&ctrl.inner);
+        super::super::super::register_controller(block_id, ctrl);
+
+        agent_lock::lock_until(block_id, agentmux_common::time::now_ms() + 60_000);
+        assert!(release_lease_if_current(block_id, &inner, &None, &None));
+        assert!(!agent_lock::is_locked(block_id), "an exited shell must drop its lease");
+
+        super::super::super::delete_controller(block_id);
+        agent_lock::release(block_id);
+    }
+
+    /// Force-restart: a REPLACEMENT controller is registered under the same
+    /// block_id and the agent takes a fresh lease on it. This stale task —
+    /// from the killed old process — must not clear that live lease, or human
+    /// keystrokes race the agent's writes on a shell still being driven.
+    #[test]
+    fn leaves_a_successors_lease_alone_after_a_force_restart() {
+        let block_id = "lease-guard-replaced";
+        let old = controller_for(block_id);
+        let old_inner = Arc::clone(&old.inner);
+        let replacement = controller_for(block_id);
+
+        // The replacement is what's registered now — exactly what
+        // `stop_for_replace` + re-register leaves behind.
+        super::super::super::register_controller(block_id, replacement);
+        agent_lock::lock_until(block_id, agentmux_common::time::now_ms() + 60_000);
+
+        assert!(
+            !release_lease_if_current(block_id, &old_inner, &None, &None),
+            "a stale task must not release"
+        );
+        assert!(
+            agent_lock::is_locked(block_id),
+            "the successor's lease must survive the old controller's cleanup"
+        );
+
+        super::super::super::delete_controller(block_id);
+        agent_lock::release(block_id);
+    }
+
+    /// No controller registered at all (block already torn down) — nothing to
+    /// own the lease, so this task must not assume the lease is its own.
+    #[test]
+    fn does_not_release_when_no_controller_is_registered() {
+        let block_id = "lease-guard-unregistered";
+        let orphan = controller_for(block_id);
+        let inner = Arc::clone(&orphan.inner);
+
+        agent_lock::lock_until(block_id, agentmux_common::time::now_ms() + 60_000);
+        assert!(!release_lease_if_current(block_id, &inner, &None, &None));
+        assert!(agent_lock::is_locked(block_id));
+
+        agent_lock::release(block_id);
     }
 }
 
