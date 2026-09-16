@@ -87,6 +87,51 @@ fn default_json_array_string() -> String {
     "[]".to_string()
 }
 
+/// Outcome of `Store::bundle_reseed_system_if_owned` — see that method's own
+/// doc comment for what each variant means and why the decision is made
+/// atomically rather than by the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleReseedOutcome {
+    Created,
+    Updated,
+    Unchanged,
+    SkippedLocalEdit,
+    /// This write's manifest generation (see `manifest_generation_from_
+    /// source_detail`) is older than the generation already recorded for
+    /// this row — an older AgentMux process must never downgrade a newer
+    /// seed. See `bundle_reseed_system_if_owned`'s own doc comment.
+    SkippedOlderGeneration,
+    /// The row doesn't exist, but a retirement tombstone (`RETIREMENT_
+    /// TOMBSTONE_SOURCE`) recorded by a newer manifest generation says it
+    /// was deliberately pruned — this caller's own (older) manifest must
+    /// not resurrect it. See `bundle_reseed_system_if_owned`'s own doc
+    /// comment.
+    SkippedRetired,
+}
+
+/// The `source` sentinel `bundle_delete_system_if_owned` stamps on the
+/// tombstone version row it appends after deleting a row — distinguishes a
+/// deliberate, generation-aware retirement (pruned because a manifest no
+/// longer lists this id) from an ordinary human delete via the Armory UI
+/// (`bundle_delete_system`, which records no version at all). `bundle_
+/// reseed_system_if_owned`'s missing-row branch checks for this sentinel
+/// specifically — see that method's own doc comment.
+const RETIREMENT_TOMBSTONE_SOURCE: &str = "operator_config_seed_retired";
+
+/// Extracts a `{"manifest_version": N}` field from a version row's
+/// `source_detail` JSON, defaulting to `0` when absent or unparseable — so a
+/// pre-existing row seeded before this field existed is always treated as
+/// generation 0, never blocking a real (>=1) manifest generation from
+/// writing over it. Shared convention between `bundle_reseed_system_if_
+/// owned`'s own generation guard and any seeder populating `source_detail`
+/// (see `operator_config_seed.rs`).
+fn manifest_generation_from_source_detail(source_detail: &str) -> u64 {
+    serde_json::from_str::<serde_json::Value>(source_detail)
+        .ok()
+        .and_then(|v| v.get("manifest_version").and_then(|g| g.as_u64()))
+        .unwrap_or(0)
+}
+
 fn default_json_object_string() -> String {
     "{}".to_string()
 }
@@ -426,6 +471,442 @@ impl Store {
         Ok(())
     }
 
+    /// Same as `bundle_upsert_system`, but also appends a `db_bundle_versions`
+    /// row in the SAME transaction — the system-tier counterpart of
+    /// `bundle_upsert_with_version`, for the same atomicity reason (codex P2,
+    /// PR #3237). Always records a version (unlike the ordinary method, this
+    /// one never returns `None`): a system row is unconditionally
+    /// `is_global=1`, so there is never a case where versioning would not
+    /// apply. See docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md
+    /// — this is what lets `operator_config_seed`'s startup reseed tell "did
+    /// AgentMux's own seeder write this last, or did a human edit it via the
+    /// Armory UI" apart, via the returned/stored `written_by`.
+    ///
+    /// Shares `bundle_upsert_system`'s exact guard and SQL, duplicated for
+    /// the same non-reentrant-`Mutex` reason `bundle_upsert_with_version`
+    /// documents on itself.
+    pub fn bundle_upsert_system_with_version(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<BundleVersion, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing_is_system: Option<i64> = tx
+            .query_row(
+                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if existing_is_system == Some(0) {
+            return Err(StoreError::Other(
+                "cannot convert an existing non-system Global Memory entry into a system entry"
+                    .to_string(),
+            ));
+        }
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        let version = bundle_version_insert_tx(
+            &tx,
+            &memory.id,
+            &memory.name,
+            &memory.instructions,
+            source,
+            source_detail,
+            written_by,
+        )?;
+
+        tx.commit()?;
+        Ok(version)
+    }
+
+    /// Same as `bundle_upsert_system_with_version`, but skips recording a
+    /// version when the write is byte-identical (`name` + `instructions`) to
+    /// what's already stored — the case where an operator opens a seeded
+    /// Operator Config entry in the Armory UI and clicks Save without
+    /// changing anything (the UI does not suppress this request). Recording
+    /// a version for a true no-op would permanently mark the row as
+    /// human-owned even though nothing actually changed, breaking `bundle_
+    /// reseed_system_if_owned`'s ownership signal for no reason (Codex P2,
+    /// PR #3244).
+    ///
+    /// The existing-content comparison happens in the SAME transaction as
+    /// the resulting write, for the identical check-then-act reason `bundle_
+    /// reseed_system_if_owned` documents on itself — an earlier revision of
+    /// `upsertsystemmemory` (`bundle.rs`) composed this from a separate
+    /// `bundle_get` call plus a conditional branch, which raced a concurrent
+    /// writer between the read and the write (ReAgent P2, PR #3244).
+    ///
+    /// Returns `Ok(None)` when the save was a no-op (still refreshes every
+    /// other field via the plain upsert; just records no version); `Ok(Some(
+    /// version))` otherwise, including for a brand-new row (never a no-op).
+    pub fn bundle_upsert_system_if_changed(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<Option<BundleVersion>, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing: Option<(String, String, i64)> = tx
+            .query_row(
+                "SELECT name, instructions, is_system FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+
+        if let Some((_, _, is_system)) = &existing {
+            if *is_system == 0 {
+                return Err(StoreError::Other(
+                    "cannot convert an existing non-system Global Memory entry into a system entry"
+                        .to_string(),
+                ));
+            }
+        }
+
+        let is_noop = existing
+            .as_ref()
+            .is_some_and(|(name, instructions, _)| *name == memory.name && *instructions == memory.instructions);
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        let version = if is_noop {
+            None
+        } else {
+            Some(bundle_version_insert_tx(
+                &tx,
+                &memory.id,
+                &memory.name,
+                &memory.instructions,
+                source,
+                source_detail,
+                written_by,
+            )?)
+        };
+
+        tx.commit()?;
+        Ok(version)
+    }
+
+    /// Atomically decide-and-apply an Operator Config reseed for one system
+    /// row — the ownership check (is this row still owned by AgentMux's own
+    /// seeder, or has a human/another writer claimed it) and the resulting
+    /// write happen inside the SAME transaction, not as two separate `Store`
+    /// calls composed by the caller. A caller-composed version (read latest
+    /// version via `bundle_version_list`, decide, then separately call
+    /// `bundle_upsert_system_with_version`) is a check-then-act race: a
+    /// concurrent writer — a human editing this row via the Armory UI, or
+    /// another AgentMux instance's own startup reseed, since multiple
+    /// instances can run in parallel by design — could land a new version
+    /// between the read and the write, and the caller's decision would be
+    /// based on data that was already stale by the time it acted (ReAgent
+    /// P1, PR #3244).
+    ///
+    /// `seeder_identity` is the reserved `written_by` value that marks a row
+    /// as still owned by the seeder (see `operator_config_seed::WRITTEN_BY`)
+    /// — a latest version written by anything else means a human (or some
+    /// other writer) has claimed this row, and it is left alone.
+    ///
+    /// - No existing `db_bundles` row at all -> (re)create, UNLESS the
+    ///   latest version for this id is a `RETIREMENT_TOMBSTONE_SOURCE`
+    ///   marker whose recorded generation is newer than `source_detail`'s
+    ///   own (`SkippedRetired` in that case) — see `bundle_delete_system_
+    ///   if_owned`'s own doc comment for why the tombstone exists: without
+    ///   it, an older AgentMux build (or a rollback) sharing this store.db
+    ///   would read "no row" as "never existed" and resurrect content a
+    ///   newer build's prune deliberately retired (ReAgent/Codex P2, PR
+    ///   #3244). An ordinary human delete (`bundle_delete_system`, which
+    ///   records no version at all) leaves no tombstone, so a manually
+    ///   deleted entry still comes back exactly as before — only a
+    ///   generation-aware prune leaves a tombstone behind.
+    /// - Existing row, latest version's `written_by != seeder_identity` ->
+    ///   `SkippedLocalEdit`, no write at all.
+    /// - Existing row, latest version's `content_hash` already matches the
+    ///   target (`name`+`instructions`) -> `Unchanged`, no write.
+    /// - Otherwise -> upsert + version insert, `Updated`.
+    pub fn bundle_reseed_system_if_owned(
+        &self,
+        memory: &Bundle,
+        seeder_identity: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<BundleReseedOutcome, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing: Option<(i64, String, String)> = tx
+            .query_row(
+                "SELECT is_system, name, instructions FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let row_exists = existing.is_some();
+
+        if let Some((0, _, _)) = existing {
+            return Err(StoreError::Other(
+                "cannot convert an existing non-system Global Memory entry into a system entry"
+                    .to_string(),
+            ));
+        }
+
+        if let Some((_, live_name, live_instructions)) = &existing {
+            // Ordered by rowid (insertion sequence), NOT created_at: unlike
+            // bundle_version_list's own history ordering (a display
+            // concern, where wall-clock order is what a human expects to
+            // see), this ownership decision has a real behavioral
+            // consequence if it picks the wrong "latest" row. A backward
+            // system-clock jump (e.g. correcting a VM whose clock was
+            // ahead) between two writes to the same bundle_id would give
+            // the chronologically-later write a SMALLER created_at, so
+            // `ORDER BY created_at DESC` could keep selecting the older
+            // row as "latest" — silently defeating the ownership
+            // guarantee this whole method exists for. rowid is monotonic
+            // per insert regardless of wall-clock time. Codex P2, PR #3244.
+            let latest: Option<(String, String, String)> = tx
+                .query_row(
+                    "SELECT written_by, content_hash, source_detail FROM db_bundle_versions
+                     WHERE bundle_id = ?1
+                     ORDER BY rowid DESC
+                     LIMIT 1",
+                    params![memory.id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            if let Some((written_by, content_hash, stored_source_detail)) = latest {
+                // The live db_bundles row must match what the latest
+                // version CLAIMS is there before `written_by` can be
+                // trusted at all — a compatible-schema OLDER build sharing
+                // this store might still run a pre-PR-#3244
+                // `upsertsystemmemory` handler that calls the unversioned
+                // `bundle_upsert_system` directly, changing the live row
+                // without ever touching `db_bundle_versions`. In that case
+                // the latest version would still (wrongly) show the seeder
+                // as the last writer, even though a human's edit is
+                // sitting live and unrecorded. Codex P2, PR #3244.
+                let live_hash = super::bundle_versions::content_hash(live_name, live_instructions);
+                if live_hash != content_hash {
+                    return Ok(BundleReseedOutcome::SkippedLocalEdit);
+                }
+                if written_by != seeder_identity {
+                    return Ok(BundleReseedOutcome::SkippedLocalEdit);
+                }
+                let target_hash = super::bundle_versions::content_hash(&memory.name, &memory.instructions);
+                let stored_generation = manifest_generation_from_source_detail(&stored_source_detail);
+                let target_generation = manifest_generation_from_source_detail(source_detail);
+                if content_hash == target_hash {
+                    // Content is identical, but if THIS call's own manifest
+                    // generation is strictly newer than what's recorded,
+                    // that fact must still be persisted — otherwise a
+                    // concurrently-running build on a LOWER generation
+                    // (still not "older" than the stale recorded one) could
+                    // later see its own differing content as valid to write
+                    // and downgrade content a newer generation already
+                    // confirmed as current. E.g. generation 3's text
+                    // happens to match generation 1's (a revert); without
+                    // this, a generation-2 build's own different text would
+                    // still pass the generation check against the
+                    // never-advanced "1" and overwrite generation 3's
+                    // result. Codex P2, PR #3244.
+                    if target_generation > stored_generation {
+                        bundle_version_insert_tx(
+                            &tx,
+                            &memory.id,
+                            &memory.name,
+                            &memory.instructions,
+                            source,
+                            source_detail,
+                            seeder_identity,
+                        )?;
+                        // Returning without an explicit commit drops `tx`,
+                        // which rolls back — harmless for every OTHER early
+                        // return in this method (they make no writes), but
+                        // this one just did. Must commit explicitly before
+                        // returning.
+                        tx.commit()?;
+                    }
+                    return Ok(BundleReseedOutcome::Unchanged);
+                }
+                // Content differs, but only from THIS process's point of
+                // view — on a machine sharing store.db across multiple
+                // AgentMux builds/versions (a supported configuration; see
+                // "Multiple Instances Run in Parallel" in this repo's own
+                // CLAUDE.md), an older build's own (older) manifest must
+                // never overwrite a newer build's already-seeded content
+                // just because both processes use the same seeder_identity.
+                // Codex P2, PR #3244.
+                if target_generation < stored_generation {
+                    return Ok(BundleReseedOutcome::SkippedOlderGeneration);
+                }
+            } else {
+                // Row exists but has ZERO version history (possible via the
+                // still-present unversioned bundle_upsert_system, or data
+                // that predates this tier having versioning at all) —
+                // conservatively treated as NOT owned by the seeder and
+                // left alone, same policy `bundle_delete_system_if_owned`
+                // already documents and implements for the identical edge
+                // case. Falling through to the unconditional upsert below
+                // would silently overwrite a row this method has no basis
+                // to claim is safe to touch. ReAgent P2, PR #3244.
+                return Ok(BundleReseedOutcome::SkippedLocalEdit);
+            }
+        } else {
+            // No db_bundles row — but check for a retirement tombstone
+            // before assuming that means "never existed, safe to create."
+            // See this method's own doc comment and `bundle_delete_system_
+            // if_owned`'s. rowid DESC for the same reason as the row_exists
+            // branch above.
+            let tombstone: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT source, source_detail FROM db_bundle_versions
+                     WHERE bundle_id = ?1
+                     ORDER BY rowid DESC
+                     LIMIT 1",
+                    params![memory.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((last_source, last_source_detail)) = tombstone {
+                if last_source == RETIREMENT_TOMBSTONE_SOURCE {
+                    let retired_generation = manifest_generation_from_source_detail(&last_source_detail);
+                    let target_generation = manifest_generation_from_source_detail(source_detail);
+                    if target_generation < retired_generation {
+                        return Ok(BundleReseedOutcome::SkippedRetired);
+                    }
+                }
+            }
+        }
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        bundle_version_insert_tx(
+            &tx,
+            &memory.id,
+            &memory.name,
+            &memory.instructions,
+            source,
+            source_detail,
+            seeder_identity,
+        )?;
+
+        tx.commit()?;
+        Ok(if row_exists {
+            BundleReseedOutcome::Updated
+        } else {
+            BundleReseedOutcome::Created
+        })
+    }
+
     /// Delete a Bundle. Refuses to delete the blank singleton, a
     /// seeded bundle, or (new) a system entry — use
     /// `bundle_delete_system` for the last case.
@@ -461,6 +942,123 @@ impl Store {
             "DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1",
             params![id],
         )?;
+        Ok(rows > 0)
+    }
+
+    /// All `is_system=1` row ids — the full universe `operator_config_seed`'s
+    /// startup prune pass checks its manifest against, to find rows for an
+    /// entry AgentMux itself removed or renamed in a later release (Codex
+    /// P2, PR #3244). Ids only, not full `Bundle`s: the prune pass needs
+    /// nothing else before deciding whether a given id is still in the
+    /// manifest.
+    pub fn bundle_list_system_ids(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM db_bundles WHERE is_system = 1")?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Atomically deletes an `is_system=1` row ONLY if its latest version is
+    /// still owned by `seeder_identity` AND that version's own recorded
+    /// manifest generation is `<= caller_manifest_version` — the delete-side
+    /// counterpart of `bundle_reseed_system_if_owned`'s ownership check,
+    /// used to prune a row whose manifest entry AgentMux itself removed in a
+    /// later release.
+    ///
+    /// The generation gate exists for the same reason `bundle_reseed_
+    /// system_if_owned` has one: on a machine sharing `store.db` across
+    /// multiple AgentMux builds/versions, an OLDER build's own manifest
+    /// simply doesn't mention an entry a NEWER build already added — that
+    /// absence means "I don't know about this yet," not "this was removed."
+    /// Without gating on generation, an older build's prune pass would
+    /// delete a newer build's own addition on every one of its startups.
+    /// Only a row whose generation this process's OWN manifest has already
+    /// caught up to (or exceeds) is eligible for pruning at all.
+    ///
+    /// A row a human has edited (`written_by` on the latest version is
+    /// anything else) is left in place — same "never clobber a local edit"
+    /// posture as the reseed path; an orphaned-but-human-owned entry is a
+    /// human's to clean up, not this seeder's. A row with NO version
+    /// history at all (should not normally happen — every write path that
+    /// can create an `is_system` row also records one) is conservatively
+    /// treated as NOT owned by the seeder and left alone, rather than
+    /// guessing. Returns `true` only when a deletion actually happened.
+    ///
+    /// Also appends a `RETIREMENT_TOMBSTONE_SOURCE`-marked version row in
+    /// the SAME transaction as the delete — without it, an older AgentMux
+    /// build (or a rollback to one) sharing this store.db, whose own
+    /// manifest still lists this id, would see no `db_bundles` row and
+    /// treat that as "never existed, safe to create," silently resurrecting
+    /// content this deletion deliberately retired. `bundle_reseed_system_
+    /// if_owned`'s missing-row branch checks for this tombstone before
+    /// recreating anything (ReAgent/Codex P2, PR #3244).
+    ///
+    /// Also validates the LIVE row's content against what the latest
+    /// version claims before trusting `written_by` at all — the delete-side
+    /// mirror of the same check `bundle_reseed_system_if_owned` gained
+    /// earlier in this PR. Without it, a compatible-schema OLDER build's
+    /// unversioned write (still possible during a rolling upgrade — see
+    /// that method's own doc comment) would leave `written_by` stale at
+    /// the seeder's identity, and this method would DELETE the unrecorded
+    /// edit outright — strictly worse than the overwrite the reseed-path
+    /// fix was built to prevent, since deletion cannot be undone from
+    /// `db_bundles` alone. ReAgent P1, PR #3244.
+    pub fn bundle_delete_system_if_owned(
+        &self,
+        id: &str,
+        seeder_identity: &str,
+        caller_manifest_version: u32,
+    ) -> Result<bool, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let live: Option<(String, String)> = tx
+            .query_row(
+                "SELECT name, instructions FROM db_bundles WHERE id = ?1 AND is_system = 1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((live_name, live_instructions)) = live else {
+            return Ok(false);
+        };
+
+        // rowid, not created_at — see bundle_reseed_system_if_owned's own
+        // comment on the same ordering choice.
+        let latest: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT written_by, content_hash, source_detail FROM db_bundle_versions
+                 WHERE bundle_id = ?1
+                 ORDER BY rowid DESC
+                 LIMIT 1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+
+        let Some((written_by, content_hash, source_detail)) = latest else {
+            return Ok(false);
+        };
+        let live_hash = super::bundle_versions::content_hash(&live_name, &live_instructions);
+        if live_hash != content_hash {
+            return Ok(false);
+        }
+        if written_by != seeder_identity {
+            return Ok(false);
+        }
+        let row_generation = manifest_generation_from_source_detail(&source_detail);
+        if row_generation > caller_manifest_version as u64 {
+            return Ok(false);
+        }
+
+        let rows = tx.execute("DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1", params![id])?;
+        if rows > 0 {
+            let tombstone_detail = format!(r#"{{"manifest_version":{caller_manifest_version}}}"#);
+            bundle_version_insert_tx(&tx, id, "", "", RETIREMENT_TOMBSTONE_SOURCE, &tombstone_detail, seeder_identity)?;
+        }
+        tx.commit()?;
         Ok(rows > 0)
     }
 
