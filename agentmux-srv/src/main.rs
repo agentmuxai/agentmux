@@ -4,6 +4,7 @@
 mod agents;
 mod ambient;
 mod backend;
+mod boot_timing;
 mod bootstrap;
 mod broker;
 mod config;
@@ -56,6 +57,11 @@ async fn main() {
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
 
+    // 1a. Start the boot-path stopwatch. Logged as one summary line at
+    //     ESTART below — see `boot_timing`'s module doc for why these numbers
+    //     go to the log rather than the splash.
+    boot_timing::init();
+
     // 1b. Direct-launch PATH fallback.
     bootstrap::enrich_path();
 
@@ -66,7 +72,9 @@ async fn main() {
 
     // 4. Initialize backend: data dir, in-process migrations, open every store,
     //    attach shared/global registries, run one-time seed/repair passes.
-    let stores = bootstrap::open_stores_and_migrate(&config, &version, &build_time);
+    let stores = boot_timing::time("open_stores_and_migrate", || {
+        bootstrap::open_stores_and_migrate(&config, &version, &build_time)
+    });
 
     // Event infrastructure + every background task that doesn't need AppState yet.
     let bg = bootstrap::spawn_background_subsystems(
@@ -77,11 +85,9 @@ async fn main() {
     );
 
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
-    let net = bootstrap::bind_listeners_and_network(
-        &config,
-        &bg.event_bus,
-        &bg.broker,
-        &version,
+    let net = boot_timing::time_async(
+        "bind_listeners_and_network",
+        bootstrap::bind_listeners_and_network(&config, &bg.event_bus, &bg.broker, &version),
     )
     .await;
 
@@ -131,7 +137,10 @@ async fn main() {
     // Failure here is non-fatal: the saga log read might be transient,
     // and starting up without recovery beats refusing to start.
     // Operator can still inspect via `--diag sagas` (PR 2 part 2).
-    let resumed = sagas::recovery::compensate_unresolved(&state)
+    let resumed = boot_timing::time_async(
+        "saga_resume_on_startup",
+        sagas::recovery::compensate_unresolved(&state),
+    )
         .await
         .unwrap_or_else(|e| {
             tracing::error!(
@@ -166,6 +175,8 @@ async fn main() {
         &build_time,
         &config.instance_id,
     );
+
+    boot_timing::log_summary();
 
     // 7. Build router and serve on both listeners
     // Clone Arcs that are needed after `state` is moved into build_router.
