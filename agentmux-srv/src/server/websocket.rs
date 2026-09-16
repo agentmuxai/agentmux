@@ -1038,26 +1038,26 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // state, is the real enforcement; the frontend gate is the UX layer
     // that keeps it from happening in the first place, not the
     // correctness boundary.
-    let wstore_ci = state.wstore.clone();
+    //
+    // Keep this check I/O-free. It reads `blockcontroller::agent_lock`, an
+    // in-memory map, NOT the block's persisted meta: the original revision
+    // called `wstore.get::<Block>()` here, putting a synchronous SQLite
+    // query behind `Store`'s single process-wide `Mutex<Connection>` inside
+    // an async handler, inline on a Tokio worker thread with no
+    // `block_in_place` — the same failure class as the sysinfo incident
+    // (#1782). This handler carries the Stop button's SIGINT and
+    // `usePtyWidth`'s debounced resizes (which burst while a pane is being
+    // dragged); it is NOT the keystroke path — those go through the
+    // `blockinput` arm below, which has no lease check at all (see
+    // `agent_lock`'s "Known gap" note). See also
+    // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md.
     engine.register_handler(
         COMMAND_CONTROLLER_INPUT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_ci.clone();
             Box::pin(async move {
                 let cmd: CommandBlockInputData = serde_json::from_value(data)
                     .map_err(|e| format!("controllerinput: {e}"))?;
-                let locked = wstore
-                    .get::<Block>(&cmd.blockid)
-                    .ok()
-                    .flatten()
-                    .and_then(|b| {
-                        b.meta
-                            .get(crate::server::META_KEY_AGENT_LOCK_UNTIL)
-                            .and_then(|v| v.as_i64())
-                    })
-                    .map(|until| until > agentmux_common::time::now_ms())
-                    .unwrap_or(false);
-                if locked {
+                if blockcontroller::agent_lock::is_locked(&cmd.blockid) {
                     tracing::debug!(block_id = %cmd.blockid, "controllerinput: dropped — agent lock active");
                     return Ok(None);
                 }
@@ -1858,9 +1858,41 @@ mod tests {
         }
 
         // Locked target: no live controller registered, but the check must
-        // never reach that far.
-        let mut locked_block = crate::backend::obj::Block {
-            oid: "locked-shell".to_string(),
+        // never reach that far. The lease is seeded through
+        // `blockcontroller::agent_lock` — the in-memory registry this
+        // handler actually enforces against — NOT through the block's
+        // `term:agentlockuntil` meta, which is now the frontend-badge copy
+        // only (see the handler's own comment and `agent_lock`'s module doc:
+        // the meta read this replaced put a synchronous SQLite query on the
+        // per-keystroke path).
+        blockcontroller::agent_lock::lock_until(
+            "ci-locked-shell",
+            agentmux_common::time::now_ms() + 60_000,
+        );
+        let resp = send_input(&engine, &mut output_rx, "ci-locked-shell").await;
+        assert!(
+            resp.error.is_empty(),
+            "a locked target must be silently dropped, not reach send_input at all: {}",
+            resp.error
+        );
+
+        // Unlocked target (no lease at all) — proves the call path above is
+        // genuinely live: it must reach `send_input` and get a real "no
+        // controller" error, not silently succeed.
+        let resp = send_input(&engine, &mut output_rx, "ci-unlocked-shell").await;
+        assert!(
+            resp.error.contains("no controller"),
+            "an unlocked target must reach send_input for real: {}",
+            resp.error
+        );
+
+        // A stale `term:agentlockuntil` in meta must NOT lock anything by
+        // itself. This is the fail-open half of moving enforcement into
+        // memory (`agent_lock`'s module doc): meta can outlive the process
+        // that wrote it, memory cannot, and a lease that survives a restart
+        // is a human who can't type `exit` in their own terminal.
+        let mut stale_meta_block = crate::backend::obj::Block {
+            oid: "ci-stale-meta-shell".to_string(),
             meta: {
                 let mut m = crate::backend::obj::MetaMapType::new();
                 m.insert(
@@ -1871,26 +1903,61 @@ mod tests {
             },
             ..Default::default()
         };
-        state.wstore.insert(&mut locked_block).unwrap();
-        let resp = send_input(&engine, &mut output_rx, "locked-shell").await;
+        state.wstore.insert(&mut stale_meta_block).unwrap();
+        let resp = send_input(&engine, &mut output_rx, "ci-stale-meta-shell").await;
         assert!(
-            resp.error.is_empty(),
-            "a locked target must be silently dropped, not reach send_input at all: {}",
+            resp.error.contains("no controller"),
+            "a lease that exists only in stale meta must not lock the keyboard: {}",
             resp.error
         );
 
-        // Unlocked target (no lock meta at all) — proves the call path
-        // above is genuinely live: it must reach `send_input` and get a
-        // real "no controller" error, not silently succeed.
-        let mut unlocked_block = crate::backend::obj::Block {
-            oid: "unlocked-shell".to_string(),
-            ..Default::default()
+        blockcontroller::agent_lock::release("ci-locked-shell");
+    }
+
+    /// The lease must stop dropping input the moment it lapses, with nobody
+    /// calling `PtyShellStop` — an agent that crashed mid-write, or simply
+    /// stopped writing, must not leave the human unable to type into their
+    /// own shell (up to and including typing `exit` to close the pane,
+    /// SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10).
+    #[tokio::test]
+    async fn controllerinput_flows_again_once_the_agent_lease_lapses() {
+        use crate::backend::rpc::engine::WshRpcEngine;
+        use crate::backend::rpc_types::RpcMessage;
+        use crate::server::tests::test_state;
+
+        let state = test_state();
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register_handlers(&engine, state, "test-conn-lapse".to_string());
+
+        let block_id = "ci-lapsing-shell";
+        blockcontroller::agent_lock::lock_until(block_id, agentmux_common::time::now_ms() + 40);
+
+        let send = |engine: std::sync::Arc<WshRpcEngine>| {
+            engine.handle_message(RpcMessage {
+                command: COMMAND_CONTROLLER_INPUT.to_string(),
+                reqid: uuid::Uuid::new_v4().to_string(),
+                data: Some(serde_json::json!({ "blockid": block_id, "inputdata64": "eQ==" })),
+                ..Default::default()
+            });
         };
-        state.wstore.insert(&mut unlocked_block).unwrap();
-        let resp = send_input(&engine, &mut output_rx, "unlocked-shell").await;
+
+        send(engine.clone());
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .expect("handler should respond within 2s")
+            .expect("response channel should not close");
+        assert!(resp.error.is_empty(), "still leased: input must be dropped");
+
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+        send(engine.clone());
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .expect("handler should respond within 2s")
+            .expect("response channel should not close");
         assert!(
             resp.error.contains("no controller"),
-            "an unlocked target must reach send_input for real: {}",
+            "a lapsed lease must let input through without any explicit release: {}",
             resp.error
         );
     }
