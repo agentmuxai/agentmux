@@ -181,8 +181,8 @@ which is presumably why it's listed first.
   translates x64→arm64, not the reverse, so an Intel Mac cannot run an
   arm64-only build — this has to be a real native x86_64 CEF binary, not a
   compatibility shim.
-- **Once the CEF binary exists:** `package-macos.sh`'s `ARCH="arm64"` (line
-  47) needs to become a parameter, `build-macos.yml` needs a second job on an
+- **Once the CEF binary exists:** `package-macos.sh`'s hardcoded `ARCH="arm64"`
+  assignment needs to become a parameter, `build-macos.yml` needs a second job on an
   Intel runner (GitHub-hosted `macos-13` is the last Intel image; Apple
   Silicon has been the default `macos-latest` for a while, matching the
   comment already in `build-macos.yml:63`), and `Taskfile.yml`'s
