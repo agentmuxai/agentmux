@@ -431,6 +431,7 @@ partial list.
 | [`SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21`](SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21.md) | SPEC — Pane Minimize Button + Failed Tool Call Immediate Collapse |
 | [`SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27`](SPEC_PANE_MINIMIZE_COLUMN_DISSOLVE_2026_06_27.md) | SPEC — Pane Minimize: Column Dissolve on Full-Column Collapse |
 | [`SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24`](SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md) | SPEC — Pane Minimize Refinements |
+| [`SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16`](SPEC_PANE_OPEN_FOCUS_ROUTING_2026_09_16.md) | Typing should go into a pane the moment it opens (editor + terminal) |
 | [`SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11`](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md) | Auto-discovery pane-overlay clipping (declarative `data-pane-overlay`) |
 | [`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07`](SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md) | SPEC: Switching in-pane tabs must not repaint the pane header or tab bar |
 | [`SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20`](SPEC_PANE_TEAROFF_MOTHER_RESIZE_2026_06_20.md) | Pane Tear-Off — Mother Window Resize |
