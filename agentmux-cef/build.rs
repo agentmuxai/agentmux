@@ -29,15 +29,24 @@ const WINDOWS_APP_MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" stand
 "#;
 
 fn main() {
-    // No `cargo:rerun-if-changed` directives by design: emitting any of them
-    // disables Cargo's default "rerun build.rs when any package file changes".
-    // That default is exactly what keeps AGENTMUX_GIT_HASH / AGENTMUX_BUILD_TIME
-    // honest — build.rs re-runs whenever agentmux-cef is rebuilt, so the
-    // embedded metadata always describes the binary just produced. A commit
-    // that touches no agentmux-cef file yields no new binary; the prior binary
-    // (carrying its own correct metadata) is what continues to run. An explicit
-    // rerun-if-changed list would instead disable source-tree watching and go
-    // stale on ordinary source edits.
+    // No blanket `cargo:rerun-if-changed` directive by design: emitting even
+    // one disables Cargo's default "rerun build.rs when any package file
+    // changes" and replaces it with exactly the paths listed. That default is
+    // exactly what keeps AGENTMUX_GIT_HASH / AGENTMUX_BUILD_TIME honest —
+    // build.rs re-runs whenever agentmux-cef is rebuilt, so the embedded
+    // metadata always describes the binary just produced. A commit that
+    // touches no agentmux-cef file yields no new binary; the prior binary
+    // (carrying its own correct metadata) is what continues to run.
+    //
+    // AGENTMUX_CEF_VERSION below reads a file OUTSIDE this package
+    // (../Cargo.lock), which the implicit default does not cover — it only
+    // watches this crate's own directory. So we replicate that default
+    // explicitly (`.`) and add the lockfile alongside it: a `cef` version
+    // bump that touches only Cargo.lock, with no other agentmux-cef file
+    // changed, would otherwise rebuild against the new crate while reusing
+    // the stale cached AGENTMUX_CEF_VERSION (codex P2, PR #3266).
+    println!("cargo:rerun-if-changed=.");
+    println!("cargo:rerun-if-changed=../Cargo.lock");
 
     // Emit the target triple so we can locate sidecar binaries at runtime.
     println!(
