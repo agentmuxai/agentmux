@@ -1,5 +1,30 @@
 # AgentMux Version History
 
+## 0.56.2 — 2026-09-16
+
+- fix(term): take the per-keystroke SQLite read off the input path; release a shell's agent lease when it exits
+- fix(fonts): drop bundled JetBrains Mono — its calt ligatures blanked repeated punctuation on CEF 152
+- fix(muxbus): skip automatic cloud-session reconnect on non-stable channels to stop repeat Keychain prompts on local builds
+- refactor(fonts): consolidate the font variable system onto two canonical tokens
+- feat(agent-pane): typing exit in the shell drawer closes the shell and collapses the drawer
+- feat(shell): add muxsh — open editor/browser panes from the terminal
+- fix(term): close the blockinput agent-lock gap that let a human keystroke corrupt a pane an agent's PtyShell was mid-write to
+- feat(agent-pane): My Agents row menu — Delete/Duplicate/Rename/View History (relocated from pane header)
+- fix(agent-shell): re-attach the composer-drawer terminal when its sub-block is respawned
+- fix(term): drop the 1s exit delay for the agent pane's shell drawer
+- fix(macos): task package:macos now bakes a per-build local channel, matching Windows/Linux
+- fix(agent-delete): sweep the instance registry so a deleted agent's card actually disappears
+- fix(editor): stop discarding the first character typed into a file
+- feat(shell): DRY foundations for the muxsh collection — shared client lib + App API manifest contract tests
+- docs(startup): audit migrations + updates on the boot path, spec the Upgrade-owned model
+- fix(statusbar): stop status metrics from silently rendering the wrong font; add CEF version to Instance panel, drop redundant version row from Backend status
+- feat(srv): time the boot path and log one summary line at ESTART
+- fix(splash): summarize older sub-items and keep the newest rows when the panel overflows
+- fix(widgets): Slack widget opens the get-started/create-workspace page instead of the generic sign-in page
+- docs: fix stale "CEF 148" references in README and regenerate the architecture diagram for the CEF 152 collapse (#3231)
+- feat(muxbus): warn macOS users about the Keychain prompt before/after sign-in
+- feat(srv): a fallible pending-migration check that fails closed
+
 ## 0.56.1 — 2026-09-15
 
 - feat(term): close-on-exit — a shell pane now actually closes itself when its process exits
