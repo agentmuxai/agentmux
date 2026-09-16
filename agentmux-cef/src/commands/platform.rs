@@ -216,6 +216,7 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         "buildLabel": read_build_label(),
         "gitHash": env!("AGENTMUX_GIT_HASH"),
         "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
+        "cefVersion": env!("AGENTMUX_CEF_VERSION"),
         "channel": channel,
         "platform": match std::env::consts::OS {
             "macos" => "darwin",

@@ -262,6 +262,7 @@ partial list.
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
+| [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
@@ -299,6 +300,7 @@ partial list.
 | [`SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07`](SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md) | SPEC: Shared filesystem-watcher framework — audit + design |
 | [`SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03`](SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md) | SPEC: Shift+drag group resize — move all sibling panes together on one splitter drag |
 | [`SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17`](SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md) | SPEC: Shift+drag group resize — fix borders that move opposite the drag direction |
+| [`SPEC_SLACK_WIDGET_GET_STARTED_URL_2026_09_16`](SPEC_SLACK_WIDGET_GET_STARTED_URL_2026_09_16.md) | SPEC: Slack widget should open Slack's get-started/create-workspace page, not the generic sign-in page |
 | [`SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03`](SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md) | SPEC: srv hang-while-alive detection (#942 family) |
 | [`SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22`](SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md) | SPEC: subagent_watcher watches the identity-bound Claude config dir, not a stale spawn-time snapshot |
 | [`SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19`](SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md) | SPEC: Robust dispatch attribution + formalized session lifecycle for Swarm |
@@ -374,6 +376,7 @@ partial list.
 | [`PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17`](PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17.md) | Plan — enforce the same per-agent Claude auth isolation on macOS that already holds on Windows |
 | [`SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05`](SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md) | SPEC — Activity dock: title over-truncates; tail glyph renders wrong near the time |
 | [`SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22`](SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22.md) | Agent Busy Bar (Marching Ants) Refinement |
+| [`SPEC_AGENT_DELETE_2026_09_16`](SPEC_AGENT_DELETE_2026_09_16.md) | SPEC: Agent Row Actions Menu — Delete + Duplicate (My Agents picker) |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11`](SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) | SPEC: Agent History as a pane tab, composer draft preservation, and a scrolling link row |
 | [`SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04`](SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md) | SPEC — Tighten the agent-pane login flow: auto-unblock on external bind, "Bind account" button |
@@ -611,6 +614,7 @@ partial list.
 | [`SPEC_MODAL_TRANSITIONS_2026_05_18`](SPEC_MODAL_TRANSITIONS_2026_05_18.md) | SPEC: Modal Transitions & Chained-Flow Crossfades |
 | [`SPEC_MSSTORE_AUTOMATED_RELEASE_2026_06_29`](SPEC_MSSTORE_AUTOMATED_RELEASE_2026_06_29.md) | SPEC: Automated Microsoft Store Release (msstore CLI + GitHub Actions) |
 | [`SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15`](SPEC_MULTI_AGENT_VERSION_COORDINATION_2026_05_15.md) | SPEC: Multi-Agent Version Coordination |
+| [`SPEC_MULTI_FORMAT_RELEASE_MATRIX_2026_09_10`](SPEC_MULTI_FORMAT_RELEASE_MATRIX_2026_09_10.md) | Multi-Format, Multi-Arch Release Matrix |
 | [`SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03`](SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) | SPEC: Multi-Instance Isolation Hardening & Crash-Safety Verification |
 | [`SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06`](SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md) | SPEC: Multi-Session Agent Fork |
 | [`SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16`](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md) | MuxBus — Persistent-Agent Delivery & Unified Agent Discovery |
@@ -689,6 +693,7 @@ partial list.
 | [`SPEC_WARDEN_WIDGET_2026-05-25`](SPEC_WARDEN_WIDGET_2026-05-25.md) | Spec: Warden Widget |
 | [`SPEC_WAVE_TS_CLEANUP_2026_04_17`](SPEC_WAVE_TS_CLEANUP_2026_04_17.md) | SPEC: wave.ts Cleanup and Modularization |
 | [`SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_2026_06_24`](SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_2026_06_24.md) | SPEC: Widget Context Menu — "Open in New Window" + "Open in Floating Pane" |
+| [`SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_PHASE_2_2026_09_16`](SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_PHASE_2_2026_09_16.md) | SPEC: Widget Context Menu — Pinned-Bar Parity + "Open in New Tab" (Phase 2) |
 | [`SPEC_WIDGET_ICON_COLORS_2026-05-26`](SPEC_WIDGET_ICON_COLORS_2026-05-26.md) | SPEC: Top-bar widget icons — theme-driven, monochrome by default |
 | [`SPEC_WIDGET_LABEL_CASING_2026-05-27`](SPEC_WIDGET_LABEL_CASING_2026-05-27.md) | Widget & Pane Label Casing — Title-Case the User-Visible Names |
 | [`SPEC_WIDGET_OPEN_IN_NEW_WINDOW_2026_04_17`](SPEC_WIDGET_OPEN_IN_NEW_WINDOW_2026_04_17.md) | SPEC: Widget "Open in New Window" Context Menu |

@@ -211,6 +211,111 @@ impl StageTimeline {
     }
 }
 
+// ── Visible rows: summarize, then keep the latest in view ────────────────────
+
+/// How many of a stage's sub-items are rendered individually. Anything older
+/// collapses into a single tally row.
+///
+/// Two, not one: the newest sub-item is usually the one still running, and
+/// seeing only it gives no sense of progress — the one just finished, with its
+/// real duration, is what tells you the batch is moving. Anything beyond that
+/// is history the user cannot act on, which is exactly the "too many detailed
+/// entries" complaint in
+/// `docs/reports/REPORT_SPLASH_MIGRATION_ROW_OVERFLOW_AND_SUMMARY_2026_09_15.md`.
+pub const SUB_DETAIL_MAX: usize = 2;
+
+/// What one rendered line stands for. Platform renderers match on this and
+/// draw it their own way (GDI text, an `NSTextField` pair, a formatted
+/// string) — the *selection* of what to draw is shared, which is the part
+/// that was wrong in three places independently.
+pub enum RowKind<'a> {
+    Stage(&'a StageEntry),
+    Sub(&'a SubEntry),
+    /// Stands in for sub-items collapsed out of the detail list.
+    /// `done` of `total` sub-items in this stage have completed.
+    SubTally { done: usize, total: usize },
+}
+
+pub struct Row<'a> {
+    pub kind: RowKind<'a>,
+    /// Sub-items and tallies are indented under their stage; stages are not.
+    pub indented: bool,
+}
+
+/// The label for a collapsed-sub-items row. Shared so all three platforms
+/// word it identically.
+pub fn tally_label(done: usize, total: usize) -> String {
+    format!("{done}/{total} done")
+}
+
+/// Flatten `stages` into at most `budget` rows: summarize each stage's older
+/// sub-items into a tally, then — if that still doesn't fit — keep the
+/// **newest** rows rather than the oldest.
+///
+/// The keep-the-newest half is the behavior change. Every platform previously
+/// iterated stages oldest-first and stopped dead at its row cap
+/// (`if row >= MAX_STAGE_ROWS { break }`), so a long sub-item burst filled the
+/// panel with the *earliest* entries and never showed the one currently
+/// running — the opposite of what a progress display is for, and the reason a
+/// slow startup looked frozen rather than busy. See the report above.
+pub fn visible_rows(stages: &[StageEntry], budget: usize) -> Vec<Row<'_>> {
+    // One block per stage: its own row first, then its (summarized) sub rows.
+    // Trimming happens block-wise below — an indented row must never outlive
+    // the stage row it belongs under.
+    let mut blocks: Vec<Vec<Row<'_>>> = Vec::new();
+    for stage in stages {
+        let mut block = vec![Row { kind: RowKind::Stage(stage), indented: false }];
+        let subs = &stage.subs;
+        if subs.len() > SUB_DETAIL_MAX {
+            // Counted over ALL of the stage's sub-items, not just the hidden
+            // ones: this is the stage's progress ratio, so it has to keep
+            // rising as the two always-shown items finish too.
+            let done = subs.iter().filter(|s| s.done.is_some()).count();
+            block.push(Row {
+                kind: RowKind::SubTally { done, total: subs.len() },
+                indented: true,
+            });
+            for sub in &subs[subs.len() - SUB_DETAIL_MAX..] {
+                block.push(Row { kind: RowKind::Sub(sub), indented: true });
+            }
+        } else {
+            for sub in subs {
+                block.push(Row { kind: RowKind::Sub(sub), indented: true });
+            }
+        }
+        blocks.push(block);
+    }
+
+    // Fill from the newest block backwards. A block that only partially fits
+    // keeps its stage row plus as many of its newest sub rows as are left —
+    // never the children alone, which would render as indented rows dangling
+    // under whatever stage happened to precede them.
+    let mut out: Vec<Row<'_>> = Vec::new();
+    let mut remaining = budget;
+    for block in blocks.into_iter().rev() {
+        if remaining == 0 {
+            break;
+        }
+        let mut chunk: Vec<Row<'_>> = if block.len() <= remaining {
+            block
+        } else {
+            let mut it = block.into_iter();
+            let header = it.next().expect("every block starts with its stage row");
+            let subs: Vec<Row<'_>> = it.collect();
+            let keep = remaining - 1;
+            let skip = subs.len() - keep;
+            let mut chunk = Vec::with_capacity(remaining);
+            chunk.push(header);
+            chunk.extend(subs.into_iter().skip(skip));
+            chunk
+        };
+        remaining -= chunk.len();
+        chunk.append(&mut out);
+        out = chunk;
+    }
+    out
+}
+
 // ── Formatting ───────────────────────────────────────────────────────────────
 
 pub fn format_ms(ms: u64) -> String {
@@ -427,6 +532,144 @@ mod tests {
         tl.apply_tick(vec![end("prep", 100)]);
         tl.apply_tick(vec![begin("backend")]); // still running
         assert_eq!(accounted_ms(&tl.stages), 100);
+    }
+
+    /// Builds a timeline with one stage carrying `n` sub-items, the last of
+    /// which is still running — the shape a migration batch actually has.
+    fn timeline_with_subs(n: usize) -> StageTimeline {
+        let mut tl = StageTimeline::new();
+        tl.apply_tick(vec![begin("backend")]);
+        tl.apply_tick(vec![]);
+        for i in 0..n {
+            let id = format!("m{i:04}");
+            tl.apply_tick(vec![StartupEvent::SubBegin {
+                stage: "backend",
+                id: id.clone(),
+                label: format!("migration {i}"),
+            }]);
+            // Every sub but the last completes.
+            if i + 1 < n {
+                tl.apply_tick(vec![StartupEvent::SubEnd {
+                    stage: "backend",
+                    id,
+                    duration_ms: 10,
+                    status: StartupStatus::Ok,
+                    detail: None,
+                }]);
+            }
+        }
+        tl.apply_tick(vec![]);
+        tl
+    }
+
+    fn labels(rows: &[Row<'_>]) -> Vec<String> {
+        rows.iter()
+            .map(|r| match &r.kind {
+                RowKind::Stage(s) => s.label.to_string(),
+                RowKind::Sub(s) => s.label.clone(),
+                RowKind::SubTally { done, total } => tally_label(*done, *total),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_short_sub_list_is_shown_in_full_with_no_tally() {
+        let tl = timeline_with_subs(2);
+        let rows = visible_rows(&tl.stages, 12);
+        assert_eq!(labels(&rows), vec!["backend", "migration 0", "migration 1"]);
+    }
+
+    #[test]
+    fn a_long_sub_list_collapses_the_older_entries_into_a_tally() {
+        // 9 subs: 8 completed + 1 running. Detail keeps the newest two; the
+        // tally reports the stage's whole ratio, so 8 of 9 are done.
+        let tl = timeline_with_subs(9);
+        let rows = visible_rows(&tl.stages, 12);
+        assert_eq!(
+            labels(&rows),
+            vec!["backend", "8/9 done", "migration 7", "migration 8"],
+            "older sub-items must collapse into one tally, not occupy a row each"
+        );
+    }
+
+    #[test]
+    fn the_running_sub_item_survives_summarization() {
+        // The whole point of the display: whatever is happening right now
+        // must be on screen.
+        let tl = timeline_with_subs(20);
+        let rows = visible_rows(&tl.stages, 12);
+        let running = rows
+            .iter()
+            .filter_map(|r| match &r.kind {
+                RowKind::Sub(s) if s.done.is_none() => Some(s.label.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(running, vec!["migration 19"]);
+    }
+
+    #[test]
+    fn overflow_keeps_the_newest_rows_not_the_oldest() {
+        // The defect this function exists to fix: every platform used to
+        // iterate oldest-first and stop at the cap, so the newest rows —
+        // including the running one — were the ones dropped.
+        let mut tl = StageTimeline::new();
+        for stage in ["prep", "backend", "host", "cef_init", "paint"] {
+            tl.apply_tick(vec![begin(stage)]);
+            tl.apply_tick(vec![]);
+        }
+        let rows = visible_rows(&tl.stages, 3);
+        assert_eq!(labels(&rows), vec!["host", "cef_init", "paint"]);
+    }
+
+    #[test]
+    fn overflow_never_orphans_a_sub_row_from_its_stage() {
+        // ReAgent P1 / codex P2 on PR #3268: trimming the flat row list by
+        // count alone could cut inside a stage block, dropping the stage row
+        // while keeping its indented children — which then render dangling
+        // under whatever stage happened to precede them. Linux's 4-line
+        // budget hits this with an ordinary prep -> backend(migrations) ->
+        // host sequence.
+        let mut tl = timeline_with_subs(5); // "backend" + 5 subs
+        tl.apply_tick(vec![begin("host")]);
+        tl.apply_tick(vec![]);
+        let rows = visible_rows(&tl.stages, 4);
+
+        assert!(
+            matches!(rows[0].kind, RowKind::Stage(_)),
+            "the first visible row must be a stage row, never an orphaned child"
+        );
+        // Every indented row is preceded, somewhere above, by a stage row.
+        let mut seen_stage = false;
+        for row in &rows {
+            match row.kind {
+                RowKind::Stage(_) => seen_stage = true,
+                _ => assert!(seen_stage, "an indented row appeared before any stage row"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_partially_fitting_stage_keeps_its_header_over_its_oldest_child() {
+        // When only part of a block fits, the stage row is mandatory and the
+        // rows given up are its oldest (the tally first, then older detail).
+        let tl = timeline_with_subs(5);
+        let rows = visible_rows(&tl.stages, 2);
+        assert_eq!(labels(&rows), vec!["backend", "migration 4"]);
+    }
+
+    #[test]
+    fn a_zero_budget_yields_no_rows_rather_than_panicking() {
+        let tl = timeline_with_subs(5);
+        assert!(visible_rows(&tl.stages, 0).is_empty());
+    }
+
+    #[test]
+    fn stages_are_not_indented_but_subs_and_tallies_are() {
+        let tl = timeline_with_subs(9);
+        let rows = visible_rows(&tl.stages, 12);
+        let indents: Vec<bool> = rows.iter().map(|r| r.indented).collect();
+        assert_eq!(indents, vec![false, true, true, true]);
     }
 
     #[test]

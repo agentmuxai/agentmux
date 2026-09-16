@@ -97,9 +97,15 @@
         }
     }
 
+    // Intentionally --font-sans, not --font-mono: this class name predates
+    // SPEC/retro-statusbar-metrics-font-change-2026-09-16, which found these
+    // readouts had (by an invalid-CSS accident) always rendered in the UI's
+    // sans font, not a monospace one. Kept that look on purpose once it was
+    // fixed to apply for real — pick a value here deliberately if changing.
     .stat-mono {
-        font-family: var(--font-mono);
+        font-family: var(--font-sans);
         font-size: 11px;
+        letter-spacing: -0.02em;
         display: inline-block;
     }
 
@@ -278,6 +284,12 @@
         letter-spacing: 0.05em;
         opacity: 0.5;
         padding: var(--space-0-5) 0;
+    }
+
+    .status-bar-popover-hint {
+        font-size: 0.8em;
+        opacity: 0.6;
+        padding: 0 0 var(--space-0-5) 0;
     }
 
     /* Toggle switch used in the LAN discovery row.

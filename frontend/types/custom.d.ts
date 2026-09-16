@@ -588,6 +588,7 @@ declare global {
         gitHash?: string;
         buildTime: number;
         buildLabel?: string;
+        cefVersion?: string;
         channel?: string;
         platform?: string;
         arch?: string;

@@ -30,7 +30,7 @@ mod x11;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use crate::splash_core::{trunc, StageTimeline};
+use crate::splash_core::{tally_label, trunc, visible_rows, RowKind, StageTimeline};
 use crate::startup_events::{StartupEvent, StartupStatus};
 
 // ── Shared look (matches splash_mac.rs / splash.rs) ─────────────────────────
@@ -135,9 +135,20 @@ impl StageList {
     }
 
     /// Up to `STAGE_MAX_LINES` formatted lines for the stage band.
+    ///
+    /// Row selection — which sub-items are shown in detail, which collapse
+    /// into a tally, and which rows survive when the band overflows — is
+    /// `splash_core::visible_rows`, shared with the Windows and macOS
+    /// renderers. This file owns only the formatting. Before that, this
+    /// method showed `subs.last()` and nothing else, so a migration batch
+    /// was one ever-changing line with no sense of how far along it was,
+    /// and the stage loop stopped at the cap oldest-first, which could hide
+    /// the stage actually running.
     pub(super) fn lines(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for s in &self.timeline.stages {
+        for entry in visible_rows(&self.timeline.stages, STAGE_MAX_LINES) {
+            match entry.kind {
+                RowKind::Stage(s) => {
             let pfx = match &s.done {
                 None => ">> ",
                 Some((_, status, _)) => match status {
@@ -164,18 +175,18 @@ impl StageList {
             // #3223). `splash_core::trunc` is the same char-safe truncation
             // Windows/macOS already apply to their own stage/sub labels.
             out.push(format!("{pfx}{:<18}{:>5}ms", trunc(s.label, 18), ms));
-            if out.len() >= STAGE_MAX_LINES {
-                break;
-            }
-            // Show the last sub-item (e.g. most recent migration).
-            if let Some(sub) = s.subs.last() {
-                let sub_ms = match &sub.done {
-                    Some((ms, ..)) => *ms,
-                    None => sub.started_at.elapsed().as_millis() as u64,
-                };
-                out.push(format!("   >{:<16}{:>5}ms", trunc(&sub.label, 16), sub_ms));
-                if out.len() >= STAGE_MAX_LINES {
-                    break;
+                }
+                // Collapsed older sub-items. No duration column: the
+                // per-item times are exactly what this row stands in for.
+                RowKind::SubTally { done, total } => {
+                    out.push(format!("   >{:<16}", trunc(&tally_label(done, total), 16)));
+                }
+                RowKind::Sub(sub) => {
+                    let sub_ms = match &sub.done {
+                        Some((ms, ..)) => *ms,
+                        None => sub.started_at.elapsed().as_millis() as u64,
+                    };
+                    out.push(format!("   >{:<16}{:>5}ms", trunc(&sub.label, 16), sub_ms));
                 }
             }
         }

@@ -49,10 +49,14 @@ import {
     type JSX,
 } from "solid-js";
 
+import { pushNotification } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { ConfirmModal } from "@/element/modal";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
+import { ObjectService } from "@/app/store/services";
 import { formatTimeAgo } from "@/util/format-time";
 import { Logger } from "@/util/logger";
 import { resolveEffectiveVendor } from "../providers/catalog";
@@ -196,12 +200,92 @@ export interface MyAgentsListProps {
      * nothing to do with "first load."
      */
     onFirstLoad?: () => void;
+    /**
+     * Row-menu "View History" action — opens a read-only history tab for
+     * the row's agent. Delegates up to the parent (AgentPicker) because
+     * `openOrFocusHistoryTab` needs the PICKER's OWN blockId (the tab this
+     * list is rendered inside) to push the history tab onto, which this
+     * component has no reason to hold itself.
+     * docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.3.
+     */
+    onViewHistory?: (row: RecentSessionRow) => void;
 }
 
 type ForkState =
     | { kind: "idle" }
     | { kind: "prompt" } // showing "Open new session / Switch" buttons
     | { kind: "naming"; label: string; loading: boolean; error: string | null }; // name input expanded
+
+interface NamePromptProps {
+    /** Prompt above the input, e.g. "Rename to:". */
+    label: string;
+    placeholder: string;
+    value: string;
+    loading: boolean;
+    error: string | null;
+    /** Text on the confirm button; swapped for "…" while loading. */
+    submitLabel: string;
+    inputTestid: string;
+    submitTestid: string;
+    onInput: (value: string) => void;
+    onSubmit: () => void;
+    onCancel: () => void;
+}
+
+/**
+ * The "type a name, Enter to confirm, Escape to back out" sub-panel, shared
+ * by the fork prompt's session naming and the row menu's Rename
+ * (docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.3 — Rename was specified to
+ * "reuse the existing fork-prompt naming sub-pattern", which until now meant
+ * a second copy of the same markup, autofocus effect and key handling).
+ * Purely presentational: every piece of state lives in the caller's own
+ * per-row map.
+ */
+const NamePrompt = (props: NamePromptProps): JSX.Element => (
+    <div class="agent-fork-naming">
+        <label class="agent-fork-label">{props.label}</label>
+        <div class="agent-fork-input-row">
+            <input
+                type="text"
+                class="agent-fork-input"
+                value={props.value}
+                disabled={props.loading}
+                placeholder={props.placeholder}
+                data-testid={props.inputTestid}
+                onInput={(e) => props.onInput(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") props.onSubmit();
+                    if (e.key === "Escape") props.onCancel();
+                }}
+                ref={(el) => {
+                    createEffect(() => {
+                        if (!props.loading) el.focus();
+                    });
+                }}
+            />
+            <button
+                type="button"
+                class="agent-fork-btn agent-fork-btn--primary"
+                disabled={props.loading || !props.value.trim()}
+                onClick={() => props.onSubmit()}
+                data-testid={props.submitTestid}
+            >
+                {props.loading ? "…" : props.submitLabel}
+            </button>
+            <button
+                type="button"
+                class="agent-fork-btn agent-fork-btn--ghost"
+                onClick={() => props.onCancel()}
+                aria-label="Cancel"
+            >
+                ✕
+            </button>
+        </div>
+        <Show when={props.error}>
+            <span class="agent-fork-error">{props.error}</span>
+        </Show>
+    </div>
+);
 
 export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const filterId = createMemo(() => {
@@ -403,6 +487,230 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         setForkState(definitionId, { kind: "idle" });
     };
 
+    // Row actions menu (chevron-toggled, per row) — docs/specs/
+    // SPEC_AGENT_DELETE_2026_09_16.md §4.
+    //
+    // Exactly one row's menu can be open, so this is a single id rather
+    // than the keyed Map/Set idiom `forkStates` uses: "open another row's
+    // menu closes this one" is then the data model rather than a rule the
+    // setters have to maintain, and the "blur every OTHER row" spotlight
+    // below always has exactly one row excluded by construction.
+    const [openMenuId, setOpenMenuId] = createSignal<string | null>(null);
+    const isMenuOpen = (definitionId: string): boolean => openMenuId() === definitionId;
+    const toggleMenu = (definitionId: string): void => {
+        setOpenMenuId((prev) => {
+            if (prev === definitionId) return null;
+            // The menu and the inline panels all render at `top: 100%` of
+            // the same row, so two open at once would overlap. They are
+            // alternatives — reopening the chevron drops a half-typed
+            // rename/duplicate name, which is the predictable reading of
+            // "go back to the menu".
+            setRenameState(definitionId, null);
+            setForkState(definitionId, { kind: "idle" });
+            return definitionId;
+        });
+    };
+    const closeMenu = (definitionId: string): void => {
+        setOpenMenuId((prev) => (prev === definitionId ? null : prev));
+    };
+
+    // "Click elsewhere collapses it" (spec §4.2), plus Escape. The toggle
+    // and the panel are excluded: the toggle owns its own close (letting
+    // both fire on one click would close then immediately reopen), and a
+    // menu item closes as part of the action it runs. Capture phase so a
+    // click that lands on something calling stopPropagation still counts as
+    // "elsewhere" — the blurred rows set `pointer-events: none`, so those
+    // clicks reach the list container rather than a row.
+    const onDocumentPointerDown = (e: MouseEvent) => {
+        if (openMenuId() === null) return;
+        const target = e.target as Element | null;
+        if (target?.closest?.(".agent-row-menu, .agent-recent-sessions-menu-toggle")) return;
+        setOpenMenuId(null);
+    };
+    const onDocumentKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setOpenMenuId(null);
+    };
+    document.addEventListener("pointerdown", onDocumentPointerDown, true);
+    document.addEventListener("keydown", onDocumentKeyDown);
+    onCleanup(() => {
+        document.removeEventListener("pointerdown", onDocumentPointerDown, true);
+        document.removeEventListener("keydown", onDocumentKeyDown);
+    });
+
+    // Duplicate — reuses the EXISTING fork-and-launch flow unchanged
+    // (handleOpenNewSession/handleForkStart above, already wired to
+    // props.onFork = AgentPicker.handleFork). The naming UI that flow
+    // drives (the `agent-fork-prompt` block below) is already rendered
+    // per-row regardless of what triggered it; only its "already open in
+    // another pane" message needed to become conditional (see JSX below),
+    // since Duplicate reaches "naming" state directly without going
+    // through "prompt" first. Repo-owner-confirmed 2026-09-16: keep
+    // conversation history forking as-is (forkSession: true, unchanged).
+    const handleDuplicate = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        // Rename and Duplicate render two DIFFERENT inline panels into the
+        // same <li>, from two independent state maps — so opening one while
+        // the other was already open showed both name inputs stacked in one
+        // row (ReAgent P2 on PR #3262). They are alternatives, not
+        // companions: entering either closes the other.
+        setRenameState(row.definition_id, null);
+        void handleOpenNewSession(row);
+    };
+
+    // Rename — RenameAgentDefinitionTitleCommand already exists (used
+    // today for fork/stack-tab double-click-rename); this is its first
+    // My Agents row entry point. Keyed by definition_id like forkStates.
+    interface RenameState {
+        label: string;
+        loading: boolean;
+        error: string | null;
+    }
+    const [renameStates, setRenameStates] = createSignal<Map<string, RenameState>>(new Map());
+    const getRenameState = (definitionId: string): RenameState | null => renameStates().get(definitionId) ?? null;
+    const setRenameState = (definitionId: string, state: RenameState | null): void => {
+        setRenameStates((prev) => {
+            const next = new Map(prev);
+            if (state === null) next.delete(definitionId);
+            else next.set(definitionId, state);
+            return next;
+        });
+    };
+    const handleRenameOpen = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        // The other half of `handleDuplicate`'s mutual exclusion — see the
+        // comment there.
+        setForkState(row.definition_id, { kind: "idle" });
+        setRenameState(row.definition_id, { label: row.instance_name || row.definition_name, loading: false, error: null });
+    };
+    const handleRenameCancel = (definitionId: string): void => setRenameState(definitionId, null);
+    const handleRenameSubmit = async (row: RecentSessionRow): Promise<void> => {
+        const rs = getRenameState(row.definition_id);
+        if (!rs || !rs.label.trim()) return;
+        const title = rs.label.trim();
+        setRenameState(row.definition_id, { ...rs, loading: true, error: null });
+        try {
+            await RpcApi.RenameAgentDefinitionTitleCommand(TabRpcClient, { id: row.definition_id, title });
+            // Backend broadcasts "agents:changed" (template.rs) — the
+            // existing subscription above (line ~334) already refetches
+            // and picks up the new name; nothing else to update here.
+            setRenameState(row.definition_id, null);
+        } catch (err) {
+            setRenameState(row.definition_id, {
+                label: title,
+                loading: false,
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
+    };
+
+    /**
+     * A row is "expanded" while ANY of its inline panels is showing — the
+     * actions menu, the rename input, or the fork/duplicate prompt.
+     *
+     * The spotlight (blur every other row) and the overlay positioning are
+     * keyed to this rather than to the menu alone. Keying them to the menu
+     * meant clicking Rename or Duplicate — which closes the menu on its way
+     * to opening a panel — dropped the row out of the effect, so the
+     * neighbours un-blurred and the panel went back to pushing them down.
+     *
+     * A plain accessor, not a `createMemo`: a memo evaluates eagerly at
+     * creation, and `renameStates` is declared below this point, so it
+     * would be read inside its own temporal dead zone.
+     */
+    const isRowExpanded = (definitionId: string): boolean =>
+        isMenuOpen(definitionId) ||
+        getRenameState(definitionId) !== null ||
+        getForkState(definitionId).kind !== "idle";
+    const anyRowExpanded = (): boolean =>
+        openMenuId() !== null ||
+        renameStates().size > 0 ||
+        // `setForkState(id, {kind: "idle"})` leaves the entry in place
+        // rather than deleting it, so size alone would stay true forever
+        // after the first fork prompt was cancelled.
+        [...forkStates().values()].some((s) => s.kind !== "idle");
+
+    // View History — delegates to the parent; see onViewHistory's own doc
+    // comment on MyAgentsListProps for why this can't be self-contained.
+    const handleViewHistory = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        props.onViewHistory?.(row);
+    };
+
+    // Delete — single confirm-modal instance (not per-row: only one can be
+    // open at a time), reusing the already-hardened backend path
+    // (agent_def_delete purges every dependent table — see
+    // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §5.1).
+    const [deleteConfirmRow, setDeleteConfirmRow] = createSignal<RecentSessionRow | null>(null);
+    const handleDeleteOpen = (row: RecentSessionRow): void => {
+        closeMenu(row.definition_id);
+        setDeleteConfirmRow(row);
+    };
+    const confirmDelete = async (): Promise<void> => {
+        const row = deleteConfirmRow();
+        if (!row) return;
+        try {
+            await RpcApi.DeleteAgentDefinitionCommand(TabRpcClient, { id: row.definition_id });
+        } catch (e: unknown) {
+            setDeleteConfirmRow(null);
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Delete failed",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+            return;
+        }
+        setDeleteConfirmRow(null);
+        // Sweep EVERY pane open for this agent (spec §5.2). Not
+        // `props.openDefinitions` — that map is keyed by definition, so an
+        // agent open in two panes collapses to whichever block registered
+        // last and the others would keep running against a deleted agent
+        // (codex P2 on PR #3262). The map's shape is right for its other
+        // caller (the fork prompt just needs *a* pane to switch to); a
+        // sweep needs all of them.
+        //
+        // KNOWN LIMITATION, this renderer only: `slots` is module-local, so
+        // a pane for this agent in ANOTHER window (or a floating-pane
+        // window) is not swept and keeps running against a deleted agent
+        // (codex P2, second round). Closing it needs a backend-global block
+        // query or a cross-window broadcast — real work, not a wider
+        // `filter` here — so it is called out rather than silently implied
+        // to be handled. Tracked in SPEC_AGENT_DELETE_2026_09_16.md §5.2.
+        //
+        // Failures are reported, not swallowed: the agent and its
+        // credentials are already gone by this point, so a pane that
+        // wouldn't close is a live pane attached to a deleted agent, and
+        // the user is the only one who can do anything about it.
+        const failedBlockIds = (
+            await Promise.all(
+                getOpenBlockIdsForDefinition(row.definition_id).map((blockId) =>
+                    ObjectService.DeleteBlock(blockId).then(
+                        () => null,
+                        () => blockId
+                    )
+                )
+            )
+        ).filter((blockId): blockId is string => blockId !== null);
+        if (failedBlockIds.length > 0) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Agent deleted, but a pane stayed open",
+                message:
+                    `${failedBlockIds.length} pane${failedBlockIds.length === 1 ? "" : "s"} for ` +
+                    `${row.instance_name || row.definition_name} could not be closed and ` +
+                    `${failedBlockIds.length === 1 ? "is" : "are"} now running against a deleted ` +
+                    `agent. Close ${failedBlockIds.length === 1 ? "it" : "them"} manually.`,
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 12000,
+            });
+        }
+        // The row itself disappears via the existing "agents:changed"
+        // refetch subscription (line ~334) — no manual list mutation here.
+    };
+
     // Surfacing rules:
     // - rows.loading              → still loading (skeleton hint) — uses the
     //                                RESOURCE's own loading flag, not
@@ -525,14 +833,17 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     </Show>
                 }
             >
-                <ul class="agent-recent-sessions-list">
+                <ul class="agent-recent-sessions-list" classList={{ "has-expanded-row": anyRowExpanded() }}>
                     <For each={sortedRows()}>
                         {(row) => {
                             const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
                             const forkState = () => getForkState(row.definition_id);
 
                             return (
-                                <li class="agent-recent-sessions-row">
+                                <li
+                                    class="agent-recent-sessions-row"
+                                    classList={{ "is-expanded": isRowExpanded(row.definition_id) }}
+                                >
                                     <button
                                         type="button"
                                         class={`agent-recent-sessions-entry${isActive() ? " agent-recent-sessions-entry--active" : ""}`}
@@ -638,13 +949,99 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                         </span>
                                     </button>
 
+                                    {/* Row actions menu — chevron toggle + inline expand.
+                                        A SIBLING of the entry button above, not nested inside
+                                        it (nested buttons are invalid HTML, and the entry
+                                        button's own click would fire first regardless). See
+                                        docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1. */}
+                                    <button
+                                        type="button"
+                                        class="agent-recent-sessions-menu-toggle"
+                                        classList={{ "is-open": isMenuOpen(row.definition_id) }}
+                                        aria-label={`Actions for ${row.instance_name || row.definition_name}`}
+                                        aria-expanded={isMenuOpen(row.definition_id)}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleMenu(row.definition_id);
+                                        }}
+                                        data-testid="agent-my-agents-menu-toggle"
+                                    >
+                                        <i class="fa-sharp fa-solid fa-chevron-down" aria-hidden="true" />
+                                    </button>
+                                    <Show when={isMenuOpen(row.definition_id)}>
+                                        <div class="agent-row-menu" data-testid="agent-row-menu">
+                                            <button
+                                                type="button"
+                                                class="agent-row-menu-item"
+                                                onClick={() => handleRenameOpen(row)}
+                                            >
+                                                <i class="fa-sharp fa-solid fa-pen" aria-hidden="true" /> Rename
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="agent-row-menu-item"
+                                                onClick={() => handleDuplicate(row)}
+                                            >
+                                                <i class="fa-sharp fa-solid fa-clone" aria-hidden="true" /> Duplicate
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="agent-row-menu-item"
+                                                onClick={() => handleViewHistory(row)}
+                                            >
+                                                <i class="fa-sharp fa-solid fa-clock-rotate-left" aria-hidden="true" /> View
+                                                History
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="agent-row-menu-item agent-row-menu-item--danger"
+                                                onClick={() => handleDeleteOpen(row)}
+                                                data-testid="agent-my-agents-delete"
+                                            >
+                                                <i class="fa-sharp fa-solid fa-trash-can" aria-hidden="true" /> Delete
+                                            </button>
+                                        </div>
+                                    </Show>
+
+                                    {/* Inline rename input — same sibling-panel pattern as
+                                        the fork prompt below. */}
+                                    <Show when={getRenameState(row.definition_id)}>
+                                        {(rs) => (
+                                            <div class="agent-fork-prompt" data-testid="agent-rename-prompt">
+                                                <NamePrompt
+                                                    label="Rename to:"
+                                                    placeholder="Agent name"
+                                                    value={rs().label}
+                                                    loading={rs().loading}
+                                                    error={rs().error}
+                                                    submitLabel="Save"
+                                                    inputTestid="agent-rename-input"
+                                                    submitTestid="agent-rename-save"
+                                                    onInput={(label) =>
+                                                        setRenameState(row.definition_id, { ...rs(), label })
+                                                    }
+                                                    onSubmit={() => void handleRenameSubmit(row)}
+                                                    onCancel={() => handleRenameCancel(row.definition_id)}
+                                                />
+                                            </div>
+                                        )}
+                                    </Show>
+
                                     {/* Fork prompt — inline below the row */}
                                     <Show when={forkState().kind !== "idle"}>
                                         <div class="agent-fork-prompt" data-testid="agent-fork-prompt">
-                                            <span class="agent-fork-prompt-msg">
-                                                <strong>{row.instance_name || row.definition_name}</strong> is already
-                                                open in another pane.
-                                            </span>
+                                            {/* Only true when reached via the "already open" row
+                                                click (kind === "prompt") — Duplicate (this spec's
+                                                new entry point) jumps straight to "naming" without
+                                                that being the reason, so the message must not
+                                                assume it. Still shown for "naming" too when the row
+                                                genuinely happens to be open elsewhere. */}
+                                            <Show when={forkState().kind === "prompt" || isActive()}>
+                                                <span class="agent-fork-prompt-msg">
+                                                    <strong>{row.instance_name || row.definition_name}</strong> is
+                                                    already open in another pane.
+                                                </span>
+                                            </Show>
                                             <Show when={forkState().kind === "prompt"}>
                                                 <div class="agent-fork-prompt-actions">
                                                     <button
@@ -681,57 +1078,26 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 }
                                             >
                                                 {(ns) => (
-                                                    <div class="agent-fork-naming">
-                                                        <label class="agent-fork-label">Name for new session:</label>
-                                                        <div class="agent-fork-input-row">
-                                                            <input
-                                                                type="text"
-                                                                class="agent-fork-input"
-                                                                value={ns().label}
-                                                                disabled={ns().loading}
-                                                                placeholder="Session name"
-                                                                data-testid="agent-fork-name-input"
-                                                                onInput={(e) =>
-                                                                    setForkState(row.definition_id, {
-                                                                        kind: "naming",
-                                                                        label: e.currentTarget.value,
-                                                                        loading: false,
-                                                                        error: null,
-                                                                    })
-                                                                }
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === "Enter") void handleForkStart(row);
-                                                                    if (e.key === "Escape")
-                                                                        handleForkCancel(row.definition_id);
-                                                                }}
-                                                                ref={(el) => {
-                                                                    createEffect(() => {
-                                                                        if (!ns().loading) el.focus();
-                                                                    });
-                                                                }}
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                class="agent-fork-btn agent-fork-btn--primary"
-                                                                disabled={ns().loading || !ns().label.trim()}
-                                                                onClick={() => handleForkStart(row)}
-                                                                data-testid="agent-fork-start"
-                                                            >
-                                                                {ns().loading ? "…" : "Start"}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                class="agent-fork-btn agent-fork-btn--ghost"
-                                                                onClick={() => handleForkCancel(row.definition_id)}
-                                                                aria-label="Cancel"
-                                                            >
-                                                                ✕
-                                                            </button>
-                                                        </div>
-                                                        <Show when={ns().error}>
-                                                            <span class="agent-fork-error">{ns().error}</span>
-                                                        </Show>
-                                                    </div>
+                                                    <NamePrompt
+                                                        label="Name for new session:"
+                                                        placeholder="Session name"
+                                                        value={ns().label}
+                                                        loading={ns().loading}
+                                                        error={ns().error}
+                                                        submitLabel="Start"
+                                                        inputTestid="agent-fork-name-input"
+                                                        submitTestid="agent-fork-start"
+                                                        onInput={(label) =>
+                                                            setForkState(row.definition_id, {
+                                                                kind: "naming",
+                                                                label,
+                                                                loading: false,
+                                                                error: null,
+                                                            })
+                                                        }
+                                                        onSubmit={() => void handleForkStart(row)}
+                                                        onCancel={() => handleForkCancel(row.definition_id)}
+                                                    />
                                                 )}
                                             </Show>
                                         </div>
@@ -742,6 +1108,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     </For>
                 </ul>
             </Show>
+            <ConfirmModal
+                open={deleteConfirmRow() !== null}
+                title={`Delete ${deleteConfirmRow()?.instance_name || deleteConfirmRow()?.definition_name}?`}
+                description="This permanently deletes the agent and its credentials, skills, and activity history. Its bundle and any manually-saved transcripts are not affected. This cannot be undone."
+                confirmLabel="Delete"
+                destructive
+                onConfirm={confirmDelete}
+                onCancel={() => setDeleteConfirmRow(null)}
+            />
         </div>
     );
 };

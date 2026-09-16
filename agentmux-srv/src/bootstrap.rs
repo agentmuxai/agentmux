@@ -566,7 +566,37 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
     // first so the launcher/sidecar extend their ESTART deadline before the
     // (potentially slow) migration work begins.
-    let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
+    // Strict check, lenient reaction: this line only sizes the supervisors'
+    // ESTART deadline, and the migration batch runs unconditionally right
+    // below, so an unreadable store costs nothing here beyond a less precise
+    // hint — `readable_pending()` reproduces exactly the number this call
+    // site used before. It is logged rather than swallowed because the same
+    // question becomes a real decision point once the boot gate lands:
+    // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
+    // invariant S1b requires that gate to fail closed, and a store that
+    // cannot be read here is precisely the case it must catch.
+    let pre_migration_count = match migrations::try_count_pending_migrations(&wave_data_dir) {
+        Ok(n) => n,
+        Err(e) => {
+            let fallback = e.readable_pending();
+            // Distinguished because they mean different things to whoever
+            // reads the log: one store was readable and the count is
+            // partial, versus nothing was readable and the count is a
+            // placeholder.
+            match &e {
+                migrations::PendingCountError::ChannelStoreUnreadable { .. } => tracing::warn!(
+                    "startup: channel-scoped migrations could not be counted: {} — sizing the ESTART deadline with {} global",
+                    e,
+                    fallback
+                ),
+                _ => tracing::warn!(
+                    "startup: no pending-migration count available: {} — sizing the ESTART deadline as if none were pending",
+                    e
+                ),
+            }
+            fallback
+        }
+    };
     if pre_migration_count > 0 {
         eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
     }
@@ -613,7 +643,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 // open would silently orphan its conversation (the still-open
                 // half of docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md).
                 if let Some(shared_dir) = root.parent().and_then(|p| p.parent()) {
-                    let filled = backend::session_backfill::backfill_session_ids(&reg, shared_dir);
+                    let filled = crate::boot_timing::time("registry_session_backfill", || {
+                        backend::session_backfill::backfill_session_ids(&reg, shared_dir)
+                    });
                     if filled > 0 {
                         tracing::info!(filled, "registry: backfilled session_id for cross-channel resume (startup pass)");
                     }
@@ -647,10 +679,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
                 // Capture user-agent ids for the transcript backfill (below).
-                backfill_def_ids = def_store
-                    .list_active()
-                    .map(|v| v.into_iter().map(|r| r.data.id).collect())
-                    .unwrap_or_default();
+                backfill_def_ids = crate::boot_timing::time("def_store_list_active", || {
+                    def_store
+                        .list_active()
+                        .map(|v| v.into_iter().map(|r| r.data.id).collect())
+                        .unwrap_or_default()
+                });
                 wstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
             }
@@ -662,6 +696,22 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         }
     } else {
         tracing::warn!("def registry: could not resolve shared definitions dir — global definitions disabled");
+    }
+    // Both host-global trees are attached now, so they can be reconciled
+    // against each other. Best-effort catch-up pass run every startup, same
+    // shape as the session_id backfill above: drops instance records whose
+    // definition is tombstoned, which the picker would otherwise keep
+    // rendering as an iconless "(missing definition)" row — a deleted agent
+    // whose card never went away. New deletes sweep the registry themselves
+    // (`Store::agent_def_delete`); this is for the orphans already on disk.
+    if let (Some(reg), Some(defs)) = (
+        wstore_raw.shared_agent_registry(),
+        wstore_raw.shared_def_registry(),
+    ) {
+        let pruned = backend::registry_reconcile::prune_tombstoned_instance_records(&reg, &defs);
+        if pruned > 0 {
+            tracing::info!(pruned, "registry: dropped instance records for deleted agents (startup pass)");
+        }
     }
     let wstore = Arc::new(wstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
@@ -793,8 +843,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         // cross-channel open render empty (the read fallback can't anchor a block
         // that doesn't exist in the opening channel). Idempotent + cheap. See
         // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
-        let healed =
-            backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids);
+        let healed = crate::boot_timing::time("transcript_snapshot_heal", || {
+            backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids)
+        });
         if healed > 0 {
             tracing::info!(healed, "global transcripts: healed poisoned snapshot sourceBlockIds");
         }
@@ -816,7 +867,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // P1 PR #631). With this seed + the plain INSERT (no OR REPLACE)
     // in `start_saga`, ID collisions become impossible by
     // construction.
-    let saga_id_seed = saga_log.max_saga_id().unwrap_or_else(|e| {
+    let saga_id_seed = crate::boot_timing::time("saga_id_seed_scan", || saga_log.max_saga_id()).unwrap_or_else(|e| {
         tracing::warn!(
             "[saga] failed to read MAX(saga_id) for allocator seed: {} — defaulting to 0; ID collisions on restart possible until next successful query",
             e
@@ -867,7 +918,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
 
     // Auto-seed agent definitions on first launch (or empty DB)
-    backend::agent_seed::auto_seed_on_startup(&wstore);
+    crate::boot_timing::time("agent_auto_seed", || backend::agent_seed::auto_seed_on_startup(&wstore));
 
     // Keep AgentMux's own Operator Config (is_system=1 Global Memory) in
     // sync with the shipped manifest on every startup — not a one-time
