@@ -310,10 +310,27 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const cmStates = new Map<string, EditorState>();
     let activeTabIdForCm: string | null = null;
 
+    // Guards setupEditor against concurrent invocation. It is async and awaits
+    // `loadLanguage()` BETWEEN destroying the previous view and constructing
+    // the new one, so two calls that both start before either constructs will
+    // both find `cmView === null`, both skip the destroy, and both append an
+    // EditorView to the same container — leaving one orphaned: alive, in the
+    // DOM, holding its own listeners and able to take focus, but referenced by
+    // nothing and therefore never destroyed.
+    //
+    // The effect below calls it on `containerRef` mount and again when
+    // `loading` flips, ~2ms apart, so this happened on every file open.
+    //
+    // Separate defect from the first-keystroke discard fixed in
+    // editor-model.ts (a live trace showed a single view id there, so this
+    // race was not that bug) — but a real one, and cheap to close.
+    let setupGeneration = 0;
+
     // Build or rebuild CodeMirror when the active tab changes
     const setupEditor = async (content: string, language: string, readOnly: boolean) => {
         const container = containerRef();
         if (!container) return;
+        const gen = ++setupGeneration;
 
         // Destroy previous instance
         if (cmView) {
@@ -382,6 +399,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         // Load language extension
         const langExt = await loadLanguage(language);
         if (langExt) extensions.push(langExt);
+
+        // A later setupEditor() started while we awaited loadLanguage().
+        // Constructing now would append a SECOND EditorView to this container
+        // and orphan one of them (see setupGeneration above) — the newer call
+        // owns the view.
+        if (gen !== setupGeneration) return;
+        // Defensive: any view present now was constructed during our await, so
+        // drop it rather than stack another on top.
+        if (cmView) {
+            cmView.destroy();
+            cmView = null;
+        }
 
         cmView = new EditorView({
             state: EditorState.create({
@@ -466,6 +495,22 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     createEffect(() => {
         const activeId = model.activeIdAtom(); // reactive: tab change
         const loading = model.loadingAtom(); // reactive: wait for content
+        // Reactive on purpose (codex P1 on PR #3260): an external file change
+        // to a CLEAN active tab replaces the buffer and bumps _contentVersion,
+        // but leaves the tab already-loaded — so `loading` does not move and,
+        // once it is properly memoized, no longer re-runs this effect. Before
+        // that memoization the rebuild happened by accident, via loadingAtom
+        // subscribing to the whole tab object. Track the content itself so the
+        // reload path keeps working on purpose rather than as a side effect;
+        // without it the pane would show stale text and a later save could
+        // overwrite the external change.
+        //
+        // Safe against the bug this PR fixes: onContentChange() deliberately
+        // does NOT bump _contentVersion on keystrokes ("CodeMirror is the
+        // source of truth for the live buffer"), so typing cannot re-trigger
+        // this. And _maybeReloadTabs never clobbers a dirty tab, so this only
+        // fires for buffers the user has not edited.
+        model.contentAtom();
         // containerRef() is reactive: when the body <Show> mounts the container
         // after content loads, this effect re-runs and proceeds (fixes the
         // first-open blank-preview race).
@@ -486,7 +531,35 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
             // If we have a saved state for this tab, restore via setState
             // on the existing cmView (no destroy). Otherwise build fresh.
-            const saved = cmStates.get(activeId);
+            // Invalidate the cached snapshot when this tab's content was
+            // reloaded underneath us (reagent P1 x2 on PR #3260).
+            //
+            // cmStates is only ever cleared on TabClosed, so a tab switched
+            // away from and back still holds the EditorState captured at that
+            // switch. On an external file change the restore branch below would
+            // put that stale buffer back and `return` — never reaching
+            // setupEditor() with the freshly-read content — which is precisely
+            // the "stale text, later save clobbers the external change" case
+            // the contentAtom dependency above exists to prevent.
+            // Repro: open A, switch to B, switch back to A, modify A on disk.
+            //
+            // Compare the SNAPSHOT against the content, not the live cmView:
+            // `activeTabIdForCm` is reassigned a few lines above, so a
+            // "same tab?" guard here is always true, and at this point cmView
+            // still holds the OUTGOING tab's state. Comparing that against the
+            // incoming tab's content differs on every ordinary switch, which
+            // would delete the very snapshot about to be restored and break
+            // cursor/scroll/undo restoration for all clean tabs.
+            //
+            // Guarded on !dirty so it can never discard the user's own edits: a
+            // dirty buffer legitimately differs from the on-disk content, and
+            // _maybeReloadTabs never reloads a dirty tab anyway. Both reads are
+            // inside untrack(), so neither adds a dependency.
+            let saved = cmStates.get(activeId);
+            if (saved && !model.dirtyAtom() && saved.doc.toString() !== content) {
+                cmStates.delete(activeId);
+                saved = undefined;
+            }
             if (saved && cmView) {
                 cmView.setState(saved);
                 // Resync the pane-wide word-wrap setting — the restored state
