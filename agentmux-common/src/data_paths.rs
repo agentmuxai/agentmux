@@ -5,7 +5,7 @@
 //!
 //! Single source of truth for where state lives on disk. Replaces the
 //! launcher / host / sidecar trio of independent path computations
-//! (see docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md §3) and the
+//! (see docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md §3) and the
 //! per-version isolation pattern it set up (data was keyed on the
 //! build version so My Agents reset on every patch bump). The current
 //! model keys data on a *channel* — a stable identifier that spans
