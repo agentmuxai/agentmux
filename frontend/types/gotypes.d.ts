@@ -318,6 +318,11 @@ declare global {
         tabid: string;
         blockid: string;
         rtopts?: RuntimeOpts;
+        // Opt out of reviving an already-exited (STATUS_DONE) controller;
+        // the resync fails with RESYNC_ERR_ALREADY_EXITED instead. Defaults
+        // to false, i.e. the crash-recovery revive TermResyncHandler wants.
+        // See the Rust field's doc comment (rpc_types/block.rs).
+        norespawn?: boolean;
     };
 
     // wshrpc.CommandCreateBlockData

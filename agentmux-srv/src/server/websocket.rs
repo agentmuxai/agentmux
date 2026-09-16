@@ -997,6 +997,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     block_id = %cmd.blockid,
                     tab_id = %cmd.tabid,
                     forcerestart = cmd.forcerestart,
+                    norespawn = cmd.norespawn,
                     "ControllerResync"
                 );
                 let block: Block = wstore
@@ -1009,7 +1010,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     &cmd.tabid,
                     cmd.rtopts,
                     cmd.forcerestart,
-                    true,
+                    // respawn_if_done — see `norespawn`'s own doc comment.
+                    // Default (false → true here) preserves TermResyncHandler's
+                    // crash-recovery behaviour for every existing caller.
+                    !cmd.norespawn,
                     Some(broker),
                     Some(event_bus),
                     Some(wstore),

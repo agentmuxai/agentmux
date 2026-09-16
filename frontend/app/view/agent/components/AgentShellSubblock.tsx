@@ -18,6 +18,8 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sendWSCommand } from "@/app/store/ws";
+import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { WOS, atoms, staticTabId } from "@/app/store/global";
 import { stringToBase64 } from "@/util/util";
 import { TermWrap } from "@/app/view/term/termwrap";
@@ -78,6 +80,20 @@ interface AgentShellSubblockProps {
      *  parent can drop its write closure rather than risk calling `.write`
      *  on a disposed `Terminal` (`TermWrap.dispose()` doesn't null it out). */
     onTermDispose?: () => void;
+    /**
+     * Fired when this shell's PROCESS ended cleanly — the human typed `exit`
+     * (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md). Distinct
+     * from `onTermDispose`, which also fires on ordinary unmount (drawer
+     * close, pane dispose) and so cannot carry "the process ended" without
+     * becoming ambiguous.
+     *
+     * Clean exits only (exit code 0), per that spec's §5 open question: a
+     * crash or a backend restart produces the same `STATUS_DONE`, and
+     * collapsing the drawer there would hide the very output the human needs
+     * to read. A non-zero exit leaves the drawer open with its scrollback
+     * intact.
+     */
+    onShellExited?: () => void;
 }
 
 const BASE_FONT_SIZE = 13;
@@ -160,6 +176,103 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         return typeof v === "number" ? v : 0;
     });
     const agentLocked = createMemo(() => agentLockedUntil() > nowTick());
+
+    // Process-exit detection (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md).
+    //
+    // Subscribes to `controllerstatus` for THIS SUB-BLOCK's id — not the
+    // parent agent block's, which agent-view.tsx separately subscribes to for
+    // turn tracking. Without this the drawer never learns its shell died: it
+    // keeps rendering a dead terminal that silently accepts no input, and the
+    // human who just typed `exit` has to close the drawer by hand.
+    //
+    // Backend close-on-exit cannot do this job. It is deliberately scoped to
+    // top-level panes (`!is_sub_block`, shell/lifecycle.rs) because its close
+    // action deletes the block and prunes the tab layout — for a drawer shell
+    // that leaves the parent's `term:shellsubblockid` dangling and the
+    // attach-or-create path respawns a replacement, which is the respawn loop
+    // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11 fixed. So the collapse is
+    // driven here, from the event the backend already publishes.
+    //
+    // Fires at most once per mount: `STATUS_DONE` can be published more than
+    // once for one block (a status re-publish, a resync), and the parent's
+    // handler tears down real state — deleting a sub-block twice races the
+    // second delete against a fresh shell the human may have opened since.
+    //
+    // Subscribed from an effect, not `onMount`: a freshly created shell has
+    // no id at mount (the async IIFE below assigns it), so a one-shot mount
+    // subscription would bind to an empty scope and never fire — the common
+    // case of opening the drawer for the first time. The effect re-subscribes
+    // when the id arrives, and its `onCleanup` unsubscribes the previous one.
+    // How this shell's process ended, if we have been told at all — set from
+    // the `controllerstatus` subscription below (live OR replayed). `undefined`
+    // means "no exit observed", which is NOT the same as "exited cleanly" and
+    // must never be treated as permission to delete anything.
+    let lastObservedExitCode: number | undefined;
+
+    createEffect(() => {
+        const id = subBlockId();
+        if (!id) return;
+        // Per-subscription, not per-mount: a fresh shell created after this
+        // one exits gets its own scope, and must arm independently.
+        let sawRunning = false;
+        let exitNotified = false;
+        const unsub = waveEventSubscribe({
+            eventType: WpsEvent.ControllerStatus,
+            scope: WOS.makeORef("block", id),
+            handler: (event) => {
+                const data = event?.data as
+                    | { shellprocstatus?: unknown; shellprocexitcode?: unknown }
+                    | undefined;
+                if (!data) return;
+                if (data.shellprocstatus === "running") {
+                    sawRunning = true;
+                    return;
+                }
+                if (data.shellprocstatus !== "done") return;
+                // Record HOW it ended before deciding whether to act on it.
+                // The attach path below consults this to tell an exit it may
+                // safely clean up (clean) from one whose scrollback is the
+                // only record of what went wrong (crash) — see its own
+                // comment. Set for replayed exits too, which is the whole
+                // point: a crash that happened while the drawer was closed is
+                // knowable ONLY from the replay.
+                lastObservedExitCode =
+                    typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
+                // ONLY act on an exit we watched happen.
+                //
+                // ReAgent P0 on PR #3253: `controllerstatus` is published with
+                // `persist: 1` precisely so a subscriber is replayed the
+                // CURRENT status on first subscribe to a scope
+                // (blockcontroller/mod.rs, wps.rs's `replay_to_route`). So a
+                // shell that exited while the drawer was closed — an agent
+                // finishing work in the shared shell, the supported case in
+                // §3.3 of this feature's spec — delivers its old `done`
+                // synchronously the moment this effect subscribes. Acting on
+                // it would collapse the drawer the human just opened *to read
+                // that output*, and the teardown deletes the sub-block, taking
+                // its persisted `term` file with it. Not hidden — gone.
+                //
+                // A replayed exit is distinguishable from a live one by what
+                // came before it: a live exit is always preceded by the
+                // `running` status this shell published while it was alive
+                // (replayed too, for a shell that IS alive). No `running`
+                // means the shell was already over before we got here, which
+                // is the attach path's problem — it resyncs with `norespawn`
+                // and falls through to creating a genuinely fresh shell.
+                if (!sawRunning) return;
+                // `shellprocexitcode` is `#[serde(default)]` on the wire, so a
+                // clean exit can arrive as 0 or be omitted entirely — both
+                // mean "exited 0". Anything else is a crash/failure and keeps
+                // the drawer open so its output stays readable.
+                const code = typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
+                if (code !== 0) return;
+                if (exitNotified) return;
+                exitNotified = true;
+                props.onShellExited?.();
+            },
+        });
+        onCleanup(() => unsub());
+    });
     const termFontSize = createMemo(() => {
         const paneZoom = props.agentPaneZoom() || 1;
         return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));
@@ -273,18 +386,63 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                     // looks normal but silently accepts no input. Confirmed live
                     // via CDP against a session that had been through several dev
                     // rebuild restarts.
+                    //
+                    // `norespawn` covers the OTHER way this id can be dead: the
+                    // shell exited while the drawer was closed (the human
+                    // `exit`ed and reopened, or an agent sharing this shell
+                    // exited it), so the live exit subscription below — which
+                    // only exists while mounted — never saw it. Without the
+                    // flag, resync's default is to silently REVIVE a
+                    // STATUS_DONE controller in place, appending a fresh
+                    // startup banner to this block's append-only `term` file
+                    // on every reopen: the respawn-loop symptom
+                    // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md fixed on the
+                    // PtyShellCreate side (§7). With it, an exited shell
+                    // surfaces as an error and takes the same fall-through as
+                    // a vanished one — a genuinely fresh shell, clean
+                    // scrollback — and the dead block is deleted rather than
+                    // left orphaned. Codex P2 on PR #3253.
                     try {
                         await RpcApi.ControllerResyncCommand(TabRpcClient, {
                             tabid: staticTabId(),
                             blockid: id,
                             forcerestart: false,
+                            norespawn: true,
                         });
                         isExistingBlock = true;
                     } catch (e) {
                         console.warn(
-                            "AgentShellSubblock: existing sub-block is stale, creating a fresh one:",
+                            "AgentShellSubblock: existing sub-block is stale or already exited, creating a fresh one:",
                             e
                         );
+                        // Delete the dead block ONLY on a positively-known
+                        // CLEAN exit.
+                        //
+                        // ReAgent P0 (round 2) on PR #3253: deleting on any
+                        // resync failure destroys the block's persisted `term`
+                        // file — and for a shell that CRASHED while the drawer
+                        // was closed, that file is the only record of what went
+                        // wrong. The live-exit listener above already refuses to
+                        // collapse on a non-zero exit for exactly this reason
+                        // (spec §5); doing it here anyway would reproduce the
+                        // same "not hidden — gone" data loss through the attach
+                        // path instead of the collapse path.
+                        //
+                        // `undefined` (no exit observed — a genuinely vanished
+                        // block, or a status we were never told) is NOT treated
+                        // as clean: skipping the delete costs at worst a dead
+                        // block lingering until the pane closes, while getting
+                        // it wrong costs the user their diagnostics. A vanished
+                        // block needs no delete anyway — it is already gone.
+                        if (lastObservedExitCode === 0) {
+                            void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
+                        } else {
+                            console.warn(
+                                `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
+                                    `${lastObservedExitCode ?? "unknown"}) — its scrollback may be the ` +
+                                    `only record of why the shell ended`
+                            );
+                        }
                         id = undefined;
                     }
                 }

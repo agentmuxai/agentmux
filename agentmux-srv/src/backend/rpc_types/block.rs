@@ -77,6 +77,23 @@ pub struct CommandControllerResyncData {
     pub blockid: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rtopts: Option<serde_json::Value>,
+    /// Opt OUT of `resync_controller`'s default "revive a `STATUS_DONE`
+    /// controller" behaviour, surfacing `RESYNC_ERR_ALREADY_EXITED` instead.
+    ///
+    /// That default is right for this command's original caller — `term.tsx`'s
+    /// `TermResyncHandler`, whose whole job is transparently reviving a shell
+    /// that died in a crash or backend restart. It is wrong for a caller that
+    /// is only ASKING whether the shell is still alive: the agent pane's
+    /// drawer reattaching on open (`AgentShellSubblock.tsx`) would otherwise
+    /// silently resurrect a shell the human had deliberately `exit`ed,
+    /// appending a fresh banner to the block's append-only `term` file — the
+    /// respawn-loop symptom SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md fixed on
+    /// the `PtyShellCreate` side (§7-8) and this closes on the drawer side.
+    ///
+    /// Defaults to `false`, so every existing caller keeps the old behaviour
+    /// without sending the field. Codex P2 on PR #3253.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub norespawn: bool,
 }
 
 /// Matches Go's `CommandBlockInputData`
