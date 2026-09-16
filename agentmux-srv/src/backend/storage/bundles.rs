@@ -87,6 +87,17 @@ fn default_json_array_string() -> String {
     "[]".to_string()
 }
 
+/// Outcome of `Store::bundle_reseed_system_if_owned` — see that method's own
+/// doc comment for what each variant means and why the decision is made
+/// atomically rather than by the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleReseedOutcome {
+    Created,
+    Updated,
+    Unchanged,
+    SkippedLocalEdit,
+}
+
 fn default_json_object_string() -> String {
     "{}".to_string()
 }
@@ -512,6 +523,140 @@ impl Store {
 
         tx.commit()?;
         Ok(version)
+    }
+
+    /// Atomically decide-and-apply an Operator Config reseed for one system
+    /// row — the ownership check (is this row still owned by AgentMux's own
+    /// seeder, or has a human/another writer claimed it) and the resulting
+    /// write happen inside the SAME transaction, not as two separate `Store`
+    /// calls composed by the caller. A caller-composed version (read latest
+    /// version via `bundle_version_list`, decide, then separately call
+    /// `bundle_upsert_system_with_version`) is a check-then-act race: a
+    /// concurrent writer — a human editing this row via the Armory UI, or
+    /// another AgentMux instance's own startup reseed, since multiple
+    /// instances can run in parallel by design — could land a new version
+    /// between the read and the write, and the caller's decision would be
+    /// based on data that was already stale by the time it acted (ReAgent
+    /// P1, PR #3244).
+    ///
+    /// `seeder_identity` is the reserved `written_by` value that marks a row
+    /// as still owned by the seeder (see `operator_config_seed::WRITTEN_BY`)
+    /// — a latest version written by anything else means a human (or some
+    /// other writer) has claimed this row, and it is left alone.
+    ///
+    /// - No existing `db_bundles` row at all -> always (re)create. This
+    ///   covers both a brand-new manifest entry and one whose row was
+    ///   deleted (`bundle_delete_system`, which removes only `db_bundles`
+    ///   and leaves the append-only `db_bundle_versions` history behind) —
+    ///   checking row existence directly, not merely "is history non-empty,"
+    ///   is what lets a deleted entry come back instead of silently staying
+    ///   absent forever once its manifest content stops changing (Codex P2,
+    ///   PR #3244).
+    /// - Existing row, latest version's `written_by != seeder_identity` ->
+    ///   `SkippedLocalEdit`, no write at all.
+    /// - Existing row, latest version's `content_hash` already matches the
+    ///   target (`name`+`instructions`) -> `Unchanged`, no write.
+    /// - Otherwise -> upsert + version insert, `Updated`.
+    pub fn bundle_reseed_system_if_owned(
+        &self,
+        memory: &Bundle,
+        seeder_identity: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<BundleReseedOutcome, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing_is_system: Option<i64> = tx
+            .query_row(
+                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let row_exists = existing_is_system.is_some();
+
+        if existing_is_system == Some(0) {
+            return Err(StoreError::Other(
+                "cannot convert an existing non-system Global Memory entry into a system entry"
+                    .to_string(),
+            ));
+        }
+
+        if row_exists {
+            let latest: Option<(String, String)> = tx
+                .query_row(
+                    "SELECT written_by, content_hash FROM db_bundle_versions
+                     WHERE bundle_id = ?1
+                     ORDER BY created_at DESC, rowid DESC
+                     LIMIT 1",
+                    params![memory.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((written_by, content_hash)) = latest {
+                if written_by != seeder_identity {
+                    return Ok(BundleReseedOutcome::SkippedLocalEdit);
+                }
+                let target_hash = super::bundle_versions::content_hash(&memory.name, &memory.instructions);
+                if content_hash == target_hash {
+                    return Ok(BundleReseedOutcome::Unchanged);
+                }
+            }
+        }
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        bundle_version_insert_tx(
+            &tx,
+            &memory.id,
+            &memory.name,
+            &memory.instructions,
+            source,
+            source_detail,
+            seeder_identity,
+        )?;
+
+        tx.commit()?;
+        Ok(if row_exists {
+            BundleReseedOutcome::Updated
+        } else {
+            BundleReseedOutcome::Created
+        })
     }
 
     /// Delete a Bundle. Refuses to delete the blank singleton, a

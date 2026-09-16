@@ -203,8 +203,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     memory.created_at = now;
                 }
                 memory.updated_at = now;
+                // Must append a db_bundle_versions row (not the plain
+                // bundle_upsert_system) so a human's edit here is stamped
+                // written_by="armory-ui" — otherwise the latest version for
+                // this row stays attributed to operator_config_seed's own
+                // reserved identity from whenever it was last (re)seeded,
+                // and the next startup's reseed would treat this row as
+                // still seeder-owned and silently overwrite the human's
+                // edit. Codex P1, PR #3244.
                 wstore
-                    .bundle_upsert_system(&memory)
+                    .bundle_upsert_system_with_version(&memory, "armory-ui", "human", "{}")
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),

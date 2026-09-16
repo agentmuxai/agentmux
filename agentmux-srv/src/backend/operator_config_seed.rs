@@ -15,27 +15,30 @@
 //! edit an Operator Config entry today via the unified Armory
 //! `MemoryEditor`, and the *entire* value of an entry is its content, so
 //! there is no separate "identity field" to diff against safely. Instead
-//! this module looks at the latest `db_bundle_versions` row for each
-//! manifest id — if `written_by` is this module's own reserved identity
-//! (`WRITTEN_BY`), it's safe to overwrite; if it's anything else (an
-//! `armory-ui` human edit), the manifest update is skipped and logged
-//! rather than clobbering it.
+//! `Store::bundle_reseed_system_if_owned` looks at the latest `db_bundle_
+//! versions` row for each manifest id — if `written_by` is this module's
+//! own reserved identity (`WRITTEN_BY`), it's safe to overwrite; if it's
+//! anything else (an `armory-ui` human edit), the manifest update is
+//! skipped and logged rather than clobbering it. That check-and-write
+//! happens atomically at the `Store` layer, not as two separate calls
+//! composed here — see that method's own doc comment (ReAgent P1, PR
+//! #3244, a check-then-act race in an earlier version of this module).
 
 use std::sync::Arc;
 
 use serde::Deserialize;
 
 use super::storage::bundles::Bundle;
-use super::storage::bundle_versions::content_hash;
 use super::storage::store::Store;
-use super::storage::StoreError;
+use super::storage::{BundleReseedOutcome, StoreError};
 
 /// The reserved `written_by` identity this seeder stamps on every version it
 /// writes. Never used by any other caller — an agent's own write stamps its
 /// real `AGENTMUX_AGENT_ID`, a human edit via the Armory UI stamps
-/// `"armory-ui"` (`bundle.rs`'s `upsertsystemmemory` handler) — so seeing
-/// this exact value on the latest version is what tells `auto_seed_on_
-/// startup` that nothing but AgentMux itself has touched the row since.
+/// `"armory-ui"` (`bundle.rs`'s `upsertsystemmemory` handler, via `bundle_
+/// upsert_system_with_version`) — so seeing this exact value on the latest
+/// version is what tells `bundle_reseed_system_if_owned` that nothing but
+/// AgentMux itself has touched the row since.
 pub const WRITTEN_BY: &str = "agentmux-operator-config-seed";
 
 const SEED_MANIFEST: &str = include_str!("../../operator-config-seed.json");
@@ -43,8 +46,8 @@ const SEED_MANIFEST: &str = include_str!("../../operator-config-seed.json");
 #[derive(Debug, Deserialize)]
 struct SeedManifest {
     /// Informational/loggable only, same as `agent-seed.json`'s own
-    /// `version` field — the reseed decision below is content-hash-based,
-    /// not a version-number comparison (see this module's own doc comment).
+    /// `version` field — the reseed decision is content-hash-based, not a
+    /// version-number comparison (see this module's own doc comment).
     version: u32,
     entries: Vec<SeedEntry>,
 }
@@ -54,13 +57,6 @@ struct SeedEntry {
     id: String,
     name: String,
     instructions: String,
-}
-
-enum SeedOutcome {
-    Created,
-    Updated,
-    Unchanged,
-    SkippedLocalEdit,
 }
 
 /// Run Operator Config seeding on startup. Unconditional, every boot, no
@@ -80,10 +76,10 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
 
     for entry in &manifest.entries {
         match seed_one(wstore, entry) {
-            Ok(SeedOutcome::Created) => created += 1,
-            Ok(SeedOutcome::Updated) => updated += 1,
-            Ok(SeedOutcome::Unchanged) => unchanged += 1,
-            Ok(SeedOutcome::SkippedLocalEdit) => {
+            Ok(BundleReseedOutcome::Created) => created += 1,
+            Ok(BundleReseedOutcome::Updated) => updated += 1,
+            Ok(BundleReseedOutcome::Unchanged) => unchanged += 1,
+            Ok(BundleReseedOutcome::SkippedLocalEdit) => {
                 skipped_local += 1;
                 tracing::info!(
                     id = %entry.id,
@@ -112,20 +108,7 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
     }
 }
 
-fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry) -> Result<SeedOutcome, StoreError> {
-    let history = wstore.bundle_version_list(&entry.id)?;
-    let target_hash = content_hash(&entry.name, &entry.instructions);
-    let is_new = history.is_empty();
-
-    if let Some(latest) = history.first() {
-        if latest.written_by != WRITTEN_BY {
-            return Ok(SeedOutcome::SkippedLocalEdit);
-        }
-        if latest.content_hash == target_hash {
-            return Ok(SeedOutcome::Unchanged);
-        }
-    }
-
+fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry) -> Result<BundleReseedOutcome, StoreError> {
     let now = agentmux_common::time::now_ms();
     let bundle = Bundle {
         id: entry.id.clone(),
@@ -146,8 +129,7 @@ fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry) -> Result<SeedOutcome, Store
         is_system: true,
     };
 
-    wstore.bundle_upsert_system_with_version(&bundle, WRITTEN_BY, "agentmux_operator_config_seed", "{}")?;
-    Ok(if is_new { SeedOutcome::Created } else { SeedOutcome::Updated })
+    wstore.bundle_reseed_system_if_owned(&bundle, WRITTEN_BY, "agentmux_operator_config_seed", "{}")
 }
 
 #[cfg(test)]
@@ -182,7 +164,7 @@ mod tests {
         let store = test_store();
         let e = entry("op-1", "Operator One", "body one");
         let outcome = seed_one(&store, &e).unwrap();
-        assert!(matches!(outcome, SeedOutcome::Created));
+        assert!(matches!(outcome, BundleReseedOutcome::Created));
 
         let bundle = store.bundle_get("op-1").unwrap().expect("row exists");
         assert!(bundle.is_system);
@@ -201,7 +183,7 @@ mod tests {
         seed_one(&store, &e).unwrap();
 
         let outcome = seed_one(&store, &e).unwrap();
-        assert!(matches!(outcome, SeedOutcome::Unchanged));
+        assert!(matches!(outcome, BundleReseedOutcome::Unchanged));
         assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 1, "no new version on no-op");
     }
 
@@ -213,7 +195,7 @@ mod tests {
 
         let e2 = entry("op-1", "Operator One", "body TWO");
         let outcome = seed_one(&store, &e2).unwrap();
-        assert!(matches!(outcome, SeedOutcome::Updated));
+        assert!(matches!(outcome, BundleReseedOutcome::Updated));
 
         let bundle = store.bundle_get("op-1").unwrap().unwrap();
         assert_eq!(bundle.instructions, "body TWO");
@@ -221,29 +203,67 @@ mod tests {
     }
 
     /// The load-bearing guarantee (spec §3.3, §5 test plan): a human edit
-    /// through the Armory UI (`written_by = "armory-ui"`) must survive the
-    /// next startup's reseed even though the manifest content differs from
-    /// what's stored.
+    /// through the Armory UI must survive the next startup's reseed even
+    /// though the manifest content differs from what's stored. Simulated via
+    /// `bundle_upsert_system_with_version(..., "armory-ui", ...)` — the exact
+    /// call `upsertsystemmemory` (`bundle.rs`) now makes for a real UI save —
+    /// not a raw `bundle_version_insert`, so this test actually exercises the
+    /// bug ReAgent/Codex flagged on PR #3244: an earlier revision of the real
+    /// handler called the non-versioned `bundle_upsert_system`, which left no
+    /// version behind at all, so the ownership check never saw the edit and
+    /// would have silently overwritten it on the next reseed.
     #[test]
     fn locally_edited_entry_is_never_overwritten() {
         let store = test_store();
         let e1 = entry("op-1", "Operator One", "body one");
         seed_one(&store, &e1).unwrap();
 
-        // Simulate a human editing this system entry via the Armory UI.
-        store
-            .bundle_version_insert("op-1", "Operator One", "human-edited body", "human", "{}", "armory-ui")
-            .unwrap();
+        // Simulate a human editing this system entry via the real Armory UI
+        // save path (`upsertsystemmemory` -> `bundle_upsert_system_with_version`).
+        let edited = Bundle {
+            id: "op-1".to_string(),
+            name: "Operator One".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: "human-edited body".to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: true,
+        };
+        store.bundle_upsert_system_with_version(&edited, "armory-ui", "human", "{}").unwrap();
 
         let e2 = entry("op-1", "Operator One", "AgentMux wants to change this");
         let outcome = seed_one(&store, &e2).unwrap();
-        assert!(matches!(outcome, SeedOutcome::SkippedLocalEdit));
+        assert!(matches!(outcome, BundleReseedOutcome::SkippedLocalEdit));
 
-        // db_bundles itself is untouched by seed_one when skipped — still
-        // whatever bundle_upsert_system last wrote (the original seed), the
-        // version-only simulated edit above didn't touch db_bundles.
         let bundle = store.bundle_get("op-1").unwrap().unwrap();
-        assert_eq!(bundle.instructions, "body one", "seed_one made no db_bundles write on skip");
+        assert_eq!(bundle.instructions, "human-edited body", "seed_one made no db_bundles write on skip");
+    }
+
+    /// Codex P2, PR #3244: `bundle_delete_system` removes only `db_bundles`,
+    /// leaving the append-only version history behind. A reseed must notice
+    /// the row itself is gone and recreate it, not take the "unchanged"
+    /// shortcut just because the stale history's content hash still matches.
+    #[test]
+    fn deleted_entry_is_recreated_even_when_manifest_content_is_unchanged() {
+        let store = test_store();
+        let e = entry("op-1", "Operator One", "body one");
+        seed_one(&store, &e).unwrap();
+        assert!(store.bundle_delete_system("op-1").unwrap(), "row deleted");
+        assert!(store.bundle_get("op-1").unwrap().is_none());
+        assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 1, "history survives the delete");
+
+        let outcome = seed_one(&store, &e).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::Created), "row existence, not history, gates recreation");
+        assert!(store.bundle_get("op-1").unwrap().is_some());
     }
 
     #[test]
