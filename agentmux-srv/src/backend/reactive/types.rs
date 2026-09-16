@@ -531,3 +531,60 @@ pub type MessageSender = Arc<dyn Fn(&str, &str) -> Result<bool, String> + Send +
 /// `None` is treated as "unverifiable," not "confirmed absent," so delivery
 /// proceeds unaffected when no positive check is possible.
 pub type AgentIdentityConfirmer = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+#[cfg(test)]
+mod app_api_manifest_contract_tests {
+    //! Rust half of the DRY contract check for `agent.send`, described in
+    //! docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §2.8 — same
+    //! mechanism as `rpc_types/block.rs`'s equivalent module for
+    //! `pane.open`, but a **subset** check (`exactMatch: false` in the
+    //! manifest), not exact-match: `InjectionRequest` carries many more
+    //! optional fields (source_agent, jekt_sig, ...) that `muxsh agent send`
+    //! never sets, and enumerating all of them in the manifest would add no
+    //! real protection against the actual risk (muxsh's own two
+    //! constructed field names drifting), just busywork every time an
+    //! unrelated jekt field is added to this struct.
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    fn load_manifest() -> serde_json::Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("agentmux-srv's parent dir is the repo root")
+            .join("docs/specs/app-api-manifest.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        serde_json::from_str(&raw).expect("app-api-manifest.json must be valid JSON")
+    }
+
+    #[test]
+    fn agent_send_manifest_fields_are_a_subset_of_the_real_struct() {
+        let manifest = load_manifest();
+        let manifest_fields: HashSet<String> = manifest["routes"]["agent.send"]["requestFields"]
+            .as_array()
+            .expect("routes.agent.send.requestFields must be an array")
+            .iter()
+            .map(|v| v.as_str().expect("field name must be a string").to_string())
+            .collect();
+
+        let instance = InjectionRequest {
+            target_agent: "a".to_string(),
+            message: "m".to_string(),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&instance).expect("InjectionRequest must serialize");
+        let struct_fields: HashSet<String> = value
+            .as_object()
+            .expect("serialized InjectionRequest must be a JSON object")
+            .keys()
+            .cloned()
+            .collect();
+
+        let missing: Vec<_> = manifest_fields.difference(&struct_fields).collect();
+        assert!(
+            missing.is_empty(),
+            "app-api-manifest.json's agent.send.requestFields names field(s) InjectionRequest doesn't have: {missing:?}"
+        );
+    }
+}
