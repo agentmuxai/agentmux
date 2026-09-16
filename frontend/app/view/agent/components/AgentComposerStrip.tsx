@@ -112,6 +112,29 @@
  *     genuinely new capability; every prior revision relied purely on CSS
  *     `@container` queries for this decision.
  *
+ *   - Rev 9 (2026-09-16, user-directed): the `auth` slot ("Logged in" /
+ *     "Not logged in") and `ctx` slot (context text + Compact) disagreed
+ *     with each other on which side to render, because the single-row
+ *     balancer (`computeBalancedLeftKeys`) and the multi-row two-pointer
+ *     pairing (`computeComposerRows` below) each decide their relative
+ *     order independently, with no shared state — one balances them
+ *     against `runtime`/`hostShell`'s fixed widths (incidentally landing
+ *     auth left, ctx right in the common case), the other just sorts by
+ *     raw width in isolation (ctx is reliably wider, so it always won
+ *     "left" there instead). They'd swap sides right at whatever width
+ *     the pane crossed from one regime to the other. Fixed by extending
+ *     Rev 8's anchor mechanism to a SECOND pinned pair (`pinnedPairs`):
+ *     `auth`/`ctx` are now excluded from both algorithms' free search
+ *     exactly like `runtime`/`hostShell` already are, and always resolve
+ *     to `auth=left, ctx=right` — in the single row by folding their
+ *     widths into the existing fixed-width accumulators, in multi-row by
+ *     reserving them out of the two-pointer pool and emitting their own
+ *     row (ordered before the anchor row, so `hostShell` stays outermost/
+ *     last regardless). Only engages when BOTH are actually present in a
+ *     given render; either alone falls through to the ordinary free pool,
+ *     unchanged. See
+ *     docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
+ *
  * Stats zone (center, unaffected by the above): tokens (↑in ↓out) ·
  * elapsed.
  *
@@ -250,6 +273,29 @@ export interface ComposerRow {
  * is acceptable" call recorded in the retro's step 3 — it was dismissed
  * once as cosmetic and has now been made a hard constraint.
  *
+ * SECOND ANCHORED PAIR — `pinnedPairs` (2026-09-16, user-directed — Rev
+ * 9, see the file-header comment and
+ * docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md).
+ * `runtime`/`hostShell` are ONE hardcoded anchor pair; `pinnedPairs`
+ * generalizes the same idea to any number of additional pairs that must
+ * never disagree with themselves about which side each member renders on
+ * — today just `auth`/`ctx` ("Logged in" and Compact swapped sides
+ * exactly at the single-row/multi-row boundary, because the two regimes
+ * decided their relative order by two different, uncoordinated rules).
+ * Each pair activates only when BOTH members are present in `slots` — if
+ * either is absent (its own visibility condition unmet), the other falls
+ * through to the ordinary free pool untouched, same escape hatch the
+ * `runtime`/`hostShell` anchor already has via `anchorsReserved`.
+ * Multi-row: reserved out of the two-pointer pool, emitted as its own
+ * row — ordered BEFORE the `runtime`/`hostShell` anchor row (never
+ * after), so `hostShell` stays the outermost/last occupant regardless of
+ * how many pinned pairs exist. Single row: both members' widths fold
+ * into the existing `fixedLeftWidth`/`fixedRightWidth` accumulators
+ * instead of participating in `computeBalancedLeftKeys`'s brute-force
+ * search — the same tradeoff Rev 8 already accepted for the first anchor
+ * pair (less flexibility for the TRULY free remainder to balance totals,
+ * in exchange for these specific elements never moving).
+ *
  * Deliberately a sort + two-pointer walk, not a search — the smallest
  * mechanism that can satisfy the invariant, matching this file's own
  * repeated lesson (SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md's
@@ -290,27 +336,46 @@ export function computeComposerRows(
     availableWidth: number,
     gapPx: number,
     anchorLeftKey?: string,
+    pinnedPairs: { leftKey: string; rightKey: string }[] = [],
 ): ComposerRow[] {
     if (slots.length === 0) return [];
 
     const anchorLeft = anchorLeftKey ? slots.find((s) => s.key === anchorLeftKey) : undefined;
     const hostShell = slots.find((s) => s.key === hostShellKey);
 
+    // Only pairs where BOTH members are present in this render activate —
+    // see the "SECOND ANCHORED PAIR" doc comment above.
+    const pinned = pinnedPairs
+        .map((p) => ({ left: slots.find((s) => s.key === p.leftKey), right: slots.find((s) => s.key === p.rightKey) }))
+        .filter((p): p is { left: { key: string; width: number }; right: { key: string; width: number } } => Boolean(p.left && p.right));
+    const pinnedKeys = new Set(pinned.flatMap((p) => [p.left.key, p.right.key]));
+
     const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx;
     if (totalWidth <= availableWidth) {
         // Single row: the anchors are the OUTERMOST occupant of their own
         // side rather than a whole reserved row (there is only one row —
         // "forget the top, it's just left and right respectively").
-        const movable = slots.filter((s) => s.key !== hostShellKey && s.key !== anchorLeft?.key);
-        const leftKeys = computeBalancedLeftKeys(movable, hostShell?.width ?? 0, anchorLeft?.width ?? 0);
+        // Pinned-pair members fold into the fixed bases alongside the
+        // primary anchor, exactly like it already does — see the
+        // "SECOND ANCHORED PAIR" doc comment.
+        const pinnedLeftWidth = pinned.reduce((sum, p) => sum + p.left.width, 0);
+        const pinnedRightWidth = pinned.reduce((sum, p) => sum + p.right.width, 0);
+        const movable = slots.filter((s) => s.key !== hostShellKey && s.key !== anchorLeft?.key && !pinnedKeys.has(s.key));
+        const leftKeys = computeBalancedLeftKeys(
+            movable,
+            (hostShell?.width ?? 0) + pinnedRightWidth,
+            (anchorLeft?.width ?? 0) + pinnedLeftWidth,
+        );
         return [
             {
                 left: [
                     ...(anchorLeft ? [anchorLeft.key] : []),
+                    ...pinned.map((p) => p.left.key),
                     ...movable.filter((s) => leftKeys.has(s.key)).map((s) => s.key),
                 ],
                 right: [
                     ...movable.filter((s) => !leftKeys.has(s.key)).map((s) => s.key),
+                    ...pinned.map((p) => p.right.key),
                     ...(hostShell ? [hostShell.key] : []),
                 ],
             },
@@ -323,10 +388,15 @@ export function computeComposerRows(
     // constraint). Reserving exactly TWO slots preserves the parity of
     // what's left, so spec §1's "at most one singleton row" still holds
     // unchanged — pairing 2 fewer slots can't turn an even remainder odd.
+    // Pinned pairs (§ SECOND ANCHORED PAIR) are reserved out the same way,
+    // independent of whether the primary anchor pair is — each pinned
+    // pair also reserves exactly two slots, so parity still holds.
     const anchorsReserved = Boolean(anchorLeft && hostShell);
-    const pool = anchorsReserved
-        ? slots.filter((s) => s.key !== anchorLeft!.key && s.key !== hostShellKey)
-        : slots;
+    const pool = (
+        anchorsReserved
+            ? slots.filter((s) => s.key !== anchorLeft!.key && s.key !== hostShellKey)
+            : slots
+    ).filter((s) => !pinnedKeys.has(s.key));
 
     const sorted = [...pool].sort((a, b) => b.width - a.width);
     const pairs: [string | undefined, string | undefined][] = [];
@@ -344,6 +414,15 @@ export function computeComposerRows(
     }
     if (i === j) {
         pairs.push([sorted[i].key, undefined]);
+    }
+
+    // Pinned pairs' rows go here — after the generic two-pointer pairing,
+    // BEFORE the primary anchor row below, so `hostShell` stays the
+    // outermost/last occupant regardless of how many pinned pairs exist.
+    // Always together, always this exact orientation — never subject to
+    // the two-pointer sort (§ SECOND ANCHORED PAIR).
+    for (const p of pinned) {
+        pairs.push([p.left.key, p.right.key]);
     }
 
     if (anchorsReserved) {
@@ -1177,6 +1256,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             width,
             gapPx,
             "runtime",
+            // auth ("Logged in") / ctx (Compact) — see Rev 9's "SECOND
+            // ANCHORED PAIR" doc comment on computeComposerRows above and
+            // docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
+            [{ leftKey: "auth", rightKey: "ctx" }],
         );
 
         // Stats share the single row's line only when slots PLUS stats
