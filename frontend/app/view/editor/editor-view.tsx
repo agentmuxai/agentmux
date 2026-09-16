@@ -310,10 +310,27 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     const cmStates = new Map<string, EditorState>();
     let activeTabIdForCm: string | null = null;
 
+    // Guards setupEditor against concurrent invocation. It is async and awaits
+    // `loadLanguage()` BETWEEN destroying the previous view and constructing
+    // the new one, so two calls that both start before either constructs will
+    // both find `cmView === null`, both skip the destroy, and both append an
+    // EditorView to the same container — leaving one orphaned: alive, in the
+    // DOM, holding its own listeners and able to take focus, but referenced by
+    // nothing and therefore never destroyed.
+    //
+    // The effect below calls it on `containerRef` mount and again when
+    // `loading` flips, ~2ms apart, so this happened on every file open.
+    //
+    // Separate defect from the first-keystroke discard fixed in
+    // editor-model.ts (a live trace showed a single view id there, so this
+    // race was not that bug) — but a real one, and cheap to close.
+    let setupGeneration = 0;
+
     // Build or rebuild CodeMirror when the active tab changes
     const setupEditor = async (content: string, language: string, readOnly: boolean) => {
         const container = containerRef();
         if (!container) return;
+        const gen = ++setupGeneration;
 
         // Destroy previous instance
         if (cmView) {
@@ -382,6 +399,18 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
         // Load language extension
         const langExt = await loadLanguage(language);
         if (langExt) extensions.push(langExt);
+
+        // A later setupEditor() started while we awaited loadLanguage().
+        // Constructing now would append a SECOND EditorView to this container
+        // and orphan one of them (see setupGeneration above) — the newer call
+        // owns the view.
+        if (gen !== setupGeneration) return;
+        // Defensive: any view present now was constructed during our await, so
+        // drop it rather than stack another on top.
+        if (cmView) {
+            cmView.destroy();
+            cmView = null;
+        }
 
         cmView = new EditorView({
             state: EditorState.create({
