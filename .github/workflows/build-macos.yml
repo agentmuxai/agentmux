@@ -229,10 +229,16 @@ jobs:
             --no-validate
 
       # ── Build + sign + notarize ────────────────────────────────────────────
-      - name: Build, sign, and notarize DMG (task package:macos)
+      # RELEASE_CHANNEL=stable is REQUIRED here as of
+      # docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md: `task
+      # package:macos` (no override) now bakes a per-build LOCAL channel, same
+      # as Windows/Linux. Without this, every release DMG would ship isolated
+      # from the user's real (stable) data dir. Matches build-linux.yml, which
+      # calls its script directly with the same override for the same reason.
+      - name: Build, sign, and notarize DMG (RELEASE_CHANNEL=stable)
         run: |
           mkdir -p "$OUT"
-          task package:macos -- "$OUT"
+          RELEASE_CHANNEL=stable bash scripts/package-macos.sh "$OUT"
 
       - name: Locate DMG
         id: dmg

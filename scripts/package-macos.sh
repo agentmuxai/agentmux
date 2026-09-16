@@ -1,13 +1,46 @@
 #!/usr/bin/env bash
 # Build AgentMux as a signed macOS .app + .dmg (Developer ID, hardened runtime).
 #
-# Usage:  bash scripts/package-macos.sh [output-dir]   (output-dir defaults to ~/Desktop)
+# Usage:  bash scripts/package-macos.sh [--fresh] [output-dir]   (output-dir defaults to ~/Desktop)
 #
-# Prerequisites (the `task package:macos` deps run these for you):
-#   task build:host      → dist/cef/agentmux-cef
-#   task build:backend   → dist/bin/agentmux-srv-<VERSION>-darwin.arm64
-#   task build:frontend  → dist/frontend/index.html
-#   task bundle          → dist/Frameworks/Chromium Embedded Framework.framework + GL libs in dist/cef/
+#   --fresh      No-op (accepted for back-compat). Every local build is now
+#                already its own isolated data dir — see CHANNEL below — so
+#                there is nothing left for --fresh to do.
+#   output-dir   Where the DMG lands (default ~/Desktop).
+#
+# Self-contained orchestrator — runs the FULL build pipeline itself
+# (build:frontend, build:backend, build:host, copy:schema, bundle) rather
+# than relying on Taskfile `deps:`, so it can compute and export
+# AGENTMUX_BUILD_CHANNEL_DEFAULT BEFORE any cargo invocation. Mirrors
+# scripts/package.sh (Windows) and scripts/package-linux.sh — see
+# docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md.
+#
+# What gets stamped:
+#   - VERSION  : semver core from package.json, UNCHANGED. No bump, no git
+#                mutation — the release version moves only via `task release`.
+#   - LABEL    : <version>+g<sha>[.dirty].<stamp>.<pid> — semver build
+#                metadata. Exported as AGENTMUX_BUILD_LABEL for local builds
+#                only (the single-instance pipe key). Does NOT affect the DMG
+#                filename (see below) — informational / pipe-key only.
+#   - CHANNEL  : local-<slug>-<branch-hash>-<build-id> — the data-dir key.
+#                PER-BUILD isolation, same scheme as Windows/Linux. Baked at
+#                compile time via AGENTMUX_BUILD_CHANNEL_DEFAULT (see
+#                agentmux-common/build.rs). Release DMGs use
+#                RELEASE_CHANNEL=stable (task package:release:macos, and CI's
+#                build-macos.yml).
+#
+# DMG filename stays version-only (AgentMux_<version>_arm64.dmg) for BOTH
+# local and release builds — deliberately NOT label-suffixed like the
+# Windows ZIP / Linux AppImage. It's the CHANNEL baked into the binary that
+# makes each build its own running instance; the filename is just what a
+# human drags into /Applications, and keeping it version-only preserves the
+# existing Desktop keep-latest-by-version cleanup workflow. Two local builds
+# of the same version now simply overwrite each other's DMG on disk, same as
+# before this change.
+#
+# Release / CI path:
+#   RELEASE_CHANNEL=stable bash scripts/package-macos.sh [output-dir]
+#   (task package:release:macos sets this automatically)
 #
 # Bundle layout. The host resolves everything RELATIVE TO ITS OWN BINARY
 # (current_exe().parent()), so this needs ZERO Rust changes — it mirrors the
@@ -43,9 +76,81 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+FRESH=0
+OUTDIR=""
+for arg in "$@"; do
+    case "$arg" in
+        --fresh) FRESH=1 ;;
+        --*) echo "ERROR: unknown flag $arg (supported: --fresh)" >&2; exit 1 ;;
+        *) OUTDIR="$arg" ;;
+    esac
+done
+OUTDIR="${OUTDIR:-$HOME/Desktop}"
+
 VERSION="$(node -p "require('./package.json').version")"
 ARCH="arm64"   # Apple Silicon; cef-dll-sys resolves the aarch64 framework
-OUTDIR="${1:-$HOME/Desktop}"
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "nogit")
+SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "nosha")
+
+DIRTY=""
+if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+    DIRTY=".dirty"
+fi
+
+STAMP=$(date -u +%Y%m%dT%H%M%S)
+LABEL="${VERSION}+g${SHA}${DIRTY}.${STAMP}.$$"
+
+# Channel = data-dir key. Same scheme as scripts/package.sh (Windows) and
+# scripts/package-linux.sh — see those files' comments for the full
+# rationale. macOS ships `shasum` (not GNU coreutils' `sha1sum`), so use
+# `shasum -a 1` for the same SHA1 hashes with no Homebrew dependency.
+BRANCH_HASH=$(printf '%s' "$BRANCH" | shasum -a 1 | cut -c1-6)
+BRANCH_SLUG=$(printf '%s' "$BRANCH" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-27)
+BUILD_ID=$(printf '%s' "$LABEL" | shasum -a 1 | cut -c1-8)
+CHANNEL="local-${BRANCH_SLUG}-${BRANCH_HASH}-${BUILD_ID}"
+
+if [ -n "${RELEASE_CHANNEL:-}" ]; then
+    if [ "$FRESH" -eq 1 ]; then
+        echo "ERROR: --fresh and RELEASE_CHANNEL are mutually exclusive." \
+             "A release DMG always uses a fixed channel ('$RELEASE_CHANNEL');" \
+             "a fresh throwaway dir doesn't make sense for a distributed artifact." >&2
+        exit 1
+    fi
+    CHANNEL="$RELEASE_CHANNEL"
+fi
+
+echo "─────────────────────── macos dmg build ───────────────────────"
+echo "  version : $VERSION   (unchanged — no bump, no git mutation)"
+echo "  label   : $LABEL"
+echo "  channel : $CHANNEL"
+if [ -n "${RELEASE_CHANNEL:-}" ]; then
+    echo "  data    : RELEASE — channel override: $RELEASE_CHANNEL"
+else
+    echo "  data    : per-build — isolated dir (agents + auth carry over globally; pane layout + memories start fresh)"
+fi
+echo "──────────────────────────────────────────────────────────────"
+
+# NOTE: per-build channels accumulate on disk (each build leaves a data dir +
+# cef-cache). Cleanup needs the launcher's pipe-liveness signal to be safe —
+# same reasoning as scripts/package.sh's identical note. Until then, prune
+# ~/.agentmux/channels/local-* manually.
+
+# Export BEFORE cargo builds — agentmux-common/build.rs reads this via
+# option_env! and bakes it in; it declares rerun-if-env-changed so a changed
+# channel actually forces a recompile instead of serving a stale cache.
+export AGENTMUX_BUILD_CHANNEL_DEFAULT="$CHANNEL"
+# Only export the label for local builds — release builds use CARGO_PKG_VERSION
+# as the pipe key so same-version stable instances keep sharing it, as designed.
+if [ -z "${RELEASE_CHANNEL:-}" ]; then
+    export AGENTMUX_BUILD_LABEL="$LABEL"
+fi
+
+task build:frontend
+task build:backend
+task build:host
+task copy:schema
+task bundle
+
 APP="$REPO_ROOT/build/AgentMux.app"
 DMG="$OUTDIR/AgentMux_${VERSION}_${ARCH}.dmg"
 # Resolve the Developer ID cert from the keychain — never hardcode the signing
@@ -57,13 +162,12 @@ CERT="${MACOS_SIGN_CERT:-$(security find-identity -v -p codesigning 2>/dev/null 
 ENTITLEMENTS="$REPO_ROOT/build/entitlements.mac.plist"
 # Bundle id: ai.agentmux.<channel>.<version>
 # Channel matches AGENTMUX_BUILD_CHANNEL_DEFAULT compiled into the binaries
-# (agentmux-common/src/data_paths.rs; default "stable"), keeping OS identity and
-# runtime channel in sync. Version suffix makes every release a distinct macOS app,
-# so double-clicking any build works without needing `open -n`.
+# (agentmux-common/src/data_paths.rs), keeping OS identity and runtime channel
+# in sync. Version suffix makes every release a distinct macOS app, so
+# double-clicking any build works without needing `open -n`.
 # Sanitize channel to the bundle-id charset [A-Za-z0-9.-]; VERSION (semver) is
 # already clean.
 # See docs/specs/SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
-CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
 CHANNEL_ID="$(printf '%s' "$CHANNEL" | tr -C 'A-Za-z0-9.-' '-' | tr '[:upper:]' '[:lower:]')"
 BUNDLE_ID="ai.agentmux.${CHANNEL_ID}.${VERSION}"
 NOTARIZE="${NOTARIZE:-1}"

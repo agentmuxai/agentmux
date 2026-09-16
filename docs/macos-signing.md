@@ -6,6 +6,13 @@ The app is a **CEF (Chromium Embedded Framework)** desktop app — 100% Rust, no
 `task package:macos` (`scripts/package-macos.sh`) does the full build + sign + (attempted)
 notarize in one command; this doc explains what it does and how to set up credentials.
 
+**As of `docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md`, plain `task package:macos`
+bakes an isolated per-build channel — it does NOT open the real user data dir.** For direct
+distribution (this doc's actual purpose), use `task package:release:macos` instead, which
+bakes the `stable` channel and is guarded (`scripts/guard-stable-build.sh`) to refuse unless
+the tree is clean and `HEAD` is a merged `chore: release v*` commit — see "Build + Sign +
+Notarize" below.
+
 Credential details (Apple ID, Team ID, certificate name) were also kept in the private
 `agentmux-builder` repo — **that repo no longer exists** (confirmed gone from the
 `agentmuxai` org, 2026-09-09). Corrected 2026-09-09 (Codex catch on PR #3122): this
@@ -53,13 +60,17 @@ name; the raw password is never needed again.
 ## Build + Sign + Notarize (one command)
 
 ```bash
-task package:macos          # → ~/Desktop/AgentMux_<VERSION>_arm64.dmg
-# task package:macos -- /some/out/dir     # alternate output dir
-# NOTARIZE=0 task package:macos           # signed-only, skip notarization
+task package:release:macos          # → ~/Desktop/AgentMux_<VERSION>_arm64.dmg, stable channel
+# task package:release:macos -- /some/out/dir     # alternate output dir
+# NOTARIZE=0 task package:release:macos           # signed-only, skip notarization
 ```
 
-`task package:macos` runs `build:host`, `build:backend`, `build:frontend`, `bundle`, then
-`scripts/package-macos.sh`, which:
+`task package:release:macos` refuses to run unless the tree is clean and `HEAD` is a merged
+`chore: release v*` commit (`scripts/guard-stable-build.sh`; `AGENTMUX_STABLE_OVERRIDE=1`
+bypasses the guard for a one-off local test — never use it for an artifact you actually
+intend to distribute). It then runs `RELEASE_CHANNEL=stable bash scripts/package-macos.sh`,
+which builds `build:frontend`/`build:backend`/`build:host`/`copy:schema`/`bundle` itself
+(exporting the channel before any cargo invocation) and:
 
 1. **Assembles `AgentMux.app`.** The host resolves everything relative to its own binary
    (`current_exe().parent()`), so the layout needs no Rust changes:
@@ -117,8 +128,9 @@ xcrun notarytool log <submission-id> --keychain-profile "notarytool"
 ### Verify the artifact is lean (release-correct)
 
 A release DMG must carry **no source maps, no debug symbols, and the `stable` channel**.
-`task package:macos` strips all three by default — but verify, especially the channel (a
-stray `AGENTMUX_BUILD_CHANNEL_DEFAULT` in the env would bake a dev channel into the build):
+`task package:release:macos` strips all three by default — but verify, especially the channel
+(building with plain `task package:macos`, or with a stray `AGENTMUX_BUILD_CHANNEL_DEFAULT` in
+the env, would bake a `local-*` channel into the build instead):
 
 ```bash
 APP=build/AgentMux.app   # the staged .app (inspect before signing seals it, or mount the DMG)
@@ -126,7 +138,7 @@ find "$APP" -name '*.map' | wc -l                              # → 0   (source
 for b in agentmux-cef agentmux-launcher agentmux-srv-*-darwin.*; do
   echo "$b DWARF: $(otool -l "$APP/Contents/MacOS/"$b | grep -c __DWARF)"   # → 0   (no debug info)
 done
-strings "$APP/Contents/MacOS/agentmux-cef" | grep -E 'local-[a-z]+-[0-9a-f]{7}'   # → empty (NOT a dev channel)
+strings "$APP/Contents/MacOS/agentmux-cef" | grep -E 'local-[a-z]+-[0-9a-f]{6}-[0-9a-f]{8}'   # → empty (stable, not a local channel)
 ```
 
 Where the leanness comes from — so you know what to fix if a check fails:
@@ -138,10 +150,14 @@ Where the leanness comes from — so you know what to fix if a check fails:
   symbols → halved), keeping the exported symbols cef-rs's loader needs.
 - **Source maps**: `package-macos.sh` deletes `frontend/**/*.map` (~28 MB). `STRIP_MAPS=0`
   keeps them (debugging only).
-- **Channel**: with `AGENTMUX_BUILD_CHANNEL_DEFAULT` unset, `option_env!` falls back to
-  `stable` → the app opens the real user data dir. `task package:macos` does **not** set it
-  (unlike local `task package`, which bakes a `local-<branch>-<hash>` channel), so a clean
-  release build is `stable`. Building from the release **tag** (below) keeps it that way.
+- **Channel**: `task package:release:macos` sets `RELEASE_CHANNEL=stable`, which
+  `scripts/package-macos.sh` exports as `AGENTMUX_BUILD_CHANNEL_DEFAULT=stable` before any
+  cargo invocation, so `option_env!` bakes in `stable` → the app opens the real user data dir.
+  Plain `task package:macos` bakes a `local-<branch>-<hash>-<build-id>` channel instead (same
+  scheme as Windows `task package` / Linux `task package:linux`) — that's the right default for
+  local testing, but wrong for anything you intend to distribute. Building from the release
+  **tag** (below) keeps the version stamped in the artifact correct; the channel is a separate,
+  independent thing this Task target controls.
 - **Locales**: non-`en*` Chromium `.lproj` removed (~52 MB).
 
 After stripping + locale trim, the DMG is essentially the irreducible Chromium framework
@@ -178,13 +194,15 @@ the same now-deleted `agentmux-builder` repo.
 
 ## Notes
 
-- **Build from the release tag, not `main`.** `package:macos` uses the committed version (no
-  bump), and `main` usually has post-release commits that would otherwise ship under the
-  release label. After the `chore: release vX.Y.Z` PR merges:
-  `git fetch origin tag vX.Y.Z && git checkout vX.Y.Z`, then build.
+- **Build from the release tag, not `main`.** `package:release:macos` uses the committed
+  version (no bump), and `main` usually has post-release commits that would otherwise ship
+  under the release label. After the `chore: release vX.Y.Z` PR merges:
+  `git fetch origin tag vX.Y.Z && git checkout vX.Y.Z`, then build. (This also satisfies
+  `guard-stable-build.sh`'s "HEAD is a merged release commit" requirement — building from an
+  arbitrary `main` commit needs `AGENTMUX_STABLE_OVERRIDE=1` to bypass the guard.)
 - **Don't output to `~/Desktop`.** It's a TCC-protected folder; unless the terminal/process
   has Full Disk Access, the DMG step fails with `rm: …: Operation not permitted`. Pass an
-  unprotected output dir: `task package:macos -- "$PWD/release-artifacts"`.
+  unprotected output dir: `task package:release:macos -- "$PWD/release-artifacts"`.
 - The notarization keychain profile is named **`notarytool`** (the packager's
   `NOTARY_PROFILE` default) — not `AC_PASSWORD`. Check with
   `xcrun notarytool history --keychain-profile notarytool`.
