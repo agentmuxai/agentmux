@@ -1256,13 +1256,26 @@ impl Store {
         // deleting their template — deleting `id` here removes only its own
         // row. The JSON registry mirror for the deleted row is covered by
         // `registry_def_retire` below.
-        let rows = {
+        let (rows, is_template) = {
             let conn = self.conn.lock().unwrap();
+            // Read BEFORE the DELETE — afterwards there is no row to ask.
+            // Decides how wide the registry sweep below may match; see
+            // `purge_agent_side_effects`. A row that isn't here at all (the
+            // cross-channel case) is never a template: the global definition
+            // store only ever holds `is_seeded == 0` user agents.
+            let is_template = conn
+                .query_row(
+                    "SELECT is_template FROM db_agents WHERE id = ?1",
+                    params![id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|v| v != 0)
+                .unwrap_or(false);
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             if rows > 0 {
                 purge_agent_dependents(&conn, id)?;
             }
-            rows
+            (rows, is_template)
         };
         // Tombstone the global definition record so another channel's stale
         // SQLite can't resurrect this deleted user agent — AND so an agent
@@ -1292,7 +1305,7 @@ impl Store {
         // unconditionally makes Delete converge: the sweep is a no-op for an
         // id with no records, so there is nothing to gate on in the first
         // place.
-        self.purge_agent_side_effects(id, "agent_def_delete");
+        self.purge_agent_side_effects(id, "agent_def_delete", is_template);
         Ok(rows > 0 || global_retired)
     }
 
@@ -1317,7 +1330,11 @@ impl Store {
     /// `instance_delete`'s own doc comment). Best-effort throughout:
     /// SQLite has already committed, and neither side failing is a reason
     /// to report the delete as failed. `caller` only labels the logs.
-    fn purge_agent_side_effects(&self, id: &str, caller: &'static str) {
+    ///
+    /// `is_template` narrows the registry sweep to the file key — see the
+    /// branch below. It is the caller's job to determine it BEFORE deleting
+    /// the row, since afterwards there is nothing left to ask.
+    fn purge_agent_side_effects(&self, id: &str, caller: &'static str, is_template: bool) {
         // Project-instruction observations are keyed by agent id with no
         // foreign key (they record files this agent READS, which is not a
         // relationship SQLite can enforce), so nothing else would remove
@@ -1333,11 +1350,28 @@ impl Store {
             );
         }
         if let Some(reg) = self.registry() {
-            // Matches a record by EITHER key — see
+            // An AGENT's records are matched by either key — see
             // `Registry::hard_delete_for_agent` for why the file key and the
             // record's own `definition_id` can disagree, and what a missed
             // record looks like in the picker.
-            match reg.hard_delete_for_agent(id) {
+            //
+            // A TEMPLATE's are matched by file key only. A template's id can
+            // legitimately be the `definition_id` of a legacy,
+            // never-re-keyed launch record belonging to a real agent
+            // launched from it, and the wide match would delete that agent's
+            // record along with the template — making agents disappear from
+            // the picker instead of the one thing the user asked to delete
+            // (ReAgent P1 round 3 on PR #3262;
+            // `agent_def_delete_removes_only_its_own_registry_file` is the
+            // protection, and
+            // `deleting_a_template_spares_a_legacy_launch_record_pointing_at_it`
+            // pins the legacy shape that test doesn't construct).
+            let swept = if is_template {
+                reg.hard_delete(id)
+            } else {
+                reg.hard_delete_for_agent(id)
+            };
+            match swept {
                 Ok(0) => {}
                 Ok(removed) => tracing::debug!(
                     agent_def_id = %id, caller, removed,
@@ -2039,7 +2073,11 @@ impl Store {
         // unfixed on this entry point. "The same deletion under a second
         // name" has to mean the same convergence too, not just the same
         // table list.
-        self.purge_agent_side_effects(id, "instance_delete");
+        // Always `false`: the template case returned early above, because
+        // this method's contract is "never a template" — it reports no
+        // deletion for one rather than sweeping narrowly like
+        // `agent_def_delete` does.
+        self.purge_agent_side_effects(id, "instance_delete", false);
         if rows > 0 {
             // Tombstone the GLOBAL definition record too. Clearing the local
             // tables alone leaves an active record in the cross-channel

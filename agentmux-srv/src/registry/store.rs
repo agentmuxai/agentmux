@@ -166,18 +166,27 @@ impl Registry {
         Ok(())
     }
 
-    /// Hard-delete (drops both active and retired files). Mirrors
-    /// SQLite `instance_delete`.
-    pub fn hard_delete(&self, instance_id: &str) -> Result<(), RegistryError> {
+    /// Hard-delete by FILE KEY only (drops both active and retired files),
+    /// returning how many files were removed.
+    ///
+    /// The narrow counterpart of [`Self::hard_delete_for_agent`]. Deleting a
+    /// TEMPLATE needs this one: a template's id can legitimately appear as
+    /// the `definition_id` of a legacy, never-re-keyed launch record
+    /// belonging to a real agent launched from it, and matching on
+    /// `definition_id` would take that agent's record along with the
+    /// template (ReAgent P1 round 3 on PR #3262). A template's own record,
+    /// if it has one, is file-keyed, so this is the complete sweep for one.
+    pub fn hard_delete(&self, instance_id: &str) -> Result<usize, RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut removed = 0usize;
         for p in [self.active_path(instance_id), self.retired_path(instance_id)] {
             match std::fs::remove_file(&p) {
-                Ok(()) => {}
+                Ok(()) => removed += 1,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => return Err(e.into()),
             }
         }
-        Ok(())
+        Ok(removed)
     }
 
     /// Drop every record — active AND retired — that belongs to the agent
