@@ -48,8 +48,10 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
+import { TransitionGroup } from "solid-transition-group";
 
-import { pushNotification } from "@/app/store/global";
+import { pushNotification, prefersReducedMotionAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
@@ -391,6 +393,39 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         }
     );
 
+    // Mirror `rows()` into a keyed store so `<For>`/`<TransitionGroup>` can
+    // tell "one row removed" from "list replaced" across a refetch.
+    // `createResource`'s own signal hands back a brand-new array of
+    // brand-new objects on every refetch, which `<For>`'s reference-based
+    // reconciliation can't diff against the previous array at all — in
+    // practice every row would unmount/remount on every "agents:changed"
+    // refetch, not just the deleted one, which also defeats any per-row
+    // exit animation. `reconcile(..., { key: "definition_id" })` is the
+    // same idiom `drone-model.ts`'s `setDraft` already uses for its store.
+    // See docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md §4.1.
+    const [rowsStore, setRowsStore] = createStore<{ list: RecentSessionRow[] }>({ list: [] });
+    createEffect(() => {
+        setRowsStore("list", reconcile(rows() ?? [], { key: "definition_id" }));
+    });
+
+    // definition_ids genuinely being deleted right now (added in
+    // confirmDelete, before the row leaves rowsStore.list) — NOT every row
+    // that happens to drop out of `sortedRows()`. A name-filter narrowing
+    // the visible set, or a background refetch reconciling away a row for
+    // some other reason, also removes it from the array `<TransitionGroup>`
+    // watches; without this distinction the poof animation would fire for
+    // ordinary filtering too, misrepresenting it as a delete (codex P2 on
+    // PR #3280). Read by the TransitionGroup's onExit handler below (§4.2/
+    // §4.3 of SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) to decide
+    // whether an exiting row gets the real animation or an instant removal,
+    // and by `hasPendingDeleteExit` to keep the list mounted (reagent P1 +
+    // codex P2 on the same PR: the empty/no-match `<Show>` gate used to
+    // unmount the whole `<ul>`/`TransitionGroup` — killing the animation
+    // outright — the instant the last visible row's optimistic removal
+    // made the list look empty).
+    const [deletingIds, setDeletingIds] = createSignal<Set<string>>(new Set());
+    const hasPendingDeleteExit = () => deletingIds().size > 0;
+
     // Re-poll on visibility regain so a session that just ended in
     // another pane shows up at the top without the user having to
     // re-open the picker. createEffect runs after first render too,
@@ -663,6 +698,19 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             return;
         }
         setDeleteConfirmRow(null);
+        // Mark this row as a GENUINE delete before it leaves the store, so
+        // the TransitionGroup's onExit handler (below) knows to play the
+        // real poof for it rather than the instant-removal path used for
+        // ordinary filtering (codex P2 on PR #3280).
+        setDeletingIds((prev) => new Set(prev).add(row.definition_id));
+        // Optimistic local removal — don't wait on the "agents:changed"
+        // broadcast round-trip before the exit animation can even start
+        // (same "optimistic collapse" philosophy the menu-close above
+        // already uses). Surgical `filter` on the STORE (not `rows()`
+        // itself) so only this one row's identity is affected — the
+        // eventual real refetch's reconcile pass is then a no-op for it.
+        // See docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md §4.1.
+        setRowsStore("list", (list) => list.filter((r) => r.definition_id !== row.definition_id));
         // Sweep EVERY pane open for this agent (spec §5.2). Not
         // `props.openDefinitions` — that map is keyed by definition, so an
         // agent open in two panes collapses to whichever block registered
@@ -707,8 +755,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 expiration: Date.now() + 12000,
             });
         }
-        // The row itself disappears via the existing "agents:changed"
-        // refetch subscription (line ~334) — no manual list mutation here.
+        // The row's removal above already triggers its exit animation; the
+        // existing "agents:changed" refetch subscription (line ~334) still
+        // runs in the background and reconciles the rest of the list, but
+        // is a no-op for this row since it's already gone from the store.
     };
 
     // Surfacing rules:
@@ -734,8 +784,18 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     //                                confused with a genuinely empty list
     // - rows [] (fetch succeeded) → empty state (filter-aware copy)
     // - rows non-empty            → list
+    //
+    // `rowsStore.list`, not `rows()`, for the length checks below — reagent
+    // P1 on PR #3280: confirmDelete's optimistic removal (§4.1 of
+    // SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md) empties
+    // `rowsStore.list` immediately, but `rows()` itself stays stale until
+    // the background "agents:changed" refetch resolves. Reading `rows()`
+    // here mismatched isEmpty/isNoMatch against what filteredRows/
+    // sortedRows (already on rowsStore.list) actually render — deleting
+    // the last agent showed "No agents match" instead of the real empty
+    // state for that window.
     const isLoading = () => rows.loading;
-    const isEmpty = () => !isLoading() && !fetchError() && (rows() ?? []).length === 0;
+    const isEmpty = () => !isLoading() && !fetchError() && rowsStore.list.length === 0;
 
     // Report the first resolution up to the parent (see onFirstLoad's own
     // doc comment on MyAgentsListProps). `once` guards against a stale
@@ -757,13 +817,19 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md.
     const filteredRows = createMemo(() => {
         const q = nameQuery();
-        const all = rows() ?? [];
+        // `rowsStore.list`, not `rows()` — see the reconcile effect above;
+        // this is what gives `<For>`/`<TransitionGroup>` stable per-row
+        // identity across a refetch.
+        const all = rowsStore.list;
         if (!q) return all;
         return all.filter((r) => (r.instance_name || r.definition_name).toLowerCase().includes(q));
     });
     // Distinct from `isEmpty()`: the fetch found real rows, but the
     // filter narrowed them all away — not "you have no agents."
-    const isNoMatch = () => !isLoading() && !fetchError() && (rows() ?? []).length > 0 && filteredRows().length === 0;
+    // `rowsStore.list`, not `rows()` — same reagent P1 fix as isEmpty above:
+    // this must agree with what filteredRows() itself is derived from, or
+    // an optimistic delete leaves this reading the stale pre-delete count.
+    const isNoMatch = () => !isLoading() && !fetchError() && rowsStore.list.length > 0 && filteredRows().length === 0;
 
     // Sort applied AFTER filtering, over whatever's already in memory — no
     // backend RPC change (§3 of the audit report above). `.slice()` before
@@ -800,7 +866,13 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 </Show>
             </div>
             <Show
-                when={!isEmpty() && !fetchError() && !isNoMatch()}
+                // `|| hasPendingDeleteExit()`: don't unmount the list (and
+                // with it, the <TransitionGroup> mid-animation) just
+                // because deleting the last visible row's optimistic
+                // removal made it LOOK empty/no-match before the poof has
+                // actually finished playing — reagent P1 + codex P2 on PR
+                // #3280.
+                when={(!isEmpty() && !fetchError() && !isNoMatch()) || hasPendingDeleteExit()}
                 fallback={
                     <Show
                         when={fetchError()}
@@ -834,6 +906,83 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 }
             >
                 <ul class="agent-recent-sessions-list" classList={{ "has-expanded-row": anyRowExpanded() }}>
+                    {/* Exit ("poof") + move (rubbery grid reflow) animation
+                        on row delete. FLIP-based (measures rects, inverts,
+                        plays) — see
+                        docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md
+                        §4.2/§4.3. No enter animation (non-goal, §3 of that
+                        spec) — enter* classes are explicitly empty.
+
+                        Exit is handled IMPERATIVELY (onBeforeExit/onExit),
+                        not via the declarative exit*Class props (left
+                        empty) — codex P2 on PR #3280: `<TransitionGroup>`
+                        treats ANY row dropping out of `sortedRows()` as an
+                        "exit," including one that just got filtered out by
+                        a name-search query, not only a real delete. Only a
+                        `definition_id` present in `deletingIds` (set by
+                        confirmDelete, BEFORE the row leaves rowsStore.list)
+                        gets the real poof; everything else calls `done()`
+                        immediately for an instant removal — the same
+                        behavior this list always had for filtering, before
+                        this animation existed. A single class
+                        (`agent-row-exit-active`) is enough since the poof
+                        is one self-contained `@keyframes` `animation`, not
+                        a Vue-style enter/active/to transition dance.
+
+                        `onBeforeExit` pins the exiting row's on-screen
+                        width/height as inline styles before that class
+                        (which switches it to `position: absolute`, pulling
+                        it out of the CSS grid's flow so surviving rows can
+                        immediately reflow) applies — without this the row
+                        would collapse to its content's intrinsic width
+                        instead of holding its original grid-cell size
+                        while it animates. Reduced motion: both handlers
+                        bail to the instant-removal path — the stylesheet's
+                        own `@media (prefers-reduced-motion: reduce)` block
+                        is a backstop, not the primary gate, per that
+                        spec's §4.4. */}
+                    <TransitionGroup
+                        enterClass=""
+                        enterActiveClass=""
+                        enterToClass=""
+                        moveClass={prefersReducedMotionAtom() ? "" : "agent-row-move"}
+                        onBeforeExit={(el) => {
+                            const id = (el as HTMLElement).dataset.definitionId;
+                            const isGenuineDelete = id !== undefined && deletingIds().has(id);
+                            if (prefersReducedMotionAtom() || !isGenuineDelete) return;
+                            const r = (el as HTMLElement).getBoundingClientRect();
+                            (el as HTMLElement).style.width = `${r.width}px`;
+                            (el as HTMLElement).style.height = `${r.height}px`;
+                        }}
+                        onExit={(el, done) => {
+                            const id = (el as HTMLElement).dataset.definitionId;
+                            const isGenuineDelete = id !== undefined && deletingIds().has(id);
+                            const clearDeleting = () => {
+                                if (id === undefined) return;
+                                setDeletingIds((prev) => {
+                                    if (!prev.has(id)) return prev;
+                                    const next = new Set(prev);
+                                    next.delete(id);
+                                    return next;
+                                });
+                            };
+                            if (!isGenuineDelete || prefersReducedMotionAtom()) {
+                                clearDeleting();
+                                done();
+                                return;
+                            }
+                            const htmlEl = el as HTMLElement;
+                            htmlEl.classList.add("agent-row-exit-active");
+                            htmlEl.addEventListener(
+                                "animationend",
+                                () => {
+                                    clearDeleting();
+                                    done();
+                                },
+                                { once: true }
+                            );
+                        }}
+                    >
                     <For each={sortedRows()}>
                         {(row) => {
                             const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
@@ -843,6 +992,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                 <li
                                     class="agent-recent-sessions-row"
                                     classList={{ "is-expanded": isRowExpanded(row.definition_id) }}
+                                    data-definition-id={row.definition_id}
                                 >
                                     <button
                                         type="button"
@@ -1106,6 +1256,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                             );
                         }}
                     </For>
+                    </TransitionGroup>
                 </ul>
             </Show>
             <ConfirmModal
