@@ -292,6 +292,32 @@ real Operator Config content ships? Candidates, **not chosen**:
    entirely, on the grounds that Operator Config now fully subsumes its
    purpose and does so provider-agnostically.
 
+## 7. Known limitation — deliberately not fixed in this PR
+
+`bundle_upsert_system_if_changed`'s no-op detection (§3.4 of the original
+implementation, `bundle.rs`'s `upsertsystemmemory` handler) compares an
+incoming save only against the row's CURRENT live content — not against
+whatever version the Armory editor actually had loaded when the operator
+opened it. If another process (another AgentMux instance sharing this
+store, or the startup reseed itself) writes a new version to the row
+between the editor loading it and the operator clicking Save, a
+byte-identical-to-what-they-originally-saw (but now stale) submission is
+indistinguishable from a real edit: it gets written back, permanently
+reverting the row to stale content and marking it `written_by="armory-ui"`
+— which then blocks every future manifest-driven correction, per this
+whole mechanism's own "never clobber a human edit" rule.
+
+Confirmed independently by both Codex and ReAgent (PR #3244, round 9) as a
+real gap, not a false positive. Not fixed here because a real fix needs a
+different layer than everything else in this PR: the Armory UI's save
+request would need to carry the version/hash it loaded (optimistic
+concurrency control), which means frontend changes (`global-bundle-
+manager.tsx`/`global-bundle-model.ts`) and an RPC schema change to
+`COMMAND_UPSERT_SYSTEM_MEMORY`, not just the backend `Store`-layer work
+this PR is scoped to. Flagged here rather than silently dropped — a
+follow-up spec should design the actual optimistic-concurrency check
+before implementing it, rather than bolting it on ad hoc.
+
 Flagging rather than deciding, consistent with how `SPEC_GLOBAL_MEMORY_
 UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md` left its own visual-distinction
 question open rather than guessed.
