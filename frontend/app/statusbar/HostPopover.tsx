@@ -257,8 +257,14 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                     <For each={props.lanInstances()}>
                         {(inst: LanInstance) => (
                             <div class="status-bar-popover-row" style={{ "padding-left": "20px" }}>
-                                <span style={{ opacity: "0.7" }}>{inst.hostname || inst.instance_id}</span>
-                                <span class="status-bar-popover-mono" style={{ opacity: "0.5" }}>v{inst.version}</span>
+                                <span style={{ opacity: "0.7" }}>
+                                    {inst.hostname || inst.instance_id || "resolving…"}
+                                </span>
+                                <Show when={inst.version}>
+                                    <span class="status-bar-popover-mono" style={{ opacity: "0.5" }}>
+                                        v{inst.version}
+                                    </span>
+                                </Show>
                             </div>
                         )}
                     </For>
