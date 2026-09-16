@@ -14,7 +14,20 @@
 // contentLoaded so it can reason about dirty-vs-disk without holding the
 // buffer.
 //
-// Spec: docs/specs/SPEC_EDITOR_TABS_2026-05-26.md (Phase 1B).
+// Spec: this file used to cite an "editor tabs" spec (SPEC_EDITOR_TABS,
+// dated 2026-05-26, Phase 1B) that was never actually written — it has never
+// existed in the repo, in any commit. The dangling pointer only surfaced now
+// because check-spec-citations.sh is scoped to changed files. The path is
+// deliberately not written out above, and deliberately NOT repointed at a
+// plausible-looking neighbouring spec: the gate's own message warns against
+// that, and sending a reader on a search that cannot succeed is worse than no
+// pointer at all.
+//
+// What actually documents the tab behaviour is the reducer in
+// frontend/app/store/editor-pane-state-store.ts (slice #10) and its test
+// suite. The same dangling citation still exists in that store, in
+// editor-tab-strip.tsx, and in the pane-tab-strip spec — left alone as out of
+// scope here; each will trip the same gate when its file is next touched.
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
