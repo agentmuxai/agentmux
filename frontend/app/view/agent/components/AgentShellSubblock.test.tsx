@@ -26,17 +26,49 @@ import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockDataSignals, seedData } = vi.hoisted(() => {
+const { blockDataSignals, seedData, wpsHandlers, wpsPersisted } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
-    return { blockDataSignals, seedData };
+    const wpsHandlers = new Map<string, Array<(event: any) => void>>();
+    const wpsPersisted = new Map<string, Record<string, unknown>>();
+    return { blockDataSignals, seedData, wpsHandlers, wpsPersisted };
 });
+
+// Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
+// scope and prove the component isn't listening to everything. Honours
+// unsubscribe, so the "stops listening on unmount" behaviour is observable
+// rather than assumed.
+//
+// Crucially it also models `persist: 1` REPLAY: `controllerstatus` is
+// published persisted specifically so a new subscriber is handed the current
+// status synchronously as part of subscribing (wps.ts's `replay_to_route`).
+// The first version of this mock only delivered events a test emitted AFTER
+// mount, which made the replay path — where ReAgent found a P0 — structurally
+// invisible to all 12 tests. `queuePersistedStatus` puts an event in that
+// replay slot instead.
+vi.mock("@/app/store/wps", () => ({
+    waveEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
+        const key = `${opts.eventType}|${opts.scope}`;
+        wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
+        const persisted = wpsPersisted.get(key);
+        if (persisted !== undefined) {
+            // Synchronously, inside subscribe — exactly how the broker does it.
+            opts.handler({ data: persisted });
+        }
+        return () => {
+            wpsHandlers.set(key, (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler));
+        };
+    },
+}));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ControllerResyncCommand: vi.fn(() => Promise.resolve()),
         CreateSubBlockCommand: vi.fn(() => Promise.resolve("block:new-sub-block-id")),
         SetMetaCommand: vi.fn(() => Promise.resolve()),
+        // Absent until the reattach-failure tests below needed it, which is
+        // why that path — where ReAgent found the round-2 P0 — had no coverage.
+        DeleteSubBlockCommand: vi.fn(() => Promise.resolve()),
     },
 }));
 
@@ -134,9 +166,24 @@ function resolveSeedFetch(oref: string) {
     set({ value: meta ? { meta } : null, loading: false });
 }
 
+/** The status the broker will replay synchronously to the NEXT subscriber for
+ *  `blockId` — the `persist: 1` behaviour, not a post-mount emission. */
+function queuePersistedStatus(blockId: string, data: Record<string, unknown>) {
+    wpsPersisted.set(`controllerstatus|block:${blockId}`, data);
+}
+
+/** Emit a `controllerstatus` event to whoever subscribed for `blockId`. */
+function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
+    for (const handler of wpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
+        handler({ data });
+    }
+}
+
 beforeEach(() => {
     blockDataSignals.clear();
     seedData.clear();
+    wpsHandlers.clear();
+    wpsPersisted.clear();
     termWrapInstances.length = 0;
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
@@ -409,5 +456,251 @@ describe("AgentShellSubblock — agent lock (SPEC_AGENT_INTERACTIVE_PTY_SHELL_AP
         const [, set] = blockDataSignals.get(oref)!;
         set({ value: { meta: {} }, loading: false });
         await waitFor(() => expect(container.querySelector(".agent-shell-agentlock-badge")).toBeNull());
+    });
+});
+
+describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15)", () => {
+    /** Mounts against an already-existing sub-block and settles its fetch, so
+     *  the component reaches its steady state with a known id subscribed. */
+    async function mountAttached(subBlockId: string, onShellExited = vi.fn()) {
+        const oref = `block:${subBlockId}`;
+        queueSeedMeta(oref, {});
+        // A live shell's own current status, replayed on subscribe — the
+        // ordinary state of affairs for a drawer open onto a running shell.
+        queuePersistedStatus(subBlockId, { shellprocstatus: "running" });
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+                onShellExited={onShellExited}
+            />
+        ));
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        return { onShellExited };
+    }
+
+    it("fires onShellExited when its own shell exits cleanly", async () => {
+        const { onShellExited } = await mountAttached("exiting-shell");
+        expect(onShellExited).not.toHaveBeenCalled();
+
+        emitControllerStatus("exiting-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /** `shellprocexitcode` is `#[serde(default)]` on the wire, so a clean exit
+     *  can arrive with the field omitted entirely. That must read as 0, not as
+     *  "unknown, assume crash" — otherwise the ordinary `exit` case (the whole
+     *  point of the feature) silently does nothing. */
+    it("treats an omitted exit code as a clean exit", async () => {
+        const { onShellExited } = await mountAttached("omitted-code-shell");
+        emitControllerStatus("omitted-code-shell", { shellprocstatus: "done" });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /** A crash produces the same STATUS_DONE. Collapsing there would hide the
+     *  output the human needs to read — spec §5 open question, resolved to
+     *  "clean exits only". */
+    it("does NOT collapse on a non-zero exit — the failure output must stay readable", async () => {
+        const { onShellExited } = await mountAttached("crashing-shell");
+        emitControllerStatus("crashing-shell", { shellprocstatus: "done", shellprocexitcode: 137 });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    it("ignores a running status", async () => {
+        const { onShellExited } = await mountAttached("running-shell");
+        emitControllerStatus("running-shell", { shellprocstatus: "running" });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /** The agent pane subscribes to `controllerstatus` for its OWN block too
+     *  (agent-view.tsx's turn tracking). The drawer must be listening to its
+     *  sub-block's scope only — a parent-scope event killing the drawer would
+     *  collapse it every time the agent's own process ended. */
+    it("ignores a controllerstatus event for a different block", async () => {
+        const { onShellExited } = await mountAttached("own-shell");
+        emitControllerStatus("parent-1", { shellprocstatus: "done", shellprocexitcode: 0 });
+        emitControllerStatus("some-other-block", { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /** STATUS_DONE can be republished for one block (a status re-publish, a
+     *  resync). The parent's handler deletes a sub-block and clears a pointer;
+     *  running it twice races the second delete against a fresh shell the
+     *  human may have opened in between. */
+    it("fires at most once even if the exit is published repeatedly", async () => {
+        const { onShellExited } = await mountAttached("repeating-shell");
+        emitControllerStatus("repeating-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+        emitControllerStatus("repeating-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+        emitControllerStatus("repeating-shell", { shellprocstatus: "done" });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    it("unsubscribes on unmount", async () => {
+        const { onShellExited } = await mountAttached("unmounting-shell");
+        cleanup();
+        emitControllerStatus("unmounting-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /**
+     * ReAgent P0 on PR #3253, and the reason this file's wps mock now models
+     * replay at all.
+     *
+     * An agent drives the shared drawer shell (a first-class case, spec §3.3)
+     * and it exits cleanly while the drawer is CLOSED. Nothing is mounted, so
+     * nothing collapses and `term:shellsubblockid` still points at the dead
+     * block. The human then opens the drawer *to read what the agent did* —
+     * and the broker replays that persisted `done` synchronously as part of
+     * this component's very first subscribe.
+     *
+     * Acting on it would collapse the drawer they just opened AND delete the
+     * sub-block, taking its persisted `term` file with it: the output isn't
+     * hidden behind a collapsed drawer (reopenable), it is destroyed. Strictly
+     * worse than the bug this feature fixes.
+     */
+    it("ignores an exit REPLAYED at subscribe time — the shell was already gone before this mount", async () => {
+        const onShellExited = vi.fn();
+        const subBlockId = "already-exited-shell";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        queuePersistedStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+                onShellExited={onShellExited}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /** The live case must still work when the replay is the shell's RUNNING
+     *  status — i.e. a drawer opened onto a healthy shell, which then exits.
+     *  Without this, "ignore replays" could be implemented as "ignore the
+     *  first event", which would break the ordinary path. */
+    it("still collapses when a replayed running status is followed by a live exit", async () => {
+        const { onShellExited } = await mountAttached("live-then-exits");
+        emitControllerStatus("live-then-exits", { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /** A shell that starts up and exits entirely within this mount: both
+     *  statuses arrive live, no replay involved. */
+    it("collapses on an exit that follows a live running status", async () => {
+        const onShellExited = vi.fn();
+        const subBlockId = "starts-then-exits";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+                onShellExited={onShellExited}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        emitControllerStatus(subBlockId, { shellprocstatus: "running" });
+        emitControllerStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * ReAgent P0 round 2 on PR #3253.
+     *
+     * The reattach path resyncs with `norespawn: true`, so an already-exited
+     * shell fails and falls through to creating a fresh one. Deleting the old
+     * block there destroys its persisted `term` file — and when the shell
+     * CRASHED while the drawer was closed, that file is the only record of
+     * why. The live listener already refuses to collapse on a non-zero exit
+     * (spec §5); deleting here anyway reproduces the same data loss through a
+     * different door.
+     */
+    it("does NOT delete a sub-block whose shell crashed, even though reattach failed", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.ControllerResyncCommand as any).mockRejectedValueOnce(new Error("already exited"));
+
+        const subBlockId = "crashed-while-closed";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        queuePersistedStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 137 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        expect(RpcApi.DeleteSubBlockCommand).not.toHaveBeenCalled();
+    });
+
+    /** The clean counterpart: nothing worth keeping, so the dead block goes
+     *  rather than lingering until the pane closes. */
+    it("deletes a sub-block whose shell exited cleanly before reattach", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.ControllerResyncCommand as any).mockRejectedValueOnce(new Error("already exited"));
+
+        const subBlockId = "cleanly-exited-while-closed";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        queuePersistedStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        expect(RpcApi.DeleteSubBlockCommand).toHaveBeenCalledWith(expect.anything(), { blockid: subBlockId });
+    });
+
+    /** A genuinely vanished block (gone from the store — no status to replay)
+     *  reports no exit at all. Unknown must not be read as clean: skipping the
+     *  delete costs nothing here (there is nothing to delete), while treating
+     *  unknown as permission is how the crash case above gets destroyed. */
+    it("does not delete when no exit status was ever observed", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.ControllerResyncCommand as any).mockRejectedValueOnce(new Error("block not found"));
+
+        const subBlockId = "vanished-block";
+        queueSeedMeta(`block:${subBlockId}`, {});
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        expect(RpcApi.DeleteSubBlockCommand).not.toHaveBeenCalled();
     });
 });
