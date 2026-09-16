@@ -128,6 +128,84 @@ impl Registry {
         Ok(())
     }
 
+    /// Drop every record — active AND retired — that belongs to the agent
+    /// `agent_id`, matching on either the record's file key (its instance
+    /// id) or its `definition_id`. Returns how many files were removed.
+    ///
+    /// **Why this exists alongside [`Self::hard_delete`].** That one keys
+    /// only on the file name. Since the agent-concept consolidation an
+    /// agent's instance id and definition id are the same value, so the two
+    /// agree — but only for records this tree has been re-keyed to.
+    /// `m0026_registry_agent_id_rekey` does that re-keying by reading
+    /// `db_agent_instances`, and returns a no-op the moment that legacy
+    /// table is gone (v32 dropped it). An install that consolidated before
+    /// m0026 could run therefore still holds one *launch*-keyed file per
+    /// agent, in addition to the correctly-keyed one.
+    ///
+    /// Deleting such an agent removed only the correctly-keyed file,
+    /// leaving the launch-keyed one active with no definition behind it —
+    /// which `listrecentsessions` still renders as a row (no provider, so
+    /// no icon, and `"(missing definition)"`). The delete looked like it
+    /// half-worked: the icon vanished, the card stayed.
+    ///
+    /// Both keys are checked rather than just `definition_id` because
+    /// callers legitimately hold either one: a consolidated agent id, or
+    /// the launch id of a registry-only row this channel's SQLite has never
+    /// seen. Matching both is a strict superset of [`Self::hard_delete`],
+    /// and a cross-key collision would require the same uuid to name two
+    /// different agents.
+    pub fn hard_delete_for_agent(&self, agent_id: &str) -> Result<usize, RegistryError> {
+        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut removed = 0usize;
+        for dir in [self.root.clone(), self.root.join("retired")] {
+            for path in records_for_agent(&dir, agent_id)? {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => removed += 1,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        Ok(removed)
+    }
+
+    /// Retire every active record for `agent_id`, matched the same way
+    /// [`Self::hard_delete_for_agent`] matches. A launch-keyed record left
+    /// active by the file-keyed [`Self::retire`] is exactly the "'Forget
+    /// agent' retires the NEW key while the stale file stays active, so the
+    /// forgotten agent reappears" failure `m0026_registry_agent_id_rekey`'s
+    /// own doc comment predicted.
+    pub fn retire_for_agent(&self, agent_id: &str) -> Result<usize, RegistryError> {
+        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.move_for_agent(agent_id, self.root.clone(), self.root.join("retired"))
+    }
+
+    /// Inverse of [`Self::retire_for_agent`].
+    pub fn unretire_for_agent(&self, agent_id: &str) -> Result<usize, RegistryError> {
+        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.move_for_agent(agent_id, self.root.join("retired"), self.root.clone())
+    }
+
+    /// Move an agent's records between the active and retired trees,
+    /// keeping each file's own name (the instance id) so the record stays
+    /// addressable by [`Self::get`]. Caller holds `write_lock`.
+    fn move_for_agent(
+        &self,
+        agent_id: &str,
+        from_dir: PathBuf,
+        to_dir: PathBuf,
+    ) -> Result<usize, RegistryError> {
+        let mut moved = 0usize;
+        for path in records_for_agent(&from_dir, agent_id)? {
+            let Some(name) = path.file_name() else {
+                continue;
+            };
+            rename_atomic(&path, &to_dir.join(name))?;
+            moved += 1;
+        }
+        Ok(moved)
+    }
+
     /// Whether an active record exists for `instance_id`. Doesn't
     /// validate — useful for migration idempotency checks. Use
     /// [`Self::exists_anywhere`] when retired records should also
@@ -190,6 +268,46 @@ impl Registry {
         }
         Ok(out)
     }
+}
+
+/// Paths of the `*.json` files under `dir` whose record belongs to
+/// `agent_id` — by file key (instance id) or by `definition_id`. A missing
+/// directory yields nothing (the `retired/` tree is created on open, but a
+/// caller may point at a tree that predates it).
+///
+/// Unparseable files are matched on their file key alone and otherwise
+/// skipped, the same way [`Registry::list_active`] skips them: a record
+/// this can't read is also one that can never surface as a row, and
+/// removing it on a guess would destroy whatever newer-schema binary
+/// authored it. The file-key match is kept so an explicitly-addressed
+/// delete still behaves like [`Registry::hard_delete`] did.
+fn records_for_agent(dir: &Path, agent_id: &str) -> Result<Vec<PathBuf>, RegistryError> {
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        let path = entry?.path();
+        if !path.is_file() || path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        if path.file_stem().and_then(|s| s.to_str()) == Some(agent_id) {
+            out.push(path);
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(rec) = serde_json::from_slice::<NamedAgentRecord>(&bytes) else {
+            continue;
+        };
+        if rec.data.definition_id == agent_id {
+            out.push(path);
+        }
+    }
+    Ok(out)
 }
 
 fn read_and_validate(path: &Path, stem: &str) -> Result<NamedAgentRecord, RegistryError> {

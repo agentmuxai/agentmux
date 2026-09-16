@@ -104,13 +104,41 @@
 
     .agent-recent-sessions-row {
         margin: 0;
+        // Anchors .agent-recent-sessions-menu-toggle AND .agent-row-menu
+        // below (both absolutely positioned) — see their own comments.
+        position: relative;
+        transition: filter 0.15s ease, opacity 0.15s ease;
+    }
+
+    // Spotlight effect while a row's menu is open: every OTHER tile blurs
+    // and dims (and stops accepting clicks, so you can't accidentally act
+    // on a dimmed row while one menu is open). `.agent-recent-sessions-list`
+    // is a CSS GRID (see above) — an in-flow menu panel growing one tile's
+    // height would otherwise resize that whole grid row and visibly shove
+    // every tile sharing it downward, which is exactly what .agent-row-menu
+    // below being taken out of flow (position: absolute) avoids; this
+    // blur rule is the second half of the same request.
+    .agent-recent-sessions-list.has-open-row-menu .agent-recent-sessions-row:not(.has-open-menu) {
+        filter: blur(2px);
+        opacity: 0.55;
+        pointer-events: none;
+    }
+
+    // The open row itself stays sharp and rises above its now-blurred
+    // neighbors so .agent-row-menu (overlaid, not pushed into flow) never
+    // renders underneath an adjacent tile.
+    .agent-recent-sessions-row.has-open-menu {
+        z-index: 5;
     }
 
     .agent-recent-sessions-entry {
         display: flex;
         align-items: flex-start;
         gap: var(--space-2);
-        padding: var(--space-2) 10px;
+        // Right padding reserves room for .agent-recent-sessions-menu-toggle
+        // (absolutely positioned, bottom-right, outside normal flow) so the
+        // timestamps row's own text never runs underneath it.
+        padding: var(--space-2) 30px var(--space-2) 10px;
         width: 100%;
         border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
         background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
@@ -249,6 +277,114 @@
     .agent-recent-sessions-entry--active {
         border-color: color-mix(in srgb, #34d399 40%, var(--border-color));
         background: color-mix(in srgb, #34d399 4%, transparent);
+    }
+
+    // Row actions menu — chevron toggle + inline expand panel.
+    // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1/§4.2.
+    .agent-recent-sessions-menu-toggle {
+        position: absolute;
+        // Bottom-right, not top-right — top-right overlaps the HOST/SANDBOX
+        // RuntimeBadge rendered inline on .agent-recent-sessions-line1.
+        bottom: var(--space-2);
+        right: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--secondary-text-color);
+        cursor: default;
+        transition: background 0.12s, color 0.12s, transform 0.12s;
+
+        i {
+            transition: transform 0.15s;
+        }
+
+        // "when hover it highlights"
+        &:hover {
+            background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+            color: var(--main-text-color);
+        }
+
+        &.is-open {
+            background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+            color: var(--main-text-color);
+
+            i {
+                transform: rotate(180deg);
+            }
+        }
+
+        &:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 1px;
+        }
+    }
+
+    .agent-row-menu {
+        // Overlays the row(s) below it instead of pushing them down — out
+        // of normal flow entirely, so it has no effect on the grid track's
+        // height (see .agent-recent-sessions-row's own comment above).
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--border-color);
+        border-top: none;
+        // `--panel-bg-color`/`--main-bg-color` are deliberately translucent
+        // app-wide (the window-opacity feature) — wrong choice for a
+        // floating overlay that needs to read as solid over a blurred row
+        // behind it. `--modal-bg-color` is the token this codebase already
+        // uses for exactly that (context-menu.scss's `.ctx-menu`) — a real
+        // opaque color per theme, not an alpha-blended one.
+        background: var(--modal-bg-color);
+        box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
+    }
+
+    .agent-row-menu-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-2) 10px;
+        font-size: 12px;
+        font-family: inherit;
+        text-align: left;
+        color: var(--main-text-color);
+        background: transparent;
+        border: none;
+        cursor: default;
+
+        i {
+            width: 14px;
+            text-align: center;
+            opacity: 0.8;
+        }
+
+        &:hover {
+            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+        }
+
+        &:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: -2px;
+        }
+    }
+
+    // Visually separated + red — "the destructive one goes at the end."
+    .agent-row-menu-item--danger {
+        color: var(--error-color);
+        border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+
+        &:hover {
+            background: color-mix(in srgb, var(--error-color) 10%, transparent);
+        }
     }
 
     // Fork prompt — inline block below the row button

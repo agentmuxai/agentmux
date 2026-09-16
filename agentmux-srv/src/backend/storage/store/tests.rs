@@ -3018,6 +3018,270 @@
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 0);
     }
 
+    // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.4 / §6 step 1.
+    #[test]
+    fn agent_def_delete_purges_dependent_tables_not_just_the_agent_row() {
+        let store = make_store();
+        let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: "dep-del".to_string(),
+            slug: String::new(),
+            name: "Goner".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: "bash".to_string(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1000,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_content (agent_id, content_type, content, updated_at) VALUES ('dep-del', 'instructions', 'x', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_skills (id, agent_id, name, trigger, skill_type, description, content, created_at) VALUES ('sk1', 'dep-del', 'n', '', 'prompt', '', '', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_history (agent_id, session_date, entry, timestamp) VALUES ('dep-del', '2026-09-16', 'e', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES ('dep-del', 'sk-ref-1')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_mcp_ref (agent_id, mcp_id) VALUES ('dep-del', 'mcp-ref-1')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_credentials (agent_id, client_id, client_secret, token_endpoint, access_token, expires_at, created_at) VALUES ('dep-del', 'c', 's', 't', 'a', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_native_memory (agent_id, filename, content, metadata_type, size_bytes, updated_at, last_seen_path, last_seen_mtime_ms) VALUES ('dep-del', 'MEMORY.md', 'x', '', 1, 0, '', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_native_memory_versions (id, agent_id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at) VALUES ('ver1', 'dep-del', 'MEMORY.md', 'x', 'h', NULL, 'agent_inferred', '{}', '', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_jekt_keys (agent_id, hmac_key, created_at) VALUES ('dep-del', 'k', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_lan_keys (agent_id, public_key, private_key, created_at) VALUES ('dep-del', 'pub', 'priv', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_conversation_trust_grants (agent_id, granted_peer_agent_id, tier, granted_at) VALUES ('dep-del', 'peer-agent', 'full', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_conversation_trust_grants (agent_id, granted_peer_agent_id, tier, granted_at) VALUES ('peer-agent', 'dep-del', 'full', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_activity_summaries (definition_id, summary, updated_at) VALUES ('dep-del', 's', 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        store.agent_def_delete("dep-del").unwrap();
+
+        let conn = store.conn.lock().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_content WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_skills WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_history WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_skills_ref WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_mcp_ref WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_credentials WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_native_memory WHERE agent_id='dep-del'"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM db_agent_native_memory_versions WHERE agent_id='dep-del'"),
+            0
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_jekt_keys WHERE agent_id='dep-del'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_lan_keys WHERE agent_id='dep-del'"), 0);
+        assert_eq!(
+            count("SELECT COUNT(*) FROM db_conversation_trust_grants WHERE agent_id='dep-del' OR granted_peer_agent_id='dep-del'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM db_agent_activity_summaries WHERE definition_id='dep-del'"),
+            0
+        );
+    }
+
+    /// The confirm dialog promises the delete removes "the agent and its
+    /// credentials, skills, and activity history" — but the live
+    /// credentials, account links and native memory are in the IDENTITY
+    /// store (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`), a second physical
+    /// database `agent_def_delete` has no connection to. Its same-named
+    /// tables in the object store are the legacy copies nothing reads.
+    ///
+    /// Also pins the sqlite_master filter that lets one table list serve
+    /// both schemas: the identity store has four of the thirteen, and
+    /// deleting from the absent nine must not error.
+    #[test]
+    fn agent_dependents_purge_works_against_the_identity_store_schema() {
+        let store = Store::open_identity_store(":memory:".as_ref()).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_credentials (agent_id, client_id, client_secret, token_endpoint, access_token, expires_at, created_at) VALUES ('gone', 'c', 's', 't', 'a', 0, 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_identity_links (agent_id, account_id, provider) VALUES ('gone', 'acct', 'claude')",
+                [],
+            )
+            .unwrap();
+        }
+
+        assert_eq!(store.agent_dependents_purge("gone").unwrap(), 2);
+
+        let conn = store.conn.lock().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_credentials WHERE agent_id='gone'"), 0);
+        assert_eq!(count("SELECT COUNT(*) FROM db_agent_identity_links WHERE agent_id='gone'"), 0);
+    }
+
+    /// The reported bug: "the icon on the card disappears, but the card
+    /// stays." Deleting an agent removed its definition but left its
+    /// instance-registry record active, and `listrecentsessions` builds its
+    /// rows from that registry — so the row survived with no definition to
+    /// resolve a provider (no icon) or a name from.
+    ///
+    /// Two independent gaps produced it, one per assertion below:
+    /// the mirror keyed on the *instance* id (missing any legacy
+    /// launch-keyed record), and it was skipped entirely when the local
+    /// `db_agents` DELETE matched nothing — which is every cross-channel
+    /// agent, i.e. most rows the picker shows in a fresh channel.
+    #[test]
+    fn agent_def_delete_sweeps_every_registry_record_for_the_agent() {
+        let (_tmp, store, reg) = store_with_registry();
+        let mut agent = sample_agent("ghost-agent", "ghost");
+        store.agent_def_insert(&mut agent).unwrap();
+
+        // The correctly-keyed record plus a legacy launch-keyed one, the
+        // shape `m0026_registry_agent_id_rekey` leaves behind when it
+        // no-ops (its `db_agent_instances` source table is gone).
+        for instance_id in ["ghost-agent", "legacy-launch-id"] {
+            let mut rec = crate::registry::NamedAgentRecord {
+                schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: instance_id.to_string(),
+                    instance_name: "Ghost".to_string(),
+                    definition_id: "ghost-agent".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "ghost".to_string(),
+                    source_agents_base: None,
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "0.56.1".to_string(),
+                    last_launched_by_version: "0.56.1".to_string(),
+                },
+            };
+            rec.data.instance_id = instance_id.to_string();
+            reg.upsert(&rec).unwrap();
+        }
+
+        assert!(store.agent_def_delete("ghost-agent").unwrap());
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "a legacy launch-keyed record must go with the agent, not stay \
+             behind as an iconless \"(missing definition)\" row"
+        );
+
+        // Cross-channel: the agent lives only in the global definition
+        // store, so the local DELETE matches nothing. The registry record
+        // another channel wrote still has to go.
+        let mut rec = crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "elsewhere-launch".to_string(),
+                instance_name: "Elsewhere".to_string(),
+                definition_id: "elsewhere-agent".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "elsewhere".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        };
+        rec.data.instance_id = "elsewhere-launch".to_string();
+        reg.upsert(&rec).unwrap();
+        let def_dir = _tmp.path().join("definitions");
+        let def_store = crate::registry::DefinitionStore::open(def_dir).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "elsewhere-agent".to_string(),
+                    name: "Elsewhere".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        store.set_def_registry(Arc::new(def_store));
+
+        assert!(
+            store.agent_def_delete("elsewhere-agent").unwrap(),
+            "a cross-channel agent is deletable through the global overlay"
+        );
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "the registry sweep must not be gated on the local row existing"
+        );
+    }
+
     #[test]
     fn launching_a_template_creates_an_agent_row_for_the_launch() {
         let store = make_store();

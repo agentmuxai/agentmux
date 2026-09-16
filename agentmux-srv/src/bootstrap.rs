@@ -663,6 +663,22 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     } else {
         tracing::warn!("def registry: could not resolve shared definitions dir — global definitions disabled");
     }
+    // Both host-global trees are attached now, so they can be reconciled
+    // against each other. Best-effort catch-up pass run every startup, same
+    // shape as the session_id backfill above: drops instance records whose
+    // definition is tombstoned, which the picker would otherwise keep
+    // rendering as an iconless "(missing definition)" row — a deleted agent
+    // whose card never went away. New deletes sweep the registry themselves
+    // (`Store::agent_def_delete`); this is for the orphans already on disk.
+    if let (Some(reg), Some(defs)) = (
+        wstore_raw.shared_agent_registry(),
+        wstore_raw.shared_def_registry(),
+    ) {
+        let pruned = backend::registry_reconcile::prune_tombstoned_instance_records(&reg, &defs);
+        if pruned > 0 {
+            tracing::info!(pruned, "registry: dropped instance records for deleted agents (startup pass)");
+        }
+    }
     let wstore = Arc::new(wstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);

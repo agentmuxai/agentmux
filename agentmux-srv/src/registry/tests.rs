@@ -105,6 +105,109 @@ fn hard_delete_removes_both_paths() {
     assert!(!reg.root().join("retired").join("aaa.json").exists());
 }
 
+/// A record keyed by its own definition id and a legacy record keyed by the
+/// launch it came from, both for one agent. `hard_delete(def_id)` only ever
+/// matched the first; the second stayed active with its definition gone,
+/// and `listrecentsessions` kept rendering it as an iconless
+/// "(missing definition)" row — a delete whose card never went away.
+#[test]
+fn hard_delete_for_agent_catches_a_legacy_launch_keyed_record() {
+    let (_t, reg) = fresh();
+    let mut current = record("agent-1", "Maks", 100);
+    current.data.definition_id = "agent-1".to_string();
+    let mut legacy = record("old-launch-id", "Maks", 90);
+    legacy.data.definition_id = "agent-1".to_string();
+    reg.upsert(&current).unwrap();
+    reg.upsert(&legacy).unwrap();
+
+    reg.hard_delete("agent-1").unwrap();
+    assert_eq!(
+        reg.list_active().unwrap().len(),
+        1,
+        "the instance-keyed delete leaves the legacy record behind — the bug"
+    );
+
+    assert_eq!(reg.hard_delete_for_agent("agent-1").unwrap(), 1);
+    assert!(reg.list_active().unwrap().is_empty());
+}
+
+#[test]
+fn hard_delete_for_agent_also_drops_retired_records() {
+    let (_t, reg) = fresh();
+    let mut rec = record("old-launch-id", "Maks", 100);
+    rec.data.definition_id = "agent-1".to_string();
+    reg.upsert(&rec).unwrap();
+    reg.retire("old-launch-id").unwrap();
+
+    assert_eq!(reg.hard_delete_for_agent("agent-1").unwrap(), 1);
+    assert!(!reg.root().join("retired").join("old-launch-id.json").exists());
+}
+
+#[test]
+fn hard_delete_for_agent_leaves_other_agents_alone() {
+    let (_t, reg) = fresh();
+    let mut mine = record("old-launch-id", "Maks", 100);
+    mine.data.definition_id = "agent-1".to_string();
+    let mut theirs = record("other-launch-id", "Korp", 100);
+    theirs.data.definition_id = "agent-2".to_string();
+    reg.upsert(&mine).unwrap();
+    reg.upsert(&theirs).unwrap();
+
+    assert_eq!(reg.hard_delete_for_agent("agent-1").unwrap(), 1);
+    let left = reg.list_active().unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].data.definition_id, "agent-2");
+}
+
+/// The other direction, and why matching `definition_id` alone isn't
+/// enough: a pre-consolidation registry-only row is addressed by its LAUNCH
+/// id, and its `definition_id` still names the template it came from. The
+/// `instance_set_hidden`/`instance_delete` callers hold that launch id.
+#[test]
+fn for_agent_also_matches_a_records_own_file_key() {
+    let (_t, reg) = fresh();
+    // `record`'s definition_id is "claude-code" — a template, not this id.
+    reg.upsert(&record("legacy-only-row", "crossver", 100)).unwrap();
+
+    assert_eq!(reg.retire_for_agent("legacy-only-row").unwrap(), 1);
+    assert!(reg.root().join("retired").join("legacy-only-row.json").exists());
+    assert_eq!(reg.unretire_for_agent("legacy-only-row").unwrap(), 1);
+    assert_eq!(reg.hard_delete_for_agent("legacy-only-row").unwrap(), 1);
+    assert!(reg.list_active().unwrap().is_empty());
+}
+
+#[test]
+fn hard_delete_for_agent_on_an_unknown_id_is_a_no_op() {
+    let (_t, reg) = fresh();
+    reg.upsert(&record("aaa", "demo", 100)).unwrap();
+    assert_eq!(reg.hard_delete_for_agent("never-existed").unwrap(), 0);
+    assert_eq!(reg.list_active().unwrap().len(), 1);
+}
+
+/// "Forget agent" retiring by file key left the legacy record active, so the
+/// forgotten agent came straight back — the failure
+/// `m0026_registry_agent_id_rekey`'s own doc comment predicted.
+#[test]
+fn retire_for_agent_round_trips_every_record_for_one_agent() {
+    let (_t, reg) = fresh();
+    let mut current = record("agent-1", "Maks", 100);
+    current.data.definition_id = "agent-1".to_string();
+    let mut legacy = record("old-launch-id", "Maks", 90);
+    legacy.data.definition_id = "agent-1".to_string();
+    reg.upsert(&current).unwrap();
+    reg.upsert(&legacy).unwrap();
+
+    assert_eq!(reg.retire_for_agent("agent-1").unwrap(), 2);
+    assert!(reg.list_active().unwrap().is_empty());
+
+    assert_eq!(reg.unretire_for_agent("agent-1").unwrap(), 2);
+    assert_eq!(reg.list_active().unwrap().len(), 2);
+    assert!(
+        reg.get("old-launch-id").unwrap().is_some(),
+        "each record keeps its own file name across the round trip"
+    );
+}
+
 #[test]
 fn unknown_envelope_schema_is_skipped() {
     let (_t, reg) = fresh();
