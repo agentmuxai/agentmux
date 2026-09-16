@@ -440,6 +440,7 @@ partial list.
 | [`SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30`](SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md) | Spec: Token stats panel — break out by agent + value-add details |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24`](SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md) | SPEC: Surface `~/.claude/CLAUDE.md` (read-only) in Global Memory |
+| [`SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Spec: System-tier Global Memory seeding (AgentMux-shipped operator notes) |
 | [`SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31`](SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md) | Tab / window render architecture — coherent-frame design |
 | [`SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31`](SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md) | SPEC — Terminal scroll wheel sensitivity setting |
 | [`SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) | Tool block: live log popout + bottom action bar |

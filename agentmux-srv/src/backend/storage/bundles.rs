@@ -426,6 +426,94 @@ impl Store {
         Ok(())
     }
 
+    /// Same as `bundle_upsert_system`, but also appends a `db_bundle_versions`
+    /// row in the SAME transaction — the system-tier counterpart of
+    /// `bundle_upsert_with_version`, for the same atomicity reason (codex P2,
+    /// PR #3237). Always records a version (unlike the ordinary method, this
+    /// one never returns `None`): a system row is unconditionally
+    /// `is_global=1`, so there is never a case where versioning would not
+    /// apply. See docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md
+    /// — this is what lets `operator_config_seed`'s startup reseed tell "did
+    /// AgentMux's own seeder write this last, or did a human edit it via the
+    /// Armory UI" apart, via the returned/stored `written_by`.
+    ///
+    /// Shares `bundle_upsert_system`'s exact guard and SQL, duplicated for
+    /// the same non-reentrant-`Mutex` reason `bundle_upsert_with_version`
+    /// documents on itself.
+    pub fn bundle_upsert_system_with_version(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<BundleVersion, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing_is_system: Option<i64> = tx
+            .query_row(
+                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if existing_is_system == Some(0) {
+            return Err(StoreError::Other(
+                "cannot convert an existing non-system Global Memory entry into a system entry"
+                    .to_string(),
+            ));
+        }
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        let version = bundle_version_insert_tx(
+            &tx,
+            &memory.id,
+            &memory.name,
+            &memory.instructions,
+            source,
+            source_detail,
+            written_by,
+        )?;
+
+        tx.commit()?;
+        Ok(version)
+    }
+
     /// Delete a Bundle. Refuses to delete the blank singleton, a
     /// seeded bundle, or (new) a system entry — use
     /// `bundle_delete_system` for the last case.

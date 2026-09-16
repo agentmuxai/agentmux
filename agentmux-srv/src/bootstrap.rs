@@ -869,6 +869,13 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // Auto-seed agent definitions on first launch (or empty DB)
     backend::agent_seed::auto_seed_on_startup(&wstore);
 
+    // Keep AgentMux's own Operator Config (is_system=1 Global Memory) in
+    // sync with the shipped manifest on every startup — not a one-time
+    // seed, since stale Operator Config content would mislead an agent
+    // rather than merely being absent. See
+    // docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md.
+    backend::operator_config_seed::auto_seed_on_startup(&wstore);
+
     // The starter Skills catalog is seeded by migrations::m0015_seed_starter_skills
     // (run once ever per channel, tracked in db_migrations) — not here. See
     // that migration's doc comment for why catalog-emptiness was dropped as
