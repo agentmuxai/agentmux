@@ -21,10 +21,9 @@
 import { Tooltip } from "@/app/element/tooltip";
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { TabRpcClient } from "@/app/store/rpc-util";
 import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
-import { atoms, getApi } from "@/store/global";
-import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
+import { atoms } from "@/store/global";
+import { isBlank, makeIconClass } from "@/util/util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
@@ -35,6 +34,7 @@ import {
     pinWidget,
     unpinWidget,
 } from "./action-widgets-config";
+import { buildWidgetOpenActions } from "./action-widgets-menu";
 import { MoreDropdown } from "./more-dropdown";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
@@ -346,28 +346,13 @@ const ActionWidgets = (): JSX.Element => {
                     : { label: "Pin group to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
             ];
         }
-        const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
-        const view = (blockMeta?.["view"] as string) ?? null;
-        const items: PopoverMenuItem[] = [
-            {
-                label: "Open in New Window",
-                click: () => {
-                    closeMore();
-                    if (view) fireAndForget(async () => getApi().openNewWindowWithView(view, blockMeta));
-                    else fireAndForget(async () => getApi().openNewWindow());
-                },
+        const items: PopoverMenuItem[] = buildWidgetOpenActions(shortName, wmap()).map((action) => ({
+            label: action.label,
+            click: () => {
+                closeMore();
+                action.run();
             },
-            {
-                label: "Open in Floating Pane",
-                click: () => {
-                    closeMore();
-                    if (!view || !blockMeta) return;
-                    fireAndForget(async () =>
-                        TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true }, {})
-                    );
-                },
-            },
-        ];
+        }));
         // Pin/Unpin here works for a grouped child too — e.g. right-clicking
         // "Discord" inside the Messengers flyout and choosing "Pin to bar"
         // PROMOTES it out of the group onto the bar as a standalone widget;
@@ -452,13 +437,10 @@ const ActionWidgets = (): JSX.Element => {
             );
             return;
         }
+        const actions = buildWidgetOpenActions(shortName, wmap());
         ContextMenuModel.showContextMenu(
             [
-                { label: "New Window", click: () => {
-                    fireAndForget(async () => {
-                        await getApi().openNewWindow();
-                    });
-                }},
+                ...actions.map((action) => ({ label: action.label, click: action.run })),
                 { type: "separator" },
                 { label: "Unpin from bar", click: () => unpinWidget(shortName, settings(), wmap()) },
             ],

@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fullConfigAtom, WOS } from "@/app/store/global";
-import { ObjectService } from "@/app/store/services";
+import { fullConfigAtom, setActiveTab, workspace, WOS } from "@/app/store/global";
+import { ObjectService, WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForTabById, markBlockRecentlyCreated } from "@/layout/index";
 import {
     LayoutTreeActionType,
@@ -236,4 +236,25 @@ export async function createBlockOnModel(
         layoutModel.treeReducer(action);
     }
     return blockId;
+}
+
+// ─── Open a single view as a brand-new tab ─────────────────────────────────
+//
+// Same CreateTab + waitForLayoutModel + createBlockOnModel sequence
+// EditorViewModel.openInNewTab (frontend/app/view/editor/editor-model.ts)
+// already uses successfully for exactly this "new tab, one pre-seeded pane"
+// case — NOT the pane.open RPC, which silently fails to render against a
+// brand-new tab_id (see createBlockOnModel's comment above).
+export async function openViewInNewTab(view: string, meta?: Record<string, unknown>): Promise<void> {
+    const ws = workspace();
+    if (!ws) return;
+    try {
+        const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
+        const layoutModel = await waitForLayoutModel(tabId);
+        if (!layoutModel) return; // Tab never propagated — nothing safe to do.
+        await createBlockOnModel(tabId, layoutModel, { meta: { ...meta, view } }, null, null);
+        await setActiveTab(tabId);
+    } catch {
+        // Fail silently, consistent with EditorViewModel.openInNewTab.
+    }
 }
