@@ -57,13 +57,17 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             buildLabel: (d as any)?.buildLabel ?? null,
             gitHash: d?.gitHash ?? null,
             buildTime: typeof d?.buildTime === "number" && d.buildTime > 0 ? d.buildTime : null,
+            cefVersion: d?.cefVersion ?? null,
             platform: (d as any)?.platform ?? null,
             arch: (d as any)?.arch ?? null,
         };
     });
 
-    // Build timestamp -> "Jan 3, 2019 8:12AM": abbreviated month, no
-    // leading-zero day/hour, 2-digit minute, AM/PM with no separating space.
+    // Build timestamp -> "Jan 3, 2019 8:12AM PDT": abbreviated month, no
+    // leading-zero day/hour, 2-digit minute, AM/PM with no separating space,
+    // trailing short timezone name (browser's local zone — this is a local
+    // build timestamp, not UTC, so the zone is the only way to read it
+    // unambiguously against a machine in a different zone).
     const formatBuildTime = (ms: number): string => {
         const s = new Date(ms).toLocaleString("en-US", {
             month: "short",
@@ -72,8 +76,9 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             hour: "numeric",
             minute: "2-digit",
             hour12: true,
+            timeZoneName: "short",
         });
-        return s.replace(/, (\d{1,2}:\d{2})/, " $1").replace(/\s(AM|PM)$/, "$1");
+        return s.replace(/, (\d{1,2}:\d{2})/, " $1").replace(/\s(AM|PM)\b/, "$1");
     };
 
     const entries = openWindowEntriesAtom;
@@ -472,6 +477,20 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         <span class="instance-panel-value instance-panel-mono">
                             {formatBuildTime(about().buildTime!)}
                         </span>
+                    </div>
+                </Show>
+                <Show when={about().cefVersion}>
+                    <div class="instance-panel-row instance-panel-row-meta">
+                        <span class="instance-panel-label">CEF</span>
+                        <span class="instance-panel-value instance-panel-mono">{about().cefVersion}</span>
+                        <button
+                            type="button"
+                            class="instance-panel-copy"
+                            title="Copy CEF version"
+                            onClick={() => clipboardWriteText(about().cefVersion!)}
+                        >
+                            ⧉
+                        </button>
                     </div>
                 </Show>
                 <Show when={about().platform || about().arch}>
