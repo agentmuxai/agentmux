@@ -495,6 +495,22 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     createEffect(() => {
         const activeId = model.activeIdAtom(); // reactive: tab change
         const loading = model.loadingAtom(); // reactive: wait for content
+        // Reactive on purpose (codex P1 on PR #3260): an external file change
+        // to a CLEAN active tab replaces the buffer and bumps _contentVersion,
+        // but leaves the tab already-loaded — so `loading` does not move and,
+        // once it is properly memoized, no longer re-runs this effect. Before
+        // that memoization the rebuild happened by accident, via loadingAtom
+        // subscribing to the whole tab object. Track the content itself so the
+        // reload path keeps working on purpose rather than as a side effect;
+        // without it the pane would show stale text and a later save could
+        // overwrite the external change.
+        //
+        // Safe against the bug this PR fixes: onContentChange() deliberately
+        // does NOT bump _contentVersion on keystrokes ("CodeMirror is the
+        // source of truth for the live buffer"), so typing cannot re-trigger
+        // this. And _maybeReloadTabs never clobbers a dirty tab, so this only
+        // fires for buffers the user has not edited.
+        model.contentAtom();
         // containerRef() is reactive: when the body <Show> mounts the container
         // after content loads, this effect re-runs and proceeds (fixes the
         // first-open blank-preview race).
