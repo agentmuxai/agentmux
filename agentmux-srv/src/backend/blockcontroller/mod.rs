@@ -12,6 +12,7 @@
 //! - Controllers dispatch I/O between the user and the process/service
 
 pub mod acp;
+pub mod agent_lock;
 pub mod app_server;
 pub mod app_server_controller;
 pub mod app_server_protocol;

@@ -4030,6 +4030,95 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
     blockcontroller::delete_controller(&second_shell_id);
 }
 
+/// A shell that has EXITED must not still hold an agent lease over the
+/// human's keyboard (`blockcontroller::agent_lock`, wired from the
+/// wait/cleanup task in `shell/lifecycle.rs`).
+///
+/// Why this matters beyond tidiness: the lease drops human `controllerinput`
+/// keystrokes outright. Leaving one attached to a dead PTY means the pane
+/// silently swallows whatever the human types next — including `exit` itself,
+/// the one key sequence the close-on-exit work
+/// (`SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §10) exists to honour.
+///
+/// The lease seeded here is deliberately far longer than the real
+/// `AGENT_LOCK_WINDOW_MS` (4s). A real lease would lapse on its own during
+/// the multi-second wait for the shell to be reaped below, so this test
+/// would pass with the release wiring deleted — it would be measuring the
+/// clock, not the fix. A 10-minute lease can only be cleared by the exit
+/// path itself.
+///
+/// `#[ignore]`d like this file's other real-PTY tests (they hang on
+/// GitHub-hosted `windows-latest` runners; tracked, unrelated cause). Run
+/// manually: `cargo test -p agentmux-srv --bin agentmux-srv
+/// an_exited_shell_does_not_keep_the_agent_lease -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn an_exited_shell_does_not_keep_the_agent_lease() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "lease-exit-agent-block".to_string(),
+        ..Default::default()
+    };
+    state.wstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "lease-exit-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // The agent types `exit` into the shell it's driving. This write takes a
+    // real lease through the production path (`lock_shell_for_agent`) as a
+    // side effect — proving the lease is genuinely live at the moment the
+    // shell starts going away, not just something this test invented.
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/input",
+        serde_json::json!({ "shell_id": shell_id, "agent_block_id": "lease-exit-agent-block", "text": "exit\r\n" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["written"], serde_json::json!(true), "input write failed: {json:?}");
+    assert!(
+        blockcontroller::agent_lock::is_locked(&shell_id),
+        "precondition: an agent write must take a lease"
+    );
+
+    // Extend it past the reap wait — see the doc comment.
+    blockcontroller::agent_lock::lock_until(&shell_id, agentmux_common::time::now_ms() + 600_000);
+
+    let mut done = false;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let (_, status_json) = post_json(
+            &app,
+            "/api/v1/ptyshell/status",
+            serde_json::json!({ "shell_id": shell_id, "agent_block_id": "lease-exit-agent-block" }),
+        )
+        .await;
+        if status_json["running"] == serde_json::json!(false) {
+            done = true;
+            break;
+        }
+    }
+    assert!(done, "expected the shell to report not-running after `exit`");
+
+    assert!(
+        !blockcontroller::agent_lock::is_locked(&shell_id),
+        "an exited shell must release its agent lease, or the pane keeps dropping the human's keystrokes"
+    );
+
+    blockcontroller::agent_lock::release(&shell_id);
+    blockcontroller::delete_controller(&shell_id);
+}
+
 /// Regression test for close-on-exit's PARENT exclusion
 /// (`docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` §11): a
 /// `PtyShellCreate`-spawned block is always a SUB-block (`parentoref`
