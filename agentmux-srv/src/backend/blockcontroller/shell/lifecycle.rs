@@ -26,7 +26,8 @@ use super::controller::KILL_GRACE_SECS;
 use super::controller::{ShellController, SHELL_INPUT_CH_SIZE};
 use super::file_ops::handle_append_block_file;
 use super::pty::{
-    detect_local_shell_path_windows, FLUSHER_DRAIN_TIMEOUT, PTY_CHANNEL_CAPACITY,
+    detect_local_shell_path_windows, FLUSHER_BARRIER_TIMEOUT, FLUSHER_DRAIN_TIMEOUT,
+    FLUSHER_EOF_GRACE, PTY_CHANNEL_CAPACITY,
     PTY_COALESCE_MAX_BYTES, PTY_COALESCE_WINDOW, PTY_READ_BUF_SIZE,
 };
 use super::translation::accumulate_and_translate;
@@ -40,6 +41,20 @@ use crate::backend::wps;
 struct PtyReadChunk {
     data: Vec<u8>,
     osc_events: Vec<crate::backend::osc_extractor::OscEvent>,
+    /// Flush barrier. When set, the flusher signals it AFTER committing the
+    /// batch this chunk lands in — so a sender that enqueues a barrier and
+    /// awaits it knows everything queued before it has reached the FileStore
+    /// and the broker.
+    ///
+    /// Exists because "the flusher task ended" is NOT a usable completion
+    /// signal on Windows: ConPTY's console host outlives the direct child, so
+    /// the read loop never sees EOF, never drops its sender, and the channel
+    /// never closes. Waiting on the task therefore always burned the full
+    /// `FLUSHER_DRAIN_TIMEOUT` (see its doc comment) even though the flusher
+    /// itself had been idle for most of that second. A barrier asks the
+    /// question actually being asked — "is prior output committed yet?" —
+    /// and is answered in about one `PTY_COALESCE_WINDOW`.
+    ack: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// Do the actual per-batch work the read loop used to do per-read: write
@@ -133,6 +148,14 @@ async fn run_pty_output_flusher(
         };
         let mut batch = first.data;
         let mut batch_osc = first.osc_events;
+        // Barriers collected into THIS batch. A barrier ends accumulation as
+        // soon as it is seen (below): everything already in `batch` is about
+        // to be flushed, and holding the batch open for the rest of the
+        // coalescing window would delay the ack for no benefit.
+        let mut batch_acks: Vec<tokio::sync::oneshot::Sender<()>> = Vec::new();
+        if let Some(ack) = first.ack {
+            batch_acks.push(ack);
+        }
         let deadline = tokio::time::Instant::now() + PTY_COALESCE_WINDOW;
 
         // Opportunistically drain more already-queued (or about-to-arrive)
@@ -149,6 +172,10 @@ async fn run_pty_output_flusher(
                 Ok(Some(next)) => {
                     batch.extend_from_slice(&next.data);
                     batch_osc.extend(next.osc_events);
+                    if let Some(ack) = next.ack {
+                        batch_acks.push(ack);
+                        break false; // flush now; someone is waiting on it
+                    }
                 }
                 Ok(None) => break true, // channel closed mid-accumulation
                 Err(_elapsed) => break false, // coalescing window elapsed
@@ -198,6 +225,13 @@ async fn run_pty_output_flusher(
         })
         .await
         .expect("PTY output flush task panicked");
+
+        // Everything enqueued up to and including the barrier is now
+        // committed. A dropped receiver (the waiter timed out and moved on)
+        // is fine — that is the bounded-wait path doing its job.
+        for ack in batch_acks {
+            let _ = ack.send(());
+        }
         line_buf = new_line_buf;
         translator = new_translator;
 
@@ -876,6 +910,23 @@ impl Controller for ShellController {
         // sustained fast producer grow queued memory without limit if the
         // flusher ever falls behind the read rate.
         let (pty_tx, pty_rx) = mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+        // Kept for the post-exit flush barrier (see the wait/cleanup task).
+        //
+        // A WEAK sender, emphatically not a clone. ReAgent P1 (round 3) on PR
+        // #3261: an mpsc channel closes only once EVERY `Sender` is dropped, so
+        // a strong clone held by the wait task keeps the channel open for as
+        // long as that task lives — which is precisely across the window where
+        // the task waits for the flusher to end. `flusher_handle` could then
+        // never resolve, on any platform, making the "prefer true EOF" fast
+        // path dead code and silently applying the fallback's residual race to
+        // every exit everywhere. An earlier revision of this very comment
+        // claimed a clone "does NOT keep the channel open"; that was simply
+        // wrong.
+        //
+        // `WeakSender` does not count towards keeping the channel alive, and
+        // `upgrade()` returning `None` is itself the answer the barrier wants:
+        // the channel is closed, so everything in it was drained.
+        let barrier_tx: tokio::sync::mpsc::WeakSender<PtyReadChunk> = pty_tx.downgrade();
 
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
@@ -936,6 +987,7 @@ impl Controller for ShellController {
                             // read loop itself must keep draining so the
                             // child process's stdout never backs up.
                             let _ = pty_tx.blocking_send(PtyReadChunk {
+                                ack: None,
                                 data: chunk.to_vec(),
                                 osc_events,
                             });
@@ -950,6 +1002,9 @@ impl Controller for ShellController {
             // `pty_tx` drops here, closing the channel — the flusher below
             // sees `recv()` return `None` once it has drained everything
             // already sent, flushes any final partial batch, and exits.
+            // (Still true with the barrier handle in play: that one is a
+            // `WeakSender`, which does not keep the channel open. It must stay
+            // weak — see its own comment above.)
         });
 
         // Coalescing flusher: batches chunks the read loop above sends,
@@ -1098,21 +1153,36 @@ impl Controller for ShellController {
             // persisting and broadcasting whatever the descendant produces
             // next, and exit naturally once the PTY genuinely reaches EOF.
             //
-            // Skipped entirely when this pane is about to close on exit
-            // (§13): the whole point of the wait is to order trailing
-            // output BEFORE clients observe `STATUS_DONE`, and there is no
-            // client left to order it for once the block is deleted a
-            // moment later. On Windows this wait is reached at its full
-            // ceiling on every ordinary exit (§12), so skipping it here is
-            // the difference between a pane that closes the instant its
-            // shell exits and one that visibly lingers a second first.
-            // The flusher is detached either way — exactly as it would be
-            // on timeout — so nothing it produces later is lost any more
-            // than it already would be.
+            // Two signals, strongest first (ReAgent P1 on PR #3261).
+            //
+            // The flusher task ENDING is the strong one: it only ends when the
+            // channel closes, which only happens once the read loop observed
+            // true EOF and dropped its sender — so every byte the child ever
+            // produced is both enqueued and committed. Wherever EOF actually
+            // arrives (Linux, macOS) this resolves in milliseconds and the
+            // guarantee is exactly what it was before the barrier existed.
+            //
+            // The barrier is the fallback, for where EOF never comes at all:
+            // on Windows ConPTY's console host outlives the direct child, so
+            // the read loop stays blocked in a read that never returns and the
+            // task can never end. Waiting on it there always burned the full
+            // ceiling (§12) — the second a human sees after typing `exit`.
+            //
+            // Residual, stated plainly: the barrier cannot order against a
+            // chunk the read loop has read but not yet enqueued, so on the
+            // fallback path a final chunk racing it can land after
+            // STATUS_DONE. Pre-PR behaviour on that same path was also
+            // best-effort (it timed out and detached), so this trades grace
+            // for responsiveness rather than trading away a guarantee that was
+            // ever actually held there. Where the guarantee WAS held — EOF
+            // platforms — it still is.
+            //
+            // Total worst case stays FLUSHER_DRAIN_TIMEOUT: the two waits
+            // split that budget rather than each taking it (ReAgent P2).
             if close_on_exit {
                 drop(flusher_handle);
             } else {
-                match tokio::time::timeout(FLUSHER_DRAIN_TIMEOUT, flusher_handle).await {
+                match tokio::time::timeout(FLUSHER_EOF_GRACE, flusher_handle).await {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
                         tracing::warn!(
@@ -1123,17 +1193,22 @@ impl Controller for ShellController {
                         );
                     }
                     Err(_) => {
-                        tracing::warn!(
-                            block_id = %block_id_wait,
-                            timeout = ?FLUSHER_DRAIN_TIMEOUT,
-                            "PTY output flusher did not finish draining within the timeout after \
-                             process exit (a background descendant still holding the PTY open?) — \
-                             proceeding with pane teardown without waiting further; leaving the \
-                             flusher and its PTY read loop running detached in the background \
-                             rather than aborting them, so no output produced after this point is \
-                             silently lost — some trailing output as of teardown time may still be \
-                             missing"
-                        );
+                        // No EOF within the grace — assume it is never coming
+                        // (ConPTY) and settle for the bounded barrier.
+                        // `None` means every sender is gone — the channel
+                        // closed and the flusher drained it, which is the
+                        // guarantee the barrier exists to obtain.
+                        let barrier = match barrier_tx.upgrade() {
+                            Some(tx) => flush_barrier(&tx, FLUSHER_BARRIER_TIMEOUT).await,
+                            None => Ok(()),
+                        };
+                        if barrier.is_err() {
+                            tracing::warn!(
+                                block_id = %block_id_wait,
+                                timeout = ?FLUSHER_BARRIER_TIMEOUT,
+                                "PTY output flush barrier went unanswered after process exit (a                                  wedged flusher, or a background descendant still holding the PTY                                  open?) — proceeding with pane teardown; the flusher and its read                                  loop stay detached and running, so later output is still not lost,                                  but some trailing output may land after STATUS_DONE"
+                            );
+                        }
                     }
                 }
             }
@@ -1713,6 +1788,57 @@ mod agent_id_for_jekt_tests {
     }
 }
 
+/// Ask the output flusher to confirm that everything enqueued so far has been
+/// committed, bounded by `timeout`.
+///
+/// This is the ordering guarantee the post-exit wait actually needs: clients
+/// must not observe `STATUS_DONE` before the output that preceded it is
+/// readable. `PtyShellStatus` → `PtyShellRead` is the sharpest case — an agent
+/// polls until `running: false` and then reads the file, so a `STATUS_DONE`
+/// that outran the final flush hands it truncated command output (Codex P1 on
+/// PR #3261).
+///
+/// Waiting on the flusher TASK was the previous way to get that, and it is a
+/// much blunter instrument: the task only ends when the channel closes, which
+/// on Windows never happens (ConPTY's console host outlives the child, so the
+/// read loop stays blocked in a read that never returns and never drops its
+/// sender). Every ordinary exit therefore paid the full
+/// `FLUSHER_DRAIN_TIMEOUT` while the flusher sat idle — a visible second of
+/// dead UI, and the reason `exit` in a shell felt stuck.
+///
+/// `Err(())` means the barrier could not be confirmed within `timeout` (or the
+/// flusher is already gone). Callers fall back to the old bounded wait.
+async fn flush_barrier(
+    tx: &mpsc::Sender<PtyReadChunk>,
+    timeout: std::time::Duration,
+) -> Result<(), ()> {
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+    // The SEND is inside the timeout too, not just the ack wait (ReAgent P1 on
+    // PR #3261). `tx` is a bounded channel: if it is full and the flusher is
+    // stalled — a wedged FileStore write, a jammed broker — an unbounded
+    // `send().await` blocks the whole wait/cleanup task forever, and with it
+    // STATUS_DONE, the jekt lease release, and the close-on-exit trigger. The
+    // entire point of this path is to be bounded; a bound with an unbounded
+    // step inside it is not one.
+    let deadline = tokio::time::Instant::now() + timeout;
+    let send_fut = tx.send(PtyReadChunk {
+        data: Vec::new(),
+        osc_events: Vec::new(),
+        ack: Some(ack_tx),
+    });
+    match tokio::time::timeout_at(deadline, send_fut).await {
+        // Receiver gone — the flusher has already exited, which means the
+        // channel closed, which means everything in it was drained.
+        Ok(Err(_)) => return Ok(()),
+        Ok(Ok(())) => {}
+        Err(_) => return Err(()),
+    }
+    match tokio::time::timeout_at(deadline, ack_rx).await {
+        Ok(Ok(())) => Ok(()),
+        _ => Err(()),
+    }
+}
+
 /// Release `block_id`'s PtyShell agent lease — both copies — but ONLY if
 /// `inner` still identifies the controller currently registered for that
 /// block. Returns whether it released.
@@ -1755,6 +1881,164 @@ pub(super) fn release_lease_if_current(
     }
     super::super::agent_lock::release_and_clear_meta(block_id, wstore, event_bus);
     true
+}
+
+#[cfg(test)]
+mod flush_barrier_tests {
+    use super::{flush_barrier, run_pty_output_flusher, PtyReadChunk, PTY_CHANNEL_CAPACITY};
+
+    /// The guarantee Codex's P1 on PR #3261 is about: the barrier must not
+    /// resolve until output enqueued BEFORE it has actually been flushed.
+    /// `PtyShellStatus` -> `PtyShellRead` depends on this — an agent polls for
+    /// `running: false` and then reads the file, so a `STATUS_DONE` that
+    /// outran the final flush hands it truncated output.
+    ///
+    /// Uses the real flusher with no broker, which makes it return
+    /// immediately and close the channel — so this asserts the OTHER half:
+    /// that a gone flusher resolves rather than hanging (see below). The
+    /// ordering itself is asserted by `barrier_resolves_only_after_the_batch`.
+    #[tokio::test]
+    async fn a_gone_flusher_resolves_the_barrier_instead_of_hanging() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+        // No broker → the flusher returns at once, dropping the receiver.
+        let flusher = tokio::spawn(run_pty_output_flusher(rx, None, "blk".into(), None, false));
+        flusher.await.expect("flusher task");
+
+        let res = flush_barrier(&tx, std::time::Duration::from_secs(5)).await;
+        assert_eq!(res, Ok(()), "a closed channel means nothing is left unflushed");
+    }
+
+    /// THE load-bearing property: the ack must not fire until the output
+    /// enqueued before it is actually COMMITTED — written to the FileStore,
+    /// not merely dequeued.
+    ///
+    /// Runs the real flusher against a real in-memory FileStore and reads the
+    /// file at the moment the barrier resolves. An earlier version of this
+    /// test drained the channel by hand instead, which only proved the
+    /// channel is FIFO — it passed unchanged when the ack was moved to BEFORE
+    /// the flush, i.e. it could not see the bug it existed to catch.
+    #[tokio::test]
+    async fn barrier_does_not_resolve_until_prior_output_is_committed() {
+        use super::super::super::super::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let (broker, _events) = super::pty_output_flusher_tests::broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let (tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+
+        tx.send(PtyReadChunk { data: b"committed output".to_vec(), osc_events: Vec::new(), ack: None })
+            .await
+            .expect("send data");
+
+        let flusher = tokio::spawn(run_pty_output_flusher(
+            rx,
+            Some(Arc::new(broker)),
+            "block-1".to_string(),
+            Some(fs.clone()),
+            false,
+        ));
+
+        flush_barrier(&tx, std::time::Duration::from_secs(5))
+            .await
+            .expect("barrier must resolve");
+
+        // The barrier has resolved — the output it was queued behind must be
+        // readable RIGHT NOW, with no further waiting.
+        let data = fs
+            .read_file("block-1", "term")
+            .expect("read_file ok")
+            .expect("output must be committed by the time the barrier resolves");
+        assert_eq!(
+            data,
+            b"committed output".to_vec(),
+            "barrier resolved before the preceding output reached the FileStore"
+        );
+
+        drop(tx);
+        let _ = flusher.await;
+    }
+
+    /// The property that makes the "prefer true EOF" fast path reachable at
+    /// all, and the exact thing ReAgent's round-3 P1 found broken: the wait
+    /// task's barrier handle must NOT keep the channel open.
+    ///
+    /// An mpsc channel closes only once EVERY `Sender` is dropped. A strong
+    /// clone held across the EOF wait means `recv()` never yields `None`, the
+    /// flusher never ends, `flusher_handle` never resolves — and the fast path
+    /// is dead code on every platform, silently applying the fallback's
+    /// residual race everywhere.
+    ///
+    /// The production site is additionally type-annotated as `WeakSender`, so
+    /// swapping it back to `clone()` is a compile error rather than a silent
+    /// behaviour change.
+    #[tokio::test]
+    async fn a_weak_barrier_handle_does_not_keep_the_flusher_alive() {
+        use super::super::super::super::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let (broker, _events) = super::pty_output_flusher_tests::broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let (tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+
+        let weak: tokio::sync::mpsc::WeakSender<PtyReadChunk> = tx.downgrade();
+        let flusher = tokio::spawn(run_pty_output_flusher(
+            rx,
+            Some(Arc::new(broker)),
+            "block-1".to_string(),
+            Some(fs),
+            false,
+        ));
+
+        // The read loop's sender going away is the ONLY strong sender.
+        drop(tx);
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), flusher)
+            .await
+            .expect("the flusher must end once the last STRONG sender drops — a weak handle must not hold it open")
+            .expect("flusher task");
+
+        assert!(
+            weak.upgrade().is_none(),
+            "a closed channel must not be upgradeable — the barrier reads this as 'already drained'"
+        );
+    }
+
+    /// ReAgent P1 on PR #3261: the SEND has to be inside the timeout too.
+    /// `tx` is bounded, so a full channel plus a stalled flusher makes an
+    /// unbounded `send().await` block the whole wait/cleanup task forever —
+    /// taking STATUS_DONE, the lease release and close-on-exit with it. A
+    /// bound with an unbounded step inside it is not a bound.
+    ///
+    /// Fills the channel to capacity with a receiver that never reads, so the
+    /// send genuinely cannot complete.
+    #[tokio::test]
+    async fn a_full_channel_expires_instead_of_blocking_forever() {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(1);
+        tx.send(PtyReadChunk { data: b"wedged".to_vec(), osc_events: Vec::new(), ack: None })
+            .await
+            .expect("first send fills the channel");
+
+        let started = std::time::Instant::now();
+        let res = flush_barrier(&tx, std::time::Duration::from_millis(80)).await;
+        assert_eq!(res, Err(()), "a send that cannot complete must expire");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "must expire on the timeout, not block: took {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The bounded-wait contract: if nothing ever acks (a wedged flusher), the
+    /// barrier gives up rather than hanging the exit path forever. This is the
+    /// case the old code always hit, and it is now the fallback rather than
+    /// the norm.
+    #[tokio::test]
+    async fn an_unanswered_barrier_times_out() {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+        // `_rx` is held open but never read, so the ack can never fire.
+        let res = flush_barrier(&tx, std::time::Duration::from_millis(50)).await;
+        assert_eq!(res, Err(()), "an unanswered barrier must expire, not block forever");
+    }
 }
 
 #[cfg(test)]
@@ -1879,7 +2163,7 @@ mod controller_agent_id_tests {
 }
 
 #[cfg(test)]
-mod pty_output_flusher_tests {
+pub(super) mod pty_output_flusher_tests {
     use super::{flush_pty_batch, run_pty_output_flusher, PtyReadChunk, PTY_CHANNEL_CAPACITY};
     use crate::backend::storage::filestore::FileStore;
     use crate::backend::wps;
@@ -1905,7 +2189,7 @@ mod pty_output_flusher_tests {
     /// A broker wired to a `RecordingClient`, subscribed (all-scopes, so
     /// this doesn't need to know the exact `block:<id>` scope string) to
     /// `EVENT_BLOCK_FILE` — the event `handle_append_block_file` publishes.
-    fn broker_recording_block_file_events() -> (wps::Broker, Arc<Mutex<Vec<wps::WaveEvent>>>) {
+    pub(super) fn broker_recording_block_file_events() -> (wps::Broker, Arc<Mutex<Vec<wps::WaveEvent>>>) {
         let broker = wps::Broker::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         broker.set_client(Box::new(RecordingClient {
@@ -1990,6 +2274,7 @@ mod pty_output_flusher_tests {
             let piece = format!("line {i}\n");
             expected.extend_from_slice(piece.as_bytes());
             tx.send(PtyReadChunk {
+                ack: None,
                 data: piece.into_bytes(),
                 osc_events: Vec::new(),
             })
@@ -2050,6 +2335,7 @@ mod pty_output_flusher_tests {
         for _ in 0..80 {
             expected.extend_from_slice(&piece);
             tx.send(PtyReadChunk {
+                ack: None,
                 data: piece.clone(),
                 osc_events: Vec::new(),
             })
@@ -2083,7 +2369,7 @@ mod pty_output_flusher_tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(1);
 
         // Fills the one slot; must return immediately (room available).
-        tx.blocking_send(PtyReadChunk { data: vec![1], osc_events: Vec::new() })
+        tx.blocking_send(PtyReadChunk { data: vec![1], osc_events: Vec::new(), ack: None })
             .expect("first send has room");
 
         // A real background thread — mirrors the production shape exactly:
@@ -2092,7 +2378,7 @@ mod pty_output_flusher_tests {
         let sent_second = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let sent_second_writer = sent_second.clone();
         let handle = std::thread::spawn(move || {
-            tx.blocking_send(PtyReadChunk { data: vec![2], osc_events: Vec::new() })
+            tx.blocking_send(PtyReadChunk { data: vec![2], osc_events: Vec::new(), ack: None })
                 .expect("second send eventually succeeds once drained");
             sent_second_writer.store(true, std::sync::atomic::Ordering::SeqCst);
         });
@@ -2161,6 +2447,7 @@ mod pty_output_flusher_tests {
         let sender = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             tx.send(PtyReadChunk {
+                ack: None,
                 data: b"trailing output".to_vec(),
                 osc_events: Vec::new(),
             })
