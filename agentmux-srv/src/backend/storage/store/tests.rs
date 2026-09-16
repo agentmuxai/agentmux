@@ -3282,6 +3282,108 @@
         );
     }
 
+    /// Codex P2 on PR #3262: if an earlier attempt tombstoned the
+    /// definition but left a registry record behind (or another channel
+    /// wrote a stale one afterwards), a RETRY has `rows == 0` and
+    /// `global_retired == false` — the tombstone already exists. Gating the
+    /// sweep on either would let the iconless ghost row survive every
+    /// further Delete until restart.
+    #[test]
+    fn deleting_an_already_tombstoned_agent_still_sweeps_the_registry() {
+        let (_tmp, store, reg) = store_with_registry();
+        let def_store =
+            crate::registry::DefinitionStore::open(_tmp.path().join("definitions")).unwrap();
+        def_store
+            .upsert(&crate::registry::DefinitionRecord {
+                schema_version: crate::registry::DEF_MAX_SUPPORTED_SCHEMA,
+                data: crate::registry::DefinitionRecordV1 {
+                    id: "retry-agent".to_string(),
+                    name: "Retry".to_string(),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        // Definition already tombstoned by a previous attempt.
+        def_store.retire("retry-agent").unwrap();
+        store.set_def_registry(Arc::new(def_store));
+
+        // ...which failed to take this record with it.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "stale-launch".to_string(),
+                instance_name: "Retry".to_string(),
+                definition_id: "retry-agent".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "retry".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        })
+        .unwrap();
+
+        // Nothing left to report as deleted — and that must not stop the sweep.
+        assert!(!store.agent_def_delete("retry-agent").unwrap());
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "a retried Delete must still clear the ghost row's record"
+        );
+    }
+
+    /// Codex P1 on PR #3262: `renameagentdefinitiontitle` moves `name` /
+    /// `branch_label`, but "My Agents" rows render `instance_name` — so a
+    /// rename redisplayed the old name. `instance_rename` moves the field
+    /// the user is actually looking at, in SQLite and in EVERY registry
+    /// record (the dedup key is `(definition_id, instance_name)`, so a
+    /// partial rename splits one agent into two rows).
+    #[test]
+    fn instance_rename_moves_the_picker_visible_name_everywhere() {
+        let (_tmp, store, reg) = store_with_registry();
+        let agents_root = _tmp.path().join("agents");
+        let inst = make_named_inst("rename-me", "OldName", &agents_root);
+        store.instance_create(&inst).unwrap();
+        // A second, launch-keyed record for the same agent — the legacy
+        // shape this PR's delete fix also has to cope with.
+        let mut legacy = reg.get("rename-me").unwrap().expect("mirrored on create");
+        legacy.data.instance_id = "legacy-launch".to_string();
+        reg.upsert(&legacy).unwrap();
+
+        assert!(store.instance_rename("rename-me", "NewName").unwrap());
+
+        assert_eq!(
+            store.instance_get("rename-me").unwrap().unwrap().instance_name,
+            "NewName"
+        );
+        for rec in reg.list_active().unwrap() {
+            assert_eq!(
+                rec.data.instance_name, "NewName",
+                "record {} kept the old name — the picker would show two rows",
+                rec.data.instance_id
+            );
+        }
+    }
+
+    /// An agent that never had a named launch must not GAIN one: a non-empty
+    /// `instance_name` is what puts a row in `instance_list_named`.
+    #[test]
+    fn instance_rename_does_not_name_a_never_named_agent() {
+        let (_tmp, store, _reg) = store_with_registry();
+        let mut agent = sample_agent("unnamed-agent", "unnamed");
+        store.agent_def_insert(&mut agent).unwrap();
+
+        assert!(!store.instance_rename("unnamed-agent", "NewName").unwrap());
+        assert_eq!(
+            store.instance_get("unnamed-agent").unwrap().unwrap().instance_name,
+            "",
+            "renaming must not conjure a picker row"
+        );
+    }
+
     #[test]
     fn launching_a_template_creates_an_agent_row_for_the_launch() {
         let store = make_store();

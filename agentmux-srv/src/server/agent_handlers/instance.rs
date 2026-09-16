@@ -203,11 +203,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
+    let identity_store_del = state.identity_store.clone();
     engine.register_typed(
         COMMAND_DELETE_AGENT_INSTANCE,
         move |cmd: CommandDeleteAgentInstanceData, _ctx| {
             let wstore = wstore.clone();
             let broker = broker.clone();
+            let identity_store = identity_store_del.clone();
             async move {
                 // Read the row first so we can emit a scoped event after.
                 let definition_id = wstore
@@ -217,6 +219,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let deleted = wstore
                     .instance_delete(&cmd.id)
                     .map_err(|e| format!("deleteagentinstance: {e}"))?;
+                if deleted {
+                    // This RPC is the same deletion as `deleteagent` under a
+                    // second name, so it needs the same second-database
+                    // sweep — see `purge_identity_store_rows`.
+                    super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagentinstance");
+                }
                 if let Some(def_id) = definition_id.filter(|_| deleted) {
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: format!("agentinstances:changed:{}", def_id),

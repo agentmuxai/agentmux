@@ -34,6 +34,43 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     bundle::register(engine, state);
 }
 
+/// Purge a deleted agent's rows from the IDENTITY store — the second
+/// physical database, reachable only from this layer.
+///
+/// `Store::agent_def_delete` / `instance_delete` purge the dependents they
+/// can see, but they run against the object store, and
+/// `db_agent_identity_links`, `db_agent_credentials` and both native-memory
+/// tables exist in BOTH schemas with the identity store holding the live
+/// rows (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` —
+/// `listrecentsessions` reads links from
+/// `identity_store.agent_identity_list_all()`, not the object store's
+/// same-named table). Without this the delete leaves an agent's real
+/// credentials and account links on disk, which the Delete confirm dialog
+/// explicitly promises it removes.
+///
+/// Called by BOTH delete RPCs (`deleteagent` and `deleteagentinstance`):
+/// they are one deletion under two names, and a fix applied to only one of
+/// them is the same bug reachable by the other route (ReAgent P1 on
+/// PR #3262). Best-effort — the agent row is already gone by the time this
+/// runs, so a failure here is leftover rows to log, not a failed delete.
+pub(super) fn purge_identity_store_rows(
+    identity_store: &crate::backend::storage::store::Store,
+    agent_id: &str,
+    caller: &'static str,
+) {
+    match identity_store.agent_dependents_purge(agent_id) {
+        Ok(0) => {}
+        Ok(removed) => tracing::debug!(
+            agent_id, caller, removed,
+            "purged identity-store rows for deleted agent"
+        ),
+        Err(e) => tracing::warn!(
+            agent_id, caller, error = %e,
+            "identity-store rows left behind for deleted agent"
+        ),
+    }
+}
+
 /// Read the per-block `output.state.json` snapshot from filestore and
 /// extract a `(preview, node_count)` pair for the AgentPicker's
 /// "Recent sessions" list.

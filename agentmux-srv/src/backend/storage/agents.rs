@@ -1270,19 +1270,29 @@ impl Store {
         // SQLite row, rows == 0) is actually deletable instead of reappearing
         // on the next agent_def_list. (P0.2b + codex P1 on #1385.)
         let global_retired = self.registry_def_retire(id);
-        // Deliberately NOT gated on `rows > 0`. The instance registry is
-        // host-global while `db_agents` is per-channel, so a cross-channel
-        // agent — one this channel only ever saw through the global overlay
-        // — deletes with `rows == 0` and still has a registry record that
-        // another channel wrote. Gating on the local row left that record
-        // active with its definition now tombstoned, which
+        // Unconditional, deliberately.
+        //
+        // Gating this on `rows > 0` was the original bug's second half: the
+        // instance registry is host-global while `db_agents` is
+        // per-channel, so a cross-channel agent — one this channel only ever
+        // saw through the global overlay — deletes with `rows == 0` and
+        // still has a registry record another channel wrote. That record
+        // stayed active with its definition now tombstoned, which
         // `listrecentsessions` still renders as a row (no provider, so no
         // icon, and "(missing definition)") — the delete looked like it
-        // half-worked. Anything that actually deleted something must sweep
-        // the registry too.
-        if rows > 0 || global_retired {
-            self.purge_agent_side_effects(id, "agent_def_delete");
-        }
+        // half-worked.
+        //
+        // `rows > 0 || global_retired` isn't enough either (codex P2 on
+        // PR #3262): if an earlier attempt retired the definition but failed
+        // to remove a registry file — or another channel wrote a stale
+        // record after this process's startup reconcile — a RETRY sees
+        // `rows == 0` AND `global_retired == false` (the tombstone already
+        // exists), so it would skip the sweep and the ghost row would
+        // survive every further Delete until restart. Sweeping
+        // unconditionally makes Delete converge: the sweep is a no-op for an
+        // id with no records, so there is nothing to gate on in the first
+        // place.
+        self.purge_agent_side_effects(id, "agent_def_delete");
         Ok(rows > 0 || global_retired)
     }
 
@@ -1753,6 +1763,50 @@ impl Store {
             }
         }
         Ok(rows > 0 || registry_acted)
+    }
+
+    /// Rename the agent's PICKER-VISIBLE display name (`instance_name`),
+    /// in SQLite and across every registry record for it.
+    ///
+    /// `renameagentdefinitiontitle` on its own writes `name` (or
+    /// `branch_label` for a fork) — the fields the pane tab strip's
+    /// `titleOf()` reads. "My Agents" rows render
+    /// `instance_name || definition_name` instead, and `instance_name` is
+    /// non-empty for every launched or registry-backed row, so a rename
+    /// closed the editor, refetched, and redisplayed the OLD name; for a
+    /// fork it changed `branch_label`, which no picker row shows at all
+    /// (codex P1 on PR #3262). Renaming an agent has to move the name the
+    /// user is actually looking at, so the handler calls this too.
+    ///
+    /// Scoped to rows that ALREADY have an `instance_name`: writing one
+    /// onto an agent that has never had a named launch would make it appear
+    /// in `instance_list_named` (which filters `instance_name <> ''`) —
+    /// conjuring a picker row rather than renaming one. Those rows fall
+    /// back to `definition_name`, which the title update already moved.
+    ///
+    /// Returns whether anything changed, counting the registry: a
+    /// cross-channel agent has no local row to update but does have records.
+    pub fn instance_rename(&self, id: &str, instance_name: &str) -> Result<bool, StoreError> {
+        let rows = {
+            let conn = self.conn.lock().unwrap();
+            let now_ms = Self::monotonic_updated_at(&conn, 0);
+            conn.execute(
+                "UPDATE db_agents SET instance_name = ?1, updated_at = ?2
+                 WHERE id = ?3 AND is_template = 0 AND instance_name <> ''",
+                params![instance_name, now_ms, id],
+            )?
+        };
+        let mut registry_renamed = 0usize;
+        if let Some(reg) = self.registry() {
+            match reg.set_instance_name_for_agent(id, instance_name) {
+                Ok(n) => registry_renamed = n,
+                Err(e) => tracing::warn!(
+                    agent_id = %id, error = %e,
+                    "registry: failed to mirror instance_rename — picker may keep showing the old name"
+                ),
+            }
+        }
+        Ok(rows > 0 || registry_renamed > 0)
     }
 
     /// Named agents for the launch modal's "Continue agent" dropdown and the

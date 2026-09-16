@@ -78,6 +78,13 @@ impl Registry {
     /// triage). Skipping is `Ok(())`: SQLite remains authoritative.
     pub fn upsert(&self, rec: &NamedAgentRecord) -> Result<(), RegistryError> {
         let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        self.upsert_unlocked(rec)
+    }
+
+    /// [`Self::upsert`] without taking `write_lock`, for callers already
+    /// holding it. `write_lock` is a plain `Mutex` — re-entering it from a
+    /// locked section would deadlock, not nest.
+    fn upsert_unlocked(&self, rec: &NamedAgentRecord) -> Result<(), RegistryError> {
         let path = self.active_path(&rec.data.instance_id);
         let bytes = match std::fs::read(&path) {
             Ok(existing) => match merge_for_write(&existing, rec)? {
@@ -89,6 +96,51 @@ impl Registry {
         };
         write_atomic(&path, &bytes)?;
         Ok(())
+    }
+
+    /// Set `instance_name` on every ACTIVE record for `agent_id`. Returns
+    /// how many files changed.
+    ///
+    /// Every record, not just the canonical one, because
+    /// `listrecentsessions` dedupes rows by `(definition_id, instance_name)`
+    /// — renaming one of an agent's records and not the others splits it
+    /// into two picker rows, one under each name. (An agent can hold more
+    /// than one record for the same reason
+    /// [`Self::hard_delete_for_agent`] exists.)
+    ///
+    /// Active tree only: `upsert` writes to the active path, so touching a
+    /// retired record here would resurrect a deliberately-forgotten agent.
+    /// A retired record keeps its old name until `unretire_for_agent`
+    /// brings it back.
+    pub fn set_instance_name_for_agent(
+        &self,
+        agent_id: &str,
+        instance_name: &str,
+    ) -> Result<usize, RegistryError> {
+        let _g = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut renamed = 0usize;
+        for path in records_for_agent(&self.root, agent_id)? {
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let Ok(mut rec) = serde_json::from_slice::<NamedAgentRecord>(&bytes) else {
+                continue;
+            };
+            // An unnamed record fails validation on READ, so it is already
+            // invisible to the picker — but `upsert` doesn't validate, so
+            // one can sit on disk, and this scan reads raw JSON (matching on
+            // `definition_id` is the whole point). Naming it here would
+            // "repair" it into a visible row for an agent that never had
+            // one. Pinned by
+            // `set_instance_name_for_agent_leaves_an_unnamed_record_invisible`.
+            if rec.data.instance_name.is_empty() || rec.data.instance_name == instance_name {
+                continue;
+            }
+            rec.data.instance_name = instance_name.to_string();
+            self.upsert_unlocked(&rec)?;
+            renamed += 1;
+        }
+        Ok(renamed)
     }
 
     /// Move record into `retired/` (soft delete — keeps the working
