@@ -8,10 +8,15 @@
 //!
 //! The lease (`term:agentlockuntil`,
 //! `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` §10.3) is
-//! enforced in `controllerinput` (`server/websocket.rs`) — the RPC handler
-//! that runs for **every keystroke typed into every pane on every
-//! connection**. The first implementation answered that question by reading
-//! the block out of `Store`:
+//! enforced in `controllerinput` (`server/websocket.rs`). That handler
+//! serves the Stop button's `SIGINT` (`useAgentCommands.ts`) and the
+//! debounced PTY-width resizes `usePtyWidth.ts` sends — the latter in bursts
+//! while a pane is actively being dragged, which is precisely when the UI is
+//! most latency-sensitive. (It is NOT the keystroke path: terminal
+//! keystrokes go through the `blockinput` WS command instead —
+//! `termViewModel.ts`, `AgentShellSubblock.tsx` — see the gap note at the
+//! bottom of this comment.) The first implementation answered the
+//! is-it-leased question by reading the block out of `Store`:
 //!
 //! ```ignore
 //! wstore.get::<Block>(&cmd.blockid)  // synchronous SQLite, on every keystroke
@@ -20,13 +25,11 @@
 //! `Store` is one process-wide SQLite connection behind one `Mutex<Connection>`
 //! (`storage/store.rs`'s own doc comment: "matching Go's `MaxOpenConns(1)`"),
 //! and `Store::get` is a plain blocking call — so that read put a real disk
-//! query, serialized against every other `Store` user in the process, on the
-//! keystroke path, executed inline on a Tokio worker thread with no
+//! query, serialized against every other `Store` user in the process, inside
+//! an async WS handler, inline on a Tokio worker thread with no
 //! `block_in_place`/`spawn_blocking`. That is the same failure class the
-//! sysinfo incident already cost this repo once (commit `0f34704a8`, #1782),
-//! and it reproduces as cross-pane input delay: typing in one pane queues
-//! behind unrelated `Store` traffic elsewhere. See
-//! `docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md`.
+//! sysinfo incident already cost this repo once (commit `0f34704a8`, #1782).
+//! See `docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md`.
 //!
 //! The lease is short-lived (`AGENT_LOCK_WINDOW_MS`, 4s), process-local, and
 //! recreated on every agent write. None of that needs durability — so it
@@ -34,6 +37,22 @@
 //! nanoseconds with no I/O inside it. For the overwhelmingly common case
 //! (no agent is driving any shell) the map is empty and the check is a hash
 //! lookup that misses.
+//!
+//! # Known gap this does NOT close
+//!
+//! `controllerinput` is not the path a human's keystrokes actually take.
+//! Both the Terminal pane (`termViewModel.ts`) and the agent pane's drawer
+//! shell (`AgentShellSubblock.tsx`) send keystrokes via the `blockinput` WS
+//! command, which calls `blockcontroller::send_input` directly with no lease
+//! check at all. So the server-side enforcement added in #3194 does not in
+//! fact cover the human-vs-agent write collision it was added for — the only
+//! thing standing in the way there is `AgentShellSubblock`'s own
+//! `agentLocked()` gate, i.e. exactly the eventually-consistent frontend
+//! check that enforcement was meant to backstop. Deliberately left alone
+//! here: this module changes how the existing check is answered, not which
+//! paths are checked. Closing the gap means calling `is_locked` from the
+//! `blockinput` arm too (cheap, now that answering costs a hash lookup) —
+//! tracked separately so it lands with its own test and its own review.
 //!
 //! # Relationship to `term:agentlockuntil` meta
 //!

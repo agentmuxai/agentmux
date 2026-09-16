@@ -1039,16 +1039,17 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // that keeps it from happening in the first place, not the
     // correctness boundary.
     //
-    // THIS RUNS ON EVERY KEYSTROKE IN EVERY PANE — keep it allocation-free
-    // and I/O-free. It reads `blockcontroller::agent_lock`, an in-memory
-    // map, NOT the block's persisted meta: the original revision of this
-    // check called `wstore.get::<Block>()` here, putting a synchronous
-    // SQLite query behind `Store`'s single process-wide `Mutex<Connection>`
-    // on the keystroke path, inline on a Tokio worker thread with no
-    // `block_in_place`. That reproduced cross-pane input delay (typing in
-    // one pane serializing behind unrelated `Store` traffic) — the same
-    // failure class as the sysinfo incident (#1782). See
-    // `agent_lock`'s module doc and
+    // Keep this check I/O-free. It reads `blockcontroller::agent_lock`, an
+    // in-memory map, NOT the block's persisted meta: the original revision
+    // called `wstore.get::<Block>()` here, putting a synchronous SQLite
+    // query behind `Store`'s single process-wide `Mutex<Connection>` inside
+    // an async handler, inline on a Tokio worker thread with no
+    // `block_in_place` — the same failure class as the sysinfo incident
+    // (#1782). This handler carries the Stop button's SIGINT and
+    // `usePtyWidth`'s debounced resizes (which burst while a pane is being
+    // dragged); it is NOT the keystroke path — those go through the
+    // `blockinput` arm below, which has no lease check at all (see
+    // `agent_lock`'s "Known gap" note). See also
     // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_REGRESSION_2026_09_15.md.
     engine.register_handler(
         COMMAND_CONTROLLER_INPUT,

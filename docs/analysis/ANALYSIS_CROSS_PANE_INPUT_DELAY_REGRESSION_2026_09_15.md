@@ -1,12 +1,14 @@
 # Analysis: Cross-Pane Input Delay Has Returned — Root Cause on the Ingress Path
 
 **Date:** 2026-09-15
-**Status:** Implemented — §4 item 2 (the in-memory lease registry), plus the
-exit-path release §5 adds. Root cause is code-inspection-confirmed and the
-fix is covered by unit + real-PTY tests (each falsified: source deliberately
-broken, right test observed failing, restored); it has NOT been measured
-against a running build, since no dev instance was available this session.
-The before/after bench in §6 is still worth running.
+**Status:** Partially retracted, then implemented at the corrected scope.
+**§2's severity claim was wrong and is struck — see §2a.** `controllerinput`
+is NOT the keystroke path, so the blocking `Store` read this report found
+does not explain the reported cross-pane typing lag, and that lag remains
+undiagnosed. The read was still real and still wrong, and is fixed (§5 — the
+in-memory lease registry plus the exit-path release), covered by unit +
+real-PTY tests, each falsified. Nothing here has been measured on a running
+build.
 **Symptom (user-reported):** typing in one pane feels slow again while a
 different pane is producing output — the same user-facing symptom
 `ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md` (the "09-04
@@ -94,6 +96,49 @@ driving a real interactive shell), a human typing in a *different* pane
 will have their own `controllerinput` handler's `Store` read serialize
 behind that agent's `Store` writes, on the exact same global mutex. Two
 pieces of the same PR contend with each other.
+
+---
+
+## 2a. CORRECTION (same day): `controllerinput` is not the keystroke path
+
+**Everything above about "every keystroke" is wrong.** I asserted it from the
+handler's name and its position in the WS loop without checking what actually
+calls it. Verified afterwards, in the frontend:
+
+- **Keystrokes go through the `blockinput` WS command, not this handler.**
+  `frontend/app/view/term/termViewModel.ts:407`, `termsticker.tsx:86`, and the
+  agent pane's drawer shell `AgentShellSubblock.tsx:365` all send
+  `wscommand: "blockinput"`. `termViewModel.ts:412` says so explicitly: "Use
+  the blockinput wscommand, not the controllerinput RPC."
+- **`controllerinput`'s real callers are two, both infrequent:**
+  `useAgentCommands.ts:1664` (the Stop button's `SIGINT`) and
+  `usePtyWidth.ts:140` (PTY width resize, debounced 150ms, only on an actual
+  width change).
+
+What survives: a synchronous SQLite read behind a process-wide mutex, inline in
+an async WS handler with no `block_in_place`, is still the wrong thing to have
+on a resize path that bursts while a pane is being dragged — and §1's
+identification of the mechanism (`Store`'s single `Mutex<Connection>`,
+`Store::get` blocking, no `spawn_blocking`) is accurate.
+
+What does NOT survive: the frequency, and therefore the conclusion. **This does
+not explain the user's reported symptom.** The cross-pane typing lag is still
+undiagnosed; §3's ruled-out list stands, but the hunt should resume from
+`blockinput`'s own path and the frontend, not from here.
+
+Two consequences worth carrying forward:
+
+1. **#3194's server-side lease enforcement doesn't cover what it was added
+   for.** Codex's P1 on that PR asked for backend enforcement because the
+   frontend gate is eventually-consistent — but the enforcement landed on
+   `controllerinput` while human keystrokes flow through `blockinput`, which
+   has no check at all. `AgentShellSubblock`'s own `agentLocked()` gate is, in
+   practice, still the only thing preventing the collision. Cheap to close now
+   that answering costs a hash lookup; tracked separately.
+2. **The verification gap is exactly how this slipped.** No dev instance was
+   available, so nothing was measured — and a single live capture of which WS
+   frame a keystroke produces would have caught it in seconds. Weigh §6
+   accordingly.
 
 ---
 
