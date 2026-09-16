@@ -100,29 +100,49 @@ fn seed_from_manifest(store: &Arc<Store>, manifest: &SeedManifest) {
 
     let mut tally = SeedTally::default();
 
-    // First pass, in manifest order. A collision here can be purely an
-    // ordering artifact WITHIN this same manifest, independent of pruning:
-    // e.g. entry B wants the display name entry A is about to release via
-    // its own update (A kept its id, only its `name` changed), but B
-    // happens to appear before A in the manifest array, so B's INSERT hits
-    // A's still-current name and fails. Collect failures instead of
-    // logging them immediately — the retry pass below resolves the
-    // ordering-only case silently.
-    let mut retry: Vec<&SeedEntry> = Vec::new();
-    for entry in &manifest.entries {
-        if !seed_and_tally(store, entry, manifest.version, &mut tally, false) {
-            retry.push(entry);
+    // A collision here can be purely an ordering artifact WITHIN this same
+    // manifest, independent of pruning: entry B wants the display name
+    // entry A is about to release via its own update (A kept its id, only
+    // its `name` changed), but B happens to appear before A in the
+    // manifest array, so B's INSERT hits A's still-current name and fails.
+    //
+    // A single retry pass only resolves a 2-entry swap — a longer
+    // dependency CHAIN (C wants a name B is about to release, B wants a
+    // name A is about to release, A releases first) can still leave an
+    // entry stranded after exactly one retry, depending on which order the
+    // chain happens to be walked in. So: keep retrying the still-failing
+    // subset until a full pass makes literally zero progress (nothing in
+    // it succeeded) — each successful entry in a pass can only unblock
+    // entries later in the SAME OR A SUBSEQUENT pass, so a pass with no
+    // successes at all means every remaining failure is a real collision
+    // (e.g. an unrelated user bundle already owns the name), not an
+    // ordering artifact. Bounded by the number of entries: each pass either
+    // shrinks the pending set by at least one or terminates the loop.
+    // Codex P2, PR #3244.
+    let mut pending: Vec<&SeedEntry> = manifest.entries.iter().collect();
+    loop {
+        let mut still_pending = Vec::new();
+        let mut made_progress = false;
+        for entry in pending {
+            if seed_and_tally(store, entry, manifest.version, &mut tally, false) {
+                made_progress = true;
+            } else {
+                still_pending.push(entry);
+            }
         }
-    }
-
-    // Second pass: by now every entry that only needed a name released by
-    // ANOTHER entry's update has had that update run. One retry resolves
-    // the ordering-dependent case without needing to analyze which entries
-    // "release" names ahead of time; a persistent failure here is a real
-    // collision (e.g. an unrelated user bundle already owns the name) and
-    // is logged as such. Codex P2, PR #3244.
-    for entry in retry {
-        seed_and_tally(store, entry, manifest.version, &mut tally, true);
+        if still_pending.is_empty() {
+            break;
+        }
+        if !made_progress {
+            // No entry in this pass succeeded — every remaining failure is
+            // a genuine collision, not something a further pass could
+            // resolve. Log each as such.
+            for entry in still_pending {
+                seed_and_tally(store, entry, manifest.version, &mut tally, true);
+            }
+            break;
+        }
+        pending = still_pending;
     }
 
     tally.log(manifest.version);
@@ -726,6 +746,36 @@ mod tests {
         let b = store.bundle_get("op-b").unwrap().expect("B must exist despite the first-pass ordering collision");
         assert_eq!(b.name, "Name X");
         assert_eq!(b.instructions, "B content");
+    }
+
+    /// Codex P2, PR #3244: a single retry pass only resolves a 2-entry
+    /// name swap — a 3-entry dependency CHAIN (C wants B's name, B wants
+    /// A's name, A releases first) needs the retry to repeat until a full
+    /// pass makes no further progress, or the entry at the far end of the
+    /// chain (C here) is stranded until the next startup.
+    #[test]
+    fn seeding_resolves_a_three_entry_name_dependency_chain() {
+        let store = test_store();
+        seed_one(&store, &entry("op-a", "Name A", "original A"), 1).unwrap();
+        seed_one(&store, &entry("op-b", "Name B", "original B"), 1).unwrap();
+
+        // Worst-case order: C (wants B's name) and B (wants A's name) both
+        // appear BEFORE A (the one entry that can succeed outright on pass 1).
+        let manifest = SeedManifest {
+            version: 2,
+            entries: vec![
+                entry("op-c", "Name B", "C content"),
+                entry("op-b", "Name A", "updated B"),
+                entry("op-a", "Name C", "updated A"),
+            ],
+        };
+        seed_from_manifest(&store, &manifest);
+
+        assert_eq!(store.bundle_get("op-a").unwrap().unwrap().name, "Name C");
+        assert_eq!(store.bundle_get("op-b").unwrap().unwrap().name, "Name A");
+        let c = store.bundle_get("op-c").unwrap().expect("C must exist despite being at the end of the dependency chain");
+        assert_eq!(c.name, "Name B");
+        assert_eq!(c.instructions, "C content");
     }
 
     #[test]
