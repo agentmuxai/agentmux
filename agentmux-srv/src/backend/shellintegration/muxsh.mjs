@@ -98,8 +98,18 @@ const CONFIG_PATH_ENV_VARS = {
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
 /** Parse the shared open/web/view/edit flag set (--title/--split/--collapse-tree/--floating/--no-focus).
+ *
+ * `isEditor` gates `--collapse-tree` (`tree_expanded` is documented in
+ * `rpc_types/block.rs` as "editor only"). Codex review (PR #3281, P2): an
+ * earlier version of this gated on the *subcommand name* ("open" vs "web"),
+ * which incorrectly accepted --collapse-tree for `muxsh view` on a media
+ * target — `view` resolves to `command: "open"` for BOTH editor and media,
+ * but only editor should accept this flag. Gating on the actually-resolved
+ * view (via this boolean) instead of the subcommand name fixes both `view`
+ * and any future caller that reuses this parser.
+ *
  * Pure. Returns `{title, split, collapseTree, floating, focus}` or `{error}`. */
-function parsePaneOpenFlags(argv, startIndex, subcommand) {
+function parsePaneOpenFlags(argv, startIndex, isEditor) {
     let title = null;
     let split = null;
     let collapseTree = false;
@@ -127,8 +137,8 @@ function parsePaneOpenFlags(argv, startIndex, subcommand) {
             return { error: `unknown argument '${arg}'` };
         }
 
-        if (subcommand === "web" && EDITOR_ONLY_FLAGS.includes(arg)) {
-            return { error: `'${arg}' is only valid with 'muxsh open'/'muxsh edit', not 'muxsh web'` };
+        if (!isEditor && EDITOR_ONLY_FLAGS.includes(arg)) {
+            return { error: `'${arg}' is only valid for an editor pane ('muxsh open'/'muxsh edit', or 'muxsh view' on a non-media, non-url target)` };
         }
     }
     return { title, split, collapseTree, floating, focus };
@@ -160,7 +170,8 @@ export function parseArgs(argv) {
         if (!target || target.startsWith("-")) {
             return { error: `'muxsh ${head}' requires a ${head === "web" ? "url" : "file path"} as its first argument` };
         }
-        const flags = parsePaneOpenFlags(argv, 2, head === "edit" ? "open" : head);
+        const isEditor = head === "open" || head === "edit";
+        const flags = parsePaneOpenFlags(argv, 2, isEditor);
         if (flags.error) return flags;
         // 'edit' is 'open' forcing the editor view, everywhere else identical.
         const subcommand = head === "edit" ? "open" : head;
@@ -176,7 +187,7 @@ export function parseArgs(argv) {
             return { error: "'muxsh view' requires a file path or url as its first argument" };
         }
         const view = guessView(target);
-        const flags = parsePaneOpenFlags(argv, 2, view === "browser" ? "web" : "open");
+        const flags = parsePaneOpenFlags(argv, 2, view === "editor");
         if (flags.error) return flags;
         if (view === "browser") {
             return { command: "web", subcommand: "web", url: target, ...flags };
@@ -295,15 +306,20 @@ export function renderResult(body) {
 // ── pane list ────────────────────────────────────────────────────────────────
 
 /** Render `GET /api/v1/tabs` response as a human-readable outline. Pure. */
+/** Render `GET /api/v1/tabs`'s real response shape — `{tabs: [{tab_id, name,
+ * pane_count}]}` (`service/introspect.rs::agent_tabs`). Pure.
+ *
+ * Codex review (PR #3281, P2): an earlier version of this assumed a richer,
+ * never-verified shape (`tab_name`/`active`/a nested `panes` array with
+ * per-pane `view`/`block_id`/`title`) that the route has never produced —
+ * caught because the test that "proved" it used a hand-invented fixture
+ * instead of the real response shape. There is no per-pane detail in what
+ * this route actually returns; `pane_count` is the closest available
+ * signal. */
 export function renderTabs(tabs) {
     if (!Array.isArray(tabs) || tabs.length === 0) return "no tabs found";
     return tabs
-        .map((tab) => {
-            const panes = Array.isArray(tab.panes) ? tab.panes : [];
-            const header = `tab ${tab.tab_name ?? tab.tab_id}${tab.active ? " (active)" : ""}`;
-            const paneLines = panes.map((p) => `  ${p.view ?? "?"}  ${p.block_id}  ${p.title ?? ""}`.trimEnd());
-            return [header, ...paneLines].join("\n");
-        })
+        .map((tab) => `tab ${tab.name || tab.tab_id}  (${tab.pane_count} pane${tab.pane_count === 1 ? "" : "s"})  ${tab.tab_id}`)
         .join("\n");
 }
 
@@ -343,12 +359,31 @@ export function buildShellStopBody(parsed) {
 // ── agent list / send ────────────────────────────────────────────────────────
 
 /** Render `GET /agentmux/discovery`'s host.agents into a human-readable list. Pure. */
+/** Render GET /agentmux/discovery's full response (`server/mod.rs::handle_discovery`).
+ *
+ * Codex review (PR #3281, P2): an earlier version only read `host.agents`,
+ * omitting `host.cross_channel` (other AgentMux channels on this same host —
+ * a real, `agent send`-reachable tier) and `lan` (mDNS peer instances, each
+ * carrying its own flat `agents: string[]`, per `LanInstance` in
+ * `lan_discovery.rs` — not a richer per-agent object, verified against
+ * source rather than assumed this time) entirely, so `muxsh agent list`
+ * silently under-reported what `muxsh agent send` can actually reach.
+ */
 export function renderAgentList(discovery) {
-    const agents = discovery?.host?.agents;
-    if (!Array.isArray(agents) || agents.length === 0) return "no agents found";
-    return agents
-        .map((a) => `${a.addressable ? "*" : " "} ${a.name}${a.addressable ? "" : "  (not addressable)"}`)
-        .join("\n");
+    const lines = [];
+    for (const a of discovery?.host?.agents ?? []) {
+        lines.push(`${a.addressable ? "*" : " "} ${a.name}${a.addressable ? "" : "  (not addressable)"}`);
+    }
+    for (const a of discovery?.host?.cross_channel ?? []) {
+        lines.push(`* ${a.name}  (channel: ${a.channel})`);
+    }
+    for (const peer of discovery?.lan ?? []) {
+        for (const name of peer.agents ?? []) {
+            lines.push(`* ${name}  (lan: ${peer.hostname})`);
+        }
+    }
+    if (lines.length === 0) return "no agents found";
+    return lines.join("\n");
 }
 
 export function renderAgentSend(body) {
@@ -486,6 +521,13 @@ async function main() {
                 method: "POST",
                 body: buildAgentSendBody(parsed),
             }, "/agentmux/reactive/inject");
+            // /agentmux/reactive/inject returns HTTP 200 even when delivery
+            // fails (success: false, e.g. "agent not found") — apiCall's
+            // !result.ok check alone can't catch this, so it's checked here
+            // explicitly. Without this, a script relying on muxsh's own
+            // exit-code contract (Codex, PR #3281 P1) would see exit 0 for
+            // an undelivered message.
+            if (!body.success) fail(renderAgentSend(body), 2);
             console.log(renderAgentSend(body));
             return;
         }

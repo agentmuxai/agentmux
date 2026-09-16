@@ -110,7 +110,7 @@ describe("muxsh parseArgs — open/web/edit", () => {
 
     it("'web' rejects editor-only flags: --collapse-tree", () => {
         expect(parseArgs(["web", "https://example.com", "--collapse-tree"]).error).toMatch(
-            /'--collapse-tree' is only valid with 'muxsh open'/,
+            /'--collapse-tree' is only valid for an editor pane/,
         );
     });
 
@@ -188,6 +188,22 @@ describe("muxsh parseArgs — view", () => {
 
     it("'view' with no target is an error", () => {
         expect(parseArgs(["view"]).error).toMatch(/requires a file path or url/);
+    });
+
+    // Codex review (PR #3281, P2): an earlier version gated --collapse-tree
+    // on the subcommand name ("open" vs "web"), which incorrectly accepted
+    // it for 'view' on a media target — media isn't the editor view either,
+    // even though it shares 'view's "open"-shaped command discriminant.
+    it("rejects --collapse-tree for a media target (it's not the editor view)", () => {
+        expect(parseArgs(["view", "/tmp/photo.png", "--collapse-tree"]).error).toMatch(/only valid for an editor pane/);
+    });
+
+    it("rejects --collapse-tree for a url target", () => {
+        expect(parseArgs(["view", "https://example.com", "--collapse-tree"]).error).toMatch(/only valid for an editor pane/);
+    });
+
+    it("still accepts --collapse-tree for a plain (editor-guessed) target", () => {
+        expect(parseArgs(["view", "/tmp/notes.md", "--collapse-tree"])).toMatchObject({ command: "open", view: "editor", collapseTree: true });
     });
 });
 
@@ -380,20 +396,27 @@ describe("muxsh renderResult", () => {
 });
 
 describe("muxsh renderTabs", () => {
+    // Real shape from service/introspect.rs::agent_tabs: {tabs: [{tab_id,
+    // name, pane_count}]} — no 'active'/'panes'/per-pane detail. Codex
+    // review (PR #3281, P2) caught an earlier version of this test asserting
+    // against a fixture the real endpoint never produces.
     it("says 'no tabs found' for an empty list", () => {
         expect(renderTabs([])).toBe("no tabs found");
     });
 
-    it("renders a tab with its panes indented underneath", () => {
-        const out = renderTabs([
-            {
-                tab_id: "tab-1",
-                tab_name: "Tab 1",
-                active: true,
-                panes: [{ block_id: "b-1", view: "editor", title: "notes.md" }],
-            },
-        ]);
-        expect(out).toBe("tab Tab 1 (active)\n  editor  b-1  notes.md");
+    it("renders each tab's name, pane count, and id", () => {
+        const out = renderTabs([{ tab_id: "tab-1", name: "Tab 1", pane_count: 2 }]);
+        expect(out).toBe("tab Tab 1  (2 panes)  tab-1");
+    });
+
+    it("singularizes 'pane' for a count of exactly 1", () => {
+        const out = renderTabs([{ tab_id: "tab-1", name: "Tab 1", pane_count: 1 }]);
+        expect(out).toBe("tab Tab 1  (1 pane)  tab-1");
+    });
+
+    it("falls back to the tab_id when name is empty", () => {
+        const out = renderTabs([{ tab_id: "tab-1", name: "", pane_count: 0 }]);
+        expect(out).toBe("tab tab-1  (0 panes)  tab-1");
     });
 });
 
@@ -415,8 +438,8 @@ describe("muxsh renderShellCreate/Status/Stop", () => {
 });
 
 describe("muxsh renderAgentList/Send", () => {
-    it("says 'no agents found' for an empty list", () => {
-        expect(renderAgentList({ host: { agents: [] } })).toBe("no agents found");
+    it("says 'no agents found' when every tier is empty", () => {
+        expect(renderAgentList({ host: { agents: [], cross_channel: [] }, lan: [] })).toBe("no agents found");
     });
 
     it("marks addressable agents with a leading '*'", () => {
@@ -424,6 +447,24 @@ describe("muxsh renderAgentList/Send", () => {
             host: { agents: [{ name: "Scouto", addressable: true }, { name: "Idle1", addressable: false }] },
         });
         expect(out).toBe("* Scouto\n  Idle1  (not addressable)");
+    });
+
+    // Codex review (PR #3281, P2): an earlier version only read host.agents,
+    // omitting host.cross_channel and lan entirely — both real,
+    // 'agent send'-reachable tiers per handle_discovery (server/mod.rs).
+    it("includes host.cross_channel agents", () => {
+        const out = renderAgentList({
+            host: { agents: [], cross_channel: [{ name: "Korp", channel: "dev-korp-fix" }] },
+        });
+        expect(out).toBe("* Korp  (channel: dev-korp-fix)");
+    });
+
+    it("includes lan agents from every peer instance (LanInstance.agents is a flat string[], not per-agent objects)", () => {
+        const out = renderAgentList({
+            host: { agents: [] },
+            lan: [{ hostname: "peer-machine", agents: ["Remote1", "Remote2"] }],
+        });
+        expect(out).toBe("* Remote1  (lan: peer-machine)\n* Remote2  (lan: peer-machine)");
     });
 
     it("renderAgentSend reports success", () => {

@@ -30,7 +30,9 @@
     "pane.list": {
       "method": "GET",
       "path": "/api/v1/tabs",
-      "note": "Query param only (block_id or workspace_id), no request body — not a field-drift risk the same way a POST body is. No contract test; listed for documentation completeness.",
+      "rustResponseSource": "agentmux_srv::server::service::introspect::agent_tabs (returns serde_json::Value built via json!(), not a typed struct — no struct to contract-test against the way pane.open's PaneOpenResult is)",
+      "note": "Query param only (block_id or workspace_id), no request body. responseFields verified directly against agent_tabs' source (2026-09-16, after ReAgent + Codex both independently caught renderTabs() assuming an unverified, richer shape — tab_name/active/panes — that this route has never produced). Protection against this recurring is now muxsh.test.mjs's renderTabs unit tests (which assert against this exact shape), not a Rust-side contract test — there's no struct here for one to check against.",
+      "responseFields": ["tab_id", "name", "pane_count"],
       "usedBy": ["muxsh pane list"]
     },
     "shell.create": {
@@ -66,7 +68,8 @@
     "agent.list": {
       "method": "GET",
       "path": "/agentmux/discovery",
-      "note": "No request body (GET, no params). Response is a raw serde_json::Value built ad hoc in handle_discovery, not a typed struct — no Rust-side struct to contract-test against. Listed for documentation completeness.",
+      "rustResponseSource": "agentmux_srv::server::mod::handle_discovery (raw serde_json::Value, not a typed struct)",
+      "note": "No request body (GET, no params). Response has three reachable-agent tiers, all real and all 'agent send'-reachable — verified directly against source after Codex caught an earlier renderAgentList() reading only host.agents: host.agents[].{name, addressable, ...}, host.cross_channel[].{name, channel, ...} (other channels on this host), and lan[].{hostname, agents: string[]} (mDNS peers — agents is a flat name list per LanInstance, not per-agent objects, also verified rather than assumed). Protection is muxsh.test.mjs's renderAgentList unit tests, not a Rust-side contract test — no struct exists here to check against.",
       "usedBy": ["muxsh agent list"]
     },
     "agent.send": {
