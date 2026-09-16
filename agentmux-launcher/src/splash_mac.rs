@@ -1263,7 +1263,7 @@ mod tests {
         }
         let rows = flatten_rows(&[stage], None);
         let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
-        assert_eq!(labels, vec!["Backend", "4/6 done", "m4", "m5"]);
+        assert_eq!(labels, vec!["Backend", "6/6 done", "m4", "m5"]);
     }
 
 }
