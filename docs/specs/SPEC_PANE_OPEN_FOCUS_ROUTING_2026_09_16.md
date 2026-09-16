@@ -104,6 +104,37 @@ three times, and the next view added would default to the same silent failure.
 It also means the acceptance criteria in §7 should cover the agent pane, even
 though the original request named only editor and terminal.
 
+### 2d. The creation path never reaches the contract at all
+
+**This is the part that makes §3 harder than it looks** (codex P1). The three
+call sites in §2 all run when focusing an *existing* pane. On **creation** —
+the case this spec is actually about — none of them runs:
+
+- `openOrFocusPaneByView()` only calls `giveFocus()` on its
+  already-exists branch; for a new pane it falls through to
+  `await createBlock(...)`.
+- `createBlock()` inserts a layout node with `focused: true` and stops there.
+- The reducer path that follows does not call `giveFocus()`, because
+  `focusManager.requestNodeFocus()` is literally:
+
+```ts
+requestNodeFocus(): void {
+    // no-op
+}
+```
+
+So today a newly created pane never has `giveFocus()` invoked at all — the
+editor's stub is not even reached. Marking a layout node `focused: true` sets
+*selection*, which is why the pane looks and behaves as selected while the caret
+is nowhere.
+
+**Consequence for the design:** making the shared contract retry (Option B) is
+necessary but **not sufficient**. Retrying a call that is never made changes
+nothing, and both primary acceptance cases in §7 would still fail. Creation must
+be explicitly connected to the contract — either by making
+`requestNodeFocus()` real, or by having the block component signal readiness to
+the focus manager when it mounts. Any option chosen in §3 has to say which.
+
 ## 3. Design options
 
 **Option A — Fix each view in place.** Implement the editor's `giveFocus()`;
@@ -127,7 +158,9 @@ the dummy input. Concretely, either:
 *Pro:* fixes editor and terminal with one mechanism, and any future view for
 free. Makes the silent-dummy-focus fallback a genuine last resort.
 *Con:* touches shared focus code used by every pane type — needs care around
-not stealing focus (§5).
+not stealing focus (§5). **And on its own it fixes nothing on the creation
+path** (§2d): it must be paired with actually invoking the contract when a pane
+is created, since `requestNodeFocus()` is currently a no-op.
 
 **Option C — Focus on mount from inside each view**, independent of the focus
 manager.
@@ -136,9 +169,11 @@ manager.
 *Con:* two sources of truth for focus; races the focus manager; likely to steal
 focus in exactly the cases §5 says it must not.
 
-**Recommendation: B, with A's editor half done first** — implementing the
-editor's `giveFocus()` is required under every option and is independently
-correct, so it can land immediately while B is agreed.
+**Recommendation: B, plus the creation wiring from §2d, with A's editor half
+done first.** Implementing the editor's `giveFocus()` is required under every
+option and is independently correct, so it can land immediately while the rest
+is agreed. But note that neither A nor B alone satisfies §7 — without §2d's
+wiring, nothing calls `giveFocus()` on a new pane at all.
 
 ## 4. Scope
 
@@ -176,12 +211,17 @@ then destroyed it.
 
 They are independent:
 
-- That one is **fixed**; this one is not.
+- That one has a fix **proposed in #3260, not yet merged** — earlier wording
+  here called it "fixed", which was premature (codex P2). Nothing in this
+  spec's ancestry contains that fix, and it should not be treated as closed on
+  the strength of this document.
 - That one was **data loss**; this one loses nothing — the keystrokes go to a
   dummy input and are discarded before any document exists.
-- Fixing this one would have *masked* that one (auto-focus, first keystroke
-  still silently dropped), which is a good argument for having fixed them in
-  this order.
+- Fixing this one *first* would have **masked** that one: auto-focus would have
+  removed the click, while the first keystroke was still silently dropped and
+  the user would simply have lost a character with no visible cause. That is an
+  argument for landing them in the order they were found — not a claim that the
+  other one is already closed (see above).
 
 ## 7. Acceptance
 
