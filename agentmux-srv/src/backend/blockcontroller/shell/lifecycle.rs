@@ -911,10 +911,22 @@ impl Controller for ShellController {
         // flusher ever falls behind the read rate.
         let (pty_tx, pty_rx) = mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
         // Kept for the post-exit flush barrier (see the wait/cleanup task).
-        // Cloning the sender does NOT keep the channel open on its own: the
-        // read loop's own clone is what the flusher's EOF depends on, and this
-        // one lives in the wait task, which finishes.
-        let barrier_tx = pty_tx.clone();
+        //
+        // A WEAK sender, emphatically not a clone. ReAgent P1 (round 3) on PR
+        // #3261: an mpsc channel closes only once EVERY `Sender` is dropped, so
+        // a strong clone held by the wait task keeps the channel open for as
+        // long as that task lives — which is precisely across the window where
+        // the task waits for the flusher to end. `flusher_handle` could then
+        // never resolve, on any platform, making the "prefer true EOF" fast
+        // path dead code and silently applying the fallback's residual race to
+        // every exit everywhere. An earlier revision of this very comment
+        // claimed a clone "does NOT keep the channel open"; that was simply
+        // wrong.
+        //
+        // `WeakSender` does not count towards keeping the channel alive, and
+        // `upgrade()` returning `None` is itself the answer the barrier wants:
+        // the channel is closed, so everything in it was drained.
+        let barrier_tx: tokio::sync::mpsc::WeakSender<PtyReadChunk> = pty_tx.downgrade();
 
         tokio::task::spawn_blocking(move || {
             let mut reader = reader;
@@ -990,6 +1002,9 @@ impl Controller for ShellController {
             // `pty_tx` drops here, closing the channel — the flusher below
             // sees `recv()` return `None` once it has drained everything
             // already sent, flushes any final partial batch, and exits.
+            // (Still true with the barrier handle in play: that one is a
+            // `WeakSender`, which does not keep the channel open. It must stay
+            // weak — see its own comment above.)
         });
 
         // Coalescing flusher: batches chunks the read loop above sends,
@@ -1180,7 +1195,14 @@ impl Controller for ShellController {
                     Err(_) => {
                         // No EOF within the grace — assume it is never coming
                         // (ConPTY) and settle for the bounded barrier.
-                        if flush_barrier(&barrier_tx, FLUSHER_BARRIER_TIMEOUT).await.is_err() {
+                        // `None` means every sender is gone — the channel
+                        // closed and the flusher drained it, which is the
+                        // guarantee the barrier exists to obtain.
+                        let barrier = match barrier_tx.upgrade() {
+                            Some(tx) => flush_barrier(&tx, FLUSHER_BARRIER_TIMEOUT).await,
+                            None => Ok(()),
+                        };
+                        if barrier.is_err() {
                             tracing::warn!(
                                 block_id = %block_id_wait,
                                 timeout = ?FLUSHER_BARRIER_TIMEOUT,
@@ -1934,6 +1956,51 @@ mod flush_barrier_tests {
 
         drop(tx);
         let _ = flusher.await;
+    }
+
+    /// The property that makes the "prefer true EOF" fast path reachable at
+    /// all, and the exact thing ReAgent's round-3 P1 found broken: the wait
+    /// task's barrier handle must NOT keep the channel open.
+    ///
+    /// An mpsc channel closes only once EVERY `Sender` is dropped. A strong
+    /// clone held across the EOF wait means `recv()` never yields `None`, the
+    /// flusher never ends, `flusher_handle` never resolves — and the fast path
+    /// is dead code on every platform, silently applying the fallback's
+    /// residual race everywhere.
+    ///
+    /// The production site is additionally type-annotated as `WeakSender`, so
+    /// swapping it back to `clone()` is a compile error rather than a silent
+    /// behaviour change.
+    #[tokio::test]
+    async fn a_weak_barrier_handle_does_not_keep_the_flusher_alive() {
+        use super::super::super::super::storage::filestore::FileStore;
+        use std::sync::Arc;
+
+        let (broker, _events) = super::pty_output_flusher_tests::broker_recording_block_file_events();
+        let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
+        let (tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);
+
+        let weak: tokio::sync::mpsc::WeakSender<PtyReadChunk> = tx.downgrade();
+        let flusher = tokio::spawn(run_pty_output_flusher(
+            rx,
+            Some(Arc::new(broker)),
+            "block-1".to_string(),
+            Some(fs),
+            false,
+        ));
+
+        // The read loop's sender going away is the ONLY strong sender.
+        drop(tx);
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), flusher)
+            .await
+            .expect("the flusher must end once the last STRONG sender drops — a weak handle must not hold it open")
+            .expect("flusher task");
+
+        assert!(
+            weak.upgrade().is_none(),
+            "a closed channel must not be upgradeable — the barrier reads this as 'already drained'"
+        );
     }
 
     /// ReAgent P1 on PR #3261: the SEND has to be inside the timeout too.
