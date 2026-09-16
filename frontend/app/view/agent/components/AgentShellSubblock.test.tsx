@@ -23,15 +23,25 @@
  */
 
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockDataSignals, seedData, wpsHandlers, wpsPersisted } = vi.hoisted(() => {
+const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, resyncRejections } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
     const wpsHandlers = new Map<string, Array<(event: any) => void>>();
     const wpsPersisted = new Map<string, Record<string, unknown>>();
-    return { blockDataSignals, seedData, wpsHandlers, wpsPersisted };
+    // Per-block-id controllable resolution for ControllerResyncCommand —
+    // lets a test hold a specific resync open to construct an
+    // out-of-order-completion race between two overlapping attach
+    // attempts. Absent an entry, the mock resolves immediately (every
+    // existing test's assumption).
+    const resyncDeferreds = new Map<string, { resolve: () => void }>();
+    // Ids for which ControllerResyncCommand rejects immediately, forcing
+    // attachShell down the create-new-block fallback path.
+    const resyncRejections = new Set<string>();
+    return { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, resyncRejections };
 });
 
 // Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
@@ -56,14 +66,28 @@ vi.mock("@/app/store/wps", () => ({
             opts.handler({ data: persisted });
         }
         return () => {
-            wpsHandlers.set(key, (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler));
+            wpsHandlers.set(
+                key,
+                (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
+            );
         };
     },
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
-        ControllerResyncCommand: vi.fn(() => Promise.resolve()),
+        ControllerResyncCommand: vi.fn((_client: any, params: { blockid: string }) => {
+            if (resyncRejections.has(params.blockid)) {
+                return Promise.reject(new Error("not found"));
+            }
+            return new Promise<void>((resolve) => {
+                if (resyncDeferreds.has(params.blockid)) {
+                    resyncDeferreds.set(params.blockid, { resolve });
+                } else {
+                    resolve();
+                }
+            });
+        }),
         CreateSubBlockCommand: vi.fn(() => Promise.resolve("block:new-sub-block-id")),
         SetMetaCommand: vi.fn(() => Promise.resolve()),
         // Absent until the reattach-failure tests below needed it, which is
@@ -71,6 +95,20 @@ vi.mock("@/app/store/rpc-api", () => ({
         DeleteSubBlockCommand: vi.fn(() => Promise.resolve()),
     },
 }));
+
+/** Registers `id` for controllable resync resolution — the next
+ *  `ControllerResyncCommand` call for this id will not resolve until
+ *  `resolveDeferredResync(id)` is called. */
+function deferResync(id: string) {
+    resyncDeferreds.set(id, { resolve: () => {} });
+}
+
+function resolveDeferredResync(id: string) {
+    const entry = resyncDeferreds.get(id);
+    if (!entry) throw new Error(`no deferred resync registered for ${id} — call deferResync first`);
+    entry.resolve();
+    resyncDeferreds.delete(id);
+}
 
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/ws", () => ({ sendWSCommand: vi.fn() }));
@@ -112,20 +150,30 @@ vi.mock("@/app/store/global", async () => {
 // assert on WHAT it was constructed with (specifically: fontSize and, for
 // the agent-lock tests, the sendDataHandler closure), not on real terminal
 // rendering.
-const termWrapInstances: Array<{ fontSize: number; loaded: boolean; terminal: any; sendDataHandler: (data: string) => void }> = [];
+const termWrapInstances: Array<{
+    id: string;
+    fontSize: number;
+    loaded: boolean;
+    disposed: boolean;
+    terminal: any;
+    sendDataHandler: (data: string) => void;
+}> = [];
 
 vi.mock("@/app/view/term/termwrap", () => {
     class FakeTermWrap {
+        id: string;
         fontSize: number;
         terminal = { options: { fontSize: 0 } };
         loaded = false;
+        disposed = false;
         sendDataHandler: (data: string) => void;
         constructor(
-            _id: string,
+            id: string,
             _container: HTMLElement,
             options: { fontSize: number },
             waveOptions: { sendDataHandler: (data: string) => void }
         ) {
+            this.id = id;
             this.fontSize = options.fontSize;
             this.terminal.options.fontSize = options.fontSize;
             this.sendDataHandler = waveOptions.sendDataHandler;
@@ -136,7 +184,9 @@ vi.mock("@/app/view/term/termwrap", () => {
         }
         handleResize() {}
         handleResize_debounced() {}
-        dispose() {}
+        dispose() {
+            this.disposed = true;
+        }
     }
     return { TermWrap: FakeTermWrap };
 });
@@ -184,6 +234,8 @@ beforeEach(() => {
     seedData.clear();
     wpsHandlers.clear();
     wpsPersisted.clear();
+    resyncDeferreds.clear();
+    resyncRejections.clear();
     termWrapInstances.length = 0;
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
@@ -317,10 +369,9 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
         // browser-view.tsx) — confirm it's fading rather than stuck visible
         // forever, then confirm it actually finishes unmounting.
         expect(container.querySelector(".agent-shell-loading-overlay.is-fading")).not.toBeNull();
-        await waitFor(
-            () => expect(container.querySelector(".agent-shell-loading-overlay")).toBeNull(),
-            { timeout: 1000 }
-        );
+        await waitFor(() => expect(container.querySelector(".agent-shell-loading-overlay")).toBeNull(), {
+            timeout: 1000,
+        });
     });
 
     it("applies a live meta update that lands while the terminal is still loading, once loading finishes (reagentx P2 guard)", async () => {
@@ -702,5 +753,302 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
         await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
 
         expect(RpcApi.DeleteSubBlockCommand).not.toHaveBeenCalled();
+    });
+});
+
+describe("AgentShellSubblock — re-attaches when the parent repoints term:shellsubblockid", () => {
+    /**
+     * Regression test for the stale-drawer bug found live 2026-09-16
+     * investigating a corrupted vim pane
+     * (docs/reports/REPORT_VIM_TERMINAL_PANE_HANG_INVESTIGATION_2026_09_16.md):
+     * a shell's process exits (e.g. `exit`), the backend's "attach or
+     * create" logic spawns a replacement sub-block and repoints the
+     * parent agent block's `term:shellsubblockid` meta at it — but the
+     * mounted `AgentShellSubblock` (the drawer was never closed) only ever
+     * reads `existingSubBlockId` inside `onMount`'s one-shot IIFE, so it
+     * stays bound to the OLD, now-dead sub-block forever. The drawer
+     * renders the last frame of a shell nobody can reach any more —
+     * exactly the "typed `exit`, it hung" symptom, since from the human's
+     * side nothing ever changes on screen even though the backend already
+     * moved on.
+     *
+     * This is DISTINCT from SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER's
+     * own-clean-exit handling above (which now collapses the drawer
+     * instead of leaving this exact scenario reachable via a human-typed
+     * `exit`): that feature deliberately does NOT touch a non-clean exit
+     * (a crash) or an exit driven by something other than watching the
+     * drawer's OWN subscription — e.g. an agent's shell getting replaced
+     * by a backend repoint while the drawer stays mounted, bound to a
+     * crashed shell. This suite covers the general "the pointer changed
+     * out from under an already-mounted drawer" class of bug.
+     *
+     * Uses a small reactive harness (a real Solid signal feeding the
+     * prop) rather than calling `render` twice — re-rendering the same
+     * component instance with a changed prop, the way `agent-view.tsx`'s
+     * real `existingSubBlockId={block()?.meta?.[...]}` JSX expression
+     * already does reactively, is exactly the scenario this bug lives in.
+     */
+    it("disposes the old TermWrap and attaches a fresh one when existingSubBlockId changes to a different id", async () => {
+        const oldId = "pre-respawn-sub-block";
+        const newId = "post-respawn-sub-block";
+        queueSeedMeta(`block:${oldId}`, {});
+        queueSeedMeta(`block:${newId}`, {});
+
+        const [subBlockId, setSubBlockId] = createSignal(oldId);
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId()}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${oldId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].id).toBe(oldId);
+        expect(termWrapInstances[0].disposed).toBe(false);
+
+        // The backend's respawn path repoints the parent's meta at a new
+        // sub-block — simulated here as the prop simply changing, the same
+        // way the real reactive JSX prop in agent-view.tsx would.
+        setSubBlockId(newId);
+        // The buggy component never reads the new oref at all (its
+        // internal `subBlockId` signal, which subBlockAtom's memo tracks,
+        // never updates), so there may be no fetch signal to resolve yet —
+        // only resolve one if it actually exists, and let the `waitFor`
+        // below fail on the real assertion instead of crashing here.
+        await new Promise((r) => setTimeout(r, 10));
+        if (blockDataSignals.has(`block:${newId}`)) {
+            resolveSeedFetch(`block:${newId}`);
+        }
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(2), { timeout: 1000 });
+        expect(termWrapInstances[0].disposed).toBe(true);
+        expect(termWrapInstances[1].id).toBe(newId);
+        expect(termWrapInstances[1].disposed).toBe(false);
+    });
+
+    it("does not re-attach when existingSubBlockId is merely echoing back a freshly self-created id", async () => {
+        // A freshly created sub-block starts undefined, then the parent
+        // feeds the created id back as a prop once its own meta write
+        // round-trips — that echo must NOT be treated as an external
+        // repoint (it's the same id the component itself just attached
+        // to), or every fresh shell would immediately tear itself down
+        // and reattach to itself on the very next render.
+        const createdId = "self-created-sub-block";
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.CreateSubBlockCommand as any).mockResolvedValueOnce(`block:${createdId}`);
+
+        const [subBlockId, setSubBlockId] = createSignal<string | undefined>(undefined);
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId()}
+                onSubBlockCreated={(id) => setSubBlockId(id)}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].id).toBe(createdId);
+
+        // Let any effect reacting to the prop echo settle, then confirm no
+        // second attach happened.
+        await new Promise((r) => setTimeout(r, 10));
+        expect(termWrapInstances.length).toBe(1);
+        expect(termWrapInstances[0].disposed).toBe(false);
+    });
+
+    /**
+     * ReAgent P1 on PR #3257: `attachShell`'s reuse-existing-id branch
+     * (the resync-succeeds path — exactly the respawn scenario this suite
+     * targets) never called `setSubBlockId(id)`. TermWrap itself got the
+     * right id, but the component's OWN `subBlockId` signal — which
+     * `subBlockAtom`/`termZoom`/`agentLocked` and `handleCtrlWheel`'s
+     * zoom-write all read — stayed stuck on the OLD, dead sub-block after
+     * every reused-id re-attach.
+     */
+    it("reads the NEW sub-block's own persisted zoom after re-attaching, not the old sub-block's", async () => {
+        const oldId = "p1-old-sub-block";
+        const newId = "p1-new-sub-block";
+        queueSeedMeta(`block:${oldId}`, { "term:zoom": 1.0 }); // fontSize 13
+        queueSeedMeta(`block:${newId}`, { "term:zoom": 2.0 }); // fontSize 26
+
+        const [subBlockId, setSubBlockId] = createSignal(oldId);
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId()}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${oldId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].fontSize).toBe(13);
+
+        setSubBlockId(newId);
+        await new Promise((r) => setTimeout(r, 10));
+        if (blockDataSignals.has(`block:${newId}`)) {
+            resolveSeedFetch(`block:${newId}`);
+        }
+        await waitFor(() => expect(termWrapInstances.length).toBe(2));
+
+        // Under the bug, subBlockAtom still reads block:oldId's meta (zoom
+        // 1.0 → fontSize 13) because subBlockId() was never updated on
+        // this (reuse-existing-id) path.
+        expect(termWrapInstances[1].fontSize).toBe(26);
+    });
+
+    /**
+     * ReAgent P1 on PR #3257: no generation guard against overlapping
+     * `attachShell` calls. If the re-attach effect fires again (another
+     * externally-driven repoint) before a prior in-flight `attachShell`
+     * finishes its awaits, both invocations run concurrently and
+     * whichever resolves LAST unconditionally commits `termWrap`/
+     * `resizeObserver` — so an OLDER, slower repoint that happens to
+     * resolve AFTER a newer one can silently clobber the newer, correct
+     * attachment. Constructs exactly that out-of-order-completion race:
+     * id A's repoint fires first but its resync is held open; id B's
+     * repoint fires next and resolves FIRST. A resolving afterward must
+     * not be allowed to construct (or, if already committed, must
+     * dispose) a second, stale TermWrap.
+     */
+    it("does not let an older repoint's resync, resolving after a newer one, clobber the newer attachment", async () => {
+        const initialId = "race-initial-sub-block";
+        const idA = "race-id-a";
+        const idB = "race-id-b";
+        queueSeedMeta(`block:${initialId}`, {});
+        queueSeedMeta(`block:${idA}`, {});
+        queueSeedMeta(`block:${idB}`, {});
+
+        const [subBlockId, setSubBlockId] = createSignal(initialId);
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId()}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${initialId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        // Both repoints' resyncs are held open — A first, then B right
+        // after, before A has resolved — simulating two rapid backend
+        // repoints landing close together.
+        deferResync(idA);
+        deferResync(idB);
+        setSubBlockId(idA);
+        setSubBlockId(idB);
+
+        // B (the newer repoint) resolves FIRST.
+        resolveDeferredResync(idB);
+        await new Promise((r) => setTimeout(r, 0));
+        if (blockDataSignals.has(`block:${idB}`)) resolveSeedFetch(`block:${idB}`);
+        await waitFor(() => expect(termWrapInstances.some((t) => t.id === idB)).toBe(true));
+
+        // A (the older, now-stale repoint) resolves SECOND — the
+        // out-of-order completion that breaks a naive "last write wins".
+        resolveDeferredResync(idA);
+        await new Promise((r) => setTimeout(r, 0));
+        if (blockDataSignals.has(`block:${idA}`)) resolveSeedFetch(`block:${idA}`);
+        // Give A's now-stale attach every chance to (wrongly) proceed.
+        await new Promise((r) => setTimeout(r, 20));
+
+        // termWrapInstances accumulates every instance ever constructed
+        // (including the initial attach's, already disposed by the first
+        // repoint) — the property that actually matters is how many are
+        // currently LIVE. Exactly one may be: B's. Under the bug, A
+        // proceeds unconditionally after B already committed and its
+        // TermWrap (bound to the dead idA) becomes the live one instead.
+        const live = termWrapInstances.filter((t) => !t.disposed);
+        expect(live.length).toBe(1);
+        expect(live[0].id).toBe(idB);
+    });
+
+    /**
+     * ReAgent P1 on PR #3257, round 2: when attachShell's create-branch
+     * (CreateSubBlockCommand) resolves but a NEWER attach has already
+     * started (isStale() true), the function bailed immediately without
+     * deleting the backend sub-block it just created. Because
+     * setSubBlockId/onSubBlockCreated never ran for that id, it's never
+     * written to term:shellsubblockid, so nothing else — including
+     * agent-view.tsx's own pane-close cleanup, which only knows about
+     * whatever that meta currently points at — can ever find it to clean
+     * it up. Its backend PTY process leaks for the app's lifetime.
+     * Reachable when two externally-driven repoints land close together
+     * and BOTH candidate ids fail ControllerResyncCommand, so both take
+     * the create-new fallback — distinct from the reuse-existing-id race
+     * covered above.
+     */
+    it("deletes the orphaned backend sub-block when a stale create-branch attempt loses the race", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        const initialId = "orphan-initial-sub-block";
+        const idA = "orphan-race-id-a"; // resync fails -> takes the create-fallback, held open
+        const idB = "orphan-race-id-b"; // a second, newer repoint that supersedes A while it's stuck creating
+        queueSeedMeta(`block:${initialId}`, {});
+        queueSeedMeta(`block:${idB}`, {});
+        resyncRejections.add(idA);
+
+        let resolveCreateA!: (oref: string) => void;
+        (RpcApi.CreateSubBlockCommand as any).mockImplementationOnce(
+            () => new Promise<string>((resolve) => (resolveCreateA = resolve))
+        );
+
+        const [subBlockId, setSubBlockId] = createSignal(initialId);
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId()}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${initialId}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        // A's repoint fires — its resync rejects immediately, so it takes
+        // the create-fallback and gets stuck there (CreateSubBlockCommand
+        // held open by the mockImplementationOnce above).
+        setSubBlockId(idA);
+        await new Promise((r) => setTimeout(r, 0));
+
+        // A second, newer repoint arrives before A's create call resolves
+        // — this must supersede A regardless of A's own eventual outcome.
+        // Its resync succeeds instantly (the default mock behavior), so it
+        // takes the ordinary reuse path.
+        setSubBlockId(idB);
+        await new Promise((r) => setTimeout(r, 0));
+        if (blockDataSignals.has(`block:${idB}`)) resolveSeedFetch(`block:${idB}`);
+        await waitFor(() => expect(termWrapInstances.some((t) => t.id === idB)).toBe(true));
+
+        // A's stale create call finally resolves, having already created a
+        // real backend sub-block before discovering it lost the race.
+        const createdIdA = "orphan-created-a";
+        resolveCreateA(`block:${createdIdA}`);
+
+        // A's own orphaned creation must be deleted — otherwise nothing
+        // ever records its id anywhere and its backend PTY leaks forever.
+        await waitFor(() =>
+            expect(RpcApi.DeleteSubBlockCommand).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ blockid: createdIdA })
+            )
+        );
+        // And critically, it must never become the live TermWrap — the
+        // orphan-and-forget failure mode ReAgent flagged would otherwise
+        // still leave the pane silently attached to it.
+        expect(termWrapInstances.some((t) => t.id === createdIdA)).toBe(false);
     });
 });
