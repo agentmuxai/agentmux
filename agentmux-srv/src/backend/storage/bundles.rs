@@ -814,6 +814,17 @@ impl Store {
                 if target_generation < stored_generation {
                     return Ok(BundleReseedOutcome::SkippedOlderGeneration);
                 }
+            } else {
+                // Row exists but has ZERO version history (possible via the
+                // still-present unversioned bundle_upsert_system, or data
+                // that predates this tier having versioning at all) —
+                // conservatively treated as NOT owned by the seeder and
+                // left alone, same policy `bundle_delete_system_if_owned`
+                // already documents and implements for the identical edge
+                // case. Falling through to the unconditional upsert below
+                // would silently overwrite a row this method has no basis
+                // to claim is safe to touch. ReAgent P2, PR #3244.
+                return Ok(BundleReseedOutcome::SkippedLocalEdit);
             }
         } else {
             // No db_bundles row — but check for a retirement tombstone
