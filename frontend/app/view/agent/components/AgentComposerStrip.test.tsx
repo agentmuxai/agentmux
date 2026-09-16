@@ -612,6 +612,157 @@ describe("computeComposerRows — anchored model selector + Shell (Rev 8)", () =
 });
 
 /**
+ * Second pinned pair — auth ("Logged in") / ctx (Compact) (Rev 9,
+ * 2026-09-16, user-directed). Reproduces the actual reported defect: the
+ * single-row balancer and the multi-row two-pointer pairing used to
+ * disagree about which of `auth`/`ctx` goes left, so they swapped sides
+ * exactly at whatever width crossed from one regime to the other. See
+ * docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
+ */
+describe("computeComposerRows — pinned auth/ctx pair (Rev 9)", () => {
+    const PAIR = [{ leftKey: "auth", rightKey: "ctx" }];
+
+    it("single row: auth resolves left, ctx right — even when unconstrained balance would prefer the opposite", () => {
+        // ctx (70) is wider than auth (20); with runtime/hostShell equal
+        // (10 each), the OLD unconstrained brute force put the wider
+        // slot (ctx) on whichever side minimized the diff — not
+        // necessarily left. Pinning removes ctx/auth from that search
+        // entirely, so the outcome no longer depends on their relative
+        // widths at all.
+        const slots = [
+            { key: "runtime", width: 10 },
+            { key: "auth", width: 20 },
+            { key: "ctx", width: 70 },
+            { key: "hostShell", width: 10 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 500, 5, "runtime", PAIR);
+        expect(rows).toHaveLength(1);
+        expect(rows[0].left).toContain("auth");
+        expect(rows[0].right).toContain("ctx");
+    });
+
+    it("multi-row: auth and ctx share their own row, auth left / ctx right", () => {
+        // availableWidth (150) is chosen to comfortably fit auth+ctx+gap
+        // (95) on their own row while still forcing multi-row overall
+        // (total pool width 215 > 150) — below 95 the pair itself can't
+        // fit and splits instead (see the capacity tests further down).
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 20 },
+            { key: "ctx", width: 70 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 150, 5, "runtime", PAIR);
+        const authRow = rows.find((r) => r.left.includes("auth") || r.right.includes("auth"));
+        expect(authRow).toEqual({ left: ["auth"], right: ["ctx"] });
+    });
+
+    it("no discontinuity at the single-row/multi-row boundary — the exact reported defect", () => {
+        // Sweep availableWidth across the fit threshold for this fixed
+        // slot set and assert auth/ctx's relative side NEVER changes,
+        // including the two adjacent widths that straddle the boundary
+        // itself (the actual "~342px" crossover in the bug report). Looks
+        // across ALL rows rather than assuming auth/ctx share one — at the
+        // narrowest widths swept here the pinned pair's own capacity check
+        // (codex P1, PR #3282) legitimately splits them onto two separate
+        // one-sided rows, which is still "no discontinuity": auth is
+        // never found in a `.right` array, ctx is never found in a
+        // `.left` array, regardless of row grouping.
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 20 },
+            { key: "ctx", width: 70 },
+            { key: "hostShell", width: 50 },
+        ];
+        const totalWidth = 60 + 20 + 70 + 50 + 3 * 5; // matches computeComposerRows' own gap accounting
+        for (const availableWidth of [totalWidth + 50, totalWidth, totalWidth - 1, totalWidth - 20, 150, 90, 50]) {
+            const rows = computeComposerRows(slots, "hostShell", availableWidth, 5, "runtime", PAIR);
+            const authRow = rows.find((r) => r.left.includes("auth") || r.right.includes("auth"));
+            const ctxRow = rows.find((r) => r.left.includes("ctx") || r.right.includes("ctx"));
+            expect(authRow?.left).toContain("auth");
+            expect(authRow?.right).not.toContain("auth");
+            expect(ctxRow?.right).toContain("ctx");
+            expect(ctxRow?.left).not.toContain("ctx");
+        }
+    });
+
+    it("only auth present (ctx absent): falls through to the ordinary free pool, unchanged", () => {
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 20 },
+            { key: "hostShell", width: 50 },
+        ];
+        expect(computeComposerRows(slots, "hostShell", 500, 5, "runtime", PAIR)).toEqual(
+            computeComposerRows(slots, "hostShell", 500, 5, "runtime"),
+        );
+    });
+
+    it("only ctx present (auth absent): falls through to the ordinary free pool, unchanged", () => {
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "ctx", width: 70 },
+            { key: "hostShell", width: 50 },
+        ];
+        expect(computeComposerRows(slots, "hostShell", 500, 5, "runtime", PAIR)).toEqual(
+            computeComposerRows(slots, "hostShell", 500, 5, "runtime"),
+        );
+    });
+
+    it("hostShell stays the outermost/last occupant even with the pinned pair present", () => {
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 20 },
+            { key: "ctx", width: 70 },
+            { key: "w1", width: 100 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 90, 5, "runtime", PAIR);
+        const last = rows[rows.length - 1];
+        expect(last).toEqual({ left: ["runtime"], right: ["hostShell"] });
+    });
+
+    it("splits into two one-sided rows, preserving each member's own side, when the pair itself doesn't fit (codex P1, PR #3282)", () => {
+        // auth(150) + ctx(150) + gap(5) = 305 > availableWidth 200 — the
+        // pair can't fit side by side even on its own dedicated row. An
+        // unconditional pair here would render as a logical
+        // {left:[auth], right:[ctx]} row that the real CSS's flex-wrap
+        // then silently breaks onto two physical one-sided lines anyway —
+        // reproducing spec §1's one-sided-lines bug. Assert the DATA
+        // already reflects two separate rows instead, each keeping its
+        // member on its own originally-pinned side (auth stays in
+        // `left`, ctx stays in `right` — not both collapsed to the
+        // generic two-pointer walk's always-`left` singleton shape).
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 150 },
+            { key: "ctx", width: 150 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime", PAIR);
+        const authRow = rows.find((r) => r.left.includes("auth") || r.right.includes("auth"));
+        const ctxRow = rows.find((r) => r.left.includes("ctx") || r.right.includes("ctx"));
+        expect(authRow).toEqual({ left: ["auth"], right: [] });
+        expect(ctxRow).toEqual({ left: [], right: ["ctx"] });
+        expect(authRow).not.toBe(ctxRow);
+    });
+
+    it("keeps the pair together when it fits, even though auth+ctx alone would overflow the FULL row (only the pinned pair's own width matters)", () => {
+        // Sanity check that the capacity fix above didn't overcorrect: the
+        // check is against the pinned pair's OWN combined width, not
+        // against everything else that happens to also be on the line.
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 20 },
+            { key: "ctx", width: 70 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime", PAIR);
+        const authRow = rows.find((r) => r.left.includes("auth") || r.right.includes("auth"));
+        expect(authRow).toEqual({ left: ["auth"], right: ["ctx"] });
+    });
+});
+
+/**
  * Edge priority for interactive elements (2026-08-26, user-directed
  * follow-up to Rev 7): on every rendered line, interactive elements
  * (buttons/dropdowns) sit flush against the strip's outer edges, with
@@ -661,19 +812,24 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
         expect(precedes(compact, ctxText)).toBe(true);
     });
 
-    it("orders a passive slot INSIDE an interactive one on the right side (auth inward of the process badge)", () => {
-        // contextTokens populates the ctx slot on the LEFT — without any
-        // left-side slot, the "left must never be completely empty"
-        // fallback would promote the badge (first right slot in pool
-        // order) to the left side, and this test would be asserting
-        // against the wrong row entirely.
+    it("orders a passive slot INSIDE an interactive one on the right side (ctx inward of the process badge)", () => {
+        // auth is pinned LEFT as of Rev 9 (SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md),
+        // so it no longer shares the right side with the process badge —
+        // this exercises the same passive-inward-of-interactive property
+        // with ctx instead (passive here: no onCompact, so no Compact
+        // button renders and the slot's own `interactive` flag is false).
+        // authStatus is still set so auth's pinned-left placement fills
+        // the left side and the "left must never be completely empty"
+        // fallback never fires — without it, that fallback would promote
+        // some right-side slot to the left instead, changing which slots
+        // actually share this row with the badge.
         const { container } = render(() => (
             <AgentComposerStrip {...baseProps} authStatus="authenticated" processCount={2} contextTokens={40_000} contextWindow={200_000} />
         ));
-        const auth = container.querySelector(".agent-composer-strip-auth")!;
+        const ctxText = container.querySelector(".agent-composer-strip-ctx")!;
         const badge = container.querySelector(".agent-composer-strip-process-badge")!;
-        expect(auth.closest(".agent-composer-strip-row-right")).not.toBeNull();
-        expect(precedes(auth, badge)).toBe(true);
+        expect(ctxText.closest(".agent-composer-strip-row-right")).not.toBeNull();
+        expect(precedes(ctxText, badge)).toBe(true);
     });
 
     it("keeps Shell the outermost element of the right edge", () => {
