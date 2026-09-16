@@ -536,3 +536,126 @@ pub struct ClosePaneRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
+
+#[cfg(test)]
+mod app_api_manifest_contract_tests {
+    //! Rust half of the DRY contract check for the `shell.*` routes,
+    //! described in docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md
+    //! §2.8 — same mechanism and rationale as
+    //! `agentmux-srv/src/backend/rpc_types/block.rs`'s
+    //! `app_api_manifest_contract_tests` module for `pane.open`. A Node-side
+    //! test (`muxsh.contract.test.mjs`) makes the matching assertion against
+    //! the same manifest.
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    fn repo_root() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("agentmux-common's parent dir is the repo root")
+            .to_path_buf()
+    }
+
+    fn load_manifest() -> serde_json::Value {
+        let path = repo_root().join("docs/specs/app-api-manifest.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        serde_json::from_str(&raw).expect("app-api-manifest.json must be valid JSON")
+    }
+
+    fn manifest_fields(manifest: &serde_json::Value, route: &str, key: &str) -> HashSet<String> {
+        manifest["routes"][route][key]
+            .as_array()
+            .unwrap_or_else(|| panic!("routes.{route}.{key} must be an array"))
+            .iter()
+            .map(|v| v.as_str().expect("field name must be a string").to_string())
+            .collect()
+    }
+
+    fn assert_exact_match(manifest_fields: &HashSet<String>, struct_fields: &HashSet<String>, route: &str) {
+        let manifest_only: Vec<_> = manifest_fields.difference(struct_fields).collect();
+        let struct_only: Vec<_> = struct_fields.difference(manifest_fields).collect();
+        assert!(
+            manifest_only.is_empty() && struct_only.is_empty(),
+            "app-api-manifest.json's {route} has drifted from the real struct — \
+             in manifest but not the struct: {manifest_only:?}; \
+             in the struct but not the manifest: {struct_only:?}"
+        );
+    }
+
+    #[test]
+    fn shell_create_request_fields_match_the_real_struct() {
+        let manifest = load_manifest();
+        let instance = ShellCreateRequest {
+            agent_block_id: "b".to_string(),
+            cmd: "echo hi".to_string(),
+            cwd: Some("/tmp".to_string()),
+            title: Some("t".to_string()),
+            env: Some(Default::default()),
+            capture_stdin: Some(true),
+        };
+        let value = serde_json::to_value(&instance).expect("must serialize");
+        let struct_fields: HashSet<String> =
+            value.as_object().expect("must be an object").keys().cloned().collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.create", "requestFields"), &struct_fields, "shell.create.requestFields");
+    }
+
+    #[test]
+    fn shell_create_response_fields_match_the_real_struct() {
+        let manifest = load_manifest();
+        let instance = ShellCreateResponse { shell_id: "s".to_string() };
+        let value = serde_json::to_value(&instance).expect("must serialize");
+        let struct_fields: HashSet<String> =
+            value.as_object().expect("must be an object").keys().cloned().collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.create", "responseFields"), &struct_fields, "shell.create.responseFields");
+    }
+
+    #[test]
+    fn shell_status_fields_match_the_real_structs() {
+        let manifest = load_manifest();
+        let req = ShellStatusRequest { shell_id: "s".to_string() };
+        let req_fields: HashSet<String> = serde_json::to_value(&req)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.status", "requestFields"), &req_fields, "shell.status.requestFields");
+
+        let resp = ShellStatusResponse { running: true, exit_code: Some(0), line_count: 1 };
+        let resp_fields: HashSet<String> = serde_json::to_value(&resp)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.status", "responseFields"), &resp_fields, "shell.status.responseFields");
+    }
+
+    #[test]
+    fn shell_stop_fields_match_the_real_structs() {
+        let manifest = load_manifest();
+        let req = ShellStopRequest { shell_id: "s".to_string() };
+        let req_fields: HashSet<String> = serde_json::to_value(&req)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.stop", "requestFields"), &req_fields, "shell.stop.requestFields");
+
+        let resp = ShellStopResponse { stopped: true };
+        let resp_fields: HashSet<String> = serde_json::to_value(&resp)
+            .expect("must serialize")
+            .as_object()
+            .expect("must be an object")
+            .keys()
+            .cloned()
+            .collect();
+        assert_exact_match(&manifest_fields(&manifest, "shell.stop", "responseFields"), &resp_fields, "shell.stop.responseFields");
+    }
+}

@@ -2,7 +2,7 @@
 
 **Author:** Vmer
 **Date:** 2026-09-16
-**Status:** proposed
+**Status:** active — Phases 1, 2a, and 2b are implemented (Phase 2b's real scope corrected during implementation, see §5.5/§5.6 — two commands originally planned there turned out not to be buildable as designed). Phase 3 not started.
 **Related:** `docs/specs/SPEC_MUXSH_CLI_2026_09_16.md` (Phase 1 — shipped, PR #3255, `muxsh open`/`muxsh web`), `docs/reports/REPORT_WSH_STYLE_CLI_FOR_AGENT_APP_API_2026_09_16.md` (the research this builds on), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why AgentMux doesn't import `wsh`'s literal command set), `docs/reports/REPORT_AGENT_OPEN_API_GAP_2026_09_06.md` (`muxopen`), `agentmux-docs/.../internals/agent-app-api.md`
 
 ---
@@ -22,10 +22,10 @@ Net result, by phase:
 | Phase | What | Backend work needed? |
 |---|---|---|
 | **1 — shipped** | `muxsh open`, `muxsh web` | No (PR #3255) |
-| **2a — DRY foundations, build first** | Extract `lib/muxclient.mjs`; stand up the App API manifest + Rust/Node contract tests, covering `pane/open` | No — refactor + tests only, §2.8 |
-| **2b — this spec's build list** | `muxsh pane close/list`, `muxsh agent list/send`, `muxsh run`, `muxsh view`, `muxsh edit`, `muxsh config edit/path`, `muxsh secret list` | No — every one is a thin wrapper over an already-existing route, built DRY on top of 2a |
-| **3 — needs backend work first** | `muxsh getmeta`/`setmeta`, `muxsh termscrollback`, `muxsh notify` | Yes — see §5 for exactly what |
-| **Not building** | `ssh`/`wsl`/`conn`, `file`, `launch`, `ai`, `setbg`/`badge`, `setconfig` | N/A — structurally doesn't map, see §6 |
+| **2a — shipped** | `lib/muxclient.mjs`; the App API manifest + Rust/Node contract tests, covering `pane/open` | No — refactor + tests only, §2.8 (PR #3263) |
+| **2b — shipped** | `muxsh view`, `muxsh edit`, `muxsh pane list`, `muxsh run`, `muxsh config edit/path`, `muxsh agent list/send` | No — every one is a thin wrapper over an already-existing, verified-unsigned route, built DRY on top of 2a. Manifest extended to cover `shell.{create,status,stop}` and `agent.send` too. |
+| **3 — needs backend work first** | `muxsh getmeta`/`setmeta`, `muxsh termscrollback`, `muxsh notify`, `muxsh pane close` (§5.5 — real route exists but is agent-signed, not `X-AuthKey`-gated like the rest; needs a new unsigned self-close route) | Yes — see §5 for exactly what |
+| **Not building** | `ssh`/`wsl`/`conn`, `file`, `launch`, `ai`, `setbg`/`badge`, `setconfig`, `secret list` (§5.6 — not a missing route, a conceptual mismatch: identity accounts are agent-scoped, and a terminal pane isn't an agent) | N/A — structurally doesn't map, see §6 |
 
 ---
 
@@ -53,7 +53,7 @@ Nouns, fixed set for this spec (extend deliberately, not ad hoc):
 | `agent` | `agent.*` / `/api/v1/agent/*`, `/agentmux/discovery`, `/agentmux/reactive/inject` |
 | `run` | *(verb-only, no noun — see §4.3)* `/api/v1/shell/*` |
 | `config` | local env-var/file paths, no network call |
-| `secret` | `identity.*` (read-only in this spec — see §4.7) |
+| `secret` | `identity.*` — **not shipped this pass, see §5.6**: agent-scoped, not terminal-scoped; kept in this table as the noun a future `--agent <name>` form would use, not a promise of `muxsh secret list` as originally drafted |
 
 **Backward-compatible exception, deliberate, not an inconsistency:** `muxsh open <file>` and `muxsh web <url>` (Phase 1, already shipped) stay as top-level shortcuts for `muxsh pane open`/`muxsh pane web` — they're the two most `wsh`-iconic gestures (`wsh view`/`wsh editor`/`wsh web` — "type a command, a UI block appears," the exact marketing gesture cited in the research report §1.1) and they're already in production use. Document them explicitly as aliases, not as evidence the grammar is inconsistent.
 
@@ -128,7 +128,7 @@ Every `wsh` subcommand (from `docs.waveterm.dev/wsh-reference`, cross-checked ag
 | `edit` / `editor` | `POST /api/v1/pane/open` (`view=editor`) | **Build, Phase 2** — `muxsh edit` (§4.1); `muxsh open` already covers this since Phase 1 |
 | `web` | `POST /api/v1/pane/open` (`view=browser`) | **Shipped, Phase 1** |
 | `launch` | *(OS-level open-with-default-app)* | **Not building** — §6.3 |
-| `deleteblock` | `POST /api/v1/agent/pane/close` (backs `ClosePane`, `server/app_api/pane.rs`, `SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md`) | **Build, Phase 2** — `muxsh pane close` (§4.2) |
+| `deleteblock` | `POST /api/v1/agent/pane/close` (backs `ClosePane`, `server/ui_handlers.rs`) — **verified at implementation time to require an agent-signed `UiAutomationAuth`, not plain `X-AuthKey`** | **Phase 3** — §5.5, not Phase 2 as originally scoped; the real unsigned mechanism (`DeleteBlock` WS RPC) has no REST route yet |
 | `blocks` | `GET /api/v1/tabs?block_id=<id>` (backs `Layout("tabs")`) | **Build, Phase 2** — `muxsh pane list` (§4.2) |
 | `getmeta` / `setmeta` | `blockfile:read_state`/`write_state` — **WebSocket RPC only today, no REST route** | **Phase 3** — needs a new REST route first, §5.1 |
 | `run` | `POST /api/v1/shell/create` + `/status` + `/stop` (backs `Shell`/`ShellStatus`/`ShellStop`) | **Build, Phase 2** — `muxsh run` (§4.3) |
@@ -141,7 +141,7 @@ Every `wsh` subcommand (from `docs.waveterm.dev/wsh-reference`, cross-checked ag
 | `wavepath` | *(env vars already injected — `AGENTMUX_DATA_DIR`, `AGENTMUX_CONFIG_DIR`, `AGENTMUX_LOG_DIR`, `AGENTMUX_SHARED_DIR`, confirmed present in every pane's env this session)* | **Build, Phase 2** — `muxsh config path` (§4.4) |
 | `getvar` / `setvar` | *(no generic workspace-scoped KV primitive exists)* | **Phase 3, lowest priority**, §5.2 |
 | `termscrollback` | *unclear whether a plain terminal pane's scrollback is persisted/reachable the way an agent block's `agent.output` is* | **Phase 3, pending investigation**, §5.4 |
-| `secret` | `identity.*` (backs `IdentityAccounts`/`IdentityValidate` MCP tools) | **Build, Phase 2, read-only only** — `muxsh secret list` (§4.7); no `set`/`get` of plaintext, see rationale there |
+| `secret` | `GET /api/v1/agent/identity/accounts?agent_id=<slug>` (backs `IdentityAccounts`) — **verified at implementation time to be agent-scoped, not caller-scoped**: `agent_id` comes from `$AGENTMUX_AGENT_ID`, injected only into agent spawn env, never a terminal pane's | **Not building this pass** — §5.6, a conceptual mismatch, not a missing route |
 | `ssh` / `wsl` / `conn` | *(no SSH/WSL pane type)* | **Not building** — §6.5, same finding as the 2026-04-12 retirement, still true |
 | `file` (cat/write/append/rm/info/cp/mv/ls) | *(local shell already has this; `muxsh` never targets a remote host)* | **Not building** — §6.6 |
 
@@ -155,9 +155,11 @@ Each of these lands on top of Phase 2a (§2.8): every subcommand below imports t
 
 `view` is a smart dispatcher matching `wsh view`'s own "just figure out the right block" behavior: a URL (`^\w+://`) → `view=browser`; a media extension (`.png/.jpg/.gif/.mp4/.pdf/...`) → `view=media`; anything else → `view=editor`. `edit` always forces `view=editor` regardless of extension — the explicit form for when you specifically want the editor, not the smart guess (matches `wsh`'s own `view`-vs-`editor` split). Both take the full §2.2 flag set.
 
-### 4.2 `muxsh pane close [block_id]` / `muxsh pane list`
+### 4.2 `muxsh pane list`
 
-`close` defaults to `$AGENTMUX_BLOCKID` (closing the calling pane's own pane is the common "clean up after myself" script case) or takes an explicit id. `list` prints the calling agent's workspace's tabs/panes (`GET /api/v1/tabs?block_id=<id>`), `--json` for scripting. `wsh`'s `deleteblock`/`blocks` had no default-to-self convenience — this is a deliberate, justified improvement, not a deviation, since a script closing its own scratch pane is the most common real case.
+**Correction, at implementation time:** this section originally also scoped `muxsh pane close [block_id]` here as zero-backend-work. That was wrong, caught by re-verifying the actual route against source before writing code (same discipline as everything else in this spec) — see §5.5, which supersedes the `close` half of this section. `list` itself is unaffected and ships as originally planned.
+
+`list` prints the calling pane's workspace's tabs/panes (`GET /api/v1/tabs?block_id=<id>`, using `$AGENTMUX_BLOCKID`), `--json` for scripting.
 
 ### 4.3 `muxsh run <cmd> [-- <args>]`
 
@@ -175,9 +177,9 @@ Thin wrapper over `Shell`/`ShellStatus`/`ShellStop` (`/api/v1/shell/*`). No noun
 
 Not duplicated under the new grammar. `muxopen` is already shipped, already has muscle memory, and its own name (a verb, "open [an agent]") predates this spec's noun-verb convention. Document it in `muxsh --help`'s "see also" rather than reimplement it as `muxsh agent open` — one implementation, two ways to typo-check yourself.
 
-### 4.7 `muxsh secret list`
+### 4.7 `muxsh secret list` — REMOVED, see §5.6
 
-Read-only, wraps whichever REST route backs the `IdentityAccounts` MCP tool (exact path to be confirmed against source at implementation time — not independently re-verified in this research pass, unlike the routes above which were). Returns account name/provider/masked-tail only, same shape the MCP tool already returns — **deliberately no `secret get`/`secret set` of plaintext**, for the same reason `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md` §7.2 already declined an inline-secret *agent* tool: a CLI arg is strictly worse than a tool-call argument for this, because it also lands in shell history, not just a transcript. `wsh secret set` had no such guard; not carrying that part of the surface over is a deliberate security choice, not an oversight.
+This section's own text flagged its route as "not independently re-verified... at implementation time." It's now been checked, and the finding is a real, structural blocker, not a missing-route gap — see §5.6. Not shipped in this pass.
 
 ---
 
@@ -198,6 +200,24 @@ A `PushNotification` MCP tool name was observed to exist in this session's tool 
 ### 5.4 `termscrollback`
 
 `agent.output`/`blockfile:read_range` give paginated persisted output for an **agent** block. Whether a plain **terminal** pane's scrollback is captured/persisted the same way is not confirmed by this research pass — needs a source check (`blockcontroller` terminal-pane path) before this can be scoped as "build" or "not applicable."
+
+### 5.5 `pane close` — moved here from §4.2, real blocker found at implementation time
+
+`ClosePane` (`POST /api/v1/agent/pane/close`, `server/ui_handlers.rs`) is **not** a plain `X-AuthKey`-gated route like every other one in §4 — its request type (`ClosePaneRequest`, `agentmux-common/src/api_types.rs`) `#[serde(flatten)]`s a `UiAutomationAuth { agent_id, ts_secs, sig }`: an HMAC-SHA256 signature computed with the *calling agent's own* `AGENTMUX_JEKT_KEY`. That key is injected only into `agentmux-mcp`'s spawn environment for a specific registered agent (the same per-agent signing key jekt sender-authentication uses) — a terminal pane's environment (`$AGENTMUX_LOCAL_URL`/`$AGENTMUX_AUTH_KEY`/`$AGENTMUX_BLOCKID`/`$AGENTMUX_TABID`) never includes it, structurally, by the same design that makes jekt sender spoofing impossible. `muxsh` cannot produce a valid signature for an identity it isn't.
+
+This is deliberately **not** treated as "needs a REST route" the way §5.1 is — a REST route already exists. The actual gap is a WS-only, *unsigned* close path: `DeleteBlock` is a real WebSocket RPC command (`backend/rpc_types/block.rs`, `backend/service.rs`) the frontend itself uses for the ordinary "click X on a tab" case, which — being the frontend's own already-authenticated session, not a claim to be a specific agent — needs no `UiAutomationAuth` signature at all. There is currently no REST route exposing `DeleteBlock`'s simpler, unsigned contract.
+
+Two real paths forward, neither a CLI-only change:
+- Add a REST route over `DeleteBlock` for self-close only (defaulting the target to the caller's own `$AGENTMUX_BLOCKID`, no agent-identity claim involved, same trust tier as `pane.open`) — the natural analogue to how `ClosePane` already documents "omitted `block_id`" as the self-only case, just without requiring a signature to prove what's already true (a terminal closing its own pane needs no proof of identity to close a pane it's already running in).
+- Or accept `ClosePane`'s existing signing requirement and give `muxsh` a way to hold a real per-agent jekt key — which would mean `muxsh` impersonating an agent identity, a materially bigger and more sensitive change than anything else in this spec, and not recommended without a much stronger justification than CLI convenience.
+
+Recommend the first option if this is picked up. Not scoped further here — real backend design work, same as §5.1.
+
+### 5.6 `secret list` — moved here from §4.7, real blocker found at implementation time
+
+The route backing `IdentityAccounts` (`agentmux-mcp/src/main.rs`) is `GET /api/v1/agent/identity/accounts?agent_id=<slug>` — and that `agent_id` isn't optional plumbing, it's the entire point of the route: identity accounts are linked *to a specific registered agent definition*, not to "whoever is currently typing in a pane." The MCP tool resolves it via `agent_slug()`, sourced from `$AGENTMUX_AGENT_ID` — injected into an **agent's** spawn environment, not a terminal pane's (terminal panes get `$AGENTMUX_BLOCKID`/`$AGENTMUX_TABID`, never `$AGENTMUX_AGENT_ID` — confirmed by grepping every existing `muxsh`/`muxspect`/`muxopen` core, none of which ever reference it).
+
+This is a **conceptual mismatch, not a missing-capability gap** — closer to §6's "doesn't apply" category than a Phase-3 "needs backend work" item, which is why it's listed here rather than promised as a future build. A terminal pane isn't an agent and has no identity-account bindings of its own to list; "which agent's accounts?" has no non-arbitrary answer from a bare shell. If this capability is wanted from a terminal, the honest shape is different from what §4.7 originally proposed — e.g. `muxsh secret list --agent <name>`, explicitly listing a *named* agent's accounts rather than an implicit "mine" — which is a different, smaller design than what was speculatively scoped here. Not built in this pass; revisit only if a concrete cross-agent use case shows up.
 
 ---
 
