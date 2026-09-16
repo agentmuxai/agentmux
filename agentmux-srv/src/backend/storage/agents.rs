@@ -1258,40 +1258,87 @@ impl Store {
         // `registry_def_retire` below.
         let rows = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?
+            let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
+            if rows > 0 {
+                purge_agent_dependents(&conn, id)?;
+            }
+            rows
         };
-        if rows > 0 {
-            // Project-instruction observations are keyed by agent id with no
-            // foreign key (they record files this agent READS, which is not a
-            // relationship SQLite can enforce), so nothing else would remove
-            // them and a future agent reusing this id would inherit somebody
-            // else's baseline — every file reporting `unchanged` against
-            // observations that were never made about it. Cleaned up here,
-            // beside the row it belongs to, rather than left to each caller
-            // (ReAgent, PR #3162).
-            if let Err(e) = self.project_instructions_forget(id) {
-                tracing::warn!(
-                    agent_def_id = %id, error = %e,
-                    "agent_def_delete: project-instruction observations left behind"
-                );
-            }
-            if let Some(reg) = self.registry() {
-                if let Err(e) = reg.hard_delete(id) {
-                    tracing::warn!(
-                        agent_def_id = %id,
-                        error = %e,
-                        "registry: failed to mirror agent_def_delete"
-                    );
-                }
-            }
-        }
         // Tombstone the global definition record so another channel's stale
         // SQLite can't resurrect this deleted user agent — AND so an agent
         // that exists in THIS channel only via the global overlay (no local
         // SQLite row, rows == 0) is actually deletable instead of reappearing
         // on the next agent_def_list. (P0.2b + codex P1 on #1385.)
         let global_retired = self.registry_def_retire(id);
+        // Deliberately NOT gated on `rows > 0`. The instance registry is
+        // host-global while `db_agents` is per-channel, so a cross-channel
+        // agent — one this channel only ever saw through the global overlay
+        // — deletes with `rows == 0` and still has a registry record that
+        // another channel wrote. Gating on the local row left that record
+        // active with its definition now tombstoned, which
+        // `listrecentsessions` still renders as a row (no provider, so no
+        // icon, and "(missing definition)") — the delete looked like it
+        // half-worked. Anything that actually deleted something must sweep
+        // the registry too.
+        if rows > 0 || global_retired {
+            self.purge_agent_side_effects(id, "agent_def_delete");
+        }
         Ok(rows > 0 || global_retired)
+    }
+
+    /// Purge this store's rows keyed to a deleted agent, without touching
+    /// `db_agents` itself. For the OTHER physical database an agent has
+    /// rows in: `agent_def_delete` covers the object store it runs against,
+    /// and the `deleteagent` handler calls this on `state.identity_store`,
+    /// which is where the live `db_agent_identity_links` /
+    /// `db_agent_credentials` / native-memory rows actually are
+    /// (`SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`). See
+    /// [`purge_agent_dependents`] for the table list and why one list
+    /// serves both stores. Returns rows removed.
+    pub fn agent_dependents_purge(&self, id: &str) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        purge_agent_dependents(&conn, id)
+    }
+
+    /// The non-SQLite half of deleting an agent row: observations keyed to
+    /// it, and its records in the host-global instance registry. Shared by
+    /// [`Self::agent_def_delete`] and [`Self::instance_delete`] — the two
+    /// names one deletion is reached by since the definition flip (see
+    /// `instance_delete`'s own doc comment). Best-effort throughout:
+    /// SQLite has already committed, and neither side failing is a reason
+    /// to report the delete as failed. `caller` only labels the logs.
+    fn purge_agent_side_effects(&self, id: &str, caller: &'static str) {
+        // Project-instruction observations are keyed by agent id with no
+        // foreign key (they record files this agent READS, which is not a
+        // relationship SQLite can enforce), so nothing else would remove
+        // them and a future agent reusing this id would inherit somebody
+        // else's baseline — every file reporting `unchanged` against
+        // observations that were never made about it. Cleaned up here,
+        // beside the row it belongs to, rather than left to each caller
+        // (ReAgent, PR #3162).
+        if let Err(e) = self.project_instructions_forget(id) {
+            tracing::warn!(
+                agent_def_id = %id, caller, error = %e,
+                "agent delete: project-instruction observations left behind"
+            );
+        }
+        if let Some(reg) = self.registry() {
+            // Matches a record by EITHER key — see
+            // `Registry::hard_delete_for_agent` for why the file key and the
+            // record's own `definition_id` can disagree, and what a missed
+            // record looks like in the picker.
+            match reg.hard_delete_for_agent(id) {
+                Ok(0) => {}
+                Ok(removed) => tracing::debug!(
+                    agent_def_id = %id, caller, removed,
+                    "registry: purged instance records for deleted agent"
+                ),
+                Err(e) => tracing::warn!(
+                    agent_def_id = %id, caller, error = %e,
+                    "registry: failed to mirror agent delete"
+                ),
+            }
+        }
     }
 
     /// One-shot grandfather pass for the layer-3 ambient-login opt-in
@@ -1680,20 +1727,29 @@ impl Store {
         };
         let mut registry_acted = false;
         if let Some(reg) = self.registry() {
-            // Only act on the registry side if a record exists there
-            // (in either active or retired). Avoids logging spurious
-            // "failed to retire" warnings on a no-op for unrelated ids.
-            if reg.exists_anywhere(id) {
-                let res = if hidden { reg.retire(id) } else { reg.unretire(id) };
-                match res {
-                    Ok(()) => registry_acted = true,
-                    Err(e) => tracing::warn!(
-                        instance_id = %id,
-                        hidden,
-                        error = %e,
-                        "registry: failed to mirror instance_set_hidden"
-                    ),
-                }
+            // Matches by file key OR the record's own `definition_id`.
+            // Retiring by file key alone left any launch-keyed record for
+            // this agent active — literally the "'Forget agent' retires the
+            // NEW key while the stale file stays active, so the forgotten
+            // agent reappears" failure `m0026_registry_agent_id_rekey`'s own
+            // doc comment describes, still reachable on an install where
+            // that migration no-ops (see
+            // `Registry::hard_delete_for_agent`). A count of 0 is a genuine
+            // no-op for an unrelated id, which is what the old
+            // `exists_anywhere` pre-check was guarding against.
+            let res = if hidden {
+                reg.retire_for_agent(id)
+            } else {
+                reg.unretire_for_agent(id)
+            };
+            match res {
+                Ok(moved) => registry_acted = moved > 0,
+                Err(e) => tracing::warn!(
+                    instance_id = %id,
+                    hidden,
+                    error = %e,
+                    "registry: failed to mirror instance_set_hidden"
+                ),
             }
         }
         Ok(rows > 0 || registry_acted)
@@ -1889,18 +1945,20 @@ impl Store {
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?
+            let rows =
+                conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
+            if rows > 0 {
+                // Same dependent purge `agent_def_delete` runs — this is
+                // that deletion arriving from the launch side, and an
+                // agent deleted through this name used to keep its
+                // credentials and signing keys on disk purely because the
+                // cleanup lived in the other function.
+                purge_agent_dependents(&conn, id)?;
+            }
+            rows
         };
         if rows > 0 {
-            if let Some(reg) = self.registry() {
-                if let Err(e) = reg.hard_delete(id) {
-                    tracing::warn!(
-                        instance_id = %id,
-                        error = %e,
-                        "registry: failed to mirror instance_delete"
-                    );
-                }
-            }
+            self.purge_agent_side_effects(id, "instance_delete");
             // Tombstone the GLOBAL definition record too. Clearing the local
             // tables alone leaves an active record in the cross-channel
             // definition registry, and `agent_def_list` overlays every active
@@ -2023,6 +2081,81 @@ fn map_instance_row(row: &rusqlite::Row) -> rusqlite::Result<AgentInstance> {
         working_directory: row.get(11)?,
         display_hidden: row.get::<_, i64>(12)? != 0,
     })
+}
+
+/// Every table keyed to an agent id that a deleted `db_agents` row leaves
+/// behind, purged explicitly (docs/specs/SPEC_AGENT_DELETE_2026_09_16.md
+/// §5.1). Called with the caller's connection lock already held, inside the
+/// same critical section as the `db_agents` DELETE. Returns rows removed.
+///
+/// Six of these declare `ON DELETE CASCADE` on `db_agents(id)` and do fire
+/// on their own — `configure_and_migrate` sets `PRAGMA foreign_keys=ON` on
+/// the production connection, contrary to §5.1's premise (and to
+/// `managed.rs`'s "only ever set in tests" comment, which is stale for this
+/// store). They are listed anyway: the rest carry no FK at all —
+/// `db_agent_credentials` and the two signing-key tables hold live secret
+/// material, so leaving them behind is a security-hygiene gap, not just
+/// clutter — and one obviously-complete list beats two half-lists where a
+/// reader has to know which half a new table belongs in to tell whether it
+/// was handled.
+///
+/// **Runs against either physical database.** Four of these
+/// (`db_agent_identity_links`, `db_agent_credentials`,
+/// `db_agent_native_memory`, `db_agent_native_memory_versions`) are created
+/// by BOTH `run_object_schema` and `run_identity_store_schema`, and per
+/// `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` the identity store holds the
+/// live rows — `listrecentsessions` reads links from
+/// `identity_store.agent_identity_list_all()`, not from the object store's
+/// same-named table. Purging only the object store would leave an agent's
+/// real credentials and account links on disk after a delete that promises
+/// to remove them. Tables absent from whichever connection this runs on are
+/// skipped, so one list serves both.
+///
+/// `db_work_queue.target_agent` is deliberately absent: releasing work
+/// claimed against a deleted agent is a state change, not a row to drop —
+/// open question §8.3 of the spec above.
+fn purge_agent_dependents(conn: &rusqlite::Connection, id: &str) -> Result<usize, StoreError> {
+    const BY_AGENT_ID: &[&str] = &[
+        "db_agent_content",
+        "db_agent_skills",
+        "db_agent_history",
+        "db_agent_identity_links",
+        "db_agent_skills_ref",
+        "db_agent_mcp_ref",
+        "db_agent_credentials",
+        "db_agent_native_memory",
+        "db_agent_native_memory_versions",
+        "db_agent_jekt_keys",
+        "db_agent_lan_keys",
+    ];
+    let present: std::collections::HashSet<String> = {
+        let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut removed = 0usize;
+    for table in BY_AGENT_ID {
+        if !present.contains(*table) {
+            continue;
+        }
+        // Table names are compile-time constants from the list above, never
+        // caller input — the id itself is still bound as a parameter.
+        removed += conn.execute(&format!("DELETE FROM {table} WHERE agent_id=?1"), params![id])?;
+    }
+    // The two that key on the agent differently.
+    if present.contains("db_conversation_trust_grants") {
+        removed += conn.execute(
+            "DELETE FROM db_conversation_trust_grants WHERE agent_id=?1 OR granted_peer_agent_id=?1",
+            params![id],
+        )?;
+    }
+    if present.contains("db_agent_activity_summaries") {
+        removed += conn.execute(
+            "DELETE FROM db_agent_activity_summaries WHERE definition_id=?1",
+            params![id],
+        )?;
+    }
+    Ok(removed)
 }
 
 /// The `db_agents` SELECT that reads a row in the `AgentDefinition` shape —

@@ -292,15 +292,37 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // deleteagent → delete agent by id, broadcast agents:changed
     let wstore_dfa = state.wstore.clone();
     let broker_dfa = state.broker.clone();
+    let identity_store_dfa = state.identity_store.clone();
     engine.register_handler(
         COMMAND_DELETE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_dfa.clone();
             let broker = broker_dfa.clone();
+            let identity_store = identity_store_dfa.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteAgentDefinitionData = serde_json::from_value(data)
                     .map_err(|e| format!("deleteagent: {e}"))?;
                 wstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
+                // Second physical database, only reachable from here: the
+                // identity store holds the LIVE db_agent_identity_links /
+                // db_agent_credentials / native-memory rows for this agent
+                // (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md), while
+                // `agent_def_delete` can only reach the object store's
+                // same-named tables. Without this the delete's own confirm
+                // copy ("deletes the agent and its credentials") would be
+                // false. Best-effort: the agent row is already gone, so a
+                // failure here is leftover rows to log, not a failed delete.
+                match identity_store.agent_dependents_purge(&cmd.id) {
+                    Ok(0) => {}
+                    Ok(removed) => tracing::debug!(
+                        agent_def_id = %cmd.id, removed,
+                        "deleteagent: purged identity-store rows for deleted agent"
+                    ),
+                    Err(e) => tracing::warn!(
+                        agent_def_id = %cmd.id, error = %e,
+                        "deleteagent: identity-store rows left behind"
+                    ),
+                }
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
