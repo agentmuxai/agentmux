@@ -1,6 +1,6 @@
 # SPEC — Fast startup: the Upgrade button owns migrations and updates, the boot path owns nothing deferrable
 
-**Status:** Spec — proposed, not implemented
+**Status:** proposed — not implemented
 **Date:** 2026-09-15
 **Tracking:** [#3258](https://github.com/agentmuxai/agentmux/issues/3258) —
 tracking: startup + splash — get migrations and updates off the boot path
@@ -98,12 +98,33 @@ launcher silently widening its `ESTART` deadline from 30 s to **30 minutes**
 
 ```
 srv boot
-  └─ count_pending_migrations()          ← already exists, bootstrap.rs:569
-       ├─ 0  → continue exactly as today. No snapshot, no migrate, no spawn,
-       │       no new I/O. Constraint 1 satisfied by construction.
-       └─ >0 → DO NOT migrate. Emit ESTART with pending_migrations:N and a
-               needs_upgrade flag, then serve normally-but-gated (§4.2).
+  └─ pending check (NOT today's count_pending_migrations — see below)
+       ├─ Ok(0)  → continue exactly as today. No snapshot, no migrate, no
+       │           spawn, no new I/O. Constraint 1 satisfied by construction.
+       ├─ Ok(n)  → DO NOT migrate. Enter upgrade-only mode (§4.2).
+       └─ Err(e) → DO NOT migrate, DO NOT boot normally. Upgrade-only mode
+                   with an error state. Fail closed.
 ```
+
+**Today's `count_pending_migrations` cannot be the gate, for two reasons —
+both documented in its own contract (`migrations/runner.rs:505-535`):**
+
+1. **It returns `0` on every error, by design** ("Returns 0 on any error so
+   startup is never blocked"): an unresolvable shared-store path, a failed
+   shared-store open, or a failed channel-store open (which silently drops
+   all channel-scoped migrations from the count). Under today's
+   always-migrate boot that is a safe default — the migration run is still
+   ahead. Under this spec it inverts: a transient open error would report
+   "nothing pending", take the fast path, and run the new binary against the
+   old schema — the exact outcome the design exists to prevent. **The check
+   must become fallible, and an error must route to the blocking state, not
+   the fast path.**
+2. **It opens both stores read-write and may create `objects.db`** —
+   `Store::open` runs DDL/schema setup and mutates the file. That breaks the
+   snapshot ordering `bootstrap.rs:529-534` deliberately established (§4.3
+   step 2). **The gate needs a genuinely non-mutating pending check** — read
+   the applied-migration ids without a schema-setup open — or the snapshot
+   must stay strictly ahead of it.
 
 ### 4.2 The gated state — full-window blocking upgrade screen
 
@@ -160,9 +181,25 @@ Sequence:
    State F live progress list (summarized + scrolled per §4.4).
 5. Restart → `0` pending → §4.1's fast path, every launch from then on.
 
-Gate it early in the frontend (`workspace.tsx` / `app.tsx`) off
-`backendInfo().pending_migrations` / `needs_upgrade`, before any pane or
-view mounts. The status-bar `UpdateStatus` chip and Maintenance section
+**The gate is in the backend; the screen is only its presentation.** A
+frontend-only check would be far too late: after the migration skip,
+`open_stores_and_migrate()` still runs `Store::open`, shared/identity-store
+attachment, and every repair/backfill/seed pass, and `main.rs` then runs
+saga resume-on-startup — all of it reading *and writing* the stale stores
+before `ESTART` is even emitted, let alone before `app.tsx` could decline to
+mount a pane. So the pending path needs an **upgrade-only srv mode**:
+
+- bind listeners and emit `ESTART` (so the window can come up and talk to
+  srv at all),
+- serve only what the upgrade screen needs — pending count, migration
+  progress, the trigger — plus whatever is genuinely schema-independent,
+- **skip** normal store initialization, the repair/backfill/seed passes,
+  saga resume, and the background subsystems entirely.
+
+The frontend gate (`workspace.tsx` / `app.tsx`, off
+`backendInfo().pending_migrations` / `needs_upgrade`, before any pane
+mounts) is then just what the user sees — defense in depth, not the
+mechanism. The status-bar `UpdateStatus` chip and Maintenance section
 reflect the same state for consistency (§5.5), but in this state the
 full-window screen is what the user actually reaches first.
 
@@ -182,21 +219,54 @@ which owns the srv process in production:
 
 ```
 User clicks Upgrade (status bar / Maintenance section)
-  1. launcher: stop srv, WAIT FOR ACTUAL PROCESS EXIT   ← Constraint 2
+  1. launcher: ENTER MAINTENANCE STATE — suspend normal srv-exit handling
+        (see "supervision" below; without this, step 2 either races a
+        respawned daemon or tears the app down mid-upgrade)
+  2. launcher: stop srv, WAIT FOR ACTUAL PROCESS EXIT   ← Constraint 2
         (not commands/backend.rs:223's 300 ms sleep heuristic)
-  2. launcher: pre-migration snapshot (moved here from boot, §3 4a)
-  3. launcher: spawn `agentmux-srv --wavedata <dir> migrate`
+  3. launcher: pre-migration snapshot — BEFORE anything opens the stores
+        (see "snapshot ordering" below)
+  4. launcher: if a staged app update exists, INSTALL IT NOW (§5) — before
+        step 5, so the migrations that run are the new version's
+  5. launcher: spawn `agentmux-srv --wavedata <dir> migrate`
         - already exists: migrations/runner.rs:75 (run_migrate_command)
         - already streams NDJSON per-migration progress the panel consumes
         - the reader already exists too: srv_spawner.rs::run_migrate,
           currently #[allow(dead_code)] with no callers — revive it
-  4. on success: if a staged app update exists, apply it here (§5)
-  5. launcher: relaunch the app
+  6. launcher: leave maintenance state, relaunch the app
         → next boot sees 0 pending → §4.1 fast path → ordinary startup
-  on failure: panel State H with the failing migration id + error; the app
-        stays on the pre-upgrade version, data untouched (backup written to
-        ~/.agentmux/shared/backups/pre-migration-*/)
+  on failure: panel State H with the failing migration id + error; see
+        "partial application" below — the data is NOT untouched
 ```
+
+**Supervision must be suspended for the whole window.** Stopping srv is not
+enough: `supervisor/windows.rs:964` treats every srv exit as unexpected and
+immediately respawns it (then deliberately kills the host and rebuilds the
+session), and `supervisor/unix.rs:713` treats a clean srv exit as launcher
+teardown and brings the host down with it. So the naive "stop srv, run
+migrate" either puts a live daemon back on the data dir *while `migrate` is
+running* — reintroducing the `341faa981` data-loss hazard this whole design
+is built around — or closes the progress UI the user is watching. An
+explicit maintenance state (or control-channel command) must suppress both
+behaviors until the relaunch in step 6.
+
+**Snapshot ordering is load-bearing.** `bootstrap.rs:529-534` puts
+`maybe_snapshot_pre_migration()` before any store open precisely because
+`Store::open` runs DDL/schema setup and mutates the file — a snapshot taken
+afterwards captures post-DDL state and is not a valid rollback aid. Since
+the pending check in §4.1 currently opens stores read-write too, either it
+becomes non-mutating or the snapshot moves ahead of it. The snapshot must
+be the first thing that touches those files in the upgrade window.
+
+**Partial application is the real failure contract.** `apply_pending` has
+no batch transaction: each migration commits and is marked applied as it
+goes, and the failing one may itself have written partially. So a mid-batch
+failure leaves the data *partly migrated*, not untouched — the backup under
+`~/.agentmux/shared/backups/pre-migration-*/` is a recovery source, not a
+rollback. State H must say which migrations applied, which failed, and
+where the backup is; retry resumes from the first unapplied id (migrations
+are individually idempotent), and neither the UI nor any recovery logic may
+assume the store is in its pre-upgrade state.
 
 `agentmux-cef/src/commands/backend.rs:173`'s existing `run_migrations`
 already implements this shape for **dev mode only** and hard-refuses in
@@ -233,8 +303,12 @@ implementation rather than a removal:
 4. **Downloads are staged, never auto-applied.** The running version keeps
    running until the user clicks. This is what makes "old binary, already
    migrated, 0 pending" the steady state, and it's why the Upgrade button
-   can own both halves (§4.3 step 4): install the staged update and run the
-   new version's migrations in the same quiesced window, then restart once.
+   can own both halves: install the staged update **first**, then run
+   `migrate` from the newly installed binary (§4.3 steps 4-5, in that
+   order), then restart once. Running `migrate` before the swap would only
+   apply the *old* binary's migrations, leaving the new version's own
+   migrations pending and the next launch blocked again — the opposite of
+   the "next boot sees 0 pending" contract.
    Staging is also what keeps §4.2's blocking screen rare — it is not a
    substitute for it, since a manually-installed build, a `task package`
    build, or a channel switch can still put a newer binary in front of an
@@ -266,10 +340,19 @@ all of them.
 A change to `bootstrap.rs`/`main.rs`/`srv_spawner.rs` should be checked
 against these:
 
-- **S1** — Ordinary boot (`count_pending_migrations() == 0`) performs no
+- **S1** — Ordinary boot (pending check returns `Ok(0)`) performs no
   migration, no snapshot, no update check, no subprocess spawn.
-- **S2** — Migrations never run while any srv process holds that data dir;
-  the launcher confirms process exit, not elapsed time.
+- **S1b** — The pending check fails **closed**: any error reaching it routes
+  to the blocking upgrade state, never to the ordinary boot path. "Couldn't
+  tell" is not "nothing pending".
+- **S1c** — With migrations pending, srv does not open, repair, backfill,
+  seed, or otherwise write the stale stores. The gate is in the backend;
+  the frontend screen is presentation.
+- **S2** — Migrations never run while any srv process holds that data dir:
+  the launcher confirms process exit (not elapsed time) **and** suspends its
+  own respawn/teardown handling for the whole migration window.
+- **S2b** — A staged update is installed before its migrations are run, never
+  after.
 - **S3** — A migration's idempotency check is `migration_is_applied(id)`,
   never "does this table already have rows" (the `m0011` class of bug —
   see §2).
@@ -282,8 +365,8 @@ against these:
 
 | Phase | Scope | Notes |
 |---|---|---|
-| 1 | Launcher-owned quiesce → snapshot → `migrate` → relaunch; revive `srv_spawner.rs::run_migrate` | Constraint 2 lives or dies here; needs the wait-for-exit fix |
-| 2 | Boot gate: `count_pending_migrations() > 0` ⇒ skip migrate, emit `needs_upgrade`; full-window blocking upgrade screen (§4.2) | The actual "no migrations at startup" change |
+| 1 | Launcher-owned maintenance state → quiesce (wait-for-exit) → snapshot → install staged update → `migrate` → relaunch; revive `srv_spawner.rs::run_migrate` | Constraint 2 lives or dies here. Suspending the supervisors' respawn/teardown handling is part of this phase, not an afterthought |
+| 2 | Fallible, non-mutating pending check (today's `count_pending_migrations` is neither); upgrade-only srv mode; full-window blocking upgrade screen (§4.2) | The actual "no migrations at startup" change. The backend mode is the gate — the screen alone is not |
 | 3 | Panel rewire: State E reachable *before* any automatic attempt; summarize + scroll per §4.4 | Mostly frontend |
 | 4 | Instrument + relocate 4c–4f; enforce the §6 budget | Independent of 1–3, can run in parallel |
 | 5 | `app-update-check.md` implementation under §5's constraints; Upgrade button installs staged update + migrates in one restart | Unblocks `install_update`, still stubbed today |

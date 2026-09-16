@@ -1,6 +1,9 @@
 # REPORT — Startup audit: get migrations off the critical path, into an explicit upgrade action
 
 **Date:** 2026-09-15
+**Status:** active — audit stands; the design follow-through is
+`docs/specs/SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`,
+tracked by [#3258](https://github.com/agentmuxai/agentmux/issues/3258)
 **Ask:** "there should be no migrations at startup... any migrations will run
 through the upgrade system which will appear as a button in the status bar,
 migrations and an app restart would happen then." Audit startup (including
