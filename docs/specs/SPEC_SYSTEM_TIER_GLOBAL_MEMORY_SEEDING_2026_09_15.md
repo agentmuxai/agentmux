@@ -321,3 +321,28 @@ before implementing it, rather than bolting it on ad hoc.
 Flagging rather than deciding, consistent with how `SPEC_GLOBAL_MEMORY_
 UNIFY_SYSTEM_AND_ORDINARY_2026_09_15.md` left its own visual-distinction
 question open rather than guessed.
+
+## 8. Known limitation — cyclic name swaps within one manifest
+
+`seed_from_manifest`'s fixed-point retry loop (§3, PR #3244 round 9)
+resolves any name-collision dependency CHAIN of any length — entry C
+waiting on a name B is about to release, B waiting on a name A is about to
+release, and so on — because each pass that makes at least one entry
+succeed unblocks the next. It cannot resolve a genuine CYCLE: two entries
+directly swapping display names in the same manifest (A: `X` → `Y`, B: `Y`
+→ `X`) can never make progress, since neither can succeed without the
+other going first. The loop correctly detects this (a pass with zero
+successes) and logs both as permanent collisions rather than looping
+forever, but both entries are left on their stale names/content/generation
+until the manifest itself stops describing a direct swap.
+
+Not fixed here — a real fix needs either a temporary placeholder name
+(rename both to unique scratch names first, then to their final names in a
+second pass) or a transaction that plans every rename before applying any
+of them, meaningfully more complex than the chain-resolving loop this PR
+already has. Deliberately not implemented: AgentMux authors its own
+Operator Config manifest and controls every entry's `name`, so a
+deliberate two-entry swap is not a realistic authoring pattern — flagging
+this as a known edge case is judged sufficient rather than building
+cycle-breaking logic for a scenario this codebase is never expected to
+actually produce.
