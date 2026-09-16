@@ -458,7 +458,14 @@ pub struct RunCliLoginResult {
 /// Placement: if `split_direction` ("right" / "left" / "down" / "up")
 /// and `split_reference_block_id` are provided, the new pane splits
 /// relative to that block. Otherwise it is inserted at the tab root.
-#[derive(Debug, Clone, Deserialize)]
+// `Serialize` is additive here — nothing currently serializes an incoming
+// pane.open request — added specifically so a contract test can construct a
+// full instance and compare its real field-name set against
+// docs/specs/app-api-manifest.json (SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md
+// §2.8), catching drift between this struct and the CLI/manifest at CI time
+// on this side, the same way a corresponding muxsh.contract.test.mjs catches
+// it on the Node side.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CommandPaneOpenData {
     pub view: String,
@@ -612,4 +619,117 @@ pub struct CommandBlockfileWriteStateData {
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileWriteStateResult {
     pub bytes_written: u64,
+}
+
+#[cfg(test)]
+mod app_api_manifest_contract_tests {
+    //! Rust half of the DRY contract check described in
+    //! docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §2.8: asserts the
+    //! `pane.open` entry in docs/specs/app-api-manifest.json names exactly
+    //! this struct's real serde field set — no more, no less. A Node-side
+    //! test (muxsh.contract.test.mjs) makes the matching assertion against
+    //! what `muxsh` actually sends, against the same manifest file. Neither
+    //! test can catch both sides being wrong in the same way, but together
+    //! a field rename here now fails CI in both suites instead of shipping
+    //! as a silent runtime mismatch (which is exactly how Phase 1's real bug,
+    //! ReAgent on PR #3255, was actually found — after merge, not before).
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::Path;
+
+    /// Walks up from this crate's manifest dir to the repo root — the same
+    /// assumption `include_str!`-based fixtures elsewhere in this crate make
+    /// about the workspace layout, just done at runtime instead of compile
+    /// time since this needs to open the file, not embed it.
+    fn repo_root() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("agentmux-srv's parent dir is the repo root")
+            .to_path_buf()
+    }
+
+    fn load_manifest() -> serde_json::Value {
+        let path = repo_root().join("docs/specs/app-api-manifest.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        serde_json::from_str(&raw).expect("app-api-manifest.json must be valid JSON")
+    }
+
+    #[test]
+    fn pane_open_manifest_request_fields_match_the_real_struct() {
+        let manifest = load_manifest();
+        let manifest_fields: HashSet<String> = manifest["routes"]["pane.open"]["requestFields"]
+            .as_array()
+            .expect("routes.pane.open.requestFields must be an array")
+            .iter()
+            .map(|v| v.as_str().expect("field name must be a string").to_string())
+            .collect();
+
+        // A fully-populated instance, so serializing it surfaces every field
+        // this struct actually has — Option::None fields still appear as
+        // `null`, not omitted, because CommandPaneOpenData has no
+        // `#[serde(skip_serializing_if = ...)]` attributes.
+        let instance = CommandPaneOpenData {
+            view: "editor".to_string(),
+            file: Some("/tmp/x".to_string()),
+            url: None,
+            cwd: None,
+            title: None,
+            tab_id: None,
+            split_direction: None,
+            split_reference_block_id: None,
+            focus: None,
+            tree_expanded: None,
+            floating: None,
+            meta: None,
+            skip_placement: None,
+            reuse_editor_pane: None,
+        };
+        let value = serde_json::to_value(&instance).expect("CommandPaneOpenData must serialize");
+        let struct_fields: HashSet<String> = value
+            .as_object()
+            .expect("serialized CommandPaneOpenData must be a JSON object")
+            .keys()
+            .cloned()
+            .collect();
+
+        let manifest_only: Vec<_> = manifest_fields.difference(&struct_fields).collect();
+        let struct_only: Vec<_> = struct_fields.difference(&manifest_fields).collect();
+        assert!(
+            manifest_only.is_empty() && struct_only.is_empty(),
+            "docs/specs/app-api-manifest.json's pane.open.requestFields has drifted from \
+             CommandPaneOpenData's real fields — in manifest but not the struct: {manifest_only:?}; \
+             in the struct but not the manifest: {struct_only:?}"
+        );
+    }
+
+    #[test]
+    fn pane_open_manifest_response_fields_match_the_real_struct() {
+        let manifest = load_manifest();
+        let manifest_fields: HashSet<String> = manifest["routes"]["pane.open"]["responseFields"]
+            .as_array()
+            .expect("routes.pane.open.responseFields must be an array")
+            .iter()
+            .map(|v| v.as_str().expect("field name must be a string").to_string())
+            .collect();
+
+        let instance = PaneOpenResult {
+            block_id: "b".to_string(),
+            tab_id: "t".to_string(),
+            view: "editor".to_string(),
+            created: true,
+        };
+        let value = serde_json::to_value(&instance).expect("PaneOpenResult must serialize");
+        let struct_fields: HashSet<String> = value
+            .as_object()
+            .expect("serialized PaneOpenResult must be a JSON object")
+            .keys()
+            .cloned()
+            .collect();
+
+        assert_eq!(
+            manifest_fields, struct_fields,
+            "docs/specs/app-api-manifest.json's pane.open.responseFields has drifted from PaneOpenResult's real fields"
+        );
+    }
 }

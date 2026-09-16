@@ -25,6 +25,8 @@
 
 import { pathToFileURL } from "node:url";
 
+import { agentmuxFetch, readAgentmuxEnv } from "./lib/muxclient.mjs";
+
 const HELP = `muxopen — launch an agent into a pane (no GUI required)
 
 usage:
@@ -97,8 +99,7 @@ async function main() {
     }
     if (parsed.error) fail(`${parsed.error}\n\n${HELP}`);
 
-    const url = process.env.AGENTMUX_LOCAL_URL;
-    const authKey = process.env.AGENTMUX_AUTH_KEY;
+    const { url, authKey } = readAgentmuxEnv();
     if (!url || !authKey) {
         fail(
             "AGENTMUX_LOCAL_URL / AGENTMUX_AUTH_KEY not set — run from a pane " +
@@ -106,12 +107,11 @@ async function main() {
         );
     }
 
-    let resp;
+    let result;
     try {
-        resp = await fetch(`${url.replace(/\/$/, "")}/api/v1/agent/open`, {
+        result = await agentmuxFetch(url, authKey, "/api/v1/agent/open", {
             method: "POST",
-            headers: { "X-AuthKey": authKey, "Content-Type": "application/json" },
-            body: JSON.stringify({ agent_id: parsed.agent, tab_id: parsed.tabId, focus: parsed.focus }),
+            body: { agent_id: parsed.agent, tab_id: parsed.tabId, focus: parsed.focus },
         });
     } catch (e) {
         fail(`cannot reach ${url}: ${e.message ?? e}`, 2);
@@ -119,19 +119,19 @@ async function main() {
 
     let body;
     try {
-        body = await resp.json();
+        body = await result.resp.json();
     } catch {
         body = {};
     }
 
-    if (!resp.ok) {
+    if (!result.ok) {
         // Surface the impl's own vocabulary (AGENT_NOT_FOUND / CLI_NOT_AVAILABLE
         // / …) verbatim — it names the remedy better than a paraphrase would.
         // A 404 here most likely means the running srv predates this route.
-        const hint = resp.status === 404
+        const hint = result.status === 404
             ? " (HTTP 404 — this AgentMux instance may predate /api/v1/agent/open)"
             : "";
-        fail(`${body.error ?? `HTTP ${resp.status}`}${hint}`, 2);
+        fail(`${body.error ?? `HTTP ${result.status}`}${hint}`, 2);
     }
 
     console.log(renderResult(body));

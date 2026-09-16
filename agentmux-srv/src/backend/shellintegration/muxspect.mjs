@@ -23,6 +23,8 @@
 
 import { pathToFileURL } from "node:url";
 
+import { agentmuxFetch, readAgentmuxEnv } from "./lib/muxclient.mjs";
+
 const USAGE = `muxspect — live process/turn-state introspection for the current AgentMux instance
 
 Usage:
@@ -148,8 +150,7 @@ function fail(msg) {
 }
 
 function requireEnv() {
-    const url = process.env.AGENTMUX_LOCAL_URL;
-    const authKey = process.env.AGENTMUX_AUTH_KEY;
+    const { url, authKey } = readAgentmuxEnv();
     if (!url || !authKey) {
         fail(
             "$AGENTMUX_LOCAL_URL / $AGENTMUX_AUTH_KEY not set — run this from inside an AgentMux agent pane.\n" +
@@ -176,7 +177,7 @@ export function logSrvVersion(resp) {
 async function apiGet(url, authKey, urlPath) {
     let resp;
     try {
-        resp = await fetch(`${url}${urlPath}`, { headers: { "X-AuthKey": authKey } });
+        ({ resp } = await agentmuxFetch(url, authKey, urlPath));
     } catch (e) {
         fail(`could not reach ${url} — instance unreachable (${e.message})`);
     }
@@ -200,11 +201,7 @@ async function apiGet(url, authKey, urlPath) {
 async function apiPost(url, authKey, urlPath, body) {
     let resp;
     try {
-        resp = await fetch(`${url}${urlPath}`, {
-            method: "POST",
-            headers: { "X-AuthKey": authKey, "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-        });
+        ({ resp } = await agentmuxFetch(url, authKey, urlPath, { method: "POST", body }));
     } catch (e) {
         fail(`could not reach ${url} — instance unreachable (${e.message})`);
     }
