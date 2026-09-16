@@ -768,7 +768,39 @@ impl Store {
                     return Ok(BundleReseedOutcome::SkippedLocalEdit);
                 }
                 let target_hash = super::bundle_versions::content_hash(&memory.name, &memory.instructions);
+                let stored_generation = manifest_generation_from_source_detail(&stored_source_detail);
+                let target_generation = manifest_generation_from_source_detail(source_detail);
                 if content_hash == target_hash {
+                    // Content is identical, but if THIS call's own manifest
+                    // generation is strictly newer than what's recorded,
+                    // that fact must still be persisted — otherwise a
+                    // concurrently-running build on a LOWER generation
+                    // (still not "older" than the stale recorded one) could
+                    // later see its own differing content as valid to write
+                    // and downgrade content a newer generation already
+                    // confirmed as current. E.g. generation 3's text
+                    // happens to match generation 1's (a revert); without
+                    // this, a generation-2 build's own different text would
+                    // still pass the generation check against the
+                    // never-advanced "1" and overwrite generation 3's
+                    // result. Codex P2, PR #3244.
+                    if target_generation > stored_generation {
+                        bundle_version_insert_tx(
+                            &tx,
+                            &memory.id,
+                            &memory.name,
+                            &memory.instructions,
+                            source,
+                            source_detail,
+                            seeder_identity,
+                        )?;
+                        // Returning without an explicit commit drops `tx`,
+                        // which rolls back — harmless for every OTHER early
+                        // return in this method (they make no writes), but
+                        // this one just did. Must commit explicitly before
+                        // returning.
+                        tx.commit()?;
+                    }
                     return Ok(BundleReseedOutcome::Unchanged);
                 }
                 // Content differs, but only from THIS process's point of
@@ -779,8 +811,6 @@ impl Store {
                 // never overwrite a newer build's already-seeded content
                 // just because both processes use the same seeder_identity.
                 // Codex P2, PR #3244.
-                let stored_generation = manifest_generation_from_source_detail(&stored_source_detail);
-                let target_generation = manifest_generation_from_source_detail(source_detail);
                 if target_generation < stored_generation {
                     return Ok(BundleReseedOutcome::SkippedOlderGeneration);
                 }
@@ -953,6 +983,17 @@ impl Store {
     /// content this deletion deliberately retired. `bundle_reseed_system_
     /// if_owned`'s missing-row branch checks for this tombstone before
     /// recreating anything (ReAgent/Codex P2, PR #3244).
+    ///
+    /// Also validates the LIVE row's content against what the latest
+    /// version claims before trusting `written_by` at all — the delete-side
+    /// mirror of the same check `bundle_reseed_system_if_owned` gained
+    /// earlier in this PR. Without it, a compatible-schema OLDER build's
+    /// unversioned write (still possible during a rolling upgrade — see
+    /// that method's own doc comment) would leave `written_by` stale at
+    /// the seeder's identity, and this method would DELETE the unrecorded
+    /// edit outright — strictly worse than the overwrite the reseed-path
+    /// fix was built to prevent, since deletion cannot be undone from
+    /// `db_bundles` alone. ReAgent P1, PR #3244.
     pub fn bundle_delete_system_if_owned(
         &self,
         id: &str,
@@ -962,22 +1003,37 @@ impl Store {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-        // rowid, not created_at — see bundle_reseed_system_if_owned's own
-        // comment on the same ordering choice.
-        let latest: Option<(String, String)> = tx
+        let live: Option<(String, String)> = tx
             .query_row(
-                "SELECT written_by, source_detail FROM db_bundle_versions
-                 WHERE bundle_id = ?1
-                 ORDER BY rowid DESC
-                 LIMIT 1",
+                "SELECT name, instructions FROM db_bundles WHERE id = ?1 AND is_system = 1",
                 params![id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-
-        let Some((written_by, source_detail)) = latest else {
+        let Some((live_name, live_instructions)) = live else {
             return Ok(false);
         };
+
+        // rowid, not created_at — see bundle_reseed_system_if_owned's own
+        // comment on the same ordering choice.
+        let latest: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT written_by, content_hash, source_detail FROM db_bundle_versions
+                 WHERE bundle_id = ?1
+                 ORDER BY rowid DESC
+                 LIMIT 1",
+                params![id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+
+        let Some((written_by, content_hash, source_detail)) = latest else {
+            return Ok(false);
+        };
+        let live_hash = super::bundle_versions::content_hash(&live_name, &live_instructions);
+        if live_hash != content_hash {
+            return Ok(false);
+        }
         if written_by != seeder_identity {
             return Ok(false);
         }
