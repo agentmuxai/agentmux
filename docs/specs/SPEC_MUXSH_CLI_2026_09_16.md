@@ -35,8 +35,9 @@ X-AuthKey: $AGENTMUX_AUTH_KEY
   "view": "editor",
   "file": "<absolute path>",
   "title": "<optional>",
-  "tab_id": null,
-  "split_direction": "<optional: right|left|down|up>",
+  "tab_id": "<$AGENTMUX_TABID, if set>",
+  "split_direction": "<right|left|down|up, only sent if split_reference_block_id is too>",
+  "split_reference_block_id": "<$AGENTMUX_BLOCKID, only sent if non-empty>",
   "focus": true,
   "tree_expanded": true,
   "floating": false
@@ -44,10 +45,22 @@ X-AuthKey: $AGENTMUX_AUTH_KEY
 → { "block_id": "...", "tab_id": "...", "view": "editor", "created": true }
 ```
 
+**`split_direction` alone does nothing.** The server's `resolve_placement`
+(`server/app_api/pane.rs`) falls back to plain `insert` whenever
+`split_reference_block_id` is empty, regardless of `split_direction` — this
+was a real bug in the first cut of this spec/implementation (ReAgent
+review, PR #3255), caught before merge. `muxsh` reads `$AGENTMUX_BLOCKID`
+(and `$AGENTMUX_TABID`) — already injected into every terminal pane's
+environment for exactly this purpose
+(`blockcontroller/shell/lifecycle.rs`), the same source the `OpenEditor`
+MCP tool already uses — and only sends `split_direction` paired with a real
+`split_reference_block_id`. Without a known block id, the new pane is
+inserted at the tab root instead, regardless of `--split`.
+
 CLI surface (mirrors `muxopen`'s flag style):
 
 ```
-muxsh open <file>                    open by absolute path, default split=right
+muxsh open <file>                    open by absolute path, default split=right (needs $AGENTMUX_BLOCKID)
 muxsh open <file> --title <t>        set the pane/tab title
 muxsh open <file> --split <dir>      right (default) | left | down | up
 muxsh open <file> --collapse-tree    open with tree_expanded=false
@@ -68,11 +81,12 @@ X-AuthKey: $AGENTMUX_AUTH_KEY
 ```
 muxsh web <url>
 muxsh web <url> --title <t>
+muxsh web <url> --split <dir>        right (default) | left | down | up — same $AGENTMUX_BLOCKID requirement as `open`
 muxsh web <url> --floating
 muxsh web <url> --no-focus
 ```
 
-`--split`/`--collapse-tree` are editor-only (`tree_expanded` is documented in `rpc_types/block.rs` as "`editor` only") and are rejected with a clear error if passed to `muxsh web`, rather than silently ignored.
+Only `--collapse-tree` is editor-only (`tree_expanded` is documented in `rpc_types/block.rs` as "`editor` only" — nothing else in `CommandPaneOpenData` is) and is rejected with a clear error if passed to `muxsh web`, rather than silently ignored. `--split` is not editor-only — `split_direction`/`split_reference_block_id` are generic pane-placement fields — so `muxsh web` supports it too.
 
 ## 5. Non-goals (this cut)
 

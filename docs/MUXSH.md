@@ -62,8 +62,14 @@ muxsh web https://grafana.internal/d/api-latency
 muxsh web https://docs.agentmux.ai --floating
 ```
 
-`--split`/`--collapse-tree` are editor-only and are rejected with an error
-if passed to `muxsh web`, rather than silently ignored.
+`--collapse-tree` is editor-only and is rejected with an error if passed to
+`muxsh web`, rather than silently ignored. `--split` works for both.
+
+Splitting relative to the calling pane requires `$AGENTMUX_BLOCKID` (set in
+every AgentMux terminal pane). Without it, the new pane is inserted at the
+tab root instead — the server's placement logic only splits when it has a
+reference block id, regardless of `--split` — so `muxsh` only sends
+`split_direction` when it actually knows the calling pane's block id.
 
 ## What this doesn't do (yet)
 

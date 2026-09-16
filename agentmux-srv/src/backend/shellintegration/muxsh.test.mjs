@@ -70,6 +70,7 @@ describe("muxsh parseArgs", () => {
             subcommand: "web",
             url: "https://example.com",
             title: null,
+            split: null,
             floating: false,
             focus: true,
         });
@@ -79,10 +80,15 @@ describe("muxsh parseArgs", () => {
         expect(parseArgs(["web"]).error).toMatch(/requires a url/);
     });
 
-    it("'web' rejects editor-only flags: --split", () => {
-        expect(parseArgs(["web", "https://example.com", "--split", "right"]).error).toMatch(
-            /'--split' is only valid with 'muxsh open'/,
-        );
+    it("'web' accepts --split (it's not editor-only)", () => {
+        expect(parseArgs(["web", "https://example.com", "--split", "right"])).toEqual({
+            subcommand: "web",
+            url: "https://example.com",
+            title: null,
+            split: "right",
+            floating: false,
+            focus: true,
+        });
     });
 
     it("'web' rejects editor-only flags: --collapse-tree", () => {
@@ -97,8 +103,12 @@ describe("muxsh parseArgs", () => {
 });
 
 describe("muxsh buildRequestBody", () => {
-    it("'open' defaults produce view=editor with no optional fields", () => {
-        expect(buildRequestBody(parseArgs(["open", "/tmp/foo.md"]))).toEqual({
+    it("with no AGENTMUX_BLOCKID in env, 'open' sends no split fields even if --split was passed", () => {
+        // resolve_placement (server/app_api/pane.rs) always falls back to plain
+        // "insert" without a split_reference_block_id, regardless of
+        // split_direction — so sending split_direction alone would be
+        // misleading; omit both together.
+        expect(buildRequestBody(parseArgs(["open", "/tmp/foo.md", "--split", "down"]), {})).toEqual({
             focus: true,
             floating: false,
             view: "editor",
@@ -106,28 +116,72 @@ describe("muxsh buildRequestBody", () => {
         });
     });
 
-    it("'open' with all options sets every optional field", () => {
+    it("with AGENTMUX_BLOCKID in env, 'open' defaults split_direction to 'right' and sets split_reference_block_id", () => {
+        expect(buildRequestBody(parseArgs(["open", "/tmp/foo.md"]), { AGENTMUX_BLOCKID: "b-1" })).toEqual({
+            focus: true,
+            floating: false,
+            view: "editor",
+            file: "/tmp/foo.md",
+            split_direction: "right",
+            split_reference_block_id: "b-1",
+        });
+    });
+
+    it("an explicit --split overrides the 'right' default", () => {
         expect(
-            buildRequestBody(
-                parseArgs(["open", "/tmp/foo.md", "--title", "Notes", "--split", "down", "--collapse-tree", "--floating"]),
-            ),
+            buildRequestBody(parseArgs(["open", "/tmp/foo.md", "--split", "down"]), { AGENTMUX_BLOCKID: "b-1" }),
+        ).toMatchObject({ split_direction: "down", split_reference_block_id: "b-1" });
+    });
+
+    it("AGENTMUX_TABID in env sets tab_id regardless of block id", () => {
+        expect(
+            buildRequestBody(parseArgs(["open", "/tmp/foo.md"]), { AGENTMUX_BLOCKID: "b-1", AGENTMUX_TABID: "t-1" }),
+        ).toMatchObject({ tab_id: "t-1", split_reference_block_id: "b-1" });
+    });
+
+    it("--floating omits split fields even with a known block id (server ignores them when floating)", () => {
+        expect(
+            buildRequestBody(parseArgs(["open", "/tmp/foo.md", "--floating"]), { AGENTMUX_BLOCKID: "b-1" }),
         ).toEqual({
             focus: true,
             floating: true,
+            view: "editor",
+            file: "/tmp/foo.md",
+        });
+    });
+
+    it("--title and --collapse-tree still round-trip", () => {
+        expect(
+            buildRequestBody(parseArgs(["open", "/tmp/foo.md", "--title", "Notes", "--collapse-tree"]), {}),
+        ).toEqual({
+            focus: true,
+            floating: false,
             title: "Notes",
             view: "editor",
             file: "/tmp/foo.md",
-            split_direction: "down",
             tree_expanded: false,
         });
     });
 
-    it("'web' defaults produce view=browser with no optional fields", () => {
-        expect(buildRequestBody(parseArgs(["web", "https://example.com"]))).toEqual({
+    it("'web' defaults produce view=browser with no optional fields when no block id is known", () => {
+        expect(buildRequestBody(parseArgs(["web", "https://example.com"]), {})).toEqual({
             focus: true,
             floating: false,
             view: "browser",
             url: "https://example.com",
+        });
+    });
+
+    it("'web' also defaults split_direction to 'right' when a block id is known", () => {
+        expect(
+            buildRequestBody(parseArgs(["web", "https://example.com"]), { AGENTMUX_BLOCKID: "b-1" }),
+        ).toEqual({
+            focus: true,
+            floating: false,
+            view: "browser",
+            url: "https://example.com",
+            split_direction: "right",
+            split_reference_block_id: "b-1",
         });
     });
 });

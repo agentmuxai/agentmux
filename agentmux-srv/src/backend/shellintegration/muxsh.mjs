@@ -42,6 +42,7 @@ usage:
 
   muxsh web <url>                open a URL in a browser pane
     --title <t>                  pane/tab title
+    --split <right|left|down|up> split direction relative to the calling pane (default: right)
     --floating                    open in a floating window instead of a docked split
     --no-focus                    open without focusing the new pane
 
@@ -50,11 +51,15 @@ usage:
 Each call always opens a NEW pane (unlike muxopen, which is idempotent per
 agent) — files and URLs aren't identity-scoped the way agents are.
 
+Splitting relative to the calling pane requires $AGENTMUX_BLOCKID (set in
+every AgentMux terminal pane) — without it the new pane is inserted at the
+tab root instead, regardless of --split.
+
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY (present in any
 AgentMux-opened pane). Opens into the instance this pane belongs to;
 cross-instance opening is not implemented here.`;
 
-const EDITOR_ONLY_FLAGS = ["--split", "--collapse-tree"];
+const EDITOR_ONLY_FLAGS = ["--collapse-tree"];
 
 /** Parse argv (already stripped of node + script path).
  *
@@ -116,18 +121,38 @@ export function parseArgs(argv) {
     if (subcommand === "open") {
         return { subcommand, file: target, title, split, collapseTree, floating, focus };
     }
-    return { subcommand, url: target, title, floating, focus };
+    return { subcommand, url: target, title, split, floating, focus };
 }
 
 /** Build the /api/v1/pane/open request body for a parsed `open`/`web` call.
- * Pure, for testability. */
-export function buildRequestBody(parsed) {
+ *
+ * `env` carries `AGENTMUX_BLOCKID`/`AGENTMUX_TABID` — injected into every
+ * terminal pane for exactly this purpose (`blockcontroller/shell/lifecycle.rs`).
+ * Without a `split_reference_block_id`, the server's `resolve_placement`
+ * (`server/app_api/pane.rs`) always falls back to plain "insert" regardless
+ * of `split_direction` — so `split_direction` is only meaningful, and is
+ * therefore only sent, when a block id is actually known. Mirrors exactly
+ * how the `OpenEditor` MCP tool derives this from `AGENTMUX_BLOCKID`
+ * (`agentmux-mcp/src/main.rs`). Ignored when floating (`floating` panes are
+ * documented as ignoring `split_direction`/`split_reference_block_id`
+ * entirely — `rpc_types/block.rs`), so they're omitted rather than sent and
+ * silently discarded. Pure, for testability.
+ */
+export function buildRequestBody(parsed, env = {}) {
     const body = { focus: parsed.focus, floating: parsed.floating };
     if (parsed.title) body.title = parsed.title;
+
+    const blockId = env.AGENTMUX_BLOCKID;
+    const tabId = env.AGENTMUX_TABID;
+    if (tabId) body.tab_id = tabId;
+    if (blockId && !parsed.floating) {
+        body.split_direction = parsed.split ?? "right";
+        body.split_reference_block_id = blockId;
+    }
+
     if (parsed.subcommand === "open") {
         body.view = "editor";
         body.file = parsed.file;
-        if (parsed.split) body.split_direction = parsed.split;
         if (parsed.collapseTree) body.tree_expanded = false;
     } else {
         body.view = "browser";
@@ -169,7 +194,7 @@ async function main() {
         resp = await fetch(`${url.replace(/\/$/, "")}/api/v1/pane/open`, {
             method: "POST",
             headers: { "X-AuthKey": authKey, "Content-Type": "application/json" },
-            body: JSON.stringify(buildRequestBody(parsed)),
+            body: JSON.stringify(buildRequestBody(parsed, process.env)),
         });
     } catch (e) {
         fail(`cannot reach ${url}: ${e.message ?? e}`, 2);
