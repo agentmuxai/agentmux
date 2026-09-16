@@ -211,10 +211,9 @@ then destroyed it.
 
 They are independent:
 
-- That one has a fix **proposed in #3260, not yet merged** — earlier wording
-  here called it "fixed", which was premature (codex P2). Nothing in this
-  spec's ancestry contains that fix, and it should not be treated as closed on
-  the strength of this document.
+- That one is **fixed and merged** (#3260). An earlier revision of this spec
+  asserted that while the PR was still open, which was premature (codex P2) —
+  the statement is only made here now that the fix is actually on `main`.
 - That one was **data loss**; this one loses nothing — the keystrokes go to a
   dummy input and are discarded before any document exists.
 - Fixing this one *first* would have **masked** that one: auto-focus would have
