@@ -259,7 +259,6 @@ partial list.
 | [`SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27`](SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md) | Spec: Opt-in isolated auth for `task dev` testing |
 | [`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14`](SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md) | SPEC: 24h TTL / rotation for the host-tier jekt signing key |
 | [`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14`](SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md) | SPEC — Relax TIER=sensitive for cryptographically-verified WAN jekts |
-| [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16`](SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md) | Spec — Pane Minimize as a Locked State (redesign) |
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
@@ -364,6 +363,7 @@ partial list.
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
+| [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API |

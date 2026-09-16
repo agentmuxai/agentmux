@@ -143,7 +143,7 @@ deliberately left alone.
 | File | Was | Now | Evidence |
 |---|---|---|---|
 | `CLAUDE.md` | `transcript_request` is "a pre-committed POLICY for a jekt type that **does not exist in shipped code yet**" | live since PR #2764 | `transcript_request.rs`; `resolve_transcript_request_tier_fields()` at `reactive.rs:716`, called at 10+ sites |
-| `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` | `Proposed — not yet implemented` | `implemented` | `jekt_sign::{sign_jekt,verify_jekt}`; `inject_jekt_signing_keys_into_mcp_json` (`agent_config.rs:1312`) |
+| `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` | `Proposed — not yet implemented` | `active` — host tier shipped, WAN half gated | `jekt_sign::{sign_jekt,verify_jekt}`; `inject_jekt_signing_keys_into_mcp_json` (`agent_config.rs:1312`). First restamped `implemented`; corrected after review — see §5.9 |
 | `ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` | `DECISIONS RESOLVED, NOT YET IMPLEMENTED` | `active` — steps 1–3 shipped | PR #2587 artifacts, §2.2 |
 | `SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT_2026_07_15.md` | `Draft — spec only, no code written yet` | `implemented` | `frontend/app/element/primitive-list-detail.tsx` cites it by name |
 | `SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md` | `Proposed (…not implemented) (implemented — see note below)` | `implemented` | `tool-renderers/registry.ts` + `registry.test.ts` |
@@ -223,6 +223,23 @@ being necessary.
 - **#1960** closed 2026-07-12 with all six gaps verified; any doc still describing A4–A7 as pending is wrong.
 - **#950** — `term.type` exists *only* in `docs/specs/app-api-extension.md`, not in server code: a doc promising an API that does not exist.
 - Eight tracking discussions last moved 2026-06-14/15 (~93 days) and are effectively abandoned.
+
+### 5.9 Jekt WAN sender-binding — built, inert, and nearly lost from the backlog 🟡 **[verified]**
+
+`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`’s title is "host-tier signing **+ WAN binding
+enforcement**". The host half shipped; the WAN half did not. `checkAgentBinding` in
+`agentmux-cloud` only warns, because `ENFORCE_AGENT_BINDING` is set in no CDK/Lambda
+environment config, and the spec’s §4.1/§6 require live verification and burn-in before the
+flag is flipped.
+
+**Worth recording as a process finding, not just a backlog item.** This report’s first pass
+restamped that spec `implemented` on the strength of the host tier alone, which would have
+removed it from `INDEX.md`’s active backlog entirely and silently retired the sender-binding
+work — committing, inside the very PR arguing that bad statuses cause bad planning, the exact
+error it argues against. Caught in review (codex P2, PR #3284). The generalisable rule: **a
+spec whose title names two halves cannot be closed by one of them**, and “verified against a
+named code artifact” is necessary but not sufficient — the artifact has to cover the spec’s
+*whole* scope.
 
 ### 5.8 `agent-view.tsx` 🟡
 
