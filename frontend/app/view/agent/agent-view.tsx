@@ -79,6 +79,7 @@ import { AgentPicker, useOpenDefinitionMap } from "./components/AgentPicker";
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentShellSubblock } from "./components/AgentShellSubblock";
+import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
 import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBanner";
 import { PaneRow } from "./components/PaneRow";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
@@ -1162,6 +1163,32 @@ const AgentPresentationView = ({
         setTermWrite(() => write);
     };
     const handleShellTermDispose = () => setTermWrite(null);
+
+    /**
+     * The drawer's shell process exited cleanly — the human typed `exit`.
+     * Collapse the drawer around it
+     * (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md §3.2).
+     *
+     * The body lives in `shell-exit-collapse.ts` so it can be tested — this
+     * file has no render harness, and the three effects it performs are each
+     * separately load-bearing (see that module's doc comment). Here we only
+     * read-and-clear the local ref, so the pane-level `onCleanup` below can't
+     * later try to delete a sub-block this already removed.
+     */
+    const handleShellExited = () => {
+        const exitedId = shellSubBlockIdRef;
+        shellSubBlockIdRef = undefined;
+        collapseDrawerOnShellExit({
+            parentBlockId: model.blockId,
+            exitedSubBlockId: exitedId,
+            clearTermWrite: () => setTermWrite(null),
+            collapseDrawer: () => paneModel.dispatchPane({ type: "DetailsCollapse" }, "system"),
+            setMeta: (args) =>
+                void RpcApi.SetMetaCommand(TabRpcClient, { oref: args.oref, meta: args.meta as any }),
+            deleteSubBlock: (args) => void RpcApi.DeleteSubBlockCommand(TabRpcClient, args),
+            makeORef: WOS.makeORef,
+        });
+    };
 
     // Startup sequence callback ref — assigned after commands + handleSendMessage
     // are defined (below), so the onReady callback can reference them.
@@ -2957,6 +2984,7 @@ const AgentPresentationView = ({
                                 }}
                                 onTermReady={handleShellTermReady}
                                 onTermDispose={handleShellTermDispose}
+                                onShellExited={handleShellExited}
                             />
                         </ResizableDetailsDrawer>
                     </div>
