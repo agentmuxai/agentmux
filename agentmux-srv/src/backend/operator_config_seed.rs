@@ -75,7 +75,7 @@ struct SeedEntry {
 /// Run Operator Config seeding on startup. Unconditional, every boot, no
 /// feature flag — called from `bootstrap.rs` next to `agent_seed`'s own
 /// call.
-pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
+pub fn auto_seed_on_startup(store: &Arc<Store>) {
     let manifest: SeedManifest = match serde_json::from_str(SEED_MANIFEST) {
         Ok(m) => m,
         Err(e) => {
@@ -83,50 +83,117 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
             return;
         }
     };
+    seed_from_manifest(store, &manifest);
+}
 
+/// The actual seed pass, separated from `auto_seed_on_startup` purely so
+/// tests can exercise it against a hand-built `SeedManifest` instead of the
+/// embedded JSON.
+fn seed_from_manifest(store: &Arc<Store>, manifest: &SeedManifest) {
     // Prune BEFORE seeding, not after: when a release renames a manifest
     // entry's id while keeping the same (UNIQUE) display `name`, the old
     // id's row must be gone before the new id's INSERT is attempted, or
     // that insert fails on the name collision with no retry — leaving the
     // renamed entry absent until the NEXT startup happens to prune the old
     // row first (Codex P2, PR #3244).
-    prune_entries_removed_from_manifest(wstore, &manifest);
+    prune_entries_removed_from_manifest(store, manifest);
 
-    let (mut created, mut updated, mut unchanged, mut skipped_local, mut skipped_older, mut skipped_collision) =
-        (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+    let mut tally = SeedTally::default();
 
+    // First pass, in manifest order. A collision here can be purely an
+    // ordering artifact WITHIN this same manifest, independent of pruning:
+    // e.g. entry B wants the display name entry A is about to release via
+    // its own update (A kept its id, only its `name` changed), but B
+    // happens to appear before A in the manifest array, so B's INSERT hits
+    // A's still-current name and fails. Collect failures instead of
+    // logging them immediately — the retry pass below resolves the
+    // ordering-only case silently.
+    let mut retry: Vec<&SeedEntry> = Vec::new();
     for entry in &manifest.entries {
-        match seed_one(wstore, entry, manifest.version) {
-            Ok(BundleReseedOutcome::Created) => created += 1,
-            Ok(BundleReseedOutcome::Updated) => updated += 1,
-            Ok(BundleReseedOutcome::Unchanged) => unchanged += 1,
-            Ok(BundleReseedOutcome::SkippedLocalEdit) => {
-                skipped_local += 1;
-                tracing::info!(
-                    id = %entry.id,
-                    "operator config seed: skipping — entry has a local (non-AgentMux) edit, not overwriting"
-                );
-            }
-            Ok(BundleReseedOutcome::SkippedOlderGeneration) => {
-                skipped_older += 1;
-                tracing::info!(
-                    id = %entry.id,
-                    manifest_version = manifest.version,
-                    "operator config seed: skipping — a newer manifest generation already seeded this row \
-                     (this build's own manifest is older; likely a different AgentMux version sharing this store)"
-                );
-            }
-            Ok(BundleReseedOutcome::SkippedRetired) => {
-                skipped_older += 1;
-                tracing::info!(
-                    id = %entry.id,
-                    manifest_version = manifest.version,
-                    "operator config seed: skipping — a newer manifest generation already retired this id \
-                     (this build's own manifest still lists it; not resurrecting it)"
-                );
-            }
-            Err(e) => {
-                skipped_collision += 1;
+        if !seed_and_tally(store, entry, manifest.version, &mut tally, false) {
+            retry.push(entry);
+        }
+    }
+
+    // Second pass: by now every entry that only needed a name released by
+    // ANOTHER entry's update has had that update run. One retry resolves
+    // the ordering-dependent case without needing to analyze which entries
+    // "release" names ahead of time; a persistent failure here is a real
+    // collision (e.g. an unrelated user bundle already owns the name) and
+    // is logged as such. Codex P2, PR #3244.
+    for entry in retry {
+        seed_and_tally(store, entry, manifest.version, &mut tally, true);
+    }
+
+    tally.log(manifest.version);
+}
+
+/// Tallies from a startup seed pass, logged once at the end (`log`).
+#[derive(Default)]
+struct SeedTally {
+    created: usize,
+    updated: usize,
+    unchanged: usize,
+    skipped_local: usize,
+    skipped_older: usize,
+    skipped_collision: usize,
+}
+
+impl SeedTally {
+    fn log(&self, manifest_version: u32) {
+        let Self { created, updated, unchanged, skipped_local, skipped_older, skipped_collision } = *self;
+        if created + updated + skipped_local + skipped_older + skipped_collision > 0 {
+            tracing::info!(
+                "operator config seed: manifest v{manifest_version}: {created} created, {updated} updated, \
+                 {unchanged} unchanged, {skipped_local} skipped (local edit), \
+                 {skipped_older} skipped (older generation), {skipped_collision} skipped (collision)",
+            );
+        }
+    }
+}
+
+/// Seeds one entry and records its outcome in `tally`. Returns `false` only
+/// for a collision-type error (`Err`) — the caller's signal to retry once
+/// more after the full first pass, in case another entry processed later
+/// would have released the colliding name. `is_retry` only affects
+/// logging: a first-pass failure is silent (might still resolve), a
+/// second-pass failure is a real, logged collision.
+fn seed_and_tally(store: &Arc<Store>, entry: &SeedEntry, manifest_version: u32, tally: &mut SeedTally, is_retry: bool) -> bool {
+    match seed_one(store, entry, manifest_version) {
+        Ok(BundleReseedOutcome::Created) => { tally.created += 1; true }
+        Ok(BundleReseedOutcome::Updated) => { tally.updated += 1; true }
+        Ok(BundleReseedOutcome::Unchanged) => { tally.unchanged += 1; true }
+        Ok(BundleReseedOutcome::SkippedLocalEdit) => {
+            tally.skipped_local += 1;
+            tracing::info!(
+                id = %entry.id,
+                "operator config seed: skipping — entry has a local (non-AgentMux) edit, not overwriting"
+            );
+            true
+        }
+        Ok(BundleReseedOutcome::SkippedOlderGeneration) => {
+            tally.skipped_older += 1;
+            tracing::info!(
+                id = %entry.id,
+                manifest_version,
+                "operator config seed: skipping — a newer manifest generation already seeded this row \
+                 (this build's own manifest is older; likely a different AgentMux version sharing this store)"
+            );
+            true
+        }
+        Ok(BundleReseedOutcome::SkippedRetired) => {
+            tally.skipped_older += 1;
+            tracing::info!(
+                id = %entry.id,
+                manifest_version,
+                "operator config seed: skipping — a newer manifest generation already retired this id \
+                 (this build's own manifest still lists it; not resurrecting it)"
+            );
+            true
+        }
+        Err(e) => {
+            if is_retry {
+                tally.skipped_collision += 1;
                 tracing::warn!(
                     id = %entry.id,
                     name = %entry.name,
@@ -134,16 +201,8 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
                     "operator config seed: skipping entry due to upsert error (name collision?)"
                 );
             }
+            false
         }
-    }
-
-    if created + updated + skipped_local + skipped_older + skipped_collision > 0 {
-        tracing::info!(
-            "operator config seed: manifest v{}: {created} created, {updated} updated, \
-             {unchanged} unchanged, {skipped_local} skipped (local edit), \
-             {skipped_older} skipped (older generation), {skipped_collision} skipped (collision)",
-            manifest.version,
-        );
     }
 }
 
@@ -162,11 +221,11 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
 /// a local edit" posture as the reseed path for a human-edited row: left in
 /// place, orphaned from the manifest but not clobbered, for a human to
 /// clean up. Codex P2, PR #3244.
-fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManifest) {
+fn prune_entries_removed_from_manifest(store: &Arc<Store>, manifest: &SeedManifest) {
     let manifest_ids: std::collections::HashSet<&str> =
         manifest.entries.iter().map(|e| e.id.as_str()).collect();
 
-    let existing_ids = match wstore.bundle_list_system_ids() {
+    let existing_ids = match store.bundle_list_system_ids() {
         Ok(ids) => ids,
         Err(e) => {
             tracing::error!("operator config seed: failed to list existing system entries for pruning: {e}");
@@ -179,7 +238,7 @@ fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManif
         if manifest_ids.contains(id.as_str()) {
             continue;
         }
-        match wstore.bundle_delete_system_if_owned(&id, WRITTEN_BY, manifest.version) {
+        match store.bundle_delete_system_if_owned(&id, WRITTEN_BY, manifest.version) {
             Ok(true) => {
                 pruned += 1;
                 tracing::info!(id = %id, "operator config seed: pruned an entry no longer in the manifest");
@@ -202,7 +261,7 @@ fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManif
     }
 }
 
-fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry, manifest_version: u32) -> Result<BundleReseedOutcome, StoreError> {
+fn seed_one(store: &Arc<Store>, entry: &SeedEntry, manifest_version: u32) -> Result<BundleReseedOutcome, StoreError> {
     let now = agentmux_common::time::now_ms();
     let bundle = Bundle {
         id: entry.id.clone(),
@@ -228,7 +287,7 @@ fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry, manifest_version: u32) -> Re
     // downgrade a newer build's already-seeded content on a shared store.db
     // (Codex P2, PR #3244).
     let source_detail = format!(r#"{{"manifest_version":{manifest_version}}}"#);
-    wstore.bundle_reseed_system_if_owned(&bundle, WRITTEN_BY, "agentmux_operator_config_seed", &source_detail)
+    store.bundle_reseed_system_if_owned(&bundle, WRITTEN_BY, "agentmux_operator_config_seed", &source_detail)
 }
 
 #[cfg(test)]
@@ -299,6 +358,38 @@ mod tests {
         let bundle = store.bundle_get("op-1").unwrap().unwrap();
         assert_eq!(bundle.instructions, "body TWO");
         assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 2);
+    }
+
+    /// Codex P2, PR #3244: a compatible-schema OLDER build sharing this
+    /// store might still run a pre-#3244 `upsertsystemmemory` handler that
+    /// calls the unversioned `bundle_upsert_system` directly — changing the
+    /// live row's content without ever touching `db_bundle_versions`. The
+    /// latest version would then (wrongly) still show the seeder as the
+    /// last writer. seed_one must notice the live content no longer
+    /// matches what that version claims, and refuse to overwrite it as if
+    /// nothing had happened.
+    #[test]
+    fn unrecorded_edit_from_an_unversioned_writer_is_never_overwritten() {
+        let store = test_store();
+        seed_one(&store, &entry("op-1", "Operator One", "seeded body"), 1).unwrap();
+
+        // Simulate an older build's unversioned write path: bundle_upsert_
+        // system changes db_bundles directly, recording no version at all.
+        let mut edited = store.bundle_get("op-1").unwrap().unwrap();
+        edited.instructions = "edited by an older, unversioned build".to_string();
+        store.bundle_upsert_system(&edited).unwrap();
+
+        // db_bundle_versions still shows the seeder as the last writer —
+        // the whole point of this test.
+        let history = store.bundle_version_list("op-1").unwrap();
+        assert_eq!(history.len(), 1, "the unversioned write left no trace in the version table");
+        assert_eq!(history[0].written_by, WRITTEN_BY);
+
+        let outcome = seed_one(&store, &entry("op-1", "Operator One", "a real manifest update"), 2).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::SkippedLocalEdit));
+
+        let bundle = store.bundle_get("op-1").unwrap().unwrap();
+        assert_eq!(bundle.instructions, "edited by an older, unversioned build", "the unrecorded edit must survive");
     }
 
     /// Codex P2, PR #3244: two AgentMux builds sharing store.db (a supported
@@ -550,6 +641,38 @@ mod tests {
         let result = seed_one(&store, &e, 1);
         assert!(result.is_err(), "name UNIQUE constraint should surface as an error, not silently create op-1");
         assert!(store.bundle_get("op-1").unwrap().is_none());
+    }
+
+    /// Codex P2, PR #3244: entry B (a brand-new id) wants the display name
+    /// entry A (an existing id, unchanged) is about to release via its own
+    /// update in this SAME manifest — but B appears first in manifest
+    /// order, so its INSERT hits A's still-current name on the first pass.
+    /// The retry pass must resolve this without either entry ending up
+    /// missing, independent of manifest array order.
+    #[test]
+    fn seeding_succeeds_regardless_of_entry_order_within_one_manifest() {
+        let store = test_store();
+        seed_one(&store, &entry("op-a", "Name X", "original A content"), 1).unwrap();
+
+        // Generation 2: A keeps its id but its name changes to "Name Y",
+        // freeing up "Name X" for the brand-new "op-b". B is listed BEFORE
+        // A in this manifest — the ordering this fix must not depend on.
+        let manifest = SeedManifest {
+            version: 2,
+            entries: vec![
+                entry("op-b", "Name X", "B content"),
+                entry("op-a", "Name Y", "updated A content"),
+            ],
+        };
+        seed_from_manifest(&store, &manifest);
+
+        let a = store.bundle_get("op-a").unwrap().expect("A must still exist");
+        assert_eq!(a.name, "Name Y");
+        assert_eq!(a.instructions, "updated A content");
+
+        let b = store.bundle_get("op-b").unwrap().expect("B must exist despite the first-pass ordering collision");
+        assert_eq!(b.name, "Name X");
+        assert_eq!(b.instructions, "B content");
     }
 
     #[test]
