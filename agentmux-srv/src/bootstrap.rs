@@ -566,7 +566,37 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // the pre-DDL state. count_pending_migrations emits AGENTMUXSRV-MIGRATING
     // first so the launcher/sidecar extend their ESTART deadline before the
     // (potentially slow) migration work begins.
-    let pre_migration_count = migrations::count_pending_migrations(&wave_data_dir);
+    // Strict check, lenient reaction: this line only sizes the supervisors'
+    // ESTART deadline, and the migration batch runs unconditionally right
+    // below, so an unreadable store costs nothing here beyond a less precise
+    // hint — `readable_pending()` reproduces exactly the number this call
+    // site used before. It is logged rather than swallowed because the same
+    // question becomes a real decision point once the boot gate lands:
+    // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
+    // invariant S1b requires that gate to fail closed, and a store that
+    // cannot be read here is precisely the case it must catch.
+    let pre_migration_count = match migrations::try_count_pending_migrations(&wave_data_dir) {
+        Ok(n) => n,
+        Err(e) => {
+            let fallback = e.readable_pending();
+            // Distinguished because they mean different things to whoever
+            // reads the log: one store was readable and the count is
+            // partial, versus nothing was readable and the count is a
+            // placeholder.
+            match &e {
+                migrations::PendingCountError::ChannelStoreUnreadable { .. } => tracing::warn!(
+                    "startup: channel-scoped migrations could not be counted: {} — sizing the ESTART deadline with {} global",
+                    e,
+                    fallback
+                ),
+                _ => tracing::warn!(
+                    "startup: no pending-migration count available: {} — sizing the ESTART deadline as if none were pending",
+                    e
+                ),
+            }
+            fallback
+        }
+    };
     if pre_migration_count > 0 {
         eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
     }

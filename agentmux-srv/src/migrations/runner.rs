@@ -523,6 +523,24 @@ pub enum PendingCountError {
     ChannelStoreUnreadable { path: PathBuf, error: String, global_pending: usize },
 }
 
+impl PendingCountError {
+    /// The pending count that WAS readable despite this error — the
+    /// global-scope half when only the channel store failed, otherwise none
+    /// at all.
+    ///
+    /// For callers that must not block on an unreadable store (the
+    /// `AGENTMUXSRV-MIGRATING` hint, which only sizes a timeout, and the
+    /// `ESTART` report, which runs after the migration batch). A caller
+    /// *deciding* anything on the count must handle the error instead — see
+    /// [`try_count_pending_migrations`].
+    pub fn readable_pending(&self) -> usize {
+        match self {
+            Self::ChannelStoreUnreadable { global_pending, .. } => *global_pending,
+            Self::SharedStoreUnresolvable | Self::SharedStoreUnreadable { .. } => 0,
+        }
+    }
+}
+
 impl std::fmt::Display for PendingCountError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -597,22 +615,13 @@ pub fn try_count_pending_migrations(data_dir: &Path) -> Result<usize, PendingCou
 pub fn count_pending_migrations(data_dir: &Path) -> usize {
     match try_count_pending_migrations(data_dir) {
         Ok(n) => n,
-        // Unchanged from before this function grew a fallible sibling: an
-        // unreadable channel store still reports the global-scope count
-        // rather than dropping to 0.
-        Err(e @ PendingCountError::ChannelStoreUnreadable { .. }) => {
-            let PendingCountError::ChannelStoreUnreadable { global_pending, .. } = e else {
-                unreachable!("matched above")
-            };
-            tracing::warn!(
-                "count_pending_migrations: channel-scoped migrations will not be counted — reporting {} global",
-                global_pending
-            );
-            global_pending
-        }
         Err(e) => {
-            tracing::warn!("count_pending_migrations: {} — reporting 0", e);
-            0
+            // Unchanged from before this function grew a fallible sibling:
+            // an unreadable channel store still reports the global-scope
+            // count rather than dropping to 0.
+            let fallback = e.readable_pending();
+            tracing::warn!("count_pending_migrations: {} — reporting {}", e, fallback);
+            fallback
         }
     }
 }
@@ -1412,6 +1421,31 @@ mod tests {
         assert_eq!(
             lenient, global_pending,
             "the lenient wrapper must keep reporting the readable global-scope count"
+        );
+    }
+
+    #[test]
+    fn readable_pending_keeps_the_global_half_but_claims_nothing_otherwise() {
+        // What the non-blocking callers fall back to. A shared-store failure
+        // has no readable half at all — reporting anything but 0 there would
+        // be inventing a number.
+        assert_eq!(
+            PendingCountError::ChannelStoreUnreadable {
+                path: std::path::PathBuf::from("/tmp/objects.db"),
+                error: "locked".into(),
+                global_pending: 3,
+            }
+            .readable_pending(),
+            3
+        );
+        assert_eq!(PendingCountError::SharedStoreUnresolvable.readable_pending(), 0);
+        assert_eq!(
+            PendingCountError::SharedStoreUnreadable {
+                path: std::path::PathBuf::from("/tmp/store.db"),
+                error: "locked".into(),
+            }
+            .readable_pending(),
+            0
         );
     }
 
