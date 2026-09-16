@@ -22,6 +22,14 @@ shared across all platforms (`CEF_FORK_MAINTENANCE.md`), so an arm64 Linux build
 needs **no new patch work** — it reuses the existing `agentmux/7977-*` branches
 unchanged.
 
+Reproduce the binary inventory (the fork is public, no auth needed):
+
+```bash
+for tag in $(gh release list --repo agentmuxai/cef --limit 50 --json tagName --jq '.[].tagName'); do
+  echo "$tag => $(gh release view "$tag" --repo agentmuxai/cef --json assets --jq '[.assets[].name]|join(", ")')"
+done
+```
+
 **Scope:** agentmuxai/agentmux (build/packaging + release CI), agentmuxai/cef (runtime binaries)
 
 ---
