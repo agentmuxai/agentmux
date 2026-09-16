@@ -8,7 +8,7 @@
     width: 100%;
     background: var(--main-bg-color);
     color: var(--main-text-color);
-    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
+    font-family: var(--font-mono);
     font-size: 13px;
     overflow: hidden;
 }
@@ -392,7 +392,7 @@
 }
 
 .swarm-current-tool-name {
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -435,7 +435,7 @@
 .swarm-workflow-name {
     flex: 1;
     font-size: 12px;
-    font-family: var(--monospace-font, monospace);
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -511,7 +511,7 @@
     flex-shrink: 0;
     padding-top: 2px;
     font-size: 10px;
-    font-family: var(--monospace-font, monospace);
+    font-family: var(--font-mono);
     color: var(--secondary-text-color);
 }
 
@@ -556,7 +556,7 @@
     .swarm-subagent-slug {
         flex: 1;
         font-size: 12px;
-        font-family: var(--monospace-font, monospace);
+        font-family: var(--font-mono);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -625,7 +625,7 @@
 .swarm-shell-title {
     flex: 1;
     font-size: 12px;
-    font-family: var(--monospace-font, monospace);
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -699,7 +699,7 @@
 .swarm-cron-expression {
     flex-shrink: 0;
     font-size: 10px;
-    font-family: var(--monospace-font, monospace);
+    font-family: var(--font-mono);
     color: var(--secondary-text-color);
     opacity: 0.8;
     white-space: nowrap;
@@ -743,7 +743,7 @@
     line-height: 1.4;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
 
     &--error {
         color: var(--error-color);
@@ -773,7 +773,7 @@
 }
 
 .swarm-subagent-detail-tool-name {
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     font-weight: 600;
     color: var(--accent-color);
 }
@@ -1074,7 +1074,7 @@
     padding: 6px 8px;
     margin-bottom: 8px;
     font-size: 11px;
-    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
+    font-family: var(--font-mono);
 }
 
 .swarm-fleet-confirm-target-row {
@@ -1149,7 +1149,7 @@
     overflow-y: auto;
     padding: 0 10px 6px;
     font-size: 11px;
-    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
+    font-family: var(--font-mono);
 }
 
 .swarm-fleet-result-row {
@@ -1185,7 +1185,7 @@
 .swarm-longrunning-title {
     flex: 1;
     font-size: 12px;
-    font-family: var(--monospace-font, monospace);
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

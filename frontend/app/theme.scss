@@ -58,8 +58,16 @@
     --dpr: 1;
     --snap: calc(1px / var(--dpr));
     --snap-chrome: calc(1px / (var(--dpr) * var(--zoomfactor, 1)));
-    --base-font: normal 14px / normal "Inter", sans-serif;
-    --fixed-font: normal 12px / normal "Hack", monospace;
+    // `font` SHORTHAND composites — valid only with `font:`, never with
+    // `font-family:`. Built from the canonical tokens below so the family and
+    // size are defined exactly once.
+    //
+    // WARNING: passing these to `font-family:` is invalid CSS — the declaration
+    // is dropped at computed-value time and the element silently inherits
+    // instead. 44 rules did exactly that before PR #3252; if you want just the
+    // family, use `var(--font-mono)` / `var(--font-sans)`.
+    --base-font: normal var(--font-sans-size) / normal var(--font-sans);
+    --fixed-font: normal var(--font-mono-size) / normal var(--font-mono);
     --accent-color: rgb(65, 159, 224);
     --accent-color-rgb: 65, 159, 224;
 
@@ -335,8 +343,32 @@
     --leading-normal: 1.45;
     --leading-loose:  1.65;
 
-    --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --font-mono: "Hack", Consolas, Menlo, monospace;
+    // ── Canonical font tokens ────────────────────────────────────────────────
+    // These two are the ONLY font-family tokens. Use them with `font-family:`.
+    //
+    // History: the app accumulated SEVEN names for "the monospace font"
+    // (--termfontfamily, --monospace-font, --mono-font, --mono-font-family,
+    // --monofontfamily, --fixed-font, --font-mono), five of which were never
+    // defined anywhere — every use silently fell through to a hardcoded
+    // fallback, and those fallbacks disagreed with each other. Consolidated in
+    // PR #3252. Do not add a sixth spelling; add a role token below instead.
+    //
+    // `--font-sans` and `--font-mono` are DEFINED IN `frontend/tailwindsetup.css`
+    // (`@theme`), not here — Tailwind v4 needs the literal there to generate the
+    // `font-sans`/`font-mono` utilities, and `@theme` emits them into `:root`,
+    // so `var(--font-mono)` resolves everywhere in this file too. They used to
+    // be declared in BOTH places with different values; do not reintroduce a
+    // second declaration here.
+    //
+    // The mono stack follows VS Code's model — system fonts, plus Hack, which
+    // we bundle for Nerd Font glyph coverage in terminals. No ligature font may
+    // be named in it; see scripts/check-ligature-fonts.sh.
+
+    // Default sizes for each family. Split out so the `font:` shorthand
+    // composites below can be built from the same tokens rather than
+    // hardcoding a second copy of the size.
+    --font-sans-size: 14px;
+    --font-mono-size: 12px;
 
     // Composite text roles (use when a component just wants "body text"
     // without picking a specific size/weight/leading combo).

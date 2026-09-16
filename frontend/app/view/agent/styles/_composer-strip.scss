@@ -382,7 +382,7 @@
     gap: 2px;
     padding: 1px var(--space-1);
     font-size: 11px;
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     color: var(--main-text-color);
     background: color-mix(in srgb, var(--accent-color) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent-color) 30%, transparent);
@@ -405,7 +405,7 @@
     align-items: center;
     padding: 1px var(--space-1);
     font-size: 10px;
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     color: var(--secondary-text-color);
     background: transparent;
     border: 1px solid var(--border-color);
@@ -427,7 +427,7 @@
 
 // Context text (replaces ContextWindowBar graphic).
 .agent-composer-strip-ctx {
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     font-size: 10px;
     white-space: nowrap;
     opacity: 0.8;
@@ -453,7 +453,7 @@
 // text always agree on color without duplicating the band→color mapping);
 // this block adds only what's specific to the countdown span itself.
 .agent-composer-strip-ctx-countdown {
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     font-size: 10px;
     white-space: nowrap;
     opacity: 0.8;
@@ -627,7 +627,7 @@
     padding: var(--space-2);
     color: var(--error-color);
     font-size: 11px;
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
 }
 
 // Loading-brain overlay covering the shell drawer from mount until the

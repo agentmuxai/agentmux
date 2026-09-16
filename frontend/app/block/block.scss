@@ -391,7 +391,7 @@
         font-size: var(--text-xs);
 
         code {
-            font-family: var(--fixed-font);
+            font-family: var(--font-mono);
             font-size: inherit;
             background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
             padding: 1px 4px;
@@ -420,7 +420,7 @@
         flex: 1;
         min-height: 0;
         overflow: auto;
-        font-family: var(--fixed-font);
+        font-family: var(--font-mono);
         font-size: var(--text-xs);
         background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
         padding: var(--space-2);
