@@ -203,6 +203,12 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // subscription would bind to an empty scope and never fire — the common
     // case of opening the drawer for the first time. The effect re-subscribes
     // when the id arrives, and its `onCleanup` unsubscribes the previous one.
+    // How this shell's process ended, if we have been told at all — set from
+    // the `controllerstatus` subscription below (live OR replayed). `undefined`
+    // means "no exit observed", which is NOT the same as "exited cleanly" and
+    // must never be treated as permission to delete anything.
+    let lastObservedExitCode: number | undefined;
+
     createEffect(() => {
         const id = subBlockId();
         if (!id) return;
@@ -223,6 +229,15 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                     return;
                 }
                 if (data.shellprocstatus !== "done") return;
+                // Record HOW it ended before deciding whether to act on it.
+                // The attach path below consults this to tell an exit it may
+                // safely clean up (clean) from one whose scrollback is the
+                // only record of what went wrong (crash) — see its own
+                // comment. Set for replayed exits too, which is the whole
+                // point: a crash that happened while the drawer was closed is
+                // knowable ONLY from the replay.
+                lastObservedExitCode =
+                    typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
                 // ONLY act on an exit we watched happen.
                 //
                 // ReAgent P0 on PR #3253: `controllerstatus` is published with
@@ -400,10 +415,34 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                             "AgentShellSubblock: existing sub-block is stale or already exited, creating a fresh one:",
                             e
                         );
-                        // Best-effort: a vanished block is already gone (this
-                        // is a no-op), an exited one would otherwise leak
-                        // until the pane closes.
-                        void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
+                        // Delete the dead block ONLY on a positively-known
+                        // CLEAN exit.
+                        //
+                        // ReAgent P0 (round 2) on PR #3253: deleting on any
+                        // resync failure destroys the block's persisted `term`
+                        // file — and for a shell that CRASHED while the drawer
+                        // was closed, that file is the only record of what went
+                        // wrong. The live-exit listener above already refuses to
+                        // collapse on a non-zero exit for exactly this reason
+                        // (spec §5); doing it here anyway would reproduce the
+                        // same "not hidden — gone" data loss through the attach
+                        // path instead of the collapse path.
+                        //
+                        // `undefined` (no exit observed — a genuinely vanished
+                        // block, or a status we were never told) is NOT treated
+                        // as clean: skipping the delete costs at worst a dead
+                        // block lingering until the pane closes, while getting
+                        // it wrong costs the user their diagnostics. A vanished
+                        // block needs no delete anyway — it is already gone.
+                        if (lastObservedExitCode === 0) {
+                            void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
+                        } else {
+                            console.warn(
+                                `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
+                                    `${lastObservedExitCode ?? "unknown"}) — its scrollback may be the ` +
+                                    `only record of why the shell ended`
+                            );
+                        }
                         id = undefined;
                     }
                 }
