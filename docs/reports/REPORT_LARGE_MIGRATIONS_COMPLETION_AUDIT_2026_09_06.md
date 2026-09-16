@@ -1,6 +1,12 @@
 # Report: large migrations and initiatives — what is done, what is pending
 
-**Status:** proposed
+**Status:** historical — superseded for STATUS purposes by
+`REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md`, which re-verified every item against
+`main` ten days later and found six scores stale in the "actually done" direction —
+including this report’s own headline finding #3 (migration failure is now fatal) and its
+largest red item (§4.1 mandatory ABF, which had in fact shipped 2026-08-15 in PR #2587).
+The method, the framing, and §7’s closing observation about skipped second halves all
+stand and are worth reading; the scoreboard in §6 is not current.
 **Date:** 2026-09-06
 **Author:** Korp
 **Baseline:** `main` @ `fe87e1732` (post-v0.55.37)

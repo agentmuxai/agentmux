@@ -1,7 +1,12 @@
 # SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale)
 
 **Date:** 2026-06-17
-**Status:** Proposed (analysis + design; not implemented) (implemented — see note below)
+**Status:** implemented — `frontend/app/view/agent/components/tool-renderers/registry.ts`
+(+ `registry.test.ts`) is the shipped mechanism, load-bearing for several other result-view
+specs. Restamped 2026-09-16: the line previously read "Proposed (analysis + design; not
+implemented) (implemented — see note below)" — it contradicted itself, so the generated
+`INDEX.md` filed an in-daily-use registry under proposals. The 2026-08-07 audit note below
+already recorded the truth; this just moves it into the Status field where the index reads it.
 **Author:** smike
 
 > **2026-08-07 audit note:** Implemented, load-bearing — `registry.ts`/

@@ -1,6 +1,10 @@
 # SPEC — Armory: eliminate split-screen list+detail layouts, single-pane at every width
 
-**Status:** Draft — spec only, no code written yet (per explicit request).
+**Status:** implemented — `frontend/app/element/primitive-list-detail.tsx` (+ its `.scss`) is
+this document’s design and cites it by name; it renders exactly one of {list, detail} at any
+pane width, and is used by Armory’s Bundles/Skills/MCP Servers tabs plus `AgentMcpModal`,
+`AgentSkillsModal` and `AgentNativeMemoryModal`. Restamped 2026-09-16 (was "Draft — spec only,
+no code written yet (per explicit request)").
 **Trigger:** user report — Armory panes are frequently used narrow (AgentMux panes are
 user-resizable/tileable, not fixed-width dialogs), and the current list+detail split-screen
 layouts either stay side-by-side (unusable when narrow) or collapse into a stacked

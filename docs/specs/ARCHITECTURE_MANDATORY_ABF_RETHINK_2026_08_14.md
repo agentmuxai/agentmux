@@ -1,13 +1,23 @@
 # Architecture rethink: making ABF mandatory ("every agent must have an ABF")
 
 **Date:** 2026-08-14
-**Status:** DECISIONS RESOLVED, NOT YET IMPLEMENTED. Extended same-day (§7)
-with a portability idea: harness + model as readonly ABF fields, so an ABF
-becomes the portable unit instead of "the agent." All open questions (§2,
-§5, §7.4) resolved as of this revision — §7.5 is the build order.
+**Status:** active — §7.5 steps 1-3 shipped 2026-08-15 in PR #2587 (each marked DONE
+inline below); step 4 (delete-cascade / orphan handling for agent-owned bundles) is the
+only build-order item still open, and was written as "(if wanted)". Live artifacts:
+`m0021_backfill_agent_bundles.rs`, `Store::agent_def_provision_and_bind_bundle`,
+`Store::bundle_provision_for_new_agent`, `Store::resolve_effective_provider_id`, and the
+readonly-once-set enforcement in `agentmux-srv/src/server/app_api/bundle.rs:125-147`.
+Restamped 2026-09-16 — this line read "DECISIONS RESOLVED, NOT YET IMPLEMENTED" for a
+month after the implementation landed the following day, which led
+`docs/reports/REPORT_LARGE_MIGRATIONS_COMPLETION_AUDIT_2026_09_06.md` §4.1 to score it as
+the repo’s largest fully-designed-but-unbuilt initiative. It is not. §7 (harness+model as
+readonly portable ABF fields) remains the genuinely open part — see §7.0’s correction.
+Extended same-day (§7) with a portability idea: harness + model as readonly ABF fields, so
+an ABF becomes the portable unit instead of "the agent." All open questions (§2, §5, §7.4)
+resolved as of this revision — §7.5 is the build order.
 **Author:** AgentY (agenty-0629j), at operator request
 **Related:** `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/specs/archive/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
+`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
 `docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md`,
 `docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`,
 PR #2505 ("model vendor as a concept distinct from harness", merged
