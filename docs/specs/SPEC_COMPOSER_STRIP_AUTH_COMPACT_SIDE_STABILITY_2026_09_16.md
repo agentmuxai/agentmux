@@ -5,7 +5,18 @@
 generalization, §4.3), with `[{ leftKey: "auth", rightKey: "ctx" }]` wired
 at the one call site. Logic validated standalone (vitest is blocked locally
 by a pre-existing, unrelated `solid-refresh`/JSDOM environment issue — CI is
-the authority there); visual confirmation pending a `task dev` run.
+the authority there) and visually against the real compiled app via `task
+dev`, resizing the actual window across the boundary — no swap in either
+state. PR #3282 review (ReAgent P2, Codex P1) found two gaps §4 didn't
+originally cover, both fixed: the unmeasured-fallback path's static `side`
+fields still had the pre-fix values, reintroducing the swap at every mount
+before the first real measurement (fixed: `auth.side` → `"left"`, `ctx.side`
+→ `"right"`, matching the pinned invariant); and the multi-row pinned-pair
+row was emitted unconditionally, bypassing the per-pair capacity check the
+generic two-pointer pairs already have — an over-width pair would still
+`flex-wrap` into two physical one-sided lines despite the row's data
+formally having both sides filled (fixed: same capacity check, split into
+two one-sided rows preserving each member's own side when it doesn't fit).
 **Affects:** `frontend/app/view/agent/components/AgentComposerStrip.tsx` —
 the `auth` slot ("Logged in" / "Not logged in") and the `ctx` slot's Compact
 button.

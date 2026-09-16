@@ -289,7 +289,14 @@ export interface ComposerRow {
  * Multi-row: reserved out of the two-pointer pool, emitted as its own
  * row — ordered BEFORE the `runtime`/`hostShell` anchor row (never
  * after), so `hostShell` stays the outermost/last occupant regardless of
- * how many pinned pairs exist. Single row: both members' widths fold
+ * how many pinned pairs exist. UNLIKE the primary anchor row, a pinned
+ * pair's row IS still subject to the per-pair capacity check the generic
+ * two-pointer walk already applies — splitting into two one-sided rows
+ * (each member keeping its own pinned side) rather than emitting an
+ * unconditional pair that `flex-wrap` would silently break onto two
+ * physical lines anyway (codex P1, PR #3282; the primary anchor pair's
+ * own capacity exemption is narrower than it looks — see its own comment
+ * below for why THAT one specifically must stay unsplit). Single row: both members' widths fold
  * into the existing `fixedLeftWidth`/`fixedRightWidth` accumulators
  * instead of participating in `computeBalancedLeftKeys`'s brute-force
  * search — the same tradeoff Rev 8 already accepted for the first anchor
@@ -419,10 +426,26 @@ export function computeComposerRows(
     // Pinned pairs' rows go here — after the generic two-pointer pairing,
     // BEFORE the primary anchor row below, so `hostShell` stays the
     // outermost/last occupant regardless of how many pinned pairs exist.
-    // Always together, always this exact orientation — never subject to
-    // the two-pointer sort (§ SECOND ANCHORED PAIR).
+    // Never subject to the two-pointer sort (§ SECOND ANCHORED PAIR) — but
+    // STILL subject to the same per-pair capacity check the generic walk
+    // already applies (codex P1, PR #3282): an unconditional pair here
+    // would bypass that check, and since a real row is `flex-wrap`, an
+    // over-width pair renders as two one-sided PHYSICAL lines anyway —
+    // reproducing spec §1's one-sided-lines bug through a different
+    // mechanism, exactly what the generic check already exists to avoid.
+    // When it doesn't fit, split into two one-sided rows, preserving each
+    // member's own pinned side (left stays in the row's `left` array,
+    // right stays in `right`) rather than collapsing both to the generic
+    // walk's singleton convention (always `left`) — so ctx still reads as
+    // right-aligned even alone on its own line. A further instance of the
+    // already-named physical-capacity exception, not a new one.
     for (const p of pinned) {
-        pairs.push([p.left.key, p.right.key]);
+        if (p.left.width + p.right.width + gapPx <= availableWidth) {
+            pairs.push([p.left.key, p.right.key]);
+        } else {
+            pairs.push([p.left.key, undefined]);
+            pairs.push([undefined, p.right.key]);
+        }
     }
 
     if (anchorsReserved) {
@@ -753,7 +776,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         if (props.authStatus === "authenticated" || props.authStatus === "unauthenticated") {
             out.push({
                 key: "auth",
-                side: "right",
+                // "right" until Rev 9 (2026-09-16); flipped to match the
+                // pinned auth=left/ctx=right invariant `pinnedPairs`
+                // establishes in the measured path — this `side` field is
+                // the UNMEASURED fallback (first paint, JSDOM, or a shed
+                // zero-width slot's fallback row), and leaving it at the
+                // old value would have reintroduced exactly the swap this
+                // revision fixes, just at the mount-time boundary instead
+                // of the resize one (reagent P2, PR #3282). See
+                // docs/specs/SPEC_COMPOSER_STRIP_AUTH_COMPACT_SIDE_STABILITY_2026_09_16.md.
+                side: "left",
                 interactive: false,
                 render: () => (
                     <span
@@ -793,8 +825,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // (left) / "status indicators + the action button"
                 // (right) is the resulting split — see
                 // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md
-                // Rev 5.
-                side: "left",
+                // Rev 5. Flipped to "right" as of Rev 9 (2026-09-16) — see
+                // the `auth` slot's own comment above; this is the
+                // matching other half of the same fallback-side fix.
+                side: "right",
                 // Interactive exactly when the Compact button actually
                 // renders (same gate as its <Show> below) — a pure
                 // ctx-text slot has nothing clickable and should sit
