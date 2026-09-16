@@ -203,17 +203,32 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     memory.created_at = now;
                 }
                 memory.updated_at = now;
-                // Must append a db_bundle_versions row (not the plain
-                // bundle_upsert_system) so a human's edit here is stamped
-                // written_by="armory-ui" — otherwise the latest version for
-                // this row stays attributed to operator_config_seed's own
-                // reserved identity from whenever it was last (re)seeded,
-                // and the next startup's reseed would treat this row as
-                // still seeder-owned and silently overwrite the human's
-                // edit. Codex P1, PR #3244.
-                wstore
-                    .bundle_upsert_system_with_version(&memory, "armory-ui", "human", "{}")
-                    .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+                // A byte-identical save (operator opens a seeded entry and
+                // hits Save without changing anything — the UI does not
+                // suppress this) must NOT append an "armory-ui" version:
+                // doing so would permanently mark the row as human-owned
+                // even though nothing actually changed, so a future
+                // Operator Config manifest update would be skipped forever
+                // instead of just once. Codex P2, PR #3244.
+                let existing = wstore.bundle_get(&memory.id).map_err(|e| format!("upsertsystemmemory: {e}"))?;
+                if is_noop_system_memory_save(existing.as_ref(), &memory) {
+                    wstore
+                        .bundle_upsert_system(&memory)
+                        .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+                } else {
+                    // Must append a db_bundle_versions row (not the plain
+                    // bundle_upsert_system) so a real human edit here is
+                    // stamped written_by="armory-ui" — otherwise the latest
+                    // version for this row stays attributed to operator_
+                    // config_seed's own reserved identity from whenever it
+                    // was last (re)seeded, and the next startup's reseed
+                    // would treat this row as still seeder-owned and
+                    // silently overwrite the human's edit. Codex P1, PR
+                    // #3244.
+                    wstore
+                        .bundle_upsert_system_with_version(&memory, "armory-ui", "human", "{}")
+                        .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+                }
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![],
@@ -280,6 +295,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+}
+
+/// True when a system-memory save through `upsertsystemmemory` would write
+/// content byte-identical to what's already stored — the case where the
+/// operator opened a seeded Operator Config entry and clicked Save without
+/// changing anything (the Armory UI does not suppress this request). A
+/// no-op save must skip `bundle_upsert_system_with_version` and its
+/// `written_by="armory-ui"` version: recording one would permanently mark
+/// the row as human-owned even though nothing actually changed, so a future
+/// Operator Config manifest update would be skipped forever instead of the
+/// row staying reseedable. Codex P2, PR #3244. A brand-new row (`existing`
+/// is `None`) is never a no-op — it always needs its first version.
+fn is_noop_system_memory_save(existing: Option<&Bundle>, memory: &Bundle) -> bool {
+    existing.is_some_and(|e| e.name == memory.name && e.instructions == memory.instructions)
 }
 
 /// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
@@ -372,6 +401,59 @@ mod claude_global_config_tests {
         let result = read_claude_global_config(dir.path()).unwrap();
         assert!(result.exists);
         assert_eq!(result.content.as_deref(), Some(""));
+    }
+}
+
+#[cfg(test)]
+mod is_noop_system_memory_save_tests {
+    use super::*;
+
+    fn bundle(id: &str, name: &str, instructions: &str) -> Bundle {
+        Bundle {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: instructions.to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: true,
+        }
+    }
+
+    #[test]
+    fn brand_new_row_is_never_a_noop() {
+        let incoming = bundle("op-1", "Name", "body");
+        assert!(!is_noop_system_memory_save(None, &incoming));
+    }
+
+    #[test]
+    fn byte_identical_save_is_a_noop() {
+        let existing = bundle("op-1", "Name", "body");
+        let incoming = bundle("op-1", "Name", "body");
+        assert!(is_noop_system_memory_save(Some(&existing), &incoming));
+    }
+
+    #[test]
+    fn changed_instructions_is_not_a_noop() {
+        let existing = bundle("op-1", "Name", "body");
+        let incoming = bundle("op-1", "Name", "different body");
+        assert!(!is_noop_system_memory_save(Some(&existing), &incoming));
+    }
+
+    #[test]
+    fn changed_name_is_not_a_noop() {
+        let existing = bundle("op-1", "Name", "body");
+        let incoming = bundle("op-1", "New Name", "body");
+        assert!(!is_noop_system_memory_save(Some(&existing), &incoming));
     }
 }
 
