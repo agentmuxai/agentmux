@@ -1,10 +1,12 @@
 # Editor: the first keystroke after focusing is accepted but not rendered
 
-**Status:** proposed — reproduced and narrowed by observation; root cause not
-yet confirmed, no fix implemented.
+**Status:** implemented — root cause confirmed by live trace and fixed; C1 was
+correct, C2 and C3 are ruled out. See §3 and §6.
 **Date:** 2026-09-15
-**Severity:** Medium — every first edit in an editor pane looks like dropped
-input. Not data loss (see §1), but it trains users to distrust the editor.
+**Severity:** HIGH — raised from Medium once the mechanism was confirmed. This
+is **silent data loss**, not a rendering annoyance: the first character typed
+into any file is discarded outright, not merely unpainted. Typing one character
+and saving would have saved the file without it.
 **Reported by:** repo owner, on CEF 152 (v0.56.0).
 **Related:** `docs/retro/retro-terminal-consecutive-period-input-loss-2026-09-15.md`
 (unrelated cause — that one is font shaping; filed separately so the two are not
@@ -31,10 +33,14 @@ That rules out the obvious first guesses:
   *blanks of the right width* for repeated punctuation only, and affects every
   text surface. This affects the first keystroke of any character, in the editor
   only.
-- **Not data loss.** The character is in the document. Whether it survives to
-  disk on save, or is discarded by a later view reset, is **open question Q3**.
+- ~~**Not data loss.**~~ **WRONG — this was the one wrong call in the original
+  analysis.** The character reaches CodeMirror, but the view is then rebuilt
+  from the on-disk content and the edit is destroyed with it. It never reaches
+  disk. Q3 is answered: this is data loss.
 
-So: **CodeMirror's state updates; its view does not paint.**
+So: **CodeMirror's state updates, and is then thrown away.** (The original
+framing, "its view does not paint", was a reasonable reading of the symptom but
+pointed at rendering rather than at a rebuild.)
 
 ## 2. What the code shows
 
@@ -71,7 +77,7 @@ worth instrumenting.
 Each is independently testable. C3 has since been ruled out by inspection; C1
 and C2 remain open.
 
-**C1 — The tab-switch effect re-runs on first edit and overwrites the view.**
+**C1 — CONFIRMED. The tab-switch effect re-runs on first edit and overwrites the view.**
 If flipping `dirty` causes the `createEffect` at ~466 to re-run (directly, or
 because `loadingAtom`/`containerRef` churn during the pane-chrome re-render),
 its `cmView.setState(saved)` branch restores a state snapshotted *before* the
@@ -81,7 +87,7 @@ attempt works: by then the effect has settled and does not re-run.
 *Test:* log every entry to that effect with the triggering atom, type one
 character into a freshly focused editor, see whether it re-runs.
 
-**C2 — Stale measurement on a container that was zero-sized at construction.**
+**C2 — RULED OUT. Stale measurement on a zero-sized container.**
 CodeMirror measures its content on creation. If `setupEditor` runs while the
 container is hidden or zero-height (the effect's own comment mentions a
 "first-open blank-preview race"), the view can hold stale geometry and skip
@@ -114,6 +120,58 @@ That path is independent of tab-strip layout, and is the plausible trigger for
 C1's effect re-run. What is dead is specifically the *layout-shift* explanation,
 not "the dirty flip causes reactive churn".
 
+## 3b. Resolution — what the live trace showed
+
+Instrumented the running CEF 152 dev build (`docChanged` on every update,
+`setupEditor` on every rebuild) and reproduced. The trace, to the millisecond:
+
+```
+15:12:59.776  setupEditor rebuild {gen:1, docLen:0}     <- file opened, view gkf9i
+15:13:01.642  docChanged {viewId:"gkf9i", docLen:1}     <- FIRST KEYSTROKE lands
+15:13:01.643  setupEditor rebuild {gen:2, docLen:0}     <- 1ms later: rebuilt from disk
+15:13:03.482  docChanged {viewId:"gz0b4", docLen:1}     <- 2nd click, new view, works
+```
+
+**C2 is ruled out** by the same trace: `containerH: 1053` at construction, so the
+container always had real geometry. Measurement was never the problem, and a
+`requestMeasure()` fix built on that premise was written, tested, and discarded.
+
+**C1 is confirmed**, with the precise trigger being narrower than the original
+guess. The effect's reactive deps are `activeIdAtom`, `loadingAtom` and
+`containerRef` — dirty is not among them. The link is that `loadingAtom` was a
+**bare arrow function, not a memo**:
+
+```ts
+this.loadingAtom = () => {
+    const tab = this.activeTabAtom();
+    return tab != null && !tab.contentLoaded && tab.loadError == null;
+};
+```
+
+Reading it subscribed the caller to the whole **tab object**, not the boolean.
+So the chain is:
+
+1. first keystroke → `onContentChange()`
+2. → dispatches `MarkDirty`, guarded by `if (!this.dirtyAtom())` — **this is why
+   only the FIRST keystroke is affected**; later edits dispatch nothing
+3. → tab object changes → `activeTabAtom` emits
+4. → un-memoized `loadingAtom` propagates even though `loading` is `false`
+   before and after
+5. → effect re-runs → CodeMirror rebuilt from `contentAtom()` (on-disk content)
+6. → the typed character is destroyed with the old view
+
+**Fix:** memoize `loadingAtom` via `useBlockAtom`/`createMemo`, so tab mutations
+that leave `loading` unchanged no longer reach the effect.
+
+**Separate defect found and fixed alongside:** `setupEditor` is async and awaits
+`loadLanguage()` *between* destroying the old view and constructing the new one,
+so two calls starting before either constructs both skip the destroy and both
+append an `EditorView` to the same container — orphaning one (alive, in the DOM,
+able to take focus, referenced by nothing, never destroyed). It fired on every
+open, ~2ms apart. Closed with a generation guard. The trace shows a single view
+id throughout, so this was **not** the cause of the first-keystroke bug — but it
+is a real bug.
+
 ## 4. Proposed work
 
 1. **Instrument first** — log every `createEffect` re-entry with its trigger, and
@@ -132,12 +190,12 @@ not "the dirty flip causes reactive churn".
 
 ## 5. Open questions
 
-- **Q1.** Does the first keystroke re-render if the window is resized instead of
-  clicked? (Separates a measurement problem, C2, from a state-overwrite one, C1 —
-  resize forces re-measure without changing focus or re-running the effect.)
+- ~~**Q1.**~~ **Moot.** It was designed to separate C2 from C1; the trace did
+  that directly and ruled C2 out.
 - **Q2.** Does it reproduce on CEF 148? Determines whether this is another 152
   regression or a long-standing bug only noticed now.
-- **Q3.** If the file is saved **without** clicking a second time, does the first
-  character reach disk? If not, this is data loss and the severity rises.
+- **Q3. ANSWERED — no, and severity rose accordingly.** The character is
+  discarded when the view is rebuilt, so it never reaches disk. This was silent
+  data loss for every first edit.
 - **Q4.** Does it reproduce in a pane that was never re-rendered — e.g. open a
   file, click away to another app, click straight back into the text area?

@@ -14,7 +14,20 @@
 // contentLoaded so it can reason about dirty-vs-disk without holding the
 // buffer.
 //
-// Spec: docs/specs/SPEC_EDITOR_TABS_2026-05-26.md (Phase 1B).
+// Spec: this file used to cite an "editor tabs" spec (SPEC_EDITOR_TABS,
+// dated 2026-05-26, Phase 1B) that was never actually written — it has never
+// existed in the repo, in any commit. The dangling pointer only surfaced now
+// because check-spec-citations.sh is scoped to changed files. The path is
+// deliberately not written out above, and deliberately NOT repointed at a
+// plausible-looking neighbouring spec: the gate's own message warns against
+// that, and sending a reader on a search that cannot succeed is worse than no
+// pointer at all.
+//
+// What actually documents the tab behaviour is the reducer in
+// frontend/app/store/editor-pane-state-store.ts (slice #10) and its test
+// suite. The same dangling citation still exists in that store, in
+// editor-tab-strip.tsx, and in the pane-tab-strip spec — left alone as out of
+// scope here; each will trip the same gate when its file is next touched.
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
@@ -333,10 +346,37 @@ export class EditorViewModel implements ViewModel {
         this.errorAtom = () => this.activeTabAtom()?.loadError ?? null;
         // "Loading" is true between OpenFile and TabContentLoaded — i.e. the
         // active tab exists but its content hasn't arrived yet.
-        this.loadingAtom = () => {
-            const tab = this.activeTabAtom();
-            return tab != null && !tab.contentLoaded && tab.loadError == null;
-        };
+        // MEMOIZED, deliberately — a bare arrow function here caused the
+        // editor to silently DISCARD the first character typed into any file.
+        //
+        // As a plain accessor, every caller that read `loadingAtom()`
+        // subscribed to `activeTabAtom()` — the whole tab OBJECT — rather than
+        // to this boolean. `editor-view.tsx`'s "rebuild CodeMirror on tab
+        // change" effect reads it, so ANY mutation of the active tab re-ran
+        // that effect, even when `loading` was false both before and after.
+        //
+        // The first edit does exactly that: `onContentChange()` dispatches
+        // MarkDirty — guarded by `if (!this.dirtyAtom())`, so it fires only on
+        // the FIRST edit — the tab object changes, the effect re-runs, and
+        // CodeMirror is rebuilt from the on-disk content, throwing away the
+        // character just typed along with the destroyed view. That is why the
+        // symptom was "the first keystroke never appears, but the dirty marker
+        // does": the model was told about the edit, the view was replaced.
+        //
+        // Confirmed in a live trace on CEF 152, to the millisecond:
+        //   15:13:01.642  docChanged  {docLen: 1}   <- keystroke lands
+        //   15:13:01.643  setupEditor {docLen: 0}   <- rebuilt from disk
+        //
+        // `createMemo` only propagates when the computed value actually
+        // changes, so tab mutations that leave `loading` alone no longer reach
+        // the effect. See
+        // docs/specs/SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md.
+        this.loadingAtom = useBlockAtom(blockId, "editor-tabs-loading", () =>
+            createMemo<boolean>(() => {
+                const tab = this.activeTabAtom();
+                return tab != null && !tab.contentLoaded && tab.loadError == null;
+            }),
+        );
 
         this.contentAtom = useBlockAtom(blockId, "editor-tabs-content", () =>
             createMemo<string>(() => {
