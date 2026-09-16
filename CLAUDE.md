@@ -577,9 +577,11 @@ only — see "Does TIER=sensitive always STOP?" below), and
 `docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` (the one
 named exception to the 08-17 relaxation — a `transcript_request` jekt's
 `ESCALATE=required` is NOT relaxed by a verified sender, see below —
-**a pre-committed POLICY for a jekt type that does not exist in shipped
-code yet**, unlike every other spec in this list; see the callout below).
-Every OTHER rule in this section is code, not just docs: the escalation
+**live in code since 2026-08-22, PR #2764** — an earlier revision of this
+line described it as a pre-committed policy for a jekt type that did not
+exist yet, which was true only for the few hours between that spec being
+written and #2764 landing the same day; see the callout below).
+Every rule in this section is code, not just docs: the escalation
 and signature-verification logic they describe
 lives in `agentmux-srv/src/backend/reactive/handler.rs`, `sanitize.rs`,
 `sign.rs`-equivalent (`agentmux_common::jekt_sign`), `server/reactive.rs`,

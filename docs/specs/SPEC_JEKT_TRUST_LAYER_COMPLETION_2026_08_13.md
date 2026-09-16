@@ -2,7 +2,17 @@
 
 **Date:** 2026-08-13
 **Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`)
-**Status:** Proposed — not yet implemented
+**Status:** implemented — the host-tier HMAC layer this document designed is live:
+`agentmux_common::jekt_sign` (`sign_jekt`/`verify_jekt`), per-agent key injection via
+`inject_jekt_signing_keys_into_mcp_json` (`agentmux-srv/src/backend/agent_config.rs:1312`,
+env `AGENTMUX_JEKT_KEY`), and the `TRUST=host-verified` / `unverified` / `self-declared`
+marker outcomes in `agentmux-srv/src/backend/reactive/`. Restamped 2026-09-16 — the line
+previously read "Proposed — not yet implemented" while this repo’s `CLAUDE.md` had already
+been citing this document as the **source of truth for shipped jekt trust behaviour**. §1/§3’s
+body text is deliberately left as written: it describes the pre-implementation state and is
+still the clearest account of *why* the layer exists. The LAN and cross-channel tiers built on
+top of it are their own specs (`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`,
+`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`).
 **Trigger:** User question — "is there a trust layer so agents know they are getting real messages? If not, let's design it."
 **Builds on:** `docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (the original spec — this document completes its never-built §5.3/Phase 5), `agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (a separate, already-mostly-shipped effort solving the same problem for the WAN tier specifically).
 

@@ -47,7 +47,7 @@ fn emit_summary(applied: usize, skipped: usize) {
 ///
 /// Deliberately NOT derived from `resolve_shared_store_path()` (which
 /// varies under isolated-auth mode, resolving to a channel-scoped path
-/// instead of the global one) — 17 of 19 registered migrations build
+/// instead of the global one) — nearly every registered migration builds
 /// paths directly off `ctx.home` (registry/definitions/transcripts dirs),
 /// and `backup_stores`/`write_error_log` below use it too. All of those
 /// must stay anchored to the real global root regardless of isolation;
