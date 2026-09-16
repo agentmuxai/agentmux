@@ -105,9 +105,26 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             };
                             return Ok(Some(serde_json::to_value(resp).unwrap()));
                         }
-                        // Kick the cloud subscriber to open a WS with the new token
-                        if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                            sub.reload_token();
+                        // Kick the cloud subscriber to open a WS with the new
+                        // token. On an isolated local-package channel
+                        // (reagentx P1 on PR #3248, round 2), boot skipped
+                        // `CloudSubscriber::init_global` entirely, so there is
+                        // no subscriber to reload yet — an explicit, successful
+                        // login is exactly the signal that should lazily bring
+                        // one up now, rather than leaving `muxbus.login` report
+                        // "success" while no WebSocket ever opens and agents
+                        // silently never receive WAN injections. `init_global`
+                        // itself is idempotent (`OnceLock::set`, no-ops if
+                        // already initialized), so this is safe to call
+                        // unconditionally rather than re-deriving "was this
+                        // isolated at boot" here.
+                        match crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                            Some(sub) => sub.reload_token(),
+                            None => {
+                                crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(
+                                    wstore.clone(),
+                                );
+                            }
                         }
                         let resp = MuxBusLoginResp {
                             success: true,
@@ -153,6 +170,29 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |_data, _ctx| {
             let wstore = wstore_status.clone();
             Box::pin(async move {
+                // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
+                // HostPopover.tsx` mounts globally and polls this handler on
+                // mount + every 60s, unconditionally — so an unguarded
+                // `muxbus_load()` here hit Keychain within a minute of launch
+                // on a fresh local build regardless of the boot-time and
+                // agent-spawn fixes elsewhere in this PR, defeating the whole
+                // point of it. Same subscriber-presence gate as
+                // `inject_muxbus_env` (see that function's doc comment for
+                // why presence, not the static channel flag, is the right
+                // signal): before any MuxBus session has ever been
+                // established on this process, report "not connected"
+                // without touching the keychain at all — identical to the
+                // real Ok(None) response below, just without the read.
+                if crate::muxbus::cloud_subscriber::get_global_subscriber().is_none() {
+                    let resp = MuxBusStatusResp {
+                        connected: false,
+                        email: String::new(),
+                        cognito_domain: String::new(),
+                        expires_at: 0,
+                        valid: false,
+                    };
+                    return Ok(Some(serde_json::to_value(resp).unwrap()));
+                }
                 // spawn_blocking — reagent P1 on #2260: same
                 // synchronous-keychain-read concern as muxbus.login's save.
                 let load_store = wstore.clone();
@@ -215,10 +255,35 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// muxbus_load does a synchronous OS-keychain read, which can hang on a
 /// slow/unresponsive Secret Service D-Bus daemon (headless Linux) and must
 /// not stall the caller's tokio worker thread.
+///
+/// Skipped when `muxbus::cloud_subscriber::get_global_subscriber()` is
+/// `None` — i.e. before ANY MuxBus session has ever been established on
+/// this process (reagentx P0/P1 on PR #3248, round 2). This call site
+/// runs on EVERY agent spawn, not just MuxBus-related ones — without
+/// this gate, the automatic `muxbus_load()` here would still prompt for
+/// Keychain consent on a fresh local build the moment ANY agent is
+/// opened, even after the startup-reconnect prompt was already fixed
+/// (see docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md).
+///
+/// Deliberately checks subscriber presence rather than re-deriving
+/// `isolated_muxbus_reconnect_enabled()` here: on `stable`/`dev-*`
+/// channels the subscriber is always initialized at boot, so this is
+/// equivalent there — but on an isolated local-package channel, the
+/// subscriber starts `None` and only becomes `Some` the moment the user
+/// explicitly completes `muxbus.login` (which lazily initializes it,
+/// see that handler). Gating on the channel flag directly would have
+/// kept this injection dead for the rest of the process's life even
+/// after a real, successful login — the user would need to fully
+/// restart the app to see it take effect. Gating on subscriber presence
+/// means injection starts working on the very next agent spawn after
+/// login, same session, no restart.
 pub async fn inject_muxbus_env(
     wstore: &Arc<crate::backend::storage::store::Store>,
     env_vars: &mut std::collections::HashMap<String, String>,
 ) {
+    if crate::muxbus::cloud_subscriber::get_global_subscriber().is_none() {
+        return;
+    }
     let load_store = wstore.clone();
     let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load()).await;
     let creds = match load_result {
