@@ -526,13 +526,23 @@ impl LanDiscovery {
             // `LAN_PEER_STALE_TIMEOUT_SECS`) — without it a genuinely departed
             // peer would sit in the map forever and this very loop would keep
             // polling it every cycle.
-            {
+            let any_pruned = {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
                 let mut instances = self.instances.write();
+                let before = instances.len();
                 instances.retain(|_, inst| now.saturating_sub(inst.last_seen) <= LAN_PEER_STALE_TIMEOUT_SECS);
+                instances.len() != before
+            };
+            // A connected frontend only updates `lanInstancesAtom` on a
+            // `laninstances` WS event — without this, a peer pruned here
+            // would keep showing in an already-open client until some
+            // unrelated ServiceResolved happened to fire a broadcast
+            // [Codex P1 on PR #3245].
+            if any_pruned {
+                self.broadcast_instances();
             }
 
             // Snapshot (key, url, lan_key) so the lock is not held across any
