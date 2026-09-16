@@ -1051,4 +1051,64 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
         // still leave the pane silently attached to it.
         expect(termWrapInstances.some((t) => t.id === createdIdA)).toBe(false);
     });
+
+    /**
+     * ReAgent P1 on PR #3257, round 3: `lastObservedExitCode` is a single
+     * component-scoped variable, written by the controllerstatus
+     * subscription and read by attachShell's resync-failure catch block
+     * (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md) — but it
+     * was never reset when a re-attach switches to a new candidate id.
+     * Since this PR is what makes attachShell run more than once per
+     * mount, a resync failure for a FRESHLY re-attached id could consult
+     * an exit code actually observed for the PREVIOUS sub-block this
+     * component was bound to. In the direction this test exercises, that
+     * means a resync failure for a brand-new id — whose own exit status
+     * was never observed at all — gets wrongly treated as a known-clean
+     * exit because the previous, unrelated sub-block happened to exit
+     * cleanly, deleting a block whose scrollback might be the only record
+     * of why it actually failed. Exactly the "not hidden — gone" data
+     * loss this code's own comments say must never happen for an unknown
+     * exit.
+     */
+    it("does not delete a re-attached sub-block's resync failure based on a PREVIOUS sub-block's stale exit code", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        const idA = "stale-exit-code-a";
+        const idB = "stale-exit-code-b";
+        queueSeedMeta(`block:${idA}`, {});
+        // A exits CLEANLY — this sets lastObservedExitCode = 0 as a side
+        // effect of being replayed at subscribe time, independent of
+        // whether the drawer acts on it (sawRunning is irrelevant to this
+        // write — see the subscription handler's own comment).
+        queuePersistedStatus(idA, { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        const [subBlockId, setSubBlockId] = createSignal(idA);
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId()}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${idA}`);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+
+        // Backend repoints to B — an entirely different, unrelated
+        // sub-block whose OWN exit status this component has never
+        // observed. B's resync fails (e.g. it already crashed), and
+        // nothing has ever published a controllerstatus for B.
+        resyncRejections.add(idB);
+        setSubBlockId(idB);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        // B's own exit is genuinely unknown to this component — A's
+        // stale, unrelated clean exit must not be read as permission to
+        // delete B.
+        expect(RpcApi.DeleteSubBlockCommand).not.toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ blockid: idB })
+        );
+    });
 });

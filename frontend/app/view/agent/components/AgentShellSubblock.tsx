@@ -214,7 +214,21 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // the `controllerstatus` subscription below (live OR replayed). `undefined`
     // means "no exit observed", which is NOT the same as "exited cleanly" and
     // must never be treated as permission to delete anything.
-    let lastObservedExitCode: number | undefined;
+    //
+    // Tagged with the id it was observed FOR, not just a bare value: this
+    // component can now re-attach to a DIFFERENT sub-block mid-mount
+    // (ReAgent P1 on #3257), and attachShell's resync-failure catch block
+    // below reads this for whatever id JUST failed to resync — a bare
+    // value would let a stale exit code from a PREVIOUS sub-block leak
+    // into that decision (round 3 of the same review), misattributing it
+    // or, worse, deleting a crashed block's only diagnostic record based
+    // on an unrelated block's clean exit. Tagging lets the reader verify
+    // relevance itself, which is more robust than trying to reset a bare
+    // value at exactly the right moment — the ordering between this
+    // effect (which can fire a replay synchronously within the SAME
+    // initial mount, before attachShell ever runs) and attachShell itself
+    // is not something call sites should have to reason about.
+    let lastObservedExit: { id: string; code: number } | undefined;
 
     createEffect(() => {
         const id = subBlockId();
@@ -241,7 +255,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 // comment. Set for replayed exits too, which is the whole
                 // point: a crash that happened while the drawer was closed is
                 // knowable ONLY from the replay.
-                lastObservedExitCode = typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
+                lastObservedExit = {
+                    id,
+                    code: typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0,
+                };
                 // ONLY act on an exit we watched happen.
                 //
                 // ReAgent P0 on PR #3253: `controllerstatus` is published with
@@ -470,18 +487,22 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                     // same "not hidden — gone" data loss through the attach
                     // path instead of the collapse path.
                     //
-                    // `undefined` (no exit observed — a genuinely vanished
-                    // block, or a status we were never told) is NOT treated
+                    // `undefined` (no exit observed for THIS id — a
+                    // genuinely vanished block, a status we were never
+                    // told, or one only ever observed for a DIFFERENT
+                    // sub-block this component was previously bound to,
+                    // per `lastObservedExit`'s own id tag) is NOT treated
                     // as clean: skipping the delete costs at worst a dead
                     // block lingering until the pane closes, while getting
                     // it wrong costs the user their diagnostics. A vanished
                     // block needs no delete anyway — it is already gone.
-                    if (lastObservedExitCode === 0) {
+                    const exitCodeForThisId = lastObservedExit?.id === id ? lastObservedExit.code : undefined;
+                    if (exitCodeForThisId === 0) {
                         void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
                     } else {
                         console.warn(
                             `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
-                                `${lastObservedExitCode ?? "unknown"}) — its scrollback may be the ` +
+                                `${exitCodeForThisId ?? "unknown"}) — its scrollback may be the ` +
                                 `only record of why the shell ended`
                         );
                     }
