@@ -38,21 +38,27 @@
 //! (no agent is driving any shell) the map is empty and the check is a hash
 //! lookup that misses.
 //!
-//! # Known gap this does NOT close
+//! # Formerly a known gap, closed 2026-09-16
 //!
 //! `controllerinput` is not the path a human's keystrokes actually take.
 //! Both the Terminal pane (`termViewModel.ts`) and the agent pane's drawer
 //! shell (`AgentShellSubblock.tsx`) send keystrokes via the `blockinput` WS
-//! command, which calls `blockcontroller::send_input` directly with no lease
-//! check at all. So the server-side enforcement added in #3194 does not in
-//! fact cover the human-vs-agent write collision it was added for — the only
-//! thing standing in the way there is `AgentShellSubblock`'s own
+//! command, which called `blockcontroller::send_input` directly with no
+//! lease check at all — so the server-side enforcement added in #3194 did
+//! not in fact cover the human-vs-agent write collision it was added for.
+//! The only thing standing in the way there was `AgentShellSubblock`'s own
 //! `agentLocked()` gate, i.e. exactly the eventually-consistent frontend
-//! check that enforcement was meant to backstop. Deliberately left alone
-//! here: this module changes how the existing check is answered, not which
-//! paths are checked. Closing the gap means calling `is_locked` from the
-//! `blockinput` arm too (cheap, now that answering costs a hash lookup) —
-//! tracked separately so it lands with its own test and its own review.
+//! check that enforcement was meant to backstop. This surfaced for real
+//! during a live vim investigation on 2026-09-16: an agent driving `vim`
+//! through `PtyShellInput` on its own composer-drawer shell (the same PTY
+//! a human's `blockinput` keystrokes reach) had its writes interleave with
+//! other input on that pane, corrupting vim's cursor-addressed
+//! alternate-screen redraw into a visibly garbled pane — not a hang, byte
+//! interleaving mid-escape-sequence. `dispatch_blockinput`
+//! (`server/websocket.rs`) now calls `is_locked` too, mirroring
+//! `controllerinput`'s check — see
+//! `blockinput_is_dropped_while_an_agent_lock_is_active` there for the
+//! regression test.
 //!
 //! # Relationship to `term:agentlockuntil` meta
 //!
@@ -144,12 +150,14 @@ pub fn release(block_id: &str) -> bool {
 /// Releasing only the in-memory copy is not enough on any path where the
 /// point is to give the human their keyboard back. Codex P1 / ReAgent P1 on
 /// PR #3249, and they're right: `AgentShellSubblock.tsx`'s `agentLocked()`
-/// derives its gate purely from that meta value, and the `blockinput` WS
-/// command those keystrokes travel on has no server-side lease check at all
-/// (see the "Known gap" note above). So the frontend gate is in practice
-/// the *only* thing suppressing a human's keystrokes — and clearing memory
-/// alone would leave them swallowed for the rest of the 4s window, which is
-/// precisely the "typed `exit`, nothing happened" case this is meant to fix.
+/// derives its gate purely from that meta value. `blockinput` now also has
+/// its own server-side lease check (see the module doc's "Formerly a known
+/// gap" section), so a stale meta value no longer risks a swallowed
+/// keystroke reaching a live controller — but the frontend still reads
+/// meta for its own badge/gate, and clearing memory alone would leave that
+/// badge (and the client-side keystroke suppression) stuck for the rest of
+/// the 4s window, which is precisely the "typed `exit`, nothing visibly
+/// happened" case this is meant to fix.
 ///
 /// Best-effort on the meta half (logs and continues), authoritative on the
 /// memory half. Mirrors `core::persist_session_id`'s established
