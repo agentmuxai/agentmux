@@ -166,14 +166,44 @@ packaging path that doesn't share CI's hard version gate.
    log specifically, or reproducing the launch by hand outside the launcher
    to recover the panic text.
 
-## Fix for this incident
+## Fix for this incident — done, verified
 
-Rebuild `~/cef-build/darwin/arm64` for real, against the now-published
-`cef-macos-arm64-152.0.7977.83-codecs` release
-(`docs/cef-build/build-patched-framework-macos.md`), verify with
-`scripts/verify-cef-framework-darwin.sh` + `scripts/cef-verify.sh --ref 7977`
-+ the same H.264/ANGLE checks Clare already ran once on her own machine, then
-repackage. See progress in #3108.
+No rebuild needed. The macOS 152 workstream had already produced a real,
+verified, human-H.264-checked release —
+[`cef-macos-arm64-152.0.7977.83-codecs`](https://github.com/agentmuxai/cef/releases/tag/cef-macos-arm64-152.0.7977.83-codecs)
+— so the fix was to download that published artifact and stage it, not
+rebuild Chromium from scratch:
+
+1. Downloaded + extracted the release tarball, confirmed `dlsym(cef_version_full)`
+   resolves against it directly (`ctypes.CDLL(...).cef_version_full`).
+2. Ran `scripts/verify-cef-framework-darwin.sh` against the staged copy —
+   `BeginWindowDrag` patch confirmed present, exit 0.
+3. Moved the stale 148 framework aside (`~/cef-build/darwin/arm64/Chromium
+   Embedded Framework.framework.pre-152-bak-20260916`, not deleted), `ditto`'d
+   the verified 152 framework into its place.
+4. Re-ran `task package:macos` from a clean `origin/main` worktree (reusing
+   the main checkout's `target/` via a symlink for incremental-compile speed).
+   `resolve-cef-runtime-darwin.sh`'s `check_version()` stayed silent this
+   time — a genuine true-positive confirmation the staged framework now
+   matches what `Cargo.lock` expects. `verify-cef-framework-darwin.sh` and
+   `verify-angle-libs.sh` both passed clean on the freshly-bundled copy.
+   Build signed, notarized, and stapled without incident.
+5. **End-to-end verified, not just built:** mounted the new DMG and ran the
+   real `agentmux-launcher` directly (not just `cefsimple` or a dry
+   `dlopen` check). Confirmed via the shared launcher log and `ps` against
+   the actual PIDs: `agentmux-cef` came up and **stayed up**, spawning a
+   full real Chromium process tree (GPU process, network/storage utility
+   processes, five renderer processes) — no `CEF host exited abnormally`,
+   no restart loop, no `restart budget exhausted`. This is the same class
+   of process tree the healthy 0.55.43 instance produces. Torn down
+   cleanly afterward by killing the launcher's own PID (never by image
+   name) and letting its Job-Object-style child cleanup run.
+
+Total time: well under an hour, once the already-published release artifact
+was found — no Chromium rebuild required for this particular gap. (A full
+from-scratch rebuild would only be needed if no matching published release
+existed yet; see §"Why this specific failure was possible" above for when
+that check should happen automatically instead of by hand.)
 
 ## Worth considering separately (not blocking the rebuild above)
 
