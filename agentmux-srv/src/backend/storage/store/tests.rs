@@ -3335,6 +3335,58 @@
         );
     }
 
+    /// ReAgent P1 round 3 on PR #3262. `agent_def_delete_removes_only_its_
+    /// own_registry_file` already forbids a template's deletion from taking
+    /// its launches' records — but it builds those records through
+    /// `instance_create`, which keys each one by the launch's OWN id, so the
+    /// wide `definition_id` match never sees them and the test passes either
+    /// way. The shape that actually breaks is the legacy, never-re-keyed
+    /// record, whose `definition_id` still points at the TEMPLATE. On a real
+    /// machine those are the common case (30 of 44 records on the reporting
+    /// one), so deleting a template would have silently removed unrelated
+    /// agents from the cross-channel picker.
+    #[test]
+    fn deleting_a_template_spares_a_legacy_launch_record_pointing_at_it() {
+        let (_tmp, store, reg) = store_with_registry();
+        // `store_with_registry` seeds `def-mirror` as a template. Give the
+        // template a record of its own (file-keyed) plus a legacy launch
+        // record for a real agent launched from it (definition-keyed).
+        let legacy = |instance_id: &str, name: &str| crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: instance_id.to_string(),
+                instance_name: name.to_string(),
+                definition_id: "def-mirror".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: name.to_lowercase(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        };
+        reg.upsert(&legacy("def-mirror", "Mirror")).unwrap();
+        reg.upsert(&legacy("legacy-launch-id", "RealAgent")).unwrap();
+
+        assert!(store.agent_def_delete("def-mirror").unwrap());
+
+        let left: Vec<String> = reg
+            .list_active()
+            .unwrap()
+            .into_iter()
+            .map(|r| r.data.instance_id)
+            .collect();
+        assert_eq!(
+            left,
+            vec!["legacy-launch-id".to_string()],
+            "deleting a template takes only its own file-keyed record — an agent \
+             launched from it must not vanish from the picker"
+        );
+    }
+
     /// ReAgent P1 round 2 on PR #3262: `instance_delete` is the same
     /// deletion as `agent_def_delete` under a second name, so it needs the
     /// same convergence. A retry after an attempt that removed the
