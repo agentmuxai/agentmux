@@ -280,6 +280,12 @@
         padding: var(--space-0-5) 0;
     }
 
+    .status-bar-popover-hint {
+        font-size: 0.8em;
+        opacity: 0.6;
+        padding: 0 0 var(--space-0-5) 0;
+    }
+
     /* Toggle switch used in the LAN discovery row.
        Spec: docs/specs/lan-discovery-toggle.md */
     .status-bar-toggle {
