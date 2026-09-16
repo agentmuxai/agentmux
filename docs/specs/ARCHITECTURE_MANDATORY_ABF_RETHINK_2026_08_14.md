@@ -17,7 +17,7 @@ an ABF becomes the portable unit instead of "the agent." All open questions (§2
 resolved as of this revision — §7.5 is the build order.
 **Author:** AgentY (agenty-0629j), at operator request
 **Related:** `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md`,
-`docs/specs/archive/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
+`docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`,
 `docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md`,
 `docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md`,
 PR #2505 ("model vendor as a concept distinct from harness", merged
