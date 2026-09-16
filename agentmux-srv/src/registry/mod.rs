@@ -53,4 +53,4 @@ pub use schema::{
     NamedAgentRecord, NamedAgentRecordV1, ValidationError, MAX_SUPPORTED_SCHEMA,
     MIN_SUPPORTED_SCHEMA,
 };
-pub use store::{Registry, RegistryError};
+pub use store::{RecordScope, Registry, RegistryError};

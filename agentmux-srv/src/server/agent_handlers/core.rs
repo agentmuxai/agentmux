@@ -292,15 +292,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // deleteagent → delete agent by id, broadcast agents:changed
     let wstore_dfa = state.wstore.clone();
     let broker_dfa = state.broker.clone();
+    let identity_store_dfa = state.identity_store.clone();
     engine.register_handler(
         COMMAND_DELETE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_dfa.clone();
             let broker = broker_dfa.clone();
+            let identity_store = identity_store_dfa.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteAgentDefinitionData = serde_json::from_value(data)
                     .map_err(|e| format!("deleteagent: {e}"))?;
                 wstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
+                super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagent");
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],

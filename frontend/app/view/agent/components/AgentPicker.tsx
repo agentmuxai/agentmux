@@ -45,6 +45,7 @@ import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, 
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
+import { openOrFocusHistoryTab } from "../open-history-tab";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import type { LaunchOverrides } from "./AgentLaunchModal";
@@ -468,6 +469,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
 
     const handleSwitchToExisting = (blockId: string): void => {
         refocusNode(blockId);
+    };
+
+    // My Agents row menu → View History (docs/specs/SPEC_AGENT_DELETE_2026_09_16.md
+    // §4.3). openOrFocusHistoryTab needs a "current pane" to push the
+    // history tab onto as a sibling tab — this picker's OWN blockId (it's
+    // the blank/picker tab itself, pre-launch) is exactly that pane.
+    const handleViewHistory = (row: RecentSessionRow): void => {
+        void openOrFocusHistoryTab({ currentBlockId: props.model.blockId, agentId: row.definition_id });
     };
 
     // (`buildInstallRequest` — the generic, pre-two-tier install
@@ -965,6 +974,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             onFork={handleFork}
                             onSwitchToExisting={handleSwitchToExisting}
                             onFirstLoad={() => setMyAgentsLoaded(true)}
+                            onViewHistory={handleViewHistory}
                         />
                         <div class="agent-picker-templates-header" data-testid="agent-templates-header">
                             <span>New Agent</span>

@@ -105,6 +105,179 @@ fn hard_delete_removes_both_paths() {
     assert!(!reg.root().join("retired").join("aaa.json").exists());
 }
 
+/// A record keyed by its own definition id and a legacy record keyed by the
+/// launch it came from, both for one agent. `hard_delete(def_id)` only ever
+/// matched the first; the second stayed active with its definition gone,
+/// and `listrecentsessions` kept rendering it as an iconless
+/// "(missing definition)" row — a delete whose card never went away.
+#[test]
+fn hard_delete_for_agent_catches_a_legacy_launch_keyed_record() {
+    let (_t, reg) = fresh();
+    let mut current = record("agent-1", "Maks", 100);
+    current.data.definition_id = "agent-1".to_string();
+    let mut legacy = record("old-launch-id", "Maks", 90);
+    legacy.data.definition_id = "agent-1".to_string();
+    reg.upsert(&current).unwrap();
+    reg.upsert(&legacy).unwrap();
+
+    reg.hard_delete("agent-1").unwrap();
+    assert_eq!(
+        reg.list_active().unwrap().len(),
+        1,
+        "the instance-keyed delete leaves the legacy record behind — the bug"
+    );
+
+    assert_eq!(reg.hard_delete_for_agent("agent-1", RecordScope::Agent).unwrap(), 1);
+    assert!(reg.list_active().unwrap().is_empty());
+}
+
+#[test]
+fn hard_delete_for_agent_also_drops_retired_records() {
+    let (_t, reg) = fresh();
+    let mut rec = record("old-launch-id", "Maks", 100);
+    rec.data.definition_id = "agent-1".to_string();
+    reg.upsert(&rec).unwrap();
+    reg.retire("old-launch-id").unwrap();
+
+    assert_eq!(reg.hard_delete_for_agent("agent-1", RecordScope::Agent).unwrap(), 1);
+    assert!(!reg.root().join("retired").join("old-launch-id.json").exists());
+}
+
+#[test]
+fn hard_delete_for_agent_leaves_other_agents_alone() {
+    let (_t, reg) = fresh();
+    let mut mine = record("old-launch-id", "Maks", 100);
+    mine.data.definition_id = "agent-1".to_string();
+    let mut theirs = record("other-launch-id", "Korp", 100);
+    theirs.data.definition_id = "agent-2".to_string();
+    reg.upsert(&mine).unwrap();
+    reg.upsert(&theirs).unwrap();
+
+    assert_eq!(reg.hard_delete_for_agent("agent-1", RecordScope::Agent).unwrap(), 1);
+    let left = reg.list_active().unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].data.definition_id, "agent-2");
+}
+
+/// The other direction, and why matching `definition_id` alone isn't
+/// enough: a pre-consolidation registry-only row is addressed by its LAUNCH
+/// id, and its `definition_id` still names the template it came from. The
+/// `instance_set_hidden`/`instance_delete` callers hold that launch id.
+#[test]
+fn for_agent_also_matches_a_records_own_file_key() {
+    let (_t, reg) = fresh();
+    // `record`'s definition_id is "claude-code" — a template, not this id.
+    reg.upsert(&record("legacy-only-row", "crossver", 100)).unwrap();
+
+    assert_eq!(reg.retire_for_agent("legacy-only-row", RecordScope::Agent).unwrap(), 1);
+    assert!(reg.root().join("retired").join("legacy-only-row.json").exists());
+    assert_eq!(reg.unretire_for_agent("legacy-only-row", RecordScope::Agent).unwrap(), 1);
+    assert_eq!(reg.hard_delete_for_agent("legacy-only-row", RecordScope::Agent).unwrap(), 1);
+    assert!(reg.list_active().unwrap().is_empty());
+}
+
+#[test]
+fn hard_delete_for_agent_on_an_unknown_id_is_a_no_op() {
+    let (_t, reg) = fresh();
+    reg.upsert(&record("aaa", "demo", 100)).unwrap();
+    assert_eq!(reg.hard_delete_for_agent("never-existed", RecordScope::Agent).unwrap(), 0);
+    assert_eq!(reg.list_active().unwrap().len(), 1);
+}
+
+/// "Forget agent" retiring by file key left the legacy record active, so the
+/// forgotten agent came straight back — the failure
+/// `m0026_registry_agent_id_rekey`'s own doc comment predicted.
+#[test]
+fn retire_for_agent_round_trips_every_record_for_one_agent() {
+    let (_t, reg) = fresh();
+    let mut current = record("agent-1", "Maks", 100);
+    current.data.definition_id = "agent-1".to_string();
+    let mut legacy = record("old-launch-id", "Maks", 90);
+    legacy.data.definition_id = "agent-1".to_string();
+    reg.upsert(&current).unwrap();
+    reg.upsert(&legacy).unwrap();
+
+    assert_eq!(reg.retire_for_agent("agent-1", RecordScope::Agent).unwrap(), 2);
+    assert!(reg.list_active().unwrap().is_empty());
+
+    assert_eq!(reg.unretire_for_agent("agent-1", RecordScope::Agent).unwrap(), 2);
+    assert_eq!(reg.list_active().unwrap().len(), 2);
+    assert!(
+        reg.get("old-launch-id").unwrap().is_some(),
+        "each record keeps its own file name across the round trip"
+    );
+}
+
+/// `listrecentsessions` dedupes rows by `(definition_id, instance_name)`, so
+/// renaming one of an agent's records and not the others splits it into two
+/// picker rows — one under each name.
+#[test]
+fn set_instance_name_for_agent_renames_every_record_for_that_agent() {
+    let (_t, reg) = fresh();
+    let mut current = record("agent-1", "Maks", 100);
+    current.data.definition_id = "agent-1".to_string();
+    let mut legacy = record("old-launch-id", "Maks", 90);
+    legacy.data.definition_id = "agent-1".to_string();
+    let mut other = record("other-id", "Korp", 100);
+    other.data.definition_id = "agent-2".to_string();
+    reg.upsert(&current).unwrap();
+    reg.upsert(&legacy).unwrap();
+    reg.upsert(&other).unwrap();
+
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 2);
+    let names: std::collections::BTreeSet<String> = reg
+        .list_active()
+        .unwrap()
+        .into_iter()
+        .map(|r| r.data.instance_name)
+        .collect();
+    assert_eq!(
+        names,
+        ["Korp".to_string(), "Renamed".to_string()].into_iter().collect(),
+        "both of agent-1's records move; agent-2's is untouched"
+    );
+    // Idempotent — a second pass has nothing left to change.
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 0);
+}
+
+/// A record with no `instance_name` fails validation on READ, so it never
+/// reaches the picker — but `upsert` doesn't validate, so one can sit on
+/// disk. `set_instance_name_for_agent` scans raw JSON (it has to: matching
+/// on `definition_id` is the whole point), so without its empty-name guard
+/// a rename would "repair" such a record into a visible row for an agent
+/// that never had one.
+#[test]
+fn set_instance_name_for_agent_leaves_an_unnamed_record_invisible() {
+    let (_t, reg) = fresh();
+    let mut unnamed = record("agent-1", "nameless", 100);
+    unnamed.data.definition_id = "agent-1".to_string();
+    unnamed.data.instance_name = String::new();
+    reg.upsert(&unnamed).unwrap();
+    assert!(
+        reg.list_active().unwrap().is_empty(),
+        "precondition: an unnamed record is already invisible"
+    );
+
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 0);
+    assert!(
+        reg.list_active().unwrap().is_empty(),
+        "renaming must not promote an invalid record into a picker row"
+    );
+}
+
+/// Renaming must not resurrect an agent the user deliberately forgot.
+#[test]
+fn set_instance_name_for_agent_leaves_retired_records_retired() {
+    let (_t, reg) = fresh();
+    let mut rec = record("agent-1", "Maks", 100);
+    rec.data.definition_id = "agent-1".to_string();
+    reg.upsert(&rec).unwrap();
+    reg.retire("agent-1").unwrap();
+
+    assert_eq!(reg.set_instance_name_for_agent("agent-1", RecordScope::Agent, "Renamed").unwrap(), 0);
+    assert!(reg.list_active().unwrap().is_empty());
+}
+
 #[test]
 fn unknown_envelope_schema_is_skipped() {
     let (_t, reg) = fresh();
