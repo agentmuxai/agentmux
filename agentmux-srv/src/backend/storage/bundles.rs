@@ -710,23 +710,23 @@ impl Store {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
-        let existing_is_system: Option<i64> = tx
+        let existing: Option<(i64, String, String)> = tx
             .query_row(
-                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                "SELECT is_system, name, instructions FROM db_bundles WHERE id = ?1",
                 params![memory.id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        let row_exists = existing_is_system.is_some();
+        let row_exists = existing.is_some();
 
-        if existing_is_system == Some(0) {
+        if let Some((0, _, _)) = existing {
             return Err(StoreError::Other(
                 "cannot convert an existing non-system Global Memory entry into a system entry"
                     .to_string(),
             ));
         }
 
-        if row_exists {
+        if let Some((_, live_name, live_instructions)) = &existing {
             // Ordered by rowid (insertion sequence), NOT created_at: unlike
             // bundle_version_list's own history ordering (a display
             // concern, where wall-clock order is what a human expects to
@@ -750,6 +750,20 @@ impl Store {
                 )
                 .optional()?;
             if let Some((written_by, content_hash, stored_source_detail)) = latest {
+                // The live db_bundles row must match what the latest
+                // version CLAIMS is there before `written_by` can be
+                // trusted at all — a compatible-schema OLDER build sharing
+                // this store might still run a pre-PR-#3244
+                // `upsertsystemmemory` handler that calls the unversioned
+                // `bundle_upsert_system` directly, changing the live row
+                // without ever touching `db_bundle_versions`. In that case
+                // the latest version would still (wrongly) show the seeder
+                // as the last writer, even though a human's edit is
+                // sitting live and unrecorded. Codex P2, PR #3244.
+                let live_hash = super::bundle_versions::content_hash(live_name, live_instructions);
+                if live_hash != content_hash {
+                    return Ok(BundleReseedOutcome::SkippedLocalEdit);
+                }
                 if written_by != seeder_identity {
                     return Ok(BundleReseedOutcome::SkippedLocalEdit);
                 }
