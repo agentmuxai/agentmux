@@ -116,6 +116,15 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
                      (this build's own manifest is older; likely a different AgentMux version sharing this store)"
                 );
             }
+            Ok(BundleReseedOutcome::SkippedRetired) => {
+                skipped_older += 1;
+                tracing::info!(
+                    id = %entry.id,
+                    manifest_version = manifest.version,
+                    "operator config seed: skipping — a newer manifest generation already retired this id \
+                     (this build's own manifest still lists it; not resurrecting it)"
+                );
+            }
             Err(e) => {
                 skipped_collision += 1;
                 tracing::warn!(
@@ -400,6 +409,60 @@ mod tests {
         let bundle = store.bundle_get("op-old").unwrap();
         assert!(bundle.is_some(), "a human-edited entry must survive even after its manifest entry is removed");
         assert_eq!(bundle.unwrap().instructions, "a human edit worth keeping");
+    }
+
+    /// ReAgent/Codex P2, PR #3244: pruning deliberately retires a row — an
+    /// OLDER build's own manifest (which still lists the retired id) must
+    /// not resurrect it just because the row is gone. Without the
+    /// retirement tombstone, "no db_bundles row" reads exactly like "never
+    /// existed," which is precisely the bug this test guards against.
+    #[test]
+    fn seed_one_does_not_resurrect_an_entry_retired_by_a_newer_generation() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "old content"), 1).unwrap();
+
+        // A newer build (generation 5) prunes it — its own manifest no
+        // longer lists "op-old" at all.
+        assert!(store.bundle_delete_system_if_owned("op-old", WRITTEN_BY, 5).unwrap());
+        assert!(store.bundle_get("op-old").unwrap().is_none());
+
+        // An older build, still on generation 3, whose OWN manifest still
+        // lists "op-old", starts up and tries to seed it.
+        let outcome = seed_one(&store, &entry("op-old", "Old Entry", "old content"), 3).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::SkippedRetired));
+        assert!(store.bundle_get("op-old").unwrap().is_none(), "a retired entry must not be resurrected by an older manifest");
+    }
+
+    /// The mirror case: once this process's own manifest generation has
+    /// caught up to (or passed) the retirement generation, and its own
+    /// manifest legitimately re-adds the id, creation must proceed
+    /// normally — a tombstone blocks resurrection by a STALE manifest, not
+    /// a deliberate re-introduction by a manifest that's caught up.
+    #[test]
+    fn seed_one_recreates_a_retired_entry_once_caller_generation_catches_up() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "old content"), 1).unwrap();
+        assert!(store.bundle_delete_system_if_owned("op-old", WRITTEN_BY, 5).unwrap());
+
+        let outcome = seed_one(&store, &entry("op-old", "Reintroduced Entry", "new content"), 5).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::Created));
+        assert_eq!(store.bundle_get("op-old").unwrap().unwrap().instructions, "new content");
+    }
+
+    /// An ORDINARY human delete via the Armory UI (`bundle_delete_system`,
+    /// via `deletesystemmemory` — records no version at all) must not leave
+    /// a tombstone behind; a manually deleted entry still comes back
+    /// exactly as before this fix (`deleted_entry_is_recreated_...` below).
+    /// Only a generation-aware prune (`bundle_delete_system_if_owned`)
+    /// leaves a tombstone.
+    #[test]
+    fn seed_one_still_recreates_after_an_ordinary_human_delete_no_tombstone() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "old content"), 1).unwrap();
+        assert!(store.bundle_delete_system("op-old").unwrap());
+
+        let outcome = seed_one(&store, &entry("op-old", "Old Entry", "old content"), 1).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::Created));
     }
 
     /// Codex P2, PR #3244: on a machine sharing store.db across two
