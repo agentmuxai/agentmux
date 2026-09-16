@@ -117,7 +117,7 @@
         font-weight: 500;
         color: var(--accent-color);
         min-width: 110px;
-        font-family: var(--monospace-font, monospace);
+        font-family: var(--font-mono);
     }
 
     .slash-autocomplete__description {
@@ -230,20 +230,20 @@
     .slash-help__name {
         font-weight: 500;
         color: var(--accent-color);
-        font-family: var(--monospace-font, monospace);
+        font-family: var(--font-mono);
     }
 
     .slash-help__aliases {
         font-size: 10px;
         color: var(--secondary-text-color);
-        font-family: var(--monospace-font, monospace);
+        font-family: var(--font-mono);
         opacity: 0.75;
     }
 
     .slash-help__arg {
         font-size: 10px;
         color: var(--secondary-text-color);
-        font-family: var(--monospace-font, monospace);
+        font-family: var(--font-mono);
         opacity: 0.6;
     }
 

@@ -86,7 +86,7 @@
 
     .disk-volume-label {
         flex: 0 0 44px;
-        font-family: var(--monofontfamily, monospace);
+        font-family: var(--font-mono);
         color: var(--main-text-color);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -111,7 +111,7 @@
 
     .disk-volume-free {
         flex: 0 0 auto;
-        font-family: var(--monofontfamily, monospace);
+        font-family: var(--font-mono);
         font-size: 11px;
         white-space: nowrap;
     }
