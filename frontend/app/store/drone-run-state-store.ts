@@ -3,8 +3,8 @@
 
 /**
  * Drone run state store — slice #10 of the frontend reducer roadmap
- * and PR 4 of Phase 1.5 (`docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
- * §6 row 4). Closes the "drone-model.ts is not a reducer" drift
+ * and PR 4 of Phase 1.5 (lineage spec retired in #1928).
+ * Closes the "drone-model.ts is not a reducer" drift
  * item by externalizing per-run state from `DroneViewModel` and
  * routing every dispatch through the `recordDispatch` audit ring.
  *

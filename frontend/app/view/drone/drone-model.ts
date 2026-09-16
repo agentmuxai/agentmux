@@ -3,8 +3,8 @@
 //
 // DroneViewModel — owns the per-pane state for the Drone widget.
 //
-// Phase 1.5 PR 4 (`docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
-// §6 row 4) routes per-run state through the `drone-run-state` slice
+// Phase 1.5 PR 4 (lineage spec retired in #1928) routes per-run
+// state through the `drone-run-state` slice
 // (#10) — same lifecycle pattern as slice #9 (browser-pane-state).
 //
 // What's reducer-backed (slot store, `recordDispatch` audit ring):

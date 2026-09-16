@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Unified agent types shared between the agent pane (interactive)
-//! and the drone Agent block (headless). See
-//! `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §3 for the
-//! full design rationale.
+//! and the drone Agent block (headless). The design rationale lived in a
+//! Phase-1.5 lineage spec retired in #1928.
 //!
 //! Wire format is camelCase via `serde(rename_all)` so the TS
 //! mirror in `frontend/types/gotypes.d.ts` requires no field
