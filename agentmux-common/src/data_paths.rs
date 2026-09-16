@@ -748,6 +748,95 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
     }
 }
 
+/// Skip the automatic MuxBus cloud-session reconnect on non-`stable`
+/// channels. Same shape and same reasoning as [`isolated_auth_enabled`] /
+/// [`isolated_settings_enabled`] — see
+/// `docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md`
+/// for the incident this closes.
+///
+/// `CloudSubscriber::init_global` (`agentmux-srv/src/bootstrap.rs`) runs
+/// unconditionally on every launch and performs a real, synchronous
+/// OS-keychain read of the single global `muxbus:global` credential
+/// almost immediately. On macOS that read requires interactive OS consent
+/// the first time a given code signature touches it — and every local
+/// `task package:macos`/`task package`/`task package:linux` build bakes a
+/// brand-new, randomized per-build channel (and, on macOS, a bundle
+/// identifier derived from it) into the binary. So every fresh local
+/// build looks like a never-before-seen app to the Keychain, and the same
+/// already-`Always Allow`'d credential prompts again on every single
+/// local rebuild — indefinitely, since a new random channel is minted
+/// every time.
+///
+/// Resolution order:
+/// 1. `AGENTMUX_ISOLATED_MUXBUS=1` / `=0` — explicit override, always wins.
+/// 2. Otherwise, defaults to isolated (skip the automatic reconnect) for
+///    every channel except `"stable"`. `stable` is the real release
+///    channel — the shipped app and `task dev` must keep muxbus
+///    reconnect-on-launch working exactly as before, so a real user's
+///    cloud session still resumes automatically. A local build simply
+///    starts with no MuxBus session until you explicitly `muxbus.login`
+///    inside that specific build — the same "exercise the real flow
+///    instead of silently inheriting global state" trade-off
+///    `isolated_auth_enabled`/`isolated_settings_enabled` already make.
+/// 3. If `AGENTMUX_CHANNEL` isn't set yet, stays global — conservative
+///    default when channel context is unknown, not a guess.
+///
+/// Deliberately a separate flag from `AGENTMUX_ISOLATED_AUTH`/
+/// `AGENTMUX_ISOLATED_SETTINGS`, not folded into either — MuxBus's cloud
+/// session is a different kind of credential (one real cloud account, not
+/// per-provider OAuth or local UI prefs) and callers should be able to
+/// isolate one without the others.
+pub fn isolated_muxbus_reconnect_enabled() -> bool {
+    isolated_muxbus_reconnect_reason().is_isolated()
+}
+
+/// Which rule decided [`isolated_muxbus_reconnect_enabled`]'s result —
+/// mirrors [`IsolatedAuthReason`]/[`IsolatedSettingsReason`] exactly, same
+/// rationale (one resolution, two views).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolatedMuxbusReconnectReason {
+    /// `AGENTMUX_ISOLATED_MUXBUS=1`.
+    ExplicitOptIn,
+    /// `AGENTMUX_ISOLATED_MUXBUS` is set to anything other than exactly
+    /// `"1"` — fail-safe by construction, same rule as
+    /// `IsolatedAuthReason::ExplicitOptOut` and for the same reason: a
+    /// typo'd opt-out attempt must not silently isolate a non-stable
+    /// channel instead of falling back to the safe (global/reconnect)
+    /// state.
+    ExplicitOptOut,
+    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
+    ChannelDefaultIsolated,
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
+    ChannelDefaultGlobal,
+}
+
+impl IsolatedMuxbusReconnectReason {
+    pub fn is_isolated(self) -> bool {
+        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+    }
+
+    /// Short, log-friendly label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitOptIn => "explicit opt-in",
+            Self::ExplicitOptOut => "explicit opt-out",
+            Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::ChannelDefaultGlobal => "channel default — global",
+        }
+    }
+}
+
+pub fn isolated_muxbus_reconnect_reason() -> IsolatedMuxbusReconnectReason {
+    match std::env::var("AGENTMUX_ISOLATED_MUXBUS") {
+        Ok(v) if v == "1" => IsolatedMuxbusReconnectReason::ExplicitOptIn,
+        Ok(_) => IsolatedMuxbusReconnectReason::ExplicitOptOut,
+        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
+            Ok(ch) if ch != "stable" => IsolatedMuxbusReconnectReason::ChannelDefaultIsolated,
+            _ => IsolatedMuxbusReconnectReason::ChannelDefaultGlobal,
+        },
+    }
+}
+
 /// `~/.agentmux/` root, or the test override via
 /// `AGENTMUX_HOME_OVERRIDE`. Falls back to error if no home dir
 /// can be resolved (rare — should only happen in stripped CI envs).
@@ -1581,6 +1670,121 @@ mod tests {
         );
 
         std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        clear_channel_env();
+    }
+
+    /// RAII guard clearing `AGENTMUX_ISOLATED_MUXBUS` on drop, even on
+    /// panic — mirrors `IsolatedSettingsGuard` above.
+    struct IsolatedMuxbusReconnectGuard;
+    impl Drop for IsolatedMuxbusReconnectGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        }
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_reason_classifies_all_four_states() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        clear_channel_env();
+        let _guard = IsolatedMuxbusReconnectGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "1");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ExplicitOptIn
+        );
+        assert!(isolated_muxbus_reconnect_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "0");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ExplicitOptOut
+        );
+        assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultIsolated
+        );
+        assert!(isolated_muxbus_reconnect_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultGlobal
+        );
+        assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+
+        clear_channel_env();
+        assert_eq!(
+            isolated_muxbus_reconnect_reason(),
+            IsolatedMuxbusReconnectReason::ChannelDefaultGlobal
+        );
+        assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
+        // Same fail-safe rule as isolated_auth_reason's/isolated_settings_reason's
+        // equivalent tests (reagentx P2 on PR #2431) — a typo'd opt-out must
+        // land on ExplicitOptOut (reconnect stays on), not silently isolate.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard = IsolatedMuxbusReconnectGuard;
+
+        for malformed in ["false", "no", "TRUE", "2", ""] {
+            std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", malformed);
+            assert_eq!(
+                isolated_muxbus_reconnect_reason(),
+                IsolatedMuxbusReconnectReason::ExplicitOptOut,
+                "AGENTMUX_ISOLATED_MUXBUS={malformed:?} on a non-stable channel must fail safe to global, not isolate"
+            );
+            assert!(!isolated_muxbus_reconnect_reason().is_isolated());
+        }
+
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        clear_channel_env();
+    }
+
+    #[test]
+    fn isolated_muxbus_reconnect_is_independent_of_auth_and_settings_isolation() {
+        // Same independence guarantee as
+        // isolated_settings_and_isolated_auth_are_independent_flags — a
+        // separate flag on purpose (see the production doc comment).
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard_a = IsolatedAuthGuard;
+        let _guard_s = IsolatedSettingsGuard;
+        let _guard_m = IsolatedMuxbusReconnectGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "0");
+        assert!(!isolated_muxbus_reconnect_enabled());
+        assert!(
+            isolated_auth_enabled(),
+            "AGENTMUX_ISOLATED_MUXBUS=0 must not disable auth isolation"
+        );
+        assert!(
+            isolated_settings_enabled(),
+            "AGENTMUX_ISOLATED_MUXBUS=0 must not disable settings isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_MUXBUS");
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+        assert!(!isolated_auth_enabled());
+        assert!(
+            isolated_muxbus_reconnect_enabled(),
+            "AGENTMUX_ISOLATED_AUTH=0 must not disable muxbus-reconnect isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         clear_channel_env();
     }
 
