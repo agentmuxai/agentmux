@@ -1,7 +1,9 @@
 # Retro: status-bar performance metrics silently rendered in the wrong font for a long time — the recent "font upgrade" just fixed it
 
 **Date:** 2026-09-16
-**Status:** not a bug — investigated and explained; no code change needed.
+**Status:** implemented — not a bug in the font-system PRs themselves (they're
+correct); root-caused here, and the pre-existing look was then restored on
+purpose in `StatusBar.scss` per the Outcome section below.
 **Severity:** Cosmetic. No data or functionality was ever affected.
 **Affects:** `.stat-mono` in `frontend/app/statusbar/StatusBar.scss` — the CPU,
 GPU, memory, commit/pagefile, disk, network, and uptime readouts in the status
