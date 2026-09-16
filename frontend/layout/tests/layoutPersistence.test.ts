@@ -100,9 +100,9 @@ function insertBlock(model: LayoutModel, blockId: string) {
 }
 
 function setPendingActions(model: LayoutModel, actions: any[]) {
-    const waveObj = model.getter(model.waveObjectAtom) as LayoutState;
-    const sig = layoutStateSignals.get(waveObj.oid);
-    if (sig) sig._set({ ...waveObj, pendingbackendactions: actions });
+    const muxObj = model.getter(model.muxObjectAtom) as LayoutState;
+    const sig = layoutStateSignals.get(muxObj.oid);
+    if (sig) sig._set({ ...muxObj, pendingbackendactions: actions });
 }
 
 function findBlock(model: LayoutModel, blockId: string) {

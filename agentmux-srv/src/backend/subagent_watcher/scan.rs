@@ -516,7 +516,7 @@ impl SubagentWatcher {
     /// batch-not-spam precedent `dispatch:activity` already established in
     /// this file for the same reason.
     ///
-    /// The frontend `waveEventSubscribe({ eventType: "subagent:abandoned",
+    /// The frontend `muxEventSubscribe({ eventType: "subagent:abandoned",
     /// ... })` listener lands in the immediately-following PR (Phase B,
     /// #2235 — SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20),
     /// not this one. Broadcasting with no subscriber yet is inert, not

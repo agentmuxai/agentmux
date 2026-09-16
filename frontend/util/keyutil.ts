@@ -15,11 +15,11 @@ function setKeyUtilPlatform(platform: NodeJS.Platform) {
 }
 
 function keydownWrapper(
-    fn: (waveEvent: MuxKeyboardEvent) => boolean
+    fn: (muxEvent: MuxKeyboardEvent) => boolean
 ): (event: KeyboardEvent) => void {
     return (event: KeyboardEvent) => {
-        const waveEvent = adaptFromReactOrNativeKeyEvent(event);
-        const rtnVal = fn(waveEvent);
+        const muxEvent = adaptFromReactOrNativeKeyEvent(event);
+        const rtnVal = fn(muxEvent);
         if (rtnVal) {
             event.preventDefault();
             event.stopPropagation();

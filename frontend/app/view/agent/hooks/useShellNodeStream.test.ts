@@ -24,7 +24,7 @@ const hub = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; scope: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; scope: string; handler: (e: unknown) => void }) => {
         const key = `${sub.eventType}:${sub.scope}`;
         hub.handlers.set(key, sub.handler);
         return () => hub.handlers.delete(key);

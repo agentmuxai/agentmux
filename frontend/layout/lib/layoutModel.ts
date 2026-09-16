@@ -132,7 +132,7 @@ export class LayoutModel {
      * MuxObject signal atom for persistence
      * @internal
      */
-    waveObjectAtom: WritableMuxObjectAtom<LayoutState>;
+    muxObjectAtom: WritableMuxObjectAtom<LayoutState>;
     /**
      * Debounce timer for persistence
      * @internal
@@ -419,7 +419,7 @@ export class LayoutModel {
             this.persistDebounceTimer = null;
             this.processedActionIds = new Set();
 
-            this.waveObjectAtom = getLayoutStateAtomFromTab(tabAtom);
+            this.muxObjectAtom = getLayoutStateAtomFromTab(tabAtom);
 
             this.localTreeStateAtom = createSignalAtom<LayoutTreeState>({
                 rootNode: undefined,

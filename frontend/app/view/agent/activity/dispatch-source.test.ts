@@ -13,7 +13,7 @@ const hub = vi.hoisted(() => ({
 // file's own comment for why only `wps` is mocked, not the whole `wos`
 // module.
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);
     }),

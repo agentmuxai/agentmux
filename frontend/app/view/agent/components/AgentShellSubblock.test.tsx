@@ -57,7 +57,7 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
 // invisible to all 12 tests. `queuePersistedStatus` puts an event in that
 // replay slot instead.
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
+    muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
         const key = `${opts.eventType}|${opts.scope}`;
         wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
         const persisted = wpsPersisted.get(key);
@@ -171,12 +171,12 @@ vi.mock("@/app/view/term/termwrap", () => {
             id: string,
             _container: HTMLElement,
             options: { fontSize: number },
-            waveOptions: { sendDataHandler: (data: string) => void }
+            muxOptions: { sendDataHandler: (data: string) => void }
         ) {
             this.id = id;
             this.fontSize = options.fontSize;
             this.terminal.options.fontSize = options.fontSize;
-            this.sendDataHandler = waveOptions.sendDataHandler;
+            this.sendDataHandler = muxOptions.sendDataHandler;
             termWrapInstances.push(this as any);
         }
         async init() {

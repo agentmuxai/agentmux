@@ -18,7 +18,7 @@ import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms, staticTabId, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { sendWSCommand } from "@/app/store/ws";
 import { TermWrap } from "@/app/view/term/termwrap";
@@ -237,7 +237,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // one exits gets its own scope, and must arm independently.
         let sawRunning = false;
         let exitNotified = false;
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", id),
             handler: (event) => {

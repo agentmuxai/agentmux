@@ -10,7 +10,7 @@ import { createSignal } from "solid-js";
 export type KeyHandler = (event: MuxKeyboardEvent) => boolean;
 
 const [simpleControlShift, setSimpleControlShift] = createSignal(false);
-export const globalKeyMap = new Map<string, (waveEvent: MuxKeyboardEvent) => boolean>();
+export const globalKeyMap = new Map<string, (muxEvent: MuxKeyboardEvent) => boolean>();
 export const globalChordMap = new Map<string, Map<string, KeyHandler>>();
 let globalKeybindingsDisabled = false;
 
@@ -85,9 +85,9 @@ function shouldDispatchToBlock(e: MuxKeyboardEvent): boolean {
 let lastHandledEvent: KeyboardEvent | null = null;
 
 // returns [keymatch, T]
-function checkKeyMap<T>(waveEvent: MuxKeyboardEvent, keyMap: Map<string, T>): [string, T] {
+function checkKeyMap<T>(muxEvent: MuxKeyboardEvent, keyMap: Map<string, T>): [string, T] {
     for (const key of keyMap.keys()) {
-        if (keyutil.checkKeyPressed(waveEvent, key)) {
+        if (keyutil.checkKeyPressed(muxEvent, key)) {
             const val = keyMap.get(key);
             return [key, val];
         }
@@ -95,11 +95,11 @@ function checkKeyMap<T>(waveEvent: MuxKeyboardEvent, keyMap: Map<string, T>): [s
     return [null, null];
 }
 
-export function appHandleKeyDown(waveEvent: MuxKeyboardEvent): boolean {
+export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
     if (globalKeybindingsDisabled) {
         return false;
     }
-    const nativeEvent = (waveEvent as any).nativeEvent;
+    const nativeEvent = (muxEvent as any).nativeEvent;
     if (lastHandledEvent != null && nativeEvent != null && lastHandledEvent === nativeEvent) {
         console.log("lastHandledEvent return false");
         return false;
@@ -109,25 +109,25 @@ export function appHandleKeyDown(waveEvent: MuxKeyboardEvent): boolean {
         console.log("handle activeChord", activeChord);
         // If we're in chord mode, look for the second key.
         const chordBindings = globalChordMap.get(activeChord);
-        const [, handler] = checkKeyMap(waveEvent, chordBindings);
+        const [, handler] = checkKeyMap(muxEvent, chordBindings);
         if (handler) {
             resetChord();
-            return handler(waveEvent);
+            return handler(muxEvent);
         } else {
             // invalid chord; reset state and consume key
             resetChord();
             return true;
         }
     }
-    const [chordKeyMatch] = checkKeyMap(waveEvent, globalChordMap);
+    const [chordKeyMatch] = checkKeyMap(muxEvent, globalChordMap);
     if (chordKeyMatch) {
         setActiveChord(chordKeyMatch);
         return true;
     }
 
-    const [, globalHandler] = checkKeyMap(waveEvent, globalKeyMap);
+    const [, globalHandler] = checkKeyMap(muxEvent, globalKeyMap);
     if (globalHandler) {
-        const handled = globalHandler(waveEvent);
+        const handled = globalHandler(muxEvent);
         if (handled) {
             return true;
         }
@@ -135,11 +135,11 @@ export function appHandleKeyDown(waveEvent: MuxKeyboardEvent): boolean {
     const layoutModel = getLayoutModelForStaticTab();
     const focusedNode = layoutModel.focusedNode?.();
     const blockId = focusedNode?.data?.blockId;
-    if (blockId != null && shouldDispatchToBlock(waveEvent)) {
+    if (blockId != null && shouldDispatchToBlock(muxEvent)) {
         const bcm = getBlockComponentModel(blockId);
         const viewModel = bcm?.viewModel;
         if (viewModel?.keyDownHandler) {
-            const handledByBlock = viewModel.keyDownHandler(waveEvent);
+            const handledByBlock = viewModel.keyDownHandler(muxEvent);
             if (handledByBlock) {
                 return true;
             }

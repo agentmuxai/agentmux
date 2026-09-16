@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
@@ -40,7 +40,7 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
     // the chart to blank under load and created a drop/reload feedback loop.
     createEffect(() => {
         const cn = connName();
-        const unsubFn = waveEventSubscribe({
+        const unsubFn = muxEventSubscribe({
             eventType: WpsEvent.SysInfo,
             scope: cn,
             handler: (event) => {

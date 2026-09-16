@@ -29,7 +29,7 @@ const hub = vi.hoisted(() => ({
     cancelCliLogin: vi.fn(),
     ensureCapability: vi.fn(),
     getCapability: vi.fn(),
-    waveEventSubscribe: vi.fn(),
+    muxEventSubscribe: vi.fn(),
     getMuxObjectAtom: vi.fn(),
 }));
 
@@ -51,7 +51,7 @@ vi.mock("@/app/store/toolchain-capabilities", () => ({
     ensureCapability: (...args: unknown[]) => hub.ensureCapability(...args),
     getCapability: (...args: unknown[]) => hub.getCapability(...args),
 }));
-vi.mock("@/app/store/wps", () => ({ waveEventSubscribe: (...args: unknown[]) => hub.waveEventSubscribe(...args) }));
+vi.mock("@/app/store/wps", () => ({ muxEventSubscribe: (...args: unknown[]) => hub.muxEventSubscribe(...args) }));
 vi.mock("@/app/store/wps-events", () => ({ WpsEvent: { InstallProgress: "install_progress" } }));
 vi.mock("@/app/store/wos", () => ({
     makeORef: (kind: string, id: string) => `${kind}:${id}`,
@@ -94,7 +94,7 @@ beforeEach(() => {
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
     hub.ensureCapability.mockReset().mockResolvedValue(undefined);
     hub.getCapability.mockReset().mockReturnValue({ status: "available" });
-    hub.waveEventSubscribe.mockReset().mockReturnValue(() => {});
+    hub.muxEventSubscribe.mockReset().mockReturnValue(() => {});
     // Default: a brand-new agent that has never resolved its CLI before
     // (no "cmd" in meta) — see the first-login vs auth-expired tests below
     // for the "has run before" case.

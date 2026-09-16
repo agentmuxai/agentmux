@@ -25,16 +25,16 @@ type MuxEventUnsubscribe = {
 
 // key is "eventType" or "eventType|oref"
 const fileSubjects = new Map<string, SubjectWithRef<WSFileEventData>>();
-const waveEventSubjects = new Map<string, MuxEventSubjectContainer[]>();
+const muxEventSubjects = new Map<string, MuxEventSubjectContainer[]>();
 
 function wpsReconnectHandler() {
-    for (const eventType of waveEventSubjects.keys()) {
+    for (const eventType of muxEventSubjects.keys()) {
         updateMuxEventSub(eventType);
     }
 }
 
 function makeMuxReSubCommand(eventType: string): RpcMessage {
-    let subjects = waveEventSubjects.get(eventType);
+    let subjects = muxEventSubjects.get(eventType);
     if (subjects == null) {
         return { command: "eventunsub", data: eventType };
     }
@@ -56,19 +56,19 @@ function updateMuxEventSub(eventType: string) {
     sendRawRpcMessage(command);
 }
 
-function waveEventSubscribe(...subscriptions: MuxEventSubscription[]): () => void {
+function muxEventSubscribe(...subscriptions: MuxEventSubscription[]): () => void {
     const unsubs: MuxEventUnsubscribe[] = [];
     const eventTypeSet = new Set<string>();
     for (const subscription of subscriptions) {
-        // console.log("waveEventSubscribe", subscription);
+        // console.log("muxEventSubscribe", subscription);
         if (subscription.handler == null) {
             return;
         }
         const id: string = crypto.randomUUID();
-        let subjects = waveEventSubjects.get(subscription.eventType);
+        let subjects = muxEventSubjects.get(subscription.eventType);
         if (subjects == null) {
             subjects = [];
-            waveEventSubjects.set(subscription.eventType, subjects);
+            muxEventSubjects.set(subscription.eventType, subjects);
         }
         const subcont: MuxEventSubjectContainer = { id, handler: subscription.handler, scope: subscription.scope };
         subjects.push(subcont);
@@ -78,13 +78,13 @@ function waveEventSubscribe(...subscriptions: MuxEventSubscription[]): () => voi
     for (const eventType of eventTypeSet) {
         updateMuxEventSub(eventType);
     }
-    return () => waveEventUnsubscribe(...unsubs);
+    return () => muxEventUnsubscribe(...unsubs);
 }
 
-function waveEventUnsubscribe(...unsubscribes: MuxEventUnsubscribe[]) {
+function muxEventUnsubscribe(...unsubscribes: MuxEventUnsubscribe[]) {
     const eventTypeSet = new Set<string>();
     for (const unsubscribe of unsubscribes) {
-        let subjects = waveEventSubjects.get(unsubscribe.eventType);
+        let subjects = muxEventSubjects.get(unsubscribe.eventType);
         if (subjects == null) {
             continue;
         }
@@ -94,7 +94,7 @@ function waveEventUnsubscribe(...unsubscribes: MuxEventUnsubscribe[]) {
         }
         subjects.splice(idx, 1);
         if (subjects.length === 0) {
-            waveEventSubjects.delete(unsubscribe.eventType);
+            muxEventSubjects.delete(unsubscribe.eventType);
         }
         eventTypeSet.add(unsubscribe.eventType);
     }
@@ -132,7 +132,7 @@ function getFileSubject(zoneId: string, fileName: string): SubjectWithRef<WSFile
 const DEFERRED_EVENTS = new Set(["sysinfo", "blockstats"]);
 
 function dispatchToSubjects(event: MuxEvent) {
-    const subjects = waveEventSubjects.get(event.event);
+    const subjects = muxEventSubjects.get(event.event);
     if (subjects == null) return;
     for (const scont of subjects) {
         if (isBlank(scont.scope)) {
@@ -154,4 +154,4 @@ function handleMuxEvent(event: MuxEvent) {
     dispatchToSubjects(event);
 }
 
-export { getFileSubject, handleMuxEvent, waveEventSubscribe, wpsReconnectHandler };
+export { getFileSubject, handleMuxEvent, muxEventSubscribe, wpsReconnectHandler };

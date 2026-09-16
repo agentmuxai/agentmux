@@ -8,7 +8,7 @@ const handlers: Array<(ev: unknown) => void> = [];
 const unsubs = vi.fn();
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: (opts: { handler: (ev: unknown) => void }) => {
+    muxEventSubscribe: (opts: { handler: (ev: unknown) => void }) => {
         handlers.push(opts.handler);
         return unsubs;
     },

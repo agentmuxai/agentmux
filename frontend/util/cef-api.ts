@@ -522,7 +522,7 @@ export function buildCefApi(): AppApi {
         },
 
         // --- Keyboard ---
-        onReinjectKey: (callback: (waveEvent: MuxKeyboardEvent) => void) => {
+        onReinjectKey: (callback: (muxEvent: MuxKeyboardEvent) => void) => {
             listenEvent<MuxKeyboardEvent>("reinject-key", (payload) => {
                 callback(payload);
             });

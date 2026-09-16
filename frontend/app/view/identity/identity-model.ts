@@ -11,7 +11,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { Logger } from "@/util/logger";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
@@ -350,7 +350,7 @@ export function primeAccountCache(): void {
     // primeAccountCache() calls don't stack duplicate handlers.
     if (!_liveSyncInstalled) {
         _liveSyncInstalled = true;
-        waveEventSubscribe({
+        muxEventSubscribe({
             eventType: "identityaccounts:changed",
             handler: () => void refreshAccountCache(),
         });

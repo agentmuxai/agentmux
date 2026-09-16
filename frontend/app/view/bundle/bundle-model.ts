@@ -27,7 +27,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 
 /** What the form fields look like in flight. Maps 1:1 to the Memory
@@ -258,7 +258,7 @@ export class BundleViewModel implements ViewModel {
 
         // Kick off initial load. Errors land in errorAtom for UI surfacing.
         void this.refresh();
-        this.unsubChanged = waveEventSubscribe({
+        this.unsubChanged = muxEventSubscribe({
             eventType: "memories:changed",
             handler: () => void this.refresh(),
         });

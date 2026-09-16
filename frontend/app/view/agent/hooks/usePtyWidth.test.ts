@@ -32,7 +32,7 @@ vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: (...args: unknown[]) => hub.getStatus(...args) },
 }));
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);
     }),

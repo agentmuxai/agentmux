@@ -815,8 +815,8 @@ async function reinitMux() {
     );
 
     await WOS.reloadMuxObject<Client>(WOS.makeORef("client", savedInitOpts.clientId));
-    const waveWindow = await WOS.reloadMuxObject<MuxWindow>(WOS.makeORef("window", savedInitOpts.windowId));
-    const ws = await WOS.reloadMuxObject<Workspace>(WOS.makeORef("workspace", waveWindow.workspaceid));
+    const muxWindow = await WOS.reloadMuxObject<MuxWindow>(WOS.makeORef("window", savedInitOpts.windowId));
+    const ws = await WOS.reloadMuxObject<Workspace>(WOS.makeORef("workspace", muxWindow.workspaceid));
     const initialTab = await WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", savedInitOpts.tabId));
     await WOS.reloadMuxObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate));
     reloadAllWorkspaceTabs(ws);
@@ -1083,7 +1083,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     // ensures client/window/workspace are loaded into the cache before rendering
     t = performance.now();
-    const [client, waveWindow, initialTab] = await withTimeout(
+    const [client, muxWindow, initialTab] = await withTimeout(
         Promise.all([
             WOS.loadAndPinMuxObject<Client>(WOS.makeORef("client", initOpts.clientId)),
             WOS.loadAndPinMuxObject<MuxWindow>(WOS.makeORef("window", initOpts.windowId)),
@@ -1097,7 +1097,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     const [ws, layoutState] = await withTimeout(
         Promise.all([
-            WOS.loadAndPinMuxObject<Workspace>(WOS.makeORef("workspace", waveWindow.workspaceid)),
+            WOS.loadAndPinMuxObject<Workspace>(WOS.makeORef("workspace", muxWindow.workspaceid)),
             WOS.reloadMuxObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate)),
         ]),
         RPC_TIMEOUT,
@@ -1107,7 +1107,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     loadAllWorkspaceTabs(ws);
-    WOS.wpsSubscribeToObject(WOS.makeORef("workspace", waveWindow.workspaceid));
+    WOS.wpsSubscribeToObject(WOS.makeORef("workspace", muxWindow.workspaceid));
     tlog("loadAllWorkspaceTabs", t);
 
     installWindowTitleEffect(initOpts.windowId);

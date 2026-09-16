@@ -3,7 +3,7 @@
 //
 // MuxObjectStore — migrated to SolidJS signals.
 
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
@@ -83,7 +83,7 @@ function debugLogBackendCall(methodName: string, durationStr: string, args: any[
 }
 
 function wpsSubscribeToObject(oref: string): () => void {
-    return waveEventSubscribe({
+    return muxEventSubscribe({
         eventType: WpsEvent.MuxObjUpdate,
         scope: oref,
         handler: (event) => {
@@ -100,7 +100,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
         const ga = window.globalAtoms as GlobalAtomsType;
         uiContext = typeof ga?.uiContext === "function" ? (ga.uiContext as any)() : null;
     }
-    const waveCall: WebCallType = {
+    const muxCall: WebCallType = {
         service,
         method,
         args,
@@ -123,7 +123,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
     const fetchPromise = fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(waveCall),
+        body: JSON.stringify(muxCall),
     });
     return fetchPromise
         .then((resp) => {
@@ -146,7 +146,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
 // MuxObject cache — signals replace Jotai atoms
 // ---------------------------------------------------------------------------
 
-const waveObjectValueCache = new Map<string, MuxObjectValue<any>>();
+const muxObjectValueCache = new Map<string, MuxObjectValue<any>>();
 const defaultHoldTime = 5000;
 
 function createMuxValueObject<T extends MuxObj>(oref: string, shouldFetch: boolean): MuxObjectValue<T> {
@@ -187,16 +187,16 @@ function createMuxValueObject<T extends MuxObj>(oref: string, shouldFetch: boole
 }
 
 function getMuxObjectValue<T extends MuxObj>(oref: string, createIfMissing = true): MuxObjectValue<T> {
-    let wov = waveObjectValueCache.get(oref);
+    let wov = muxObjectValueCache.get(oref);
     if (wov === undefined && createIfMissing) {
         wov = createMuxValueObject(oref, true);
-        waveObjectValueCache.set(oref, wov);
+        muxObjectValueCache.set(oref, wov);
     }
     return wov;
 }
 
 function reloadMuxObject<T extends MuxObj>(oref: string): Promise<T> {
-    let wov = waveObjectValueCache.get(oref);
+    let wov = muxObjectValueCache.get(oref);
     if (wov === undefined) {
         wov = getMuxObjectValue<T>(oref, true);
         return wov.pendingPromise!;
@@ -304,9 +304,9 @@ function updateMuxObjects(vals: MuxObjUpdate[]) {
 
 function cleanMuxObjectCache() {
     const now = Date.now();
-    for (const [oref, wov] of waveObjectValueCache) {
+    for (const [oref, wov] of muxObjectValueCache) {
         if (wov.refCount == 0 && wov.holdTime < now) {
-            waveObjectValueCache.delete(oref);
+            muxObjectValueCache.delete(oref);
         }
     }
 }

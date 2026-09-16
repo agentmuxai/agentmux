@@ -74,7 +74,7 @@ class ObjectServiceType {
     }
 
     // @returns object updates
-    UpdateObject(waveObj: MuxObj, returnUpdates: boolean): Promise<void> {
+    UpdateObject(muxObj: MuxObj, returnUpdates: boolean): Promise<void> {
         return WOS.callBackendService("object", "UpdateObject", Array.from(arguments))
     }
 

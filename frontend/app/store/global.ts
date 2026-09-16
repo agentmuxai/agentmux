@@ -19,7 +19,7 @@ import { openModal } from "./modalmodel";
 import { AboutModal } from "@/app/modals/about";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as WOS from "./wos";
-import { getFileSubject, waveEventSubscribe } from "./wps";
+import { getFileSubject, muxEventSubscribe } from "./wps";
 import { getApi } from "./app-api";
 import {
     fullConfigAtom,
@@ -41,7 +41,7 @@ import {
     staticTabId,
     setStaticTabId,
     client,
-    waveWindow,
+    muxWindow,
     workspace,
     tabAtom,
     activeTabId,
@@ -131,7 +131,7 @@ export const atoms = {
     clientId: clientId,
     uiContext: uiContext,
     client: client,
-    waveWindow: waveWindow,
+    muxWindow: muxWindow,
     workspace: workspace,
     fullConfigAtom: fullConfigAtom,
     settingsAtom: settingsAtom,
@@ -221,7 +221,7 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 }
 
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
-    waveEventSubscribe(
+    muxEventSubscribe(
         {
             eventType: WpsEvent.MuxObjUpdate,
             handler: (event) => {
@@ -337,7 +337,7 @@ export {
 export {
     staticTabId,
     client,
-    waveWindow,
+    muxWindow,
     workspace,
     tabAtom,
     activeTabId,

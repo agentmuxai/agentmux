@@ -318,7 +318,7 @@ const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
 /// only re-derives `focusedNodeId` at initial model construction or via a
 /// `pendingBackendActions`-driven tree action — a bare `focusednodeid`
 /// MuxObj push to an ALREADY-MOUNTED `LayoutModel` (confirmed by reading
-/// the function directly: no branch reads `waveObj.focusednodeid` outside
+/// the function directly: no branch reads `muxObj.focusednodeid` outside
 /// those two triggers) is silently never applied to the live `treeState`.
 /// Making that work would mean changing `onBackendUpdate`'s reactivity —
 /// shared code this file's own comments show has deliberately been kept

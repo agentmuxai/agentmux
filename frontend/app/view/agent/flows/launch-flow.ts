@@ -47,7 +47,7 @@ import { translateError } from "@/app/errors/translate";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ensureCapability, getCapability } from "@/app/store/toolchain-capabilities";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { BlockService } from "@/app/store/services";
@@ -218,7 +218,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
 
     // Subscribe to install progress events — backend streams npm/installer output line-by-line
     const installScope = WOS.makeORef("block", blockId);
-    const unsubInstall = waveEventSubscribe({
+    const unsubInstall = muxEventSubscribe({
         eventType: WpsEvent.InstallProgress,
         scope: installScope,
         handler: (event: any) => {

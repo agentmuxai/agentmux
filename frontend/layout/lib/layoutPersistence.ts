@@ -24,14 +24,14 @@ import type { LayoutModel } from "./layoutModel";
  * @param model The LayoutModel instance.
  */
 export function initializeFromMuxObject(model: LayoutModel) {
-    const waveObjState = model.getter(model.waveObjectAtom);
+    const muxObjState = model.getter(model.muxObjectAtom);
 
     const initialState: LayoutTreeState = {
-        rootNode: waveObjState?.rootnode,
-        focusedNodeId: waveObjState?.focusednodeid,
-        magnifiedNodeId: waveObjState?.magnifiednodeid,
+        rootNode: muxObjState?.rootnode,
+        focusedNodeId: muxObjState?.focusednodeid,
+        magnifiedNodeId: muxObjState?.magnifiednodeid,
         leafOrder: undefined,
-        pendingBackendActions: waveObjState?.pendingbackendactions,
+        pendingBackendActions: muxObjState?.pendingbackendactions,
     };
 
     model.treeState = initialState;
@@ -57,18 +57,18 @@ export function initializeFromMuxObject(model: LayoutModel) {
  * @param model The LayoutModel instance.
  */
 export function onBackendUpdate(model: LayoutModel) {
-    const waveObj = model.getter(model.waveObjectAtom);
-    if (!waveObj) return;
+    const muxObj = model.getter(model.muxObjectAtom);
+    if (!muxObj) return;
 
     // If the model has no rootNode but the backend does, re-initialize.
     // This handles tear-off windows where the LayoutState wasn't loaded
     // when the LayoutModel was first constructed.
-    if (!model.treeState.rootNode && waveObj.rootnode) {
+    if (!model.treeState.rootNode && muxObj.rootnode) {
         initializeFromMuxObject(model);
         return;
     }
 
-    const pendingActions = waveObj?.pendingbackendactions;
+    const pendingActions = muxObj?.pendingbackendactions;
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
     }
@@ -178,8 +178,8 @@ export function pruneDanglingLeaves(model: LayoutModel) {
  * @param model The LayoutModel instance.
  */
 export async function processPendingBackendActions(model: LayoutModel) {
-    const waveObj = model.getter(model.waveObjectAtom);
-    const actions = waveObj?.pendingbackendactions;
+    const muxObj = model.getter(model.muxObjectAtom);
+    const actions = muxObj?.pendingbackendactions;
     if (!actions?.length) return;
 
     model.treeState.pendingBackendActions = undefined;
@@ -394,13 +394,13 @@ export function persistToBackend(model: LayoutModel) {
     }
 
     model.persistDebounceTimer = setTimeout(() => {
-        const waveObj = model.getter(model.waveObjectAtom);
-        if (!waveObj) return;
+        const muxObj = model.getter(model.muxObjectAtom);
+        if (!muxObj) return;
 
-        waveObj.rootnode = model.treeState.rootNode;
-        waveObj.focusednodeid = model.treeState.focusedNodeId;
-        waveObj.magnifiednodeid = model.treeState.magnifiedNodeId;
-        waveObj.leaforder = model.treeState.leafOrder;
+        muxObj.rootnode = model.treeState.rootNode;
+        muxObj.focusednodeid = model.treeState.focusedNodeId;
+        muxObj.magnifiednodeid = model.treeState.magnifiedNodeId;
+        muxObj.leaforder = model.treeState.leafOrder;
         // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
         // the pendingbackendactions queue is BACKEND-owned. Never write our
         // (often stale) local copy — a debounced persist racing a freshly
@@ -409,13 +409,13 @@ export function persistToBackend(model: LayoutModel) {
         // this model has already processed: ordinary persists preserve
         // unseen actions verbatim, and post-processing persists still clear
         // consumed ones.
-        const liveQueue = model.getter(model.waveObjectAtom)?.pendingbackendactions;
+        const liveQueue = model.getter(model.muxObjectAtom)?.pendingbackendactions;
         const unprocessed = liveQueue?.filter(
             (a) => a.actionid && !model.processedActionIds.has(a.actionid)
         );
-        waveObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
+        muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
 
-        model.setter(model.waveObjectAtom, waveObj);
+        model.setter(model.muxObjectAtom, muxObj);
         model.persistDebounceTimer = null;
     }, 100);
 }

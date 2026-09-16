@@ -8,7 +8,7 @@
 import { createMemo, createSignal } from "solid-js";
 import { isBlank } from "@/util/util";
 import { WpsEvent } from "@/app/store/wps-events";
-import { waveEventSubscribe } from "./wps";
+import { muxEventSubscribe } from "./wps";
 import { ClientService } from "./services";
 
 // Connection status map: connName → ConnStatus signal
@@ -31,7 +31,7 @@ export async function loadConnStatus() {
 }
 
 export function subscribeToConnEvents() {
-    waveEventSubscribe({
+    muxEventSubscribe({
         eventType: WpsEvent.ConnChange,
         handler: (event: MuxEvent) => {
             try {

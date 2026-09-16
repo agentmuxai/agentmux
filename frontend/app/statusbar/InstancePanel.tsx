@@ -220,7 +220,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         return resolveFloatingPaneName({ blockViewLabel, workspaceName, indexInOpenPanes: idx });
     };
 
-    // For THIS window's row, fall back to atoms.waveWindow()?.oid when
+    // For THIS window's row, fall back to atoms.muxWindow()?.oid when
     // the entry's windowId is still null. WindowEntry.windowId is null
     // for the first ~100ms after a window opens — until the
     // registerBackendWindow IPC round-trip completes (see comment at
@@ -230,7 +230,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // workspace name — visible inconsistency the user reported.
     const resolveEntryWindowId = (entry: WindowEntry): string | null => {
         if (entry.windowId) return entry.windowId;
-        if (entry.label === myLabel()) return atoms.waveWindow()?.oid ?? null;
+        if (entry.label === myLabel()) return atoms.muxWindow()?.oid ?? null;
         return null;
     };
 
@@ -274,7 +274,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
 
     const enterRename = (entry: WindowEntry, currentName: string) => {
         // Same fallback as resolveName: for this window's row we can use
-        // atoms.waveWindow()?.oid when the entry's windowId hasn't been
+        // atoms.muxWindow()?.oid when the entry's windowId hasn't been
         // populated yet via the registerBackendWindow round-trip.
         if (!resolveEntryWindowId(entry)) return;
         setEditingLabel(entry.label);

@@ -23,7 +23,7 @@ import {
     type AgentBlockResult,
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
@@ -331,7 +331,7 @@ export class DroneViewModel implements ViewModel {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
-        this.activeRunUnsub = waveEventSubscribe({
+        this.activeRunUnsub = muxEventSubscribe({
             eventType: `dronerun:${runId}`,
             scope: "",
             handler: (event) => {

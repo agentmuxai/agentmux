@@ -15,7 +15,7 @@ import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
@@ -171,7 +171,7 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
                 extensions: ALL_MEDIA_EXTENSIONS,
             }),
         );
-        unsubFileChanged = waveEventSubscribe({
+        unsubFileChanged = muxEventSubscribe({
             eventType: WpsEvent.MediaFileChanged,
             scope: makeORef("block", model.blockId),
             handler: (event) => {

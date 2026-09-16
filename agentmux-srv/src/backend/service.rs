@@ -208,7 +208,7 @@ pub fn get_method_meta(service: &str, method: &str) -> Option<MethodMeta> {
         }),
         ("object", "UpdateObject") => Some(MethodMeta {
             desc: Some("update a wave object".into()),
-            arg_names: vec!["uiContext".into(), "waveObj".into(), "returnUpdates".into()],
+            arg_names: vec!["uiContext".into(), "muxObj".into(), "returnUpdates".into()],
             return_desc: None,
         }),
 

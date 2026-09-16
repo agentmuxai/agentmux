@@ -37,7 +37,7 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService, ObjectService } from "@/app/store/services";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
@@ -2284,7 +2284,7 @@ const AgentPresentationView = ({
     createEffect(() => {
         const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
         if (!agentDefinitionId) return;
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: `agentidentities:changed:${agentDefinitionId}`,
             handler: () => {
                 void refreshLinkedAccountId();

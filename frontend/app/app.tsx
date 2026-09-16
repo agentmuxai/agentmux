@@ -391,7 +391,7 @@ const AppInner = () => {
     const IS_CREDENTIAL_APPROVAL = new URLSearchParams(window.location.search).get("initialView") === "credential-approval";
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     const client = atoms.client;
-    const windowData = atoms.waveWindow;
+    const windowData = atoms.muxWindow;
     const isFullScreen = atoms.isFullScreen;
 
     if (IS_CREDENTIAL_APPROVAL) {

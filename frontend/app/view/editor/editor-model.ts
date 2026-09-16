@@ -48,7 +48,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
@@ -243,7 +243,7 @@ export class EditorViewModel implements ViewModel {
 
         // Live-reload: one subscription per pane, scoped to this block.
         // Fires when a path open in one of this pane's tabs changes on disk.
-        this._unsubFileChanged = waveEventSubscribe({
+        this._unsubFileChanged = muxEventSubscribe({
             eventType: WpsEvent.EditorFileChanged,
             scope: makeORef("block", blockId),
             handler: (event) => {

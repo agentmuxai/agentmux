@@ -17,7 +17,7 @@ declare global {
         clientId: Accessor<string>;
         client: Accessor<Client>;
         uiContext: Accessor<UIContext>;
-        waveWindow: Accessor<MuxWindow>;
+        muxWindow: Accessor<MuxWindow>;
         workspace: Accessor<Workspace>;
         fullConfigAtom: Accessor<FullConfigType>;
         settingsAtom: Accessor<SettingsType>;
@@ -141,7 +141,7 @@ declare global {
         installAppUpdate: () => void;
         onMenuItemAbout: (callback: () => void) => void;
         updateWindowControlsOverlay: (rect: Dimensions) => void;
-        onReinjectKey: (callback: (waveEvent: MuxKeyboardEvent) => void) => void;
+        onReinjectKey: (callback: (muxEvent: MuxKeyboardEvent) => void) => void;
         onControlShiftStateUpdate: (callback: (state: boolean) => void) => void;
         openNewWindow: () => Promise<string>;
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;

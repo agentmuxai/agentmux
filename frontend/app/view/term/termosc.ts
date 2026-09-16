@@ -32,11 +32,11 @@ export function handleOscMuxCommand(data: string, blockId: string, loaded: boole
         return true;
     }
     let jsonPayload: string;
-    let waveId: string | undefined;
+    let muxId: string | undefined;
     if (parts.length === 2) {
         jsonPayload = parts[1];
     } else if (parts.length >= 3) {
-        waveId = parts[1];
+        muxId = parts[1];
         jsonPayload = parts.slice(2).join(";");
     } else {
         console.log("Invalid AgentMux OSC command received (1 part)", data);
@@ -51,19 +51,19 @@ export function handleOscMuxCommand(data: string, blockId: string, loaded: boole
         return true;
     }
 
-    if (waveId) {
+    if (muxId) {
         fireAndForget(() => {
-            return RpcApi.ResolveIdsCommand(TabRpcClient, { blockid: blockId, ids: [waveId] })
+            return RpcApi.ResolveIdsCommand(TabRpcClient, { blockid: blockId, ids: [muxId] })
                 .then((response: { resolvedids: { [key: string]: any } }) => {
-                    const oref = response.resolvedids[waveId];
+                    const oref = response.resolvedids[muxId];
                     if (!oref) {
-                        console.error("Failed to resolve wave id:", waveId);
+                        console.error("Failed to resolve wave id:", muxId);
                         return;
                     }
                     services.ObjectService.UpdateObjectMeta(oref, meta);
                 })
                 .catch((err: any) => {
-                    console.error("Error resolving wave id", waveId, err);
+                    console.error("Error resolving wave id", muxId, err);
                 });
         });
     } else {

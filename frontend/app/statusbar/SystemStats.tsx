@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
@@ -154,7 +154,7 @@ const SystemStats = (): JSX.Element => {
     });
 
     onMount(() => {
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {

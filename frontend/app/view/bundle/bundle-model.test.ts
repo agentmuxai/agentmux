@@ -140,7 +140,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 // bundle-mcp-model.test.ts / global-bundle-model.test.ts use.
 const wpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         wpsHub.handlers.set(sub.eventType, sub.handler);
         return () => wpsHub.handlers.delete(sub.eventType);
     }),

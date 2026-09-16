@@ -3,7 +3,7 @@
 
 import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom, termRendererAtom } from "@/store/global";
 import { setRestartInProgress } from "@/store/backendStatus";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { getGpuInfo } from "@/util/gpuutil";
 import { Accessor, createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -309,7 +309,7 @@ const BackendStatus = (): JSX.Element => {
     // fixes. `ts` is still passed as a clamped fallback for a payload that
     // predates the field.
     onMount(() => {
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {

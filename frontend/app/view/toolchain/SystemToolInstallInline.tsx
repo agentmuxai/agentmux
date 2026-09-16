@@ -26,7 +26,7 @@ import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { CORE_TOOLS } from "@/app/view/agent/providers/toolchain-catalog";
 import "./SystemToolInstallInline.scss";
 
@@ -223,7 +223,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
         try {
             const r = await RpcApi.ToolchainInstallSystemToolCommand(TabRpcClient, { toolId: props.toolId });
             if (disposed) return;
-            unsub = waveEventSubscribe({
+            unsub = muxEventSubscribe({
                 eventType: "install_chunk",
                 scope: `install:${r.sessionId}`,
                 handler: (event: any) => {

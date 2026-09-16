@@ -63,10 +63,10 @@ const UserInputModal = (props: UserInputRequest & ModalCloseProps) => {
         }
     };
 
-    const handleKeyDown = (waveEvent: MuxKeyboardEvent): boolean => {
+    const handleKeyDown = (muxEvent: MuxKeyboardEvent): boolean => {
         // Enter submits; ESC is handled by `<Modal>`'s closeOnEscape
         // which calls our onClose → handleSendErrResponse.
-        if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
+        if (keyutil.checkKeyPressed(muxEvent, "Enter")) {
             handleSubmit();
             return true;
         }

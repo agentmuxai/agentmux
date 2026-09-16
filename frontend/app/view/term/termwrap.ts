@@ -109,11 +109,11 @@ export class TermWrap {
         blockId: string,
         connectElem: HTMLDivElement,
         options: TermTypes.ITerminalOptions & TermTypes.ITerminalInitOnlyOptions,
-        waveOptions: TermWrapOptions
+        muxOptions: TermWrapOptions
     ) {
         this.loaded = false;
         this.blockId = blockId;
-        this.sendDataHandler = waveOptions.sendDataHandler;
+        this.sendDataHandler = muxOptions.sendDataHandler;
         this.ptyOffset = 0;
         this.dataBytesProcessed = 0;
         this.lastUpdated = Date.now();
@@ -193,7 +193,7 @@ export class TermWrap {
         this.terminal.registerLinkProvider(
             new FilePathLinkProvider(this.terminal, makeFilePathHandler(getCwd))
         );
-        this.loadRendererAddon(waveOptions.useWebGl);
+        this.loadRendererAddon(muxOptions.useWebGl);
 
         // Register OSC handlers
         this.terminal.parser.registerOscHandler(9283, (data: string) => {
@@ -211,7 +211,7 @@ export class TermWrap {
         this.terminal.parser.registerOscHandler(2, (data: string) => {
             return handleOscTitleCommand(data, this.blockId, this.loaded);
         });
-        this.terminal.attachCustomKeyEventHandler(waveOptions.keydownHandler);
+        this.terminal.attachCustomKeyEventHandler(muxOptions.keydownHandler);
 
         // Tier-2 scroll fix: block macOS trackpad momentum scroll events.
         // After the user lifts their finger, the OS keeps emitting WheelEvents with small,
