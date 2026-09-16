@@ -215,10 +215,26 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// muxbus_load does a synchronous OS-keychain read, which can hang on a
 /// slow/unresponsive Secret Service D-Bus daemon (headless Linux) and must
 /// not stall the caller's tokio worker thread.
+///
+/// Skipped entirely on a channel-isolated build (see
+/// `agentmux_common::isolated_muxbus_reconnect_enabled` — same flag
+/// `CloudSubscriber::init_global`'s startup reconnect already uses, see
+/// `bootstrap.rs`). This call site runs on EVERY agent spawn, not just
+/// MuxBus-related ones — without this gate, the automatic
+/// `muxbus_load()` here would still prompt for Keychain consent on a
+/// fresh local build the moment ANY agent is opened, even after the
+/// startup-reconnect prompt was already fixed (see
+/// docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md).
+/// Real installs (`stable` channel) and `task dev` are unaffected — a
+/// user who has actually logged in via `muxbus.login` keeps getting the
+/// token injected into every spawned agent exactly as before.
 pub async fn inject_muxbus_env(
     wstore: &Arc<crate::backend::storage::store::Store>,
     env_vars: &mut std::collections::HashMap<String, String>,
 ) {
+    if agentmux_common::isolated_muxbus_reconnect_enabled() {
+        return;
+    }
     let load_store = wstore.clone();
     let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load()).await;
     let creds = match load_result {
