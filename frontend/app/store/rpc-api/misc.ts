@@ -37,7 +37,7 @@ export const MiscApi = {
         return client.rpcCall("message", data, opts);
     },
 
-    NotifyCommand(client: RpcClient, data: WaveNotificationOptions, opts?: RpcOpts): Promise<void> {
+    NotifyCommand(client: RpcClient, data: MuxNotificationOptions, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("notify", data, opts);
     },
 
@@ -77,7 +77,7 @@ export const MiscApi = {
         return client.rpcCall("test", data, opts);
     },
 
-    WaveInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<WaveInfoData> {
+    MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxInfoData> {
         return client.rpcCall("waveinfo", null, opts);
     },
 

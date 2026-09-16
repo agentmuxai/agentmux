@@ -18,7 +18,7 @@ fn is_zero(n: &usize) -> bool {
 /// `POST /agentmux/wps/publish` — shared client/server envelope.
 ///
 /// Sent by `agentmux-bashwrap` and received by `agentmux-srv`.
-/// Mirrors `WaveEvent` but omits the server-populated `sender` field.
+/// Mirrors `MuxEvent` but omits the server-populated `sender` field.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WpsPublishRequest {
     pub event: String,

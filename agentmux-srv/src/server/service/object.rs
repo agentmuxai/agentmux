@@ -127,19 +127,19 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Some(bid) => {
                     let mut updates = vec![];
                     if let Ok(block) = store.must_get::<Block>(&bid) {
-                        updates.push(WaveObjUpdate {
+                        updates.push(MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: OTYPE_BLOCK.to_string(),
                             oid: bid.clone(),
-                            obj: Some(wave_obj_to_value(&block)),
+                            obj: Some(mux_obj_to_value(&block)),
                         });
                     }
                     if let Ok(tab) = store.must_get::<Tab>(&tab_id) {
-                        updates.push(WaveObjUpdate {
+                        updates.push(MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: OTYPE_TAB.to_string(),
                             oid: tab_id.clone(),
-                            obj: Some(wave_obj_to_value(&tab)),
+                            obj: Some(mux_obj_to_value(&tab)),
                         });
                     }
                     WebReturnType::success_data_updates(serde_json::json!(bid), updates)
@@ -177,7 +177,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             WebReturnType::success_empty()
         }
         "UpdateObject" => {
-            let wave_obj_value: serde_json::Value = match service::get_arg(args, 0) {
+            let mux_obj_value: serde_json::Value = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
@@ -199,14 +199,14 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             // `TabRecord` focus state can't silently diverge on that
             // branch (reagent P1 #1970, review 3).
             let mut fallback_slice: Option<(String, String, String)> = None;
-            if wave_obj_value.get("otype").and_then(|v| v.as_str()) == Some(OTYPE_LAYOUT) {
+            if mux_obj_value.get("otype").and_then(|v| v.as_str()) == Some(OTYPE_LAYOUT) {
                 let layout_route: Option<(String, Option<agentmux_common::LayoutNode>)> =
-                    match wave_obj_value
+                    match mux_obj_value
                         .get("oid")
                         .and_then(|v| v.as_str())
                         .and_then(|layout_oid| find_tab_for_layout(store, layout_oid))
                     {
-                        Some(tab_id) => match wave_obj_value.get("rootnode") {
+                        Some(tab_id) => match mux_obj_value.get("rootnode") {
                             None | Some(serde_json::Value::Null) => Some((tab_id, None)),
                             Some(v) => match serde_json::from_value(v.clone()) {
                                 Ok(tree) => Some((tab_id, Some(tree))),
@@ -217,7 +217,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                                          falling back to legacy wcore-direct write"
                                     );
                                     let get_str = |key: &str| -> String {
-                                        wave_obj_value
+                                        mux_obj_value
                                             .get(key)
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
@@ -241,7 +241,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                         }
                     };
                 if let Some((tab_id, new_tree)) = layout_route {
-                    return update_layout_via_reducer(state, wave_obj_value, tab_id, new_tree)
+                    return update_layout_via_reducer(state, mux_obj_value, tab_id, new_tree)
                         .await;
                 }
             }
@@ -250,7 +250,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             // tab, so there is nothing to dispatch; the owned-but-unparsable
             // fallback dispatches the focus/magnify slice AFTER the write
             // succeeds (failure-atomicity ordering per codex P2 PR #632).
-            match update_object(store, wave_obj_value) {
+            match update_object(store, mux_obj_value) {
                 Ok((otype, oid, obj_val)) => {
                     if let Some((tab_id, new_focused, new_magnified)) = fallback_slice {
                         let focus_events = dispatch_to_reducer(
@@ -272,7 +272,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                         .await;
                         publish_events(state, &mag_events);
                     }
-                    let update = WaveObjUpdate {
+                    let update = MuxObjUpdate {
                         updatetype: "update".into(),
                         otype,
                         oid,
@@ -323,7 +323,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                     // Remaining otypes (Layout, Client, Temp) aren't
                     // meta-mutated via the reducer yet; fall back to
                     // wcore for forward-compat. They publish no event,
-                    // so the WaveObjUpdate bridge can't see them — the
+                    // so the MuxObjUpdate bridge can't see them — the
                     // frontend cache stays stale until next bootstrap
                     // (deemed acceptable since these aren't user-edited).
                     // Future Phase E.5.x migrations can add reducer arms
@@ -378,21 +378,21 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             // Return the updated object so the frontend WOS cache stays in sync.
             if oref.otype == OTYPE_BLOCK {
                 if let Ok(block) = store.must_get::<Block>(&oref.oid) {
-                    return WebReturnType::success_with_updates(vec![WaveObjUpdate {
+                    return WebReturnType::success_with_updates(vec![MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: OTYPE_BLOCK.to_string(),
                         oid: oref.oid.clone(),
-                        obj: Some(wave_obj_to_value(&block)),
+                        obj: Some(mux_obj_to_value(&block)),
                     }]);
                 }
             }
             if oref.otype == OTYPE_TAB {
                 if let Ok(tab) = store.must_get::<Tab>(&oref.oid) {
-                    return WebReturnType::success_with_updates(vec![WaveObjUpdate {
+                    return WebReturnType::success_with_updates(vec![MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: OTYPE_TAB.to_string(),
                         oid: oref.oid.clone(),
-                        obj: Some(wave_obj_to_value(&tab)),
+                        obj: Some(mux_obj_to_value(&tab)),
                     }]);
                 }
             }
@@ -432,11 +432,11 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             }
             publish_events(state, &events);
             if let Ok(updated_tab) = store.must_get::<Tab>(&tab_id) {
-                let update = WaveObjUpdate {
+                let update = MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: OTYPE_TAB.to_string(),
                     oid: tab_id.clone(),
-                    obj: Some(wave_obj_to_value(&updated_tab)),
+                    obj: Some(mux_obj_to_value(&updated_tab)),
                 };
                 return WebReturnType::success_with_updates(vec![update]);
             }
@@ -471,26 +471,26 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
 /// route leaves the stored meta untouched.
 async fn update_layout_via_reducer(
     state: &AppState,
-    wave_obj_value: serde_json::Value,
+    mux_obj_value: serde_json::Value,
     tab_id: String,
     new_tree: Option<agentmux_common::LayoutNode>,
 ) -> WebReturnType {
     let store = &state.wstore;
-    let oid = wave_obj_value
+    let oid = mux_obj_value
         .get("oid")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
 
     let get_str = |key: &str| -> String {
-        wave_obj_value
+        mux_obj_value
             .get(key)
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string()
     };
     let get_json = |key: &str| -> Option<serde_json::Value> {
-        wave_obj_value.get(key).filter(|v| !v.is_null()).cloned()
+        mux_obj_value.get(key).filter(|v| !v.is_null()).cloned()
     };
     let slices = agentmux_common::LayoutClientSlices {
         leaforder: get_json("leaforder"),
@@ -602,7 +602,7 @@ async fn update_layout_via_reducer(
     // Return the committed row (fresh version) so the pusher's WOS cache
     // stays in sync — same response shape as the legacy path.
     match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
-        Ok(obj_val) => WebReturnType::success_with_updates(vec![WaveObjUpdate {
+        Ok(obj_val) => WebReturnType::success_with_updates(vec![MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_LAYOUT.to_string(),
             oid,

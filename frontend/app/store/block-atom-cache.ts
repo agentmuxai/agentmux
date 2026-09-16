@@ -59,7 +59,7 @@ export function getBlockMetaKeyAtom<T extends keyof MetaType>(blockId: string, k
         memo = createRoot((dispose) => {
             addBlockAtomDisposer(blockId, dispose);
             return createMemo(() => {
-                const blockAccessor = WOS.getWaveObjectAtom(WOS.makeORef("block", blockId));
+                const blockAccessor = WOS.getMuxObjectAtom(WOS.makeORef("block", blockId));
                 const blockData = blockAccessor();
                 return blockData?.meta?.[key];
             });

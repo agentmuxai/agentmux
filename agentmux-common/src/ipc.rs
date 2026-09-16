@@ -433,7 +433,7 @@ pub enum Command {
     /// Phase E.5.x — apply a meta-patch to a window's `meta` map.
     /// Same pass-through shape as `UpdateWorkspaceMeta`. Migrated
     /// through the reducer per issue #855 so `Event::WindowMetaUpdated`
-    /// lands on `srv_events_tx` and the WaveObjUpdate broadcast bridge
+    /// lands on `srv_events_tx` and the MuxObjUpdate broadcast bridge
     /// picks it up — replaces the wcore-direct fallback that bypassed
     /// reducer + bridge entirely.
     UpdateWindowMeta {
@@ -1406,7 +1406,7 @@ pub enum Event {
     },
     /// Phase E.5.x (issue #855) — meta-patch applied to a window's
     /// `meta` map. Same shape as `WorkspaceMetaUpdated`. Persist
-    /// subscriber merges into wstore; WaveObjUpdate bridge translates
+    /// subscriber merges into wstore; MuxObjUpdate bridge translates
     /// to a frontend `waveobj:update` broadcast.
     WindowMetaUpdated {
         window_id: String,

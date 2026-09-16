@@ -24,7 +24,7 @@ import {
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
 import { waveEventSubscribe } from "@/app/store/wps";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
 
@@ -181,7 +181,7 @@ export class DroneViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.blockAtom = getWaveObjectAtom(makeORef("block", blockId));
+        this.blockAtom = getMuxObjectAtom(makeORef("block", blockId));
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? this.draftAtom().name;

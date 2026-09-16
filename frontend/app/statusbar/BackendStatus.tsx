@@ -313,7 +313,7 @@ const BackendStatus = (): JSX.Element => {
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
-                const data = (event as WaveEvent)?.data;
+                const data = (event as MuxEvent)?.data;
                 const next = resolveUptimeSecs(data?.uptime_secs, data?.ts, startedAt());
                 if (next != null) {
                     setUptimeSecs(next);

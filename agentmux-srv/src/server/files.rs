@@ -36,7 +36,7 @@ pub(super) struct LocalFileQueryParams {
 // text-oriented number.
 const STREAM_LOCAL_FILE_MAX_BYTES: u64 = 500_000_000;
 
-pub(super) async fn handle_wave_file(
+pub(super) async fn handle_mux_file(
     State(state): State<AppState>,
     Query(params): Query<FileQueryParams>,
 ) -> Response {

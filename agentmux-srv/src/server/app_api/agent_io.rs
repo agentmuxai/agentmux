@@ -231,7 +231,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             &Some(wstore.clone()),
                             &Some(event_bus.clone()),
                         );
-                        broker.publish(crate::backend::wps::WaveEvent {
+                        broker.publish(crate::backend::wps::MuxEvent {
                             event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
                             scopes: vec![format!("block:{}", cmd.block_id)],
                             sender: String::new(),

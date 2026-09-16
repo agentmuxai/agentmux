@@ -98,7 +98,7 @@ class TermViewModel implements ViewModel {
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
-        this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         this.termMode = createMemo(() => {
             const blockData = this.blockAtom();
@@ -516,7 +516,7 @@ class TermViewModel implements ViewModel {
         return false;
     }
 
-    keyDownHandler(waveEvent: WaveKeyboardEvent): boolean {
+    keyDownHandler(waveEvent: MuxKeyboardEvent): boolean {
         return false;
     }
 

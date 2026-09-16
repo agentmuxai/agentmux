@@ -21,7 +21,7 @@
 // `undefined` and the view degrades to a context-free empty state.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, type Accessor } from "solid-js";
 
 export class IdentityPaneViewModel implements ViewModel {
@@ -48,7 +48,7 @@ export class IdentityPaneViewModel implements ViewModel {
         this.blockId = blockId ?? "";
         this.nodeModel = nodeModel ?? null;
         this.blockAtom = blockId
-            ? getWaveObjectAtom(makeORef("block", blockId))
+            ? getMuxObjectAtom(makeORef("block", blockId))
             : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();

@@ -10,16 +10,16 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use super::wps::{WaveEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS, EVENT_BLOCK_FILE};
+use super::wps::{MuxEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS, EVENT_BLOCK_FILE};
 
 // ---- Event type constants ----
 
 pub const WS_EVENT_RPC: &str = "rpc";
 
-/// One WS frame carrying an ARRAY of `WaveObjUpdate`s from a single atomic
+/// One WS frame carrying an ARRAY of `MuxObjUpdate`s from a single atomic
 /// backend transition. Mirrored in `frontend/app/store/wps-events.ts`
-/// (`WpsEvent.WaveObjBatchedUpdates`) — the frontend applies the whole array
-/// in one Solid `batch()` flush. See `broadcast_wave_obj_updates` below.
+/// (`WpsEvent.MuxObjBatchedUpdates`) — the frontend applies the whole array
+/// in one Solid `batch()` flush. See `broadcast_mux_obj_updates` below.
 pub const WS_EVENT_WAVE_OBJ_BATCHED_UPDATES: &str = "waveobj:batchedupdates";
 
 /// Egress priority lane for a server→client event.
@@ -172,9 +172,9 @@ impl EventBus {
         self.broadcast_event_lane(event, Lane::Priority);
     }
 
-    /// Broadcast a set of related `WaveObjUpdate`s from ONE atomic backend
+    /// Broadcast a set of related `MuxObjUpdate`s from ONE atomic backend
     /// transition as ONE `waveobj:batchedupdates` WS frame, so the frontend
-    /// applies them in a single reactive flush (`updateWaveObjects`'s
+    /// applies them in a single reactive flush (`updateMuxObjects`'s
     /// `batch()`), preserving the array's order.
     ///
     /// Why one frame instead of N `waveobj:update` frames: each frame is
@@ -187,7 +187,7 @@ impl EventBus {
     /// instead (§7). Single-update callers (blockcontroller, setmeta, the
     /// wave-obj bridge) keep emitting plain `waveobj:update` — there is
     /// nothing to batch there.
-    pub fn broadcast_wave_obj_updates(&self, updates: &[super::obj::WaveObjUpdate]) {
+    pub fn broadcast_mux_obj_updates(&self, updates: &[super::obj::MuxObjUpdate]) {
         if updates.is_empty() {
             return;
         }
@@ -274,7 +274,7 @@ impl Default for EventBus {
 }
 
 /// Bridge from WPS Broker to EventBus.
-/// Wraps WaveEvents as RPC eventrecv messages and broadcasts them to all WS clients.
+/// Wraps MuxEvents as RPC eventrecv messages and broadcasts them to all WS clients.
 pub struct EventBusBridge {
     event_bus: Arc<EventBus>,
 }
@@ -286,11 +286,11 @@ impl EventBusBridge {
 }
 
 impl WpsClient for EventBusBridge {
-    fn send_event(&self, route_id: &str, event: WaveEvent) {
+    fn send_event(&self, route_id: &str, event: MuxEvent) {
         // Perf telemetry is droppable and must never delay interactive terminal
         // I/O, so route sysinfo + per-block stats to the background lane and
         // everything else to the priority lane. This is the only place the raw
-        // WaveEvent type is visible before it's wrapped as an opaque RPC
+        // MuxEvent type is visible before it's wrapped as an opaque RPC
         // envelope. See SPEC_TERMINAL_INPUT_PRIORITY_OVER_SYSINFO_2026_06_16.
         let lane = match event.event.as_str() {
             EVENT_SYS_INFO | EVENT_BLOCK_STATS => Lane::Background,
@@ -378,27 +378,27 @@ mod tests {
     /// N frames — N frames repaint the renderer in N unbatched steps (the
     /// SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7 flash).
     #[test]
-    fn test_broadcast_wave_obj_updates_single_batched_frame() {
-        use crate::backend::obj::WaveObjUpdate;
+    fn test_broadcast_mux_obj_updates_single_batched_frame() {
+        use crate::backend::obj::MuxObjUpdate;
 
         let bus = EventBus::new();
         let mut rx = bus.register_ws("conn-1", "tab-1");
 
         let updates = vec![
-            WaveObjUpdate {
+            MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "workspace".into(),
                 oid: "ws-1".into(),
                 obj: Some(serde_json::json!({"oid": "ws-1"})),
             },
-            WaveObjUpdate {
+            MuxObjUpdate {
                 updatetype: "delete".into(),
                 otype: "tab".into(),
                 oid: "tab-9".into(),
                 obj: None,
             },
         ];
-        bus.broadcast_wave_obj_updates(&updates);
+        bus.broadcast_mux_obj_updates(&updates);
 
         let msg = rx.priority.try_recv().expect("one frame expected");
         assert_eq!(
@@ -413,7 +413,7 @@ mod tests {
         assert!(rx.priority.try_recv().is_err());
 
         // Empty slice → no frame at all.
-        bus.broadcast_wave_obj_updates(&[]);
+        bus.broadcast_mux_obj_updates(&[]);
         assert!(rx.priority.try_recv().is_err());
     }
 
@@ -477,7 +477,7 @@ mod tests {
         let mut rx = bus.register_ws("conn-1", "tab-1");
         let bridge = EventBusBridge::new(bus.clone());
 
-        let telemetry = |event: &str| WaveEvent {
+        let telemetry = |event: &str| MuxEvent {
             event: event.to_string(),
             scopes: vec![],
             sender: String::new(),

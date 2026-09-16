@@ -46,7 +46,7 @@ export const AgentCredentialsRevokedChip = (
     // sibling `agentidentities:changed:<id>` event.
     const unsub = waveEventSubscribe({
         eventType: `agentcredentials:revoked:${props.agentId}`,
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             const provider =
                 typeof event?.data?.provider === "string" ? event.data.provider : "";
             setRevoked((prev) => {

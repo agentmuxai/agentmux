@@ -30,7 +30,7 @@ const hub = vi.hoisted(() => ({
     ensureCapability: vi.fn(),
     getCapability: vi.fn(),
     waveEventSubscribe: vi.fn(),
-    getWaveObjectAtom: vi.fn(),
+    getMuxObjectAtom: vi.fn(),
 }));
 
 vi.mock("@/app/errors/translate", () => ({
@@ -55,7 +55,7 @@ vi.mock("@/app/store/wps", () => ({ waveEventSubscribe: (...args: unknown[]) => 
 vi.mock("@/app/store/wps-events", () => ({ WpsEvent: { InstallProgress: "install_progress" } }));
 vi.mock("@/app/store/wos", () => ({
     makeORef: (kind: string, id: string) => `${kind}:${id}`,
-    getWaveObjectAtom: (...args: unknown[]) => hub.getWaveObjectAtom(...args),
+    getMuxObjectAtom: (...args: unknown[]) => hub.getMuxObjectAtom(...args),
 }));
 vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: (...args: unknown[]) => hub.getControllerStatus(...args) },
@@ -98,7 +98,7 @@ beforeEach(() => {
     // Default: a brand-new agent that has never resolved its CLI before
     // (no "cmd" in meta) — see the first-login vs auth-expired tests below
     // for the "has run before" case.
-    hub.getWaveObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "host", agentId: "agent-1" } }));
+    hub.getMuxObjectAtom.mockReset().mockReturnValue(() => ({ meta: { agentMode: "host", agentId: "agent-1" } }));
 });
 afterEach(() => {
     vi.clearAllMocks();

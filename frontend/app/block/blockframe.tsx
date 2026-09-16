@@ -25,7 +25,7 @@ import { MicButton } from "@/app/element/MicButton";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
-import { computeBgStyleFromMeta } from "@/util/waveutil";
+import { computeBgStyleFromMeta } from "@/util/muxutil";
 import clsx from "clsx";
 import type { Accessor, JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
@@ -319,14 +319,14 @@ function EndIcons(props: {
 function BlockFrame_Header(
     props: BlockFrameProps & { changeConnModalAtom: util.SignalAtom<boolean>; error?: Error; blockId: Accessor<string> }
 ): JSX.Element {
-    // `getWaveObjectAtom`-in-a-memo, not `useWaveObjectValue`: the latter
+    // `getMuxObjectAtom`-in-a-memo, not `useMuxObjectValue`: the latter
     // ref-counts through onCleanup tied to THIS component's mount, and never
     // re-subscribes if `props.blockId()` later points at a different oref —
     // exactly the leak a hoisted, switch-surviving chrome caller would hit.
-    // `getWaveObjectAtom` has no such lifecycle coupling; calling it fresh
+    // `getMuxObjectAtom` has no such lifecycle coupling; calling it fresh
     // inside a memo that re-runs when blockId changes correctly re-points at
     // live data with no leak (frontend/app/store/wos.ts).
-    const blockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", props.blockId()))());
+    const blockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", props.blockId()))());
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
     // Memos, not bare top-level reads (ReAgent P1 on PR #3157). These read
     // through `props.viewModel`, which for a HOISTED header
@@ -622,7 +622,7 @@ function ConnStatusOverlay({
     viewModel: ViewModel;
     changeConnModalAtom: util.SignalAtom<boolean>;
 }): JSX.Element {
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
     const connModalOpen = changeConnModalAtom();
     const connName = createMemo(() => blockData()?.meta?.connection);
     const connStatus = createMemo(() => getConnStatusAtom(connName())());
@@ -789,7 +789,7 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const blockNum = () => nodeModel.blockNum();
     const isLayoutMode = () => atoms.controlShiftDelayAtom();
     const showOverlayBlockNums = () => getSettingsKeyAtom("app:showoverlayblocknums")() ?? true;
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
         const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta, atoms.tabAtom()?.meta);
@@ -811,7 +811,7 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
 
 function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const nodeModel = props.nodeModel;
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
     const isFocused = () => nodeModel.isFocused();
     // With only one pane in the tab, there's nothing to distinguish
     // "focused" from "unfocused" against, so the focus ring carries no
@@ -1086,7 +1086,7 @@ function BlockFrame_Default(props: BlockFrameProps): JSX.Element {
 
 function BlockFrame(props: BlockFrameProps): JSX.Element {
     const blockId = props.nodeModel.blockId;
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
     return (
         <Show when={blockId && blockData()}>
             <BlockFrame_Default {...props} />

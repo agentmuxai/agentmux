@@ -25,10 +25,10 @@ export const client = createMemo<Client>(() => {
     return WOS.getObjectValue(WOS.makeORef("client", cid));
 });
 
-export const waveWindow = createMemo<WaveWindow>(() => {
+export const waveWindow = createMemo<MuxWindow>(() => {
     const wid = windowId();
     if (!wid) return null;
-    return WOS.getObjectValue<WaveWindow>(WOS.makeORef("window", wid));
+    return WOS.getObjectValue<MuxWindow>(WOS.makeORef("window", wid));
 });
 
 export const workspace = createMemo<Workspace>(() => {

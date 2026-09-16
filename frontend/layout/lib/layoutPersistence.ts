@@ -20,10 +20,10 @@ import {
 import type { LayoutModel } from "./layoutModel";
 
 /**
- * Initialize the layout tree from the persisted WaveObject state.
+ * Initialize the layout tree from the persisted MuxObject state.
  * @param model The LayoutModel instance.
  */
-export function initializeFromWaveObject(model: LayoutModel) {
+export function initializeFromMuxObject(model: LayoutModel) {
     const waveObjState = model.getter(model.waveObjectAtom);
 
     const initialState: LayoutTreeState = {
@@ -53,7 +53,7 @@ export function initializeFromWaveObject(model: LayoutModel) {
 }
 
 /**
- * Handle a WaveObject update notification from the backend.
+ * Handle a MuxObject update notification from the backend.
  * @param model The LayoutModel instance.
  */
 export function onBackendUpdate(model: LayoutModel) {
@@ -64,7 +64,7 @@ export function onBackendUpdate(model: LayoutModel) {
     // This handles tear-off windows where the LayoutState wasn't loaded
     // when the LayoutModel was first constructed.
     if (!model.treeState.rootNode && waveObj.rootnode) {
-        initializeFromWaveObject(model);
+        initializeFromMuxObject(model);
         return;
     }
 
@@ -85,7 +85,7 @@ export function onBackendUpdate(model: LayoutModel) {
 // PR #2105, P1): createBlock/createBlockSplitHorizontally/createBlockSplit-
 // Vertically (global.ts) insert the new leaf into the local tree
 // SYNCHRONOUSLY via treeReducer, but the block's membership in
-// `tab.blockids` only lands later via an async WaveObject push. Any prune
+// `tab.blockids` only lands later via an async MuxObject push. Any prune
 // trigger that fires inside that window would see the fresh leaf as
 // "disowned" and delete + persist the deletion — a real, distinct path to
 // the same class of bug pruneDanglingLeaves exists to fix. Call sites for
@@ -174,7 +174,7 @@ export function pruneDanglingLeaves(model: LayoutModel) {
 }
 
 /**
- * Process all pending backend actions from the WaveObject queue.
+ * Process all pending backend actions from the MuxObject queue.
  * @param model The LayoutModel instance.
  */
 export async function processPendingBackendActions(model: LayoutModel) {
@@ -385,7 +385,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 }
 
 /**
- * Persist current tree state to the backend WaveObject (debounced).
+ * Persist current tree state to the backend MuxObject (debounced).
  * @param model The LayoutModel instance.
  */
 export function persistToBackend(model: LayoutModel) {

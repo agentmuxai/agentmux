@@ -69,7 +69,7 @@ waveEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() }
 waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
 waveEventSubscribe({
     eventType: "subagent:named",
-    handler: (event: WaveEvent) => {
+    handler: (event: MuxEvent) => {
         const data = event?.data as { agentId?: string; displayName?: string } | undefined;
         if (!data?.agentId || !data.displayName) return;
         setAllSubagents((prev) =>

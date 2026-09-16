@@ -6,7 +6,7 @@ import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom
 import { ObjectService } from "@/store/services";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
-import { computeBgStyleFromMeta } from "@/util/waveutil";
+import { computeBgStyleFromMeta } from "@/util/muxutil";
 import { ISearchOptions } from "@xterm/addon-search";
 import clsx from "clsx";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -83,7 +83,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     let viewRef!: HTMLDivElement;
     let connectElemRef!: HTMLDivElement;
 
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
 
     const termSettingsAtom = getSettingsPrefixAtom("term");
     const termSettings = createMemo(() => termSettingsAtom());
@@ -461,10 +461,10 @@ const TermPaneChrome = (props: {
     const isFocused = () => nodeModel.isFocused();
     const isAlone = () => nodeModel.numLeafs() <= 1;
 
-    // Tracks the CURRENTLY ACTIVE member, not the anchor — getWaveObjectAtom
-    // inside a memo (not useWaveObjectValue), the reactive-oref pattern
+    // Tracks the CURRENTLY ACTIVE member, not the anchor — getMuxObjectAtom
+    // inside a memo (not useMuxObjectValue), the reactive-oref pattern
     // established in #3134 for exactly this kind of switch-surviving reader.
-    const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+    const activeBlockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
 
     // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
     // `.block-mask` — reused so a custom `frame:activebordercolor`/

@@ -318,7 +318,7 @@ const ChangeConnectionBlockModal = ({
     nodeModel: NodeModel;
 }) => {
     const [connSelected, setConnSelected] = createSignal("");
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
     const isNodeFocused = nodeModel.isFocused;
     const connection = () => blockData()?.meta?.connection;
     const connStatus = () => getConnStatusAtom(connection())();
@@ -477,7 +477,7 @@ const ChangeConnectionBlockModal = ({
         return list;
     };
 
-    const handleTypeAheadKeyDown = (waveEvent: WaveKeyboardEvent): boolean => {
+    const handleTypeAheadKeyDown = (waveEvent: MuxKeyboardEvent): boolean => {
         const sl = selectionList();
         if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
             const rowItem = sl[rowIndex()];

@@ -325,7 +325,7 @@ function currentWindowLabel(): string {
     return new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
 }
 
-async function initHostWave(): Promise<void> {
+async function initHostMux(): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
         const ms = (performance.now() - since).toFixed(1);
@@ -404,9 +404,9 @@ async function initHostWave(): Promise<void> {
 
         // Initialize wave (this will render the UI)
         t = performance.now();
-        await initWaveWrap(initOpts);
-        tlog("initWaveWrap", t);
-        tlog("TOTAL initCefWave", t0);
+        await initMuxWrap(initOpts);
+        tlog("initMuxWrap", t);
+        tlog("TOTAL initCefMux", t0);
 
         // Apply dev window title — task dev TITLE="agentx: PR #1780"
         // Only runs in Vite dev mode; VITE_DEV_TITLE is empty string in prod builds.
@@ -418,7 +418,7 @@ async function initHostWave(): Promise<void> {
             );
         }
 
-        // Initialize instance tracking (must come after initWaveWrap so global state is ready)
+        // Initialize instance tracking (must come after initMuxWrap so global state is ready)
         await initInstanceTracking();
 
         // Issue #2977 WS4 — show what the background service did while no
@@ -432,15 +432,15 @@ async function initHostWave(): Promise<void> {
         benchDump(); // emit full startup timeline to log
 
     } catch (error) {
-        console.error("[initHostWave] Initialization failed:", error);
-        getApi().sendLog(`[initHostWave] ERROR: ${error}`);
+        console.error("[initHostMux] Initialization failed:", error);
+        getApi().sendLog(`[initHostMux] ERROR: ${error}`);
         showStartupError(String(error));
     }
 }
 
 /**
  * Initialize a new (non-main) host window by creating new backend objects.
- * Unlike initHostWave() which reuses existing Window/Workspace/Tab,
+ * Unlike initHostMux() which reuses existing Window/Workspace/Tab,
  * this creates a fresh set for the new window.
  */
 async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<string, unknown> | null): Promise<void> {
@@ -484,11 +484,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
         tlog("CreateWindow", t);
 
         // Register label→window_id with the host NOW, not at the end of
-        // initWave (which also registers — idempotently — after render):
+        // initMux (which also registers — idempotently — after render):
         // the srv window row exists as of this line, and every host close
         // path (on_before_close, demote_srv_cleanup) resolves WHICH srv row
         // to close through this registration. A window closed in the
-        // seconds between CreateWindow and initWave's late registration —
+        // seconds between CreateWindow and initMux's late registration —
         // e.g. a tear-off merged straight back — used to orphan its srv
         // row forever: the close's demote reloads this renderer to the
         // pool boot URL, so the late registration never arrives, and the
@@ -531,11 +531,11 @@ async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<str
 
         // Initialize wave (this will render the UI)
         t = performance.now();
-        await initWaveWrap(initOpts);
-        tlog("initWaveWrap", t);
+        await initMuxWrap(initOpts);
+        tlog("initMuxWrap", t);
         tlog("TOTAL initCefNewWindow", t0);
 
-        // Initialize instance tracking (must come after initWaveWrap so global state is ready)
+        // Initialize instance tracking (must come after initMuxWrap so global state is ready)
         await initInstanceTracking();
 
         // Issue #2977 WS4 — show what the background service did while no
@@ -587,7 +587,7 @@ async function initAppInner() {
     // Assign deferred module-level values now.
     platform = getApi().getPlatform();
     // Note: document.title is left at the index.html default ("AgentMux")
-    // until installWindowTitleEffect() runs at the end of initWave(). The
+    // until installWindowTitleEffect() runs at the end of initMux(). The
     // body is `visibility: hidden` during init so users don't see the
     // bare "AgentMux" pre-init title.
 
@@ -635,7 +635,7 @@ async function initAppInner() {
 
     if (!hostApp) {
         // Non-host: wait for the host to emit agentmux-init with IDs
-        getApi().onAgentMuxInit(initWaveWrap);
+        getApi().onAgentMuxInit(initMuxWrap);
     }
     setKeyUtilPlatform(platform);
     loadFonts();
@@ -697,7 +697,7 @@ async function initAppInner() {
                 benchMark("isMainWindow-done");
                 if (isMain) {
                     // Main window with freshly spawned backend: standard initialization
-                    await initHostWave();
+                    await initHostMux();
                 } else {
                     // New window: create new backend window objects
                     const label = await getApi().getWindowLabel();
@@ -760,25 +760,25 @@ if (!isHostApp()) {
     }
 }
 
-async function initWaveWrap(initOpts: AgentMuxInitOpts) {
+async function initMuxWrap(initOpts: AgentMuxInitOpts) {
     try {
         if (savedInitOpts) {
-            await reinitWave();
+            await reinitMux();
             return;
         }
         savedInitOpts = initOpts;
-        await initWave(initOpts);
+        await initMux(initOpts);
         // Phase B.7.3.1 — start the launcher-event reducer effect now
         // that global state is wired. Idempotent: subsequent calls
-        // (e.g. via reinitWave path) are no-ops.
+        // (e.g. via reinitMux path) are no-ops.
         startLauncherEventReducer();
         // Bundle-management PR 3 — wire singleton-modal crash release.
         // Subscribes to the launcher window-exit signal so a dead
         // holder's singleton claim is auto-released. Idempotent.
         startSingletonCrashRelease();
     } catch (e) {
-        getApi().sendLog("Error in initWave " + e.message + "\n" + e.stack);
-        console.error("Error in initWave", e);
+        getApi().sendLog("Error in initMux " + e.message + "\n" + e.stack);
+        console.error("Error in initMux", e);
     } finally {
         // First-paint + new-window reveal coordination — see issue
         // #774. The body was hidden at line 324 before any rendering;
@@ -789,8 +789,8 @@ async function initWaveWrap(initOpts: AgentMuxInitOpts) {
         // This covers:
         //   - Cold app start (the first window in the user's session)
         //   - "New Window" from the hamburger menu (each opens its
-        //     own bootstrap → initWaveWrap)
-        //   - Any future window-spawning path that reuses initWave
+        //     own bootstrap → initMuxWrap)
+        //   - Any future window-spawning path that reuses initMux
         //
         // `scheduleRevealLift` already handles rapid Ctrl-Tab spam by
         // resetting its detector, so the prior call from createTab /
@@ -802,9 +802,9 @@ async function initWaveWrap(initOpts: AgentMuxInitOpts) {
     }
 }
 
-async function reinitWave() {
-    console.log("Reinit Wave");
-    getApi().sendLog("Reinit Wave");
+async function reinitMux() {
+    console.log("Reinit AgentMux");
+    getApi().sendLog("Reinit AgentMux");
 
     // We use this hack to prevent a flicker of the previously-hovered tab when this view was last active.
     document.body.classList.add("nohover");
@@ -814,14 +814,14 @@ async function reinitWave() {
         }, 100)
     );
 
-    await WOS.reloadWaveObject<Client>(WOS.makeORef("client", savedInitOpts.clientId));
-    const waveWindow = await WOS.reloadWaveObject<WaveWindow>(WOS.makeORef("window", savedInitOpts.windowId));
-    const ws = await WOS.reloadWaveObject<Workspace>(WOS.makeORef("workspace", waveWindow.workspaceid));
-    const initialTab = await WOS.reloadWaveObject<Tab>(WOS.makeORef("tab", savedInitOpts.tabId));
-    await WOS.reloadWaveObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate));
+    await WOS.reloadMuxObject<Client>(WOS.makeORef("client", savedInitOpts.clientId));
+    const waveWindow = await WOS.reloadMuxObject<MuxWindow>(WOS.makeORef("window", savedInitOpts.windowId));
+    const ws = await WOS.reloadMuxObject<Workspace>(WOS.makeORef("workspace", waveWindow.workspaceid));
+    const initialTab = await WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", savedInitOpts.tabId));
+    await WOS.reloadMuxObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate));
     reloadAllWorkspaceTabs(ws);
-    // Title is driven by installWindowTitleEffect() (set up in initWave)
-    // and reacts to atom changes — reinitWave's reloads update the atoms,
+    // Title is driven by installWindowTitleEffect() (set up in initMux)
+    // and reacts to atom changes — reinitMux's reloads update the atoms,
     // the effect re-runs, document.title updates. No imperative write needed.
     getApi().setWindowInitStatus("wave-ready");
     setReinitVersion((v) => v + 1);
@@ -869,7 +869,7 @@ function installWindowTitleEffect(windowId: string): void {
             const tab = activeTabId
                 ? WOS.getObjectValue<Tab>(WOS.makeORef("tab", activeTabId))
                 : undefined;
-            const win = WOS.getObjectValue<WaveWindow>(WOS.makeORef("window", windowId));
+            const win = WOS.getObjectValue<MuxWindow>(WOS.makeORef("window", windowId));
             const ws = atoms.workspace();
             const entries = openWindowEntriesAtom();
 
@@ -1015,10 +1015,10 @@ function reloadAllWorkspaceTabs(ws: Workspace) {
         return;
     }
     ws.tabids?.forEach((tabid) => {
-        WOS.reloadWaveObject<Tab>(WOS.makeORef("tab", tabid));
+        WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", tabid));
     });
     ws.pinnedtabids?.forEach((tabid) => {
-        WOS.reloadWaveObject<Tab>(WOS.makeORef("tab", tabid));
+        WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", tabid));
     });
 }
 
@@ -1034,15 +1034,15 @@ function loadAllWorkspaceTabs(ws: Workspace) {
     });
 }
 
-async function initWave(initOpts: AgentMuxInitOpts) {
+async function initMux(initOpts: AgentMuxInitOpts) {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
         const ms = (performance.now() - since).toFixed(1);
         const total = (performance.now() - t0).toFixed(1);
-        console.log(`[startup-perf] initWave ${label}: ${ms}ms (total: ${total}ms)`);
+        console.log(`[startup-perf] initMux ${label}: ${ms}ms (total: ${total}ms)`);
     };
 
-    getApi().sendLog("Init Wave " + JSON.stringify(initOpts));
+    getApi().sendLog("Init AgentMux " + JSON.stringify(initOpts));
     let t = performance.now();
     initGlobal({
         tabId: initOpts.tabId,
@@ -1085,9 +1085,9 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     const [client, waveWindow, initialTab] = await withTimeout(
         Promise.all([
-            WOS.loadAndPinWaveObject<Client>(WOS.makeORef("client", initOpts.clientId)),
-            WOS.loadAndPinWaveObject<WaveWindow>(WOS.makeORef("window", initOpts.windowId)),
-            WOS.loadAndPinWaveObject<Tab>(WOS.makeORef("tab", initOpts.tabId)),
+            WOS.loadAndPinMuxObject<Client>(WOS.makeORef("client", initOpts.clientId)),
+            WOS.loadAndPinMuxObject<MuxWindow>(WOS.makeORef("window", initOpts.windowId)),
+            WOS.loadAndPinMuxObject<Tab>(WOS.makeORef("tab", initOpts.tabId)),
         ]),
         RPC_TIMEOUT,
         "loadAndPin client/window/tab"
@@ -1097,8 +1097,8 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     const [ws, layoutState] = await withTimeout(
         Promise.all([
-            WOS.loadAndPinWaveObject<Workspace>(WOS.makeORef("workspace", waveWindow.workspaceid)),
-            WOS.reloadWaveObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate)),
+            WOS.loadAndPinMuxObject<Workspace>(WOS.makeORef("workspace", waveWindow.workspaceid)),
+            WOS.reloadMuxObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate)),
         ]),
         RPC_TIMEOUT,
         "loadAndPin workspace/layout"
@@ -1153,7 +1153,7 @@ async function initWave(initOpts: AgentMuxInitOpts) {
         );
     });
 
-    tlog("TOTAL initWave", t0);
+    tlog("TOTAL initMux", t0);
 
     // Register this window's backend ID with the CEF host so on_before_close
     // can call CloseWindow on the backend when this window is destroyed.

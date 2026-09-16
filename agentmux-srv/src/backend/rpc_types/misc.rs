@@ -146,9 +146,9 @@ pub struct BlockInfoData {
     pub files: Option<Vec<FileInfo>>,
 }
 
-/// Matches Go's `WaveInfoData`
+/// Matches Go's `MuxInfoData`
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct WaveInfoData {
+pub struct MuxInfoData {
     #[serde(default)]
     pub version: String,
     #[serde(default)]
@@ -185,9 +185,9 @@ pub struct ConnStatus {
     pub error: String,
 }
 
-/// Matches Go's `WaveNotificationOptions`
+/// Matches Go's `MuxNotificationOptions`
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct WaveNotificationOptions {
+pub struct MuxNotificationOptions {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]

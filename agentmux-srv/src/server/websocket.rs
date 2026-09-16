@@ -36,7 +36,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_BACKGROUND_TASKS, CommandListBackgroundTasksData,
 };
 use crate::backend::base::normalize_working_dir;
-use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
+use crate::backend::obj::{Block, TermSize, MuxObjUpdate, mux_obj_to_value};
 use super::service::{update_object_meta, schedule_agent_zoom_mirror};
 
 use super::AppState;
@@ -212,7 +212,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 
             // Priority event lane → WebSocket. Two sources feed it:
             //   1. WPS Broker (via EventBusBridge) — already wrapped as
-            //      { eventtype: "rpc", data: { command: "eventrecv", data: WaveEvent } }
+            //      { eventtype: "rpc", data: { command: "eventrecv", data: MuxEvent } }
             //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
             //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
             // This carries terminal echo output and all interactive events.
@@ -317,7 +317,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 /// Two shapes arrive: already-RPC-wrapped values (from the WPS broker via
 /// EventBusBridge) are forwarded as-is; raw event-bus values (e.g. SetMeta's
 /// `waveobj:update`) are wrapped as an RPC `eventrecv` so the frontend
-/// WshRouter routes them to handleWaveEvent → updateWaveObject. Shared by both
+/// WshRouter routes them to handleMuxEvent → updateMuxObject. Shared by both
 /// the priority and background egress lanes.
 async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool {
     let msg = if event["eventtype"] == "rpc" {
@@ -325,7 +325,7 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
         serde_json::to_string(&event).unwrap_or_default()
     } else {
         // Raw event bus event — wrap as RPC eventrecv
-        let wave_event = json!({
+        let mux_event = json!({
             "event": event["eventtype"],
             "scopes": [event["oref"]],
             "data": event["data"],
@@ -334,7 +334,7 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
             "eventtype": "rpc",
             "data": {
                 "command": "eventrecv",
-                "data": wave_event,
+                "data": mux_event,
             },
         });
         serde_json::to_string(&wrapped).unwrap_or_default()
@@ -763,7 +763,7 @@ async fn handle_incoming_text(
 /// nothing to keep in sync between two payload shapes. See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
 fn publish_background_task_updated(broker: &crate::backend::wps::Broker, block_id: &str) {
-    broker.publish(crate::backend::wps::WaveEvent {
+    broker.publish(crate::backend::wps::MuxEvent {
         event: "background-task-updated".to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
@@ -896,17 +896,17 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         }
                     }
                 }
-                // Read the updated object and broadcast a proper WaveObjUpdate
+                // Read the updated object and broadcast a proper MuxObjUpdate
                 // so all WS clients refresh their atoms with the new data.
                 let oref = crate::backend::ORef::parse(&oref_str)
                     .map_err(|e| e.to_string())?;
                 let update_data = if oref.otype == "block" {
                     if let Ok(block) = wstore.must_get::<Block>(&oref.oid) {
-                        Some(serde_json::to_value(&WaveObjUpdate {
+                        Some(serde_json::to_value(&MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: oref.otype.clone(),
                             oid: oref.oid.clone(),
-                            obj: Some(wave_obj_to_value(&block)),
+                            obj: Some(mux_obj_to_value(&block)),
                         }).unwrap_or_default())
                     } else { None }
                 } else { None };
@@ -1346,7 +1346,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                             }
                         }
                     }
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: "ambient-narration".to_string(),
                         scopes: vec![format!("block:{}", cmd.blockid)],
                         sender: String::new(),

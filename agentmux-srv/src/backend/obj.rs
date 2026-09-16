@@ -139,7 +139,7 @@ pub trait StoreObj: Serialize + for<'de> Deserialize<'de> {
 
 /// Macro that implements `StoreObj` for a struct that has standard fields:
 /// `oid: String`, `version: i64`, `meta: MetaMapType`.
-macro_rules! impl_wave_obj {
+macro_rules! impl_mux_obj {
     ($ty:ty, $otype:expr) => {
         impl StoreObj for $ty {
             fn get_otype() -> &'static str {
@@ -326,7 +326,7 @@ pub struct Client {
     pub tempoid: String,
 }
 
-impl_wave_obj!(Client, OTYPE_CLIENT);
+impl_mux_obj!(Client, OTYPE_CLIENT);
 
 /// Go: `Window` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -373,7 +373,7 @@ pub struct Window {
     pub meta: MetaMapType,
 }
 
-impl_wave_obj!(Window, OTYPE_WINDOW);
+impl_mux_obj!(Window, OTYPE_WINDOW);
 
 /// Go: `Workspace` in pkg/obj/wtype.go
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -392,7 +392,7 @@ pub struct Workspace {
     pub meta: MetaMapType,
 }
 
-impl_wave_obj!(Workspace, OTYPE_WORKSPACE);
+impl_mux_obj!(Workspace, OTYPE_WORKSPACE);
 
 /// Go: `WorkspaceListEntry` in pkg/obj/wtype.go
 /// Used by ListWorkspaces — returns just {workspaceid, windowid}, not full workspace objects.
@@ -418,7 +418,7 @@ pub struct Tab {
     pub meta: MetaMapType,
 }
 
-impl_wave_obj!(Tab, OTYPE_TAB);
+impl_mux_obj!(Tab, OTYPE_TAB);
 
 // ====================================================================
 // Phase E.4.B Phase 3 — LayoutNode, LayoutNodeData, FlexDirection now
@@ -492,14 +492,14 @@ pub struct Block {
     pub subblockids: Option<Vec<String>>,
 }
 
-impl_wave_obj!(Block, OTYPE_BLOCK);
+impl_mux_obj!(Block, OTYPE_BLOCK);
 
-// ---- WaveObjUpdate ----
+// ---- MuxObjUpdate ----
 
 /// Represents an update notification for a wave object.
-/// Matches Go's `WaveObjUpdate`.
+/// Matches Go's `MuxObjUpdate`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaveObjUpdate {
+pub struct MuxObjUpdate {
     pub updatetype: String,
     pub otype: String,
     pub oid: String,
@@ -515,7 +515,7 @@ fn is_zero_i64(v: &i64) -> bool {
 
 /// Serialize any StoreObj to JSON bytes, including the "otype" field.
 /// This matches Go's `obj.ToJson()`.
-pub fn wave_obj_to_json<T: StoreObj>(obj: &T) -> Result<Vec<u8>, serde_json::Error> {
+pub fn mux_obj_to_json<T: StoreObj>(obj: &T) -> Result<Vec<u8>, serde_json::Error> {
     let mut map = serde_json::to_value(obj)?;
     if let Some(m) = map.as_object_mut() {
         m.insert("otype".to_string(), serde_json::Value::String(T::get_otype().to_string()));
@@ -525,7 +525,7 @@ pub fn wave_obj_to_json<T: StoreObj>(obj: &T) -> Result<Vec<u8>, serde_json::Err
 
 /// Serialize any StoreObj to a serde_json::Value, including the "otype" field.
 /// This matches Go's `obj.ToJsonMap()` — used by GetObject/GetObjects responses.
-pub fn wave_obj_to_value<T: StoreObj>(obj: &T) -> serde_json::Value {
+pub fn mux_obj_to_value<T: StoreObj>(obj: &T) -> serde_json::Value {
     let mut map = serde_json::to_value(obj).unwrap_or_default();
     if let Some(m) = map.as_object_mut() {
         m.insert("otype".to_string(), serde_json::Value::String(T::get_otype().to_string()));
@@ -535,7 +535,7 @@ pub fn wave_obj_to_value<T: StoreObj>(obj: &T) -> serde_json::Value {
 
 /// Deserialize JSON bytes to a specific StoreObj type.
 /// Does NOT validate the otype field — caller should verify if needed.
-pub fn wave_obj_from_json<T: StoreObj>(data: &[u8]) -> Result<T, serde_json::Error> {
+pub fn mux_obj_from_json<T: StoreObj>(data: &[u8]) -> Result<T, serde_json::Error> {
     serde_json::from_slice(data)
 }
 
@@ -557,8 +557,8 @@ mod tests {
             tosagreed: 1700000000000,
             ..Default::default()
         };
-        let json = wave_obj_to_json(&client).unwrap();
-        let parsed: Client = wave_obj_from_json(&json).unwrap();
+        let json = mux_obj_to_json(&client).unwrap();
+        let parsed: Client = mux_obj_from_json(&json).unwrap();
         assert_eq!(parsed.oid, client.oid);
         assert_eq!(parsed.version, client.version);
         assert_eq!(parsed.windowids, client.windowids);
@@ -580,8 +580,8 @@ mod tests {
             meta: MetaMapType::new(),
             ..Default::default()
         };
-        let json = wave_obj_to_json(&window).unwrap();
-        let parsed: Window = wave_obj_from_json(&json).unwrap();
+        let json = mux_obj_to_json(&window).unwrap();
+        let parsed: Window = mux_obj_from_json(&json).unwrap();
         assert_eq!(parsed.workspaceid, "ws-123");
         assert_eq!(parsed.pos.x, 100);
         assert_eq!(parsed.winsize.width, 1920);
@@ -599,8 +599,8 @@ mod tests {
             meta: MetaMapType::new(),
             ..Default::default()
         };
-        let json = wave_obj_to_json(&ws).unwrap();
-        let parsed: Workspace = wave_obj_from_json(&json).unwrap();
+        let json = mux_obj_to_json(&ws).unwrap();
+        let parsed: Workspace = mux_obj_from_json(&json).unwrap();
         assert_eq!(parsed.name, "My Workspace");
         assert_eq!(parsed.tabids.len(), 2);
         assert_eq!(parsed.pinnedtabids, vec!["t0"]);
@@ -616,8 +616,8 @@ mod tests {
             blockids: vec!["b1".to_string(), "b2".to_string()],
             meta: MetaMapType::new(),
         };
-        let json = wave_obj_to_json(&tab).unwrap();
-        let parsed: Tab = wave_obj_from_json(&json).unwrap();
+        let json = mux_obj_to_json(&tab).unwrap();
+        let parsed: Tab = mux_obj_from_json(&json).unwrap();
         assert_eq!(parsed.name, "Tab 1");
         assert_eq!(parsed.blockids.len(), 2);
     }
@@ -639,8 +639,8 @@ mod tests {
             magnifiednodeid: "node-1".to_string(),
             ..Default::default()
         };
-        let json = wave_obj_to_json(&ls).unwrap();
-        let parsed: LayoutState = wave_obj_from_json(&json).unwrap();
+        let json = mux_obj_to_json(&ls).unwrap();
+        let parsed: LayoutState = mux_obj_from_json(&json).unwrap();
         assert_eq!(parsed.magnifiednodeid, "node-1");
         assert!(parsed.rootnode.is_some());
         assert_eq!(parsed.rootnode.as_ref().unwrap().id, "node-1");
@@ -870,8 +870,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let json = wave_obj_to_json(&block).unwrap();
-        let parsed: Block = wave_obj_from_json(&json).unwrap();
+        let json = mux_obj_to_json(&block).unwrap();
+        let parsed: Block = mux_obj_from_json(&json).unwrap();
         assert_eq!(parsed.parentoref, "tab:parent-id");
         assert_eq!(
             parsed.meta.get("view").and_then(|v| v.as_str()),
@@ -908,13 +908,13 @@ mod tests {
     }
 
     #[test]
-    fn test_wave_obj_to_json_includes_otype() {
+    fn test_mux_obj_to_json_includes_otype() {
         let client = Client {
             oid: "test".to_string(),
             version: 1,
             ..Default::default()
         };
-        let json_bytes = wave_obj_to_json(&client).unwrap();
+        let json_bytes = mux_obj_to_json(&client).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&json_bytes).unwrap();
         assert_eq!(v["otype"], "client");
     }

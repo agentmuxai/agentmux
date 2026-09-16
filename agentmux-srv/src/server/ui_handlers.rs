@@ -179,7 +179,7 @@ fn prune_old_screenshots(dir: &std::path::Path) {
 
 /// `POST /api/v1/ui/screenshot` — backs the `UIScreenshot` MCP tool.
 /// Captures a PNG clipped to the caller's own pane, writes it to
-/// `<wave_data_dir>/tmp/ui-screenshots/<uuid>.png`, and returns both the
+/// `<mux_data_dir>/tmp/ui-screenshots/<uuid>.png`, and returns both the
 /// path (openable via `OpenMedia`) and the base64 bytes inline.
 pub(crate) async fn handle_ui_screenshot(
     State(state): State<AppState>,
@@ -233,7 +233,7 @@ pub(crate) async fn handle_ui_screenshot(
         }
     };
 
-    let dir = crate::backend::base::get_wave_data_dir().join("tmp/ui-screenshots");
+    let dir = crate::backend::base::get_mux_data_dir().join("tmp/ui-screenshots");
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return err_response(
             StatusCode::INTERNAL_SERVER_ERROR,

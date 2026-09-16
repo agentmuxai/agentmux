@@ -170,7 +170,7 @@ describe("zoomAllPanesIn/Out", () => {
 
     // ReAgent P1, PR #3090: the real RpcApi.SetMetaCommand is fire-and-forget
     // — WOS's local object cache is NOT updated synchronously by it, only
-    // later when the backend pushes a WaveObjUpdate event back
+    // later when the backend pushes a MuxObjUpdate event back
     // (global.ts's initGlobalEventSubs). Every OTHER test in this file uses
     // a setMetaMock that updates blockMetas synchronously, which masked a
     // real bug: stepAllPanes originally re-read getBlockZoom(blockId) right
@@ -183,7 +183,7 @@ describe("zoomAllPanesIn/Out", () => {
     it("computes the summary range from the freshly stepped value, not a re-read of WOS's (unsynced) cache", () => {
         // Deliberately never touches blockMetas — reproduces the real
         // system's actual timing (RpcApi.SetMetaCommand is fire-and-forget;
-        // WOS's cache only updates later, off a WaveObjUpdate event).
+        // WOS's cache only updates later, off a MuxObjUpdate event).
         // beforeEach resets this back to defaultSetMetaImpl for every other
         // test, so this override cannot leak.
         setMetaMock.mockImplementation(() => Promise.resolve(undefined));

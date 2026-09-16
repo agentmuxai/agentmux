@@ -46,7 +46,7 @@ use parking_lot::Mutex;
 
 use crate::backend::blockcontroller::{self, BlockControllerRuntimeStatus};
 use crate::backend::process_tracker::{self, TrackedProcess, TrackingConfidence};
-use crate::backend::wps::{Broker as WpsBroker, WaveEvent};
+use crate::backend::wps::{Broker as WpsBroker, MuxEvent};
 
 /// WPS event name for a `ProcessStatus` change. Scoped `block:<id>`, same
 /// convention as `agent:process-added`/`controllerstatus`. Consumers that
@@ -329,7 +329,7 @@ impl ProcessBroker {
         let Some(ref broker) = self.wps_broker else {
             return;
         };
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_STATUS_CHANGED.to_string(),
             scopes: vec![format!("block:{}", status.block_id)],
             sender: String::new(),
@@ -361,7 +361,7 @@ impl ProcessBroker {
         let Some(ref broker) = self.wps_broker else {
             return;
         };
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_TRACKED_BLOCKS_CHANGED.to_string(),
             scopes: vec![],
             sender: String::new(),

@@ -753,33 +753,33 @@ pub(crate) async fn open_agent_impl(
                 {
                     let mut updates = Vec::new();
                     if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
-                        updates.push(obj::WaveObjUpdate {
+                        updates.push(obj::MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: "block".into(),
                             oid: block_id.clone(),
-                            obj: Some(obj::wave_obj_to_value(&updated_block)),
+                            obj: Some(obj::mux_obj_to_value(&updated_block)),
                         });
                     }
                     if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
-                        updates.push(obj::WaveObjUpdate {
+                        updates.push(obj::MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: "tab".into(),
                             oid: tab_id.clone(),
-                            obj: Some(obj::wave_obj_to_value(&updated_tab)),
+                            obj: Some(obj::mux_obj_to_value(&updated_tab)),
                         });
                         if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
-                            updates.push(obj::WaveObjUpdate {
+                            updates.push(obj::MuxObjUpdate {
                                 updatetype: "update".into(),
                                 otype: "layout".into(),
                                 oid: updated_tab.layoutstate.clone(),
-                                obj: Some(obj::wave_obj_to_value(&updated_layout)),
+                                obj: Some(obj::mux_obj_to_value(&updated_layout)),
                             });
                         }
                     }
                     // One batched frame so the renderer applies all of them in
                     // a single reactive flush — see
-                    // EventBus::broadcast_wave_obj_updates.
-                    event_bus.broadcast_wave_obj_updates(&updates);
+                    // EventBus::broadcast_mux_obj_updates.
+                    event_bus.broadcast_mux_obj_updates(&updates);
                 }
 
                 Ok(AgentOpenResult {

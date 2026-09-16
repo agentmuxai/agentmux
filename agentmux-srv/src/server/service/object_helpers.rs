@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wave-object read/update/meta primitives used by the `object` service
+//! AgentMux-object read/update/meta primitives used by the `object` service
 //! handler, plus the per-agent zoom mirror. `update_object_meta` and
 //! `schedule_agent_zoom_mirror` are re-exported crate-wide.
 

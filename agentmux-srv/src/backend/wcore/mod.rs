@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wave Core: application coordinator for storage + pub/sub.
+//! AgentMux Core: application coordinator for storage + pub/sub.
 //! Port of Go's pkg/wcore/wcore.go + window.go + workspace.go + block.go.
 //!
 //! Orchestrates Store mutations with WPS event publishing.

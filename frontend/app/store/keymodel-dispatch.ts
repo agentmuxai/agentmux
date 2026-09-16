@@ -7,10 +7,10 @@ import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
 import { createSignal } from "solid-js";
 
-export type KeyHandler = (event: WaveKeyboardEvent) => boolean;
+export type KeyHandler = (event: MuxKeyboardEvent) => boolean;
 
 const [simpleControlShift, setSimpleControlShift] = createSignal(false);
-export const globalKeyMap = new Map<string, (waveEvent: WaveKeyboardEvent) => boolean>();
+export const globalKeyMap = new Map<string, (waveEvent: MuxKeyboardEvent) => boolean>();
 export const globalChordMap = new Map<string, Map<string, KeyHandler>>();
 let globalKeybindingsDisabled = false;
 
@@ -63,7 +63,7 @@ export function enableGlobalKeybindings() {
     globalKeybindingsDisabled = false;
 }
 
-function shouldDispatchToBlock(e: WaveKeyboardEvent): boolean {
+function shouldDispatchToBlock(e: MuxKeyboardEvent): boolean {
     if (atoms.modalOpen()) {
         return false;
     }
@@ -85,7 +85,7 @@ function shouldDispatchToBlock(e: WaveKeyboardEvent): boolean {
 let lastHandledEvent: KeyboardEvent | null = null;
 
 // returns [keymatch, T]
-function checkKeyMap<T>(waveEvent: WaveKeyboardEvent, keyMap: Map<string, T>): [string, T] {
+function checkKeyMap<T>(waveEvent: MuxKeyboardEvent, keyMap: Map<string, T>): [string, T] {
     for (const key of keyMap.keys()) {
         if (keyutil.checkKeyPressed(waveEvent, key)) {
             const val = keyMap.get(key);
@@ -95,7 +95,7 @@ function checkKeyMap<T>(waveEvent: WaveKeyboardEvent, keyMap: Map<string, T>): [
     return [null, null];
 }
 
-export function appHandleKeyDown(waveEvent: WaveKeyboardEvent): boolean {
+export function appHandleKeyDown(waveEvent: MuxKeyboardEvent): boolean {
     if (globalKeybindingsDisabled) {
         return false;
     }

@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Wave file fetching — split out of global.ts (see global.ts's "Wave file
+// AgentMux file fetching — split out of global.ts (see global.ts's "AgentMux file
 // fetching" section for the original context). Re-exported from global.ts
 // for backward-compat (97 files import from that module).
 
@@ -9,11 +9,11 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { getApi } from "./app-api";
 
-export async function fetchWaveFile(
+export async function fetchMuxFile(
     zoneId: string,
     fileName: string,
     offset?: number
-): Promise<{ data: Uint8Array; fileInfo: WaveFile }> {
+): Promise<{ data: Uint8Array; fileInfo: MuxFile }> {
     const usp = new URLSearchParams();
     usp.set("zoneid", zoneId);
     usp.set("name", fileName);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Pushed per-agent **progress**: the agent's current todo checklist and the
-//! tool it is running right now, published as an `agent:progress` WaveEvent so
+//! tool it is running right now, published as an `agent:progress` MuxEvent so
 //! the Swarm pane can list them under the agent's name.
 //!
 //! Sibling of [`super::activity_watcher`], and deliberately a separate loop:
@@ -36,7 +36,7 @@ use tokio::time::interval;
 
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::wps::{Broker, WaveEvent};
+use crate::backend::wps::{Broker, MuxEvent};
 
 use super::get_global_handler;
 
@@ -122,7 +122,7 @@ pub struct AgentProgress {
 }
 
 impl AgentProgress {
-    /// Nothing worth publishing — avoids a WaveEvent per tick per idle agent.
+    /// Nothing worth publishing — avoids a MuxEvent per tick per idle agent.
     fn is_empty(&self) -> bool {
         self.todos.is_empty() && self.current_tool.is_none()
     }
@@ -551,7 +551,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
 
-            broker.publish(WaveEvent {
+            broker.publish(MuxEvent {
                 event: EVENT_AGENT_PROGRESS.to_string(),
                 scopes: vec![format!("block:{}", block_id)],
                 sender: String::new(),

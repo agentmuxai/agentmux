@@ -153,7 +153,7 @@ impl AppServerController {
     fn publish_protocol_frame(&self, frame: serde_json::Value) {
         let line = format!("{}\n", frame);
         if let Some(broker) = &self.broker {
-            broker.publish(wps::WaveEvent {
+            broker.publish(wps::MuxEvent {
                 event: "output".to_string(),
                 scopes: vec![format!("block:{}", self.block_id)],
                 sender: String::new(),

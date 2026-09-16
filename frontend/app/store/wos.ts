@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// WaveObjectStore — migrated to SolidJS signals.
+// MuxObjectStore — migrated to SolidJS signals.
 
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
@@ -16,17 +16,17 @@ import { getApi } from "./app-api";
 // Internal types
 // ---------------------------------------------------------------------------
 
-type WaveObjectDataItemType<T extends WaveObj> = {
+type MuxObjectDataItemType<T extends MuxObj> = {
     value: T;
     loading: boolean;
 };
 
-// Each cached WaveObject holds a SolidJS signal instead of a Jotai atom.
-type WaveObjectValue<T extends WaveObj> = {
+// Each cached MuxObject holds a SolidJS signal instead of a Jotai atom.
+type MuxObjectValue<T extends MuxObj> = {
     pendingPromise: Promise<T> | null;
     // signal getter & setter pair
-    getData: () => WaveObjectDataItemType<T>;
-    setData: (v: WaveObjectDataItemType<T>) => void;
+    getData: () => MuxObjectDataItemType<T>;
+    setData: (v: MuxObjectDataItemType<T>) => void;
     refCount: number;
     holdTime: number;
 };
@@ -51,7 +51,7 @@ function isBlankNum(num: number): boolean {
     return num == null || isNaN(num) || num == 0;
 }
 
-function isValidWaveObj(val: WaveObj): boolean {
+function isValidMuxObj(val: MuxObj): boolean {
     if (val == null) return false;
     return !(isBlank(val.otype) || isBlank(val.oid) || isBlankNum(val.version));
 }
@@ -84,10 +84,10 @@ function debugLogBackendCall(methodName: string, durationStr: string, args: any[
 
 function wpsSubscribeToObject(oref: string): () => void {
     return waveEventSubscribe({
-        eventType: WpsEvent.WaveObjUpdate,
+        eventType: WpsEvent.MuxObjUpdate,
         scope: oref,
         handler: (event) => {
-            updateWaveObject(event.data);
+            updateMuxObject(event.data);
         },
     });
 }
@@ -134,7 +134,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
         })
         .then((respData: WebReturnType) => {
             if (respData == null) return null;
-            if (respData.updates != null) updateWaveObjects(respData.updates);
+            if (respData.updates != null) updateMuxObjects(respData.updates);
             if (respData.error != null) throw new Error(`call ${methodName} error: ${respData.error}`);
             const durationStr = Date.now() - startTs + "ms";
             debugLogBackendCall(methodName, durationStr, args);
@@ -143,15 +143,15 @@ function callBackendService(service: string, method: string, args: any[], noUICo
 }
 
 // ---------------------------------------------------------------------------
-// WaveObject cache — signals replace Jotai atoms
+// MuxObject cache — signals replace Jotai atoms
 // ---------------------------------------------------------------------------
 
-const waveObjectValueCache = new Map<string, WaveObjectValue<any>>();
+const waveObjectValueCache = new Map<string, MuxObjectValue<any>>();
 const defaultHoldTime = 5000;
 
-function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boolean): WaveObjectValue<T> {
-    const [getData, setData] = createSignal<WaveObjectDataItemType<T>>({ value: null, loading: true });
-    const wov: WaveObjectValue<T> = { pendingPromise: null, getData, setData, refCount: 0, holdTime: Date.now() + 5000 };
+function createMuxValueObject<T extends MuxObj>(oref: string, shouldFetch: boolean): MuxObjectValue<T> {
+    const [getData, setData] = createSignal<MuxObjectDataItemType<T>>({ value: null, loading: true });
+    const wov: MuxObjectValue<T> = { pendingPromise: null, getData, setData, refCount: 0, holdTime: Date.now() + 5000 };
     if (!shouldFetch) return wov;
 
     const startTs = Date.now();
@@ -166,19 +166,19 @@ function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boo
         }
         wov.pendingPromise = null;
         wov.setData({ value: val, loading: false });
-        console.log("WaveObj resolved", oref, Date.now() - startTs + "ms");
+        console.log("MuxObj resolved", oref, Date.now() - startTs + "ms");
     }).catch((err) => {
         wov.pendingPromise = null;
         // A backend "not found" rejection (get_object_by_oref's
         // `Err(format!("not found: {}", oref_str))`, object_helpers.rs) is a
         // DEFINITIVE answer, not a transient failure — resolve loading so
-        // callers checking getWaveObjectLoadingAtom (e.g. swarm-model.ts's
+        // callers checking getMuxObjectLoadingAtom (e.g. swarm-model.ts's
         // hasRenderableBlock) can actually distinguish "confirmed absent"
         // from "still fetching" instead of this oref staying stuck at
         // loading:true forever (reagentx P1 on #2438, second pass). Any
         // OTHER error (network blip, endpoint not yet set at module init)
         // keeps the prior behavior: leave loading as-is, caller can retry
-        // via getWaveObjectValue when ready.
+        // via getMuxObjectValue when ready.
         if (err instanceof Error && err.message.includes("not found: " + oref)) {
             wov.setData({ value: null, loading: false });
         }
@@ -186,19 +186,19 @@ function createWaveValueObject<T extends WaveObj>(oref: string, shouldFetch: boo
     return wov;
 }
 
-function getWaveObjectValue<T extends WaveObj>(oref: string, createIfMissing = true): WaveObjectValue<T> {
+function getMuxObjectValue<T extends MuxObj>(oref: string, createIfMissing = true): MuxObjectValue<T> {
     let wov = waveObjectValueCache.get(oref);
     if (wov === undefined && createIfMissing) {
-        wov = createWaveValueObject(oref, true);
+        wov = createMuxValueObject(oref, true);
         waveObjectValueCache.set(oref, wov);
     }
     return wov;
 }
 
-function reloadWaveObject<T extends WaveObj>(oref: string): Promise<T> {
+function reloadMuxObject<T extends MuxObj>(oref: string): Promise<T> {
     let wov = waveObjectValueCache.get(oref);
     if (wov === undefined) {
-        wov = getWaveObjectValue<T>(oref, true);
+        wov = getMuxObjectValue<T>(oref, true);
         return wov.pendingPromise!;
     }
     const prtn = GetObject<T>(oref);
@@ -213,12 +213,12 @@ function reloadWaveObject<T extends WaveObj>(oref: string): Promise<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns a SignalAtom for a WaveObject — callable as a getter, writable via ._set().
+ * Returns a SignalAtom for a MuxObject — callable as a getter, writable via ._set().
  * Calling the atom reads the current value (reactive in SolidJS components).
  * Setting via ._set() updates the local cache and optionally pushes to the server.
  */
-function getWaveObjectAtom<T extends WaveObj>(oref: string): SignalAtom<T> {
-    const wov = getWaveObjectValue<T>(oref);
+function getMuxObjectAtom<T extends MuxObj>(oref: string): SignalAtom<T> {
+    const wov = getMuxObjectValue<T>(oref);
     const atom = () => wov.getData().value;
     (atom as any)._set = (value: T | ((prev: T) => T)) => {
         const nextValue =
@@ -229,8 +229,8 @@ function getWaveObjectAtom<T extends WaveObj>(oref: string): SignalAtom<T> {
 }
 
 /** Returns a signal accessor for the loading state. */
-function getWaveObjectLoadingAtom(oref: string): () => boolean {
-    const wov = getWaveObjectValue(oref);
+function getMuxObjectLoadingAtom(oref: string): () => boolean {
+    const wov = getMuxObjectValue(oref);
     return () => {
         const d = wov.getData();
         return d.loading ? null : d.loading;
@@ -242,8 +242,8 @@ function getWaveObjectLoadingAtom(oref: string): () => boolean {
  * Must be called inside a component or reactive root.
  * Manages refCount and cleanup automatically.
  */
-function useWaveObjectValue<T extends WaveObj>(oref: string): [() => T, () => boolean] {
-    const wov = getWaveObjectValue<T>(oref);
+function useMuxObjectValue<T extends MuxObj>(oref: string): [() => T, () => boolean] {
+    const wov = getMuxObjectValue<T>(oref);
     wov.refCount++;
     onCleanup(() => {
         wov.refCount--;
@@ -254,8 +254,8 @@ function useWaveObjectValue<T extends WaveObj>(oref: string): [() => T, () => bo
     ];
 }
 
-function loadAndPinWaveObject<T extends WaveObj>(oref: string): Promise<T> {
-    const wov = getWaveObjectValue<T>(oref);
+function loadAndPinMuxObject<T extends MuxObj>(oref: string): Promise<T> {
+    const wov = getMuxObjectValue<T>(oref);
     wov.refCount++;
     if (wov.pendingPromise == null) {
         const dataValue = wov.getData();
@@ -264,15 +264,15 @@ function loadAndPinWaveObject<T extends WaveObj>(oref: string): Promise<T> {
     return wov.pendingPromise;
 }
 
-function updateWaveObject(update: WaveObjUpdate) {
+function updateMuxObject(update: MuxObjUpdate) {
     if (update == null) return;
     const oref = makeORef(update.otype, update.oid);
-    const wov = getWaveObjectValue(oref);
+    const wov = getMuxObjectValue(oref);
     if (update.updatetype == "delete") {
-        console.log("WaveObj deleted", oref);
+        console.log("MuxObj deleted", oref);
         wov.setData({ value: null, loading: false });
     } else {
-        if (!isValidWaveObj(update.obj)) {
+        if (!isValidMuxObj(update.obj)) {
             console.log("invalid wave object update", update);
             return;
         }
@@ -280,13 +280,13 @@ function updateWaveObject(update: WaveObjUpdate) {
         if (curValue.value != null && curValue.value.version >= update.obj.version) {
             return;
         }
-        console.log("WaveObj updated", oref);
+        console.log("MuxObj updated", oref);
         wov.setData({ value: update.obj, loading: false });
     }
     wov.holdTime = Date.now() + defaultHoldTime;
 }
 
-function updateWaveObjects(vals: WaveObjUpdate[]) {
+function updateMuxObjects(vals: MuxObjUpdate[]) {
     // batch() so a single RPC response carrying multiple related updates
     // (e.g. CloseTab's [delete Tab, update Workspace] pair) applies as one
     // atomic reactive flush. Without it, each setData() below propagates
@@ -297,12 +297,12 @@ function updateWaveObjects(vals: WaveObjUpdate[]) {
     // disappearing. See docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §6.
     batch(() => {
         for (const val of vals) {
-            updateWaveObject(val);
+            updateMuxObject(val);
         }
     });
 }
 
-function cleanWaveObjectCache() {
+function cleanMuxObjectCache() {
     const now = Date.now();
     for (const [oref, wov] of waveObjectValueCache) {
         if (wov.refCount == 0 && wov.holdTime < now) {
@@ -311,18 +311,18 @@ function cleanWaveObjectCache() {
     }
 }
 
-// Periodically clean up stale WaveObject cache entries
-setInterval(cleanWaveObjectCache, 30000);
+// Periodically clean up stale MuxObject cache entries
+setInterval(cleanMuxObjectCache, 30000);
 
 /** Non-reactive read — returns the current value without tracking. */
-function getObjectValue<T extends WaveObj>(oref: string): T {
-    const wov = getWaveObjectValue<T>(oref);
+function getObjectValue<T extends MuxObj>(oref: string): T {
+    const wov = getMuxObjectValue<T>(oref);
     return wov.getData().value;
 }
 
-function setObjectValue<T extends WaveObj>(value: T, pushToServer?: boolean) {
+function setObjectValue<T extends MuxObj>(value: T, pushToServer?: boolean) {
     const oref = makeORef(value.otype, value.oid);
-    const wov = getWaveObjectValue(oref, false);
+    const wov = getMuxObjectValue(oref, false);
     if (wov === undefined) return;
     wov.setData({ value, loading: false });
     if (pushToServer) {
@@ -333,14 +333,14 @@ function setObjectValue<T extends WaveObj>(value: T, pushToServer?: boolean) {
 export {
     callBackendService,
     getObjectValue,
-    getWaveObjectAtom,
-    getWaveObjectLoadingAtom,
-    loadAndPinWaveObject,
+    getMuxObjectAtom,
+    getMuxObjectLoadingAtom,
+    loadAndPinMuxObject,
     makeORef,
-    reloadWaveObject,
+    reloadMuxObject,
     setObjectValue,
-    updateWaveObject,
-    updateWaveObjects,
-    useWaveObjectValue,
+    updateMuxObject,
+    updateMuxObjects,
+    useMuxObjectValue,
     wpsSubscribeToObject,
 };

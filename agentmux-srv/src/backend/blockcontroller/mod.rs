@@ -803,9 +803,9 @@ pub fn publish_controller_status(
     broker: &super::wps::Broker,
     status: &BlockControllerRuntimeStatus,
 ) {
-    use super::wps::{WaveEvent, EVENT_CONTROLLER_STATUS};
+    use super::wps::{MuxEvent, EVENT_CONTROLLER_STATUS};
 
-    let event = WaveEvent {
+    let event = MuxEvent {
         event: EVENT_CONTROLLER_STATUS.to_string(),
         scopes: vec![format!("block:{}", status.blockid)],
         sender: String::new(),

@@ -13,13 +13,13 @@ import { fireAndForget } from "@/util/util";
 import { Terminal } from "@xterm/xterm";
 import { handleAgentIdChange } from "./termagent";
 
-// OSC 9283 — Wave meta commands
-export function handleOscWaveCommand(data: string, blockId: string, loaded: boolean): boolean {
+// OSC 9283 — AgentMux meta commands
+export function handleOscMuxCommand(data: string, blockId: string, loaded: boolean): boolean {
     if (!loaded) {
         return true;
     }
     if (!data || data.length === 0) {
-        console.log("Invalid Wave OSC command received (empty)");
+        console.log("Invalid AgentMux OSC command received (empty)");
         return true;
     }
 
@@ -28,7 +28,7 @@ export function handleOscWaveCommand(data: string, blockId: string, loaded: bool
     // "setmeta;[wave-id];{JSONDATA}"
     const parts = data.split(";");
     if (parts[0] !== "setmeta") {
-        console.log("Invalid Wave OSC command received (bad command)", data);
+        console.log("Invalid AgentMux OSC command received (bad command)", data);
         return true;
     }
     let jsonPayload: string;
@@ -39,7 +39,7 @@ export function handleOscWaveCommand(data: string, blockId: string, loaded: bool
         waveId = parts[1];
         jsonPayload = parts.slice(2).join(";");
     } else {
-        console.log("Invalid Wave OSC command received (1 part)", data);
+        console.log("Invalid AgentMux OSC command received (1 part)", data);
         return true;
     }
 
@@ -47,7 +47,7 @@ export function handleOscWaveCommand(data: string, blockId: string, loaded: bool
     try {
         meta = JSON.parse(jsonPayload);
     } catch (e) {
-        console.error("Invalid JSON in Wave OSC command:", e);
+        console.error("Invalid JSON in AgentMux OSC command:", e);
         return true;
     }
 

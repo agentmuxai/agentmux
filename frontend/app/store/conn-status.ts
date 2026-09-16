@@ -33,7 +33,7 @@ export async function loadConnStatus() {
 export function subscribeToConnEvents() {
     waveEventSubscribe({
         eventType: WpsEvent.ConnChange,
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             try {
                 const connStatus = event.data as ConnStatus;
                 if (connStatus == null || isBlank(connStatus.connection)) return;

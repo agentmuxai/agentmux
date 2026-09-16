@@ -23,7 +23,7 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// Floating-pane branch of `open_pane`. The block already exists in
 /// `source_tab_id`'s blockids (created by the caller, with no layout node).
 /// This moves it into a fresh floating workspace via the `tear_off_block`
-/// saga, sets up the new tab's layout, broadcasts the new WaveObjs, and asks
+/// saga, sets up the new tab's layout, broadcasts the new MuxObjs, and asks
 /// the source window's frontend to materialize the chromeless floating OS
 /// window via the host `open_floating_pane_window` command (srv cannot open
 /// windows itself). See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
@@ -117,44 +117,44 @@ pub(super) async fn open_pane_floating(
     }
 
     // Broadcast the new workspace + layout + tab + block so any frontend syncs
-    // its WaveObj cache (mirrors the docked path + the tear-off DnD handler).
+    // its MuxObj cache (mirrors the docked path + the tear-off DnD handler).
     {
-        let mut updates: Vec<obj::WaveObjUpdate> = Vec::new();
+        let mut updates: Vec<obj::MuxObjUpdate> = Vec::new();
         if let Ok(ws) = wstore.must_get::<Workspace>(&new_ws_id) {
-            updates.push(obj::WaveObjUpdate {
+            updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "workspace".into(),
                 oid: new_ws_id.clone(),
-                obj: Some(obj::wave_obj_to_value(&ws)),
+                obj: Some(obj::mux_obj_to_value(&ws)),
             });
         }
         if let Ok(t) = wstore.must_get::<Tab>(&new_tab_id) {
             if let Ok(layout) = wstore.must_get::<obj::LayoutState>(&t.layoutstate) {
-                updates.push(obj::WaveObjUpdate {
+                updates.push(obj::MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: "layout".into(),
                     oid: t.layoutstate.clone(),
-                    obj: Some(obj::wave_obj_to_value(&layout)),
+                    obj: Some(obj::mux_obj_to_value(&layout)),
                 });
             }
-            updates.push(obj::WaveObjUpdate {
+            updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "tab".into(),
                 oid: new_tab_id.clone(),
-                obj: Some(obj::wave_obj_to_value(&t)),
+                obj: Some(obj::mux_obj_to_value(&t)),
             });
         }
         if let Ok(b) = wstore.must_get::<Block>(&block_id) {
-            updates.push(obj::WaveObjUpdate {
+            updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "block".into(),
                 oid: block_id.clone(),
-                obj: Some(obj::wave_obj_to_value(&b)),
+                obj: Some(obj::mux_obj_to_value(&b)),
             });
         }
         // One batched frame so the renderer applies all of them in a single
-        // reactive flush — see EventBus::broadcast_wave_obj_updates.
-        event_bus.broadcast_wave_obj_updates(&updates);
+        // reactive flush — see EventBus::broadcast_mux_obj_updates.
+        event_bus.broadcast_mux_obj_updates(&updates);
     }
 
     // Ask the source window's frontend to open the floating OS window — scoped
@@ -170,7 +170,7 @@ pub(super) async fn open_pane_floating(
     };
     match window_id {
         Some(win) => {
-            state.broker.publish(crate::backend::wps::WaveEvent {
+            state.broker.publish(crate::backend::wps::MuxEvent {
                 event: "openfloatingpane".to_string(),
                 scopes: vec![win],
                 sender: String::new(),
@@ -263,7 +263,7 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// reactively by `EditorViewModel`'s `createEffect` over its own block meta,
 /// then cleared immediately after — covers both "not yet mounted when this
 /// was written" and "already mounted, reacts as soon as the write lands"
-/// uniformly through the same WaveObj sync path the pane already depends on
+/// uniformly through the same MuxObj sync path the pane already depends on
 /// for everything else.
 ///
 /// **Array, not a single scalar** (codex P1 on PR #2404): if 2+ `OpenEditor`
@@ -280,13 +280,13 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// on a later, unrelated remount. Second, deeper finding after fixing that:
 /// the WPS event is a direct WS push and arrives essentially synchronously,
 /// while THIS meta write only reaches the frontend's `blockAtom` after an
-/// async WaveObj DB-refetch — so the live handler's own dequeue attempt
+/// async MuxObj DB-refetch — so the live handler's own dequeue attempt
 /// could run and read stale data (this exact write not yet reflected)
 /// before it landed, no-op, and strand the entry anyway. Removing the
 /// separate live path entirely (rather than patching a second-order race in
 /// its own race-fix) leaves one delivery mechanism and one reactive
 /// consumer — nothing to race. Trades a small amount of latency for the
-/// already-mounted case (a real WaveObj round-trip instead of a direct
+/// already-mounted case (a real MuxObj round-trip instead of a direct
 /// push) for not being racy.
 ///
 /// **Superseded relying on WPS `persist > 0` for durability** (codex P1 on
@@ -317,7 +317,7 @@ const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
 /// the frontend's `onBackendUpdate` (`frontend/layout/lib/layoutPersistence.ts:59-82`)
 /// only re-derives `focusedNodeId` at initial model construction or via a
 /// `pendingBackendActions`-driven tree action — a bare `focusednodeid`
-/// WaveObj push to an ALREADY-MOUNTED `LayoutModel` (confirmed by reading
+/// MuxObj push to an ALREADY-MOUNTED `LayoutModel` (confirmed by reading
 /// the function directly: no branch reads `waveObj.focusednodeid` outside
 /// those two triggers) is silently never applied to the live `treeState`.
 /// Making that work would mean changing `onBackendUpdate`'s reactivity —

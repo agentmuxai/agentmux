@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
-import { computeBgStyleFromMeta } from "@/util/waveutil";
+import { computeBgStyleFromMeta } from "@/util/muxutil";
 import type { JSX } from "solid-js";
 import { createMemo, onCleanup, onMount } from "solid-js";
 import { debounce } from "throttle-debounce";

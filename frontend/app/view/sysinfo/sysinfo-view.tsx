@@ -9,7 +9,7 @@ import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Sh
 
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
-import { convertWaveEventToDataItem } from "./sysinfo-util";
+import { convertMuxEventToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
     blockId: string;
@@ -45,7 +45,7 @@ function SysinfoView(props: SysinfoViewProps): JSX.Element {
             scope: cn,
             handler: (event) => {
                 if (model.loadingAtom()) return;
-                const dataItem = convertWaveEventToDataItem(event);
+                const dataItem = convertMuxEventToDataItem(event);
                 if (dataItem == null) return;
                 model.appendData(dataItem);
             },

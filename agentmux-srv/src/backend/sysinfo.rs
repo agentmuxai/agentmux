@@ -16,7 +16,7 @@ use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigState;
-use crate::backend::wps::{Broker, WaveEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
+use crate::backend::wps::{Broker, MuxEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;
@@ -1081,7 +1081,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
 
         let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
 
-        let event = WaveEvent {
+        let event = MuxEvent {
             event: EVENT_SYS_INFO.to_string(),
             scopes: vec![conn_name.clone()],
             sender: String::new(),
@@ -1176,7 +1176,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigSta
                     // Per-block process stats, not the backend's own uptime.
                     uptime_secs: None,
                 };
-                let block_event = WaveEvent {
+                let block_event = MuxEvent {
                     event: EVENT_BLOCK_STATS.to_string(),
                     scopes: vec![format!("block:{}", block_id)],
                     sender: String::new(),

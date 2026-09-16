@@ -83,7 +83,7 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
-                const vals = (event as WaveEvent)?.data?.values;
+                const vals = (event as MuxEvent)?.data?.values;
                 if (vals == null) return;
                 const next: Core[] = [];
                 for (const key in vals) {

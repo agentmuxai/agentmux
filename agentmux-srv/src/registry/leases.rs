@@ -16,7 +16,7 @@
 //! `claim`/`renew`/`release` each hold a real, blocking, per-`instance_id`
 //! OS advisory lock (`flock` on Unix, `LockFileEx` on Windows — same
 //! primitive family already used for single-instance enforcement in
-//! `backend::base::WaveLock` and `agentmux-launcher::second_instance`,
+//! `backend::base::MuxLock` and `agentmux-launcher::second_instance`,
 //! just scoped per-lease instead of globally) for the short duration of
 //! the call, not across calls. An earlier draft tried to get away with
 //! pure atomic-rename/create-if-not-exists tricks and no real lock; it
@@ -275,7 +275,7 @@ struct CriticalSection {
 impl CriticalSection {
     /// Deliberately never removes `lock_path` — one empty lock file
     /// persists per `instance_id` that has ever called `claim`, same
-    /// bounded/accepted cost as `backend::base::WaveLock`'s single
+    /// bounded/accepted cost as `backend::base::MuxLock`'s single
     /// global lock file. This is NOT an oversight: deleting a flock/
     /// LockFileEx-locked file out from under a waiter is the classic
     /// "unlink race" footgun — a process blocked in `open()` (before

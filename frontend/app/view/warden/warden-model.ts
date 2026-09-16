@@ -3,7 +3,7 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, type Accessor } from "solid-js";
 
 export type WardenSection = "host" | "lan" | "internet" | "audit" | "supervisor";
@@ -47,7 +47,7 @@ export class WardenViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
+        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
         this.zoomAtom = useBlockAtom(blockId, "warden-zoom", () =>
             createMemo<number>(() => {
                 const z = this.blockAtom()?.meta?.["term:zoom"];

@@ -5,7 +5,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { sendWSCommand } from "@/app/store/ws";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, atoms, fetchWaveFile, getSettingsKeyAtom, openLink, setTermRendererAtom } from "@/app/store/global";
+import { WOS, atoms, fetchMuxFile, getSettingsKeyAtom, openLink, setTermRendererAtom } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { PLATFORM, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -23,7 +23,7 @@ import { debounce } from "throttle-debounce";
 import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
 import { FitAddon } from "@xterm/addon-fit";
 import { registeredAgentsByBlock, unregisterAgent } from "./termagent";
-import { handleOsc7Command, handleOsc16162Command, handleOscTitleCommand, handleOscWaveCommand } from "./termosc";
+import { handleOsc7Command, handleOsc16162Command, handleOscTitleCommand, handleOscMuxCommand } from "./termosc";
 import { markStart, markEnd } from "@/perf";
 import { PredictiveEcho } from "./predictive-echo";
 
@@ -197,7 +197,7 @@ export class TermWrap {
 
         // Register OSC handlers
         this.terminal.parser.registerOscHandler(9283, (data: string) => {
-            return handleOscWaveCommand(data, this.blockId, this.loaded);
+            return handleOscMuxCommand(data, this.blockId, this.loaded);
         });
         this.terminal.parser.registerOscHandler(7, (data: string) => {
             return handleOsc7Command(data, this.blockId, this.loaded);
@@ -815,7 +815,7 @@ export class TermWrap {
 
     private async loadInitialTerminalData(): Promise<void> {
         let startTs = Date.now();
-        const { data: cacheData, fileInfo: cacheFile } = await fetchWaveFile(this.blockId, TermCacheFileName);
+        const { data: cacheData, fileInfo: cacheFile } = await fetchMuxFile(this.blockId, TermCacheFileName);
         let ptyOffset = 0;
         if (cacheFile != null) {
             ptyOffset = cacheFile.meta["ptyoffset"] ?? 0;
@@ -837,7 +837,7 @@ export class TermWrap {
                 }
             }
         }
-        const { data: mainData, fileInfo: mainFile } = await fetchWaveFile(this.blockId, TermFileName, ptyOffset);
+        const { data: mainData, fileInfo: mainFile } = await fetchMuxFile(this.blockId, TermFileName, ptyOffset);
         console.log(
             `terminal loaded cachefile:${cacheData?.byteLength ?? 0} main:${mainData?.byteLength ?? 0} bytes, ${Date.now() - startTs}ms`
         );

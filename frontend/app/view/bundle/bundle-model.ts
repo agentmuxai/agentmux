@@ -26,7 +26,7 @@
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 
@@ -240,7 +240,7 @@ export class BundleViewModel implements ViewModel {
         this.blockId = blockId ?? "";
         this.nodeModel = nodeModel ?? null;
         this.blockAtom = blockId
-            ? getWaveObjectAtom(makeORef("block", blockId))
+            ? getMuxObjectAtom(makeORef("block", blockId))
             : () => undefined;
         this.viewName = createMemo(() => {
             const block = this.blockAtom();

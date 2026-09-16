@@ -358,7 +358,7 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
  * `"Agent"` fallback string is for, unchanged since 2026-06-22) — that's a
  * real, transient loading state on a real block, and from "the fetch for
  * this oref just hasn't resolved yet" (`isLoading`) — `WOS.
- * getWaveObjectAtom` seeds a freshly-tracked oref with `{ value: null,
+ * getMuxObjectAtom` seeds a freshly-tracked oref with `{ value: null,
  * loading: true }` (`wos.ts:152-153`) until its async `GetObject` fetch
  * resolves, so a genuinely real, just-spawned block's row would otherwise
  * read identically to a phantom one on the very first `buildTree()` pass —
@@ -798,7 +798,7 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
 
     const unsub = waveEventSubscribe({
         eventType: "dispatch:activity",
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             const data = event?.data as any;
             if (data?.dispatchId !== dispatchId) return;
             const members = (data?.members as { agentId: string; events: SubagentEvent[] }[]) ?? [];
@@ -1161,7 +1161,7 @@ export class SwarmViewModel implements ViewModel {
         // re-fetch the whole active-shells list on every chunk).
         const unsubShellChunk = waveEventSubscribe({
             eventType: "shell_chunk",
-            handler: (event: WaveEvent) => {
+            handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 if (data?.op === "exit") this.scheduleLoadShells();
             },
@@ -1182,7 +1182,7 @@ export class SwarmViewModel implements ViewModel {
         // reload — store it keyed by block and let buildTree read it.
         const unsubProgress = waveEventSubscribe({
             eventType: "agent:progress",
-            handler: (event: WaveEvent) => {
+            handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 const blockId = data?.blockId;
                 if (typeof blockId !== "string" || !blockId) return;
@@ -1212,7 +1212,7 @@ export class SwarmViewModel implements ViewModel {
         // not just the one whose expand click triggered subagent.GenerateName.
         const unsubNamed = waveEventSubscribe({
             eventType: "subagent:named",
-            handler: (event: WaveEvent) => {
+            handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 const agentId = data?.agentId;
                 const displayName = data?.displayName;
@@ -1926,14 +1926,14 @@ export class SwarmViewModel implements ViewModel {
         const liveGroupKeys = new Set<string>();
         const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.flatMap((blockId) => {
-            const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+            const blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
             // isLoading distinguishes "this oref hasn't resolved yet" from
             // "this oref resolved to nothing" — both read as block == null,
             // but only the latter means the id is genuinely phantom.
-            // getWaveObjectLoadingAtom returns `null` while loading, `false`
+            // getMuxObjectLoadingAtom returns `null` while loading, `false`
             // once GetObject has resolved either way (wos.ts:232-238).
-            const isLoading = WOS.getWaveObjectLoadingAtom(`block:${blockId}`)() !== false;
+            const isLoading = WOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =
                 (block?.meta?.["agentName"] as string | undefined)?.trim() ||

@@ -25,7 +25,7 @@ import "./swarm-view.scss";
 
 export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Element {
     const model = props.model;
-    const block = WOS.getWaveObjectAtom<Block>(`block:${model.blockId}`);
+    const block = WOS.getMuxObjectAtom<Block>(`block:${model.blockId}`);
 
     const zoomFactor = createMemo(() => {
         const z = block()?.meta?.["term:zoom"];

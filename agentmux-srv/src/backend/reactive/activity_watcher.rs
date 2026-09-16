@@ -4,7 +4,7 @@
 //! Pushed per-agent activity summaries: periodically runs the same
 //! Haiku-powered digest used by `session:activity_summary` for every
 //! registered reactive agent that is actively running, and publishes the
-//! result as an `agent:summary` WaveEvent — so panes (the swarm feed, in
+//! result as an `agent:summary` MuxEvent — so panes (the swarm feed, in
 //! particular) can show a live one-liner without polling.
 //!
 //! Each call goes through `app_api::session::generate_pushed_activity_summary`,
@@ -38,7 +38,7 @@ use tokio::time::interval;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps::{Broker, WaveEvent};
+use crate::backend::wps::{Broker, MuxEvent};
 
 use super::get_global_handler;
 
@@ -152,7 +152,7 @@ pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
 
-                broker.publish(WaveEvent {
+                broker.publish(MuxEvent {
                     event: EVENT_AGENT_SUMMARY.to_string(),
                     scopes: vec![format!("block:{}", block_id)],
                     sender: String::new(),

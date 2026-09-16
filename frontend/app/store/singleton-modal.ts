@@ -237,7 +237,7 @@ function ensureWired(kind: SingletonKind, st: KindState): void {
     waveEventSubscribe({
         eventType: EVENT_SINGLETON_CLAIM,
         scope: scopeFor(kind),
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             const payload = parsePayload(event.data);
             if (payload && payload.kind === kind) applyClaim(payload);
         },

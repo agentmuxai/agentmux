@@ -51,7 +51,7 @@ pub struct WebReturnType {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub updates: Option<Vec<obj::WaveObjUpdate>>,
+    pub updates: Option<Vec<obj::MuxObjUpdate>>,
 }
 
 impl WebReturnType {
@@ -76,7 +76,7 @@ impl WebReturnType {
     }
 
     /// Create a success response with updates.
-    pub fn success_with_updates(updates: Vec<obj::WaveObjUpdate>) -> Self {
+    pub fn success_with_updates(updates: Vec<obj::MuxObjUpdate>) -> Self {
         Self {
             success: true,
             error: None,
@@ -92,7 +92,7 @@ impl WebReturnType {
     /// Create a success response with both data and updates.
     pub fn success_data_updates(
         data: serde_json::Value,
-        updates: Vec<obj::WaveObjUpdate>,
+        updates: Vec<obj::MuxObjUpdate>,
     ) -> Self {
         Self {
             success: true,
@@ -117,7 +117,7 @@ impl WebReturnType {
     }
 }
 
-// ---- WaveObjUpdate (matches Go's obj.WaveObjUpdate) ----
+// ---- MuxObjUpdate (matches Go's obj.MuxObjUpdate) ----
 // This is re-exported from obj where it's defined.
 
 // ---- Method metadata (for documentation and code generation) ----
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_web_return_type_with_updates() {
-        let updates = vec![obj::WaveObjUpdate {
+        let updates = vec![obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "tab".into(),
             oid: "123".into(),
@@ -504,7 +504,7 @@ mod tests {
     fn test_web_return_type_serde_roundtrip() {
         let rtn = WebReturnType::success_data_updates(
             serde_json::json!({"id": "block-1"}),
-            vec![obj::WaveObjUpdate {
+            vec![obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "block".into(),
                 oid: "abc".into(),

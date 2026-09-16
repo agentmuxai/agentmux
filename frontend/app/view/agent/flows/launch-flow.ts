@@ -137,7 +137,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
     // binary is on PATH and can't tell the daemon is stopped, so an agent
     // could pass this gate and still fail deeper in container spawn. See
     // docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
-    const blockData = WOS.getWaveObjectAtom<Block>(oref)();
+    const blockData = WOS.getMuxObjectAtom<Block>(oref)();
     const agentMode = blockData?.meta?.agentMode ?? "host";
     const agentDefinitionId = blockData?.meta?.agentId as string | undefined;
 

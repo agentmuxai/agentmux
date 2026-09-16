@@ -28,10 +28,10 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::fs_watch::{FsWatchEventKind, FsWatchPool, Subscription};
-use super::wps::{Broker, WaveEvent};
+use super::wps::{Broker, MuxEvent};
 
 /// WPS event fired when a file open in at least one editor tab changes on
-/// disk. Scoped per-block (`block:<id>`) via `WaveEvent::scopes`, matching
+/// disk. Scoped per-block (`block:<id>`) via `MuxEvent::scopes`, matching
 /// `EVENT_CONTROLLER_STATUS`/`EVENT_BLOCK_ACTIVITY`'s existing pattern —
 /// never a global broadcast, so panes on unrelated files aren't notified.
 /// Payload is deliberately just the path (a wake signal, not content); the
@@ -221,7 +221,7 @@ impl EditorFileWatcher {
 /// open on `path`. Mirrors `publish_block_activity`'s per-block scoping
 /// (`agentmux-srv/src/backend/wps.rs`) — not a global broadcast.
 fn publish_editor_file_changed(broker: &Broker, path: &Path, block_ids: &[String]) {
-    broker.publish(WaveEvent {
+    broker.publish(MuxEvent {
         event: EVENT_EDITOR_FILE_CHANGED.to_string(),
         scopes: block_ids.iter().map(|id| format!("block:{id}")).collect(),
         sender: String::new(),
@@ -236,11 +236,11 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     struct TestClient {
-        events: StdMutex<Vec<(String, WaveEvent)>>,
+        events: StdMutex<Vec<(String, MuxEvent)>>,
     }
 
     impl super::super::wps::WpsClient for Arc<TestClient> {
-        fn send_event(&self, route_id: &str, event: WaveEvent) {
+        fn send_event(&self, route_id: &str, event: MuxEvent) {
             self.events.lock().unwrap().push((route_id.to_string(), event));
         }
     }

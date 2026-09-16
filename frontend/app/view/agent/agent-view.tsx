@@ -387,11 +387,11 @@ export const AgentPaneChrome = (props: {
 
     // Block-scoped reads (agentId/isHistoryTab/zoom) must track the
     // CURRENTLY ACTIVE member, not `anchorBlockId` (frozen to whichever
-    // ViewModel instance first rendered this chrome) — getWaveObjectAtom
-    // inside a memo, not useWaveObjectValue, the same reactive-oref pattern
+    // ViewModel instance first rendered this chrome) — getMuxObjectAtom
+    // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
     // PR #3134 already established for BlockFrame_Header
     // (frontend/app/store/wos.ts's own doc comments explain why).
-    const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+    const activeBlockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
     const agentId = () => activeBlockData()?.meta?.["agentId"];
     const isHistoryTab = () => !!activeBlockData()?.meta?.[HISTORY_TAB_FOR_META_KEY];
 
