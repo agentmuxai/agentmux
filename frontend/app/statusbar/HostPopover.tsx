@@ -12,6 +12,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
 import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { isMacOS } from "@/util/platformutil";
 import QRCode from "qrcode";
 
 type HostInfo = {
@@ -330,6 +331,12 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                             <span class="status-bar-popover-mono" style={{ "font-size": "0.85em" }}>{muxbus.status()?.email}</span>
                         </Show>
                     </div>
+                    <Show when={isMacOS() && !(muxbus.status()?.connected && muxbus.status()?.valid)}>
+                        <div class="status-bar-popover-hint">
+                            macOS will ask for Keychain access after you sign in — that's
+                            AgentMux securely storing your session.
+                        </div>
+                    </Show>
                     <Show when={muxbus.status()?.connected && muxbus.status()?.valid}>
                         <div class="status-bar-popover-row" style={{ "justify-content": "flex-end" }}>
                             <button
