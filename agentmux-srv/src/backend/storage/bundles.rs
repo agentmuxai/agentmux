@@ -96,6 +96,25 @@ pub enum BundleReseedOutcome {
     Updated,
     Unchanged,
     SkippedLocalEdit,
+    /// This write's manifest generation (see `manifest_generation_from_
+    /// source_detail`) is older than the generation already recorded for
+    /// this row — an older AgentMux process must never downgrade a newer
+    /// seed. See `bundle_reseed_system_if_owned`'s own doc comment.
+    SkippedOlderGeneration,
+}
+
+/// Extracts a `{"manifest_version": N}` field from a version row's
+/// `source_detail` JSON, defaulting to `0` when absent or unparseable — so a
+/// pre-existing row seeded before this field existed is always treated as
+/// generation 0, never blocking a real (>=1) manifest generation from
+/// writing over it. Shared convention between `bundle_reseed_system_if_
+/// owned`'s own generation guard and any seeder populating `source_detail`
+/// (see `operator_config_seed.rs`).
+fn manifest_generation_from_source_detail(source_detail: &str) -> u64 {
+    serde_json::from_str::<serde_json::Value>(source_detail)
+        .ok()
+        .and_then(|v| v.get("manifest_version").and_then(|g| g.as_u64()))
+        .unwrap_or(0)
 }
 
 fn default_json_object_string() -> String {
@@ -584,23 +603,36 @@ impl Store {
         }
 
         if row_exists {
-            let latest: Option<(String, String)> = tx
+            let latest: Option<(String, String, String)> = tx
                 .query_row(
-                    "SELECT written_by, content_hash FROM db_bundle_versions
+                    "SELECT written_by, content_hash, source_detail FROM db_bundle_versions
                      WHERE bundle_id = ?1
                      ORDER BY created_at DESC, rowid DESC
                      LIMIT 1",
                     params![memory.id],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
-            if let Some((written_by, content_hash)) = latest {
+            if let Some((written_by, content_hash, stored_source_detail)) = latest {
                 if written_by != seeder_identity {
                     return Ok(BundleReseedOutcome::SkippedLocalEdit);
                 }
                 let target_hash = super::bundle_versions::content_hash(&memory.name, &memory.instructions);
                 if content_hash == target_hash {
                     return Ok(BundleReseedOutcome::Unchanged);
+                }
+                // Content differs, but only from THIS process's point of
+                // view — on a machine sharing store.db across multiple
+                // AgentMux builds/versions (a supported configuration; see
+                // "Multiple Instances Run in Parallel" in this repo's own
+                // CLAUDE.md), an older build's own (older) manifest must
+                // never overwrite a newer build's already-seeded content
+                // just because both processes use the same seeder_identity.
+                // Codex P2, PR #3244.
+                let stored_generation = manifest_generation_from_source_detail(&stored_source_detail);
+                let target_generation = manifest_generation_from_source_detail(source_detail);
+                if target_generation < stored_generation {
+                    return Ok(BundleReseedOutcome::SkippedOlderGeneration);
                 }
             }
         }

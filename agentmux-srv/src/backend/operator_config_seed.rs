@@ -45,9 +45,13 @@ const SEED_MANIFEST: &str = include_str!("../../operator-config-seed.json");
 
 #[derive(Debug, Deserialize)]
 struct SeedManifest {
-    /// Informational/loggable only, same as `agent-seed.json`'s own
-    /// `version` field — the reseed decision is content-hash-based, not a
-    /// version-number comparison (see this module's own doc comment).
+    /// The primary reseed decision is still content-hash-based, not this
+    /// number (see this module's own doc comment) — but `version` also
+    /// travels into each write's `source_detail` as a monotonic generation
+    /// guard: `bundle_reseed_system_if_owned` refuses to let a write whose
+    /// generation is lower than what's already recorded win, so an older
+    /// AgentMux build's own (older) manifest can never downgrade a row a
+    /// newer build already seeded on a shared store.db (Codex P2, PR #3244).
     version: u32,
     entries: Vec<SeedEntry>,
 }
@@ -71,11 +75,11 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
         }
     };
 
-    let (mut created, mut updated, mut unchanged, mut skipped_local, mut skipped_collision) =
-        (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut created, mut updated, mut unchanged, mut skipped_local, mut skipped_older, mut skipped_collision) =
+        (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
 
     for entry in &manifest.entries {
-        match seed_one(wstore, entry) {
+        match seed_one(wstore, entry, manifest.version) {
             Ok(BundleReseedOutcome::Created) => created += 1,
             Ok(BundleReseedOutcome::Updated) => updated += 1,
             Ok(BundleReseedOutcome::Unchanged) => unchanged += 1,
@@ -84,6 +88,15 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
                 tracing::info!(
                     id = %entry.id,
                     "operator config seed: skipping — entry has a local (non-AgentMux) edit, not overwriting"
+                );
+            }
+            Ok(BundleReseedOutcome::SkippedOlderGeneration) => {
+                skipped_older += 1;
+                tracing::info!(
+                    id = %entry.id,
+                    manifest_version = manifest.version,
+                    "operator config seed: skipping — a newer manifest generation already seeded this row \
+                     (this build's own manifest is older; likely a different AgentMux version sharing this store)"
                 );
             }
             Err(e) => {
@@ -98,17 +111,17 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
         }
     }
 
-    if created + updated + skipped_local + skipped_collision > 0 {
+    if created + updated + skipped_local + skipped_older + skipped_collision > 0 {
         tracing::info!(
             "operator config seed: manifest v{}: {created} created, {updated} updated, \
              {unchanged} unchanged, {skipped_local} skipped (local edit), \
-             {skipped_collision} skipped (collision)",
+             {skipped_older} skipped (older generation), {skipped_collision} skipped (collision)",
             manifest.version,
         );
     }
 }
 
-fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry) -> Result<BundleReseedOutcome, StoreError> {
+fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry, manifest_version: u32) -> Result<BundleReseedOutcome, StoreError> {
     let now = agentmux_common::time::now_ms();
     let bundle = Bundle {
         id: entry.id.clone(),
@@ -129,7 +142,12 @@ fn seed_one(wstore: &Arc<Store>, entry: &SeedEntry) -> Result<BundleReseedOutcom
         is_system: true,
     };
 
-    wstore.bundle_reseed_system_if_owned(&bundle, WRITTEN_BY, "agentmux_operator_config_seed", "{}")
+    // manifest_version travels in source_detail so bundle_reseed_system_if_
+    // owned can refuse to let an older AgentMux build's own (older) manifest
+    // downgrade a newer build's already-seeded content on a shared store.db
+    // (Codex P2, PR #3244).
+    let source_detail = format!(r#"{{"manifest_version":{manifest_version}}}"#);
+    wstore.bundle_reseed_system_if_owned(&bundle, WRITTEN_BY, "agentmux_operator_config_seed", &source_detail)
 }
 
 #[cfg(test)]
@@ -163,7 +181,7 @@ mod tests {
     fn fresh_install_creates_every_entry() {
         let store = test_store();
         let e = entry("op-1", "Operator One", "body one");
-        let outcome = seed_one(&store, &e).unwrap();
+        let outcome = seed_one(&store, &e, 1).unwrap();
         assert!(matches!(outcome, BundleReseedOutcome::Created));
 
         let bundle = store.bundle_get("op-1").unwrap().expect("row exists");
@@ -180,9 +198,9 @@ mod tests {
     fn unchanged_manifest_is_a_no_op() {
         let store = test_store();
         let e = entry("op-1", "Operator One", "body one");
-        seed_one(&store, &e).unwrap();
+        seed_one(&store, &e, 1).unwrap();
 
-        let outcome = seed_one(&store, &e).unwrap();
+        let outcome = seed_one(&store, &e, 1).unwrap();
         assert!(matches!(outcome, BundleReseedOutcome::Unchanged));
         assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 1, "no new version on no-op");
     }
@@ -191,15 +209,36 @@ mod tests {
     fn changed_manifest_content_overwrites_when_seeder_owns_it() {
         let store = test_store();
         let e1 = entry("op-1", "Operator One", "body one");
-        seed_one(&store, &e1).unwrap();
+        seed_one(&store, &e1, 1).unwrap();
 
         let e2 = entry("op-1", "Operator One", "body TWO");
-        let outcome = seed_one(&store, &e2).unwrap();
+        let outcome = seed_one(&store, &e2, 2).unwrap();
         assert!(matches!(outcome, BundleReseedOutcome::Updated));
 
         let bundle = store.bundle_get("op-1").unwrap().unwrap();
         assert_eq!(bundle.instructions, "body TWO");
         assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 2);
+    }
+
+    /// Codex P2, PR #3244: two AgentMux builds sharing store.db (a supported
+    /// configuration — see "Multiple Instances Run in Parallel" in this
+    /// repo's own CLAUDE.md) must not let an older build's own older
+    /// manifest downgrade a row a newer build already seeded, even though
+    /// both share the same `written_by` seeder identity.
+    #[test]
+    fn older_manifest_generation_never_downgrades_a_newer_seed() {
+        let store = test_store();
+        let e_v3 = entry("op-1", "Operator One", "content from generation 3");
+        seed_one(&store, &e_v3, 3).unwrap();
+
+        // A different (older) AgentMux build, running its own older
+        // manifest (generation 1), starts up and reseeds the same row.
+        let e_v1 = entry("op-1", "Operator One", "content from generation 1");
+        let outcome = seed_one(&store, &e_v1, 1).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::SkippedOlderGeneration));
+
+        let bundle = store.bundle_get("op-1").unwrap().unwrap();
+        assert_eq!(bundle.instructions, "content from generation 3", "newer generation's content must survive");
     }
 
     /// The load-bearing guarantee (spec §3.3, §5 test plan): a human edit
@@ -216,7 +255,7 @@ mod tests {
     fn locally_edited_entry_is_never_overwritten() {
         let store = test_store();
         let e1 = entry("op-1", "Operator One", "body one");
-        seed_one(&store, &e1).unwrap();
+        seed_one(&store, &e1, 1).unwrap();
 
         // Simulate a human editing this system entry via the real Armory UI
         // save path (`upsertsystemmemory` -> `bundle_upsert_system_with_version`).
@@ -241,7 +280,7 @@ mod tests {
         store.bundle_upsert_system_with_version(&edited, "armory-ui", "human", "{}").unwrap();
 
         let e2 = entry("op-1", "Operator One", "AgentMux wants to change this");
-        let outcome = seed_one(&store, &e2).unwrap();
+        let outcome = seed_one(&store, &e2, 2).unwrap();
         assert!(matches!(outcome, BundleReseedOutcome::SkippedLocalEdit));
 
         let bundle = store.bundle_get("op-1").unwrap().unwrap();
@@ -256,12 +295,12 @@ mod tests {
     fn deleted_entry_is_recreated_even_when_manifest_content_is_unchanged() {
         let store = test_store();
         let e = entry("op-1", "Operator One", "body one");
-        seed_one(&store, &e).unwrap();
+        seed_one(&store, &e, 1).unwrap();
         assert!(store.bundle_delete_system("op-1").unwrap(), "row deleted");
         assert!(store.bundle_get("op-1").unwrap().is_none());
         assert_eq!(store.bundle_version_list("op-1").unwrap().len(), 1, "history survives the delete");
 
-        let outcome = seed_one(&store, &e).unwrap();
+        let outcome = seed_one(&store, &e, 1).unwrap();
         assert!(matches!(outcome, BundleReseedOutcome::Created), "row existence, not history, gates recreation");
         assert!(store.bundle_get("op-1").unwrap().is_some());
     }
@@ -291,7 +330,7 @@ mod tests {
         store.bundle_upsert(&existing).unwrap();
 
         let e = entry("op-1", "Operator One", "body one");
-        let result = seed_one(&store, &e);
+        let result = seed_one(&store, &e, 1);
         assert!(result.is_err(), "name UNIQUE constraint should surface as an error, not silently create op-1");
         assert!(store.bundle_get("op-1").unwrap().is_none());
     }
