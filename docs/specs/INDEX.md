@@ -260,6 +260,7 @@ partial list.
 | [`SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16`](SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md) | Spec — Pane Minimize as a Locked State (redesign) |
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
+| [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
