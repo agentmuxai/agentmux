@@ -544,6 +544,111 @@ impl Store {
         Ok(version)
     }
 
+    /// Same as `bundle_upsert_system_with_version`, but skips recording a
+    /// version when the write is byte-identical (`name` + `instructions`) to
+    /// what's already stored — the case where an operator opens a seeded
+    /// Operator Config entry in the Armory UI and clicks Save without
+    /// changing anything (the UI does not suppress this request). Recording
+    /// a version for a true no-op would permanently mark the row as
+    /// human-owned even though nothing actually changed, breaking `bundle_
+    /// reseed_system_if_owned`'s ownership signal for no reason (Codex P2,
+    /// PR #3244).
+    ///
+    /// The existing-content comparison happens in the SAME transaction as
+    /// the resulting write, for the identical check-then-act reason `bundle_
+    /// reseed_system_if_owned` documents on itself — an earlier revision of
+    /// `upsertsystemmemory` (`bundle.rs`) composed this from a separate
+    /// `bundle_get` call plus a conditional branch, which raced a concurrent
+    /// writer between the read and the write (ReAgent P2, PR #3244).
+    ///
+    /// Returns `Ok(None)` when the save was a no-op (still refreshes every
+    /// other field via the plain upsert; just records no version); `Ok(Some(
+    /// version))` otherwise, including for a brand-new row (never a no-op).
+    pub fn bundle_upsert_system_if_changed(
+        &self,
+        memory: &Bundle,
+        written_by: &str,
+        source: &str,
+        source_detail: &str,
+    ) -> Result<Option<BundleVersion>, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        let existing: Option<(String, String, i64)> = tx
+            .query_row(
+                "SELECT name, instructions, is_system FROM db_bundles WHERE id = ?1",
+                params![memory.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+
+        if let Some((_, _, is_system)) = &existing {
+            if *is_system == 0 {
+                return Err(StoreError::Other(
+                    "cannot convert an existing non-system Global Memory entry into a system entry"
+                        .to_string(),
+                ));
+            }
+        }
+
+        let is_noop = existing
+            .as_ref()
+            .is_some_and(|(name, instructions, _)| *name == memory.name && *instructions == memory.instructions);
+
+        tx.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+
+        let version = if is_noop {
+            None
+        } else {
+            Some(bundle_version_insert_tx(
+                &tx,
+                &memory.id,
+                &memory.name,
+                &memory.instructions,
+                source,
+                source_detail,
+                written_by,
+            )?)
+        };
+
+        tx.commit()?;
+        Ok(version)
+    }
+
     /// Atomically decide-and-apply an Operator Config reseed for one system
     /// row — the ownership check (is this row still owned by AgentMux's own
     /// seeder, or has a human/another writer claimed it) and the resulting
