@@ -165,8 +165,20 @@
     // minus new position) with no transition, then clears it on the next
     // frame with this transition active, so the browser animates the
     // surviving row gliding into its new grid cell instead of snapping.
+    //
+    // Includes filter/opacity alongside transform, matching the base
+    // `.agent-recent-sessions-row` rule above verbatim — reagent P1 on PR
+    // #3280: `transition` is a shorthand, and the cascade picks ONE
+    // declaration per property per element rather than merging longhands
+    // across rules of different specificity. `.agent-row-move` (a compound
+    // selector) is MORE specific than the base row rule, so while a row is
+    // both moving AND is the spotlight-blur target (`.has-expanded-row
+    // ... :not(.is-expanded)` below), a `transition: transform` -only
+    // declaration here would fully replace — not add to — the base rule's
+    // `transition: filter …, opacity …`, and that blur/dim would snap
+    // instead of animate for as long as the move is in flight.
     .agent-recent-sessions-row.agent-row-move {
-        transition: transform var(--motion-spring);
+        transition: transform var(--motion-spring), filter 0.15s ease, opacity 0.15s ease;
     }
 
     @media (prefers-reduced-motion: reduce) {
