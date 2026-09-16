@@ -1263,9 +1263,15 @@ impl Store {
             // See `scope_for_row` for what this decides and why.
             let scope = Self::scope_for_row(&conn, id);
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
-            if rows > 0 {
-                purge_agent_dependents(&conn, id)?;
-            }
+            // Unconditional, same convergence rule as the registry sweep
+            // below (codex P2 on PR #3262): if a previous attempt committed
+            // the `db_agents` DELETE and then failed partway through the
+            // dependent purge, the retry sees `rows == 0` — gating here
+            // would strand that agent's credentials and signing keys
+            // permanently, with no UI path left to try again. Every
+            // statement in the purge is an idempotent DELETE, so running it
+            // for an id with no rows costs a few no-op statements.
+            purge_agent_dependents(&conn, id)?;
             (rows, scope)
         };
         // Tombstone the global definition record so another channel's stale
@@ -2084,14 +2090,12 @@ impl Store {
             }
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
-            if rows > 0 {
-                // Same dependent purge `agent_def_delete` runs — this is
-                // that deletion arriving from the launch side, and an
-                // agent deleted through this name used to keep its
-                // credentials and signing keys on disk purely because the
-                // cleanup lived in the other function.
-                purge_agent_dependents(&conn, id)?;
-            }
+            // Same dependent purge `agent_def_delete` runs, and
+            // unconditional for the same reason — this is that deletion
+            // arriving from the launch side, and an agent deleted through
+            // this name used to keep its credentials and signing keys on
+            // disk purely because the cleanup lived in the other function.
+            purge_agent_dependents(&conn, id)?;
             rows
         };
         // Unconditional, for the reason `agent_def_delete`'s own sweep is
