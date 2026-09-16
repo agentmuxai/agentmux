@@ -45,10 +45,32 @@ LIGATURE_FONTS='JetBrains Mono|Fira Code|Cascadia Code|Iosevka|Victor Mono|Monoi
 
 fail=0
 
-# 1) CSS/SCSS must not name one in a font stack. Comments are excluded so the
-#    retro/explanatory notes that cite the offending font by name stay legal.
-css_hits="$(grep -rEn --include='*.scss' --include='*.css' "$LIGATURE_FONTS" frontend/ 2>/dev/null \
-    | grep -vE '^\s*[^:]+:[0-9]+:\s*(//|/\*|\*)' || true)"
+# 1) CSS/SCSS must not name one in a font stack.
+#
+#    Comments are excluded so the explanatory notes that cite these fonts by
+#    name (including the one in tailwindsetup.css warning you not to add them)
+#    stay legal. That exclusion must handle MULTI-LINE block comments: an
+#    earlier version only skipped lines *beginning* with `//`, `/*` or `*`,
+#    which false-positived on a continuation line inside a `/* … */` block --
+#    caught when this gate failed on its own documentation.
+#
+#    Comments are blanked out rather than deleted so reported line numbers
+#    still match the real file.
+strip_comments() {
+    perl -0777 -pe '
+        s{/\*.*?\*/}{ my $c = $&; $c =~ s/[^\n]/ /g; $c }ges;   # block comments
+        s{(^|[^:])//[^\n]*}{ my $c = $&; $c =~ s{//[^\n]*}{ " " x length($&) }e; $c }gme;
+    ' "$1"
+}
+
+css_hits=""
+while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    hits="$(strip_comments "$f" | grep -nE "$LIGATURE_FONTS" || true)"
+    [[ -n "$hits" ]] && css_hits+="$(echo "$hits" | sed "s|^|$f:|")"$'\n'
+done < <(find frontend -type f \( -name '*.scss' -o -name '*.css' \) 2>/dev/null)
+
+css_hits="$(echo "$css_hits" | sed '/^$/d')"
 
 if [[ -n "$css_hits" ]]; then
     echo "FAIL: a programming-ligature font is named in a CSS font stack."

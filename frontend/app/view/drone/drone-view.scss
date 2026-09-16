@@ -426,7 +426,7 @@
 
 .drone-runpanel-active {
     color: var(--accent-color);
-    font-family: var(--mono-font, monospace);
+    font-family: var(--font-mono);
 }
 
 .drone-runpanel-list {
@@ -461,13 +461,13 @@
 }
 
 .drone-runpanel-id {
-    font-family: var(--mono-font, monospace);
+    font-family: var(--font-mono);
     font-size: 10px;
     color: var(--secondary-text-color);
 }
 
 .drone-runpanel-output {
-    font-family: var(--mono-font, monospace);
+    font-family: var(--font-mono);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
