@@ -36,7 +36,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use crate::splash_core::{
-    format_ms, format_running, hold_duration, reconcile, trunc, StageEntry, StageTimeline,
+    format_ms, format_running, hold_duration, reconcile, tally_label, trunc, visible_rows,
+    RowKind, StageEntry, StageTimeline,
 };
 use crate::startup_events::{StartupEvent, StartupStatus};
 
@@ -150,64 +151,81 @@ struct FlatRow {
 
 fn flatten_rows(stages: &[StageEntry], total_ms: Option<u64>) -> Vec<FlatRow> {
     let mut out = Vec::new();
-    for stage in stages {
-        if out.len() >= MAX_STAGE_ROWS {
-            break;
-        }
-        // Colored by status, not unconditionally "done" green — a
-        // `finalize_running`-produced Warn/interrupted outcome (no matching
-        // End ever arrived) must not render indistinguishably from a real
-        // success (codex P2 on PR #3222).
-        let (time_text, time_color) = match &stage.done {
-            Some((ms, status, _detail)) => {
-                let color = match status {
-                    StartupStatus::Ok => (TIME_DONE_R, TIME_DONE_G, TIME_DONE_B),
-                    StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
-                    StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
+    // Reserve the trailing "other"/"total" rows up front, so an overfull
+    // panel drops the OLDEST timeline row instead of silently losing the
+    // summary — which is what appending them if-there-is-room used to do.
+    let reserved = if total_ms.is_some() { 2 } else { 0 };
+    let budget = MAX_STAGE_ROWS.saturating_sub(reserved);
+    // Row selection (detail vs. tally, and which rows survive an overflow)
+    // is shared with the Windows and Linux renderers; this file owns only
+    // the NSTextField-shaped formatting.
+    for entry in visible_rows(stages, budget) {
+        match entry.kind {
+            RowKind::Stage(stage) => {
+                // Colored by status, not unconditionally "done" green — a
+                // `finalize_running`-produced Warn/interrupted outcome (no
+                // matching End ever arrived) must not render
+                // indistinguishably from a real success (codex P2 on PR #3222).
+                let (time_text, time_color) = match &stage.done {
+                    Some((ms, status, _detail)) => {
+                        let color = match status {
+                            StartupStatus::Ok => (TIME_DONE_R, TIME_DONE_G, TIME_DONE_B),
+                            StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
+                            StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
+                        };
+                        (format_ms(*ms), color)
+                    }
+                    None => (format_running(stage.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
                 };
-                (format_ms(*ms), color)
+                out.push(FlatRow {
+                    indented: false,
+                    label: trunc(stage.label, STAGE_LABEL_MAX_CHARS),
+                    time_text,
+                    label_color: (STAGE_R, STAGE_G, STAGE_B),
+                    time_color,
+                });
             }
-            None => (format_running(stage.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
-        };
-        out.push(FlatRow {
-            indented: false,
-            label: trunc(stage.label, STAGE_LABEL_MAX_CHARS),
-            time_text,
-            label_color: (STAGE_R, STAGE_G, STAGE_B),
-            time_color,
-        });
-        for sub in &stage.subs {
-            if out.len() >= MAX_STAGE_ROWS {
-                break;
+            // Collapsed older sub-items. Empty time column: the per-item
+            // durations are exactly what this row stands in for.
+            RowKind::SubTally { done, total } => {
+                out.push(FlatRow {
+                    indented: true,
+                    label: trunc(&tally_label(done, total), SUB_LABEL_MAX_CHARS),
+                    time_text: String::new(),
+                    label_color: (SUB_R, SUB_G, SUB_B),
+                    time_color: (SUB_R, SUB_G, SUB_B),
+                });
             }
-            // NSTextField is one color per field — combine the status glyph
-            // into the time text and color the whole thing by status once
-            // done (Windows shows the glyph as a separately-colored swatch
-            // next to a SUB_COLOR time; that needs a 3rd field per row,
-            // which isn't worth the extra layout complexity here).
-            let (time_text, time_color) = match &sub.done {
-                Some((ms, status, _detail)) => {
-                    let glyph = match status {
-                        StartupStatus::Ok => "+",
-                        StartupStatus::Warn => "!",
-                        StartupStatus::Error => "X",
-                    };
-                    let color = match status {
-                        StartupStatus::Ok => (STATUS_OK_R, STATUS_OK_G, STATUS_OK_B),
-                        StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
-                        StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
-                    };
-                    (format!("{} {}", format_ms(*ms), glyph), color)
-                }
-                None => (format_running(sub.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
-            };
-            out.push(FlatRow {
-                indented: true,
-                label: trunc(&sub.label, SUB_LABEL_MAX_CHARS),
-                time_text,
-                label_color: (SUB_R, SUB_G, SUB_B),
-                time_color,
-            });
+            RowKind::Sub(sub) => {
+                // NSTextField is one color per field — combine the status glyph
+                // into the time text and color the whole thing by status once
+                // done (Windows shows the glyph as a separately-colored swatch
+                // next to a SUB_COLOR time; that needs a 3rd field per row,
+                // which isn't worth the extra layout complexity here).
+                let (time_text, time_color) = match &sub.done {
+                    Some((ms, status, _detail)) => {
+                        let glyph = match status {
+                            StartupStatus::Ok => "+",
+                            StartupStatus::Warn => "!",
+                            StartupStatus::Error => "X",
+                        };
+                        let color = match status {
+                            StartupStatus::Ok => (STATUS_OK_R, STATUS_OK_G, STATUS_OK_B),
+                            StartupStatus::Warn => (STATUS_WARN_R, STATUS_WARN_G, STATUS_WARN_B),
+                            StartupStatus::Error => (STATUS_ERR_R, STATUS_ERR_G, STATUS_ERR_B),
+                        };
+                        (format!("{} {}", format_ms(*ms), glyph), color)
+                    }
+                    None => (format_running(sub.started_at), (TIME_RUN_R, TIME_RUN_G, TIME_RUN_B)),
+                };
+                out.push(FlatRow {
+                    indented: true,
+                    label: trunc(&sub.label, SUB_LABEL_MAX_CHARS),
+                    time_text,
+                    label_color: (SUB_R, SUB_G, SUB_B),
+                    time_color,
+                });
+            }
         }
     }
     if let Some(ms) = total_ms {
@@ -1208,10 +1226,13 @@ mod tests {
     }
 
     #[test]
-    fn total_row_still_shown_when_panel_is_nearly_full() {
-        // MAX_STAGE_ROWS(12) - 1 stage rows leaves exactly one slot: "total"
-        // must win that slot over "other" per the priority documented at
-        // the call site.
+    fn a_full_panel_drops_the_oldest_row_not_the_summary() {
+        // Both summary rows are now reserved up front, so they survive an
+        // over-budget panel and the OLDEST stage row is what gives way.
+        // Previously they were appended only if rows happened to be left
+        // over, so a full panel silently lost "other" (and could lose
+        // "total" too) while keeping the earliest rows — the opposite of
+        // useful, since the earliest rows are the ones already finished.
         let stages: Vec<StageEntry> = (0..MAX_STAGE_ROWS - 1)
             .map(|i| {
                 let label: &'static str = Box::leak(format!("s{i}").into_boxed_str());
@@ -1221,8 +1242,28 @@ mod tests {
             .collect();
         let rows = flatten_rows(&stages, Some(1000));
         assert_eq!(rows.len(), MAX_STAGE_ROWS);
-        assert!(other_row_text(&rows).is_none());
+        assert!(other_row_text(&rows).is_some(), "the summary is reserved, not appended if-room");
         assert!(total_row_text(&rows).is_some());
+        assert_eq!(rows[0].label, "s1", "the oldest stage row is the one dropped");
+    }
+
+    #[test]
+    fn older_sub_items_collapse_into_a_tally_row() {
+        // A migration batch used to get one permanent row per migration,
+        // filling the panel with finished work. Now the older ones collapse
+        // and the newest two stay in detail.
+        let mut stage = done_stage("backend", "Backend", 900);
+        for i in 0..6 {
+            stage.subs.push(SubEntry {
+                id: format!("{i:03}"),
+                label: format!("m{i}"),
+                started_at: Instant::now(),
+                done: Some((10, StartupStatus::Ok, None)),
+            });
+        }
+        let rows = flatten_rows(&[stage], None);
+        let labels: Vec<&str> = rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(labels, vec!["Backend", "6/6 done", "m4", "m5"]);
     }
 
 }
