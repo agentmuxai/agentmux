@@ -20,7 +20,14 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { buildRequestBody, parseArgs } from "./muxsh.mjs";
+import {
+    buildAgentSendBody,
+    buildRequestBody,
+    buildShellCreateBody,
+    buildShellStatusBody,
+    buildShellStopBody,
+    parseArgs,
+} from "./muxsh.mjs";
 
 function loadManifest() {
     // agentmux-srv/src/backend/shellintegration/ -> repo root is four levels up.
@@ -82,5 +89,43 @@ describe("muxsh <-> app-api-manifest.json contract", () => {
 
         const webBody = buildRequestBody(parseArgs(["web", "https://example.com", "--split", "left"]), { AGENTMUX_BLOCKID: "b-1" });
         expect(webBody).toMatchObject({ split_direction: "left", split_reference_block_id: "b-1" });
+    });
+
+    describe("shell.create / shell.status / shell.stop", () => {
+        const shellFields = new Set(manifest.routes["shell.create"].requestFields);
+        const statusFields = new Set(manifest.routes["shell.status"].requestFields);
+        const stopFields = new Set(manifest.routes["shell.stop"].requestFields);
+
+        it("buildShellCreateBody only emits fields in shell.create.requestFields", () => {
+            const body = buildShellCreateBody(parseArgs(["run", "ls", "-la"]), { AGENTMUX_BLOCKID: "b-1" });
+            const unknown = Object.keys(body).filter((f) => !shellFields.has(f));
+            expect(unknown).toEqual([]);
+            expect(body).toEqual({ agent_block_id: "b-1", cmd: "ls -la" });
+        });
+
+        it("buildShellStatusBody only emits fields in shell.status.requestFields", () => {
+            const body = buildShellStatusBody(parseArgs(["run", "--status", "shell-1"]));
+            const unknown = Object.keys(body).filter((f) => !statusFields.has(f));
+            expect(unknown).toEqual([]);
+            expect(body).toEqual({ shell_id: "shell-1" });
+        });
+
+        it("buildShellStopBody only emits fields in shell.stop.requestFields", () => {
+            const body = buildShellStopBody(parseArgs(["run", "--stop", "shell-1"]));
+            const unknown = Object.keys(body).filter((f) => !stopFields.has(f));
+            expect(unknown).toEqual([]);
+            expect(body).toEqual({ shell_id: "shell-1" });
+        });
+    });
+
+    describe("agent.send", () => {
+        const sendFields = new Set(manifest.routes["agent.send"].requestFields);
+
+        it("buildAgentSendBody only emits fields in agent.send.requestFields", () => {
+            const body = buildAgentSendBody(parseArgs(["agent", "send", "Scouto", "hello", "there"]));
+            const unknown = Object.keys(body).filter((f) => !sendFields.has(f));
+            expect(unknown).toEqual([]);
+            expect(body).toEqual({ target_agent: "Scouto", message: "hello there" });
+        });
     });
 });

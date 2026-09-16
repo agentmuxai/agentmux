@@ -1,10 +1,11 @@
 {
   "$schema": "informal — see docs/specs/SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md §2.8",
-  "description": "Source of truth for Agent App API routes that a muxsh-family Node CLI binds to. Checked, on the Rust side, against the real rpc_types struct's serde field names (agentmux-srv/src/backend/rpc_types/block.rs's CommandPaneOpenData/PaneOpenResult, test in that same file), and, on the Node side, against what each muxsh subcommand's buildRequestBody() actually emits (muxsh.contract.test.mjs). A route entry here is a claim: 'this is the real, current field set' — both tests fail if either side drifts from it.",
+  "description": "Source of truth for Agent App API routes that a muxsh-family Node CLI binds to. Checked, on the Rust side, against the real struct's serde field names (test alongside each struct's own definition), and, on the Node side, against what muxsh actually sends (muxsh.contract.test.mjs). A route entry here is a claim: 'this is the real, current field set' — both tests fail if either side drifts from it. 'exactMatch: true' routes are checked as an exact field-name set in both directions (manifest == real struct fields); 'exactMatch: false' routes only list the subset of fields muxsh actually constructs — appropriate for a struct with many more optional fields muxsh never touches (documented per-route below), where full enumeration adds no real DRY protection for muxsh's own risk surface.",
   "routes": {
     "pane.open": {
       "method": "POST",
       "path": "/api/v1/pane/open",
+      "exactMatch": true,
       "rustRequestStruct": "agentmux_srv::backend::rpc_types::block::CommandPaneOpenData",
       "rustResponseStruct": "agentmux_srv::backend::rpc_types::block::PaneOpenResult",
       "requestFields": [
@@ -24,10 +25,61 @@
         "reuse_editor_pane"
       ],
       "responseFields": ["block_id", "tab_id", "view", "created"],
-      "usedBy": [
-        "muxsh open (view=editor)",
-        "muxsh web (view=browser)"
-      ]
+      "usedBy": ["muxsh open (view=editor)", "muxsh web (view=browser)", "muxsh view", "muxsh edit", "muxsh config edit"]
+    },
+    "pane.list": {
+      "method": "GET",
+      "path": "/api/v1/tabs",
+      "rustResponseSource": "agentmux_srv::server::service::introspect::agent_tabs (returns serde_json::Value built via json!(), not a typed struct — no struct to contract-test against the way pane.open's PaneOpenResult is)",
+      "note": "Query param only (block_id or workspace_id), no request body. responseFields verified directly against agent_tabs' source (2026-09-16, after ReAgent + Codex both independently caught renderTabs() assuming an unverified, richer shape — tab_name/active/panes — that this route has never produced). Protection against this recurring is now muxsh.test.mjs's renderTabs unit tests (which assert against this exact shape), not a Rust-side contract test — there's no struct here for one to check against.",
+      "responseFields": ["tab_id", "name", "pane_count"],
+      "usedBy": ["muxsh pane list"]
+    },
+    "shell.create": {
+      "method": "POST",
+      "path": "/api/v1/shell/create",
+      "exactMatch": true,
+      "rustRequestStruct": "agentmux_common::api_types::ShellCreateRequest",
+      "rustResponseStruct": "agentmux_common::api_types::ShellCreateResponse",
+      "requestFields": ["agent_block_id", "cmd", "cwd", "title", "env", "capture_stdin"],
+      "responseFields": ["shell_id"],
+      "usedBy": ["muxsh run <cmd>"]
+    },
+    "shell.status": {
+      "method": "POST",
+      "path": "/api/v1/shell/status",
+      "exactMatch": true,
+      "rustRequestStruct": "agentmux_common::api_types::ShellStatusRequest",
+      "rustResponseStruct": "agentmux_common::api_types::ShellStatusResponse",
+      "requestFields": ["shell_id"],
+      "responseFields": ["running", "exit_code", "line_count"],
+      "usedBy": ["muxsh run --status"]
+    },
+    "shell.stop": {
+      "method": "POST",
+      "path": "/api/v1/shell/stop",
+      "exactMatch": true,
+      "rustRequestStruct": "agentmux_common::api_types::ShellStopRequest",
+      "rustResponseStruct": "agentmux_common::api_types::ShellStopResponse",
+      "requestFields": ["shell_id"],
+      "responseFields": ["stopped"],
+      "usedBy": ["muxsh run --stop"]
+    },
+    "agent.list": {
+      "method": "GET",
+      "path": "/agentmux/discovery",
+      "rustResponseSource": "agentmux_srv::server::mod::handle_discovery (raw serde_json::Value, not a typed struct)",
+      "note": "No request body (GET, no params). Response has three reachable-agent tiers, all real and all 'agent send'-reachable — verified directly against source after Codex caught an earlier renderAgentList() reading only host.agents: host.agents[].{name, addressable, ...}, host.cross_channel[].{name, channel, ...} (other channels on this host), and lan[].{hostname, agents: string[]} (mDNS peers — agents is a flat name list per LanInstance, not per-agent objects, also verified rather than assumed). Protection is muxsh.test.mjs's renderAgentList unit tests, not a Rust-side contract test — no struct exists here to check against.",
+      "usedBy": ["muxsh agent list"]
+    },
+    "agent.send": {
+      "method": "POST",
+      "path": "/agentmux/reactive/inject",
+      "exactMatch": false,
+      "rustRequestStruct": "agentmux_srv::backend::reactive::types::InjectionRequest",
+      "note": "InjectionRequest has many more optional fields (source_agent, request_id, priority, wait_for_idle, jekt_tier, delivery_tier, forward_hops, ts_secs, jekt_sig, ...) that muxsh never sets — this entry lists only the two muxsh actually constructs. Subset-checked, not exact-matched.",
+      "requestFields": ["target_agent", "message"],
+      "usedBy": ["muxsh agent send"]
     }
   }
 }
