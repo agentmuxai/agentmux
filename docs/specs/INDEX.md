@@ -262,6 +262,7 @@ partial list.
 | [`SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13`](SPEC_LIGHT_THEME_DEPTH_AND_MORE_THEMES_2026_07_13.md) | Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes |
 | [`SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13`](SPEC_LINUX_GPU_BACKEND_PRECEDENCE_2026_06_13.md) | SPEC: Linux GPU Backend Precedence (capability-probed ANGLE selection) |
 | [`SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24`](SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md) | SPEC: macOS DMG Per-Build Channel Isolation |
+| [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access |
 | [`SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24`](SPEC_MACOS_TAB_REDOCK_PARITY_2026_07_24.md) | macOS Tab Redock Parity — Implementation Scoping |
 | [`SPEC_MCP_LOOP_TOOL_2026_06_16`](SPEC_MCP_LOOP_TOOL_2026_06_16.md) | SPEC: MCP `Loop` / `LoopStop` tools — recurring prompt injection |
 | [`SPEC_MEDIA_PANE_2026_07_26`](SPEC_MEDIA_PANE_2026_07_26.md) | Spec: Media pane — live-updating image/video viewer for agent-generated files |
@@ -595,7 +596,6 @@ partial list.
 | [`SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25`](SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md) | Spec: Local Build Channel Pruner |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03`](SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md) | SPEC: macOS Accessibility Robustness — surviving external AX clients without crashing |
-| [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access |
 | [`SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03`](SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03.md) | SPEC: Native macOS menu bar (File / Edit / View / Window / Help) |
 | [`SPEC_MACOS_WINDOW_CLOSE_LIFECYCLE_2026-06-04`](SPEC_MACOS_WINDOW_CLOSE_LIFECYCLE_2026-06-04.md) | SPEC: macOS window-close lifecycle — "closes but stays open hidden" |
 | [`SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21`](SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md) | SPEC: Magnify & Zoom — Implementation Plan |

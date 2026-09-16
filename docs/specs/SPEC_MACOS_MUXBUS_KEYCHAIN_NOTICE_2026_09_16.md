@@ -127,22 +127,26 @@ indirection than just reading it in the page's own JS). `navigator.userAgent`
 sufficient and is exactly what's available to this page:
 
 ```js
-const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent) && !/Windows|Linux|Android/.test(navigator.userAgent);
+const isMac = /Macintosh/.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent);
 ```
 
-(Loose but sufficient here — a false positive/negative just changes whether a
-cosmetic hint shows, not any security-relevant behavior. `Mac` alone would
-also catch iOS/iPadOS Safari's "Mac" UA on some versions; excluding a false
-match isn't worth the complexity for a hint this low-stakes. Simpler:
-`navigator.userAgent.includes("Mac")` is probably good enough in practice
-since this page is only ever reached via a desktop-initiated PKCE flow.)
+(A bare `/Mac/` test is NOT sufficient — iPhone/iPod UAs contain the substring
+"like Mac OS X", so they'd false-positive on the note even though they never
+show a native macOS Keychain prompt. Real desktop Safari/Chrome/Firefox on
+macOS carries "Macintosh"; iOS/iPadOS mobile UAs don't. This does not
+disambiguate iPadOS *requesting desktop-class UA* — as of recent iPadOS
+versions Safari there reports an indistinguishable "Macintosh; Intel Mac OS X"
+string by design — but that's an accepted, low-stakes edge case: worst case a
+Keychain hint shows on an iPad that never sees the prompt, ReAgent-reviewed
+and judged not worth further complexity. Caught in review on the
+`agentmux-cloud` PR — see PR #75.)
 
 **Change:** on success, append a short macOS-only line to the detail text:
 
 ```js
 title.textContent = "Connected to AgentMux Cloud";
 detail.textContent = "You can close this tab and return to AgentMux.";
-if (/Mac/.test(navigator.userAgent)) {
+if (/Macintosh/.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.userAgent)) {
   detail.textContent += " macOS may ask for Keychain access — that's AgentMux securely storing your session.";
 }
 ```
