@@ -66,6 +66,9 @@ vi.mock("@/app/store/rpc-api", () => ({
         ControllerResyncCommand: vi.fn(() => Promise.resolve()),
         CreateSubBlockCommand: vi.fn(() => Promise.resolve("block:new-sub-block-id")),
         SetMetaCommand: vi.fn(() => Promise.resolve()),
+        // Absent until the reattach-failure tests below needed it, which is
+        // why that path — where ReAgent found the round-2 P0 — had no coverage.
+        DeleteSubBlockCommand: vi.fn(() => Promise.resolve()),
     },
 }));
 
@@ -614,5 +617,90 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
         emitControllerStatus(subBlockId, { shellprocstatus: "running" });
         emitControllerStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
         expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * ReAgent P0 round 2 on PR #3253.
+     *
+     * The reattach path resyncs with `norespawn: true`, so an already-exited
+     * shell fails and falls through to creating a fresh one. Deleting the old
+     * block there destroys its persisted `term` file — and when the shell
+     * CRASHED while the drawer was closed, that file is the only record of
+     * why. The live listener already refuses to collapse on a non-zero exit
+     * (spec §5); deleting here anyway reproduces the same data loss through a
+     * different door.
+     */
+    it("does NOT delete a sub-block whose shell crashed, even though reattach failed", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.ControllerResyncCommand as any).mockRejectedValueOnce(new Error("already exited"));
+
+        const subBlockId = "crashed-while-closed";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        queuePersistedStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 137 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        expect(RpcApi.DeleteSubBlockCommand).not.toHaveBeenCalled();
+    });
+
+    /** The clean counterpart: nothing worth keeping, so the dead block goes
+     *  rather than lingering until the pane closes. */
+    it("deletes a sub-block whose shell exited cleanly before reattach", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.ControllerResyncCommand as any).mockRejectedValueOnce(new Error("already exited"));
+
+        const subBlockId = "cleanly-exited-while-closed";
+        queueSeedMeta(`block:${subBlockId}`, {});
+        queuePersistedStatus(subBlockId, { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        expect(RpcApi.DeleteSubBlockCommand).toHaveBeenCalledWith(expect.anything(), { blockid: subBlockId });
+    });
+
+    /** A genuinely vanished block (gone from the store — no status to replay)
+     *  reports no exit at all. Unknown must not be read as clean: skipping the
+     *  delete costs nothing here (there is nothing to delete), while treating
+     *  unknown as permission is how the crash case above gets destroyed. */
+    it("does not delete when no exit status was ever observed", async () => {
+        const { RpcApi } = await import("@/app/store/rpc-api");
+        (RpcApi.ControllerResyncCommand as any).mockRejectedValueOnce(new Error("block not found"));
+
+        const subBlockId = "vanished-block";
+        queueSeedMeta(`block:${subBlockId}`, {});
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+        resolveSeedFetch(`block:${subBlockId}`);
+        await waitFor(() => expect(RpcApi.CreateSubBlockCommand).toHaveBeenCalled());
+
+        expect(RpcApi.DeleteSubBlockCommand).not.toHaveBeenCalled();
     });
 });

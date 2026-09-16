@@ -203,7 +203,7 @@ sub-block exclusion intact.
   delegates.
 
 **Tests, each falsified** (break the source, confirm the specific test
-fails, restore): ten in `AgentShellSubblock.test.tsx`, six in
+fails, restore): thirteen in `AgentShellSubblock.test.tsx`, six in
 `shell-exit-collapse.test.ts`.
 
 **Not verified on a running build.** The whole path is unit-tested but has
@@ -250,6 +250,31 @@ side, still open on this one. Added a `norespawn` flag to the resync command
 so an exited shell surfaces as `RESYNC_ERR_ALREADY_EXITED` and takes the same
 fall-through as a vanished one: a genuinely fresh shell, clean scrollback,
 dead block deleted rather than orphaned.
+
+**7.2a (P0, round 2) The attach path deleted crash diagnostics.** 7.2's
+`norespawn` fix made an exited shell fail its resync — and the catch block
+deleted the block and created a fresh one on *any* failure, exit code
+unexamined. For a shell that crashed while the drawer was closed, that
+persisted `term` file is the only record of why, and the live listener
+already refuses to collapse on a non-zero exit (§5) precisely to preserve it.
+So the same "not hidden — gone" data loss 7.1 had just closed was still open
+through the attach path.
+
+The delete is now gated on a positively-known **clean** exit, read from the
+same replayed status 7.1 taught the component to receive. `undefined` — a
+genuinely vanished block, or a status we were never told — is NOT treated as
+clean: skipping a delete costs at worst a dead block lingering until the pane
+closes, while getting it wrong costs the user their diagnostics. A vanished
+block needs no delete anyway.
+
+**Residual limitation, deliberately not fixed here:** the crashed block is
+*preserved* but not *shown*. The drawer still creates a fresh shell and
+repoints `term:shellsubblockid` at it, so the crash output survives on disk
+with no UI route back to it. Fixing that means attaching the drawer read-only
+to the dead block — which trades the data-loss bug for "the human has a
+terminal they cannot type into", the very state this feature exists to
+remove. That trade-off deserves its own decision, not a silent one made
+inside a review round.
 
 **7.3 (P2) The teardown RPCs had to be ordered.** `DeleteSubBlockCommand`
 read-modify-writes the parent to drop the child from `subblockids`. Fired
