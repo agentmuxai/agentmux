@@ -874,7 +874,15 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // seed, since stale Operator Config content would mislead an agent
     // rather than merely being absent. See
     // docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md.
-    backend::operator_config_seed::auto_seed_on_startup(&wstore);
+    //
+    // Seeded into id_store, NOT wstore: Global Memory reads/writes
+    // (agent_open.rs's bundle_list_global, bundle.rs's handlers via
+    // state.id_store) all route through id_store, which points at the
+    // shared store once 0011_shared_store_backfill has run and only falls
+    // back to wstore before that. Seeding wstore directly would leave these
+    // rows invisible under the normal shared-store configuration once that
+    // migration has applied. Codex P1, PR #3244.
+    backend::operator_config_seed::auto_seed_on_startup(&id_store);
 
     // The starter Skills catalog is seeded by migrations::m0015_seed_starter_skills
     // (run once ever per channel, tracked in db_migrations) — not here. See
