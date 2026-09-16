@@ -443,7 +443,7 @@ async function initHostWave(): Promise<void> {
  * Unlike initHostWave() which reuses existing Window/Workspace/Tab,
  * this creates a fresh set for the new window.
  */
-async function initHostNewWindow(): Promise<void> {
+async function initHostNewWindow(seedView?: string | null, seedMeta?: Record<string, unknown> | null): Promise<void> {
     const t0 = performance.now();
     const tlog = (label: string, since: number) => {
         const ms = (performance.now() - since).toFixed(1);
@@ -469,7 +469,18 @@ async function initHostNewWindow(): Promise<void> {
         }
 
         t = performance.now();
-        const newWindow = await withTimeout(WindowService.CreateWindow(null, tearOffWsId, currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
+        const newWindow = await withTimeout(
+            WindowService.CreateWindow(
+                null,
+                tearOffWsId,
+                currentWindowLabel(),
+                false,
+                seedView ?? undefined,
+                seedMeta ?? undefined
+            ),
+            RPC_TIMEOUT,
+            "CreateWindow"
+        );
         tlog("CreateWindow", t);
 
         // Register label→window_id with the host NOW, not at the end of
@@ -665,14 +676,11 @@ async function initAppInner() {
                 getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
                 const { initialView, initialMeta } = await awaitPoolPromote();
                 getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
-                await initHostNewWindow();
-                if (initialView) {
-                    await TabRpcClient.rpcCall("pane.open", {
-                        view: initialView,
-                        ...(initialMeta ? { meta: initialMeta } : {}),
-                        floating: false,
-                    }, {});
-                }
+                // Pass the widget's view straight into CreateWindow's seed
+                // (rather than seeding the default 3-pane layout and then
+                // pane.open-ing a 4th pane alongside it) so "Open in New
+                // Window" on a widget opens with ONLY that widget.
+                await initHostNewWindow(initialView, initialMeta);
             } else if (isPanePoolMode()) {
                 // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
                 // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
@@ -694,7 +702,6 @@ async function initAppInner() {
                     // New window: create new backend window objects
                     const label = await getApi().getWindowLabel();
                     getApi().sendLog(`Initializing as new window: ${label}`);
-                    await initHostNewWindow();
                     const coldSearchParams = new URL(window.location.href).searchParams;
                     const coldInitialView = coldSearchParams.get("initialView");
                     // "credential-approval" is not a real pane view — it's
@@ -704,17 +711,19 @@ async function initAppInner() {
                     // why: a pane opened via pane.open gets a
                     // [data-blockid] wrapper, which would make its Approve
                     // button reachable by any agent's UIQuery/UIClick).
-                    // Opening it as a real pane here would defeat that.
-                    if (coldInitialView && coldInitialView !== "credential-approval") {
+                    // Seeding it as a real pane here would defeat that, so
+                    // it's excluded from seedView and falls back to
+                    // initHostNewWindow's default 3-pane seed underneath
+                    // (irrelevant — app.tsx replaces this window's content
+                    // entirely for credential-approval).
+                    let coldMeta: Record<string, unknown> | undefined;
+                    const seedView =
+                        coldInitialView && coldInitialView !== "credential-approval" ? coldInitialView : undefined;
+                    if (seedView) {
                         const coldMetaRaw = coldSearchParams.get("initialMeta");
-                        let coldMeta: Record<string, unknown> | undefined;
                         try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }
-                        await TabRpcClient.rpcCall("pane.open", {
-                            view: coldInitialView,
-                            ...(coldMeta ? { meta: coldMeta } : {}),
-                            floating: false,
-                        }, {});
                     }
+                    await initHostNewWindow(seedView, coldMeta);
                 }
             }
         } catch (error) {

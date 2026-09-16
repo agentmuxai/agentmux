@@ -43,6 +43,13 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         .unwrap_or(true);
     let restore_if_available: bool =
         service::get_arg(args, 3).unwrap_or(false) && client_windowids_empty;
+    // "Open in New Window" from a widget's context menu (arg 4/5, optional,
+    // same additive pattern as restoreIfAvailable above) — when present,
+    // seed the fresh tab with ONLY this one block instead of the default
+    // 3-pane agent/swarm/sysinfo layout. Ignored on the tear-off / existing-
+    // workspace path (the `else` arm below), same as the default seed is.
+    let seed_view: Option<String> = service::get_optional_arg(args, 4).unwrap_or(None);
+    let seed_meta: Option<serde_json::Value> = service::get_optional_arg(args, 5).unwrap_or(None);
     // Set when a restore actually replays the last snapshot — gates clearing
     // it (see the final read-back below) so a genuinely successful restore
     // can't be replayed again by a later call, while a crash mid-restore
@@ -149,9 +156,11 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     ));
                 }
             }
-            // Seed the default 3-pane launch layout (agent | sysinfo /
-            // swarm) into the fresh tab so "Open another window" matches
-            // first launch instead of opening blank. Only this
+            // Seed the fresh tab so "Open another window" matches first
+            // launch instead of opening blank: the default 3-pane launch
+            // layout (agent | sysinfo / swarm), UNLESS `seed_view` (arg 4)
+            // was supplied — then seed a single pane with just that view
+            // instead (a widget's "Open in New Window"). Only this
             // fresh-workspace branch seeds; tear-off (existing workspace,
             // the `else` arm) reattaches its populated workspace as-is.
             // Non-fatal: a seed failure leaves an empty tab (the prior
@@ -178,17 +187,27 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 }
                 _ => None,
             }) {
-                // Dispatch the three seed blocks through the reducer. This
-                // order is the one `default_three_pane_tree` expects
-                // positionally (agent, swarm, sysinfo) — NOT top-to-bottom
-                // display order, since sysinfo renders above swarm.
+                let seed_views: Vec<String> = match &seed_view {
+                    Some(v) => vec![v.clone()],
+                    None => vec!["agent".to_string(), "swarm".to_string(), "sysinfo".to_string()],
+                };
+                // Dispatch the seed block(s) through the reducer. For the
+                // default 3-pane case, order is the one
+                // `default_three_pane_tree` expects positionally (agent,
+                // swarm, sysinfo) — NOT top-to-bottom display order, since
+                // sysinfo renders above swarm.
                 let mut seeded_ids: Vec<String> = Vec::new();
-                for view in ["agent", "swarm", "sysinfo"] {
+                for view in &seed_views {
+                    let meta = if seed_view.is_some() {
+                        seed_meta.clone().unwrap_or_else(|| serde_json::json!({ "view": view }))
+                    } else {
+                        serde_json::json!({ "view": view })
+                    };
                     let evs = dispatch_to_reducer(
                         state,
                         agentmux_common::ipc::Command::CreateBlock {
                             tab_id: new_tab_id.clone(),
-                            meta: serde_json::json!({ "view": view }),
+                            meta,
                         },
                     )
                     .await;
@@ -228,18 +247,26 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     block_seed_events.extend(evs);
                 }
 
-                if seeded_ids.len() == 3 {
+                let tree_and_focus = if seed_view.is_some() && seeded_ids.len() == 1 {
+                    // "Open in New Window" from a widget — single-pane seed,
+                    // no split. See single_leaf_tree's doc comment.
+                    Some(crate::backend::wcore::single_leaf_tree(&seeded_ids[0]))
+                } else if seed_view.is_none() && seeded_ids.len() == 3 {
                     // SPEC_864 Phase 3 — post-bootstrap seed routes
                     // through the reducer (single writer of
                     // db_layout); the tree shape is shared with the
                     // pre-bootstrap store-direct first-launch seed
                     // via `default_three_pane_tree`.
-                    let (tree, focused, leaforder) =
-                        crate::backend::wcore::default_three_pane_tree(
-                            &seeded_ids[0],
-                            &seeded_ids[1],
-                            &seeded_ids[2],
-                        );
+                    Some(crate::backend::wcore::default_three_pane_tree(
+                        &seeded_ids[0],
+                        &seeded_ids[1],
+                        &seeded_ids[2],
+                    ))
+                } else {
+                    None
+                };
+
+                if let Some((tree, focused, leaforder)) = tree_and_focus {
                     if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
                         state,
                         &new_tab_id,
@@ -402,6 +429,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
 #[cfg(test)]
 mod create_window_seed_tests {
     use super::super::window::handle_window_service;
+    use crate::backend::obj::{Block, LayoutState, Tab};
     use crate::backend::service::WebCallType;
     use crate::server::tests::test_state;
 
@@ -476,5 +504,73 @@ mod create_window_seed_tests {
             "tear-off from a freshly-created window must succeed, got: {:?}",
             result.err()
         );
+    }
+
+    /// A widget's "Open in New Window" (arg 4 `seed_view` / arg 5
+    /// `seed_meta`) must seed the new tab with ONLY that one pane — not the
+    /// default 3-pane layout plus the widget as a 4th split. Regression: the
+    /// pre-existing frontend-only `initial_view` mechanism opened the
+    /// default 3-pane layout via CreateWindow and then called `pane.open`
+    /// on top of it, which only ever ADDED a pane rather than replacing the
+    /// seed.
+    #[tokio::test]
+    async fn new_window_with_seed_view_seeds_a_single_pane_not_the_default_three() {
+        let state = test_state();
+
+        let call = WebCallType {
+            service: "window".to_string(),
+            method: "CreateWindow".to_string(),
+            uicontext: None,
+            args: vec![
+                serde_json::Value::Null,                        // winSize
+                serde_json::Value::String(String::new()),       // workspaceId — fresh
+                serde_json::Value::Null,                        // hostLabel
+                serde_json::Value::Bool(false),                 // restoreIfAvailable
+                serde_json::Value::String("browser".to_string()), // seedView
+                serde_json::json!({ "view": "browser", "url": "https://example.com" }), // seedMeta
+            ],
+        };
+
+        let ret = handle_window_service(&state, &call).await;
+        assert!(ret.success, "CreateWindow failed: {:?}", ret.error);
+
+        let win = ret.data.expect("CreateWindow returns the Window");
+        let workspace_id = win
+            .get("workspaceid")
+            .and_then(|v| v.as_str())
+            .expect("window has a workspaceid")
+            .to_string();
+
+        let tab_id = {
+            let s = state.srv_state.lock().await;
+            let ws = s.workspaces.get(&workspace_id).expect("new workspace is in the reducer");
+            assert_eq!(ws.tab_ids.len(), 1, "one tab");
+            let tab_id = ws.tab_ids.first().unwrap().clone();
+            let tab = s.tabs.get(&tab_id).expect("new tab is in the reducer");
+            assert_eq!(
+                tab.block_ids.len(),
+                1,
+                "seeded with exactly ONE block, not the default 3-pane layout"
+            );
+            tab_id
+        };
+
+        let store = &state.wstore;
+        let tab = store.must_get::<Tab>(&tab_id).unwrap();
+        assert_eq!(tab.blockids.len(), 1);
+        let block = store.must_get::<Block>(&tab.blockids[0]).unwrap();
+        assert_eq!(block.meta.get("view").and_then(|v| v.as_str()), Some("browser"));
+        assert_eq!(
+            block.meta.get("url").and_then(|v| v.as_str()),
+            Some("https://example.com"),
+            "the full seedMeta must be used, not just a bare {{view}} object"
+        );
+
+        // Single-leaf tree — no split, root node itself wraps the block.
+        let layout = store.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        let root = layout.rootnode.as_ref().expect("layout must be populated");
+        assert!(root.children.is_empty(), "single pane — no split children");
+        assert_eq!(root.data.as_ref().unwrap().block_id, tab.blockids[0]);
+        assert_eq!(layout.leaforder.as_ref().unwrap().len(), 1);
     }
 }

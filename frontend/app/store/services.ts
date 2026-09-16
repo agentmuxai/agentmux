@@ -116,7 +116,19 @@ class WindowServiceType {
     // snapshot (if one exists) instead of seeding the hardcoded default
     // 3-pane layout. Every other caller (tear-off, "Open New Window") omits
     // it and keeps today's always-blank-workspace behavior.
-    CreateWindow(winSize: WinSize, workspaceId: string, hostLabel?: string, restoreIfAvailable?: boolean): Promise<WaveWindow> {
+    // `seedView`/`seedMeta` (optional, arg 4/5 — same additive pattern as
+    // `restoreIfAvailable` above): a widget's "Open in New Window" passes
+    // its resolved view + full blockdef.meta here so srv seeds the fresh
+    // tab with ONLY that one pane instead of the default 3-pane layout.
+    // Every other caller omits them and keeps the default-seed behavior.
+    CreateWindow(
+        winSize: WinSize,
+        workspaceId: string,
+        hostLabel?: string,
+        restoreIfAvailable?: boolean,
+        seedView?: string,
+        seedMeta?: Record<string, unknown>
+    ): Promise<WaveWindow> {
         return WOS.callBackendService("window", "CreateWindow", Array.from(arguments))
     }
     GetWindow(windowId: string): Promise<WaveWindow> {

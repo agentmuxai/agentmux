@@ -289,6 +289,29 @@ pub(crate) fn default_three_pane_tree(
     (rootnode, agent_node_id, leaforder)
 }
 
+/// Pure builder for a single-pane tree wrapping exactly one block — no
+/// splits. Used by the post-bootstrap CreateWindow seed
+/// (`handle_create_window`) when the caller supplies a specific `seed_view`
+/// (e.g. "Open in New Window" on a widget) instead of wanting the default
+/// 3-pane launch layout — the new window's sole pane is the requested
+/// widget, not that widget plus the default agent/swarm/sysinfo split.
+pub(crate) fn single_leaf_tree(block_id: &str) -> (LayoutNode, String, Vec<LeafOrderEntry>) {
+    let node_id = Uuid::new_v4().to_string();
+    let rootnode = LayoutNode {
+        id: node_id.clone(),
+        flex_direction: FlexDirection::Column,
+        size: 10.0,
+        children: Vec::new(),
+        data: Some(LayoutNodeData {
+            block_id: block_id.to_string(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let leaforder = vec![LeafOrderEntry { nodeid: node_id.clone(), blockid: block_id.to_string() }];
+    (rootnode, node_id, leaforder)
+}
+
 /// Get the singleton client record.
 pub fn get_client(store: &Store) -> Result<Client, StoreError> {
     let clients = store.get_all::<Client>()?;
@@ -501,6 +524,18 @@ mod tests {
 
         let order: Vec<&str> = leaforder.iter().map(|e| e.blockid.as_str()).collect();
         assert_eq!(order, vec!["b-agent", "b-sysinfo", "b-swarm"]);
+    }
+
+    #[test]
+    fn single_leaf_tree_wraps_exactly_one_block_with_no_split() {
+        let (root, focused, leaforder) = single_leaf_tree("b-widget");
+
+        assert!(root.children.is_empty(), "no split — the root node IS the leaf");
+        assert_eq!(root.data.as_ref().unwrap().block_id, "b-widget");
+        assert_eq!(focused, root.id, "the sole pane starts focused");
+        assert_eq!(leaforder.len(), 1);
+        assert_eq!(leaforder[0].blockid, "b-widget");
+        assert_eq!(leaforder[0].nodeid, root.id);
     }
 
     #[test]
