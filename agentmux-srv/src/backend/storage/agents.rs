@@ -2111,20 +2111,27 @@ impl Store {
         // deletion for one rather than sweeping narrowly the way
         // `agent_def_delete` does.
         self.purge_agent_side_effects(id, "instance_delete", RecordScope::Agent);
-        if rows > 0 {
-            // Tombstone the GLOBAL definition record too. Clearing the local
-            // tables alone leaves an active record in the cross-channel
-            // definition registry, and `agent_def_list` overlays every active
-            // record back onto the local list on every read — so the deleted
-            // agent reappears on the very next My Agents fetch, no restart
-            // needed (reagent P1 round 2 on #3080). Same tombstone
-            // `agent_def_delete` writes; this is that deletion arriving from
-            // the launch side. Scoped to a real local deletion: an agent that
-            // exists ONLY in the global registry has no row here, and
-            // `agent_def_delete` is the path that deletes one of those.
-            self.registry_def_retire(id);
-        }
-        Ok(rows > 0)
+        // Tombstone the GLOBAL definition record too. Clearing the local
+        // tables alone leaves an active record in the cross-channel
+        // definition registry, and `agent_def_list` overlays every active
+        // record back onto the local list on every read — so the deleted
+        // agent reappears on the very next My Agents fetch, no restart
+        // needed (reagent P1 round 2 on #3080). Same tombstone
+        // `agent_def_delete` writes; this is that deletion arriving from the
+        // launch side.
+        //
+        // Unconditional, like everything else in this function (ReAgent P2
+        // on PR #3262). This was the last step still gated on `rows > 0`,
+        // on the reasoning that an agent existing only in the global
+        // registry is `agent_def_delete`'s business — but once the purge
+        // above went unconditional, that gate left a genuinely incoherent
+        // outcome reachable here: a cross-channel agent's dependent rows
+        // and registry records swept while its definition stays ACTIVE, so
+        // the overlay keeps serving a definition nothing backs. Retiring an
+        // id with no global record is a no-op, and a template can't reach
+        // this line (early return above), so there is nothing to gate on.
+        let global_retired = self.registry_def_retire(id);
+        Ok(rows > 0 || global_retired)
     }
 
     /// Resolve the agent bindings tied to a block.
