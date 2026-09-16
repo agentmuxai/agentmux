@@ -213,6 +213,13 @@ jobs:
       - name: Scrollbar cursor gate
         run: bash scripts/check-scrollbar-cursor.sh
 
+      # Same posture as the two gates above: encodes a regression that already
+      # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
+      # a stack that still NAMES a ligature font resolves against a
+      # system-installed copy and reintroduces the CEF 152 blank-glyph bug.
+      - name: Ligature font gate
+        run: bash scripts/check-ligature-fonts.sh
+
       # scripts/cef-verify.sh is the carry-set gate for the CEF fork
       # (docs/cef-build/CEF_FORK_MAINTENANCE.md §5). It runs against a CEF
       # checkout, which CI does not have -- so what runs here is its TEST SUITE,

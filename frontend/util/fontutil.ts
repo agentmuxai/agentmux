@@ -1,7 +1,20 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-let isJetBrainsMonoLoaded = false;
+// NOTE: JetBrains Mono was removed here (PR #3247). It carried `calt` rules
+// that ligate runs of punctuation by substituting a BLANK glyph (`glyph00388`,
+// no contours) plus a composed glyph drawn leftward. The font guards this to
+// runs of 2-3, but CEF 152's shaper stopped honoring those guards and applied
+// it across whole runs, so holding "." rendered as blank cells with a single
+// dot at the end. Nothing ever selected this font deliberately — it only
+// appeared inside fallbacks of CSS variables that are never defined — so
+// dropping it removes the bug at the source rather than fighting `calt` in
+// CSS (which loses to any of the app's 19 `font:` shorthands).
+// See docs/retro/retro-terminal-consecutive-period-input-loss-2026-09-15.md.
+//
+// Hack (our actual mono default) has no `calt` table at all, so it is
+// unaffected. Do not reintroduce a ligature font without first re-checking
+// this on the shipped CEF milestone.
 let isHackNerdFontLoaded = false;
 let isInterFontLoaded = false;
 
@@ -15,31 +28,6 @@ function loadAndLog(fontFace: FontFace, label: string) {
         () => console.log(`[font] loaded: ${label}`),
         (err) => console.error(`[font] FAILED to load: ${label}`, err)
     );
-}
-
-function loadJetBrainsMonoFont() {
-    if (isJetBrainsMonoLoaded) {
-        return;
-    }
-    isJetBrainsMonoLoaded = true;
-    const jbmFontNormal = new FontFace("JetBrains Mono", "url('/fonts/jetbrains-mono-v13-latin-regular.woff2')", {
-        style: "normal",
-        weight: "400",
-    });
-    const jbmFont200 = new FontFace("JetBrains Mono", "url('/fonts/jetbrains-mono-v13-latin-200.woff2')", {
-        style: "normal",
-        weight: "200",
-    });
-    const jbmFont700 = new FontFace("JetBrains Mono", "url('/fonts/jetbrains-mono-v13-latin-700.woff2')", {
-        style: "normal",
-        weight: "700",
-    });
-    addToFontFaceSet(document.fonts, jbmFontNormal);
-    addToFontFaceSet(document.fonts, jbmFont200);
-    addToFontFaceSet(document.fonts, jbmFont700);
-    loadAndLog(jbmFontNormal, "JetBrains Mono 400");
-    loadAndLog(jbmFont200, "JetBrains Mono 200");
-    loadAndLog(jbmFont700, "JetBrains Mono 700");
 }
 
 function loadHackNerdFont() {
@@ -88,7 +76,6 @@ function loadInterFont() {
 
 function loadFonts() {
     loadInterFont();
-    loadJetBrainsMonoFont();
     loadHackNerdFont();
 }
 

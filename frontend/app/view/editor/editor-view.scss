@@ -291,7 +291,7 @@
     border: 1px solid var(--accent-color, #89b4fa);
     border-radius: 2px;
     color: var(--main-text-color);
-    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
     font-size: 11px;
     outline: none;
 
@@ -365,7 +365,7 @@
         display: inline-block;
         min-width: 16px;
         padding: 1px 6px;
-        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
         font-size: 11px;
         line-height: 16px;
         text-align: center;
@@ -433,7 +433,7 @@
 }
 
 .editor-error-panel-path {
-    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
     font-size: 11px;
     color: var(--secondary-text-color);
     word-break: break-all;
@@ -474,7 +474,7 @@
     }
 
     .cm-scroller {
-        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
         font-size: 13px;
     }
 
@@ -664,7 +664,7 @@
 }
 
 .editor-lsp-banner-install {
-    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
     font-size: 11px;
     flex-wrap: wrap;
 }

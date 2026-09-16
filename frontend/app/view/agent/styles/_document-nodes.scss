@@ -666,7 +666,7 @@
     // Shiki emits <pre><code> with <span class="line"> per line.
     // We wrap in our own <pre class="agent-highlighted-code"> and inject innerHTML.
     .agent-highlighted-code {
-        font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+        font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
         // 1em (relative), not a fixed 12px: the overlay-log's preview-zoom
         // (`font-size: <scale>%`) sets the em base, so the code body scales with
         // Ctrl+scroll over the preview. An absolute px here silently ignored the

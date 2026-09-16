@@ -74,7 +74,7 @@
     border-radius: 0;
     background: var(--form-element-bg-color);
     color: var(--main-text-color);
-    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+    font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
     font-size: 12px;
 
     &:focus {

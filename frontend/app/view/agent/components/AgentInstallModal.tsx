@@ -218,8 +218,12 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // back to xterm's default (Courier), which renders wider
         // than the rest of the app's terminals.
         const cs = getComputedStyle(termRef);
+        // Fallback no longer names JetBrains Mono: it is no longer bundled
+        // (PR #3247 — its `calt` blank-glyph ligatures broke repeated
+        // punctuation under CEF 152), so naming it here would resolve to
+        // nothing and fall through anyway. "Hack" is the font we actually ship.
         const termFont = cs.getPropertyValue("--termfontfamily").trim()
-            || `"JetBrains Mono", "Fira Code", "Consolas", monospace`;
+            || `"Hack", Consolas, Menlo, monospace`;
         // Bind to the same theme source the regular term pane uses
         // (single source of truth — see SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md).
         const [initialTheme] = computeTermThemeFromSettings(atoms.fullConfigAtom());

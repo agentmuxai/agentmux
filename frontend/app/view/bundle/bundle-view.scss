@@ -152,7 +152,7 @@
     background: var(--code-bg-color, rgba(0, 0, 0, 0.2));
     border-radius: 0;
     white-space: pre-wrap;
-    font-family: var(--mono-font, "JetBrains Mono", monospace);
+    font-family: var(--mono-font, "Hack", Consolas, Menlo, monospace);
     font-size: 12px;
     max-height: 240px;
     overflow-y: auto;
@@ -251,7 +251,7 @@
 }
 
 .bundle-view-textarea {
-    font-family: var(--mono-font, "JetBrains Mono", monospace);
+    font-family: var(--mono-font, "Hack", Consolas, Menlo, monospace);
     font-size: 12px;
     resize: vertical;
     min-height: 120px;
@@ -322,7 +322,7 @@
 }
 
 .bundle-view-validation-field {
-    font-family: var(--mono-font, "JetBrains Mono", monospace);
+    font-family: var(--mono-font, "Hack", Consolas, Menlo, monospace);
     font-size: 11px;
     opacity: 0.8;
 }
