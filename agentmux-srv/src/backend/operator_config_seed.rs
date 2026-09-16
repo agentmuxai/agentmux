@@ -23,6 +23,15 @@
 //! happens atomically at the `Store` layer, not as two separate calls
 //! composed here — see that method's own doc comment (ReAgent P1, PR
 //! #3244, a check-then-act race in an earlier version of this module).
+//!
+//! "In sync" also covers removal: `prune_entries_removed_from_manifest`
+//! deletes any seeder-owned row whose manifest entry a later AgentMux
+//! release dropped or renamed, so a retired Operator Config note doesn't
+//! keep being injected into every future agent forever (Codex P2, PR
+//! #3244) — mirroring `agent_seed.rs`'s own "remove a seeded agent not in
+//! the manifest" behavior. A human-edited row meets the same fate as
+//! everywhere else in this module: left alone, never deleted out from
+//! under the human who edited it.
 
 use std::sync::Arc;
 
@@ -118,6 +127,54 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
              {skipped_older} skipped (older generation), {skipped_collision} skipped (collision)",
             manifest.version,
         );
+    }
+
+    prune_entries_removed_from_manifest(wstore, &manifest);
+}
+
+/// A row for an entry AgentMux itself removed (or renamed to a new id) in a
+/// later release must not linger as a seeder-owned `is_system` row forever —
+/// it would keep being injected into every future agent indefinitely,
+/// exactly the "stale Operator Config actively misleads an agent" failure
+/// mode this whole seeding mechanism exists to prevent (Codex P2, PR #3244).
+/// Only prunes rows still owned by this seeder (`bundle_delete_system_if_
+/// owned` checks atomically) — a row a human has edited is left in place,
+/// orphaned from the manifest but not clobbered, for a human to clean up.
+fn prune_entries_removed_from_manifest(wstore: &Arc<Store>, manifest: &SeedManifest) {
+    let manifest_ids: std::collections::HashSet<&str> =
+        manifest.entries.iter().map(|e| e.id.as_str()).collect();
+
+    let existing_ids = match wstore.bundle_list_system_ids() {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!("operator config seed: failed to list existing system entries for pruning: {e}");
+            return;
+        }
+    };
+
+    let mut pruned = 0usize;
+    for id in existing_ids {
+        if manifest_ids.contains(id.as_str()) {
+            continue;
+        }
+        match wstore.bundle_delete_system_if_owned(&id, WRITTEN_BY) {
+            Ok(true) => {
+                pruned += 1;
+                tracing::info!(id = %id, "operator config seed: pruned an entry no longer in the manifest");
+            }
+            Ok(false) => {
+                tracing::info!(
+                    id = %id,
+                    "operator config seed: an entry is no longer in the manifest but has a local edit — leaving it in place"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(id = %id, error = %e, "operator config seed: failed to prune an entry no longer in the manifest");
+            }
+        }
+    }
+    if pruned > 0 {
+        tracing::info!("operator config seed: pruned {pruned} entries no longer in the manifest");
     }
 }
 
@@ -285,6 +342,49 @@ mod tests {
 
         let bundle = store.bundle_get("op-1").unwrap().unwrap();
         assert_eq!(bundle.instructions, "human-edited body", "seed_one made no db_bundles write on skip");
+    }
+
+    /// Codex P2, PR #3244: an entry AgentMux itself removes from a later
+    /// manifest (renamed id, retired content, ...) must not linger forever
+    /// as a seeder-owned row, still injected into every future agent.
+    #[test]
+    fn seeder_owned_entry_removed_from_manifest_is_pruned() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "old content"), 1).unwrap();
+        assert!(store.bundle_get("op-old").unwrap().is_some());
+
+        // This release's manifest no longer mentions "op-old" at all.
+        let manifest = SeedManifest { version: 2, entries: vec![entry("op-new", "New Entry", "new content")] };
+        // seed_one for the still-present entry, then run the prune pass
+        // directly (mirrors what auto_seed_on_startup does after its loop).
+        seed_one(&store, &manifest.entries[0], manifest.version).unwrap();
+        prune_entries_removed_from_manifest(&store, &manifest);
+
+        assert!(store.bundle_get("op-old").unwrap().is_none(), "seeder-owned, manifest-removed entry must be pruned");
+        assert!(store.bundle_get("op-new").unwrap().is_some(), "entries still in the manifest are untouched");
+    }
+
+    /// The same "never clobber a local edit" guarantee applies to pruning:
+    /// a human-edited entry that AgentMux later removes from its manifest
+    /// must be left in place, not silently deleted out from under them.
+    #[test]
+    fn locally_edited_entry_removed_from_manifest_is_not_pruned() {
+        let store = test_store();
+        seed_one(&store, &entry("op-old", "Old Entry", "old content"), 1).unwrap();
+
+        let edited = {
+            let mut b = store.bundle_get("op-old").unwrap().unwrap();
+            b.instructions = "a human edit worth keeping".to_string();
+            b
+        };
+        store.bundle_upsert_system_with_version(&edited, "armory-ui", "human", "{}").unwrap();
+
+        let manifest = SeedManifest { version: 2, entries: vec![] };
+        prune_entries_removed_from_manifest(&store, &manifest);
+
+        let bundle = store.bundle_get("op-old").unwrap();
+        assert!(bundle.is_some(), "a human-edited entry must survive even after its manifest entry is removed");
+        assert_eq!(bundle.unwrap().instructions, "a human edit worth keeping");
     }
 
     /// Codex P2, PR #3244: `bundle_delete_system` removes only `db_bundles`,

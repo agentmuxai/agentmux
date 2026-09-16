@@ -708,11 +708,23 @@ impl Store {
         }
 
         if row_exists {
+            // Ordered by rowid (insertion sequence), NOT created_at: unlike
+            // bundle_version_list's own history ordering (a display
+            // concern, where wall-clock order is what a human expects to
+            // see), this ownership decision has a real behavioral
+            // consequence if it picks the wrong "latest" row. A backward
+            // system-clock jump (e.g. correcting a VM whose clock was
+            // ahead) between two writes to the same bundle_id would give
+            // the chronologically-later write a SMALLER created_at, so
+            // `ORDER BY created_at DESC` could keep selecting the older
+            // row as "latest" — silently defeating the ownership
+            // guarantee this whole method exists for. rowid is monotonic
+            // per insert regardless of wall-clock time. Codex P2, PR #3244.
             let latest: Option<(String, String, String)> = tx
                 .query_row(
                     "SELECT written_by, content_hash, source_detail FROM db_bundle_versions
                      WHERE bundle_id = ?1
-                     ORDER BY created_at DESC, rowid DESC
+                     ORDER BY rowid DESC
                      LIMIT 1",
                     params![memory.id],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -831,6 +843,59 @@ impl Store {
             "DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1",
             params![id],
         )?;
+        Ok(rows > 0)
+    }
+
+    /// All `is_system=1` row ids — the full universe `operator_config_seed`'s
+    /// startup prune pass checks its manifest against, to find rows for an
+    /// entry AgentMux itself removed or renamed in a later release (Codex
+    /// P2, PR #3244). Ids only, not full `Bundle`s: the prune pass needs
+    /// nothing else before deciding whether a given id is still in the
+    /// manifest.
+    pub fn bundle_list_system_ids(&self) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id FROM db_bundles WHERE is_system = 1")?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Atomically deletes an `is_system=1` row ONLY if its latest version is
+    /// still owned by `seeder_identity` — the delete-side counterpart of
+    /// `bundle_reseed_system_if_owned`'s ownership check, used to prune a
+    /// row whose manifest entry AgentMux itself removed in a later release.
+    /// A row a human has edited (`written_by` on the latest version is
+    /// anything else) is left in place — same "never clobber a local edit"
+    /// posture as the reseed path; an orphaned-but-human-owned entry is a
+    /// human's to clean up, not this seeder's. A row with NO version
+    /// history at all (should not normally happen — every write path that
+    /// can create an `is_system` row also records one) is conservatively
+    /// treated as NOT owned by the seeder and left alone, rather than
+    /// guessing. Returns `true` only when a deletion actually happened.
+    pub fn bundle_delete_system_if_owned(&self, id: &str, seeder_identity: &str) -> Result<bool, StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+        // rowid, not created_at — see bundle_reseed_system_if_owned's own
+        // comment on the same ordering choice.
+        let latest_written_by: Option<String> = tx
+            .query_row(
+                "SELECT written_by FROM db_bundle_versions
+                 WHERE bundle_id = ?1
+                 ORDER BY rowid DESC
+                 LIMIT 1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+
+        if latest_written_by.as_deref() != Some(seeder_identity) {
+            return Ok(false);
+        }
+
+        let rows = tx.execute("DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1", params![id])?;
+        tx.commit()?;
         Ok(rows > 0)
     }
 
