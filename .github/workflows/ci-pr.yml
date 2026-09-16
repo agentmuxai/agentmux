@@ -75,12 +75,27 @@ on:
 # collide on the same group, and a push to one would cancel the OTHER PR's
 # required CI run — silent, cross-PR, and only noticed when someone's merge
 # is unexpectedly blocked. github.event.pull_request.number is unique per
-# PR regardless of branch naming; use that instead. It's only set for
-# pull_request events, so this still falls through to github.ref for `push`
-# (not a PR) — main pushes get their own group, keyed differently than PR
-# runs, same as before.
+# PR regardless of branch naming; use that instead.
+#
+# github.event.pull_request.number is only set for pull_request events, so
+# this falls through to the second operand for `push` (not a PR — a merge
+# landing on main). That second operand used to be github.ref — WRONG, this
+# file's own earlier comment here claimed "main pushes get their own group,
+# keyed differently than PR runs" as if that meant per-push, but github.ref
+# is the literal constant string "refs/heads/main" for every single push to
+# main — every post-merge run shared ONE group, so cancel-in-progress killed
+# whichever merge's post-merge run was still in flight the instant the next
+# merge landed. Confirmed directly: 10 of 13 push-triggered runs cancelled
+# in a 45-minute window of ordinary merge activity on 2026-09-16, none of it
+# a real test failure — see
+# docs/analysis/ANALYSIS_MAIN_CI_CANCELLED_RUNS_COMMIT_HISTORY_2026_09_16.md.
+# github.sha is unique per push (the very commit that triggered it), giving
+# push events the same per-trigger isolation pull_request events already
+# have via the PR number — a second push can never land on the same SHA, so
+# this loses no real cancellation behavior, only the spurious cross-merge
+# kind.
 concurrency:
-  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-pr-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
