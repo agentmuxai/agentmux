@@ -1,5 +1,21 @@
 # AgentMux Version History
 
+## 0.56.1 — 2026-09-15
+
+- feat(term): close-on-exit — a shell pane now actually closes itself when its process exits
+- fix(armory): use Global Memory terminology instead of AgentMux in the system-tier UI
+- refactor(armory): unify Global Memory system-tier and ordinary entries into one list
+- fix(test): make the fs_watch stale-rearm test deterministic instead of handle-count based
+- feat(linux): widen release/nightly Linux packaging to AppImage + .deb + portable .tar.gz
+- fix(linux): apparmor-cover the .deb/.rpm install path, set LD_LIBRARY_PATH for the new package entry points
+- feat(mcp): agent-facing Global Memory API (GlobalMemoryWrite/List/Read/Remove) + audit trail
+- feat(linux): add .rpm release/nightly packaging
+- feat(agent-pane): make window-level tab switching near-instant via content-visibility + View Transitions
+- fix(test): compare the fs_watch stale-rearm probe's reason, not just its presence
+- docs(cef): add default-branch switch to the milestone upgrade runbook
+- feat(memory): seed AgentMux-shipped Operator Config into Global Memory
+- fix(lan-discovery): stop wiping peer identity on mDNS ServiceRemoved churn
+
 ## 0.56.0 — 2026-09-15
 
 - feat(mcp): ClosePane — close your own pane, or any pane by block_id (fleet tier)
