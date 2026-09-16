@@ -58,13 +58,18 @@ So: **CodeMirror's state updates; its view does not paint.**
   `return this.dirtyAtom() ? `${fp} *` : fp;`
 
 So the first keystroke flips `dirty`, which changes the pane title, which
-re-renders pane chrome and the tab strip — including the close/dirty affordance
-the reporter suspected. There is a real reactive cascade fired by exactly the
+re-renders pane chrome. There is a real reactive cascade fired by exactly the
 keystroke that goes missing.
+
+Note the cascade is **not** a tab-strip *layout* change — the close/dirty
+affordance already reserves its box and only animates opacity (see C3 below,
+ruled out). What remains is the title-derived re-render, which is what makes C1
+worth instrumenting.
 
 ## 3. Candidate mechanisms, in rough order
 
-Each is independently testable; none is confirmed.
+Each is independently testable. C3 has since been ruled out by inspection; C1
+and C2 remain open.
 
 **C1 — The tab-switch effect re-runs on first edit and overwrites the view.**
 If flipping `dirty` causes the `createEffect` at ~466 to re-run (directly, or
@@ -84,22 +89,36 @@ painting until something forces a re-measure — a click being one such thing.
 *Test:* call `cmView.requestMeasure()` after mount and see whether the first
 keystroke renders.
 
-**C3 — Layout shift from the dirty affordance invalidating the paint.**
-The reporter's own hypothesis. The dirty indicator/close icon appearing changes
-tab-strip layout on exactly that keystroke; if that reflows the editor container,
-CodeMirror's cached geometry is stale for the frame that should have painted the
-character.
-*Test:* make the dirty affordance reserve its space permanently (render it
-always, toggling only visibility/opacity) so no layout changes on the transition,
-then retest.
+**C3 — Layout shift from the dirty affordance — RULED OUT.**
+The reporter's original hypothesis was that the dirty indicator / close icon
+appearing shifts tab-strip layout on exactly that keystroke, leaving
+CodeMirror's cached geometry stale for the frame that should have painted.
+**Disproven by code inspection** (codex P2 on PR #3250), recorded here so nobody
+spends time re-testing it:
 
-C1 and C3 are not mutually exclusive: C3 could be what makes C1's effect re-run.
+- `.pane-tab-close` is `flex: 0 0 16px; width: 16px; height: 16px` with
+  `opacity: 0` — it **permanently reserves its box**; only opacity animates
+  (`transition: opacity 80ms`).
+- It is rendered whenever `onClose` exists (`<Show when={props.onClose}>`),
+  never conditioned on dirty.
+- `editor-tab-strip.tsx:72` passes `getAttention={(tab) => tab.dirty}`, and the
+  `--attention` modifier only changes opacity.
+
+The clean→dirty transition therefore changes no tab-strip geometry, and the
+experiment originally proposed here (reserve the space permanently) would have
+been a no-op against an already-reserved box.
+
+**This does not rule out C1.** Dirty still drives a real reactive change
+elsewhere: `editor-model.ts:369` derives the *pane title* from it (`${fp} *`).
+That path is independent of tab-strip layout, and is the plausible trigger for
+C1's effect re-run. What is dead is specifically the *layout-shift* explanation,
+not "the dirty flip causes reactive churn".
 
 ## 4. Proposed work
 
 1. **Instrument first** — log every `createEffect` re-entry with its trigger, and
    log `cmView.state.doc` before/after the first keystroke. Confirm which of
-   C1/C2/C3 fires before writing a fix. This bug has an easy plausible story per
+   C1/C2 fires before writing a fix. This bug has an easy plausible story per
    mechanism, and the companion retro is a case study in what picking one on
    plausibility costs.
 2. **Fix the confirmed mechanism only.**
