@@ -1812,11 +1812,23 @@ async fn handle_pty_shell_input(
 /// Best-effort: a failure to write the lock meta just means the human's
 /// input isn't blocked this time, not that the agent's write itself failed.
 fn lock_shell_for_agent(state: &AppState, shell_id: &str) {
+    let until_ms = agentmux_common::time::now_ms() + AGENT_LOCK_WINDOW_MS;
+
+    // In-memory first, and unconditionally: this is what `controllerinput`
+    // actually enforces against (see `blockcontroller::agent_lock`'s module
+    // doc for why the enforcement path can't afford a `Store` read). It
+    // cannot fail and costs a hash insert, so the lock is live before the
+    // persisted/broadcast half is even attempted — which also shrinks the
+    // pre-existing "human keystroke in the sliver before the write commits"
+    // window described above to the width of a mutex acquire.
+    blockcontroller::agent_lock::lock_until(shell_id, until_ms);
+
+    // Then the meta write, which drives the frontend's own badge + gate
+    // (`AgentShellSubblock.tsx`). Best-effort, exactly as before: a failure
+    // here costs the human the "Agent is using this shell" indicator, not
+    // the enforcement itself.
     let mut meta = crate::backend::obj::MetaMapType::new();
-    meta.insert(
-        META_KEY_AGENT_LOCK_UNTIL.to_string(),
-        json!(agentmux_common::time::now_ms() + AGENT_LOCK_WINDOW_MS),
-    );
+    meta.insert(META_KEY_AGENT_LOCK_UNTIL.to_string(), json!(until_ms));
     if let Err(e) = broadcast_meta_update(state, shell_id, &meta) {
         tracing::warn!(shell_id = %shell_id, error = %e, "ptyshell: failed to write agent lock");
     }
@@ -1934,14 +1946,12 @@ async fn handle_pty_shell_stop(
     if !is_owned_by_agent(&state.wstore, &req.shell_id, &req.agent_block_id) {
         return (StatusCode::OK, Json(PtyShellStopResponse { released: false }));
     }
-    let was_locked = state
-        .wstore
-        .get::<crate::backend::obj::Block>(&req.shell_id)
-        .ok()
-        .flatten()
-        .and_then(|b| b.meta.get(META_KEY_AGENT_LOCK_UNTIL).and_then(|v| v.as_i64()))
-        .map(|until| until > agentmux_common::time::now_ms())
-        .unwrap_or(false);
+    // Released in memory first — that's the copy `controllerinput` enforces
+    // against, so the human's keyboard is live again the instant this
+    // returns, not once the meta write commits and the frontend hears about
+    // it. The return value is the authoritative "was a lease actually held",
+    // for the same reason.
+    let was_locked = blockcontroller::agent_lock::release(&req.shell_id);
 
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(META_KEY_AGENT_LOCK_UNTIL.to_string(), serde_json::Value::Null);

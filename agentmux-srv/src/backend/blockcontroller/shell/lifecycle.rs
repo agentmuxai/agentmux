@@ -1165,6 +1165,23 @@ impl Controller for ShellController {
                     }
                 }
 
+                // Release any PtyShell agent lease this block still holds.
+                //
+                // The lease (`blockcontroller::agent_lock`) locks a human out
+                // of their own keyboard while an agent drives the pane's
+                // shell, and it is deliberately time-bounded so it always
+                // lapses on its own. But "the shell this lease belongs to has
+                // exited" is a stronger signal than the clock: there is
+                // nothing left to collide with, and holding the lock for the
+                // remainder of its window would drop keystrokes aimed at
+                // whatever comes next in this pane. Matters most for the
+                // exact case that motivated close-on-exit
+                // (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §10): a human
+                // typing `exit` in a shell an agent was using must not have
+                // their following keystrokes swallowed by a lease for a PTY
+                // that is already gone.
+                super::super::agent_lock::release(&block_id_wait);
+
                 // Update inner state
                 {
                     let mut inner = inner_wait.lock().unwrap();
