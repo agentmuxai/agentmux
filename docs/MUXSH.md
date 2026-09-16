@@ -1,5 +1,7 @@
 # `muxsh` — open editor/browser panes from the terminal
 
+**Status:** living — reference doc kept current alongside the tool, same as `MUXLOG.md`/`MUXSPECT.md`.
+
 `muxsh` is shipped in every AgentMux terminal (bash / zsh / pwsh / fish), same
 family as `muxlog`/`muxspect`/`muxopen`. It's AgentMux's own successor to
 Wave Terminal's `wsh` CLI — not a revival of it (AgentMux retired the
