@@ -14,16 +14,16 @@
  * which calls DeleteSubBlockCommand).
  */
 
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { atoms, staticTabId, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { sendWSCommand } from "@/app/store/ws";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
-import { WOS, atoms, staticTabId } from "@/app/store/global";
-import { stringToBase64 } from "@/util/util";
+import { sendWSCommand } from "@/app/store/ws";
 import { TermWrap } from "@/app/view/term/termwrap";
-import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { stringToBase64 } from "@/util/util";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 
 // Matches browser-view.tsx's LOADING_SPINNER_FADE_MS / BrainSpinner.scss's
 // is-fading transition duration — keep in sync if either changes.
@@ -124,6 +124,13 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     let termWrap: TermWrap | undefined;
     let resizeObserver: ResizeObserver | undefined;
     let disposed = false;
+    // Bumped at the start of every `attachShell` call — an in-flight call
+    // whose own generation no longer matches this by the time one of its
+    // `await`s resolves knows a NEWER attach has since started (another
+    // externally-driven repoint arriving before this one finished) and
+    // must abandon itself rather than commit `termWrap`/`resizeObserver`
+    // out from under the newer, correct attachment (ReAgent P1 on #3257).
+    let attachGeneration = 0;
 
     const [subBlockId, setSubBlockId] = createSignal<string | undefined>(props.existingSubBlockId);
     const [error, setError] = createSignal<string | null>(null);
@@ -207,7 +214,21 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // the `controllerstatus` subscription below (live OR replayed). `undefined`
     // means "no exit observed", which is NOT the same as "exited cleanly" and
     // must never be treated as permission to delete anything.
-    let lastObservedExitCode: number | undefined;
+    //
+    // Tagged with the id it was observed FOR, not just a bare value: this
+    // component can now re-attach to a DIFFERENT sub-block mid-mount
+    // (ReAgent P1 on #3257), and attachShell's resync-failure catch block
+    // below reads this for whatever id JUST failed to resync — a bare
+    // value would let a stale exit code from a PREVIOUS sub-block leak
+    // into that decision (round 3 of the same review), misattributing it
+    // or, worse, deleting a crashed block's only diagnostic record based
+    // on an unrelated block's clean exit. Tagging lets the reader verify
+    // relevance itself, which is more robust than trying to reset a bare
+    // value at exactly the right moment — the ordering between this
+    // effect (which can fire a replay synchronously within the SAME
+    // initial mount, before attachShell ever runs) and attachShell itself
+    // is not something call sites should have to reason about.
+    let lastObservedExit: { id: string; code: number } | undefined;
 
     createEffect(() => {
         const id = subBlockId();
@@ -220,9 +241,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", id),
             handler: (event) => {
-                const data = event?.data as
-                    | { shellprocstatus?: unknown; shellprocexitcode?: unknown }
-                    | undefined;
+                const data = event?.data as { shellprocstatus?: unknown; shellprocexitcode?: unknown } | undefined;
                 if (!data) return;
                 if (data.shellprocstatus === "running") {
                     sawRunning = true;
@@ -236,8 +255,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 // comment. Set for replayed exits too, which is the whole
                 // point: a crash that happened while the drawer was closed is
                 // knowable ONLY from the replay.
-                lastObservedExitCode =
-                    typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
+                lastObservedExit = {
+                    id,
+                    code: typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0,
+                };
                 // ONLY act on an exit we watched happen.
                 //
                 // ReAgent P0 on PR #3253: `controllerstatus` is published with
@@ -273,6 +294,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         });
         onCleanup(() => unsub());
     });
+
     const termFontSize = createMemo(() => {
         const paneZoom = props.agentPaneZoom() || 1;
         return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));
@@ -370,205 +392,298 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         containerRef?.addEventListener("wheel", handleCtrlWheel, { passive: false, capture: true });
         onCleanup(() => containerRef?.removeEventListener("wheel", handleCtrlWheel, { capture: true }));
 
-        void (async () => {
-            try {
-                let id = subBlockId();
-                let isExistingBlock = false;
-                if (id) {
-                    // Reusing a sub-block id persisted on the parent's meta from a
-                    // prior mount — but a sub-block, unlike its parent agent block,
-                    // does not survive a full app restart (it's gone from the object
-                    // store entirely, not just missing its in-memory controller).
-                    // Verify it's still real before trusting it: resync throws
-                    // "block <id> not found" for a stale reference. Reconnecting to
-                    // a dead id otherwise renders whatever history is left (once
-                    // persisted) with no live process behind it — the terminal
-                    // looks normal but silently accepts no input. Confirmed live
-                    // via CDP against a session that had been through several dev
-                    // rebuild restarts.
-                    //
-                    // `norespawn` covers the OTHER way this id can be dead: the
-                    // shell exited while the drawer was closed (the human
-                    // `exit`ed and reopened, or an agent sharing this shell
-                    // exited it), so the live exit subscription below — which
-                    // only exists while mounted — never saw it. Without the
-                    // flag, resync's default is to silently REVIVE a
-                    // STATUS_DONE controller in place, appending a fresh
-                    // startup banner to this block's append-only `term` file
-                    // on every reopen: the respawn-loop symptom
-                    // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md fixed on the
-                    // PtyShellCreate side (§7). With it, an exited shell
-                    // surfaces as an error and takes the same fall-through as
-                    // a vanished one — a genuinely fresh shell, clean
-                    // scrollback — and the dead block is deleted rather than
-                    // left orphaned. Codex P2 on PR #3253.
-                    try {
-                        await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                            tabid: staticTabId(),
-                            blockid: id,
-                            forcerestart: false,
-                            norespawn: true,
-                        });
-                        isExistingBlock = true;
-                    } catch (e) {
-                        console.warn(
-                            "AgentShellSubblock: existing sub-block is stale or already exited, creating a fresh one:",
-                            e
-                        );
-                        // Delete the dead block ONLY on a positively-known
-                        // CLEAN exit.
-                        //
-                        // ReAgent P0 (round 2) on PR #3253: deleting on any
-                        // resync failure destroys the block's persisted `term`
-                        // file — and for a shell that CRASHED while the drawer
-                        // was closed, that file is the only record of what went
-                        // wrong. The live-exit listener above already refuses to
-                        // collapse on a non-zero exit for exactly this reason
-                        // (spec §5); doing it here anyway would reproduce the
-                        // same "not hidden — gone" data loss through the attach
-                        // path instead of the collapse path.
-                        //
-                        // `undefined` (no exit observed — a genuinely vanished
-                        // block, or a status we were never told) is NOT treated
-                        // as clean: skipping the delete costs at worst a dead
-                        // block lingering until the pane closes, while getting
-                        // it wrong costs the user their diagnostics. A vanished
-                        // block needs no delete anyway — it is already gone.
-                        if (lastObservedExitCode === 0) {
-                            void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
-                        } else {
-                            console.warn(
-                                `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
-                                    `${lastObservedExitCode ?? "unknown"}) — its scrollback may be the ` +
-                                    `only record of why the shell ended`
-                            );
-                        }
-                        id = undefined;
-                    }
-                }
-                if (!id) {
-                    const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
-                        parentblockid: props.parentBlockId,
-                        blockdef: {
-                            meta: {
-                                view: "term",
-                                controller: "shell",
-                                "cmd:cwd": props.cwd,
-                            },
-                        },
-                    });
-                    // ORef wire format is always "<otype>:<oid>" (wos.ts makeORef) —
-                    // oid is a UUID, never contains a colon, so a single split is safe.
-                    id = oref.slice(oref.indexOf(":") + 1);
-                    setSubBlockId(id);
-                    props.onSubBlockCreated(id);
-                }
-
-                // Seed the persisted zoom BEFORE constructing TermWrap, so the
-                // very first paint already uses the correct font size instead
-                // of the BASE_FONT_SIZE default followed by a visible
-                // correction jerk — see
-                // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
-                // freshly created sub-block has no persisted term:zoom yet
-                // (the already-correct default of 1.0 applies), so only the
-                // reused-existing-block path needs to wait for anything.
-                //
-                // Deliberately does NOT call WOS.reloadWaveObject here: the
-                // `subBlockAtom` memo above already triggered a fetch for
-                // this exact oref as a side effect of being constructed
-                // (WOS.getWaveObjectAtom → getWaveObjectValue eagerly fetches
-                // on first read, and that memo runs synchronously at
-                // component construction, before this async IIFE even
-                // starts). Calling reloadWaveObject here would force a
-                // SECOND, redundant GetObject round-trip for the same object
-                // on every reused-sub-block drawer open (reagentx P1 on
-                // #2522). Instead, just wait for that already-in-flight
-                // fetch to settle, bounded by a timeout so a genuine network
-                // failure (which can leave the loading atom stuck, per
-                // wos.ts's own comment on GetObject rejections) can't hang
-                // shell startup indefinitely — falls back to whatever
-                // termFontSize() currently computes (default zoom) if it
-                // times out; the live-update effect below corrects it later
-                // if a subsequent fetch/push succeeds.
-                if (isExistingBlock) {
-                    await waitForWaveObjectSettled(WOS.makeORef("block", id));
-                }
-                setZoomSeeded(true);
-
-                if (disposed || !containerRef) return;
-                const wrap = new TermWrap(
-                    id,
-                    containerRef,
-                    {
-                        fontSize: termFontSize(),
-                        fontFamily: "Hack",
-                        allowTransparency: false,
-                        scrollback: 2000,
-                        allowProposedApi: true,
-                    },
-                    {
-                        useWebGl: true,
-                        // Bare sendDataHandler mirroring TermViewModel's fast path
-                        // (termViewModel.ts:370-379) — blockinput, not the
-                        // controllerinput RPC, so consecutive keystrokes stay in
-                        // TCP order. No chunked-paste handling for this spike.
-                        sendDataHandler: (data: string) => {
-                            // Dropped, not queued: while the agent holds the
-                            // lock, this shell's PTY is being actively driven
-                            // by PtyShellInput — forwarding the human's
-                            // keystrokes too would interleave both into the
-                            // same input stream. See `agentLocked` above.
-                            if (agentLocked()) return;
-                            sendWSCommand({
-                                wscommand: "blockinput",
-                                blockid: id,
-                                inputdata64: stringToBase64(data),
-                            } as BlockInputWSCommand);
-                        },
-                    }
-                );
-                termWrap = wrap;
-                await wrap.init();
-                if (!disposed) setWrapLoaded(true);
-                if (!disposed) {
-                    props.onTermReady?.((text: string) => {
-                        // Leading \r\n forces this line to start fresh regardless of
-                        // where the cursor was left by concurrently-arriving live PTY
-                        // output — see the onTermReady doc comment above.
-                        termWrap?.terminal.write(`\r\n${text}\r\n`);
-                    });
-                }
-
-                // Reflow the PTY grid whenever the container is resized — drag-
-                // resizing the details drawer (ResizableDetailsDrawer), the pane
-                // itself, or the window. Without this the container can change
-                // size (e.g. via the drawer's drag handle) with the terminal
-                // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
-                // Plain DOM API, not a Solid primitive, so it's safe to set up
-                // here post-await; teardown is registered synchronously below
-                // via the `resizeObserver` closure var, not a second onCleanup.
-                if (!disposed && containerRef) {
-                    resizeObserver = new ResizeObserver(() => {
-                        termWrap?.handleResize_debounced();
-                    });
-                    resizeObserver.observe(containerRef);
-                }
-            } catch (e) {
-                // Without this, a rejection here (e.g. createsubblock failing)
-                // was an unhandled promise rejection and the drawer silently
-                // never rendered a terminal — no user-facing error at all.
-                console.error("AgentShellSubblock: failed to start shell:", e);
-                if (!disposed) {
-                    setError(e instanceof Error ? e.message : String(e));
-                    // Clear the loading overlay even on failure — otherwise a
-                    // rejection before setZoomSeeded(true) (e.g. resync/create
-                    // both failing) leaves the BrainSpinner overlay covering
-                    // the error message forever.
-                    setZoomSeeded(true);
-                }
-            }
-        })();
+        void attachShell(subBlockId());
     });
+
+    // Re-attach when the parent's `term:shellsubblockid` meta repoints at a
+    // DIFFERENT sub-block while this component stays mounted (the drawer
+    // was never closed) — e.g. the previous shell's process exited and the
+    // backend's "attach or create" logic created a replacement
+    // (SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11's respawn path).
+    // `onMount`'s own `attachShell` call only ever runs once, for whatever
+    // id was current AT MOUNT TIME — without this, the drawer stays bound
+    // to the now-dead sub-block forever, rendering its last frame with no
+    // live process behind it. Found live 2026-09-16 investigating a
+    // corrupted vim pane
+    // (docs/reports/REPORT_VIM_TERMINAL_PANE_HANG_INVESTIGATION_2026_09_16.md).
+    let lastSeenExternalId = props.existingSubBlockId;
+    createEffect(() => {
+        const nextId = props.existingSubBlockId;
+        if (nextId === lastSeenExternalId) return;
+        lastSeenExternalId = nextId;
+        // Undefined means the pointer was cleared, not repointed — nothing
+        // to attach to. Equal to what's already attached means this is the
+        // prop catching up to our OWN just-created id (onSubBlockCreated →
+        // parent persists meta → re-render), not an external change;
+        // attachShell already handled that id when we created it.
+        if (!nextId || nextId === subBlockId()) return;
+        termWrap?.dispose();
+        termWrap = undefined;
+        resizeObserver?.disconnect();
+        resizeObserver = undefined;
+        setWrapLoaded(false);
+        setZoomSeeded(false);
+        setError(null);
+        void attachShell(nextId);
+    });
+
+    async function attachShell(candidateId: string | undefined) {
+        const myGeneration = ++attachGeneration;
+        const isStale = () => disposed || myGeneration !== attachGeneration;
+        try {
+            let id = candidateId;
+            let isExistingBlock = false;
+            if (id) {
+                // Reusing a sub-block id persisted on the parent's meta from a
+                // prior mount — but a sub-block, unlike its parent agent block,
+                // does not survive a full app restart (it's gone from the object
+                // store entirely, not just missing its in-memory controller).
+                // Verify it's still real before trusting it: resync throws
+                // "block <id> not found" for a stale reference. Reconnecting to
+                // a dead id otherwise renders whatever history is left (once
+                // persisted) with no live process behind it — the terminal
+                // looks normal but silently accepts no input. Confirmed live
+                // via CDP against a session that had been through several dev
+                // rebuild restarts.
+                //
+                // `norespawn` covers the OTHER way this id can be dead: the
+                // shell exited while the drawer was closed (the human
+                // `exit`ed and reopened, or an agent sharing this shell
+                // exited it), so the live exit subscription above — which
+                // only exists while mounted — never saw it. Without the
+                // flag, resync's default is to silently REVIVE a
+                // STATUS_DONE controller in place, appending a fresh
+                // startup banner to this block's append-only `term` file
+                // on every reopen: the respawn-loop symptom
+                // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md fixed on the
+                // PtyShellCreate side (§7). With it, an exited shell
+                // surfaces as an error and takes the same fall-through as
+                // a vanished one — a genuinely fresh shell, clean
+                // scrollback — and the dead block is deleted rather than
+                // left orphaned. Codex P2 on PR #3253.
+                try {
+                    await RpcApi.ControllerResyncCommand(TabRpcClient, {
+                        tabid: staticTabId(),
+                        blockid: id,
+                        forcerestart: false,
+                        norespawn: true,
+                    });
+                    isExistingBlock = true;
+                } catch (e) {
+                    console.warn(
+                        "AgentShellSubblock: existing sub-block is stale or already exited, creating a fresh one:",
+                        e
+                    );
+                    // Delete the dead block ONLY on a positively-known
+                    // CLEAN exit.
+                    //
+                    // ReAgent P0 (round 2) on PR #3253: deleting on any
+                    // resync failure destroys the block's persisted `term`
+                    // file — and for a shell that CRASHED while the drawer
+                    // was closed, that file is the only record of what went
+                    // wrong. The live-exit listener above already refuses to
+                    // collapse on a non-zero exit for exactly this reason
+                    // (spec §5); doing it here anyway would reproduce the
+                    // same "not hidden — gone" data loss through the attach
+                    // path instead of the collapse path.
+                    //
+                    // `undefined` (no exit observed for THIS id — a
+                    // genuinely vanished block, a status we were never
+                    // told, or one only ever observed for a DIFFERENT
+                    // sub-block this component was previously bound to,
+                    // per `lastObservedExit`'s own id tag) is NOT treated
+                    // as clean: skipping the delete costs at worst a dead
+                    // block lingering until the pane closes, while getting
+                    // it wrong costs the user their diagnostics. A vanished
+                    // block needs no delete anyway — it is already gone.
+                    const exitCodeForThisId = lastObservedExit?.id === id ? lastObservedExit.code : undefined;
+                    if (exitCodeForThisId === 0) {
+                        void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id }).catch(() => {});
+                    } else {
+                        console.warn(
+                            `AgentShellSubblock: leaving sub-block ${id} in place (exit code ` +
+                                `${exitCodeForThisId ?? "unknown"}) — its scrollback may be the ` +
+                                `only record of why the shell ended`
+                        );
+                    }
+                    id = undefined;
+                }
+                // Bail BEFORE touching any signal: a stale attempt (a newer
+                // repoint already started while this resync was in flight)
+                // must not even briefly reassign subBlockId back toward its
+                // own dead id — it would corrupt subBlockAtom/termZoom/
+                // agentLocked for the currently-live attachment even though
+                // this attempt goes on to correctly bail before constructing
+                // a TermWrap (ReAgent P1 on #3257).
+                if (isStale()) return;
+            }
+            if (!id) {
+                const oref = await RpcApi.CreateSubBlockCommand(TabRpcClient, {
+                    parentblockid: props.parentBlockId,
+                    blockdef: {
+                        meta: {
+                            view: "term",
+                            controller: "shell",
+                            "cmd:cwd": props.cwd,
+                        },
+                    },
+                });
+                // ORef wire format is always "<otype>:<oid>" (wos.ts makeORef) —
+                // oid is a UUID, never contains a colon, so a single split is safe.
+                id = oref.slice(oref.indexOf(":") + 1);
+                if (isStale()) {
+                    // A newer attach already started while this create call
+                    // was in flight. This id was never recorded anywhere —
+                    // setSubBlockId/onSubBlockCreated haven't run for it, so
+                    // it never reaches term:shellsubblockid — meaning
+                    // nothing else, including agent-view.tsx's own
+                    // pane-close cleanup (which only knows about whatever
+                    // that meta currently points at), can ever find it to
+                    // clean up. Delete it ourselves or its backend PTY
+                    // process leaks for the rest of the app's life
+                    // (ReAgent P1 on #3257, round 2).
+                    void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: id });
+                    return;
+                }
+                // Set BEFORE onSubBlockCreated, not after: the parent can
+                // (and in the real app does) synchronously feed this id
+                // straight back as a new `existingSubBlockId` prop value —
+                // that re-triggers the re-attach effect below, whose
+                // "is this just our own echo?" guard compares the new prop
+                // against subBlockId(). If subBlockId() were still stale at
+                // that moment, the echo would look like an EXTERNAL repoint
+                // and trigger a redundant, self-inflicted re-attach.
+                setSubBlockId(id);
+                props.onSubBlockCreated(id);
+            } else {
+                // Reuse-existing-id path: `id` was resolved via resync
+                // above, not just-created, so there's no risk of racing our
+                // own echo — but this component's OWN reactive state
+                // (subBlockAtom/termZoom/agentLocked, and
+                // handleCtrlWheel's zoom-write) all key off this signal,
+                // not the local `id` variable. Leaving it stuck on the OLD
+                // id after a reused-id re-attach silently breaks all of
+                // them against the wrong block (ReAgent P1 on #3257).
+                setSubBlockId(id);
+            }
+
+            // Seed the persisted zoom BEFORE constructing TermWrap, so the
+            // very first paint already uses the correct font size instead
+            // of the BASE_FONT_SIZE default followed by a visible
+            // correction jerk — see
+            // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
+            // freshly created sub-block has no persisted term:zoom yet
+            // (the already-correct default of 1.0 applies), so only the
+            // reused-existing-block path needs to wait for anything.
+            //
+            // Deliberately does NOT call WOS.reloadWaveObject here: the
+            // `subBlockAtom` memo above already triggered a fetch for
+            // this exact oref as a side effect of being constructed
+            // (WOS.getWaveObjectAtom → getWaveObjectValue eagerly fetches
+            // on first read, and that memo runs synchronously at
+            // component construction, before this async IIFE even
+            // starts). Calling reloadWaveObject here would force a
+            // SECOND, redundant GetObject round-trip for the same object
+            // on every reused-sub-block drawer open (reagentx P1 on
+            // #2522). Instead, just wait for that already-in-flight
+            // fetch to settle, bounded by a timeout so a genuine network
+            // failure (which can leave the loading atom stuck, per
+            // wos.ts's own comment on GetObject rejections) can't hang
+            // shell startup indefinitely — falls back to whatever
+            // termFontSize() currently computes (default zoom) if it
+            // times out; the live-update effect below corrects it later
+            // if a subsequent fetch/push succeeds.
+            if (isExistingBlock) {
+                await waitForWaveObjectSettled(WOS.makeORef("block", id));
+            }
+            if (isStale()) return;
+            setZoomSeeded(true);
+
+            if (isStale() || !containerRef) return;
+            const wrap = new TermWrap(
+                id,
+                containerRef,
+                {
+                    fontSize: termFontSize(),
+                    fontFamily: "Hack",
+                    allowTransparency: false,
+                    scrollback: 2000,
+                    allowProposedApi: true,
+                },
+                {
+                    useWebGl: true,
+                    // Bare sendDataHandler mirroring TermViewModel's fast path
+                    // (termViewModel.ts:370-379) — blockinput, not the
+                    // controllerinput RPC, so consecutive keystrokes stay in
+                    // TCP order. No chunked-paste handling for this spike.
+                    sendDataHandler: (data: string) => {
+                        // Dropped, not queued: while the agent holds the
+                        // lock, this shell's PTY is being actively driven
+                        // by PtyShellInput — forwarding the human's
+                        // keystrokes too would interleave both into the
+                        // same input stream. See `agentLocked` above.
+                        if (agentLocked()) return;
+                        sendWSCommand({
+                            wscommand: "blockinput",
+                            blockid: id,
+                            inputdata64: stringToBase64(data),
+                        } as BlockInputWSCommand);
+                    },
+                }
+            );
+            await wrap.init();
+            if (isStale()) {
+                // Abandoned: either unmounted mid-init, or a NEWER attach
+                // (another repoint) has since started and will commit its
+                // own TermWrap. Dispose this one rather than leaving it
+                // (and its PTY/WS subscription) leaked and orphaned, or —
+                // worse — committing it to `termWrap` out from under the
+                // newer, correct attachment (ReAgent P1 on #3257).
+                wrap.dispose();
+                return;
+            }
+            termWrap = wrap;
+            setWrapLoaded(true);
+            props.onTermReady?.((text: string) => {
+                // Leading \r\n forces this line to start fresh regardless of
+                // where the cursor was left by concurrently-arriving live PTY
+                // output — see the onTermReady doc comment above.
+                termWrap?.terminal.write(`\r\n${text}\r\n`);
+            });
+
+            // Reflow the PTY grid whenever the container is resized — drag-
+            // resizing the details drawer (ResizableDetailsDrawer), the pane
+            // itself, or the window. Without this the container can change
+            // size (e.g. via the drawer's drag handle) with the terminal
+            // never re-fitting to it. Mirrors term.tsx's rszObs pattern.
+            // Plain DOM API, not a Solid primitive, so it's safe to set up
+            // here post-await; teardown is registered synchronously below
+            // via the `resizeObserver` closure var, not a second onCleanup.
+            if (containerRef) {
+                resizeObserver = new ResizeObserver(() => {
+                    termWrap?.handleResize_debounced();
+                });
+                resizeObserver.observe(containerRef);
+            }
+        } catch (e) {
+            // Without this, a rejection here (e.g. createsubblock failing)
+            // was an unhandled promise rejection and the drawer silently
+            // never rendered a terminal — no user-facing error at all.
+            console.error("AgentShellSubblock: failed to start shell:", e);
+            // A stale attempt's failure isn't this pane's problem any more
+            // — a newer attach has already superseded it (or the component
+            // unmounted), so surfacing its error would show a stale/wrong
+            // message over whatever the newer attempt is doing.
+            if (!isStale()) {
+                setError(e instanceof Error ? e.message : String(e));
+                // Clear the loading overlay even on failure — otherwise a
+                // rejection before setZoomSeeded(true) (e.g. resync/create
+                // both failing) leaves the BrainSpinner overlay covering
+                // the error message forever.
+                setZoomSeeded(true);
+            }
+        }
+    }
 
     onCleanup(() => {
         disposed = true;
@@ -586,7 +701,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 </div>
             </Show>
             <Show when={agentLocked()}>
-                <div class="agent-shell-agentlock-badge" title="The agent is actively typing into this shell — your own input is paused until it stops.">
+                <div
+                    class="agent-shell-agentlock-badge"
+                    title="The agent is actively typing into this shell — your own input is paused until it stops."
+                >
                     Agent is using this shell
                 </div>
             </Show>
