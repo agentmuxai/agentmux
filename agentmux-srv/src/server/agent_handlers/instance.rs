@@ -219,12 +219,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let deleted = wstore
                     .instance_delete(&cmd.id)
                     .map_err(|e| format!("deleteagentinstance: {e}"))?;
-                if deleted {
-                    // This RPC is the same deletion as `deleteagent` under a
-                    // second name, so it needs the same second-database
-                    // sweep — see `purge_identity_store_rows`.
-                    super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagentinstance");
-                }
+                // Unconditional, matching the sibling `deleteagent` handler
+                // (ReAgent P1 round 2 on PR #3262). Gating on `deleted`
+                // skipped the identity-store purge on a RETRY — where the
+                // local `db_agents` row is already gone but an earlier
+                // attempt's credential/identity-link cleanup failed — which
+                // is the "the confirm dialog promises a purge it doesn't
+                // deliver" bug, reproduced on this entry point. The purge
+                // is a no-op for an id with no rows, so there is nothing to
+                // gate on.
+                super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagentinstance");
                 if let Some(def_id) = definition_id.filter(|_| deleted) {
                     broker.publish(crate::backend::wps::WaveEvent {
                         event: format!("agentinstances:changed:{}", def_id),

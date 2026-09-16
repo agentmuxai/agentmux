@@ -1999,6 +1999,26 @@ impl Store {
     pub fn instance_delete(&self, id: &str) -> Result<bool, StoreError> {
         let rows = {
             let conn = self.conn.lock().unwrap();
+            // Refuse a template explicitly, rather than leaning on the
+            // DELETE's own `is_template = 0` guard. The registry sweep below
+            // runs even when the DELETE matches nothing, and a template's id
+            // can appear as the `definition_id` of a legacy, never-re-keyed
+            // launch record — sweeping on it would take records belonging to
+            // agents launched from that template, which
+            // `agent_def_delete_removes_only_its_own_registry_file` exists
+            // to forbid. A missing row reads as "not a template" so the
+            // retry path below still works.
+            let is_template = conn
+                .query_row(
+                    "SELECT is_template FROM db_agents WHERE id = ?1",
+                    params![id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|v| v != 0)
+                .unwrap_or(false);
+            if is_template {
+                return Ok(false);
+            }
             let rows =
                 conn.execute("DELETE FROM db_agents WHERE id = ?1 AND is_template = 0", params![id])?;
             if rows > 0 {
@@ -2011,8 +2031,16 @@ impl Store {
             }
             rows
         };
+        // Unconditional, for the reason `agent_def_delete`'s own sweep is
+        // (ReAgent P1 round 2 on PR #3262): a retry after a previous attempt
+        // removed the `db_agents` row but failed to remove the registry file
+        // sees `rows == 0`, so gating here left the iconless ghost row
+        // behind indefinitely — the exact bug this PR exists to fix, just
+        // unfixed on this entry point. "The same deletion under a second
+        // name" has to mean the same convergence too, not just the same
+        // table list.
+        self.purge_agent_side_effects(id, "instance_delete");
         if rows > 0 {
-            self.purge_agent_side_effects(id, "instance_delete");
             // Tombstone the GLOBAL definition record too. Clearing the local
             // tables alone leaves an active record in the cross-channel
             // definition registry, and `agent_def_list` overlays every active

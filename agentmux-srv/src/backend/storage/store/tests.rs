@@ -3335,6 +3335,82 @@
         );
     }
 
+    /// ReAgent P1 round 2 on PR #3262: `instance_delete` is the same
+    /// deletion as `agent_def_delete` under a second name, so it needs the
+    /// same convergence. A retry after an attempt that removed the
+    /// `db_agents` row but failed to remove the registry file sees
+    /// `rows == 0` — gating the sweep on that left the ghost row forever.
+    #[test]
+    fn instance_delete_sweeps_the_registry_even_when_the_row_is_already_gone() {
+        let (_tmp, store, reg) = store_with_registry();
+        // No local row for this id — the state a retry finds.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "stale-launch".to_string(),
+                instance_name: "Ghost".to_string(),
+                definition_id: "already-deleted".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "ghost".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        })
+        .unwrap();
+
+        assert!(!store.instance_delete("already-deleted").unwrap());
+        assert!(
+            reg.list_active().unwrap().is_empty(),
+            "a retried delete through this RPC must still clear the ghost record"
+        );
+    }
+
+    /// The guard the unconditional sweep needs: a template's id can be the
+    /// `definition_id` of a legacy launch record, so sweeping on one would
+    /// take records belonging to agents launched from it — what
+    /// `agent_def_delete_removes_only_its_own_registry_file` forbids.
+    #[test]
+    fn instance_delete_refuses_a_template_and_leaves_its_launches_alone() {
+        let (_tmp, store, reg) = store_with_registry();
+        // `store_with_registry` seeds `def-mirror` as a template.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "legacy-launch-of-template".to_string(),
+                instance_name: "FromTemplate".to_string(),
+                // Pre-re-key shape: points at the TEMPLATE, not its own id.
+                definition_id: "def-mirror".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: None,
+                working_dir: "fromtemplate".to_string(),
+                source_agents_base: None,
+                created_at_ms: 1,
+                last_launched_at_ms: 1,
+                created_by_version: "0.56.1".to_string(),
+                last_launched_by_version: "0.56.1".to_string(),
+            },
+        })
+        .unwrap();
+
+        assert!(!store.instance_delete("def-mirror").unwrap());
+        assert_eq!(
+            reg.list_active().unwrap().len(),
+            1,
+            "an agent launched from a template must survive deleting the template"
+        );
+        assert_eq!(
+            count_agents(&store, "id = 'def-mirror'"),
+            1,
+            "the template row itself is untouched"
+        );
+    }
+
     /// Codex P1 on PR #3262: `renameagentdefinitiontitle` moves `name` /
     /// `branch_label`, but "My Agents" rows render `instance_name` — so a
     /// rename redisplayed the old name. `instance_rename` moves the field
