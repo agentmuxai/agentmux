@@ -101,9 +101,11 @@ export const WardenLanManager = (): JSX.Element => {
                                 return (
                                     <tr>
                                         <td class="warden-manager-mono">
-                                            {p.hostname || p.instance_id}
+                                            {p.hostname || p.instance_id || "resolving…"}
                                         </td>
-                                        <td class="warden-manager-mono warden-manager-dim">v{p.version}</td>
+                                        <td class="warden-manager-mono warden-manager-dim">
+                                            <Show when={p.version}>v{p.version}</Show>
+                                        </td>
                                         <td class="warden-manager-mono warden-manager-dim">
                                             {p.address}:{p.port}
                                         </td>
