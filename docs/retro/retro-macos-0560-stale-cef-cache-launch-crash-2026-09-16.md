@@ -1,6 +1,7 @@
 # Retro: `AgentMux_0.56.0_arm64.dmg` panicked on every launch — stale local CEF-148 cache bundled under a CEF-152 binding
 
 **Date:** 2026-09-16
+**Status:** implemented — root cause found, fix landed and verified end-to-end (see "Fix for this incident — done, verified" below)
 **Severity:** P1 — every launch of this one locally-built DMG showed the splash and nothing else, no window, no crash report
 **Resolution:** rebuild `~/cef-build/darwin/arm64` against the real, published `cef-macos-arm64-152.0.7977.83-codecs` release, per #3108
 **Time lost:** ~1 focused debugging session (no wall-clock days — caught same-day)
@@ -17,8 +18,11 @@ that work being wrong.
 The DMG that actually failed was a **local** `task package:macos` build on
 this machine, not the official release artifact. `task package:macos`
 resolves the native CEF framework to bundle via a 3-tier fallback
-(`scripts/resolve-cef-runtime-darwin.sh`), and tier 2 — `~/cef-build/darwin/arm64`,
-this machine's personal hermetic CEF build cache — still held a **CEF 148**
+(`scripts/resolve-cef-runtime-darwin.sh`), and tier 2 — `$HOME/cef-build/darwin/$ARCH`,
+where the script maps `uname -m`'s `arm64` to `ARCH=aarch64` (Rust's
+`target_arch` convention, not Apple's), so on this machine it probes
+`~/cef-build/darwin/aarch64` — a symlink to `~/cef-build/darwin/arm64`, the
+actual hermetic CEF build cache directory — still held a **CEF 148**
 framework left over from **before the 152 migration started** (mtime: Jul 28;
 the migration's earliest recon commit is Sep 7). The Rust glue (`agentmux-cef`)
 compiled cleanly against the now-152 `cef`/`cef-dll-sys` dependency graph on
@@ -126,25 +130,37 @@ design:
 > explicit-override case); CI's `scripts/verify-cef-version.sh` remains the
 > hard gate for anything shipped.
 
-That's a real gap for exactly this incident: **`scripts/verify-cef-version.sh`
-only runs in the official `release.yml` CI pipeline. `task package:macos` —
-the local dev-build path, the one that actually produced this DMG — never
-calls it.** So the only safety net available to a local build is a `stderr`
-line printed once, mid-build, in a script whose whole job is to silently
-succeed. It almost certainly *did* fire correctly when this DMG was built
-(the version-string grep technique is real and should have found nothing
-matching `152.x` in a 148 framework) — it just wasn't loud enough to notice
-in a normal `task package:macos` run's output, and there is no equivalent of
-CI's hard gate on this path at all.
+That comment (quoted verbatim from `resolve-cef-runtime-darwin.sh` itself) is
+misleading about what `scripts/verify-cef-version.sh` actually covers —
+**correcting my own earlier draft here, caught in review (Codex P2 on this
+PR).** `verify-cef-version.sh` reads a bundled `libcef.dll`'s `ProductVersion`
+via `pwsh` and compares it to `Cargo.lock`'s `cef` crate version — it is
+**Windows-only** (`Taskfile.yml`, `scripts/cef-build/fetch-patched-cef-windows.sh`
+are its only callers), invoked from `build-windows.yml`/`bundle:windows`, and
+could never run against a macOS `.framework` at all.
+
+Checking further: **there is no macOS analog of it, hard or soft, anywhere in
+`build-macos.yml` or `release.yml`.** So the real picture is narrower than "a
+hard gate exists but this path doesn't call it" — for macOS specifically,
+**no CI step, on any path, ever verifies a bundled CEF framework's version
+against what the Rust code expects.** The official `v0.56.0` release is safe
+not because anything checked it, but because its packaging step
+(`RELEASE_CHANNEL=stable`) always pulls the correct, already-version-matched
+published release tag by construction, never a local `~/cef-build` cache.
+`task package:macos`'s only safety net, for anyone building locally, really is
+just the one `stderr` line `check_version()` prints — no hard gate to fall
+back on if that's missed, on macOS or in CI, unlike Windows.
 
 **This is not a Clare/Korp/Opaz mistake.** Their cross-platform work (real
 H.264 playback on all three platforms, ANGLE export-table verification, the
 Cargo `links`-collision fix, ABI struct-size guards on `begin_window_drag`,
 independent re-verification of each other's findings) is exactly the kind of
 thorough, cross-checked work this project wants, and the official `v0.56.0`
-GitHub release it produced is correctly built end to end. The failure is
-scoped to one machine's stale personal build cache, hit through the one local
-packaging path that doesn't share CI's hard version gate.
+GitHub release it produced is correctly built end to end — safe by
+construction (it never touches a local cache), not because anything actively
+verified it. The failure is scoped to one machine's stale personal build
+cache, hit through the one local packaging path where nothing — not even
+CI, for macOS — checks the bundled framework's version at all.
 
 ## Contributing factors, named plainly
 
@@ -155,8 +171,11 @@ packaging path that doesn't share CI's hard version gate.
    changes.
 2. **The only automatic defense (`check_version`) is warn-only, and only
    exists on the macOS/Linux resolvers** — by explicit design, deferring to
-   CI's hard gate. But CI's hard gate never runs on the path that actually
-   produced the broken artifact.
+   "CI's hard gate" per its own comment. On Windows that gate really exists
+   (`verify-cef-version.sh`, invoked from `build-windows.yml`). On macOS it
+   doesn't — there's no equivalent anywhere in `build-macos.yml`/`release.yml`
+   — so the deferral is to a safety net that was never actually built for
+   this platform.
 3. **The failure mode is maximally silent at every later stage.** No build
    error, no codesign/notarization error (the framework's signature is
    perfectly valid — it's just the wrong CEF), no crash report at launch
@@ -207,11 +226,16 @@ that check should happen automatically instead of by hand.)
 
 ## Worth considering separately (not blocking the rebuild above)
 
-- Make `task package:macos`/`package:linux`/`package` (Windows) call their
-  platform's hard version gate too, not just CI — or at minimum upgrade
-  `check_version`'s warning to something that can't be missed (a
-  confirmation prompt, or a required `--i-know-this-is-stale` flag) rather
-  than one `stderr` line in a long build.
+- Windows has a real hard gate (`verify-cef-version.sh`) that only CI calls
+  today — worth having `task package` call it too, not just `build-windows.yml`.
+  **macOS (and Linux) have no such gate to call yet** — confirmed while
+  fixing this retro, there's nothing in `build-macos.yml`/`release.yml`
+  checking a bundled framework's version at all. Building a macOS/Linux
+  equivalent (or generalizing the Windows one) is real, unstarted work, not
+  just a wiring gap. At minimum, upgrade `check_version`'s warning to
+  something that can't be missed (a confirmation prompt, or a required
+  `--i-know-this-is-stale` flag) rather than one `stderr` line in a long
+  build.
 - Consider a cheap, generic mtime/manifest staleness check for any tier-2
   local cache directory relative to the last CEF milestone bump commit —
   independent of the version-string grep, which only catches a *major*
