@@ -595,6 +595,7 @@ partial list.
 | [`SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25`](SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md) | Spec: Local Build Channel Pruner |
 | [`SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15`](SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md) | SPEC: Pinned Activity Dock — Unified Long-Running Activities |
 | [`SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03`](SPEC_MACOS_ACCESSIBILITY_ROBUSTNESS_2026-06-03.md) | SPEC: macOS Accessibility Robustness — surviving external AX clients without crashing |
+| [`SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16`](SPEC_MACOS_MUXBUS_KEYCHAIN_NOTICE_2026_09_16.md) | SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access |
 | [`SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03`](SPEC_MACOS_NATIVE_MENU_BAR_2026-06-03.md) | SPEC: Native macOS menu bar (File / Edit / View / Window / Help) |
 | [`SPEC_MACOS_WINDOW_CLOSE_LIFECYCLE_2026-06-04`](SPEC_MACOS_WINDOW_CLOSE_LIFECYCLE_2026-06-04.md) | SPEC: macOS window-close lifecycle — "closes but stays open hidden" |
 | [`SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21`](SPEC_MAGNIFY_ZOOM_IMPLEMENTATION_2026-05-21.md) | SPEC: Magnify & Zoom — Implementation Plan |

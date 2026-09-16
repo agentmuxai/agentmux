@@ -1,7 +1,9 @@
 # SPEC: Warn macOS users up front that MuxBus sign-in will prompt for Keychain access
 
 **Date:** 2026-09-16
-**Status:** Draft — not yet implemented.
+**Status:** implemented — agentmux side in PR #3271 (approved); agentmux-cloud
+companion side in `agentmux-cloud` PR #75 (review in progress, addressing the
+iOS/iPadOS UA false-positive and package.json version bump).
 **Repos touched:** `agentmuxai/agentmux` (desktop app) and `agentmuxai/agentmux-cloud`
 (hosted login-relay page). Cross-repo specs are kept in `agentmux`'s `docs/specs/`
 per existing precedent (see `SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`,
