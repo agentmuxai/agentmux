@@ -26,11 +26,26 @@ import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockDataSignals, seedData } = vi.hoisted(() => {
+const { blockDataSignals, seedData, wpsHandlers } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
-    return { blockDataSignals, seedData };
+    const wpsHandlers = new Map<string, Array<(event: any) => void>>();
+    return { blockDataSignals, seedData, wpsHandlers };
 });
+
+// Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
+// scope and prove the component isn't listening to everything. Honours
+// unsubscribe, so the "stops listening on unmount" behaviour is observable
+// rather than assumed.
+vi.mock("@/app/store/wps", () => ({
+    waveEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
+        const key = `${opts.eventType}|${opts.scope}`;
+        wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
+        return () => {
+            wpsHandlers.set(key, (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler));
+        };
+    },
+}));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -134,9 +149,17 @@ function resolveSeedFetch(oref: string) {
     set({ value: meta ? { meta } : null, loading: false });
 }
 
+/** Emit a `controllerstatus` event to whoever subscribed for `blockId`. */
+function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
+    for (const handler of wpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
+        handler({ data });
+    }
+}
+
 beforeEach(() => {
     blockDataSignals.clear();
     seedData.clear();
+    wpsHandlers.clear();
     termWrapInstances.length = 0;
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
@@ -409,5 +432,91 @@ describe("AgentShellSubblock — agent lock (SPEC_AGENT_INTERACTIVE_PTY_SHELL_AP
         const [, set] = blockDataSignals.get(oref)!;
         set({ value: { meta: {} }, loading: false });
         await waitFor(() => expect(container.querySelector(".agent-shell-agentlock-badge")).toBeNull());
+    });
+});
+
+describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15)", () => {
+    /** Mounts against an already-existing sub-block and settles its fetch, so
+     *  the component reaches its steady state with a known id subscribed. */
+    async function mountAttached(subBlockId: string, onShellExited = vi.fn()) {
+        const oref = `block:${subBlockId}`;
+        queueSeedMeta(oref, {});
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={subBlockId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+                onShellExited={onShellExited}
+            />
+        ));
+        resolveSeedFetch(oref);
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        return { onShellExited };
+    }
+
+    it("fires onShellExited when its own shell exits cleanly", async () => {
+        const { onShellExited } = await mountAttached("exiting-shell");
+        expect(onShellExited).not.toHaveBeenCalled();
+
+        emitControllerStatus("exiting-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /** `shellprocexitcode` is `#[serde(default)]` on the wire, so a clean exit
+     *  can arrive with the field omitted entirely. That must read as 0, not as
+     *  "unknown, assume crash" — otherwise the ordinary `exit` case (the whole
+     *  point of the feature) silently does nothing. */
+    it("treats an omitted exit code as a clean exit", async () => {
+        const { onShellExited } = await mountAttached("omitted-code-shell");
+        emitControllerStatus("omitted-code-shell", { shellprocstatus: "done" });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    /** A crash produces the same STATUS_DONE. Collapsing there would hide the
+     *  output the human needs to read — spec §5 open question, resolved to
+     *  "clean exits only". */
+    it("does NOT collapse on a non-zero exit — the failure output must stay readable", async () => {
+        const { onShellExited } = await mountAttached("crashing-shell");
+        emitControllerStatus("crashing-shell", { shellprocstatus: "done", shellprocexitcode: 137 });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    it("ignores a running status", async () => {
+        const { onShellExited } = await mountAttached("running-shell");
+        emitControllerStatus("running-shell", { shellprocstatus: "running" });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /** The agent pane subscribes to `controllerstatus` for its OWN block too
+     *  (agent-view.tsx's turn tracking). The drawer must be listening to its
+     *  sub-block's scope only — a parent-scope event killing the drawer would
+     *  collapse it every time the agent's own process ended. */
+    it("ignores a controllerstatus event for a different block", async () => {
+        const { onShellExited } = await mountAttached("own-shell");
+        emitControllerStatus("parent-1", { shellprocstatus: "done", shellprocexitcode: 0 });
+        emitControllerStatus("some-other-block", { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).not.toHaveBeenCalled();
+    });
+
+    /** STATUS_DONE can be republished for one block (a status re-publish, a
+     *  resync). The parent's handler deletes a sub-block and clears a pointer;
+     *  running it twice races the second delete against a fresh shell the
+     *  human may have opened in between. */
+    it("fires at most once even if the exit is published repeatedly", async () => {
+        const { onShellExited } = await mountAttached("repeating-shell");
+        emitControllerStatus("repeating-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+        emitControllerStatus("repeating-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+        emitControllerStatus("repeating-shell", { shellprocstatus: "done" });
+        expect(onShellExited).toHaveBeenCalledTimes(1);
+    });
+
+    it("unsubscribes on unmount", async () => {
+        const { onShellExited } = await mountAttached("unmounting-shell");
+        cleanup();
+        emitControllerStatus("unmounting-shell", { shellprocstatus: "done", shellprocexitcode: 0 });
+        expect(onShellExited).not.toHaveBeenCalled();
     });
 });

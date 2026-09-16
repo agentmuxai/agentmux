@@ -18,6 +18,8 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sendWSCommand } from "@/app/store/ws";
+import { waveEventSubscribe } from "@/app/store/wps";
+import { WpsEvent } from "@/app/store/wps-events";
 import { WOS, atoms, staticTabId } from "@/app/store/global";
 import { stringToBase64 } from "@/util/util";
 import { TermWrap } from "@/app/view/term/termwrap";
@@ -78,6 +80,20 @@ interface AgentShellSubblockProps {
      *  parent can drop its write closure rather than risk calling `.write`
      *  on a disposed `Terminal` (`TermWrap.dispose()` doesn't null it out). */
     onTermDispose?: () => void;
+    /**
+     * Fired when this shell's PROCESS ended cleanly — the human typed `exit`
+     * (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md). Distinct
+     * from `onTermDispose`, which also fires on ordinary unmount (drawer
+     * close, pane dispose) and so cannot carry "the process ended" without
+     * becoming ambiguous.
+     *
+     * Clean exits only (exit code 0), per that spec's §5 open question: a
+     * crash or a backend restart produces the same `STATUS_DONE`, and
+     * collapsing the drawer there would hide the very output the human needs
+     * to read. A non-zero exit leaves the drawer open with its scrollback
+     * intact.
+     */
+    onShellExited?: () => void;
 }
 
 const BASE_FONT_SIZE = 13;
@@ -160,6 +176,58 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         return typeof v === "number" ? v : 0;
     });
     const agentLocked = createMemo(() => agentLockedUntil() > nowTick());
+
+    // Process-exit detection (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md).
+    //
+    // Subscribes to `controllerstatus` for THIS SUB-BLOCK's id — not the
+    // parent agent block's, which agent-view.tsx separately subscribes to for
+    // turn tracking. Without this the drawer never learns its shell died: it
+    // keeps rendering a dead terminal that silently accepts no input, and the
+    // human who just typed `exit` has to close the drawer by hand.
+    //
+    // Backend close-on-exit cannot do this job. It is deliberately scoped to
+    // top-level panes (`!is_sub_block`, shell/lifecycle.rs) because its close
+    // action deletes the block and prunes the tab layout — for a drawer shell
+    // that leaves the parent's `term:shellsubblockid` dangling and the
+    // attach-or-create path respawns a replacement, which is the respawn loop
+    // SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §11 fixed. So the collapse is
+    // driven here, from the event the backend already publishes.
+    //
+    // Fires at most once per mount: `STATUS_DONE` can be published more than
+    // once for one block (a status re-publish, a resync), and the parent's
+    // handler tears down real state — deleting a sub-block twice races the
+    // second delete against a fresh shell the human may have opened since.
+    //
+    // Subscribed from an effect, not `onMount`: a freshly created shell has
+    // no id at mount (the async IIFE below assigns it), so a one-shot mount
+    // subscription would bind to an empty scope and never fire — the common
+    // case of opening the drawer for the first time. The effect re-subscribes
+    // when the id arrives, and its `onCleanup` unsubscribes the previous one.
+    let exitNotified = false;
+    createEffect(() => {
+        const id = subBlockId();
+        if (!id) return;
+        const unsub = waveEventSubscribe({
+            eventType: WpsEvent.ControllerStatus,
+            scope: WOS.makeORef("block", id),
+            handler: (event) => {
+                const data = event?.data as
+                    | { shellprocstatus?: unknown; shellprocexitcode?: unknown }
+                    | undefined;
+                if (!data || data.shellprocstatus !== "done") return;
+                // `shellprocexitcode` is `#[serde(default)]` on the wire, so a
+                // clean exit can arrive as 0 or be omitted entirely — both
+                // mean "exited 0". Anything else is a crash/failure and keeps
+                // the drawer open so its output stays readable.
+                const code = typeof data.shellprocexitcode === "number" ? data.shellprocexitcode : 0;
+                if (code !== 0) return;
+                if (exitNotified) return;
+                exitNotified = true;
+                props.onShellExited?.();
+            },
+        });
+        onCleanup(() => unsub());
+    });
     const termFontSize = createMemo(() => {
         const paneZoom = props.agentPaneZoom() || 1;
         return Math.max(4, Math.min(64, Math.round((BASE_FONT_SIZE * termZoom()) / paneZoom)));

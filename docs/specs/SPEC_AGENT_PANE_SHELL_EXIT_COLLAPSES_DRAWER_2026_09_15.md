@@ -1,7 +1,8 @@
 # SPEC: Typing `exit` in the agent pane's shell drawer should close the shell and collapse the drawer
 
 **Date:** 2026-09-15
-**Status:** proposed — design only, no code changed by this document.
+**Status:** implemented — §3's design shipped in the same PR as this document.
+§5's first open question is resolved (clean exits only; see §6).
 **Related:**
 `docs/specs/SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md` (close-on-exit for
 top-level panes, and §11's deliberate exclusion of sub-blocks — read that
@@ -165,16 +166,47 @@ which is precisely how this gap survived.
 
 ## 5. Open questions
 
-1. **Crash vs. intentional exit.** A shell that dies because the backend
-   restarted, or because the process crashed, produces the same
-   `STATUS_DONE`. Collapsing the drawer on a crash may hide the error output
-   the human needs. `TermResyncHandler`'s crash-recovery path deliberately
-   revives such a shell for top-level term panes; the drawer has no
-   equivalent. Cheapest resolution is to collapse only on exit code 0 and
-   leave the drawer open (with its scrollback intact) otherwise — but
-   `BlockControllerRuntimeStatus` carries `shellprocexitcode`, so this is a
-   decision to make, not a capability to build. **Recommend: collapse on
-   exit code 0 only.**
-2. **Drawer height.** `term:shellheight` persists across open/close. Nothing
-   here changes it; confirm on implementation that a collapse-then-reopen
-   still restores the human's chosen height rather than the default.
+1. ~~**Crash vs. intentional exit.**~~ **RESOLVED — clean exits only.** A
+   shell that dies from a crash or a backend restart produces the same
+   `STATUS_DONE`, and collapsing the drawer there would hide the very output
+   the human needs to read. Implemented as: collapse on `shellprocexitcode`
+   0 (or absent — the field is `#[serde(default)]`, so a clean exit can
+   arrive omitted), leave the drawer open with its scrollback on anything
+   else. Both branches are tested.
+2. **Drawer height.** `term:shellheight` persists across open/close and is
+   read from the PARENT agent block's meta (`agent-view.tsx`'s
+   `ResizableDetailsDrawer persistedHeight=`), not the sub-block's — so
+   deleting the exited sub-block cannot disturb it, and a
+   collapse-then-reopen restores the human's chosen height. Confirmed by
+   reading the call site; not separately regression-tested.
+
+## 6. What shipped
+
+Implemented exactly as designed in §3 — `lifecycle.rs` untouched, §2.1's
+sub-block exclusion intact.
+
+- **`AgentShellSubblock.tsx`** subscribes to `controllerstatus` for its own
+  sub-block id and fires a new `onShellExited` prop on a clean exit.
+  Subscribed from a `createEffect`, not `onMount`: a freshly created shell
+  has no id at mount (the async IIFE assigns it), so a one-shot mount
+  subscription would bind an empty scope and never fire — which is the
+  *common* case of opening the drawer for the first time. Guarded to fire at
+  most once per mount, since `STATUS_DONE` can be republished and the
+  parent's handler tears down real state.
+- **`shell-exit-collapse.ts`** (new) holds the parent-side response, split
+  out of `agent-view.tsx` purely so it can be tested — that file is ~3000
+  lines with no render harness, and these are exactly the effects that
+  silently stop happening.
+- **`agent-view.tsx`** reads-and-clears its `shellSubBlockIdRef` (so the
+  pane-level cleanup can't later delete a block this already removed) and
+  delegates.
+
+**Tests, each falsified** (break the source, confirm the specific test
+fails, restore): seven in `AgentShellSubblock.test.tsx` covering clean exit,
+omitted exit code, non-zero exit, `running` status, a different block's
+event, repeated publishes, and unsubscribe-on-unmount; five in
+`shell-exit-collapse.test.ts` asserting the three effects separately plus
+the no-sub-block-id case.
+
+**Not verified on a running build.** The whole path is unit-tested but has
+never been exercised against a real PTY in a real drawer.
