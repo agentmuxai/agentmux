@@ -52,6 +52,7 @@ import {
 import { pushNotification } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { ConfirmModal } from "@/element/modal";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
@@ -537,6 +538,12 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // conversation history forking as-is (forkSession: true, unchanged).
     const handleDuplicate = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
+        // Rename and Duplicate render two DIFFERENT inline panels into the
+        // same <li>, from two independent state maps — so opening one while
+        // the other was already open showed both name inputs stacked in one
+        // row (ReAgent P2 on PR #3262). They are alternatives, not
+        // companions: entering either closes the other.
+        setRenameState(row.definition_id, null);
         void handleOpenNewSession(row);
     };
 
@@ -560,6 +567,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     };
     const handleRenameOpen = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
+        // The other half of `handleDuplicate`'s mutual exclusion — see the
+        // comment there.
+        setForkState(row.definition_id, { kind: "idle" });
         setRenameState(row.definition_id, { label: row.instance_name || row.definition_name, loading: false, error: null });
     };
     const handleRenameCancel = (definitionId: string): void => setRenameState(definitionId, null);
@@ -617,12 +627,18 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             return;
         }
         setDeleteConfirmRow(null);
-        // Sweep any pane currently open for this agent (spec §5.2) — the
-        // same openDefinitions map the fork-prompt "already open" check
-        // above already uses to find it, so no new plumbing is needed.
-        const openMap = props.openDefinitions?.() ?? new Map<string, string>();
-        const openBlockId = openMap.get(row.definition_id);
-        if (openBlockId) await ObjectService.DeleteBlock(openBlockId).catch(() => {});
+        // Sweep EVERY pane open for this agent (spec §5.2). Not
+        // `props.openDefinitions` — that map is keyed by definition, so an
+        // agent open in two panes collapses to whichever block registered
+        // last and the others would keep running against a deleted agent
+        // (codex P2 on PR #3262). The map's shape is right for its other
+        // caller (the fork prompt just needs *a* pane to switch to); a
+        // sweep needs all of them.
+        await Promise.all(
+            getOpenBlockIdsForDefinition(row.definition_id).map((blockId) =>
+                ObjectService.DeleteBlock(blockId).catch(() => {})
+            )
+        );
         // The row itself disappears via the existing "agents:changed"
         // refetch subscription (line ~334) — no manual list mutation here.
     };

@@ -473,4 +473,22 @@ export function getOpenDefinitionMap(): Map<string, string> {
     return result;
 }
 
+/**
+ * Every open block showing `definitionId`, not just a representative one.
+ *
+ * `getOpenDefinitionMap` keys by definition, so a definition open in more
+ * than one pane collapses to whichever block was registered last. That is
+ * the right shape for its callers — the fork prompt only needs *a* pane to
+ * offer "switch to existing" — but wrong for anything that has to act on
+ * all of them. Deleting an agent swept that single block and left every
+ * other pane running against a now-deleted agent (codex P2 on PR #3262).
+ */
+export function getOpenBlockIdsForDefinition(definitionId: string): string[] {
+    const result: string[] = [];
+    for (const [blockId, slot] of slots) {
+        if (slot.state.streaming.agentId === definitionId) result.push(blockId);
+    }
+    return result;
+}
+
 export type { AgentPaneCommand, AgentPaneEvent, AgentPaneState };
