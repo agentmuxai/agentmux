@@ -613,7 +613,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 // open would silently orphan its conversation (the still-open
                 // half of docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md).
                 if let Some(shared_dir) = root.parent().and_then(|p| p.parent()) {
-                    let filled = backend::session_backfill::backfill_session_ids(&reg, shared_dir);
+                    let filled = crate::boot_timing::time("registry_session_backfill", || {
+                        backend::session_backfill::backfill_session_ids(&reg, shared_dir)
+                    });
                     if filled > 0 {
                         tracing::info!(filled, "registry: backfilled session_id for cross-channel resume (startup pass)");
                     }
@@ -647,10 +649,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         match registry::DefinitionStore::open(def_dir.clone()) {
             Ok(def_store) => {
                 // Capture user-agent ids for the transcript backfill (below).
-                backfill_def_ids = def_store
-                    .list_active()
-                    .map(|v| v.into_iter().map(|r| r.data.id).collect())
-                    .unwrap_or_default();
+                backfill_def_ids = crate::boot_timing::time("def_store_list_active", || {
+                    def_store
+                        .list_active()
+                        .map(|v| v.into_iter().map(|r| r.data.id).collect())
+                        .unwrap_or_default()
+                });
                 wstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
             }
@@ -793,8 +797,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         // cross-channel open render empty (the read fallback can't anchor a block
         // that doesn't exist in the opening channel). Idempotent + cheap. See
         // docs/retro/retro-legacy-agent-history-cross-channel-2026-06-16.md.
-        let healed =
-            backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids);
+        let healed = crate::boot_timing::time("transcript_snapshot_heal", || {
+            backend::agent_session::heal_global_snapshot_source_block_ids(fs, &backfill_def_ids)
+        });
         if healed > 0 {
             tracing::info!(healed, "global transcripts: healed poisoned snapshot sourceBlockIds");
         }
@@ -816,7 +821,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // P1 PR #631). With this seed + the plain INSERT (no OR REPLACE)
     // in `start_saga`, ID collisions become impossible by
     // construction.
-    let saga_id_seed = saga_log.max_saga_id().unwrap_or_else(|e| {
+    let saga_id_seed = crate::boot_timing::time("saga_id_seed_scan", || saga_log.max_saga_id()).unwrap_or_else(|e| {
         tracing::warn!(
             "[saga] failed to read MAX(saga_id) for allocator seed: {} — defaulting to 0; ID collisions on restart possible until next successful query",
             e
@@ -867,7 +872,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
 
     // Auto-seed agent definitions on first launch (or empty DB)
-    backend::agent_seed::auto_seed_on_startup(&wstore);
+    crate::boot_timing::time("agent_auto_seed", || backend::agent_seed::auto_seed_on_startup(&wstore));
 
     // Keep AgentMux's own Operator Config (is_system=1 Global Memory) in
     // sync with the shipped manifest on every startup — not a one-time
