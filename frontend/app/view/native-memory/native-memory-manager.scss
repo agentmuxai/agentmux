@@ -198,7 +198,7 @@
 .memory-file-card-title {
     font-size: var(--text-sm);
     font-weight: 600;
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -310,7 +310,7 @@
     min-width: 0;
     font-size: var(--text-sm);
     color: var(--secondary-text-color);
-    font-family: var(--termfontfamily, monospace);
+    font-family: var(--font-mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

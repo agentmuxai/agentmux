@@ -283,7 +283,7 @@
     // === Status Log (terminal-style) ===
     .agent-history-loading {
         padding: var(--space-1) var(--space-2);
-        font-family: var(--fixed-font);
+        font-family: var(--font-mono);
         font-size: 11px;
         color: var(--secondary-text-color);
         opacity: 0.6;

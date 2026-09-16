@@ -147,7 +147,7 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
-    font-family: var(--mono-font-family);
+    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.4;
     white-space: normal;
@@ -163,7 +163,7 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     color: var(--main-text-color);
-    font-family: var(--mono-font-family);
+    font-family: var(--font-mono);
     font-size: 12px;
 
     &:focus {
@@ -199,7 +199,7 @@
 }
 
 .pre-launch-auth-panel-device-code-value {
-    font-family: var(--mono-font-family);
+    font-family: var(--font-mono);
     font-size: 20px;
     font-weight: 600;
     letter-spacing: 0.1em;

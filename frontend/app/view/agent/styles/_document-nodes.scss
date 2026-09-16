@@ -69,7 +69,7 @@
         padding: 1px 0;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        font-size: var(--termfontsize, 15px);
+        font-size: var(--font-mono-size);
         line-height: 1.3;
         color: var(--main-text-color);
     }
@@ -666,7 +666,7 @@
     // Shiki emits <pre><code> with <span class="line"> per line.
     // We wrap in our own <pre class="agent-highlighted-code"> and inject innerHTML.
     .agent-highlighted-code {
-        font-family: var(--termfontfamily, "Hack", Consolas, Menlo, monospace);
+        font-family: var(--font-mono);
         // 1em (relative), not a fixed 12px: the overlay-log's preview-zoom
         // (`font-size: <scale>%`) sets the em base, so the code body scales with
         // Ctrl+scroll over the preview. An absolute px here silently ignored the
@@ -1745,7 +1745,7 @@
         background: var(--secondary-bg-color);
 
         &.agent-fetch-content-json {
-            font-family: var(--mono-font, monospace);
+            font-family: var(--font-mono);
         }
     }
 

@@ -35,8 +35,26 @@
     --color-accent: rgb(65, 159, 224);
     --color-accenthover: rgb(95, 181, 234);
 
-    --font-sans: "Inter", sans-serif;
-    --font-mono: "Hack", monospace;
+    /* CANONICAL definition of the app's two font families — this is the single
+       source of truth, and `frontend/app/theme.scss` deliberately does NOT
+       redeclare them.
+
+       It lives here rather than in theme.scss because Tailwind v4 needs a
+       literal in `@theme` to generate the `font-sans`/`font-mono` utilities
+       (used by quicktips.tsx), and `@theme` emits these into `:root`, so every
+       `var(--font-mono)` in the app's own SCSS resolves against them too.
+
+       They were previously declared in BOTH files with DIFFERENT values, so
+       which one won depended purely on emit order — two sources of truth for
+       the app's two font families (PR #3252).
+
+       NO LIGATURE FONT may be named here (JetBrains Mono, Fira Code, Cascadia,
+       Iosevka …): their `calt` rules substitute blank glyphs for repeated
+       punctuation and render it as empty cells on CEF 152. Enforced by
+       scripts/check-ligature-fonts.sh. Hack is bundled for Nerd Font glyph
+       coverage in terminals and has no `calt` table at all. */
+    --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "Hack", Consolas, Menlo, monospace;
     --font-markdown:
         -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji",
         "Segoe UI Emoji";

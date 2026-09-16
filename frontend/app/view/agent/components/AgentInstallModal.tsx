@@ -213,16 +213,16 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
         // container has a layout size (FitAddon needs a real rect).
         if (!termRef) return;
         // Resolve the project's monospace font at runtime — xterm.js
-        // doesn't parse CSS variables, so passing the literal
-        // `var(--termfontfamily, ...)` string would silently fall
-        // back to xterm's default (Courier), which renders wider
-        // than the rest of the app's terminals.
+        // doesn't parse CSS variables, so passing a literal `var(...)`
+        // string would silently fall back to xterm's default (Courier),
+        // which renders wider than the rest of the app's terminals.
         const cs = getComputedStyle(termRef);
-        // Fallback no longer names JetBrains Mono: it is no longer bundled
-        // (PR #3247 — its `calt` blank-glyph ligatures broke repeated
-        // punctuation under CEF 152), so naming it here would resolve to
-        // nothing and fall through anyway. "Hack" is the font we actually ship.
-        const termFont = cs.getPropertyValue("--termfontfamily").trim()
+        // Reads --font-mono, the canonical family token (PR #3252). This
+        // previously read --termfontfamily, which was never defined anywhere
+        // in the codebase — so this lookup always returned "" and silently
+        // used the hardcoded fallback instead of the app's actual font.
+        // The fallback is kept as a belt, but it should now be unreachable.
+        const termFont = cs.getPropertyValue("--font-mono").trim()
             || `"Hack", Consolas, Menlo, monospace`;
         // Bind to the same theme source the regular term pane uses
         // (single source of truth — see SPEC_INSTALL_MODAL_TERM_THEME_BINDING_2026_05_18.md).
