@@ -3395,7 +3395,7 @@
     /// renaming a template would hide/rename those agents instead.
     ///
     /// One test for both, because they share one rule
-    /// (`Store::registry_scope_for`) and the point is that the rule holds
+    /// (`Store::scope_for_row`) and the point is that the rule holds
     /// everywhere, not that two functions each happen to be right.
     #[test]
     fn hiding_or_renaming_a_template_spares_its_launches_registry_records() {

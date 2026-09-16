@@ -1260,7 +1260,7 @@ impl Store {
         let (rows, scope) = {
             let conn = self.conn.lock().unwrap();
             // Read BEFORE the DELETE — afterwards there is no row to ask.
-            // See `registry_scope_for` for what this decides and why.
+            // See `scope_for_row` for what this decides and why.
             let scope = Self::scope_for_row(&conn, id);
             let rows = conn.execute("DELETE FROM db_agents WHERE id=?1", params![id])?;
             if rows > 0 {
@@ -1317,14 +1317,12 @@ impl Store {
     /// store only holds `is_seeded == 0` user agents, so a cross-channel id
     /// is always an agent — which is what lets the delete paths still sweep
     /// on a retry after the local row is already gone.
-    fn registry_scope_for(&self, id: &str) -> RecordScope {
-        let conn = self.conn.lock().unwrap();
-        Self::scope_for_row(&conn, id)
-    }
-
-    /// [`Self::registry_scope_for`] for a caller already holding the
-    /// connection lock — the delete paths, which must read `is_template`
-    /// in the same critical section as the DELETE that removes the row.
+    ///
+    /// Takes the connection rather than `&self` because every caller needs
+    /// this read in the SAME critical section as its own UPDATE/DELETE —
+    /// otherwise the row could change kind in between. A `&self` wrapper
+    /// existed briefly and was dead on arrival for exactly that reason
+    /// (ReAgent P2 on PR #3262).
     fn scope_for_row(conn: &rusqlite::Connection, id: &str) -> RecordScope {
         let is_template = conn
             .query_row(
@@ -1363,7 +1361,7 @@ impl Store {
     /// SQLite has already committed, and neither side failing is a reason
     /// to report the delete as failed. `caller` only labels the logs.
     ///
-    /// `scope` must come from `registry_scope_for`/`scope_for_row`, read
+    /// `scope` must come from `scope_for_row`, read
     /// BEFORE the row was deleted — afterwards there is nothing left to ask.
     fn purge_agent_side_effects(&self, id: &str, caller: &'static str, scope: RecordScope) {
         // Project-instruction observations are keyed by agent id with no
@@ -1790,7 +1788,7 @@ impl Store {
     pub fn instance_set_hidden(&self, id: &str, hidden: bool) -> Result<bool, StoreError> {
         // Read in the same critical section as the UPDATE, so the row can't
         // change kind underneath the registry call below. See
-        // `registry_scope_for`: retiring a TEMPLATE with the wide scope
+        // `scope_for_row`: retiring a TEMPLATE with the wide scope
         // would hide every real agent launched from it (ReAgent P1 round 4
         // on PR #3262).
         let (rows, scope) = {
