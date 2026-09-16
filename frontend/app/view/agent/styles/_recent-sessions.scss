@@ -90,6 +90,12 @@
         list-style: none;
         padding: 0;
         margin: 0;
+        // Positioned ancestor for `.agent-row-exit-active`'s
+        // `position: absolute` (SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md
+        // §4.3) — without this, an exiting row would anchor to whatever
+        // positioned ancestor is further up the tree instead of staying
+        // put in its own grid cell while it animates.
+        position: relative;
         // Tile grid matching the templates tier — sessions flow across the
         // full pane width instead of a single 520px column.
         display: grid;
@@ -109,6 +115,73 @@
         // own comments.
         position: relative;
         transition: filter 0.15s ease, opacity 0.15s ease;
+    }
+
+    // Delete exit animation ("poof") + surviving-row reflow ("rubbery
+    // shift"), applied via <TransitionGroup> in MyAgentsList.tsx — see
+    // docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md §4.2/§4.3.
+    // `--motion-spring` (theme.scss) is reused deliberately for both: it's
+    // the only motion token in the app with overshoot in its curve — i.e.
+    // it already reads as "rubbery" — and was otherwise unused anywhere.
+    .agent-recent-sessions-row.agent-row-exit-active {
+        // Pulls the exiting row OUT of the grid's flow so surviving rows
+        // reflow into their new cells immediately, instead of waiting for
+        // this row's ~400ms animation to finish. Width/height are pinned
+        // as inline styles by MyAgentsList.tsx's `onBeforeExit` just
+        // before this class applies — grid-cell width varies with pane
+        // width, so a fixed CSS width here would drift from whatever this
+        // row's actual cell happened to be. No `top`/`left`: the CSS
+        // "static position" algorithm keeps an element that just became
+        // absolutely positioned at the same visual spot it already
+        // occupied (the standard FLIP-list technique).
+        position: absolute;
+        z-index: 4; // above ordinary rows, below .is-expanded's 5
+        pointer-events: none;
+        animation: agent-row-poof var(--motion-spring) forwards;
+    }
+
+    @keyframes agent-row-poof {
+        0% {
+            transform: scale(1);
+            opacity: 1;
+            filter: blur(0);
+        }
+        // The overshoot-then-collapse shape mirrors --motion-spring's own
+        // curve (which also passes 100% before settling) rather than
+        // fighting it with a monotonic keyframe.
+        35% {
+            transform: scale(1.06);
+            opacity: 1;
+            filter: blur(0);
+        }
+        100% {
+            transform: scale(0.4);
+            opacity: 0;
+            filter: blur(3px);
+        }
+    }
+
+    // FLIP move: the library applies an inverse transform (old position
+    // minus new position) with no transition, then clears it on the next
+    // frame with this transition active, so the browser animates the
+    // surviving row gliding into its new grid cell instead of snapping.
+    .agent-recent-sessions-row.agent-row-move {
+        transition: transform var(--motion-spring);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        // Backstop for the JS-side gate in MyAgentsList.tsx (which swaps
+        // these classes to "" entirely) — mirrors the existing two-layer
+        // pattern documented at app.scss:295-311 for view transitions: the
+        // app-wide `.prefers-reduced-motion` class only zeroes
+        // `transition-*`, never `animation-*`, so a `@keyframes`-driven
+        // poof needs its own explicit reduced-motion handling here.
+        .agent-recent-sessions-row.agent-row-exit-active {
+            animation-duration: 1ms;
+        }
+        .agent-recent-sessions-row.agent-row-move {
+            transition-duration: 1ms;
+        }
     }
 
     // Spotlight effect while a row is EXPANDED — its actions menu, rename

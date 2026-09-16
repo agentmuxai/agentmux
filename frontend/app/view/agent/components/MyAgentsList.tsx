@@ -48,8 +48,10 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
+import { TransitionGroup } from "solid-transition-group";
 
-import { pushNotification } from "@/app/store/global";
+import { pushNotification, prefersReducedMotionAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
@@ -391,6 +393,21 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         }
     );
 
+    // Mirror `rows()` into a keyed store so `<For>`/`<TransitionGroup>` can
+    // tell "one row removed" from "list replaced" across a refetch.
+    // `createResource`'s own signal hands back a brand-new array of
+    // brand-new objects on every refetch, which `<For>`'s reference-based
+    // reconciliation can't diff against the previous array at all — in
+    // practice every row would unmount/remount on every "agents:changed"
+    // refetch, not just the deleted one, which also defeats any per-row
+    // exit animation. `reconcile(..., { key: "definition_id" })` is the
+    // same idiom `drone-model.ts`'s `setDraft` already uses for its store.
+    // See docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md §4.1.
+    const [rowsStore, setRowsStore] = createStore<{ list: RecentSessionRow[] }>({ list: [] });
+    createEffect(() => {
+        setRowsStore("list", reconcile(rows() ?? [], { key: "definition_id" }));
+    });
+
     // Re-poll on visibility regain so a session that just ended in
     // another pane shows up at the top without the user having to
     // re-open the picker. createEffect runs after first render too,
@@ -663,6 +680,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
             return;
         }
         setDeleteConfirmRow(null);
+        // Optimistic local removal — don't wait on the "agents:changed"
+        // broadcast round-trip before the exit animation can even start
+        // (same "optimistic collapse" philosophy the menu-close above
+        // already uses). Surgical `filter` on the STORE (not `rows()`
+        // itself) so only this one row's identity is affected — the
+        // eventual real refetch's reconcile pass is then a no-op for it.
+        // See docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md §4.1.
+        setRowsStore("list", (list) => list.filter((r) => r.definition_id !== row.definition_id));
         // Sweep EVERY pane open for this agent (spec §5.2). Not
         // `props.openDefinitions` — that map is keyed by definition, so an
         // agent open in two panes collapses to whichever block registered
@@ -707,8 +732,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 expiration: Date.now() + 12000,
             });
         }
-        // The row itself disappears via the existing "agents:changed"
-        // refetch subscription (line ~334) — no manual list mutation here.
+        // The row's removal above already triggers its exit animation; the
+        // existing "agents:changed" refetch subscription (line ~334) still
+        // runs in the background and reconciles the rest of the list, but
+        // is a no-op for this row since it's already gone from the store.
     };
 
     // Surfacing rules:
@@ -757,7 +784,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md.
     const filteredRows = createMemo(() => {
         const q = nameQuery();
-        const all = rows() ?? [];
+        // `rowsStore.list`, not `rows()` — see the reconcile effect above;
+        // this is what gives `<For>`/`<TransitionGroup>` stable per-row
+        // identity across a refetch.
+        const all = rowsStore.list;
         if (!q) return all;
         return all.filter((r) => (r.instance_name || r.definition_name).toLowerCase().includes(q));
     });
@@ -834,6 +864,40 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 }
             >
                 <ul class="agent-recent-sessions-list" classList={{ "has-expanded-row": anyRowExpanded() }}>
+                    {/* Exit ("poof") + move (rubbery grid reflow) animation
+                        on row delete. FLIP-based (measures rects, inverts,
+                        plays) — see
+                        docs/specs/SPEC_AGENT_ROW_DELETE_ANIMATION_2026_09_16.md
+                        §4.2/§4.3. No enter animation (non-goal, §3 of that
+                        spec) — enter* classes are explicitly empty.
+                        `onBeforeExit` pins the exiting row's on-screen
+                        width/height as inline styles before the
+                        `agent-row-exit-active` class (which switches it to
+                        `position: absolute`, pulling it out of the CSS
+                        grid's flow so surviving rows can immediately
+                        reflow) applies — without this the row would
+                        collapse to its content's intrinsic width instead
+                        of holding its original grid-cell size while it
+                        animates. Reduced-motion: swap every class to ""
+                        (no CSS rule matches → no animation, no FLIP
+                        transform, row just disappears — the pre-this-spec
+                        behavior), per that spec's §4.4 JS-gate half; the
+                        stylesheet's own `@media (prefers-reduced-motion:
+                        reduce)` block is the backstop half. */}
+                    <TransitionGroup
+                        enterClass=""
+                        enterActiveClass=""
+                        enterToClass=""
+                        exitClass={prefersReducedMotionAtom() ? "" : "agent-row-exit"}
+                        exitActiveClass={prefersReducedMotionAtom() ? "" : "agent-row-exit-active"}
+                        exitToClass={prefersReducedMotionAtom() ? "" : "agent-row-exit-to"}
+                        moveClass={prefersReducedMotionAtom() ? "" : "agent-row-move"}
+                        onBeforeExit={(el) => {
+                            const r = (el as HTMLElement).getBoundingClientRect();
+                            (el as HTMLElement).style.width = `${r.width}px`;
+                            (el as HTMLElement).style.height = `${r.height}px`;
+                        }}
+                    >
                     <For each={sortedRows()}>
                         {(row) => {
                             const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
@@ -1106,6 +1170,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                             );
                         }}
                     </For>
+                    </TransitionGroup>
                 </ul>
             </Show>
             <ConfirmModal
