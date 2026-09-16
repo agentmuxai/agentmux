@@ -438,6 +438,44 @@ mod tests {
         assert_eq!(bundle.instructions, "edited by an older, unversioned build", "the unrecorded edit must survive");
     }
 
+    /// ReAgent P2, PR #3244: a row that exists but has ZERO version history
+    /// at all (possible via the still-present unversioned bundle_upsert_
+    /// system, with no prior seed_one call to have created one) must be
+    /// left alone by seed_one, same conservative policy bundle_delete_
+    /// system_if_owned already implements for the identical edge case —
+    /// not silently overwritten by falling through to the unconditional
+    /// upsert.
+    #[test]
+    fn row_with_zero_version_history_is_never_overwritten() {
+        let store = test_store();
+        // Created via the plain, unversioned path directly — no seed_one
+        // call precedes this, so db_bundle_versions has nothing for "op-1".
+        let bundle = Bundle {
+            id: "op-1".to_string(),
+            name: "Operator One".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: "content with no version history".to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: true,
+        };
+        store.bundle_upsert_system(&bundle).unwrap();
+        assert!(store.bundle_version_list("op-1").unwrap().is_empty(), "precondition: no version history at all");
+
+        let outcome = seed_one(&store, &entry("op-1", "Operator One", "a manifest update"), 1).unwrap();
+        assert!(matches!(outcome, BundleReseedOutcome::SkippedLocalEdit));
+        assert_eq!(store.bundle_get("op-1").unwrap().unwrap().instructions, "content with no version history");
+    }
+
     /// Codex P2, PR #3244: two AgentMux builds sharing store.db (a supported
     /// configuration — see "Multiple Instances Run in Parallel" in this
     /// repo's own CLAUDE.md) must not let an older build's own older
