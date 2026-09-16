@@ -64,6 +64,25 @@ fn main() {
         .unwrap_or(0);
     println!("cargo:rustc-env=AGENTMUX_BUILD_TIME={build_time_ms}");
 
+    // Embed the linked `cef` crate's version (e.g. "152.1.0+152.0.6" — the
+    // part after `+` is the actual CEF binary release) for the Instance
+    // panel's CEF row. Read directly from the workspace Cargo.lock rather
+    // than shelling out to `cargo metadata` (what
+    // scripts/verify-cef-version.sh does) — this runs on every agentmux-cef
+    // rebuild, and a lockfile scan is near-instant where a metadata
+    // subprocess is not. Falls back to "unknown" rather than failing the
+    // build if the lockfile ever moves or the entry isn't found.
+    let cef_version = std::fs::read_to_string("../Cargo.lock")
+        .ok()
+        .and_then(|lock| {
+            let idx = lock.find("name = \"cef\"")?;
+            let after = &lock[idx..];
+            let line = after.lines().nth(1)?; // the `version = "..."` line right after `name = "cef"`
+            line.trim().strip_prefix("version = \"")?.strip_suffix('"').map(str::to_string)
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=AGENTMUX_CEF_VERSION={cef_version}");
+
     // Windows: embed application icon + version info into PE VERSIONINFO resource.
     // FileDescription controls the "Name" column in Task Manager's Processes tab.
     // The actual exe filename controls WER crash dump names and Event Viewer entries.
