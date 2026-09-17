@@ -340,3 +340,14 @@ pub struct BookmarksResult {
 pub struct CommandBookmarksSetData {
     pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
 }
+
+/// `bookmarks.list` request — no arguments, but deliberately a struct rather
+/// than `()`. Serde deserializes `()` ONLY from JSON `null`, and the frontend
+/// stub sends `{}`, so a unit Req makes every list call fail at runtime with
+/// "invalid type: map, expected unit" — invisible to the compiler and to any
+/// test that does not exercise the real payload (codex P1 on PR #3293). An
+/// empty struct accepts `{}` and ignores unknown keys, matching the previous
+/// untyped handler's behaviour of ignoring `data` entirely.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandBookmarksListData {}

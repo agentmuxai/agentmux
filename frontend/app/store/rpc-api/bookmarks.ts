@@ -8,12 +8,13 @@
 
 import { RpcClient } from "../rpc-client";
 import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
+import type { CommandBookmarksListData } from "@/types/rpc/CommandBookmarksListData";
 import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
 
 export const BookmarksApi = {
     ListBookmarksCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: CommandBookmarksListData = {},
         opts?: RpcOpts,
     ): Promise<BookmarksResult> {
         return client.rpcCall("bookmarks.list", data, opts);

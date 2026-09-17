@@ -32,7 +32,7 @@ fn register_bookmarks_list(engine: &Arc<WshRpcEngine>) {
     // request/response shapes are named types carrying `#[derive(ts_rs::TS)]`,
     // so the frontend consumes generated bindings and drift fails the build.
     // `()` is a legal Req for a command that takes no arguments.
-    engine.register_typed(COMMAND_BOOKMARKS_LIST, move |_req: (), _ctx| async move {
+    engine.register_typed(COMMAND_BOOKMARKS_LIST, move |_req: CommandBookmarksListData, _ctx| async move {
         Ok(BookmarksResult { bookmarks: bookmarks_list_impl()? })
     });
 }
@@ -76,6 +76,20 @@ mod tests {
                 created_at: 0,
             }]
         );
+    }
+
+    /// Pins the payload shape the FRONTEND actually sends for bookmarks.list.
+    /// The stub's `data` defaults to `{}`, and serde accepts `()` only from
+    /// `null` — so typing the handler's Req as `()` broke every list call at
+    /// runtime while compiling cleanly (codex P1 on PR #3293). This test fails
+    /// if anyone narrows the Req back to a unit type.
+    #[test]
+    fn list_req_accepts_the_empty_object_the_stub_sends() {
+        let sent_by_stub = json!({});
+        serde_json::from_value::<CommandBookmarksListData>(sent_by_stub)
+            .expect("bookmarks.list must accept the {} payload the frontend sends");
+        // and a unit Req would NOT have:
+        assert!(serde_json::from_value::<()>(json!({})).is_err());
     }
 
     #[test]
