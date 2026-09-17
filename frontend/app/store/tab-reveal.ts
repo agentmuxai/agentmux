@@ -157,14 +157,19 @@ function startDetector(handle: DetectorHandle, onSettle: () => void): void {
 const [tabSwitching, setTabSwitching] = createSignal(false);
 export { tabSwitching };
 
-// When non-null, the gate hides ONLY this tab id (once it becomes the
-// active tab) instead of whichever tab is currently active. Set by
-// destination-aware holders (tab close promotion, tab switches): the
-// SOURCE tab then stays visible right up to the activetabid flip instead
-// of blanking the content region the moment the gate goes up — the
-// "neighbor pane flash" of SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9. Null
-// (legacy) hides the current active tab, which createTab still wants
-// (its destination id doesn't exist until the RPC returns).
+// The tab id the gate hides once it becomes the active tab — never
+// whichever tab happens to be active when the gate goes up. Set by every
+// holder (tab close promotion, tab switches, tab creation once its
+// content is ready): the SOURCE tab stays visible right up to the
+// activetabid flip instead of blanking the content region the moment the
+// gate goes up — the "neighbor pane flash" of
+// SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9. null only while no gate is
+// currently held (the resting state `liftTabGate()` resets to) — there is
+// no longer an "untargeted hold" case: createTab used to hide the
+// current tab because its destination didn't exist yet, but as of
+// SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md it doesn't hold
+// this gate at all until the destination tab's content already exists
+// (via the ordinary setActiveTab() path, always targeted).
 const [gateTargetTabId, setGateTargetTabId] = createSignal<string | null>(null);
 export { gateTargetTabId };
 
@@ -199,14 +204,13 @@ function liftTabGate(): void {
  * be left blank indefinitely. The normal-path `scheduleRevealLift()`
  * cancels this timer before installing its own detector.
  *
- * @param targetTabId when the destination tab of the transition is known
- *   up front (tab switch, close-promotion), pass it: the gate then hides
- *   only that tab once it becomes active, and the source keeps painting
- *   until the actual activetabid flip — no premature blank. Omit (null)
- *   for the legacy hide-current-active behavior (createTab, where the
- *   destination id doesn't exist yet).
+ * @param targetTabId the destination tab of the transition — always
+ *   required (no untargeted form anymore, see `gateTargetTabId`'s own
+ *   doc comment). The gate hides only this tab once it becomes active;
+ *   the source keeps painting until the actual activetabid flip — no
+ *   premature blank.
  */
-export function holdRevealGate(targetTabId: string | null = null): void {
+export function holdRevealGate(targetTabId: string): void {
     setGateTargetTabId(targetTabId);
     setTabSwitching(true);
     cancelDetector(tabHandle);
