@@ -14,7 +14,7 @@ const hub = vi.hoisted(() => ({
     acceptedHistory: [] as Array<(e: unknown) => void>,
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         if (sub.eventType === "agent-message-accepted") hub.acceptedHistory.push(sub.handler);
@@ -23,7 +23,7 @@ vi.mock("@/app/store/wps", () => ({
         };
     }),
 }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ snapshot: () => null }));
 vi.mock("@/store/token-usage", () => ({ recordTurn: () => {} }));
 

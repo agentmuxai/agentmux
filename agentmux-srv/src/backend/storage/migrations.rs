@@ -788,11 +788,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- db_agent_definitions — see OBJECT_SCHEMA_VERSION's v30 doc comment).
         -- Bundles are authoritatively written through `id_store` (the
         -- shared store in a normal production install — see
-        -- `bundle.rs::register_bundle_upsert`), not `wstore`/objects.db,
+        -- `bundle.rs::register_bundle_upsert`), not `mstore`/objects.db,
         -- where this table lives (it must live here to FK to
-        -- db_mcp_servers/db_skills, which used to be wstore-local too (now
+        -- db_mcp_servers/db_skills, which used to be mstore-local too (now
         -- authoritatively identity_store as of Phase 2 — see
-        -- OBJECT_SCHEMA_VERSION's v34 doc comment). wstore's own copy of
+        -- OBJECT_SCHEMA_VERSION's v34 doc comment). mstore's own copy of
         -- db_bundles is a schema-compatible but essentially always-
         -- empty local mirror in that case — an FK against it would make
         -- every real bind fail. Same no-FK-to-a-table-living-in-the-wrong-
@@ -802,7 +802,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- — see `Store::bundle_mcp_bind`'s `id_store` parameter.
         --
         -- v34: skill_id's FK to db_skills is ALSO gone now (it was
-        -- wstore-local before v34; see OBJECT_SCHEMA_VERSION's v34 doc
+        -- mstore-local before v34; see OBJECT_SCHEMA_VERSION's v34 doc
         -- comment) — this table has never had a bundle_id FK, so it is now
         -- FK-free entirely, existence checked purely at the application
         -- layer for both columns.
@@ -1554,7 +1554,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        in `run_object_schema` keep their declarations (never removed —
 ///        see that spec's §5.1 and §8 item 3) and continue to exist only as
 ///        the same best-effort degraded-mode fallback `bootstrap.rs` already
-///        substitutes for every other identity-store table (`wstore` in
+///        substitutes for every other identity-store table (`mstore` in
 ///        place of `identity_store` when the identity store can't be
 ///        resolved, created, or opened). Deliberately NOT declared with the
 ///        ref tables (`db_agent_skills_ref`, `db_bundle_skills_ref`, and

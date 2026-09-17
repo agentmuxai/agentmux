@@ -196,12 +196,12 @@ fn git_identity_env_vars(agent_id: &str) -> [(&'static str, String); 4] {
 /// body itself is unchanged by the extraction.
 #[derive(Clone)]
 pub struct AgentTurnDeps {
-    pub wstore: Arc<crate::backend::storage::store::Store>,
+    pub mstore: Arc<crate::backend::storage::store::Store>,
     pub id_store: Arc<crate::backend::storage::store::Store>,
     pub identity_store: Arc<crate::backend::storage::store::Store>,
     /// Streaming-bash wrapper auth key — see SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7.
     pub auth_key: String,
-    pub broker: Arc<crate::backend::wps::Broker>,
+    pub broker: Arc<crate::backend::mps::Broker>,
     pub container_manager: Arc<crate::backend::container::ContainerRuntimeHandle>,
     /// Named `filestore_gate` because the spawn-gate error frame MUST be
     /// persisted through it, not merely live-broadcast (reagent P1, PR #2164).
@@ -213,7 +213,7 @@ pub struct AgentTurnDeps {
 impl AgentTurnDeps {
     pub fn from_state(state: &AppState) -> Self {
         Self {
-            wstore: state.wstore.clone(),
+            mstore: state.mstore.clone(),
             id_store: state.id_store.clone(),
             identity_store: state.identity_store.clone(),
             auth_key: state.auth_key.clone(),
@@ -268,7 +268,7 @@ pub async fn run_agent_turn(
     registration: TurnRegistration,
 ) -> Result<(), String> {
     let AgentTurnDeps {
-        wstore,
+        mstore,
         id_store,
         identity_store,
         auth_key,
@@ -283,7 +283,7 @@ pub async fn run_agent_turn(
         .ok_or_else(|| format!("no controller for block {}", block_id))?;
 
     // Re-read the spawn config from block metadata
-    let block: Block = wstore
+    let block: Block = mstore
         .get(&block_id)
         .map_err(|e| format!("agentinput: load block: {e}"))?
         .ok_or_else(|| format!("block {} not found", block_id))?;
@@ -326,7 +326,7 @@ pub async fn run_agent_turn(
     // publish `identitybundlebindings:changed:<bundle_id>`
     // when it flips a token's status valid→expired etc.
     env_vars = match crate::identity::resolver::inject_identity_env_async(
-        wstore.clone(),
+        mstore.clone(),
         id_store.clone(),
         identity_store.clone(),
         Some(broker.clone()),
@@ -372,11 +372,11 @@ pub async fn run_agent_turn(
             crate::backend::blockcontroller::core::persist_last_failure(
                 &block_id,
                 Some(&gate_failure),
-                &Some(wstore.clone()),
+                &Some(mstore.clone()),
                 &Some(event_bus_gate.clone()),
             );
-            broker.publish(crate::backend::wps::MuxEvent {
-                event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
+            broker.publish(crate::backend::mps::MuxEvent {
+                event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
                 scopes: vec![format!("block:{}", block_id)],
                 sender: String::new(),
                 persist: 1,
@@ -404,7 +404,7 @@ pub async fn run_agent_turn(
     //    rewrites the command to invoke it. AGENTMUX_LOCAL_URL
     //    is already in the inherited process env (main.rs:498).
     env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.clone());
-    // Block id so the wrapper can scope its WPS publishes
+    // Block id so the wrapper can scope its MPS publishes
     // to `block:<id>`. Without this, chunks publish without
     // a scope and the frontend's per-block subscription
     // doesn't receive them.
@@ -781,7 +781,7 @@ pub async fn run_agent_turn(
 
 pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // subprocessspawn → spawn agent CLI as subprocess for a single turn
-    let wstore_spawn = state.wstore.clone();
+    let mstore_spawn = state.mstore.clone();
     let broker_spawn = state.broker.clone();
     let event_bus_spawn = state.event_bus.clone();
     let filestore_spawn = state.filestore.clone();
@@ -789,7 +789,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     engine.register_handler(
         COMMAND_SUBPROCESS_SPAWN,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_spawn.clone();
+            let mstore = mstore_spawn.clone();
             let broker = broker_spawn.clone();
             let event_bus = event_bus_spawn.clone();
             let filestore = filestore_spawn.clone();
@@ -812,13 +812,13 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     }
                     _ => {
                         // Create and register a new SubprocessController
-                        let registry = wstore.shared_agent_registry();
+                        let registry = mstore.shared_agent_registry();
                         let ctrl = blockcontroller::subprocess::SubprocessController::new(
                             cmd.tabid.clone(),
                             cmd.blockid.clone(),
                             Some(broker),
                             Some(event_bus),
-                            Some(wstore),
+                            Some(mstore),
                             Some(filestore),
                             registry,
                             boot_id,

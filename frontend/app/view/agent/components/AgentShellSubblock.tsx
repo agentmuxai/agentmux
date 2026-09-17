@@ -15,11 +15,11 @@
  */
 
 import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { atoms, staticTabId, WOS } from "@/app/store/global";
+import { atoms, staticTabId, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { sendWSCommand } from "@/app/store/ws";
 import { TermWrap } from "@/app/view/term/termwrap";
 import { stringToBase64 } from "@/util/util";
@@ -99,19 +99,19 @@ interface AgentShellSubblockProps {
 const BASE_FONT_SIZE = 13;
 
 /**
- * Waits for an already-in-flight WOS fetch for `oref` to settle (succeed or
+ * Waits for an already-in-flight MOS fetch for `oref` to settle (succeed or
  * fail), WITHOUT triggering a new one — see the onMount IIFE below for why a
  * second fetch must be avoided (reagentx P1 on #2522: `subBlockAtom`'s
  * `createMemo` already eagerly fetches this exact oref at component
  * construction). `getMuxObjectLoadingAtom` returns `null` while loading and
  * `false` once settled (regardless of whether the value ended up populated
- * or null) — see its doc comment in wos.ts. Bounded by `timeoutMs` since a
+ * or null) — see its doc comment in mos.ts. Bounded by `timeoutMs` since a
  * genuine network failure can leave the loading atom stuck at "loading"
- * forever (wos.ts's own comment on GetObject rejections other than a
+ * forever (mos.ts's own comment on GetObject rejections other than a
  * definitive "not found").
  */
 async function waitForMuxObjectSettled(oref: string, timeoutMs = 2000): Promise<void> {
-    const loadingAtom = WOS.getMuxObjectLoadingAtom(oref);
+    const loadingAtom = MOS.getMuxObjectLoadingAtom(oref);
     const start = Date.now();
     while (loadingAtom() === null) {
         if (Date.now() - start >= timeoutMs) return;
@@ -153,7 +153,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // This is what makes zoom a property of the terminal, not the agent pane.
     const subBlockAtom = createMemo(() => {
         const id = subBlockId();
-        return id ? WOS.getMuxObjectAtom<Block>(`block:${id}`) : null;
+        return id ? MOS.getMuxObjectAtom<Block>(`block:${id}`) : null;
     });
 
     const termZoom = createMemo(() => {
@@ -239,7 +239,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         let exitNotified = false;
         const unsub = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
-            scope: WOS.makeORef("block", id),
+            scope: MOS.makeORef("block", id),
             handler: (event) => {
                 const data = event?.data as { shellprocstatus?: unknown; shellprocexitcode?: unknown } | undefined;
                 if (!data) return;
@@ -264,7 +264,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 // ReAgent P0 on PR #3253: `controllerstatus` is published with
                 // `persist: 1` precisely so a subscriber is replayed the
                 // CURRENT status on first subscribe to a scope
-                // (blockcontroller/mod.rs, wps.rs's `replay_to_route`). So a
+                // (blockcontroller/mod.rs, mps.rs's `replay_to_route`). So a
                 // shell that exited while the drawer was closed — an agent
                 // finishing work in the shared shell, the supported case in
                 // §3.3 of this feature's spec — delivers its old `done`
@@ -385,7 +385,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             const delta = ev.deltaY > 0 ? -STEP : STEP;
             const next = Math.max(0.5, Math.min(2.0, Math.round((termZoom() + delta) * 100) / 100));
             void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", id),
+                oref: MOS.makeORef("block", id),
                 meta: { "term:zoom": next === 1.0 ? null : next } as any,
             });
         };
@@ -528,7 +528,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                         },
                     },
                 });
-                // ORef wire format is always "<otype>:<oid>" (wos.ts makeORef) —
+                // ORef wire format is always "<otype>:<oid>" (mos.ts makeORef) —
                 // oid is a UUID, never contains a colon, so a single split is safe.
                 id = oref.slice(oref.indexOf(":") + 1);
                 if (isStale()) {
@@ -576,10 +576,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             // (the already-correct default of 1.0 applies), so only the
             // reused-existing-block path needs to wait for anything.
             //
-            // Deliberately does NOT call WOS.reloadMuxObject here: the
+            // Deliberately does NOT call MOS.reloadMuxObject here: the
             // `subBlockAtom` memo above already triggered a fetch for
             // this exact oref as a side effect of being constructed
-            // (WOS.getMuxObjectAtom → getMuxObjectValue eagerly fetches
+            // (MOS.getMuxObjectAtom → getMuxObjectValue eagerly fetches
             // on first read, and that memo runs synchronously at
             // component construction, before this async IIFE even
             // starts). Calling reloadMuxObject here would force a
@@ -588,13 +588,13 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             // #2522). Instead, just wait for that already-in-flight
             // fetch to settle, bounded by a timeout so a genuine network
             // failure (which can leave the loading atom stuck, per
-            // wos.ts's own comment on GetObject rejections) can't hang
+            // mos.ts's own comment on GetObject rejections) can't hang
             // shell startup indefinitely — falls back to whatever
             // termFontSize() currently computes (default zoom) if it
             // times out; the live-update effect below corrects it later
             // if a subsequent fetch/push succeeds.
             if (isExistingBlock) {
-                await waitForMuxObjectSettled(WOS.makeORef("block", id));
+                await waitForMuxObjectSettled(MOS.makeORef("block", id));
             }
             if (isStale()) return;
             setZoomSeeded(true);

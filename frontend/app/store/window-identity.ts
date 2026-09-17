@@ -11,34 +11,34 @@
 // files import from that module).
 
 import { createMemo, createSignal } from "solid-js";
-import * as WOS from "./wos";
+import * as MOS from "./mos";
 
 // Window identity — set once at init, never change.
 export const [windowId, setWindowId] = createSignal("");
 export const [clientId, setClientId] = createSignal("");
 export const [staticTabId, setStaticTabId] = createSignal("");
 
-// Derived objects from WOS
+// Derived objects from MOS
 export const client = createMemo<Client>(() => {
     const cid = clientId();
     if (!cid) return null;
-    return WOS.getObjectValue(WOS.makeORef("client", cid));
+    return MOS.getObjectValue(MOS.makeORef("client", cid));
 });
 
 export const muxWindow = createMemo<MuxWindow>(() => {
     const wid = windowId();
     if (!wid) return null;
-    return WOS.getObjectValue<MuxWindow>(WOS.makeORef("window", wid));
+    return MOS.getObjectValue<MuxWindow>(MOS.makeORef("window", wid));
 });
 
 export const workspace = createMemo<Workspace>(() => {
     const win = muxWindow();
     if (!win) return null;
-    return WOS.getObjectValue(WOS.makeORef("workspace", win.workspaceid));
+    return MOS.getObjectValue(MOS.makeORef("workspace", win.workspaceid));
 });
 
 export const tabAtom = createMemo<Tab>(() => {
-    return WOS.getObjectValue(WOS.makeORef("tab", staticTabId()));
+    return MOS.getObjectValue(MOS.makeORef("tab", staticTabId()));
 });
 
 export const activeTabId = createMemo<string>(() => {

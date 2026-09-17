@@ -21,9 +21,9 @@
  */
 
 import { createEffect, onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import * as MOS from "@/app/store/mos";
 import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -123,7 +123,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // truthy, silently dropping that cost/turn-count data.
         if (opts.provider) {
             const agentName =
-                WOS.getObjectValue<Block>(WOS.makeORef("block", opts.blockId))?.meta?.agentName
+                MOS.getObjectValue<Block>(MOS.makeORef("block", opts.blockId))?.meta?.agentName
                 ?? opts.blockId.slice(0, 7);
             recordTurn(opts.provider, tokens, {
                 blockId: opts.blockId,
@@ -172,7 +172,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     let procExitGraceTimer: number | null = null;
     const procExitUnsub = muxEventSubscribe({
         eventType: WpsEvent.ControllerStatus,
-        scope: WOS.makeORef("block", opts.blockId),
+        scope: MOS.makeORef("block", opts.blockId),
         handler: (event) => {
             const status = (event as any)?.data?.shellprocstatus;
             if (status === "running") {
@@ -307,7 +307,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // WHICH `Submitting` episode it's really for — a stale/late accepted
     // event for an EARLIER message, delivered after that episode already
     // timed out and a NEWER, still-genuinely-unacknowledged `TurnStart`
-    // began (e.g. the backend's own retried WPS push, or a reconnect
+    // began (e.g. the backend's own retried MPS push, or a reconnect
     // backlog replay, landing well after the client already gave up and
     // the user retried), would incorrectly disarm the NEWER episode's
     // timer — silently reintroducing the exact stuck-Submitting bug this
@@ -344,7 +344,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         }, SUBMIT_TIMEOUT_MS);
         const acceptedUnsub = muxEventSubscribe({
             eventType: WpsEvent.AgentMessageAccepted,
-            scope: WOS.makeORef("block", opts.blockId),
+            scope: MOS.makeORef("block", opts.blockId),
             handler: () => {
                 if (timer != null) {
                     clearTimeout(timer);

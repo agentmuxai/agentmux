@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const handlers: Array<(ev: unknown) => void> = [];
 const unsubs = vi.fn();
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: (opts: { handler: (ev: unknown) => void }) => {
         handlers.push(opts.handler);
         return unsubs;

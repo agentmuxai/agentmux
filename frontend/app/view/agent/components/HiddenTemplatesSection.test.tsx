@@ -23,7 +23,7 @@ vi.mock("@/app/store/rpc-api", () => {
     return { RpcApi };
 });
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn(() => () => {}),
 }));
 vi.mock("@/element/ProviderLogo", () => ({

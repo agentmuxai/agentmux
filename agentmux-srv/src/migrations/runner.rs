@@ -365,7 +365,7 @@ fn open_stores_for_preview(shared_store_path: &Path, data_dir: &Path) -> Result<
     // Always open/create it so that seed migrations (e.g. m0008_default_bundle)
     // run on fresh install. Skipping it on a fresh install once left the
     // Channel-scoped migrations (0002/0003/0007) out of the pending list, so
-    // they were never marked applied; when wstore then created objects.db,
+    // they were never marked applied; when mstore then created objects.db,
     // count_pending_migrations at ESTART reported them pending and fired the
     // "Migration failed" UI warning on every fresh first launch.
     // Data-transformation migrations guard themselves with

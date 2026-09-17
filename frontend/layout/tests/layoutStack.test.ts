@@ -38,7 +38,7 @@ function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
 
 vi.mock("@/app/store/global", () => {
     return {
-        WOS: {
+        MOS: {
             makeORef: (_otype: string, oid: string) => oid,
             getMuxObjectAtom: (oid: string) => {
                 if (!layoutStateSignals.has(oid)) {
@@ -627,7 +627,7 @@ describe("LayoutModel.dispose()", () => {
         expect(model.nodeModels.size).toBe(0);
 
         // Frozen-vs-live: mutate the same underlying signal `isFocused`
-        // depends on (`localTreeStateAtom`, via the mocked WOS layer — this
+        // depends on (`localTreeStateAtom`, via the mocked MOS layer — this
         // still works after dispose() since the mock signal itself isn't
         // torn down, only the model's own reactive graph). A live memo
         // would now read false; a disposed one stays frozen at whatever it

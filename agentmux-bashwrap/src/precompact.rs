@@ -28,17 +28,17 @@
 //!   here would be interpreted as hook output Claude Code has to
 //!   parse; silence is the correct "no opinion" signal for this hook.
 //!
-//! Every failure mode (malformed stdin, missing WPS env, unreachable
+//! Every failure mode (malformed stdin, missing MPS env, unreachable
 //! sidecar) degrades to the same outcome: exit 0, nothing printed. A
 //! hook must never block or error the user's Claude session — this
 //! is best-effort observability only, matching the "degrade silently"
-//! philosophy already documented in `wps_client.rs`.
+//! philosophy already documented in `mps_client.rs`.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
-use crate::wps_client::WpsClient;
+use crate::mps_client::WpsClient;
 
 /// Which `PreCompact` matcher fired. Baked into argv per hook entry
 /// (see the module doc comment) rather than read from stdin.
@@ -77,7 +77,7 @@ struct PreCompactInput {
     session_id: String,
 }
 
-/// Payload published on the `compaction_started` WPS event. camelCase
+/// Payload published on the `compaction_started` MPS event. camelCase
 /// on the wire, matching `agentmux-srv`'s `AgentEvent` convention
 /// (`types.rs`) so the frontend never has to special-case this event.
 #[derive(Serialize)]
@@ -101,7 +101,7 @@ pub async fn run(args: Args) -> Result<()> {
     let Some(client) = WpsClient::from_env() else {
         tracing::debug!(
             target: "bashwrap",
-            "precompact: WPS env absent, skipping publish"
+            "precompact: MPS env absent, skipping publish"
         );
         return Ok(());
     };
@@ -160,7 +160,7 @@ mod tests {
     use clap::Parser;
     use crate::test_env_lock::ENV_LOCK;
 
-    // Shared with wps_client.rs's test module (crate::test_env_lock) — both
+    // Shared with mps_client.rs's test module (crate::test_env_lock) — both
     // mutate the SAME process-global env vars under cargo test's default
     // parallel execution; a private per-module lock didn't actually
     // synchronize cross-module (Codex P2, PR #2378 round 6).

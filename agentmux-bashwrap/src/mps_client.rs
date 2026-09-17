@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Thin HTTP client for publishing WPS events to the AgentMux sidecar.
+//! Thin HTTP client for publishing MPS events to the AgentMux sidecar.
 //!
 //! Reads `AGENTMUX_LOCAL_URL` and `AGENTMUX_AUTH_KEY` from the
 //! process environment (inherited from the agentmux-srv → claude →
@@ -47,7 +47,7 @@ const COMPACTION_STARTED_EVENT: &str = "compaction_started";
 /// `persist: 0` — never retained/replayed. A late/reconnecting
 /// subscriber must NOT see a past "compaction started" ping: there
 /// is no matching completion tombstone (`compact_boundary` arrives
-/// over the separate NDJSON stream, not WPS), so replaying a
+/// over the separate NDJSON stream, not MPS), so replaying a
 /// retained start indistinguishably resurrects "Compacting…" for a
 /// compaction that may have finished seconds after the ping — a
 /// timestamp-age guard alone can't tell "recently finished" apart
@@ -132,7 +132,7 @@ impl WpsClient {
         .await
     }
 
-    /// Shared publish path for every WPS event this crate emits.
+    /// Shared publish path for every MPS event this crate emits.
     /// `event`/`persist` vary per call site; the scoping (`block:<id>`)
     /// and auth/error-handling are identical across all of them.
     /// `timeout_override` replaces the client-wide default

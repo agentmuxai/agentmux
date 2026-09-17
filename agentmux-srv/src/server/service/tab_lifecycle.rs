@@ -18,7 +18,7 @@ use super::reducer_helpers::{compensate_via_reducer, dispatch_to_reducer, publis
 // `Workspace.pinnedtabids`; bootstrap merges them into
 // `tab_ids` so they behave as regular tabs.
 pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -67,11 +67,11 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
         agentmux_common::ipc::Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
         _ => None,
     });
-    // Apply synchronously to wstore (forward+compensate on
+    // Apply synchronously to mstore (forward+compensate on
     // failure — same pattern as CreateWorkspace in E.2c.2).
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }
@@ -114,7 +114,7 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
             let mut active_err: Option<String> = None;
             for ev in &active_events {
                 if let Err(e) =
-                    crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
                 {
                     active_err = Some(e.to_string());
                     break;
@@ -165,11 +165,11 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
 }
 
 // Phase E.2c.3 — SetActiveTab routes through the reducer.
-// Read-through reads (e.g., GetWorkspace) still hit wstore
+// Read-through reads (e.g., GetWorkspace) still hit mstore
 // during the migration window, so the synchronous
-// apply-to-wstore keeps them consistent.
+// apply-to-mstore keeps them consistent.
 pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -208,7 +208,7 @@ pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) 
     // is a UI-driven action; the user can retry.)
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }
@@ -240,7 +240,7 @@ pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) 
 // should issue DeleteWorkspace instead — that path migrates
 // in Step 5 PR 2).
 pub(crate) async fn handle_close_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -290,7 +290,7 @@ pub(crate) async fn handle_close_tab(state: &AppState, call: &WebCallType) -> We
 // double-counts a tab once a workspace's tabs are
 // reordered through the reducer.
 pub(crate) async fn handle_update_tab_ids(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -316,7 +316,7 @@ pub(crate) async fn handle_update_tab_ids(state: &AppState, call: &WebCallType) 
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "UpdateTabIds: SQLite write failed: {}",
                 e
@@ -343,7 +343,7 @@ pub(crate) async fn handle_update_tab_ids(state: &AppState, call: &WebCallType) 
 // remainder of the session — converges back at next restart
 // via bootstrap.
 pub(crate) async fn handle_reorder_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -382,7 +382,7 @@ pub(crate) async fn handle_reorder_tab(state: &AppState, call: &WebCallType) -> 
     }
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }

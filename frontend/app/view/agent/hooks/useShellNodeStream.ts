@@ -16,8 +16,8 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode } from "../types";
@@ -28,7 +28,7 @@ export interface UseShellNodeStreamOptions {
     queue: StreamFlushQueue;
 }
 
-/** Payload carried by a `shell_node_create` WPS event. */
+/** Payload carried by a `shell_node_create` MPS event. */
 interface ShellNodeCreateData {
     shell_id?: unknown;
     cmd?: unknown;

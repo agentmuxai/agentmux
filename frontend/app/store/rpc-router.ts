@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { handleMuxEvent } from "@/app/store/wps";
+import { handleMuxEvent } from "@/app/store/mps";
 import * as util from "@/util/util";
 import debug from "debug";
 

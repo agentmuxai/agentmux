@@ -3,8 +3,8 @@
 //
 // MuxObjectStore — migrated to SolidJS signals.
 
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { type SignalAtom, fireAndForget } from "@/util/util";
@@ -82,7 +82,7 @@ function debugLogBackendCall(methodName: string, durationStr: string, args: any[
     console.log("[service]", methodName, durationStr);
 }
 
-function wpsSubscribeToObject(oref: string): () => void {
+function mpsSubscribeToObject(oref: string): () => void {
     return muxEventSubscribe({
         eventType: WpsEvent.MuxObjUpdate,
         scope: oref,
@@ -342,5 +342,5 @@ export {
     updateMuxObject,
     updateMuxObjects,
     useMuxObjectValue,
-    wpsSubscribeToObject,
+    mpsSubscribeToObject,
 };

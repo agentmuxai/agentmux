@@ -214,7 +214,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     if !line.trim().is_empty() {
                                         tracing::info!(line = %line, "npm stderr");
                                         if !block_id_install.is_empty() {
-                                            crate::backend::wps::publish_install_progress(&broker_npm, &block_id_install, line);
+                                            crate::backend::mps::publish_install_progress(&broker_npm, &block_id_install, line);
                                         }
                                     }
                                 }
@@ -222,7 +222,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     if !line.trim().is_empty() {
                                         tracing::info!(line = %line, "npm stdout");
                                         if !block_id_install.is_empty() {
-                                            crate::backend::wps::publish_install_progress(&broker_npm, &block_id_install, line);
+                                            crate::backend::mps::publish_install_progress(&broker_npm, &block_id_install, line);
                                         }
                                     }
                                 }

@@ -52,17 +52,17 @@ vi.mock("@/app/view/skill/skill-manager", () => ({
 // reading a plain (non-reactive) stub only ever satisfies a memo's *first*
 // (eager, at-construction) computation. Backing the mock with a genuine
 // signal, and having the SetMetaCommand mock write into it, reproduces the
-// real write -> WPS push -> blockAtom update round trip closely enough for
+// real write -> MPS push -> blockAtom update round trip closely enough for
 // clicking a rail item to actually flip the visible/active section here,
 // the same way it does against the real backend.
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
-vi.mock("@/app/store/wos", () => ({
+vi.mock("@/app/store/mos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
     getMuxObjectAtom: () => () => ({ meta: blockMeta() }),
     // global.ts/window-identity.ts evaluate a `tabAtom` createMemo at
-    // module-init time that calls WOS.getObjectValue — without this stub
+    // module-init time that calls MOS.getObjectValue — without this stub
     // the import chain crashes during test setup (same gap browser-model
-    // .test.ts's wos mock documents).
+    // .test.ts's mos mock documents).
     getObjectValue: () => ({}),
 }));
 

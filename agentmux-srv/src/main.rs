@@ -78,7 +78,7 @@ async fn main() {
 
     // Event infrastructure + every background task that doesn't need AppState yet.
     let bg = bootstrap::spawn_background_subsystems(
-        &stores.wstore,
+        &stores.mstore,
         &stores.filestore,
         &stores.id_store,
         &stores.identity_store,
@@ -92,7 +92,7 @@ async fn main() {
     .await;
 
     // Phase E.2 — srv reducer plumbing (state, event bus, event log, persist subscriber).
-    let reducer = bootstrap::spawn_reducer_plumbing(&stores.wstore, &bg.event_bus, &bg.subagent_watcher).await;
+    let reducer = bootstrap::spawn_reducer_plumbing(&stores.mstore, &bg.event_bus, &bg.subagent_watcher).await;
 
     let state = bootstrap::build_app_state(&config, version.clone(), stores, bg, &net, &reducer);
 
@@ -112,7 +112,7 @@ async fn main() {
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
     backend::native_memory_drift::spawn(
         state.fs_watch_pool.clone(),
-        state.wstore.clone(),
+        state.mstore.clone(),
         state.id_store.clone(),
         state.broker.clone(),
     );
@@ -181,7 +181,7 @@ async fn main() {
     // 7. Build router and serve on both listeners
     // Clone Arcs that are needed after `state` is moved into build_router.
     let shell_sessions_shutdown = state.shell_sessions.clone();
-    let wal_wstore = Arc::clone(&state.wstore);
+    let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let router = build_router(state);
@@ -205,7 +205,7 @@ async fn main() {
 
     // Periodic WAL checkpoint — prevents unbounded WAL file growth during
     // long-running sessions.
-    bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_wstore, wal_filestore);
+    bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
 
     // Run both servers until shutdown
     tokio::select! {

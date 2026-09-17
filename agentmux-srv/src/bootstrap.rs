@@ -26,7 +26,7 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::migrations::OBJECT_SCHEMA_VERSION;
 use crate::backend::storage::snapshot::maybe_snapshot_pre_migration;
 use crate::backend::storage::store::Store;
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 use crate::backend::wconfig;
 use crate::backend::{base, docsite, sysinfo, wcore};
 use crate::config::{self, CliArgs};
@@ -456,7 +456,7 @@ pub fn load_config() -> config::Config {
 /// Output of [`open_stores_and_migrate`] — every store/log handle the rest
 /// of bootstrap and `AppState` need.
 pub struct Stores {
-    pub wstore: Arc<Store>,
+    pub mstore: Arc<Store>,
     pub filestore: Arc<FileStore>,
     pub global_transcript_store: Option<Arc<FileStore>>,
     pub shared_store: Option<Arc<Store>>,
@@ -466,7 +466,7 @@ pub struct Stores {
     /// memory, cron jobs) — see
     /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`. Distinct from
     /// `id_store`: never redirected by `isolated_auth_enabled()`. Falls
-    /// back to `wstore` (never `None`) on the same best-effort terms as
+    /// back to `mstore` (never `None`) on the same best-effort terms as
     /// `id_store`'s own fallback, so a resolution/open failure degrades to
     /// today's per-channel behavior instead of panicking.
     pub identity_store: Arc<Store>,
@@ -621,7 +621,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         }
     }
 
-    let wstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let mstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
     });
@@ -650,10 +650,10 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                         tracing::info!(filled, "registry: backfilled session_id for cross-channel resume (startup pass)");
                     }
                 }
-                wstore_raw.set_registry(Arc::new(reg));
+                mstore_raw.set_registry(Arc::new(reg));
                 if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
                     if !base.is_empty() {
-                        wstore_raw
+                        mstore_raw
                             .set_registry_agents_base(std::path::PathBuf::from(base));
                     }
                 }
@@ -685,7 +685,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                         .map(|v| v.into_iter().map(|r| r.data.id).collect())
                         .unwrap_or_default()
                 });
-                wstore_raw.set_def_registry(Arc::new(def_store));
+                mstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
             }
             Err(e) => tracing::warn!(
@@ -705,15 +705,15 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // whose card never went away. New deletes sweep the registry themselves
     // (`Store::agent_def_delete`); this is for the orphans already on disk.
     if let (Some(reg), Some(defs)) = (
-        wstore_raw.shared_agent_registry(),
-        wstore_raw.shared_def_registry(),
+        mstore_raw.shared_agent_registry(),
+        mstore_raw.shared_def_registry(),
     ) {
         let pruned = backend::registry_reconcile::prune_tombstoned_instance_records(&reg, &defs);
         if pruned > 0 {
             tracing::info!(pruned, "registry: dropped instance records for deleted agents (startup pass)");
         }
     }
-    let wstore = Arc::new(wstore_raw);
+    let mstore = Arc::new(mstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
@@ -752,7 +752,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         };
     // GLOBAL shared store — identity accounts, memory bundles, drone
     // definitions, MuxBus credentials. Best-effort: disabled when the shared
-    // root can't be resolved. Falls back to wstore so behavior is unchanged
+    // root can't be resolved. Falls back to mstore so behavior is unchanged
     // from today. See SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md.
     let shared_store: Option<Arc<Store>> = match registry::resolve_shared_store_path() {
         Some(path) => {
@@ -794,9 +794,9 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         Some(ss) if ss.migration_is_applied("0011_shared_store_backfill") => ss.clone(),
         Some(_) => {
             tracing::warn!("id_store: 0011_shared_store_backfill not yet applied — using per-channel store");
-            wstore.clone()
+            mstore.clone()
         }
-        None => wstore.clone(),
+        None => mstore.clone(),
     };
 
     // Permanently-global identity store (agent→account links, memory
@@ -805,7 +805,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md. Deliberately NOT
     // gated by isolated_auth_enabled() at all, unlike shared_store above:
     // none of this store's tables have a legitimate per-channel-isolation
-    // use case. Best-effort, same fallback-to-wstore terms as id_store —
+    // use case. Best-effort, same fallback-to-mstore terms as id_store —
     // a resolution/open failure degrades to today's per-channel behavior
     // rather than being fatal.
     let identity_store: Arc<Store> = match registry::resolve_identity_store_path() {
@@ -813,7 +813,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
             let parent = path.parent().unwrap_or(path.as_path());
             if let Err(e) = std::fs::create_dir_all(parent) {
                 tracing::warn!(path = %path.display(), error = %e, "identity store: failed to create dir — falling back to per-channel store");
-                wstore.clone()
+                mstore.clone()
             } else {
                 match Store::open_identity_store(&path) {
                     Ok(s) => {
@@ -822,14 +822,14 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                     }
                     Err(e) => {
                         tracing::warn!(path = %path.display(), error = %e, "identity store: failed to open — falling back to per-channel store");
-                        wstore.clone()
+                        mstore.clone()
                     }
                 }
             }
         }
         None => {
             tracing::warn!("identity store: could not resolve path — falling back to per-channel store");
-            wstore.clone()
+            mstore.clone()
         }
     };
 
@@ -853,7 +853,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
 
     // Saga durability — see SPEC_SAGA_DURABILITY_2026-05-01.md.
     // Backed by its own SQLite file (`sagas.db`) so saga writes
-    // commit independently of the wstore connection. Failure here
+    // commit independently of the mstore connection. Failure here
     // is fatal: without the log, a srv crash mid-saga leaves
     // unrecoverable state divergence.
     let saga_log = Arc::new(
@@ -882,7 +882,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
 
     // Bootstrap data (creates Client/Window/Workspace/Tab on first launch)
-    let first_launch = wcore::ensure_initial_data(&wstore).unwrap_or_else(|e| {
+    let first_launch = wcore::ensure_initial_data(&mstore).unwrap_or_else(|e| {
         tracing::error!("Failed to ensure initial data: {}", e);
         std::process::exit(1);
     });
@@ -908,7 +908,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // `session:active_pid` from a previous run — those sessions were killed
     // by a crash/reboot. Transfer to `session:was_interrupted` so the
     // frontend can show a reconnect banner.
-    let orphan_count = backend::blockcontroller::session_recovery::scan_orphans(&wstore);
+    let orphan_count = backend::blockcontroller::session_recovery::scan_orphans(&mstore);
     if orphan_count > 0 {
         tracing::info!(
             orphan_count = orphan_count,
@@ -918,7 +918,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     }
 
     // Auto-seed agent definitions on first launch (or empty DB)
-    crate::boot_timing::time("agent_auto_seed", || backend::agent_seed::auto_seed_on_startup(&wstore));
+    crate::boot_timing::time("agent_auto_seed", || backend::agent_seed::auto_seed_on_startup(&mstore));
 
     // Keep AgentMux's own Operator Config (is_system=1 Global Memory) in
     // sync with the shipped manifest on every startup — not a one-time
@@ -926,11 +926,11 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // rather than merely being absent. See
     // docs/specs/SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md.
     //
-    // Seeded into id_store, NOT wstore: Global Memory reads/writes
+    // Seeded into id_store, NOT mstore: Global Memory reads/writes
     // (agent_open.rs's bundle_list_global, bundle.rs's handlers via
     // state.id_store) all route through id_store, which points at the
     // shared store once 0011_shared_store_backfill has run and only falls
-    // back to wstore before that. Seeding wstore directly would leave these
+    // back to mstore before that. Seeding mstore directly would leave these
     // rows invisible under the normal shared-store configuration once that
     // migration has applied. Codex P1, PR #3244.
     backend::operator_config_seed::auto_seed_on_startup(&id_store);
@@ -961,12 +961,12 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // this point simply publish an empty key, which readers treat as "cannot
     // check."
     crate::backend::reactive::registry::init_jekt_public_key_resolver({
-        let wstore = wstore.clone();
-        move |agent_id| wstore.agent_lan_public_key_load(agent_id).ok().flatten()
+        let mstore = mstore.clone();
+        move |agent_id| mstore.agent_lan_public_key_load(agent_id).ok().flatten()
     });
 
     Stores {
-        wstore,
+        mstore,
         filestore,
         global_transcript_store,
         shared_store,
@@ -1000,7 +1000,7 @@ pub struct BackgroundSubsystems {
 /// WhatsApp), docsite dir, messagebus, subagent watcher, history service,
 /// and the session archiver.
 pub fn spawn_background_subsystems(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
@@ -1009,7 +1009,7 @@ pub fn spawn_background_subsystems(
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());
 
-    // Bridge WPS events to WebSocket clients via EventBus
+    // Bridge MPS events to WebSocket clients via EventBus
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
 
@@ -1073,12 +1073,12 @@ pub fn spawn_background_subsystems(
     // Push a live Haiku activity summary per registered agent (swarm feed) —
     // reads reactive::get_global_handler() as its registry, so it needs no
     // AppState and can start before AppState is built (matches sysinfo/watchdog above).
-    let activity_wstore = Arc::clone(wstore);
+    let activity_mstore = Arc::clone(mstore);
     let activity_filestore = Arc::clone(filestore);
     let activity_broker = broker.clone();
     tokio::spawn(async move {
         backend::reactive::activity_watcher::run_agent_summary_loop(
-            activity_wstore, activity_filestore, activity_broker,
+            activity_mstore, activity_filestore, activity_broker,
         ).await;
     });
 
@@ -1363,11 +1363,11 @@ pub fn spawn_background_subsystems(
     // Subagent watcher — monitors Claude Code session dirs for spawned subagents
     let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(
         event_bus.clone(),
-        wstore.clone(),
+        mstore.clone(),
         id_store.clone(),
         identity_store.clone(),
     );
-    // Wires `subagent:backfill_status` (scoped, persisted WPS event) — see
+    // Wires `subagent:backfill_status` (scoped, persisted MPS event) — see
     // `SubagentWatcher`'s `broker` field doc comment for why this is a
     // post-construction setter rather than a constructor parameter.
     subagent_watcher.set_broker(broker.clone());
@@ -1385,7 +1385,7 @@ pub fn spawn_background_subsystems(
     // relative path and create archives under the current working directory).
     if let Some(archive_dir) = backend::session_archive::default_archive_dir() {
         let archiver = Arc::new(backend::session_archive::SessionArchiver::new(
-            wstore.clone(),
+            mstore.clone(),
             filestore.clone(),
             7,                              // inactive days
             2 * 1024 * 1024 * 1024,         // 2 GB max
@@ -1654,11 +1654,11 @@ pub struct ReducerPlumbing {
 /// write-back), the MuxObjUpdate bridge, and the subagent-watcher block-delete
 /// cascade backstop.
 pub async fn spawn_reducer_plumbing(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     subagent_watcher: &Arc<backend::subagent_watcher::SubagentWatcher>,
 ) -> ReducerPlumbing {
-    let wstore_for_persist = Arc::clone(wstore);
+    let mstore_for_persist = Arc::clone(mstore);
     let srv_state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
     let (srv_events_tx, _) =
         tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
@@ -1669,7 +1669,7 @@ pub async fn spawn_reducer_plumbing(
     // Bootstrap reducer state from SQLite. Always runs (even in
     // `task dev` where there's no pipe IPC server) so RPC handlers
     // dispatching through the reducer see populated state.
-    persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
+    persist::bootstrap_state_from_mstore(&srv_state, &mstore_for_persist).await;
 
     // Spawn the disk writer (forensic log of every reducer event)
     // and the persist subscriber (idempotent SQLite write-back).
@@ -1679,7 +1679,7 @@ pub async fn spawn_reducer_plumbing(
     let subscriber_rx = srv_events_tx.subscribe();
     persist_subscriber::spawn_persist_subscriber(
         subscriber_rx,
-        std::sync::Arc::clone(&wstore_for_persist),
+        std::sync::Arc::clone(&mstore_for_persist),
         std::sync::Arc::clone(&srv_state),
     );
 
@@ -1698,7 +1698,7 @@ pub async fn spawn_reducer_plumbing(
     let bridge_rx = srv_events_tx.subscribe();
     let bridge_handle = server::mux_obj_bridge::spawn_mux_obj_bridge(
         bridge_rx,
-        std::sync::Arc::clone(&wstore_for_persist),
+        std::sync::Arc::clone(&mstore_for_persist),
         std::sync::Arc::clone(event_bus),
     );
     tokio::spawn(async move {
@@ -1709,7 +1709,7 @@ pub async fn spawn_reducer_plumbing(
             ),
             Err(e) if e.is_panic() => tracing::error!(
                 target: "wave-obj-bridge",
-                "bridge task PANICKED at top level — frontend WOS will stop receiving updates until srv restart. Panic: {}",
+                "bridge task PANICKED at top level — frontend MOS will stop receiving updates until srv restart. Panic: {}",
                 e
             ),
             Err(e) => tracing::error!(
@@ -1759,7 +1759,7 @@ pub fn build_app_state(
         version,
         hostname: net.hostname.clone(),
         app_path: config.app_path.clone(),
-        wstore: stores.wstore,
+        mstore: stores.mstore,
         shared_store: stores.shared_store,
         id_store: stores.id_store,
         identity_store: stores.identity_store,
@@ -1979,7 +1979,7 @@ pub fn install_shutdown_handlers() -> tokio_util::sync::CancellationToken {
 /// the next pass. (SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26 §4.E)
 pub fn spawn_wal_checkpoint_loop(
     token: tokio_util::sync::CancellationToken,
-    wal_wstore: Arc<Store>,
+    wal_mstore: Arc<Store>,
     wal_filestore: Arc<FileStore>,
 ) {
     tokio::spawn(async move {
@@ -1989,7 +1989,7 @@ pub fn spawn_wal_checkpoint_loop(
                 _ = tokio::time::sleep(INTERVAL) => {}
                 _ = token.cancelled() => break,
             }
-            if let Err(e) = wal_wstore.checkpoint() {
+            if let Err(e) = wal_mstore.checkpoint() {
                 tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on objects.db failed");
             } else {
                 tracing::debug!("wal_checkpoint(TRUNCATE): objects.db ok");

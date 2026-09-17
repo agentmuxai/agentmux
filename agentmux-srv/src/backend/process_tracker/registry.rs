@@ -20,7 +20,7 @@ use std::sync::{Arc, OnceLock};
 use parking_lot::Mutex;
 
 use super::{new_tracker, TrackedProcess, TrackerHandle, TrackingConfidence};
-use crate::backend::wps;
+use crate::backend::mps;
 
 /// Host-wide registry, set once at startup. Exposed as a global so
 /// `SubprocessController` / `PersistentSubprocessController` can reach
@@ -58,7 +58,7 @@ pub fn track_spawned(block_id: &str, pid: u32) {
 
 pub struct AgentProcessRegistry {
     inner: Mutex<HashMap<String, RegistryEntry>>,
-    broker: Option<Arc<wps::Broker>>,
+    broker: Option<Arc<mps::Broker>>,
 }
 
 struct RegistryEntry {
@@ -70,7 +70,7 @@ struct RegistryEntry {
 }
 
 impl AgentProcessRegistry {
-    pub fn new(broker: Option<Arc<wps::Broker>>) -> Self {
+    pub fn new(broker: Option<Arc<mps::Broker>>) -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
             broker,
@@ -190,7 +190,7 @@ impl AgentProcessRegistry {
 
     fn emit(&self, event_name: &str, block_id: &str, data: serde_json::Value) {
         let Some(ref broker) = self.broker else { return };
-        broker.publish(wps::MuxEvent {
+        broker.publish(mps::MuxEvent {
             event: event_name.to_string(),
             scopes: vec![format!("block:{}", block_id)],
             sender: String::new(),

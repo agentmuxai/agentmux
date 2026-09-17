@@ -103,7 +103,7 @@ impl FileStore {
             "PRAGMA journal_mode=WAL;
              PRAGMA busy_timeout=5000;",
         )?;
-        // Safety lock BEFORE migrations — same discipline as wstore /
+        // Safety lock BEFORE migrations — same discipline as mstore /
         // sagas: refuse to touch a newer-schema DB on disk before any
         // mutating step runs. See `check_schema_compat` doc.
         check_schema_compat(&conn, FILESTORE_SCHEMA_VERSION, "filestore.db")?;

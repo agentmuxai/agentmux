@@ -142,17 +142,17 @@ fn merge_json_object(base: &mut serde_json::Value, overlay: &serde_json::Value) 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Identity account CRUD ----
     // id_store: routes to shared/store.db when available so accounts survive
-    // version upgrades. Falls back to wstore transparently.
+    // version upgrades. Falls back to mstore transparently.
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_IDENTITY_ACCOUNTS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandListIdentityAccountsData =
                     serde_json::from_value(data).unwrap_or_default();
-                let accounts = wstore
+                let accounts = mstore
                     .identity_list(cmd.provider.as_deref())
                     .map_err(|e| format!("listidentityaccounts: {e}"))?;
                 Ok(Some(serde_json::to_value(&accounts).unwrap_or_default()))
@@ -160,15 +160,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_GET_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandGetIdentityAccountData =
                     serde_json::from_value(data).map_err(|e| format!("getidentityaccount: {e}"))?;
-                match wstore
+                match mstore
                     .identity_get(&cmd.id)
                     .map_err(|e| format!("getidentityaccount: {e}"))?
                 {
@@ -179,13 +179,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -208,10 +208,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 account.updated_at = now;
                 // identity_upsert_with_mirror — reagentx P0 review on PR
                 // #2632.
-                wstore
+                mstore
                     .identity_upsert_with_mirror(&identity_store, &account)
                     .map_err(|e| format!("upsertidentityaccount: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "identityaccounts:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -227,13 +227,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // The plaintext goes to the OS keychain; the DB row keeps only the
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
     // See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_KEY_VERIFY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -289,7 +289,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Fetch the existing row once (replacement path) — preserves
                 // created_at and any previously-stored context.
-                let existing = wstore.identity_get(&account_id).ok().flatten();
+                let existing = mstore.identity_get(&account_id).ok().flatten();
 
                 // Non-secret context, merged so nothing the user set is lost:
                 //   existing context  →  user-entered context  →  validation
@@ -333,7 +333,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     updated_at: now,
                 };
                 // identity_upsert_with_mirror — reagentx P0 review on PR #2632.
-                if let Err(e) = wstore.identity_upsert_with_mirror(&identity_store, &account) {
+                if let Err(e) = mstore.identity_upsert_with_mirror(&identity_store, &account) {
                     // DB write failed after the keychain write.
                     //  - New account: nothing references the secret yet, so
                     //    roll it back to avoid an orphan with no DB row.
@@ -360,7 +360,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     return Err(format!("account.key.verify: {e}"));
                 }
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "identityaccounts:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -381,12 +381,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ── Armory service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
-    let oauth_wstore = state.id_store.clone();
+    let oauth_mstore = state.id_store.clone();
     let oauth_identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_OAUTH_START,
         Box::new(move |data, _ctx| {
-            let wstore = oauth_wstore.clone();
+            let mstore = oauth_mstore.clone();
             let identity_store = oauth_identity_store.clone();
             Box::pin(async move {
                 let req: OAuthStartReq = serde_json::from_value(data)
@@ -397,7 +397,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         client_secret: req.client_secret,
                     }
                 });
-                match crate::identity::oauth_client::start(&req.provider, req.name, byo, wstore, identity_store) {
+                match crate::identity::oauth_client::start(&req.provider, req.name, byo, mstore, identity_store) {
                     Ok((session_id, status)) => Ok(Some(serde_json::json!({
                         "sessionId": session_id,
                         "status": oauth_status_wire(&status),
@@ -436,13 +436,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -457,7 +457,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // keyring + fs are blocking, so run via spawn_blocking.
                 // Capture provider before the row is deleted so the logout-
                 // side log lines can carry it.
-                let acct = wstore.identity_get(&cmd.id).ok().flatten();
+                let acct = mstore.identity_get(&cmd.id).ok().flatten();
                 let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
                 if let Some(acct) = acct {
                     // Containment root for OAuth dirs: only paths inside
@@ -474,7 +474,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     })
                     .await;
                 }
-                let outcome = wstore
+                let outcome = mstore
                     .identity_delete(&cmd.id)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
                 let deleted = outcome.deleted;
@@ -526,7 +526,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.delete: account removed (deleteidentityaccount)"
                 );
                 if deleted {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "identityaccounts:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -553,14 +553,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             "identity.delete: running agent(s) affected"
                         );
                         for agent_id in &affected_agents {
-                            broker.publish(crate::backend::wps::MuxEvent {
+                            broker.publish(crate::backend::mps::MuxEvent {
                                 event: format!("agentidentities:changed:{agent_id}"),
                                 scopes: vec![],
                                 sender: String::new(),
                                 persist: 0,
                                 data: None,
                             });
-                            broker.publish(crate::backend::wps::MuxEvent {
+                            broker.publish(crate::backend::mps::MuxEvent {
                                 event: format!("agentcredentials:revoked:{agent_id}"),
                                 scopes: vec![],
                                 sender: String::new(),
@@ -585,20 +585,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Agent ↔ Identity junction ----
 
-    let wstore = state.identity_store.clone();
+    let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_LINK_AGENT_IDENTITY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandLinkAgentIdentityData = serde_json::from_value(data)
                     .map_err(|e| format!("linkagentidentity: {e}"))?;
-                wstore
+                mstore
                     .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
                     .map_err(|e| format!("linkagentidentity: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agentidentities:changed:{}", cmd.agent_id),
                     scopes: vec![],
                     sender: String::new(),
@@ -616,17 +616,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.identity_store.clone();
+    let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UNLINK_AGENT_IDENTITY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandUnlinkAgentIdentityData = serde_json::from_value(data)
                     .map_err(|e| format!("unlinkagentidentity: {e}"))?;
-                let removed = wstore
+                let removed = mstore
                     .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
                     .map_err(|e| format!("unlinkagentidentity: {e}"))?;
                 // info!, not debug!: the production filter is
@@ -639,7 +639,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: agent-identity link removed (unlinkagentidentity)"
                 );
                 if removed {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: format!("agentidentities:changed:{}", cmd.agent_id),
                         scopes: vec![],
                         sender: String::new(),
@@ -653,7 +653,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // unbind — see CommandUnlinkAgentIdentityData's doc
                     // comment; reagent P2 on PR #2414).
                     if !cmd.silent {
-                        broker.publish(crate::backend::wps::MuxEvent {
+                        broker.publish(crate::backend::mps::MuxEvent {
                             event: format!("agentcredentials:revoked:{}", cmd.agent_id),
                             scopes: vec![],
                             sender: String::new(),
@@ -670,15 +670,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.identity_store.clone();
+    let mstore = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_IDENTITIES,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentIdentitiesData = serde_json::from_value(data)
                     .map_err(|e| format!("listagentidentities: {e}"))?;
-                let rows = wstore
+                let rows = mstore
                     .agent_identity_list_for_agent(&cmd.agent_id)
                     .map_err(|e| format!("listagentidentities: {e}"))?;
                 Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
@@ -687,13 +687,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // Every direct link across every agent — see the constant's doc comment.
-    let wstore = state.identity_store.clone();
+    let mstore = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_ALL_AGENT_IDENTITIES,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
-                let rows = wstore
+                let rows = mstore
                     .agent_identity_list_all()
                     .map_err(|e| format!("listallagentidentities: {e}"))?;
                 Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
@@ -706,13 +706,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // listnamedagents — powers the launch modal's "Continue agent"
     // dropdown. Joins instance rows with the definition / identity /
     // memory bundle names so the frontend renders without follow-ups.
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let id_store_lna = state.id_store.clone();
     let identity_store_lna = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_NAMED_AGENTS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store_lna.clone();
             let identity_store = identity_store_lna.clone();
             Box::pin(async move {
@@ -727,7 +727,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // typical account/bundle counts in the low dozens, a
                 // linear lookup on cached lists beats per-row
                 // round-trips through the store.
-                let defs = wstore
+                let defs = mstore
                     .agent_def_list()
                     .map_err(|e| format!("listnamedagents: agent_def_list: {e}"))?;
                 let memories = id_store
@@ -782,13 +782,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // environments). SQLite remains authoritative for
                 // PR B (parallel-write is still active); the choice
                 // here just affects which surface gets surfaced.
-                let rows: Vec<NamedAgentRow> = match wstore.shared_agent_registry() {
+                let rows: Vec<NamedAgentRow> = match mstore.shared_agent_registry() {
                     Some(reg) => {
                         // Re-join relative working_dir against the CURRENT
                         // channel's agents dir (symmetric with the write
                         // mirror), not the registry's own parent — P0.3
                         // re-roots the registry out of channels/<ch>/agents/.
-                        let agents_root = wstore.registry_agents_base();
+                        let agents_root = mstore.registry_agents_base();
                         let mut records = reg
                             .list_active()
                             .map_err(|e| format!("listnamedagents: registry: {e}"))?;
@@ -815,7 +815,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // enrichment misses, silently downgrading
                         // running-state badges and block_id_hints to
                         // "available" / empty.
-                        let sqlite_rows: Vec<AgentInstance> = wstore
+                        let sqlite_rows: Vec<AgentInstance> = mstore
                             .instance_list_named(
                                 records.len().max(1),
                                 cmd.definition_id.as_deref(),
@@ -912,7 +912,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // modal's "Continue agent" dropdown directly.
                         // One entry per chain root, mirroring the
                         // registry path's semantics.
-                        let instances = wstore
+                        let instances = mstore
                             .instance_list_named(
                                 limit,
                                 cmd.definition_id.as_deref(),
@@ -966,19 +966,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // hidenamedagent — soft-delete (sets display_hidden = 1) so the
     // row disappears from the dropdown. Working dir stays on disk.
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_HIDE_NAMED_AGENT,
         move |cmd: CommandHideNamedAgentData, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                let hidden = wstore
+                let hidden = mstore
                     .instance_set_hidden(&cmd.id, true)
                     .map_err(|e| format!("hidenamedagent: {e}"))?;
                 if hidden {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "namedagents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),

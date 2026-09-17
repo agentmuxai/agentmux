@@ -115,7 +115,7 @@ pub fn global() -> Option<Arc<SubagentWatcher>> {
 
 pub struct SubagentWatcher {
     event_bus: Arc<EventBus>,
-    wstore: Arc<crate::backend::storage::store::Store>,
+    mstore: Arc<crate::backend::storage::store::Store>,
     /// Held so `recheck_config_dir`/`recheck_all_watched_agents` (called
     /// from the identity-bind RPC handlers, `server/app_api/identity.rs`
     /// and `server/agent_handlers/identity.rs`) can re-resolve a fresh
@@ -156,7 +156,7 @@ pub struct SubagentWatcher {
     /// case rather than panicking, matching this module's existing
     /// "unknown/untracked -> safe no-op" convention (see `set_display_name`).
     self_ref: Mutex<Option<std::sync::Weak<SubagentWatcher>>>,
-    /// The scoped, persisted WPS broker -- used only for
+    /// The scoped, persisted MPS broker -- used only for
     /// `subagent:backfill_status` (`scan.rs`'s `publish_backfill_status`),
     /// so a pane can query "is my own backfill still in progress" via
     /// `EventReadHistoryCommand` rather than relying solely on live-event
@@ -165,11 +165,11 @@ pub struct SubagentWatcher {
     /// section 6.2). Deliberately separate from `event_bus` above (the raw,
     /// unscoped, unpersisted WS fan-out every OTHER event in this module
     /// uses) -- this one event specifically needs the scope+persist
-    /// semantics only `wps::Broker` provides. `None` until `set_broker` is
+    /// semantics only `mps::Broker` provides. `None` until `set_broker` is
     /// called (bootstrap only, after both this watcher and the broker
     /// exist) -- every test call site built via bare `new()` skips this
     /// event entirely rather than panicking, same posture as `self_ref`.
-    broker: Mutex<Option<Arc<crate::backend::wps::Broker>>>,
+    broker: Mutex<Option<Arc<crate::backend::mps::Broker>>>,
     /// reagentx P2 (PR #2781): `scan_session_subagents` can be called twice
     /// for the SAME `parent_block_id` in overlapping fashion (the same
     /// block re-registered under a new `agent_id` -- see
@@ -189,13 +189,13 @@ pub struct SubagentWatcher {
 impl SubagentWatcher {
     pub fn new(
         event_bus: Arc<EventBus>,
-        wstore: Arc<crate::backend::storage::store::Store>,
+        mstore: Arc<crate::backend::storage::store::Store>,
         id_store: Arc<crate::backend::storage::store::Store>,
         identity_store: Arc<crate::backend::storage::store::Store>,
     ) -> Self {
         Self {
             event_bus,
-            wstore,
+            mstore,
             id_store,
             identity_store,
             sessions: Mutex::new(HashMap::new()),
@@ -209,10 +209,10 @@ impl SubagentWatcher {
         }
     }
 
-    /// Wire in the shared WPS broker post-construction (bootstrap only) --
+    /// Wire in the shared MPS broker post-construction (bootstrap only) --
     /// see the `broker` field's own doc comment for why this is optional
     /// and set separately rather than a constructor parameter.
-    pub fn set_broker(&self, broker: Arc<crate::backend::wps::Broker>) {
+    pub fn set_broker(&self, broker: Arc<crate::backend::mps::Broker>) {
         *self.broker.lock().unwrap() = Some(broker);
     }
 
@@ -222,11 +222,11 @@ impl SubagentWatcher {
     /// `watch_agent`'s existing `tokio::spawn` pattern.
     pub fn spawn(
         event_bus: Arc<EventBus>,
-        wstore: Arc<crate::backend::storage::store::Store>,
+        mstore: Arc<crate::backend::storage::store::Store>,
         id_store: Arc<crate::backend::storage::store::Store>,
         identity_store: Arc<crate::backend::storage::store::Store>,
     ) -> Arc<Self> {
-        let watcher = Arc::new(Self::new(event_bus, wstore, id_store, identity_store));
+        let watcher = Arc::new(Self::new(event_bus, mstore, id_store, identity_store));
         *watcher.self_ref.lock().unwrap() = Some(Arc::downgrade(&watcher));
         tracing::info!("subagent watcher initialized");
         let flusher = Arc::clone(&watcher);
@@ -375,7 +375,7 @@ impl SubagentWatcher {
         // backfill call: a blind scan-everything would flood Swarm with
         // every session this identity has ever run, not just this pane's.
         for block_id in &all_block_ids {
-            let Ok(Some(block)) = self.wstore.get::<crate::backend::obj::Block>(block_id) else {
+            let Ok(Some(block)) = self.mstore.get::<crate::backend::obj::Block>(block_id) else {
                 continue;
             };
             let session_id = crate::backend::obj::meta_get_string(
@@ -426,11 +426,11 @@ impl SubagentWatcher {
             if block_id.is_empty() {
                 continue;
             }
-            let Some(block) = self.wstore.get::<crate::backend::obj::Block>(&block_id).ok().flatten() else {
+            let Some(block) = self.mstore.get::<crate::backend::obj::Block>(&block_id).ok().flatten() else {
                 continue;
             };
             let bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
-                &self.wstore,
+                &self.mstore,
                 &self.id_store,
                 &self.identity_store,
                 &block_id,
@@ -722,7 +722,7 @@ impl SubagentWatcher {
     /// block's to process. See
     /// docs/retro/retro-subagent-watcher-shared-dir-fanout-and-leak-2026-07-23.md.
     fn session_belongs_to_block(&self, block_id: &str, session_id: &str) -> bool {
-        let Ok(Some(block)) = self.wstore.get::<crate::backend::obj::Block>(block_id) else {
+        let Ok(Some(block)) = self.mstore.get::<crate::backend::obj::Block>(block_id) else {
             return false;
         };
         crate::backend::obj::meta_get_string(

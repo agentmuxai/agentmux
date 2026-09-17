@@ -10,11 +10,11 @@ use crate::backend::wcore;
 
 use super::super::AppState;
 use super::reducer_helpers::{
-    compensate_via_reducer, dispatch_to_reducer, publish_events, wstore_workspace_exists,
+    compensate_via_reducer, dispatch_to_reducer, publish_events, mstore_workspace_exists,
 };
 
 pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let name: String = service::get_arg(args, 0).unwrap_or_default();
     let events = dispatch_to_reducer(
@@ -28,14 +28,14 @@ pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType
         }
         _ => None,
     });
-    // Apply synchronously to wstore BEFORE publishing or
+    // Apply synchronously to mstore BEFORE publishing or
     // returning. On SQLite failure, dispatch a compensating
     // `DeleteWorkspace` so the reducer's session-only state
     // doesn't carry a ghost workspace that was never
     // persisted (codex P2 #615).
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }
@@ -78,13 +78,13 @@ pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType
 }
 
 pub(crate) async fn handle_get_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
         Err(e) => return WebReturnType::error(e),
     };
-    // wstore-direct during the migration window (see
+    // mstore-direct during the migration window (see
     // ("workspace", ...) header comment above for the
     // rationale). Reducer-state reads return on E.2c.3+ once
     // tabs (and pinned tabs) live in the reducer.
@@ -95,7 +95,7 @@ pub(crate) async fn handle_get_workspace(state: &AppState, call: &WebCallType) -
 }
 
 pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -124,7 +124,7 @@ pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType
     // SQLite). The saga runs its own existence check; we mirror
     // the legacy NotFound semantics here for backward-compat
     // error messages.
-    let exists_in_wstore = match wstore_workspace_exists(store, &ws_id) {
+    let exists_in_mstore = match mstore_workspace_exists(store, &ws_id) {
         Ok(v) => v,
         Err(e) => {
             return WebReturnType::error(format!(
@@ -133,7 +133,7 @@ pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType
             ))
         }
     };
-    if !exists_in_wstore {
+    if !exists_in_mstore {
         let exists_in_state = state
             .srv_state
             .lock()
@@ -158,7 +158,7 @@ pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType
 // mutated). Meta-only updates are dispatched as
 // UpdateWorkspaceMeta separately by frontends.
 pub(crate) async fn handle_update_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -183,7 +183,7 @@ pub(crate) async fn handle_update_workspace(state: &AppState, call: &WebCallType
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "UpdateWorkspace: SQLite write failed: {}",
                 e

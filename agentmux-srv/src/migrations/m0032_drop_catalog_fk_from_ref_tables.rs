@@ -213,7 +213,7 @@ impl Migration for M0032DropCatalogFkFromRefTables {
         // connection below touches anything.
         drop(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("drop_catalog_fk_from_ref_tables: open wstore: {e}")))?,
+                .map_err(|e| MigrationError(format!("drop_catalog_fk_from_ref_tables: open mstore: {e}")))?,
         );
         let conn = Connection::open(&ctx.channel_store_path)
             .map_err(|e| MigrationError(format!("drop_catalog_fk_from_ref_tables: open: {e}")))?;

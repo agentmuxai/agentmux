@@ -43,7 +43,7 @@
 //!
 //! Unknown frame types and malformed shapes produce an empty `Vec`
 //! rather than panicking — the runner falls back to whatever the
-//! parallel raw-byte WPS path published, so an unfamiliar frame
+//! parallel raw-byte MPS path published, so an unfamiliar frame
 //! degrades gracefully.
 //!
 //! `thinking_delta`, `message_delta` / `message_stop` are discarded

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Storage layer: SQLite-backed object store and file store.
-//! Port of Go's pkg/wstore and pkg/filestore.
+//! Port of Go's pkg/mstore and pkg/filestore.
 
 pub mod agent_activity_summaries;
 pub mod agent_credentials;

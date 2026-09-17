@@ -21,7 +21,7 @@ use crate::backend::blockcontroller::{
     core, publish_controller_status,
     session_stats, shell, DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
 };
-use crate::backend::wps;
+use crate::backend::mps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
@@ -29,7 +29,7 @@ impl SubprocessController {
     /// Spawn a single turn of the agent CLI.
     ///
     /// This is the core method — it spawns `claude -p`, writes the user message to stdin,
-    /// reads NDJSON from stdout (publishing WPS events), and waits for exit.
+    /// reads NDJSON from stdout (publishing MPS events), and waits for exit.
     ///
     /// If a session_id exists from a previous turn, `--resume <sid>` is appended to args.
     pub fn spawn_turn(&self, config: SubprocessSpawnConfig) -> Result<(), String> {
@@ -263,13 +263,13 @@ impl SubprocessController {
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
         let inner_read = Arc::clone(&self.inner);
-        let wstore_read = self.wstore.clone();
+        let mstore_read = self.mstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let session_id_field = config.session_id_field.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
-            shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Retain the terminal `result` frame so a failure reported on STDOUT
         // (auth / rate-limit / usage — the common case; claude may even exit 0)
         // can be classified, not just stderr-reported ones. Shared with the
@@ -308,7 +308,7 @@ impl SubprocessController {
                         // Track session metadata (debounced 1 s).
                         // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
                         // so token_estimate stays consistent across controller types.
-                        stats.record_line(line.len(), &wstore_read);
+                        stats.record_line(line.len(), &mstore_read);
 
                         // Retain the terminal `result` frame for failure
                         // classification.
@@ -352,12 +352,12 @@ impl SubprocessController {
                                         session_id = %sid_string,
                                         "captured session id"
                                     );
-                                    core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
+                                    core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
                                 }
                             }
                         }
 
-                        // Publish the NDJSON line as a WPS blockfile event on the "output" subject
+                        // Publish the NDJSON line as a MPS blockfile event on the "output" subject
                         // and write-through to FileStore for persistent history (Phase 1.3).
                         if let Some(ref broker) = broker_read {
                             // debug, not info: fires on every NDJSON line, and
@@ -485,7 +485,7 @@ impl SubprocessController {
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
         let last_inband_error_wait = Arc::clone(&last_inband_error);
-        let wstore_wait = self.wstore.clone();
+        let mstore_wait = self.mstore.clone();
         let event_bus_wait = self.event_bus.clone();
         let lease_store_wait = self.lease_store.clone();
         let claimed_lease_wait = claimed_lease;
@@ -647,13 +647,13 @@ impl SubprocessController {
 
             // Persist or clear agent:last_failure in block meta so the recovery
             // banner survives tab switches and page reloads (P1.1 of
-            // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the WPS
+            // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the MPS
             // publish so the durable state is written first; the event is then
             // a low-latency push to any active subscriber.
             core::persist_last_failure(
                 &block_id_wait,
                 run_failure.as_ref(),
-                &wstore_wait,
+                &mstore_wait,
                 &event_bus_wait,
             );
 
@@ -662,8 +662,8 @@ impl SubprocessController {
             // subscribers also receive the last failure without needing a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
-                broker.publish(wps::MuxEvent {
-                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                broker.publish(mps::MuxEvent {
+                    event: mps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id_wait)],
                     sender: String::new(),
                     persist: 1,

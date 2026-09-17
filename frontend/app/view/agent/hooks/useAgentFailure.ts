@@ -35,9 +35,9 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -204,7 +204,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
     onMount(() => {
         // P1.2 — Seed from persisted block meta so the recovery banner survives
-        // tab switches and page reloads. Read once on mount; the WPS event
+        // tab switches and page reloads. Read once on mount; the MPS event
         // subscription below handles live updates for the current session.
         // (SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20 §4 P1.2)
         const persistedAtom = getBlockMetaKeyAtom(opts.blockId, "agent:last_failure");
@@ -217,7 +217,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
         const unsubFailure = muxEventSubscribe({
             eventType: WpsEvent.AgentFailure,
-            scope: WOS.makeORef("block", opts.blockId),
+            scope: MOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;
                 if (!f) return;

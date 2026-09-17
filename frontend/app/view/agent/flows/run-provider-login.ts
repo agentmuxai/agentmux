@@ -80,7 +80,7 @@ import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
 
@@ -201,7 +201,7 @@ async function finalizeAccount(
     // account's dir fresh regardless of this pane-local cache.
     if (!p.linkTarget.blockId) return;
     try {
-        const oref = WOS.makeORef("block", p.linkTarget.blockId);
+        const oref = MOS.makeORef("block", p.linkTarget.blockId);
         await RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
             meta: { "cmd:env": { ...p.authEnv, [p.provider.authConfigDirEnvVar]: dir } },

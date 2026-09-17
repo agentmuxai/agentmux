@@ -28,7 +28,7 @@
  */
 
 import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack } from "@/layout/index";
-import { atoms, pushNotification, WOS } from "@/app/store/global";
+import { atoms, pushNotification, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
@@ -100,7 +100,7 @@ export interface QuickForkModel {
  *   of its own to push a notification on `false`).
  */
 export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
-    const meta = WOS.getObjectValue<Block>(WOS.makeORef("block", model.blockId))?.meta;
+    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", model.blockId))?.meta;
     const definitionId = meta?.["agentId"] as string | undefined;
     if (!definitionId) {
         Logger.warn("quick-fork", "pane has no live agent to fork", { blockId: model.blockId });
@@ -250,7 +250,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
                 });
             } else if (showNoHistoryFallback) {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", paneOpenResult.block_id),
+                    oref: MOS.makeORef("block", paneOpenResult.block_id),
                     meta: { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true },
                 }).catch((e: any) =>
                     Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) }),

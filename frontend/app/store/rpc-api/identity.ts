@@ -212,7 +212,7 @@ export const IdentityApi = {
 
     // command "install.start" — begin install of a provider's CLI; the
     // backend npm-installs into the per-version cache and streams output
-    // via `install_chunk` WPS events scoped to `install:<sessionId>`.
+    // via `install_chunk` MPS events scoped to `install:<sessionId>`.
     InstallStartCommand(
         client: RpcClient,
         data: {
@@ -293,7 +293,7 @@ export const IdentityApi = {
     },
 
     // command "toolchain.install_system_tool" — spawns the resolved
-    // install command and streams output via the SAME `install_chunk` WPS
+    // install command and streams output via the SAME `install_chunk` MPS
     // event shape `install.start` uses, scoped `install:<sessionId>`.
     // `InstallCancelCommand` above already works unchanged for these
     // sessions (shared session registry) — no separate cancel command.

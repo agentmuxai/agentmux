@@ -50,15 +50,15 @@ const nativeMemoryListMock = vi.fn();
 // accept the VARIADIC multi-subscription call NativeMemoryManager makes
 // (one subscription per grid agent in a single muxEventSubscribe(...) call,
 // not bundle-mcp-model.ts's single-subscription shape).
-const wpsHub = vi.hoisted(() => ({
+const mpsHub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((...subs: Array<{ eventType: string; handler: (e: unknown) => void }>) => {
-        for (const sub of subs) wpsHub.handlers.set(sub.eventType, sub.handler);
+        for (const sub of subs) mpsHub.handlers.set(sub.eventType, sub.handler);
         return () => {
-            for (const sub of subs) wpsHub.handlers.delete(sub.eventType);
+            for (const sub of subs) mpsHub.handlers.delete(sub.eventType);
         };
     }),
 }));
@@ -102,7 +102,7 @@ beforeEach(() => {
     listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY")]);
     nativeMemoryListMock.mockResolvedValue({ files: [] });
     localStorage.clear();
-    wpsHub.handlers.clear();
+    mpsHub.handlers.clear();
     historyPanelMountCount = 0;
 });
 
@@ -349,7 +349,7 @@ describe("NativeMemoryManager — reactive updates", () => {
                 ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] })
                 : Promise.resolve({ files: [] })
         );
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
         expect(await screen.findByText("1 file")).toBeInTheDocument();
         // a2's card never re-fetched (still shows the original empty state).
@@ -380,7 +380,7 @@ describe("NativeMemoryManager — reactive updates", () => {
                         resolveRefresh = resolve;
                     })
             );
-            wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+            mpsHub.handlers.get("agent:memory:changed:a1")?.({});
             // Past the 250ms debounce -- fetchCountFor has now actually been
             // called and its RPC is in flight (held pending by resolveRefresh).
             await vi.advanceTimersByTimeAsync(250);
@@ -413,7 +413,7 @@ describe("NativeMemoryManager — reactive updates", () => {
                 ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] })
                 : Promise.resolve({ files: [] })
         );
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
         expect(await screen.findByText("1 file")).toBeInTheDocument();
         expect(screen.queryByText("Couldn't read memories")).toBeNull();
@@ -426,7 +426,7 @@ describe("NativeMemoryManager — reactive updates", () => {
             await vi.waitFor(() => expect(nativeMemoryListMock).toHaveBeenCalledTimes(2));
             nativeMemoryListMock.mockClear();
 
-            const handler = wpsHub.handlers.get("agent:memory:changed:a1");
+            const handler = mpsHub.handlers.get("agent:memory:changed:a1");
             handler?.({});
             handler?.({});
             handler?.({});
@@ -446,7 +446,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
 
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] });
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
         // Still showing the same file's history — the event refreshed the
         // list in place, it did not kick the user back to the file grid.
@@ -464,7 +464,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         await waitFor(() => expect(fileTileNames()).toEqual(["MEMORY.md"]));
 
         nativeMemoryListMock.mockClear();
-        wpsHub.handlers.get("agent:memory:changed:a2")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a2")?.({});
 
         // a2's own grid card legitimately refetches in the background (the
         // grid stays reactive even while the detail view is open) — what
@@ -483,7 +483,7 @@ describe("NativeMemoryManager — reactive updates", () => {
 
         // The file that was selected is gone in the refreshed list.
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "OTHER.md" }] });
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
         // Falls back to the file grid rather than holding a history panel open
         // on a file that no longer exists.
@@ -494,8 +494,8 @@ describe("NativeMemoryManager — reactive updates", () => {
     test("subscriptions are re-registered when the agent set changes", async () => {
         render(() => <NativeMemoryManager />);
         await screen.findByText("Manoz");
-        expect(wpsHub.handlers.has("agent:memory:changed:a1")).toBe(true);
-        expect(wpsHub.handlers.has("agent:memory:changed:a2")).toBe(true);
+        expect(mpsHub.handlers.has("agent:memory:changed:a1")).toBe(true);
+        expect(mpsHub.handlers.has("agent:memory:changed:a2")).toBe(true);
 
         listAgentDefinitionsMock.mockResolvedValue([agent("a3", "Nark")]);
         // Simulate the agents:changed-driven refetch useAgentDefinitions does
@@ -507,9 +507,9 @@ describe("NativeMemoryManager — reactive updates", () => {
         render(() => <NativeMemoryManager />);
         await screen.findByText("Nark");
 
-        expect(wpsHub.handlers.has("agent:memory:changed:a1")).toBe(false);
-        expect(wpsHub.handlers.has("agent:memory:changed:a2")).toBe(false);
-        expect(wpsHub.handlers.has("agent:memory:changed:a3")).toBe(true);
+        expect(mpsHub.handlers.has("agent:memory:changed:a1")).toBe(false);
+        expect(mpsHub.handlers.has("agent:memory:changed:a2")).toBe(false);
+        expect(mpsHub.handlers.has("agent:memory:changed:a3")).toBe(true);
     });
 
     // Codex P1, PR #2932: a live write to the file already open in the
@@ -527,7 +527,7 @@ describe("NativeMemoryManager — reactive updates", () => {
 
         // Same file list, same selected file — nothing about agentId or
         // filename changes, only the file's own content on the backend.
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
         await waitFor(() => expect(historyPanelMountCount).toBeGreaterThan(mountsBefore));
         // Still showing the same agent/file — a remount, not a navigation.
@@ -559,7 +559,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         // A change event's refetch fires and resolves BEFORE the initial
         // fetch does — it becomes the new latestRequestId.
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
         await waitFor(() => expect(fileTileNames()).toEqual(["MEMORY.md"]));
 
         // The original (now-superseded) initial fetch finally resolves.
@@ -596,7 +596,7 @@ describe("NativeMemoryManager — reactive updates", () => {
                 ? Promise.resolve({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] })
                 : Promise.resolve({ files: [] })
         );
-        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        mpsHub.handlers.get("agent:memory:changed:a1")?.({});
         await screen.findByText("2 files");
 
         // The original slow request finally resolves with stale data.
@@ -629,13 +629,13 @@ describe("NativeMemoryManager — reactive updates", () => {
             // (AgentPicker.tsx) via the same mocked muxEventSubscribe hub,
             // so triggering that here re-fetches the agent list for real,
             // exactly as it would from a genuine unrelated create/edit.
-            wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+            mpsHub.handlers.get("agent:memory:changed:a1")?.({});
             listAgentDefinitionsMock.mockResolvedValue([
                 agent("a1", "Manoz"),
                 agent("a2", "AgentY"),
                 agent("a3", "Nark"),
             ]);
-            wpsHub.handlers.get("agents:changed")?.({});
+            mpsHub.handlers.get("agents:changed")?.({});
             await vi.waitFor(() => expect(screen.queryByText("Nark")).not.toBeNull());
 
             // a1's debounce timer must still fire, not have been silently

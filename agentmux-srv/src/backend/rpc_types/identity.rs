@@ -3,7 +3,7 @@
 
 //! Identity / account / agent-identity-link command payloads (v6 + v7).
 //! See docs/specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
-//! Strings use snake_case for cross-language parity with wstore.
+//! Strings use snake_case for cross-language parity with mstore.
 
 use serde::{Deserialize, Serialize};
 

@@ -9,12 +9,12 @@
 //! shape, since the Armory has no agent connection context to gate on).
 //!
 //! `db_skills` is authoritatively `identity_store` as of Phase 2 of
-//! SPEC_DURABLE_BINDINGS_2026_09_10.md (§5.1/§5.4) — `wstore` stays the
+//! SPEC_DURABLE_BINDINGS_2026_09_10.md (§5.1/§5.4) — `mstore` stays the
 //! ref-table owner (`db_agent_skills_ref`/`db_bundle_skills_ref` are not
 //! promoted until Phase 3/6). Pure single-table reads/writes (`skill_get`,
 //! `skill_upsert_unique_global`) call directly on `identity_store`; methods
 //! that combine a ref table with the catalog now take `identity_store` as an
-//! explicit `catalog` parameter while still being called ON `wstore` (the
+//! explicit `catalog` parameter while still being called ON `mstore` (the
 //! ref-owning receiver).
 
 use super::*;
@@ -39,12 +39,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_SKILL_LIST,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -52,7 +52,7 @@ fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.list: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                let skills = wstore.skill_list(&identity_store, &req.agent_id)
+                let skills = mstore.skill_list(&identity_store, &req.agent_id)
                     .map_err(|e| format!("skill.list: {e}"))?;
                 Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
             })
@@ -61,12 +61,12 @@ fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_SKILL_GET,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -74,7 +74,7 @@ fn register_skill_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.get: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                if !wstore.skill_is_accessible_to(&identity_store, &req.agent_id, &req.id)
+                if !mstore.skill_is_accessible_to(&identity_store, &req.agent_id, &req.id)
                     .map_err(|e| format!("skill.get: {e}"))?
                 {
                     return Err("FORBIDDEN: skill not accessible to this agent".to_string());
@@ -88,13 +88,13 @@ fn register_skill_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_UPSERT,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -120,7 +120,7 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let (id, created_at) = if req.id.is_empty() {
                     (uuid::Uuid::new_v4().to_string(), now)
                 } else {
-                    if !wstore.skill_is_bound_to(&req.agent_id, &req.id)
+                    if !mstore.skill_is_bound_to(&req.agent_id, &req.id)
                         .map_err(|e| format!("skill.upsert: {e}"))?
                     {
                         return Err("FORBIDDEN: skill not bound to this agent".to_string());
@@ -151,9 +151,9 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // the ref-bind (Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md
                 // §5.4, accepted interim gap) — see
                 // `Store::managed_upsert_unique`'s doc comment.
-                wstore.skill_upsert_unique(&identity_store, &req.agent_id, &skill, req.id.is_empty())
+                mstore.skill_upsert_unique(&identity_store, &req.agent_id, &skill, req.id.is_empty())
                     .map_err(|e| format!("skill.upsert: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -164,13 +164,13 @@ fn register_skill_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_DELETE,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -179,7 +179,7 @@ fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.delete: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                if !wstore.skill_is_bound_to(&req.agent_id, &req.id)
+                if !mstore.skill_is_bound_to(&req.agent_id, &req.id)
                     .map_err(|e| format!("skill.delete: {e}"))?
                 {
                     return Err("FORBIDDEN: skill not bound to this agent".to_string());
@@ -191,10 +191,10 @@ fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         return Err("FORBIDDEN: cannot delete a global skill".to_string());
                     }
                 }
-                let deleted = wstore.skill_delete(&identity_store, &req.id)
+                let deleted = mstore.skill_delete(&identity_store, &req.id)
                     .map_err(|e| format!("skill.delete: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });
@@ -206,13 +206,13 @@ fn register_skill_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_BIND,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -228,7 +228,7 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 {
                     None => return Err("skill.bind: skill not found".to_string()),
                     Some(s) if !s.is_global => {
-                        if !wstore.skill_is_bound_to(&req.agent_id, &req.skill_id)
+                        if !mstore.skill_is_bound_to(&req.agent_id, &req.skill_id)
                             .map_err(|e| format!("skill.bind: {e}"))?
                         {
                             return Err("FORBIDDEN: can only bind global skills".to_string());
@@ -236,13 +236,13 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                wstore.skill_bind(&identity_store, &req.agent_id, &req.skill_id)
+                mstore.skill_bind(&identity_store, &req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.bind: {e}"))?;
                 // An agent binding a skill to itself over its own authenticated
                 // connection should reach an already-open Stash Skills tab for
                 // that agent too — same reactivity as the catalog-tier bind.
                 // reagentx P2 on PR #2329.
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -253,12 +253,12 @@ fn register_skill_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_UNBIND,
         Box::new(move |data, ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -266,10 +266,10 @@ fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.unbind: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                let unbound = wstore.skill_unbind(&req.agent_id, &req.skill_id)
+                let unbound = mstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.unbind: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });
@@ -281,15 +281,15 @@ fn register_skill_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_skill_catalog_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_LIST,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             Box::pin(async move {
-                let skills = wstore.skill_list_global(&identity_store)
+                let skills = mstore.skill_list_global(&identity_store)
                     .map_err(|e| format!("skill.catalog.list: {e}"))?;
                 Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
             })
@@ -355,7 +355,7 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // directly on identity_store.
                 identity_store.skill_upsert_unique_global(&skill)
                     .map_err(|e| format!("skill.catalog.upsert: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -376,13 +376,13 @@ fn register_skill_catalog_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // *other* agent ids), which nobody asked for.
 // See docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md §2.4.
 fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_BIND,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -398,7 +398,7 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 {
                     None => return Err("skill.catalog.bind: skill not found".to_string()),
                     Some(s) if !s.is_global => {
-                        if !wstore.skill_is_bound_to(&req.agent_id, &req.skill_id)
+                        if !mstore.skill_is_bound_to(&req.agent_id, &req.skill_id)
                             .map_err(|e| format!("skill.catalog.bind: {e}"))?
                         {
                             return Err("FORBIDDEN: can only bind global skills".to_string());
@@ -406,12 +406,12 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                wstore.skill_bind(&identity_store, &req.agent_id, &req.skill_id)
+                mstore.skill_bind(&identity_store, &req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.bind: {e}"))?;
                 // Lets any other open Stash/Armory view for this agent pick up
                 // the new binding without a manual refresh — skill.bind (the
                 // check_s1 agent-self-service path) intentionally left alone.
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -435,19 +435,19 @@ fn register_skill_catalog_bind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// `Store::skill_list_global_for_agent`'s doc comment and
 /// docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_LIST_FOR_AGENT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.catalog.list_for_agent: {e}"))?;
-                let skills = wstore.skill_list_global_for_agent(&identity_store, &req.agent_id)
+                let skills = mstore.skill_list_global_for_agent(&identity_store, &req.agent_id)
                     .map_err(|e| format!("skill.catalog.list_for_agent: {e}"))?;
                 Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
             })
@@ -466,13 +466,13 @@ fn register_skill_catalog_list_for_agent(engine: &Arc<WshRpcEngine>, state: &App
 /// today — defense in depth over relying solely on UUID secrecy.
 /// reagentx P1 on PR #2329 (round 2).
 fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_UNBIND,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -489,10 +489,10 @@ fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     Some(_) => {}
                 }
-                let unbound = wstore.skill_unbind(&req.agent_id, &req.skill_id)
+                let unbound = mstore.skill_unbind(&req.agent_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.unbind: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });
@@ -509,14 +509,14 @@ fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // Composable model v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md
 // (GH issue #2024 item 3).
 fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_BIND_TO_BUNDLE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
@@ -534,7 +534,7 @@ fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &App
                 {
                     None => return Err("skill.catalog.bind_to_bundle: skill not found".to_string()),
                     Some(s) if !s.is_global => {
-                        if !wstore.bundle_skill_is_accessible_to(&identity_store, &req.bundle_id, &req.skill_id)
+                        if !mstore.bundle_skill_is_accessible_to(&identity_store, &req.bundle_id, &req.skill_id)
                             .map_err(|e| format!("skill.catalog.bind_to_bundle: {e}"))?
                         {
                             return Err("FORBIDDEN: can only bind global skills to a bundle".to_string());
@@ -542,9 +542,9 @@ fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &App
                     }
                     Some(_) => {}
                 }
-                wstore.bundle_skill_bind(&identity_store, &id_store, &req.bundle_id, &req.skill_id)
+                mstore.bundle_skill_bind(&identity_store, &id_store, &req.bundle_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.bind_to_bundle: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -561,19 +561,19 @@ fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &App
 /// `skill_list_global_for_agent`'s doc comment — see `bundle_skill_list`'s
 /// own implementation.
 fn register_skill_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_LIST_FOR_BUNDLE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { bundle_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.catalog.list_for_bundle: {e}"))?;
-                let skills = wstore.bundle_skill_list(&identity_store, &req.bundle_id)
+                let skills = mstore.bundle_skill_list(&identity_store, &req.bundle_id)
                     .map_err(|e| format!("skill.catalog.list_for_bundle: {e}"))?;
                 Ok(Some(serde_json::to_value(&skills).map_err(|e| e.to_string())?))
             })
@@ -586,14 +586,14 @@ fn register_skill_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &Ap
 /// `mcp.rs`'s `register_mcp_catalog_upsert_for_bundle` for the full
 /// reasoning (reagentx P1 review on PR #2639).
 fn register_skill_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
@@ -616,7 +616,7 @@ fn register_skill_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &
                 let (id, created_at) = if req.id.is_empty() {
                     (uuid::Uuid::new_v4().to_string(), now)
                 } else {
-                    if !wstore.bundle_skill_is_bound_to(&req.bundle_id, &req.id)
+                    if !mstore.bundle_skill_is_bound_to(&req.bundle_id, &req.id)
                         .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?
                     {
                         return Err("FORBIDDEN: skill not bound to this bundle".to_string());
@@ -643,9 +643,9 @@ fn register_skill_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &
                     created_at,
                     updated_at: now,
                 };
-                wstore.bundle_skill_upsert_unique(&identity_store, &id_store, &req.bundle_id, &skill, req.id.is_empty())
+                mstore.bundle_skill_upsert_unique(&identity_store, &id_store, &req.bundle_id, &skill, req.id.is_empty())
                     .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "skills:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -659,22 +659,22 @@ fn register_skill_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &
 // mcp.rs's register_mcp_catalog_unbind_from_bundle for why this does NOT
 // restrict to global-only, unlike its agent-level sibling.
 fn register_skill_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_UNBIND_FROM_BUNDLE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
                 struct Req { bundle_id: String, skill_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.catalog.unbind_from_bundle: {e}"))?;
-                let unbound = wstore.bundle_skill_unbind(&req.bundle_id, &req.skill_id)
+                let unbound = mstore.bundle_skill_unbind(&req.bundle_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.unbind_from_bundle: {e}"))?;
                 if unbound {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });
@@ -686,13 +686,13 @@ fn register_skill_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: 
 }
 
 fn register_skill_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_DELETE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -707,10 +707,10 @@ fn register_skill_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         return Err("FORBIDDEN: cannot delete a private skill via the catalog".to_string());
                     }
                 }
-                let deleted = wstore.skill_delete(&identity_store, &req.id)
+                let deleted = mstore.skill_delete(&identity_store, &req.id)
                     .map_err(|e| format!("skill.catalog.delete: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });

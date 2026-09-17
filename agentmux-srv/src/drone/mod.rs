@@ -13,7 +13,7 @@
 //!
 //! Architecture:
 //!   * `types.rs`        — DroneDefinition, DroneRun, FlowNode, FlowEdge.
-//!   * `storage.rs`      — wstore CRUD over db_drone_definitions
+//!   * `storage.rs`      — mstore CRUD over db_drone_definitions
 //!                         + db_drone_runs.
 //!   * `executor/`       — DAG topological sort + per-layer concurrent runner.
 //!   * `executor/blocks` — one file per block type.

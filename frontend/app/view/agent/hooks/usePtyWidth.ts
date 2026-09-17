@@ -34,9 +34,9 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import * as MOS from "@/app/store/mos";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 
 export interface UsePtyWidthOpts {
@@ -203,7 +203,7 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
         // next turn starts, rather than failing against a dead PTY.
         const unsubStatus = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
-            scope: WOS.makeORef("block", opts.blockId),
+            scope: MOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const status = (event as any)?.data?.shellprocstatus;
                 if (status === "running") markReady();

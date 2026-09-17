@@ -379,7 +379,7 @@ impl Migration for M0025AgentsLaunchStateBackfill {
         // the raw connection below touches the table.
         drop(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("agents_launch_state_backfill: open wstore: {e}")))?,
+                .map_err(|e| MigrationError(format!("agents_launch_state_backfill: open mstore: {e}")))?,
         );
         let mut conn = Connection::open(&ctx.channel_store_path)
             .map_err(|e| MigrationError(format!("agents_launch_state_backfill: open: {e}")))?;

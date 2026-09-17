@@ -9,7 +9,7 @@
 //!   DONE ─(resync+force)─> RUNNING
 //!
 //! I/O model (3 async tasks when running):
-//! 1. PTY read loop: process stdout → FileStore + WPS event
+//! 1. PTY read loop: process stdout → FileStore + MPS event
 //! 2. Input loop: input channel → process stdin
 //! 3. Wait loop: monitor process exit, update status
 //!

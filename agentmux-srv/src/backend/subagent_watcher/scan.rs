@@ -17,7 +17,7 @@ use super::parse::file_mtime;
 use super::types::*;
 use super::SubagentWatcher;
 use crate::backend::eventbus::{WSEventType, WS_EVENT_RPC};
-use crate::backend::wps;
+use crate::backend::mps;
 
 /// How many times `reconcile_stale_subagents` retries when the parent
 /// block's controller isn't registered yet, before giving up and leaving
@@ -29,7 +29,7 @@ use crate::backend::wps;
 const MAX_RECONCILE_RETRIES: u32 = 5;
 const RECONCILE_RETRY_INTERVAL_MS: u64 = 3_000;
 
-/// Publish a `wps::EVENT_SUBAGENT_BACKFILL_STATUS` ping, scoped to this
+/// Publish a `mps::EVENT_SUBAGENT_BACKFILL_STATUS` ping, scoped to this
 /// pane's own block id. No-op if `self.broker` was never wired (tests, or a
 /// `SubagentWatcher` built via bare `new()`) -- see the `broker` field's own
 /// doc comment in `mod.rs`. See
@@ -37,8 +37,8 @@ const RECONCILE_RETRY_INTERVAL_MS: u64 = 3_000;
 /// section 5.
 fn publish_backfill_status(watcher: &SubagentWatcher, parent_block_id: &str, status: &str) {
     let Some(broker) = watcher.broker.lock().unwrap().clone() else { return };
-    broker.publish(wps::MuxEvent {
-        event: wps::EVENT_SUBAGENT_BACKFILL_STATUS.to_string(),
+    broker.publish(mps::MuxEvent {
+        event: mps::EVENT_SUBAGENT_BACKFILL_STATUS.to_string(),
         scopes: vec![format!("block:{}", parent_block_id)],
         sender: String::new(),
         persist: 2,

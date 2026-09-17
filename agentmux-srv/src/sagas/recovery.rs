@@ -18,7 +18,7 @@
 //      effects didn't apply.)
 //   3. For each succeeded step, derive the inverse `Command` via
 //      `derive_inverse_command`. If derivable, dispatch it through
-//      the reducer + apply emitted events to wstore. If NOT derivable,
+//      the reducer + apply emitted events to mstore. If NOT derivable,
 //      log a warning + skip — operator review needed.
 //   4. After the walk: `terminate(Compensated)` if every dispatched
 //      inverse succeeded; `mark_failed_compensation` otherwise. The
@@ -138,7 +138,7 @@ async fn recover_saga(state: &AppState, saga: &UnresolvedSaga) -> Result<(), Str
     // (codex P1 PR #636 round 6.) Pending steps mean a step started
     // but never reached succeeded/failed/compensated — usually a
     // crash between dispatch and finish_step, AFTER the reducer +
-    // wstore-apply already committed. We CANNOT safely auto-mark
+    // mstore-apply already committed. We CANNOT safely auto-mark
     // such a saga as `compensated` because side effects may still
     // be applied. Surface as `failed_compensation` for operator
     // review; the saga's pending step + forward state remain in
@@ -311,7 +311,7 @@ async fn recover_saga(state: &AppState, saga: &UnresolvedSaga) -> Result<(), Str
 }
 
 /// Dispatch a recovery-time compensating command + apply its events
-/// to wstore. Mirrors `SagaCtx::compensate` but standalone (no live
+/// to mstore. Mirrors `SagaCtx::compensate` but standalone (no live
 /// saga to attach to). Returns the emitted events on success, the
 /// reducer's error message on rejection.
 async fn dispatch_inverse(state: &AppState, cmd: Command) -> Result<Vec<Event>, String> {
@@ -323,8 +323,8 @@ async fn dispatch_inverse(state: &AppState, cmd: Command) -> Result<Vec<Event>, 
         return Err(message);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore) {
-            return Err(format!("wstore apply failed: {}", e));
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
+            return Err(format!("mstore apply failed: {}", e));
         }
     }
     crate::server::service::publish_events(state, &events);
@@ -713,11 +713,11 @@ mod tests {
     /// and assert it returns 1 + the saga is marked `compensated`."
     /// The reducer state difference between the original and fresh
     /// AppState mirrors what happens at process restart — except in
-    /// this test wstore is also fresh, so the recovery's reducer
+    /// this test mstore is also fresh, so the recovery's reducer
     /// dispatches operate against a clean reducer state. We assert
-    /// only the saga log behaviour (the wstore-dispatched compensating
+    /// only the saga log behaviour (the mstore-dispatched compensating
     /// commands are no-ops here because there's no entity to delete in
-    /// the fresh wstore — but the saga log still records the
+    /// the fresh mstore — but the saga log still records the
     /// compensation attempts, which is what `--diag sagas` surfaces).
     #[tokio::test]
     async fn compensate_unresolved_picks_up_running_saga_with_succeeded_steps() {
@@ -782,7 +782,7 @@ mod tests {
 
         // Saga log shows it `compensated` (or `failed_compensation`
         // if the dispatched inverses errored against the empty
-        // wstore — but the saga is no longer unresolved either way).
+        // mstore — but the saga is no longer unresolved either way).
         let unresolved = state.saga_log.unresolved_sagas().unwrap();
         assert!(
             unresolved.is_empty(),

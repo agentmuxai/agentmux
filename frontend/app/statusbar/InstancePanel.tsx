@@ -23,7 +23,7 @@ import { launcherEventsActive } from "@/util/launcher-events";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { ObjectService } from "@/store/services";
-import { getObjectValue, makeORef } from "@/store/wos";
+import { getObjectValue, makeORef } from "@/store/mos";
 import { dispatchWindowOpacity, liveWindowOpacity } from "@/app/store/window-opacity-store";
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import {

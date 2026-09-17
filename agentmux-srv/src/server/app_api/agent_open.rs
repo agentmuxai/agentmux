@@ -82,7 +82,7 @@ fn resolve_vendor_env_override(
 // Store::resolve_effective_provider_id in backend/storage/agents.rs
 // (2026-08-15) — the identical resolution logic was independently
 // duplicated in identity/resolver/inject.rs's layer-3 credential gate,
-// found reading agent.provider directly (the same wstore-vs-id_store
+// found reading agent.provider directly (the same mstore-vs-id_store
 // class of bug this file's own version was fixed for in round 3 of PR
 // #2587's review). Consolidated so both call sites share one
 // implementation and can't drift on it separately again — see that
@@ -241,7 +241,7 @@ pub(crate) async fn open_agent_impl(
     state: &AppState,
     cmd: CommandAgentOpenData,
 ) -> Result<AgentOpenResult, String> {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let event_bus = state.event_bus.clone();
     let filestore = state.filestore.clone();
@@ -252,7 +252,7 @@ pub(crate) async fn open_agent_impl(
     tracing::info!(agent_id = %cmd.agent_id, "agent.open");
 
                 // 1. Load the agent definition (by id or name)
-                let agents = wstore.agent_def_list()
+                let agents = mstore.agent_def_list()
                     .map_err(|e| format!("agent.open: {e}"))?;
                 let mut agent = agents.iter()
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
@@ -264,7 +264,7 @@ pub(crate) async fn open_agent_impl(
                 // Store::resolve_effective_provider_id's own doc comment
                 // in backend/storage/agents.rs) — one lookup here instead
                 // of rewriting every downstream `agent.provider` read in
-                // this handler. MUST be app_state.id_store, never wstore.
+                // this handler. MUST be app_state.id_store, never mstore.
                 agent.provider = app_state.id_store.resolve_effective_provider_id(&agent);
 
                 // Serialize the rest of this handler per agent definition —
@@ -278,11 +278,11 @@ pub(crate) async fn open_agent_impl(
                     .ok_or_else(|| format!("INVALID_PROVIDER: unknown provider '{}'", agent.provider))?;
 
                 // 3. Determine tab
-                let tab_id = resolve_tab_id(&wstore, cmd.tab_id.as_deref())?;
+                let tab_id = resolve_tab_id(&mstore, cmd.tab_id.as_deref())?;
 
                 // 4. Check for existing agent pane in this tab (idempotent)
                 // Use resolved agent.id (not raw user input which could be a name)
-                if let Some(existing) = find_agent_block(&wstore, &tab_id, &agent.id)? {
+                if let Some(existing) = find_agent_block(&mstore, &tab_id, &agent.id)? {
                     // Ensure the controller is registered (may be missing if block
                     // was created by the frontend without backend initialization)
                     if blockcontroller::get_controller(&existing.oid).is_none() {
@@ -296,15 +296,15 @@ pub(crate) async fn open_agent_impl(
                         meta_update.insert("controller".to_string(), json!(controller_type));
                         meta_update.insert("agentProvider".to_string(), json!(&agent.provider));
                         let _ = crate::server::service::update_object_meta(
-                            &wstore, &format!("block:{}", existing.oid), &meta_update,
+                            &mstore, &format!("block:{}", existing.oid), &meta_update,
                         );
                         // Register controller
-                        let block_for_resync = wstore.must_get::<Block>(&existing.oid)
+                        let block_for_resync = mstore.must_get::<Block>(&existing.oid)
                             .map_err(|e| format!("agent.open: reload block: {e}"))?;
                         let _ = blockcontroller::resync_controller(
                             &block_for_resync, &tab_id, None, true, true,
-                            Some(broker.clone()), Some(event_bus.clone()), Some(wstore.clone()),
-                            Some(filestore.clone()), wstore.shared_agent_registry(),
+                            Some(broker.clone()), Some(event_bus.clone()), Some(mstore.clone()),
+                            Some(filestore.clone()), mstore.shared_agent_registry(),
                             app_state.boot_id.clone(),
                         );
                     }
@@ -465,7 +465,7 @@ pub(crate) async fn open_agent_impl(
                 // Merge env vars from the definition's persisted env content blob (KEY=VALUE lines).
                 // Provider/auth entries inserted above take precedence; definition-level vars
                 // are merged after so they can extend (but not override) the auth env.
-                if let Ok(Some(env_blob)) = wstore.agent_content_get(&agent.id, "env") {
+                if let Ok(Some(env_blob)) = mstore.agent_content_get(&agent.id, "env") {
                     for line in env_blob.content.lines() {
                         if let Some((k, v)) = line.split_once('=') {
                             let k = k.trim();
@@ -521,7 +521,7 @@ pub(crate) async fn open_agent_impl(
                 // prevent. A block with no registered controller (e.g. right
                 // after an app restart, before anything has resynced) is not
                 // "live" and doesn't block seeding.
-                let agent_live_elsewhere = wstore.get_all::<Block>()
+                let agent_live_elsewhere = mstore.get_all::<Block>()
                     .map(|blocks| {
                         blocks.iter().any(|b| {
                             obj::meta_get_string(&b.meta, "agentId", "") == agent.id
@@ -532,7 +532,7 @@ pub(crate) async fn open_agent_impl(
                 let resume_session_id: Option<String> = if agent_live_elsewhere {
                     None
                 } else {
-                    wstore.shared_agent_registry()
+                    mstore.shared_agent_registry()
                         .and_then(|reg| reg.list_active().ok())
                         .and_then(|records| {
                             records.into_iter()
@@ -552,7 +552,7 @@ pub(crate) async fn open_agent_impl(
                 // the same agent restores its zoom instead of resetting to 1.0.
                 // Stored only for non-default zooms; clamp to the frontend's
                 // [0.5, 2.0] range so a corrupt value can't escape it.
-                if let Ok(Some(c)) = wstore.agent_content_get(&agent.id, "ui:zoom") {
+                if let Ok(Some(c)) = mstore.agent_content_get(&agent.id, "ui:zoom") {
                     if let Some(z) = parse_seed_zoom(&c.content) {
                         meta.insert("term:zoom".to_string(), json!(z));
                     }
@@ -571,7 +571,7 @@ pub(crate) async fn open_agent_impl(
                 // can't inject arbitrary CSS.
                 {
                     use crate::backend::agent_color::{dim_agent_color, is_valid_agent_color, pick_agent_color};
-                    let stored = wstore
+                    let stored = mstore
                         .agent_content_get(&agent.id, "ui:color")
                         .ok()
                         .flatten()
@@ -588,7 +588,7 @@ pub(crate) async fn open_agent_impl(
                             // Best-effort: a store error here shouldn't block
                             // opening the agent — the pane just stays uncolored
                             // this session and we retry next open.
-                            let _ = wstore.agent_content_set(&crate::backend::storage::store::AgentContent {
+                            let _ = mstore.agent_content_set(&crate::backend::storage::store::AgentContent {
                                 agent_id: agent.id.clone(),
                                 content_type: "ui:color".to_string(),
                                 content: picked.clone(),
@@ -645,7 +645,7 @@ pub(crate) async fn open_agent_impl(
                 // block is invisible to the reducer-canonical `state.blocks`
                 // (only hydrated from SQLite at bootstrap), so tearing this agent
                 // pane off later was rejected "block not found". BlockCreated
-                // carries meta → apply_block_created writes the wstore Block,
+                // carries meta → apply_block_created writes the mstore Block,
                 // which the controller resync below reloads by id.
                 let meta_val = serde_json::to_value(&meta)
                     .map_err(|e| format!("agent.open: meta serialize: {e}"))?;
@@ -673,8 +673,8 @@ pub(crate) async fn open_agent_impl(
                     })
                     .ok_or_else(|| "agent.open: CreateBlock emitted no BlockCreated".to_string())?;
                 for ev in &create_events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
-                        tracing::warn!("agent.open: CreateBlock wstore apply failed: {e}");
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                        tracing::warn!("agent.open: CreateBlock mstore apply failed: {e}");
                     }
                 }
                 crate::server::service::publish_events(&app_state, &create_events);
@@ -730,10 +730,10 @@ pub(crate) async fn open_agent_impl(
                 //    missing and overwrites whatever's there. Same-
                 //    name same-hour launches will share a workdir;
                 //    proper allocation is tracked as a follow-up.
-                write_agent_config_files(&wstore, &app_state.id_store, &app_state.identity_store, &agent, routing_id, &work_dir)?;
+                write_agent_config_files(&mstore, &app_state.id_store, &app_state.identity_store, &agent, routing_id, &work_dir)?;
 
                 // 9. Register controller (resync)
-                let block_for_resync = wstore.must_get::<Block>(&block_id)
+                let block_for_resync = mstore.must_get::<Block>(&block_id)
                     .map_err(|e| format!("agent.open: reload block: {e}"))?;
                 blockcontroller::resync_controller(
                     &block_for_resync,
@@ -743,16 +743,16 @@ pub(crate) async fn open_agent_impl(
                     true,
                     Some(broker.clone()),
                     Some(event_bus.clone()),
-                    Some(wstore.clone()),
+                    Some(mstore.clone()),
                     Some(filestore.clone()),
-                    wstore.shared_agent_registry(),
+                    mstore.shared_agent_registry(),
                     app_state.boot_id.clone(),
                 )?;
 
                 // 10. Broadcast block + tab + layout updates to frontend
                 {
                     let mut updates = Vec::new();
-                    if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
+                    if let Ok(updated_block) = mstore.must_get::<Block>(&block_id) {
                         updates.push(obj::MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: "block".into(),
@@ -760,14 +760,14 @@ pub(crate) async fn open_agent_impl(
                             obj: Some(obj::mux_obj_to_value(&updated_block)),
                         });
                     }
-                    if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
+                    if let Ok(updated_tab) = mstore.must_get::<Tab>(&tab_id) {
                         updates.push(obj::MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: "tab".into(),
                             oid: tab_id.clone(),
                             obj: Some(obj::mux_obj_to_value(&updated_tab)),
                         });
-                        if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
+                        if let Ok(updated_layout) = mstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
                             updates.push(obj::MuxObjUpdate {
                                 updatetype: "update".into(),
                                 otype: "layout".into(),
@@ -795,7 +795,7 @@ pub(crate) async fn open_agent_impl(
 
 /// Write agent config files (CLAUDE.md, .mcp.json, etc.) to the working directory.
 pub(super) fn write_agent_config_files(
-    wstore: &Store,
+    mstore: &Store,
     id_store: &Store,
     identity_store: &Store,
     agent: &crate::backend::storage::AgentDefinition,
@@ -803,7 +803,7 @@ pub(super) fn write_agent_config_files(
     work_dir: &str,
 ) -> Result<(), String> {
     // Load agent content
-    let contents = wstore.agent_content_get_all(&agent.id)
+    let contents = mstore.agent_content_get_all(&agent.id)
         .unwrap_or_default();
 
     let mut content_map = std::collections::HashMap::new();
@@ -860,7 +860,7 @@ pub(super) fn write_agent_config_files(
     // db_agent_skills. See Store::effective_skills for the merge algorithm —
     // shared with the `listagentskills` RPC handler so the frontend's
     // pre-launch skill fetch and this materialization path never diverge.
-    let effective_skills = wstore.effective_skills(identity_store, &agent.id);
+    let effective_skills = mstore.effective_skills(identity_store, &agent.id);
 
     let mut config_files = crate::backend::agent_config::build_config_files(
         &content_map,
@@ -879,7 +879,7 @@ pub(super) fn write_agent_config_files(
     // `effective_mcp_servers` (not the raw `mcp_server_list`) also unions in
     // the agent's bound bundle's own referenced servers — composable model
     // v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.effective_mcp_servers(identity_store, &agent.id); // own refs + bundle refs + globals
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id); // own refs + bundle refs + globals
     // reagentx P1 on PR #2639: has_own_mcp_refs must reflect ONLY the
     // agent's own direct binds, computed from the raw (pre-bundle-union)
     // mcp_server_list — NOT from `visible_mcp` above, which already
@@ -890,7 +890,7 @@ pub(super) fn write_agent_config_files(
     // silently dropped, even though the agent itself never bound anything.
     // Same fix as effective_skills's has_own_skill_refs — see its own
     // comment for the full reasoning.
-    let has_own_mcp_refs = wstore.mcp_server_list(identity_store, &agent.id)
+    let has_own_mcp_refs = mstore.mcp_server_list(identity_store, &agent.id)
         .unwrap_or_default()
         .iter()
         .any(|item| !item.server.is_global);
@@ -934,7 +934,7 @@ pub(super) fn write_agent_config_files(
     if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
         match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
             &config_files[pos].content,
-            &wstore,
+            &mstore,
             agent_slug,
         ) {
             Some(rewritten) => config_files[pos].content = rewritten,
@@ -1039,7 +1039,7 @@ pub(super) fn write_agent_config_files(
     //
     // Best-effort: an agent must never fail to launch because a tracking row
     // could not be written.
-    observe_project_instructions(wstore, agent, &expanded_dir);
+    observe_project_instructions(mstore, agent, &expanded_dir);
 
     tracing::info!(
         agent_id = %agent.id,
@@ -1056,7 +1056,7 @@ pub(super) fn write_agent_config_files(
 /// Split out so the launch path reads as one line and this can be tested on
 /// its own. Never returns an error: see the call site.
 pub(super) fn observe_project_instructions(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
     working_dir: &str,
 ) {
@@ -1089,7 +1089,7 @@ pub(super) fn observe_project_instructions(
         })
         .collect();
 
-    if let Err(e) = wstore.project_instructions_record(&agent.id, &observations) {
+    if let Err(e) = mstore.project_instructions_record(&agent.id, &observations) {
         tracing::warn!(
             agent_id = %agent.id, error = %e,
             "agent.open: could not record project-instruction observations"
@@ -1161,24 +1161,24 @@ mod write_agent_config_files_tests {
     /// file stays active alongside the newly selected format.
     #[test]
     fn switching_skill_format_removes_the_stale_artifact() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         let work_dir = tempfile::tempdir().unwrap();
         let work_dir_str = work_dir.path().to_str().unwrap();
 
         let mut agent = make_agent("agent-1", work_dir_str);
-        wstore.agent_def_insert(&mut agent).unwrap();
-        wstore.skill_upsert_unique(&wstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
+        mstore.agent_def_insert(&mut agent).unwrap();
+        mstore.skill_upsert_unique(&mstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
 
-        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
         let skill_md = work_dir.path().join(".claude/skills/deploy/SKILL.md");
         assert!(skill_md.exists(), "expected .claude/skills/deploy/SKILL.md to be written");
 
         // Flip the same skill to "prompt" format and relaunch.
         let mut prompt_skill = make_skill("prompt");
         prompt_skill.updated_at = 1_700_000_000_001;
-        wstore.skill_upsert_unique(&wstore, "agent-1", &prompt_skill, true).unwrap();
-        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
+        mstore.skill_upsert_unique(&mstore, "agent-1", &prompt_skill, true).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
 
         let command_md = work_dir.path().join(".claude/commands/deploy.md");
         assert!(command_md.exists(), "expected .claude/commands/deploy.md to be written");
@@ -1197,21 +1197,21 @@ mod write_agent_config_files_tests {
     /// the stale-cleanup pass.
     #[test]
     fn user_authored_files_outside_the_manifest_are_never_touched() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         let work_dir = tempfile::tempdir().unwrap();
         let work_dir_str = work_dir.path().to_str().unwrap();
 
         let mut agent = make_agent("agent-1", work_dir_str);
-        wstore.agent_def_insert(&mut agent).unwrap();
+        mstore.agent_def_insert(&mut agent).unwrap();
 
         let user_file = work_dir.path().join(".claude/commands/my-own-command.md");
         std::fs::create_dir_all(user_file.parent().unwrap()).unwrap();
         std::fs::write(&user_file, "# hand-authored, not from AgentMux").unwrap();
 
-        wstore.skill_upsert_unique(&wstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
-        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
-        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
+        mstore.skill_upsert_unique(&mstore, "agent-1", &make_skill("agent-skill"), true).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(user_file.exists(), "hand-authored file outside AgentMux's manifest must survive");
     }
@@ -1223,13 +1223,13 @@ mod write_agent_config_files_tests {
     /// agent's working directory (reagent P1, PR #2322).
     #[test]
     fn cleanup_refuses_to_delete_a_manifest_path_that_escapes_the_working_dir() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         let work_dir = tempfile::tempdir().unwrap();
         let work_dir_str = work_dir.path().to_str().unwrap();
 
         let mut agent = make_agent("agent-1", work_dir_str);
-        wstore.agent_def_insert(&mut agent).unwrap();
+        mstore.agent_def_insert(&mut agent).unwrap();
 
         // A sentinel file OUTSIDE the working directory that a traversal
         // attempt would target.
@@ -1252,7 +1252,7 @@ mod write_agent_config_files_tests {
 
         // No skills at all this run, so the manifest's one entry is "stale"
         // and would normally be deleted.
-        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(sentinel.exists(), "file outside the working directory must never be deleted");
     }
@@ -1267,16 +1267,16 @@ mod write_agent_config_files_tests {
     /// bound anything.
     #[test]
     fn a_bundle_referenced_private_mcp_server_does_not_drop_the_agents_legacy_mcp_blob() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         let work_dir = tempfile::tempdir().unwrap();
         let work_dir_str = work_dir.path().to_str().unwrap();
 
         let mut agent = make_agent("agent-1", work_dir_str);
         agent.memory_id = "bundle-1".to_string();
-        wstore.agent_def_insert(&mut agent).unwrap();
+        mstore.agent_def_insert(&mut agent).unwrap();
 
-        wstore
+        mstore
             .bundle_upsert(&crate::backend::storage::bundles::Bundle {
                 id: "bundle-1".to_string(),
                 name: "Bundle 1".to_string(),
@@ -1296,9 +1296,9 @@ mod write_agent_config_files_tests {
                 is_system: false,
             })
             .unwrap();
-        wstore
+        mstore
             .mcp_server_upsert_unique(
-                &wstore,
+                &mstore,
                 "some-other-context",
                 &crate::backend::storage::McpServer {
                     id: "bundle-private-server".to_string(),
@@ -1312,10 +1312,10 @@ mod write_agent_config_files_tests {
                 false,
             )
             .unwrap_or(());
-        wstore.bundle_mcp_bind(&wstore, &wstore, "bundle-1", "bundle-private-server").unwrap();
+        mstore.bundle_mcp_bind(&mstore, &mstore, "bundle-1", "bundle-private-server").unwrap();
         // agent-1 itself has NO own db_mcp_servers ref — only its bundle does.
 
-        wstore
+        mstore
             .agent_content_set(&crate::backend::storage::content::AgentContent {
                 agent_id: "agent-1".to_string(),
                 content_type: "mcp".to_string(),
@@ -1324,7 +1324,7 @@ mod write_agent_config_files_tests {
             })
             .unwrap();
 
-        write_agent_config_files(&wstore, &id_store, &wstore, &agent, "test-agent", work_dir_str).unwrap();
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
 
         let mcp_json_path = work_dir.path().join(".mcp.json");
         let mcp_json = std::fs::read_to_string(&mcp_json_path).unwrap();

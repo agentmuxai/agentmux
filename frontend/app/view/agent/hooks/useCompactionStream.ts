@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useCompactionStream — the single per-block WPS subscription for
+ * useCompactionStream — the single per-block MPS subscription for
  * `compaction_started` events, published by the `PreCompact` hook
  * (`agentmux-bashwrap precompact --trigger=manual|auto`) the instant
  * Claude Code begins compacting. See
@@ -28,7 +28,7 @@
  * Codex P1 on PR #2378 (two rounds): this event is published with
  * `persist: 0` (`wps_client.rs`) — never retained/replayed — because
  * there is no completion tombstone (`compact_boundary` arrives over
- * the separate NDJSON stream, not WPS), so a replayed "started" ping
+ * the separate NDJSON stream, not MPS), so a replayed "started" ping
  * is indistinguishable from a genuinely active one and a timestamp-
  * age guard alone cannot fix that on the receiving end: a pane
  * reconnecting seconds after a real, already-finished compaction
@@ -71,8 +71,8 @@
 
 import { createEffect, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import type { CompactionStartedNode } from "../types";
@@ -96,7 +96,7 @@ export interface UseCompactionStreamOptions {
 
 /**
  * A `compaction_started` ping older than this is treated as stale —
- * almost certainly a WPS replay of a compaction that already
+ * almost certainly a MPS replay of a compaction that already
  * finished (its `compact_boundary` completion arrived over the
  * separate NDJSON stream while nobody was subscribed to see it), not
  * a real one still in flight. The real captured example in the spec
@@ -118,7 +118,7 @@ const CLOCK_SKEW_TOLERANCE_MS = 60 * 1000;
 export type CompactionTrigger = "manual" | "auto";
 
 /**
- * Validate + resolve a raw `compaction_started` WPS payload into a
+ * Validate + resolve a raw `compaction_started` MPS payload into a
  * trigger + clamped `startedAt`, or `null` to reject it outright
  * (malformed shape, unparseable/missing timestamp, or stale replay —
  * see the module doc comment). Pure and exported so the staleness

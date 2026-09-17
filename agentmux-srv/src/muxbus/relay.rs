@@ -159,7 +159,7 @@ pub(crate) async fn relay_inject(
 /// **`store` must be the one muxbus credentials actually live in —
 /// `AppState::id_store`,** the same store `CloudSubscriber::init_global` and
 /// every `muxbus.login`/`status`/`disconnect` handler use. Passing the
-/// per-channel `wstore` finds nothing whenever the shared root resolves (the
+/// per-channel `mstore` finds nothing whenever the shared root resolves (the
 /// normal case), so tier 4 would silently never fire for a logged-in user
 /// (reagent #3023 P0). Note this deliberately does NOT follow `AppState`'s
 /// general steer toward `identity_store` for new muxbus call sites: the

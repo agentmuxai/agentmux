@@ -362,9 +362,9 @@ mod tests {
             std::env::set_var(k, v);
         }
 
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "claude", &mut env);
+        let (account_id, dir) = compute_and_ensure_account_dir(&mstore, "", "claude", &mut env);
         assert!(!account_id.is_empty(), "must mint a fresh id when none supplied");
         let dir = dir.expect("oauth-class provider must yield a dir");
         let expected = paths.identity_dir(&account_id).unwrap().join("claude");
@@ -393,9 +393,9 @@ mod tests {
             std::env::set_var(k, v);
         }
 
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, _) = compute_and_ensure_account_dir(&wstore, "acc-reconnect", "claude", &mut env);
+        let (account_id, _) = compute_and_ensure_account_dir(&mstore, "acc-reconnect", "claude", &mut env);
         assert_eq!(account_id, "acc-reconnect", "reconnect must reuse the supplied id, not mint a new one");
 
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
@@ -429,9 +429,9 @@ mod tests {
         }
         assert!(agentmux_common::isolated_auth_enabled(), "precondition: this test needs isolation actually on");
 
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "claude", &mut env);
+        let (account_id, dir) = compute_and_ensure_account_dir(&mstore, "", "claude", &mut env);
         let dir = std::path::PathBuf::from(dir.expect("oauth-class provider must yield a dir"));
         assert!(
             dir.starts_with(&paths.instance_dir),
@@ -496,9 +496,9 @@ mod tests {
         // but the account id is still returned (unlike bundle mode,
         // there's no "skip entirely" case here — the account always
         // gets minted/reused, only the isolation dir is conditional).
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut env = std::collections::HashMap::new();
-        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "kimi", &mut env);
+        let (account_id, dir) = compute_and_ensure_account_dir(&mstore, "", "kimi", &mut env);
         assert!(!account_id.is_empty());
         assert!(dir.is_none(), "api-key provider class must skip the OAuth dir path");
         assert!(env.get("KIMI_SHARE_DIR").is_none());

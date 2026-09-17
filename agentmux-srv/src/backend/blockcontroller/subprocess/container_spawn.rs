@@ -20,7 +20,7 @@ use futures_util::StreamExt as _;
 use crate::backend::blockcontroller::{
     core, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
-use crate::backend::wps;
+use crate::backend::mps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
@@ -145,7 +145,7 @@ impl SubprocessController {
     ///   • uploads the turn message into the container as a file and redirects
     ///     the CLI's stdin from it — see `container_turn_exec` for why the
     ///     exec's own stdin, argv, and env are all unusable for this
-    ///   • reads NDJSON from the output stream, publishing WPS blockfile events
+    ///   • reads NDJSON from the output stream, publishing MPS blockfile events
     ///   • captures session_id from the provider's init event
     ///   • transitions status running → done
     ///   • drains the pending-message queue when the exec exits
@@ -220,7 +220,7 @@ impl SubprocessController {
         let run_lock = Arc::clone(&self.run_lock);
         let broker = self.broker.clone();
         let event_bus = self.event_bus.clone();
-        let wstore = self.wstore.clone();
+        let mstore = self.mstore.clone();
         let filestore = self.filestore.clone();
         let health_monitor = Arc::clone(&self.health_monitor);
         let block_id = self.block_id.clone();
@@ -411,7 +411,7 @@ impl SubprocessController {
             // so every container-exec `output` line is also mirrored to the
             // cross-channel store. `None` for non-agent blocks.
             let global_output_zone =
-                shell::resolve_global_output_zone(&wstore, &block_id);
+                shell::resolve_global_output_zone(&mstore, &block_id);
 
             tracing::info!(block_id = %block_id, "container exec output reader started");
 
@@ -451,7 +451,7 @@ impl SubprocessController {
                             None => {
                                 // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
                                 }
                                 tracing::info!(block_id = %block_id, "container exec output EOF");
                                 break;
@@ -487,7 +487,7 @@ impl SubprocessController {
                                 for ch in chunk.chars() {
                                     if ch == '\n' {
                                         if !line_buf.trim().is_empty() {
-                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &mstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
                                         }
                                         line_buf.clear();
                                     } else {
@@ -596,14 +596,14 @@ impl SubprocessController {
             // persisted failure is cleared after a later successful turn — this
             // call handles both cases regardless of whether run_failure is
             // Some or None. Mirrors host_spawn.rs's process_waiter.
-            core::persist_last_failure(&block_id, run_failure.as_ref(), &wstore, &event_bus);
+            core::persist_last_failure(&block_id, run_failure.as_ref(), &mstore, &event_bus);
 
             // Surface the classified failure cause to the pane. persist:1 so
             // reconnecting subscribers also receive the last failure without a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(ref b)) = (run_failure.as_ref(), broker.as_ref()) {
-                b.publish(wps::MuxEvent {
-                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                b.publish(mps::MuxEvent {
+                    event: mps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id)],
                     sender: String::new(),
                     persist: 1,
@@ -652,7 +652,7 @@ impl SubprocessController {
     fn publish_queued_spawn_error(
         block_id: &str,
         error: &str,
-        broker: &Option<Arc<crate::backend::wps::Broker>>,
+        broker: &Option<Arc<crate::backend::mps::Broker>>,
         filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
     ) {
         let Some(broker) = broker else {
@@ -675,16 +675,16 @@ impl SubprocessController {
     }
 
     /// Publish a single NDJSON line from container exec output: session-id
-    /// capture, WPS blockfile event, and FileStore write-through. Used by
+    /// capture, MPS blockfile event, and FileStore write-through. Used by
     /// `spawn_container_turn`'s output reader task.
     fn publish_line(
         line: &str,
         block_id: &str,
         session_id_field: &str,
         inner: &std::sync::Mutex<SubprocessControllerInner>,
-        wstore: &Option<Arc<crate::backend::storage::store::Store>>,
+        mstore: &Option<Arc<crate::backend::storage::store::Store>>,
         event_bus: &Option<Arc<crate::backend::eventbus::EventBus>>,
-        broker: &Option<Arc<crate::backend::wps::Broker>>,
+        broker: &Option<Arc<crate::backend::mps::Broker>>,
         filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
         stats: &mut session_stats::SessionStatsAccumulator,
         global_output_zone: Option<&str>,
@@ -695,7 +695,7 @@ impl SubprocessController {
         if trimmed.is_empty() {
             return;
         }
-        stats.record_line(trimmed.len(), wstore);
+        stats.record_line(trimmed.len(), mstore);
 
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
             // Capture session_id from provider init event.
@@ -703,7 +703,7 @@ impl SubprocessController {
                 let changed = SubprocessController::record_captured_session_id_inner(inner, sid);
                 if changed {
                     tracing::info!(block_id = %block_id, session_id = %sid, "container exec: captured session id");
-                    core::persist_session_id(block_id, sid, &wstore, &event_bus);
+                    core::persist_session_id(block_id, sid, &mstore, &event_bus);
                 }
             }
 

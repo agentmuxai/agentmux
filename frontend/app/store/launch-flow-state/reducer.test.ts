@@ -18,7 +18,7 @@ import {
 } from "./types";
 import type { Account } from "@/app/view/identity/identity-model";
 
-// Test fixtures. Match the wire shapes in frontend/types/gotypes.d.ts
+// Test fixtures. Match the wire shapes in frontend/types/srv-types.d.ts
 // and frontend/app/view/identity/identity-model.ts.
 const acct = (id: string, name: string, provider = "claude"): Account => ({
     id,

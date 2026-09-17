@@ -6,12 +6,12 @@
  *
  * Pins the fix: the shell drawer's terminal must be constructed with the
  * FINAL (persisted) font size, not a default followed by a corrective jerk —
- * without triggering a second, redundant WOS fetch to get there (reagentx P1
+ * without triggering a second, redundant MOS fetch to get there (reagentx P1
  * on #2522). Mocks RPC/store/TermWrap at the module boundary (same approach
  * as AgentLaunchModal.integration.test.tsx); SUT is the real
  * AgentShellSubblock.
  *
- * Mock design note: mirrors the REAL wos.ts shape — one signal per oref
+ * Mock design note: mirrors the REAL mos.ts shape — one signal per oref
  * holding `{ value, loading }` together (not two independent signals), with
  * `getMuxObjectAtom` and `getMuxObjectLoadingAtom` both reading from it.
  * The signal starts at `{ value: null, loading: true }` and is only resolved
@@ -27,11 +27,11 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, resyncRejections } = vi.hoisted(() => {
+const { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, resyncRejections } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
-    const wpsHandlers = new Map<string, Array<(event: any) => void>>();
-    const wpsPersisted = new Map<string, Record<string, unknown>>();
+    const mpsHandlers = new Map<string, Array<(event: any) => void>>();
+    const mpsPersisted = new Map<string, Record<string, unknown>>();
     // Per-block-id controllable resolution for ControllerResyncCommand —
     // lets a test hold a specific resync open to construct an
     // out-of-order-completion race between two overlapping attach
@@ -41,7 +41,7 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
     // Ids for which ControllerResyncCommand rejects immediately, forcing
     // attachShell down the create-new-block fallback path.
     const resyncRejections = new Set<string>();
-    return { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, resyncRejections };
+    return { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, resyncRejections };
 });
 
 // Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
@@ -51,24 +51,24 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
 //
 // Crucially it also models `persist: 1` REPLAY: `controllerstatus` is
 // published persisted specifically so a new subscriber is handed the current
-// status synchronously as part of subscribing (wps.ts's `replay_to_route`).
+// status synchronously as part of subscribing (mps.ts's `replay_to_route`).
 // The first version of this mock only delivered events a test emitted AFTER
 // mount, which made the replay path — where ReAgent found a P0 — structurally
 // invisible to all 12 tests. `queuePersistedStatus` puts an event in that
 // replay slot instead.
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
         const key = `${opts.eventType}|${opts.scope}`;
-        wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
-        const persisted = wpsPersisted.get(key);
+        mpsHandlers.set(key, [...(mpsHandlers.get(key) ?? []), opts.handler]);
+        const persisted = mpsPersisted.get(key);
         if (persisted !== undefined) {
             // Synchronously, inside subscribe — exactly how the broker does it.
             opts.handler({ data: persisted });
         }
         return () => {
-            wpsHandlers.set(
+            mpsHandlers.set(
                 key,
-                (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
+                (mpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
             );
         };
     },
@@ -125,13 +125,13 @@ vi.mock("@/app/store/global", async () => {
         return sig;
     }
 
-    const WOS = {
+    const MOS = {
         makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
         getMuxObjectAtom: (oref: string) => {
             const [get] = getOrCreateDataSignal(oref);
             return () => get().value;
         },
-        // Mirrors the real wos.ts implementation exactly: null while
+        // Mirrors the real mos.ts implementation exactly: null while
         // loading, false once settled (regardless of resulting value).
         getMuxObjectLoadingAtom: (oref: string) => {
             const [get] = getOrCreateDataSignal(oref);
@@ -140,7 +140,7 @@ vi.mock("@/app/store/global", async () => {
     };
 
     return {
-        WOS,
+        MOS,
         atoms: { prefersReducedMotionAtom: () => false },
         staticTabId: () => "tab-1",
     };
@@ -219,12 +219,12 @@ function resolveSeedFetch(oref: string) {
 /** The status the broker will replay synchronously to the NEXT subscriber for
  *  `blockId` — the `persist: 1` behaviour, not a post-mount emission. */
 function queuePersistedStatus(blockId: string, data: Record<string, unknown>) {
-    wpsPersisted.set(`controllerstatus|block:${blockId}`, data);
+    mpsPersisted.set(`controllerstatus|block:${blockId}`, data);
 }
 
 /** Emit a `controllerstatus` event to whoever subscribed for `blockId`. */
 function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
-    for (const handler of wpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
+    for (const handler of mpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
         handler({ data });
     }
 }
@@ -232,8 +232,8 @@ function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
 beforeEach(() => {
     blockDataSignals.clear();
     seedData.clear();
-    wpsHandlers.clear();
-    wpsPersisted.clear();
+    mpsHandlers.clear();
+    mpsPersisted.clear();
     resyncDeferreds.clear();
     resyncRejections.clear();
     termWrapInstances.length = 0;
@@ -331,7 +331,7 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
     it("falls back to the default font size if the seed fetch never settles (bounded wait, no infinite hang)", async () => {
         const existingId = "hung-sub-block";
         // Deliberately never call resolveSeedFetch — simulates a genuine
-        // network failure that leaves the loading atom stuck (per wos.ts's
+        // network failure that leaves the loading atom stuck (per mos.ts's
         // own comment on non-"not found" GetObject rejections).
         render(() => (
             <AgentShellSubblock
@@ -599,7 +599,7 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
     });
 
     /**
-     * ReAgent P0 on PR #3253, and the reason this file's wps mock now models
+     * ReAgent P0 on PR #3253, and the reason this file's mps mock now models
      * replay at all.
      *
      * An agent drives the shared drawer shell (a first-class case, spec §3.3)

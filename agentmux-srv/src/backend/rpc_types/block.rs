@@ -111,7 +111,7 @@ pub struct CommandBlockInputData {
     pub seq: Option<u64>,
 }
 
-/// Matches TS `CommandCreateSubBlockData` (frontend/types/gotypes.d.ts:238-241).
+/// Matches TS `CommandCreateSubBlockData` (frontend/types/srv-types.d.ts:238-241).
 /// Creates a headless sub-block (no tab/layout entry) parented to
 /// `parentblockid` — e.g. a `term`-view PTY embedded in an agent
 /// pane's details drawer.
@@ -222,7 +222,7 @@ pub struct CommandBackgroundTaskCompletionData {
 }
 
 /// Data for `COMMAND_BACKGROUND_TASK_PID` — a declared-background task's
-/// real OS pid, relayed from `agentmux-bashwrap`'s own WPS `"pid"` chunk.
+/// real OS pid, relayed from `agentmux-bashwrap`'s own MPS `"pid"` chunk.
 /// `node_id` is the originating tool call's node_id/tool_use_id, same join
 /// key as `CommandBackgroundTaskCompletionData` above. See
 /// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
@@ -498,7 +498,7 @@ pub struct CommandPaneOpenData {
     pub meta: Option<MetaMapType>,
     /// `Some(true)` creates the block through the reducer (same as the docked
     /// path) but skips BOTH the layout-placement step AND the floating path's
-    /// `tear_off_block` saga — the block exists (and the frontend's WOS cache
+    /// `tear_off_block` saga — the block exists (and the frontend's MOS cache
     /// knows about it) but isn't rendered anywhere yet. `split_direction` /
     /// `split_reference_block_id` are ignored when set (there's no placement
     /// to direct). Review finding: `floating` is checked BEFORE this field

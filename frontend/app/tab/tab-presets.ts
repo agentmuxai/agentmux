@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { fullConfigAtom, setActiveTab, workspace, WOS } from "@/app/store/global";
+import { fullConfigAtom, setActiveTab, workspace, MOS } from "@/app/store/global";
 import { ObjectService, WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForTabById, markBlockRecentlyCreated } from "@/layout/index";
 import {
@@ -91,7 +91,7 @@ function resolveBlockDef(widgetKey: WidgetKey): BlockDef | null {
 export async function waitForLayoutModel(tabId: string, timeoutMs = 2000): Promise<any | null> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-        const tab = WOS.getObjectValue(WOS.makeORef("tab", tabId));
+        const tab = MOS.getObjectValue(MOS.makeORef("tab", tabId));
         if (tab) {
             const model = getLayoutModelForTabById(tabId);
             if (model) return model;

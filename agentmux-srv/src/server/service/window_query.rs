@@ -11,7 +11,7 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use super::super::AppState;
 
 pub(crate) async fn handle_get_window(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let window_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -31,7 +31,7 @@ pub(crate) async fn handle_get_window(state: &AppState, call: &WebCallType) -> W
 // use case. An empty array is a normal answer (row predates the
 // crumb, or the label never created a row).
 pub(crate) async fn handle_find_window_by_label(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let label: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -110,7 +110,7 @@ mod window_label_crumb_tests {
 
         // The crumb is on the persisted row itself.
         let row = state
-            .wstore
+            .mstore
             .must_get::<Window>(&created_id)
             .expect("created window row exists");
         assert_eq!(
@@ -141,7 +141,7 @@ mod window_label_crumb_tests {
             .and_then(|v| v.as_str())
             .unwrap()
             .to_string();
-        let row = state.wstore.must_get::<Window>(&created_id).unwrap();
+        let row = state.mstore.must_get::<Window>(&created_id).unwrap();
         assert!(
             !row.meta.contains_key("host:label"),
             "two-arg CreateWindow must not invent a crumb"

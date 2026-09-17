@@ -23,8 +23,8 @@
 
 import { onCleanup } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 
 export interface UseDockClearStreamOptions {
     blockId: string;
@@ -44,7 +44,7 @@ export function useDockClearStream(opts: UseDockClearStreamOptions): void {
             // here, not the raw (throwing) dispatch: this handler can fire
             // after the pane's slot unregisters (pane closed, or the
             // documented CASCADE_DETECTED unmount race) and
-            // dispatchToSubjects in wps.ts invokes handlers with no
+            // dispatchToSubjects in mps.ts invokes handlers with no
             // try/catch, so a throw here would be uncaught. reagentx P1 on
             // PR #2432 — mirrors useCompactionStream.ts's use of
             // opts.model.dispatchPane for the identical reason.

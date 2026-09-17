@@ -158,7 +158,7 @@ export function recordTurn(
     // useAgentStream.ts (via useTurnLifecycle.ts) pass `input` as the
     // COLLAPSED total (freshInput + cacheCreation + cacheRead) with a
     // separate `freshInput` for the fresh-only count. The backend
-    // TokenCounts shape — gotypes.d.ts's `{input, output, cacheCreation,
+    // TokenCounts shape — srv-types.d.ts's `{input, output, cacheCreation,
     // cacheRead}`, no `freshInput` field at all, reaching recordTurn via
     // useNextPromptSuggestion/useAgentActivitySummary/ActivityDock/
     // swarm-view's ambient `result.tokens` — uses `input` to mean

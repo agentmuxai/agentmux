@@ -51,9 +51,9 @@ vi.mock("@/app/store/toolchain-capabilities", () => ({
     ensureCapability: (...args: unknown[]) => hub.ensureCapability(...args),
     getCapability: (...args: unknown[]) => hub.getCapability(...args),
 }));
-vi.mock("@/app/store/wps", () => ({ muxEventSubscribe: (...args: unknown[]) => hub.muxEventSubscribe(...args) }));
-vi.mock("@/app/store/wps-events", () => ({ WpsEvent: { InstallProgress: "install_progress" } }));
-vi.mock("@/app/store/wos", () => ({
+vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: (...args: unknown[]) => hub.muxEventSubscribe(...args) }));
+vi.mock("@/app/store/mps-events", () => ({ WpsEvent: { InstallProgress: "install_progress" } }));
+vi.mock("@/app/store/mos", () => ({
     makeORef: (kind: string, id: string) => `${kind}:${id}`,
     getMuxObjectAtom: (...args: unknown[]) => hub.getMuxObjectAtom(...args),
 }));

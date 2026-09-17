@@ -90,8 +90,8 @@ fn existing_archive_snapshots(filestore: &FileStore, def_id: &str) -> Vec<Vec<u8
 /// read at all — that is not "complete", and the callers must not treat it
 /// as such (codex P1 on #3070): bootstrap fails rather than stamps, the
 /// doctor reports an error.
-pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> Result<bool, String> {
-    let blocks = wstore.get_all::<Block>().map_err(|e| format!("read blocks: {e}"))?;
+pub fn block_zones_look_incomplete(mstore: &Store, filestore: &FileStore) -> Result<bool, String> {
+    let blocks = mstore.get_all::<Block>().map_err(|e| format!("read blocks: {e}"))?;
     let mut current_populated: HashMap<String, bool> = HashMap::new();
     for block in &blocks {
         let Some(def_id) = agent_definition_id(block) else { continue };
@@ -124,14 +124,14 @@ pub fn block_zones_look_incomplete(wstore: &Store, filestore: &FileStore) -> Res
 /// (codex P1 on #3070; before Phase 2 this returned default stats and `up`
 /// reported `Ok`).
 pub fn migrate_block_zones_v1(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     data_dir: &Path,
 ) -> Result<MigrationStats, String> {
     let marker_path = data_dir.join(MIGRATION_MARKER_V1);
     let mut stats = MigrationStats::default();
 
-    let blocks: Vec<Block> = wstore
+    let blocks: Vec<Block> = mstore
         .get_all::<Block>()
         .map_err(|e| format!("agent_session migration: read blocks: {e}"))?;
 

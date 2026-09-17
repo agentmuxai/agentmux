@@ -169,7 +169,7 @@ fn handle_resolve_identity(state: &AppState, call: &WebCallType) -> WebReturnTyp
         Err(e) => return WebReturnType::error(format!("credential.ResolveIdentity: {e}")),
     };
     let identity_id = state
-        .wstore
+        .mstore
         .instance_get_active_for_block(&args.block_id)
         .ok()
         .flatten()

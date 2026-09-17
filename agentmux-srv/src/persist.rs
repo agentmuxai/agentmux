@@ -38,27 +38,27 @@ use crate::state::{BlockRecord, State, TabRecord, WindowRecord, WorkspaceRecord}
 /// independent — a workspace-load failure does not prevent the tab
 /// load from being attempted (and vice versa), since pipe commands
 /// later in the session can populate either map.
-pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Store) {
-    let workspaces = wstore.get_all::<Workspace>().unwrap_or_else(|e| {
+pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Store) {
+    let workspaces = mstore.get_all::<Workspace>().unwrap_or_else(|e| {
         tracing::warn!(
             target: "srv-persist",
-            "[srv-persist] bootstrap: failed to load workspaces from wstore: {} — workspaces start empty",
+            "[srv-persist] bootstrap: failed to load workspaces from mstore: {} — workspaces start empty",
             e
         );
         Vec::new()
     });
-    let tabs = wstore.get_all::<Tab>().unwrap_or_else(|e| {
+    let tabs = mstore.get_all::<Tab>().unwrap_or_else(|e| {
         tracing::warn!(
             target: "srv-persist",
-            "[srv-persist] bootstrap: failed to load tabs from wstore: {} — tabs start empty",
+            "[srv-persist] bootstrap: failed to load tabs from mstore: {} — tabs start empty",
             e
         );
         Vec::new()
     });
-    let blocks = wstore.get_all::<Block>().unwrap_or_else(|e| {
+    let blocks = mstore.get_all::<Block>().unwrap_or_else(|e| {
         tracing::warn!(
             target: "srv-persist",
-            "[srv-persist] bootstrap: failed to load blocks from wstore: {} — blocks start empty",
+            "[srv-persist] bootstrap: failed to load blocks from mstore: {} — blocks start empty",
             e
         );
         Vec::new()
@@ -141,7 +141,7 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Sto
         let (focused_node_id, magnified_node_id, rootnode) = if tab.layoutstate.is_empty() {
             (String::new(), String::new(), None)
         } else {
-            match wstore.get::<crate::backend::obj::LayoutState>(&tab.layoutstate) {
+            match mstore.get::<crate::backend::obj::LayoutState>(&tab.layoutstate) {
                 Ok(Some(layout)) => (
                     layout.focusednodeid,
                     layout.magnifiednodeid,
@@ -195,10 +195,10 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Sto
     // window+workspace lifecycle. Skip windows whose `workspaceid`
     // refers to a workspace that didn't load — those are dangling
     // refs, same defensive treatment as orphan tabs/blocks.
-    let windows = wstore.get_all::<Window>().unwrap_or_else(|e| {
+    let windows = mstore.get_all::<Window>().unwrap_or_else(|e| {
         tracing::warn!(
             target: "srv-persist",
-            "[srv-persist] bootstrap: failed to load windows from wstore: {} — windows start empty",
+            "[srv-persist] bootstrap: failed to load windows from mstore: {} — windows start empty",
             e
         );
         Vec::new()
@@ -230,7 +230,7 @@ pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, wstore: &Sto
     }
     tracing::info!(
         target: "srv-persist",
-        "[srv-persist] bootstrap loaded {} workspace(s) + {} tab(s) + {} block(s) + {} window(s) from wstore",
+        "[srv-persist] bootstrap loaded {} workspace(s) + {} tab(s) + {} block(s) + {} window(s) from mstore",
         state.workspaces.len(),
         state.tabs.len(),
         state.blocks.len(),

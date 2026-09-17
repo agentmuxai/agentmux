@@ -8,7 +8,7 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-vi.mock("@/app/store/wps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
+vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         SkillCatalogListForBundleCommand: vi.fn(),

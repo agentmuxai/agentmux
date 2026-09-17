@@ -38,7 +38,7 @@ import { getApi, getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
 import { sleep } from "@/util/util";
 import { RpcApi } from "@/app/store/rpc-api";
 import { BlockService } from "@/app/store/services";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
@@ -513,7 +513,7 @@ export function useAgentControllerStatus(
             // of re-running the full resolution RPC. Best-effort — a failed
             // write just means the next click re-resolves.
             try {
-                const oref = WOS.makeORef("block", opts.blockId);
+                const oref = MOS.makeORef("block", opts.blockId);
                 await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { cmd: r.cli_path } });
             } catch { /* non-fatal: next click re-resolves */ }
             return r.cli_path;

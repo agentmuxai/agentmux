@@ -5,8 +5,8 @@ import { Block } from "@/app/block/block";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sendWSCommand } from "@/app/store/ws";
 import { makeFeBlockRouteId } from "@/app/store/rpc-router";
@@ -24,7 +24,7 @@ import {
     removeNotificationById,
     setIsTermMultiInput,
     useBlockAtom,
-    WOS,
+    MOS,
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
@@ -98,7 +98,7 @@ class TermViewModel implements ViewModel {
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
-        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         this.termMode = createMemo(() => {
             const blockData = this.blockAtom();
@@ -332,7 +332,7 @@ class TermViewModel implements ViewModel {
         });
         this.shellProcStatusUnsubFn = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
-            scope: WOS.makeORef("block", blockId),
+            scope: MOS.makeORef("block", blockId),
             handler: (event) => {
                 let bcRTS: BlockControllerRuntimeStatus = event.data;
                 this.updateShellProcStatus(bcRTS);
@@ -575,7 +575,7 @@ class TermViewModel implements ViewModel {
 
     setTerminalTheme(themeName: string) {
         RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", this.blockId),
+            oref: MOS.makeORef("block", this.blockId),
             meta: { "term:theme": themeName },
         });
     }

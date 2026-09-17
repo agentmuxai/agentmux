@@ -14,9 +14,9 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { fireAndForget } from "@/util/util";
@@ -135,7 +135,7 @@ class MediaViewModel implements ViewModel {
 
 function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
     const [displayPath, setDisplayPath] = createSignal("");
-    // Bumped on every WPS change event, even ones that leave displayPath's
+    // Bumped on every MPS change event, even ones that leave displayPath's
     // string value unchanged (a pipeline overwriting a stable filename in
     // place) — Solid's signal wouldn't otherwise notice anything changed
     // and the fetch effect below would never re-run. Codex review.
@@ -190,7 +190,7 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
 
     // Show `path` directly, and start watching its containing directory —
     // if a newer matching file lands there (a fresh render from the same
-    // pipeline), the pane live-swaps to it via the WPS handler above.
+    // pipeline), the pane live-swaps to it via the MPS handler above.
     const showPath = (path: string) => {
         setErrorMsg("");
         setDisplayPath(path);

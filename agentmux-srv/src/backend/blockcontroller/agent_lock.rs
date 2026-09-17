@@ -19,7 +19,7 @@
 //! is-it-leased question by reading the block out of `Store`:
 //!
 //! ```ignore
-//! wstore.get::<Block>(&cmd.blockid)  // synchronous SQLite, on every keystroke
+//! mstore.get::<Block>(&cmd.blockid)  // synchronous SQLite, on every keystroke
 //! ```
 //!
 //! `Store` is one process-wide SQLite connection behind one `Mutex<Connection>`
@@ -161,16 +161,16 @@ pub fn release(block_id: &str) -> bool {
 ///
 /// Best-effort on the meta half (logs and continues), authoritative on the
 /// memory half. Mirrors `core::persist_session_id`'s established
-/// update-then-broadcast shape; no-ops on the meta half when `wstore` is
+/// update-then-broadcast shape; no-ops on the meta half when `mstore` is
 /// `None`, as unit tests that don't wire a store expect.
 pub fn release_and_clear_meta(
     block_id: &str,
-    wstore: &Option<std::sync::Arc<crate::backend::storage::store::Store>>,
+    mstore: &Option<std::sync::Arc<crate::backend::storage::store::Store>>,
     event_bus: &Option<std::sync::Arc<crate::backend::eventbus::EventBus>>,
 ) -> bool {
     let was_locked = release(block_id);
 
-    let Some(store) = wstore else { return was_locked };
+    let Some(store) = mstore else { return was_locked };
     let oref_str = format!("block:{block_id}");
     let mut meta_update = crate::backend::obj::MetaMapType::new();
     meta_update.insert(

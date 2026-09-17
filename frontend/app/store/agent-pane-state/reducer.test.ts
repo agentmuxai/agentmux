@@ -430,7 +430,7 @@ describe("agent-pane-state reducer", () => {
 
             it("buffers onto pendingCompactionPing when subscribed but Idle, instead of dropping (SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02)", () => {
                 // `compaction_started` arrives over a SEPARATE transport
-                // (WPS) from the primary NDJSON stream carrying TurnEnd /
+                // (MPS) from the primary NDJSON stream carrying TurnEnd /
                 // compact_boundary AND from the ReconcileTurnActive RPC, so
                 // it can race and land while the pane is Idle for either of
                 // two very different reasons: (a) a real turn already ended
@@ -495,7 +495,7 @@ describe("agent-pane-state reducer", () => {
             it("is a no-op when the start's own timestamp is at or before the last known CompactionBoundary (reagent, round 6)", () => {
                 // Narrower race than round 5's fix: compaction_started and
                 // compact_boundary travel over two independent transports
-                // (WPS vs. the primary NDJSON stream) with no ordering
+                // (MPS vs. the primary NDJSON stream) with no ordering
                 // guarantee. A stale start can arrive AFTER its own
                 // matching boundary while the turn is STILL working (e.g.
                 // streaming new content past the compaction that already
@@ -1073,7 +1073,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         describe("CompactionBoundary preserves a newer compaction against an out-of-order delayed boundary (codex P2, round 8)", () => {
-            // compact_boundary (NDJSON) and compaction_started (WPS) travel
+            // compact_boundary (NDJSON) and compaction_started (MPS) travel
             // over two independent transports with no ordering guarantee.
             // If compaction N+1 has already started before a DELAYED
             // boundary for compaction N arrives, clearing `compacting`
@@ -1176,7 +1176,7 @@ describe("agent-pane-state reducer", () => {
                 // Compaction N truly completed at t=50 (frameTimestamp), but
                 // its boundary frame is delayed in delivery and only
                 // reaches the frontend at t=500 (receipt/`at`). Compaction
-                // N+1's own `CompactionStarted.at` carries the WPS payload's
+                // N+1's own `CompactionStarted.at` carries the MPS payload's
                 // embedded TRUE start time (t=60), not a receipt timestamp
                 // -- comparing it against N's inflated receipt-time
                 // boundary (500) instead of N's true completion (50) would

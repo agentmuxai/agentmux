@@ -5,7 +5,7 @@
 //!
 //! Phase α of `SPEC_AGENT_INSTALL_STAGE_2026_05_17.md`. Spawns
 //! `npm install <package>` for the requested provider, streams every
-//! line of stdout+stderr to `install_chunk` WPS events scoped to
+//! line of stdout+stderr to `install_chunk` MPS events scoped to
 //! `install:<sessionId>`, and emits a terminal `{ op: "done", ok,
 //! error? }` event when the child exits (or the user cancels).
 //!
@@ -29,7 +29,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::wps::{Broker, MuxEvent};
+use crate::backend::mps::{Broker, MuxEvent};
 use crate::server::AppState;
 
 pub const COMMAND_INSTALL_START: &str = "install.start";

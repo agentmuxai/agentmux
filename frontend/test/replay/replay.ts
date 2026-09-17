@@ -17,7 +17,7 @@
  *    command (new vs update routed by id-presence). Lines that yield
  *    `null` (partial, init, session-end-only) are skipped.
  *
- * 2. `wps` — match `event` + `data.op` to the right reducer command:
+ * 2. `mps` — match `event` + `data.op` to the right reducer command:
  *      - `tool_chunk` + `op: "chunk"` → `dispatchDoc(ToolChunkAppend)`
  *      - `tool_chunk` + `op: "terminal"` → synthesize a system chunk
  *        (the frontend's chunk handler does the same — see
@@ -65,7 +65,7 @@ export interface ReplayResult {
     stats: {
         streamLinesParsed: number;
         nodesAppended: number;
-        wpsEvents: number;
+        mpsEvents: number;
         toolChunksApplied: number;
         dispatchEvents: number;
         eventsDropped: number;
@@ -96,7 +96,7 @@ export function replayInstant(
     const stats = {
         streamLinesParsed: 0,
         nodesAppended: 0,
-        wpsEvents: 0,
+        mpsEvents: 0,
         toolChunksApplied: 0,
         dispatchEvents: 0,
         eventsDropped: 0,
@@ -133,7 +133,7 @@ export function replayInstant(
     for (const ev of fixture.events) {
         if (ev.src === "stream-json") {
             handleStreamLine(ev, parser, nodeIds, applyDoc, stats, warnings);
-        } else if (ev.src === "wps") {
+        } else if (ev.src === "mps") {
             handleWpsEvent(ev, applyDoc, stats, warnings);
         } else if (ev.src === "dispatch") {
             handleDispatch(ev, applyDoc, applyPane, stats, warnings);
@@ -180,12 +180,12 @@ function handleWpsEvent(
     stats: ReplayResult["stats"],
     warnings: string[],
 ): void {
-    stats.wpsEvents += 1;
+    stats.mpsEvents += 1;
     if (ev.event !== "tool_chunk") {
         // Recognized but unhandled — extend the demuxer when a test
         // needs controller-status / blockfile replay.
         warnings.push(
-            `wps event "${ev.event}" not handled by replay driver (seq ${ev.seq})`,
+            `mps event "${ev.event}" not handled by replay driver (seq ${ev.seq})`,
         );
         return;
     }

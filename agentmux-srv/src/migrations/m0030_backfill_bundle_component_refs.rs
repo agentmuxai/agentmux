@@ -27,7 +27,7 @@
 //! `db_skills`/`db_mcp_servers` are authoritatively `identity_store` and the
 //! ref tables no longer carry the FK described above at all — this
 //! migration itself is unaffected (it ran, or runs, entirely within the
-//! world this comment describes, since it always operated on `wstore`'s own
+//! world this comment describes, since it always operated on `mstore`'s own
 //! local catalog copy) and is left as a historical record of why the two
 //! stores were split, not a claim about the current schema.
 //!
@@ -57,7 +57,7 @@ pub struct M0030BackfillBundleComponentRefs;
 /// Same resolution, and the same never-hard-fail posture, as
 /// `m0021_backfill_agent_bundles::resolve_bundle_store`. An unusable shared
 /// store means "not today" rather than a failed boot.
-fn resolve_bundle_store(ctx: &MigrationContext, wstore: &Arc<Store>) -> Arc<Store> {
+fn resolve_bundle_store(ctx: &MigrationContext, mstore: &Arc<Store>) -> Arc<Store> {
     match Store::open_shared(&ctx.shared_store_path) {
         Ok(shared) => Arc::new(shared),
         Err(e) => {
@@ -66,7 +66,7 @@ fn resolve_bundle_store(ctx: &MigrationContext, wstore: &Arc<Store>) -> Arc<Stor
                 path = %ctx.shared_store_path.display(),
                 "backfill_bundle_component_refs: shared store unavailable, falling back to channel store"
             );
-            wstore.clone()
+            mstore.clone()
         }
     }
 }
@@ -84,7 +84,7 @@ fn now_ms() -> i64 {
 /// Returns `(skills_bound, mcp_bound)`. Never returns `Err` for bad data —
 /// see the module doc on why one bad bundle must not stop the rest.
 fn backfill_one_bundle(
-    wstore: &Store,
+    mstore: &Store,
     bundle_store: &Store,
     bundle_id: &str,
     skills_json: &str,
@@ -100,14 +100,14 @@ fn backfill_one_bundle(
                 // A skill id whose row is already gone has nothing to bind;
                 // the ref tables cannot represent it and the export could
                 // never have rendered it either.
-                match wstore.skill_get(&id) {
-                    // `wstore` also serves as `catalog` here: this migration
+                match mstore.skill_get(&id) {
+                    // `mstore` also serves as `catalog` here: this migration
                     // pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's
                     // catalog redirect, back when `db_skills` genuinely lived
                     // on the channel store alone — see this module's own doc
                     // comment on why `db_skills` lives here and `db_bundles`
                     // lives in `bundle_store`.
-                    Ok(Some(_)) => match wstore.bundle_skill_bind(wstore, bundle_store, bundle_id, &id) {
+                    Ok(Some(_)) => match mstore.bundle_skill_bind(mstore, bundle_store, bundle_id, &id) {
                         Ok(()) => skills_bound += 1,
                         Err(e) => tracing::warn!(
                             bundle_id, skill_id = %id, error = %e,
@@ -142,7 +142,7 @@ fn backfill_one_bundle(
             // end up identical — including how duplicate names are kept apart
             // and how a re-run decides it has nothing to do.
             let (created, warnings) =
-                wstore.bundle_mcp_bind_inline_entries(wstore, bundle_store, bundle_id, &entries, now_ms());
+                mstore.bundle_mcp_bind_inline_entries(mstore, bundle_store, bundle_id, &entries, now_ms());
             mcp_bound += created;
             for w in warnings {
                 tracing::warn!(bundle_id, warning = %w, "backfill_bundle_component_refs");
@@ -177,10 +177,10 @@ impl Migration for M0030BackfillBundleComponentRefs {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(Store::open(&ctx.channel_store_path).map_err(|e| {
-            MigrationError(format!("backfill_bundle_component_refs: open wstore: {e}"))
+        let mstore = Arc::new(Store::open(&ctx.channel_store_path).map_err(|e| {
+            MigrationError(format!("backfill_bundle_component_refs: open mstore: {e}"))
         })?);
-        let bundle_store = resolve_bundle_store(ctx, &wstore);
+        let bundle_store = resolve_bundle_store(ctx, &mstore);
 
         let bundles = bundle_store.bundle_list().map_err(|e| {
             MigrationError(format!("backfill_bundle_component_refs: list bundles: {e}"))
@@ -190,7 +190,7 @@ impl Migration for M0030BackfillBundleComponentRefs {
         let mut total_mcp = 0usize;
         for bundle in &bundles {
             let (s, m) = backfill_one_bundle(
-                &wstore,
+                &mstore,
                 &bundle_store,
                 &bundle.id,
                 &bundle.skills,
@@ -236,7 +236,7 @@ mod tests {
     use crate::backend::storage::skills::Skill;
 
     fn store() -> Store {
-        // One in-memory store serves as both wstore and bundle store:
+        // One in-memory store serves as both mstore and bundle store:
         // `run_object_schema` creates db_bundles alongside the ref tables, so
         // both sides resolve. The cross-store rule itself is pinned by
         // `mcp_servers.rs::bind_checks_bundle_existence_in_id_store_not_self`.

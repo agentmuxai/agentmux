@@ -17,7 +17,7 @@
 import { createSignal, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 
 interface AgentControlBarProps {
     blockId: string;
@@ -134,7 +134,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId, onOpenHistory 
     const dismissInterrupted = async () => {
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", blockId),
+                oref: MOS.makeORef("block", blockId),
                 meta: { "session:was_interrupted": null } as MetaType,
             });
         } catch (e) {
@@ -157,7 +157,7 @@ export const AgentControlBar = ({ blockId, blockAtom, providerId, onOpenHistory 
     const dismissResumeFailed = async () => {
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", blockId),
+                oref: MOS.makeORef("block", blockId),
                 meta: { "session:resume_failed": null } as MetaType,
             });
         } catch (e) {

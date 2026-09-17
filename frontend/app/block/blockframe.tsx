@@ -13,7 +13,7 @@ import {
     getSettingsKeyAtom,
     recordTEvent,
     useBlockAtom,
-    WOS,
+    MOS,
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -325,8 +325,8 @@ function BlockFrame_Header(
     // exactly the leak a hoisted, switch-surviving chrome caller would hit.
     // `getMuxObjectAtom` has no such lifecycle coupling; calling it fresh
     // inside a memo that re-runs when blockId changes correctly re-points at
-    // live data with no leak (frontend/app/store/wos.ts).
-    const blockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", props.blockId()))());
+    // live data with no leak (frontend/app/store/mos.ts).
+    const blockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", props.blockId()))());
     const showBlockIds = getSettingsKeyAtom("blockheader:showblockids")();
     // Memos, not bare top-level reads (ReAgent P1 on PR #3157). These read
     // through `props.viewModel`, which for a HOISTED header
@@ -622,7 +622,7 @@ function ConnStatusOverlay({
     viewModel: ViewModel;
     changeConnModalAtom: util.SignalAtom<boolean>;
 }): JSX.Element {
-    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
     const connModalOpen = changeConnModalAtom();
     const connName = createMemo(() => blockData()?.meta?.connection);
     const connStatus = createMemo(() => getConnStatusAtom(connName())());
@@ -789,7 +789,7 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const blockNum = () => nodeModel.blockNum();
     const isLayoutMode = () => atoms.controlShiftDelayAtom();
     const showOverlayBlockNums = () => getSettingsKeyAtom("app:showoverlayblocknums")() ?? true;
-    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
         const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta, atoms.tabAtom()?.meta);
@@ -811,7 +811,7 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
 
 function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     const nodeModel = props.nodeModel;
-    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", nodeModel.blockId));
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
     const isFocused = () => nodeModel.isFocused();
     // With only one pane in the tab, there's nothing to distinguish
     // "focused" from "unfocused" against, so the focus ring carries no
@@ -1086,7 +1086,7 @@ function BlockFrame_Default(props: BlockFrameProps): JSX.Element {
 
 function BlockFrame(props: BlockFrameProps): JSX.Element {
     const blockId = props.nodeModel.blockId;
-    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", blockId));
     return (
         <Show when={blockId && blockData()}>
             <BlockFrame_Default {...props} />

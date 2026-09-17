@@ -9,7 +9,7 @@
 #
 # docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md §2.1 counted 334
 # "keep in sync with the agentmux-srv RPC" comments across 284 hand-written
-# stubs and a 2,819-line hand-maintained `gotypes.d.ts`, plus one drift found
+# stubs and a 2,819-line hand-maintained `srv-types.d.ts`, plus one drift found
 # by hand (the default layout tree, PR #2988 — whose own comment claimed it
 # was in sync). A comment cannot fail a build. This can.
 #

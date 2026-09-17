@@ -5,7 +5,7 @@
 //! AgentMux Core: application coordinator for storage + pub/sub.
 //! Port of Go's pkg/wcore/wcore.go + window.go + workspace.go + block.go.
 //!
-//! Orchestrates Store mutations with WPS event publishing.
+//! Orchestrates Store mutations with MPS event publishing.
 
 mod block;
 mod dnd;

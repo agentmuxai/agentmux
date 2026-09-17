@@ -998,16 +998,16 @@ impl Store {
     /// never hard-fails on this alone.
     ///
     /// **Call this on the EFFECTIVE identity/memory store
-    /// (`AppState.id_store`), never on the per-channel `wstore` directly**
+    /// (`AppState.id_store`), never on the per-channel `mstore` directly**
     /// — the bundle lives in the shared store when one is configured (the
-    /// normal case), so a `wstore` lookup silently returns the fallback
+    /// normal case), so a `mstore` lookup silently returns the fallback
     /// every time in that configuration. See
     /// `bundle_provision_for_new_agent`'s own doc comment for the write-
     /// side half of this same rule.
     ///
     /// Consolidated here (2026-08-15) after the identical resolution
     /// logic was independently duplicated in `agent_open.rs`'s spawn path
-    /// and found to have the exact same wstore-vs-id_store mistake twice
+    /// and found to have the exact same mstore-vs-id_store mistake twice
     /// in review (rounds 3 and, for a second call site,
     /// `identity/resolver/inject.rs`'s layer-3 credential gate, found in
     /// a later scoping pass — not by an automated review this time). One
@@ -1035,15 +1035,15 @@ impl Store {
     /// this point, so there's no need to guess.
     ///
     /// **Call this on the EFFECTIVE identity/memory store
-    /// (`AppState.id_store`), never on the per-channel `wstore` directly.**
+    /// (`AppState.id_store`), never on the per-channel `mstore` directly.**
     /// Bundles live in the shared store when one is configured (the normal
     /// case) — every real bundle-read path (`listmemories`/`getmemory`/
     /// the Armory editor/the bundle-summary panel) reads through
-    /// `id_store`, so a bundle created via `wstore.bundle_upsert`
+    /// `id_store`, so a bundle created via `mstore.bundle_upsert`
     /// directly would be written to a different SQLite file and be
     /// invisible everywhere else (P1 finding, Codex review on PR #2587,
     /// live in the shipped code this fixes: `agent_def_provision_and_
-    /// bind_bundle`'s callers all used to invoke this method ON `wstore`).
+    /// bind_bundle`'s callers all used to invoke this method ON `mstore`).
     ///
     /// Does NOT mutate `agent` or touch `db_agent_definitions` — returns
     /// the new bundle's id; callers set `agent.memory_id` themselves before
@@ -1138,7 +1138,7 @@ impl Store {
     /// `createagent`, `importagentfromclaw`) return the real value instead
     /// of the empty string the struct held before this call.
     ///
-    /// `self` (the definition store, i.e. `wstore`) and `bundle_store`
+    /// `self` (the definition store, i.e. `mstore`) and `bundle_store`
     /// (the effective identity/memory store, i.e. `AppState.id_store`) are
     /// deliberately two SEPARATE parameters, not the same store used for
     /// both writes — see `bundle_provision_for_new_agent`'s own doc
@@ -2975,17 +2975,17 @@ mod bundle_provisioning_store_separation_tests {
     // The core store-separation regression case: the bundle exists in ONE
     // store but the method is called on a DIFFERENT one — proves the
     // lookup only succeeds via the store it's actually called on, so a
-    // caller that mistakenly passes wstore instead of id_store gets the
+    // caller that mistakenly passes mstore instead of id_store gets the
     // safe fallback rather than a silent, unexplained "wrong" answer.
     #[test]
     fn resolve_effective_provider_id_falls_back_when_called_on_the_wrong_store() {
         let id_store = Store::open_in_memory().unwrap();
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut agent = base_agent("a1", "Agent One", "claude", "");
         let bundle_id = id_store.bundle_provision_for_new_agent(&base_agent("a1", "Agent One", "codex", ""), 0).unwrap();
         agent.memory_id = bundle_id;
 
         assert_eq!(id_store.resolve_effective_provider_id(&agent), "codex", "must find it via the store it was actually provisioned into");
-        assert_eq!(wstore.resolve_effective_provider_id(&agent), "claude", "an unrelated store must fall back to agent.provider, not silently succeed");
+        assert_eq!(mstore.resolve_effective_provider_id(&agent), "claude", "an unrelated store must fall back to agent.provider, not silently succeed");
     }
 }

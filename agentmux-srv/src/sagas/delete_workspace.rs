@@ -224,7 +224,7 @@ mod tests {
     ) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -306,10 +306,10 @@ mod tests {
             assert_eq!(s.blocks.len(), 2);
         }
         for tab_id in &tab_ids {
-            assert!(state.wstore.get::<Tab>(tab_id).unwrap().is_some());
+            assert!(state.mstore.get::<Tab>(tab_id).unwrap().is_some());
         }
         for block_id in &block_ids {
-            assert!(state.wstore.get::<Block>(block_id).unwrap().is_some());
+            assert!(state.mstore.get::<Block>(block_id).unwrap().is_some());
         }
 
         let result = run(&state, ws_id.clone()).await.unwrap();
@@ -325,12 +325,12 @@ mod tests {
         drop(s);
 
         // SQLite: matches.
-        assert!(state.wstore.get::<Workspace>(&ws_id).unwrap().is_none());
+        assert!(state.mstore.get::<Workspace>(&ws_id).unwrap().is_none());
         for tab_id in &tab_ids {
-            assert!(state.wstore.get::<Tab>(tab_id).unwrap().is_none());
+            assert!(state.mstore.get::<Tab>(tab_id).unwrap().is_none());
         }
         for block_id in &block_ids {
-            assert!(state.wstore.get::<Block>(block_id).unwrap().is_none());
+            assert!(state.mstore.get::<Block>(block_id).unwrap().is_none());
         }
     }
 

@@ -17,16 +17,16 @@ impl Migration for M0003TemplateSessionsV1 {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("template_sessions_v1: open wstore: {}", e)))?,
+                .map_err(|e| MigrationError(format!("template_sessions_v1: open mstore: {}", e)))?,
         );
         let filestore_path = ctx.data_dir.join("db").join("filestore.db");
         let filestore = Arc::new(
             FileStore::open(&filestore_path)
                 .map_err(|e| MigrationError(format!("template_sessions_v1: open filestore: {}", e)))?,
         );
-        crate::backend::agent_session::migrate_promote_template_sessions_v1(&wstore, &filestore, &ctx.data_dir);
+        crate::backend::agent_session::migrate_promote_template_sessions_v1(&mstore, &filestore, &ctx.data_dir);
         Ok(())
     }
 

@@ -71,7 +71,7 @@
 //!
 //! So the migration is `Channel`-scoped: it runs once per channel, with
 //! that channel's own store doing the enumeration — matching what the
-//! drift sweep itself gets in production (`state.wstore` is the channel
+//! drift sweep itself gets in production (`state.mstore` is the channel
 //! store) — while still reading and writing versions in the shared store.
 //! The repair half is idempotent, so running once per channel is safe.
 //!

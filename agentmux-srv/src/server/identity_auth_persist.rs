@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 
 /// Upserts the `IdentityAccount` (`SecretRef::OAuthConfigDir`, status
 /// "valid") on a successful OAuth handshake (CLI exited 0 +
@@ -32,7 +32,7 @@ use crate::backend::wps::Broker;
 /// concept to fall back to; the caller surfaces `account_id: None` on
 /// the wire and the frontend treats that as "nothing to select").
 fn persist_oauth_direct_account(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     identity_store: &Arc<Store>,
     broker: &Arc<Broker>,
     account_id: &str,
@@ -74,7 +74,7 @@ fn persist_oauth_direct_account(
     // is THE primary OAuth account-creation path (auth.start), so without
     // the mirror write every newly-OAuth'd account had no fallback entry
     // and reproduced the reported bug on its own next channel switch.
-    if let Err(e) = wstore.identity_upsert_with_mirror(identity_store, &account) {
+    if let Err(e) = mstore.identity_upsert_with_mirror(identity_store, &account) {
         tracing::warn!(
             target: "identity",
             account_id,
@@ -84,7 +84,7 @@ fn persist_oauth_direct_account(
         );
         return None;
     }
-    broker.publish(crate::backend::wps::MuxEvent {
+    broker.publish(crate::backend::mps::MuxEvent {
         event: "identityaccounts:changed".to_string(),
         scopes: vec![],
         sender: String::new(),
@@ -123,7 +123,7 @@ fn persist_oauth_direct_account(
 /// row that happened to have `id=""`. Reagent P1.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn persist_oauth_success(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     identity_store: &Arc<Store>,
     broker: &Arc<Broker>,
     _direct_account: bool,
@@ -136,7 +136,7 @@ pub(crate) fn persist_oauth_success(
     if account_id.is_empty() {
         return (String::new(), None);
     }
-    let persisted = persist_oauth_direct_account(wstore, identity_store, broker, account_id, provider_id, dir, session_id);
+    let persisted = persist_oauth_direct_account(mstore, identity_store, broker, account_id, provider_id, dir, session_id);
     (String::new(), persisted)
 }
 
@@ -146,11 +146,11 @@ mod tests {
 
     #[test]
     fn persist_oauth_direct_account_round_trip() {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let r = persist_oauth_direct_account(
-            &wstore,
+            &mstore,
             &identity_store,
             &broker,
             "acc-1",
@@ -160,7 +160,7 @@ mod tests {
         );
         assert_eq!(r, Some("acc-1".to_string()));
 
-        let acct = wstore.identity_get("acc-1").unwrap().expect("account row exists");
+        let acct = mstore.identity_get("acc-1").unwrap().expect("account row exists");
         assert_eq!(acct.provider, "claude");
         assert_eq!(acct.kind, "oauth");
         assert_eq!(acct.status, "valid");
@@ -172,12 +172,12 @@ mod tests {
 
     #[test]
     fn persist_oauth_direct_account_returns_none_when_dir_unresolved() {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
-        let r = persist_oauth_direct_account(&wstore, &identity_store, &broker, "acc-1", "claude", None, "sess-z");
+        let broker = Arc::new(crate::backend::mps::Broker::new());
+        let r = persist_oauth_direct_account(&mstore, &identity_store, &broker, "acc-1", "claude", None, "sess-z");
         assert!(r.is_none());
-        assert!(wstore.identity_get("acc-1").unwrap().is_none(), "nothing persisted when dir is unresolved");
+        assert!(mstore.identity_get("acc-1").unwrap().is_none(), "nothing persisted when dir is unresolved");
     }
 
     #[test]
@@ -186,11 +186,11 @@ mod tests {
         // SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — persist_oauth_success
         // always persists a direct account now, regardless of the
         // (now-vestigial) direct_account/into_bundle_id parameters.
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let (bundle_id, account_id) = persist_oauth_success(
-            &wstore,
+            &mstore,
             &identity_store,
             &broker,
             true,
@@ -202,7 +202,7 @@ mod tests {
         );
         assert_eq!(bundle_id, "", "bundle id is always empty now");
         assert_eq!(account_id, Some("acc-1".to_string()));
-        assert!(wstore.identity_get("acc-1").unwrap().is_some());
+        assert!(mstore.identity_get("acc-1").unwrap().is_some());
     }
 
     #[test]
@@ -213,11 +213,11 @@ mod tests {
         // `directAccount: true`) can still reach this. Without the
         // empty-id guard, persist_oauth_direct_account's identity_upsert
         // would silently write/overwrite a db_accounts row with id="".
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let (bundle_id, account_id) = persist_oauth_success(
-            &wstore,
+            &mstore,
             &identity_store,
             &broker,
             false,
@@ -230,7 +230,7 @@ mod tests {
         assert_eq!(bundle_id, "");
         assert_eq!(account_id, None, "empty account_id must not be persisted");
         assert!(
-            wstore.identity_get("").unwrap().is_none(),
+            mstore.identity_get("").unwrap().is_none(),
             "no row with id=\"\" should ever be written"
         );
     }

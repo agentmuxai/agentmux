@@ -54,13 +54,13 @@ pub const META_SESSION_RESUME_FAILED: &str = "session:resume_failed";
 
 /// Record that a subprocess with `pid` has been spawned for `block_id`.
 /// Best-effort — logs on failure but never panics.
-pub fn mark_active_pid(wstore: &Arc<Store>, block_id: &str, pid: u32) {
+pub fn mark_active_pid(mstore: &Arc<Store>, block_id: &str, pid: u32) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_ACTIVE_PID.to_string(), serde_json::json!(pid));
     // Clear any stale interrupt flag — we're running again.
     meta.insert(META_SESSION_WAS_INTERRUPTED.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to mark active pid");
     }
 }
@@ -80,18 +80,18 @@ pub fn mark_active_pid(wstore: &Arc<Store>, block_id: &str, pid: u32) {
 /// only on the pane's next reload/reopen. Mirrors `persist_session_id`'s
 /// broadcast in `core.rs`. `event_bus: None` (tests / no live subscribers)
 /// silently skips the broadcast, matching every other call site's contract.
-pub fn mark_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>, block_id: &str) {
+pub fn mark_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>, block_id: &str) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_RESUME_FAILED.to_string(), serde_json::json!(true));
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to mark resume_failed");
         return;
     }
     let Some(ref bus) = event_bus else {
         return;
     };
-    if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
+    if let Ok(updated_block) = mstore.must_get::<Block>(block_id) {
         let update_data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "block".into(),
@@ -126,8 +126,8 @@ pub fn mark_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
 /// a `Resumed` outcome is the overwhelmingly common case and almost never
 /// follows a failure, so the no-op path must not spam `waveobj:update` on
 /// every ordinary resume.
-pub fn clear_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>, block_id: &str) {
-    match wstore.get::<Block>(block_id) {
+pub fn clear_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>, block_id: &str) {
+    match mstore.get::<Block>(block_id) {
         Ok(Some(block)) => {
             let set = block
                 .meta
@@ -146,7 +146,7 @@ pub fn clear_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_RESUME_FAILED.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to clear resume_failed");
         return;
     }
@@ -160,7 +160,7 @@ pub fn clear_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>
     // Same live-delivery requirement as `mark_resume_failed`: the user may be
     // staring at the banner right now, so the clear must reach an already-open
     // `blockAtom`, not only the pane's next reload.
-    if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
+    if let Ok(updated_block) = mstore.must_get::<Block>(block_id) {
         let update_data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "block".into(),
@@ -177,11 +177,11 @@ pub fn clear_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>
 }
 
 /// Clear `session:active_pid` — called when the subprocess exits for any reason.
-pub fn clear_active_pid(wstore: &Arc<Store>, block_id: &str) {
+pub fn clear_active_pid(mstore: &Arc<Store>, block_id: &str) {
     let mut meta = MetaMapType::new();
     meta.insert(META_SESSION_ACTIVE_PID.to_string(), serde_json::Value::Null);
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
         tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to clear active pid");
     }
 }
@@ -207,9 +207,9 @@ pub fn clear_active_pid(wstore: &Arc<Store>, block_id: &str) {
 ///
 /// Best-effort like the unconditional variant: logs on failure, never
 /// panics. Returns nothing — callers do not branch on the outcome.
-pub fn clear_active_pid_if_pid(wstore: &Arc<Store>, block_id: &str, expected_pid: u32) {
+pub fn clear_active_pid_if_pid(mstore: &Arc<Store>, block_id: &str, expected_pid: u32) {
     let block_id_owned = block_id.to_string();
-    let result = wstore.with_tx(|tx| {
+    let result = mstore.with_tx(|tx| {
         let mut block = tx.must_get::<Block>(&block_id_owned)?;
         let current = block
             .meta
@@ -244,8 +244,8 @@ pub fn clear_active_pid_if_pid(wstore: &Arc<Store>, block_id: &str, expected_pid
 /// `session:active_pid` set, transfer the flag to `session:was_interrupted`.
 ///
 /// Returns the number of orphaned sessions found.
-pub fn scan_orphans(wstore: &Arc<Store>) -> u32 {
-    let all_blocks = match wstore.get_all::<Block>() {
+pub fn scan_orphans(mstore: &Arc<Store>) -> u32 {
+    let all_blocks = match mstore.get_all::<Block>() {
         Ok(blocks) => blocks,
         Err(e) => {
             tracing::warn!(error = %e, "session_recovery: scan_orphans get_all failed");
@@ -279,7 +279,7 @@ pub fn scan_orphans(wstore: &Arc<Store>) -> u32 {
             serde_json::json!(true),
         );
         let oref_str = format!("block:{}", block.oid);
-        match crate::server::service::update_object_meta(wstore, &oref_str, &update) {
+        match crate::server::service::update_object_meta(mstore, &oref_str, &update) {
             Ok(()) => {
                 count += 1;
                 tracing::info!(
@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn test_scan_orphans_transfers_flag() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
 
         // ORef parser requires valid UUIDs, so generate them inline.
         let orphan_id = "11111111-1111-1111-1111-111111111111";
@@ -337,7 +337,7 @@ mod tests {
             },
             subblockids: None,
         };
-        wstore.insert(&mut orphan).unwrap();
+        mstore.insert(&mut orphan).unwrap();
 
         // Agent block without active_pid — should be left alone.
         let mut clean = Block {
@@ -353,7 +353,7 @@ mod tests {
             },
             subblockids: None,
         };
-        wstore.insert(&mut clean).unwrap();
+        mstore.insert(&mut clean).unwrap();
 
         // Non-agent block with active_pid (shouldn't exist in practice, but
         // sanity check the view filter) — should be left alone.
@@ -371,13 +371,13 @@ mod tests {
             },
             subblockids: None,
         };
-        wstore.insert(&mut nonagent).unwrap();
+        mstore.insert(&mut nonagent).unwrap();
 
-        let count = scan_orphans(&wstore);
+        let count = scan_orphans(&mstore);
         assert_eq!(count, 1, "exactly one agent orphan should be flagged");
 
         // Verify orphan block meta
-        let after: Block = wstore.get(orphan_id).unwrap().unwrap();
+        let after: Block = mstore.get(orphan_id).unwrap().unwrap();
         assert!(
             after.meta.get(META_SESSION_ACTIVE_PID).and_then(|v| v.as_u64()).unwrap_or(0) == 0,
             "active_pid should be cleared"
@@ -389,11 +389,11 @@ mod tests {
         );
 
         // Clean block untouched
-        let clean_after: Block = wstore.get(clean_id).unwrap().unwrap();
+        let clean_after: Block = mstore.get(clean_id).unwrap().unwrap();
         assert!(clean_after.meta.get(META_SESSION_WAS_INTERRUPTED).is_none());
 
         // Non-agent block untouched (still has active_pid)
-        let term_after: Block = wstore.get(term_id).unwrap().unwrap();
+        let term_after: Block = mstore.get(term_id).unwrap().unwrap();
         assert_eq!(
             term_after.meta.get(META_SESSION_ACTIVE_PID).and_then(|v| v.as_u64()),
             Some(67890),
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn test_mark_resume_failed_sets_the_flag() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
 
         let block_id = "44444444-4444-4444-4444-444444444444";
         let mut block = Block {
@@ -419,11 +419,11 @@ mod tests {
             },
             subblockids: None,
         };
-        wstore.insert(&mut block).unwrap();
+        mstore.insert(&mut block).unwrap();
 
-        mark_resume_failed(&wstore, &None, block_id);
+        mark_resume_failed(&mstore, &None, block_id);
 
-        let after: Block = wstore.get(block_id).unwrap().unwrap();
+        let after: Block = mstore.get(block_id).unwrap().unwrap();
         assert_eq!(
             after.meta.get(META_SESSION_RESUME_FAILED).and_then(|v| v.as_bool()),
             Some(true),
@@ -439,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn test_mark_resume_failed_broadcasts_waveobj_update() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
         let event_bus = Arc::new(EventBus::new());
 
         let block_id = "77777777-7777-7777-7777-777777777777";
@@ -456,11 +456,11 @@ mod tests {
             },
             subblockids: None,
         };
-        wstore.insert(&mut block).unwrap();
+        mstore.insert(&mut block).unwrap();
 
         let mut receivers = event_bus.register_ws("test-conn", "test-tab");
 
-        mark_resume_failed(&wstore, &Some(event_bus.clone()), block_id);
+        mark_resume_failed(&mstore, &Some(event_bus.clone()), block_id);
 
         let msg = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
             .await
@@ -502,16 +502,16 @@ mod tests {
     #[test]
     fn test_clear_resume_failed_retracts_the_flag() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
 
         let block_id = "55555555-5555-5555-5555-555555555555";
         let mut block = agent_block(block_id);
-        wstore.insert(&mut block).unwrap();
+        mstore.insert(&mut block).unwrap();
 
-        mark_resume_failed(&wstore, &None, block_id);
-        clear_resume_failed(&wstore, &None, block_id);
+        mark_resume_failed(&mstore, &None, block_id);
+        clear_resume_failed(&mstore, &None, block_id);
 
-        let after: Block = wstore.get(block_id).unwrap().unwrap();
+        let after: Block = mstore.get(block_id).unwrap().unwrap();
         assert_eq!(
             after.meta.get(META_SESSION_RESUME_FAILED).and_then(|v| v.as_bool()),
             None,
@@ -525,17 +525,17 @@ mod tests {
     #[tokio::test]
     async fn test_clear_resume_failed_is_silent_when_the_flag_was_never_set() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
         let event_bus = Arc::new(EventBus::new());
 
         let block_id = "66666666-6666-6666-6666-666666666666";
         let mut block = agent_block(block_id);
-        wstore.insert(&mut block).unwrap();
-        let version_before = wstore.get::<Block>(block_id).unwrap().unwrap().version;
+        mstore.insert(&mut block).unwrap();
+        let version_before = mstore.get::<Block>(block_id).unwrap().unwrap().version;
 
         let mut receivers = event_bus.register_ws("test-conn", "test-tab");
 
-        clear_resume_failed(&wstore, &Some(event_bus.clone()), block_id);
+        clear_resume_failed(&mstore, &Some(event_bus.clone()), block_id);
 
         assert!(
             tokio::time::timeout(
@@ -547,7 +547,7 @@ mod tests {
             "no broadcast may fire when there was no flag to retract",
         );
         assert_eq!(
-            wstore.get::<Block>(block_id).unwrap().unwrap().version,
+            mstore.get::<Block>(block_id).unwrap().unwrap().version,
             version_before,
             "the block must not be rewritten when there was nothing to clear",
         );
@@ -559,17 +559,17 @@ mod tests {
     #[tokio::test]
     async fn test_clear_resume_failed_broadcasts_waveobj_update() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
         let event_bus = Arc::new(EventBus::new());
 
         let block_id = "88888888-8888-8888-8888-888888888888";
         let mut block = agent_block(block_id);
-        wstore.insert(&mut block).unwrap();
-        mark_resume_failed(&wstore, &None, block_id);
+        mstore.insert(&mut block).unwrap();
+        mark_resume_failed(&mstore, &None, block_id);
 
         let mut receivers = event_bus.register_ws("test-conn", "test-tab");
 
-        clear_resume_failed(&wstore, &Some(event_bus.clone()), block_id);
+        clear_resume_failed(&mstore, &Some(event_bus.clone()), block_id);
 
         let msg = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
             .await

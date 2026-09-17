@@ -30,29 +30,29 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // launch). Previously returned only agent_skill_list (legacy-only),
     // silently hiding every standalone/Armory-catalog skill from the actual
     // launch flow (reagent P0 on PR #2322).
-    let wstore_lfs = state.wstore.clone();
+    let mstore_lfs = state.mstore.clone();
     let identity_store_lfs = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_SKILLS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_lfs.clone();
+            let mstore = mstore_lfs.clone();
             let identity_store = identity_store_lfs.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentSkillsData = serde_json::from_value(data)
                     .map_err(|e| format!("listagentskills: {e}"))?;
-                let skills = wstore.effective_skills(&identity_store, &cmd.agent_id);
+                let skills = mstore.effective_skills(&identity_store, &cmd.agent_id);
                 Ok(Some(serde_json::to_value(&skills).unwrap_or_default()))
             })
         }),
     );
 
     // createagentskill → insert new skill, broadcast agentskills:changed
-    let wstore_cfs = state.wstore.clone();
+    let mstore_cfs = state.mstore.clone();
     let broker_cfs = state.broker.clone();
     engine.register_handler(
         COMMAND_CREATE_AGENT_SKILL,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_cfs.clone();
+            let mstore = mstore_cfs.clone();
             let broker = broker_cfs.clone();
             Box::pin(async move {
                 let cmd: CommandCreateAgentSkillData = serde_json::from_value(data)
@@ -71,8 +71,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: cmd.content,
                     created_at: now,
                 };
-                wstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                mstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -85,17 +85,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // updateagentskill → update existing skill, broadcast agentskills:changed
-    let wstore_ufs = state.wstore.clone();
+    let mstore_ufs = state.mstore.clone();
     let broker_ufs = state.broker.clone();
     engine.register_handler(
         COMMAND_UPDATE_AGENT_SKILL,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_ufs.clone();
+            let mstore = mstore_ufs.clone();
             let broker = broker_ufs.clone();
             Box::pin(async move {
                 let cmd: CommandUpdateAgentSkillData = serde_json::from_value(data)
                     .map_err(|e| format!("updateagentskill: {e}"))?;
-                let existing = wstore.agent_skill_get(&cmd.id)
+                let existing = mstore.agent_skill_get(&cmd.id)
                     .map_err(|e| format!("updateagentskill: {e}"))?
                     .ok_or_else(|| format!("updateagentskill: skill {} not found", cmd.id))?;
                 let skill = AgentSkill {
@@ -108,11 +108,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: cmd.content,
                     created_at: existing.created_at,
                 };
-                let found = wstore.agent_skill_update(&skill).map_err(|e| format!("updateagentskill: {e}"))?;
+                let found = mstore.agent_skill_update(&skill).map_err(|e| format!("updateagentskill: {e}"))?;
                 if !found {
                     return Err(format!("updateagentskill: skill {} not found", skill.id));
                 }
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -125,18 +125,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // deleteagentskill → delete skill by id, broadcast agentskills:changed
-    let wstore_dfs = state.wstore.clone();
+    let mstore_dfs = state.mstore.clone();
     let broker_dfs = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_AGENT_SKILL,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_dfs.clone();
+            let mstore = mstore_dfs.clone();
             let broker = broker_dfs.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteAgentSkillData = serde_json::from_value(data)
                     .map_err(|e| format!("deleteagentskill: {e}"))?;
-                wstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                mstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),

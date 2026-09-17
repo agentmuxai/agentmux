@@ -22,7 +22,7 @@ const pushNotification = vi.fn();
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => activeTabId() },
     pushNotification: (...args: unknown[]) => pushNotification(...args),
-    WOS: {
+    MOS: {
         getObjectValue: (...args: unknown[]) => getObjectValue(...args),
         makeORef: (kind: string, id: string) => `${kind}:${id}`,
     },

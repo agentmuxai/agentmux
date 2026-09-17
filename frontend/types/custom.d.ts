@@ -809,7 +809,7 @@ declare global {
 
         // Debug utilities (exposed for console access)
         RpcApi: any;
-        WOS: any;
+        MOS: any;
         TabRpcClient: any;
         globalWS: any;
         modalsModel: any;

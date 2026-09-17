@@ -14,14 +14,14 @@
  * `K` across EVERY window of the AgentMux process, where each window is
  * its own CEF renderer. That is cross-window coordination, not DOM inert.
  *
- * Chosen mechanism — WPS-backed shared store (no Rust change)
+ * Chosen mechanism — MPS-backed shared store (no Rust change)
  * -----------------------------------------------------------
  * Every AgentMux process runs exactly one `agentmux-srv`; every window's
- * renderer holds a WebSocket to it. The srv's WPS broker
- * (`agentmux-srv/src/backend/wps.rs`) is therefore a *process-wide* event
+ * renderer holds a WebSocket to it. The srv's MPS broker
+ * (`agentmux-srv/src/backend/mps.rs`) is therefore a *process-wide* event
  * bus already shared by all windows. We ride it:
  *
- *   1. **Registry + broadcast.** A claim is a WPS event of type
+ *   1. **Registry + broadcast.** A claim is a MPS event of type
  *      `EVENT_SINGLETON_CLAIM`, scoped `singleton:<kind>`, published with
  *      `persist: 1`. `persist: 1` means the broker keeps the *latest*
  *      claim and replays it to any window that subscribes later — so the
@@ -46,7 +46,7 @@
  * process; if the process dies the claim is moot anyway. The win is
  * zero Rust/launcher changes: the whole layer is renderer-side over
  * infrastructure that already exists and is already battle-tested
- * (the same WPS persist/replay path that backs `tool_chunk` streaming).
+ * (the same MPS persist/replay path that backs `tool_chunk` streaming).
  *
  * Publish transport
  * -----------------
@@ -63,10 +63,10 @@ import { getApi, openWindowEntriesAtom } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { subscribeLauncherEvent } from "@/util/launcher-events";
 
-/** WPS event name carrying singleton claim/release broadcasts. */
+/** MPS event name carrying singleton claim/release broadcasts. */
 const EVENT_SINGLETON_CLAIM = "singleton:claim";
 
 /**
@@ -78,7 +78,7 @@ const EVENT_SINGLETON_CLAIM = "singleton:claim";
 export type SingletonKind = string;
 
 /**
- * Payload of an `EVENT_SINGLETON_CLAIM` WPS event. `data` on the wire.
+ * Payload of an `EVENT_SINGLETON_CLAIM` MPS event. `data` on the wire.
  *  - `holder` = window label currently holding the singleton, or `null`
  *    when released.
  *  - `epoch` = monotonically-increasing-per-window claim counter; used
@@ -104,7 +104,7 @@ interface KindState {
     setHolder: (v: string | null) => void;
     /** Local epoch counter for claims this window publishes. */
     epoch: number;
-    /** True once a WPS subscription + history-replay has been wired. */
+    /** True once a MPS subscription + history-replay has been wired. */
     wired: boolean;
 }
 
@@ -164,7 +164,7 @@ function myLabelSync(): string | null {
 // ── Publish ────────────────────────────────────────────────────────────
 
 /**
- * Publish a claim/release to the process-wide WPS broker via the
+ * Publish a claim/release to the process-wide MPS broker via the
  * auth-gated HTTP endpoint. `persist: 1` so a window that subscribes
  * later replays the current holder. Fire-and-forget — the optimistic
  * local update already happened; a failed publish self-heals on the
@@ -219,7 +219,7 @@ function parsePayload(raw: unknown): ClaimPayload | null {
     return { kind: r.kind, holder: holder as string | null, epoch };
 }
 
-// ── Wiring: WPS subscription + history replay + crash release ───────────
+// ── Wiring: MPS subscription + history replay + crash release ───────────
 
 function ensureWired(kind: SingletonKind, st: KindState): void {
     if (st.wired) return;
@@ -351,7 +351,7 @@ function isWindowLive(label: string): boolean {
  * of opening the modal.
  *
  * Two windows racing a genuinely-free singleton is possible but rare
- * (both must call within the WPS round-trip); last-write-wins and both
+ * (both must call within the MPS round-trip); last-write-wins and both
  * converge. For the bundle manager the trigger is a deliberate
  * hamburger click, so the race is not a practical concern.
  */

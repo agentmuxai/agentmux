@@ -11,14 +11,14 @@ use crate::backend::wconfig;
 use crate::backend::wcore;
 
 pub(crate) fn test_state() -> AppState {
-    let wstore = Arc::new(Store::open_in_memory().unwrap());
-    // This one store backs wstore/id_store/identity_store below, so it has to
+    let mstore = Arc::new(Store::open_in_memory().unwrap());
+    // This one store backs mstore/id_store/identity_store below, so it has to
     // carry BOTH schemas. Without the identity schema, any handler touching a
     // table that lives only in the global identity store (`db_work_queue`)
     // failed with a bare "no such table" 500 in tests while being perfectly
     // correct in production. Additive and idempotent — every statement in that
     // schema is CREATE ... IF NOT EXISTS.
-    wstore.apply_identity_schema_for_tests().unwrap();
+    mstore.apply_identity_schema_for_tests().unwrap();
     let filestore = Arc::new(FileStore::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());
@@ -33,7 +33,7 @@ pub(crate) fn test_state() -> AppState {
     ));
 
     // Bootstrap initial data
-    wcore::ensure_initial_data(&wstore).unwrap();
+    wcore::ensure_initial_data(&mstore).unwrap();
 
     let config_watcher = Arc::new(wconfig::ConfigState::new());
 
@@ -50,14 +50,14 @@ pub(crate) fn test_state() -> AppState {
         version: "0.28.20".to_string(),
         hostname: "test-host".to_string(),
         app_path: String::new(),
-        wstore: wstore.clone(),
+        mstore: mstore.clone(),
         shared_store: None,
-        id_store: wstore.clone(),
-        // Aliased to `wstore` on purpose — a lot of existing setup code seeds
+        id_store: mstore.clone(),
+        // Aliased to `mstore` on purpose — a lot of existing setup code seeds
         // through one store and reads through another. See the
         // `apply_identity_schema_for_tests` call above for why that single
         // store now carries the identity schema too.
-        identity_store: wstore.clone(),
+        identity_store: mstore.clone(),
         filestore,
         global_transcript_store: None,
         event_bus: event_bus.clone(),
@@ -70,7 +70,7 @@ pub(crate) fn test_state() -> AppState {
         host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
         host_reg_secret: Some("test-host-reg-secret".to_string()),
         local_web_url: String::new(),
-        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone(), wstore.clone(), wstore.clone())),
+        subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), mstore.clone(), mstore.clone(), mstore.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
         lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
             "test-instance".to_string(),
@@ -683,7 +683,7 @@ fn signed_ui_auth(state: &AppState, block_id_hint: &str) -> (String, serde_json:
     let unique = uuid::Uuid::new_v4();
     let agent_id = format!("test-agent-{unique}");
     let block_id = format!("{block_id_hint}-{unique}");
-    let key = state.wstore.agent_jekt_key_ensure(&agent_id).unwrap();
+    let key = state.mstore.agent_jekt_key_ensure(&agent_id).unwrap();
     crate::backend::reactive::handler::get_global_handler()
         .register_agent(&agent_id, &block_id, None)
         .unwrap();
@@ -1078,7 +1078,7 @@ async fn reactive_supervisor_decision_nudge_rejected_when_opted_out() {
         "auto_continue_enabled": 0,
     }))
     .expect("definition fixture");
-    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+    state.mstore.agent_def_insert(&mut def).expect("insert definition");
 
     let app = build_router(state);
     let body = serde_json::json!({
@@ -1117,7 +1117,7 @@ async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
         "auto_continue_enabled": 1,
     }))
     .expect("definition fixture");
-    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+    state.mstore.agent_def_insert(&mut def).expect("insert definition");
 
     let app = build_router(state);
     let body = serde_json::json!({
@@ -1162,7 +1162,7 @@ async fn reactive_supervisor_decision_nudge_slug_match_does_not_cross_into_a_col
         "auto_continue_enabled": 0,
     }))
     .expect("definition fixture");
-    state.wstore.agent_def_insert(&mut agent_a).expect("insert agent a");
+    state.mstore.agent_def_insert(&mut agent_a).expect("insert agent a");
 
     let mut agent_b: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
         "id": "def-collision-agent-b",
@@ -1175,7 +1175,7 @@ async fn reactive_supervisor_decision_nudge_slug_match_does_not_cross_into_a_col
         "auto_continue_enabled": 1,
     }))
     .expect("definition fixture");
-    state.wstore.agent_def_insert(&mut agent_b).expect("insert agent b");
+    state.mstore.agent_def_insert(&mut agent_b).expect("insert agent b");
 
     let app = build_router(state);
     let body = serde_json::json!({
@@ -1227,7 +1227,7 @@ async fn wps_publish_accepts_persist_field() {
     // This test exercises the deserialize + handler-200 path with a
     // 1024-persist body matching what agentmux-bashwrap actually
     // sends. Broker-level persistence semantics are covered by
-    // wps.rs::tests::test_event_persistence.
+    // mps.rs::tests::test_event_persistence.
     let app = test_router();
     let body = serde_json::json!({
         "event": "tool_chunk",
@@ -1280,8 +1280,8 @@ async fn wps_publish_omits_persist_defaults_to_zero() {
 #[tokio::test]
 async fn self_endpoint_resolves_seeded_agent() {
     let state = test_state();
-    let wstore = state.wstore.clone();
-    let tab = wstore
+    let mstore = state.mstore.clone();
+    let tab = mstore
         .get_all::<crate::backend::obj::Tab>()
         .unwrap()
         .into_iter()
@@ -1551,15 +1551,15 @@ async fn window_name_malformed_id_is_400() {
 }
 
 /// Happy path: renaming the seeded window succeeds and persists
-/// `window:displayname` in wstore. srv_state is hydrated from wstore via
-/// the same `bootstrap_state_from_wstore` production runs, so the new
+/// `window:displayname` in mstore. srv_state is hydrated from mstore via
+/// the same `bootstrap_state_from_mstore` production runs, so the new
 /// reducer existence guard sees the seeded window exactly as it would live.
 #[tokio::test]
 async fn window_name_renames_seeded_window_and_persists() {
     let state = test_state();
-    crate::persist::bootstrap_state_from_wstore(&state.srv_state, &state.wstore).await;
-    let wstore = state.wstore.clone();
-    let window = wstore
+    crate::persist::bootstrap_state_from_mstore(&state.srv_state, &state.mstore).await;
+    let mstore = state.mstore.clone();
+    let window = mstore
         .get_all::<crate::backend::obj::Window>()
         .unwrap()
         .into_iter()
@@ -1581,14 +1581,14 @@ async fn window_name_renames_seeded_window_and_persists() {
     assert_eq!(json["success"], true);
     assert_eq!(json["name"], "renamed-by-test");
 
-    let reread = wstore
+    let reread = mstore
         .get::<crate::backend::obj::Window>(&window.oid)
         .unwrap()
         .expect("window still exists");
     assert_eq!(
         reread.meta.get("window:displayname").and_then(|v| v.as_str()),
         Some("renamed-by-test"),
-        "display name must be persisted in wstore meta"
+        "display name must be persisted in mstore meta"
     );
 }
 
@@ -1607,15 +1607,15 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
     use crate::backend::obj::{LayoutActionData, LayoutState, Tab};
 
     let state = test_state();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let srv_state = state.srv_state.clone();
 
     // Seed workspace + tab through the reducer so BOTH reducer state and
-    // wstore know the tab (mirrors production bootstrap).
+    // mstore know the tab (mirrors production bootstrap).
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -1643,7 +1643,7 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
         })
         .unwrap();
 
-    let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
+    let tab = mstore.get::<Tab>(&tab_id).unwrap().unwrap();
     let layout_oid = tab.layoutstate.clone();
 
     // The push below references block "b-1" directly (a predetermined id
@@ -1665,7 +1665,7 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
     // Seed a pending backend action (as a redock would); the push below
     // omits pendingbackendactions — the ack must clear it.
     {
-        let mut layout = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+        let mut layout = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
         layout.pendingbackendactions = Some(vec![LayoutActionData {
             actiontype: "insert".into(),
             actionid: "a1".into(),
@@ -1679,9 +1679,9 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
             targetblockid: String::new(),
             position: String::new(),
         }]);
-        wstore.update(&mut layout).unwrap();
+        mstore.update(&mut layout).unwrap();
     }
-    let version_before = wstore
+    let version_before = mstore
         .get::<LayoutState>(&layout_oid)
         .unwrap()
         .unwrap()
@@ -1726,7 +1726,7 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
     );
 
     // (b) exactly ONE version bump — the double-write is collapsed.
-    let layout = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    let layout = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
     assert_eq!(
         layout.version,
         version_before + 1,
@@ -1762,13 +1762,13 @@ async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
     use crate::backend::obj::Tab;
 
     let state = test_state();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let srv_state = state.srv_state.clone();
 
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -1795,7 +1795,7 @@ async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
             _ => None,
         })
         .unwrap();
-    let layout_oid = wstore.get::<Tab>(&tab_id).unwrap().unwrap().layoutstate;
+    let layout_oid = mstore.get::<Tab>(&tab_id).unwrap().unwrap().layoutstate;
 
     // rootnode.id must be a string — a numeric id fails the typed parse and
     // forces the legacy fallback branch.
@@ -1830,7 +1830,7 @@ async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
     );
 
     // Row was written wholesale (raw JSON survives even though typed parse failed).
-    let raw = wstore
+    let raw = mstore
         .get_raw("layout", &layout_oid)
         .unwrap()
         .expect("row present");
@@ -1856,13 +1856,13 @@ async fn layout_seeders_route_through_reducer_coherently() {
     use crate::backend::obj::{LayoutState, Tab};
 
     let state = test_state();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let srv_state = state.srv_state.clone();
 
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -1911,8 +1911,8 @@ async fn layout_seeders_route_through_reducer_coherently() {
     .await
     .expect("three-pane seed via reducer");
 
-    let layout_oid = wstore.get::<Tab>(&tab1).unwrap().unwrap().layoutstate;
-    let row = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    let layout_oid = mstore.get::<Tab>(&tab1).unwrap().unwrap().layoutstate;
+    let row = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
     assert_eq!(row.leaforder.as_ref().unwrap().len(), 3);
     assert!(!row.focusednodeid.is_empty(), "focus persisted");
     {
@@ -1949,8 +1949,8 @@ async fn layout_seeders_route_through_reducer_coherently() {
         .await
         .expect("tear-off seed via reducer");
 
-    let layout_oid = wstore.get::<Tab>(&tab2).unwrap().unwrap().layoutstate;
-    let row = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
+    let layout_oid = mstore.get::<Tab>(&tab2).unwrap().unwrap().layoutstate;
+    let row = mstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
     let root = row.rootnode.as_ref().expect("single-leaf tree persisted");
     assert_eq!(root.data.as_ref().unwrap().block_id, "b-moved");
     assert_eq!(row.leaforder.as_ref().unwrap()[0].blockid, "b-moved");
@@ -1997,7 +1997,7 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
     use crate::backend::obj::{LayoutState, Tab};
 
     let state = test_state();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let srv_state = state.srv_state.clone();
 
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
@@ -2008,15 +2008,15 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
             events
         );
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
 
     async fn assert_coherent(state: &AppState, tab_id: &str, step: &str) {
-        let tab = state.wstore.get::<Tab>(tab_id).unwrap().unwrap();
+        let tab = state.mstore.get::<Tab>(tab_id).unwrap().unwrap();
         let db_layout = state
-            .wstore
+            .mstore
             .get::<LayoutState>(&tab.layoutstate)
             .unwrap()
             .unwrap();
@@ -2167,8 +2167,8 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
     .unwrap();
     assert_coherent(&state, &tab_id, "queue-append").await;
     {
-        let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
-        let layout = wstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
+        let tab = mstore.get::<Tab>(&tab_id).unwrap().unwrap();
+        let layout = mstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
         assert_eq!(
             layout.pendingbackendactions.as_ref().map(|a| a.len()),
             Some(1),
@@ -2200,8 +2200,8 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
     .await;
     assert_coherent(&state, &tab_id, "frontend-ack").await;
     {
-        let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
-        let layout = wstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
+        let tab = mstore.get::<Tab>(&tab_id).unwrap().unwrap();
+        let layout = mstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
         assert!(
             layout.pendingbackendactions.is_none(),
             "ack slice must clear the queue"
@@ -2243,8 +2243,8 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
     )
     .await;
     assert_coherent(&state, &tab_id, "delete-by-block (b3, root orphan)").await;
-    let tab = wstore.get::<Tab>(&tab_id).unwrap().unwrap();
-    let layout = wstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
+    let tab = mstore.get::<Tab>(&tab_id).unwrap().unwrap();
+    let layout = mstore.get::<LayoutState>(&tab.layoutstate).unwrap().unwrap();
     assert!(layout.rootnode.is_none(), "tree must be fully empty at the end");
 }
 
@@ -2339,7 +2339,7 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
         "created_at": 1,
     }))
     .expect("definition fixture");
-    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+    state.mstore.agent_def_insert(&mut def).expect("insert definition");
 
     let inst: crate::backend::storage::AgentInstance = serde_json::from_value(serde_json::json!({
         "id": "inst-1",
@@ -2353,7 +2353,7 @@ async fn resolve_agent_definition_id_maps_slug_and_passes_through_def_id() {
         "working_directory": "",
     }))
     .expect("instance fixture");
-    state.wstore.instance_create(&inst).expect("create instance");
+    state.mstore.instance_create(&inst).expect("create instance");
 
     // Slug (AGENTMUX_AGENT_ID, what a real MCP-tool caller actually sends)
     // → definition id. NOT the display name — that's a different,
@@ -3422,7 +3422,7 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
     // `update_object_meta`, which parses its oref through `ORef::parse` —
     // strict about the oid being a real UUID (matching every genuine block
     // in the app, always minted via `Uuid::new_v4()`). Also has to actually
-    // exist in the store, unlike the plain `wstore.get`-based checks
+    // exist in the store, unlike the plain `mstore.get`-based checks
     // elsewhere in this file that tolerate a fixture id referring to
     // nothing at all.
     let agent_block_id = uuid::Uuid::new_v4().to_string();
@@ -3430,7 +3430,7 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
         oid: agent_block_id.clone(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let (status, json) = post_json(
         &app,
@@ -3446,7 +3446,7 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
     // sub-block — same shape createsubblock's WS handler builds for
     // AgentShellSubblock.tsx — not a bespoke record type.
     let block: crate::backend::obj::Block =
-        state.wstore.must_get(&shell_id).expect("block was inserted");
+        state.mstore.must_get(&shell_id).expect("block was inserted");
     assert_eq!(block.meta.get("view").and_then(|v| v.as_str()), Some("term"));
     assert_eq!(
         block.meta.get(blockcontroller::META_KEY_CONTROLLER).and_then(|v| v.as_str()),
@@ -3458,7 +3458,7 @@ async fn ptyshell_create_returns_a_shell_id_and_inserts_a_real_term_block() {
     // lets a drawer opened afterward (or a human who already has one open)
     // attach to the same shell instead of getting an independent one.
     let agent_block: crate::backend::obj::Block =
-        state.wstore.must_get(&agent_block_id).expect("agent block exists");
+        state.mstore.must_get(&agent_block_id).expect("agent block exists");
     assert_eq!(
         agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
         Some(shell_id.as_str())
@@ -3508,7 +3508,7 @@ async fn ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_
         oid: agent_block_id.clone(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let mut human_shell = crate::backend::obj::Block {
         oid: human_shell_id.clone(),
@@ -3524,11 +3524,11 @@ async fn ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_
         },
         ..Default::default()
     };
-    state.wstore.insert(&mut human_shell).expect("insert human shell block");
+    state.mstore.insert(&mut human_shell).expect("insert human shell block");
     let mut agent_meta = crate::backend::obj::MetaMapType::new();
     agent_meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::json!(human_shell_id));
     crate::server::service::object_helpers::update_object_meta(
-        &state.wstore,
+        &state.mstore,
         &format!("block:{agent_block_id}"),
         &agent_meta,
     )
@@ -3549,7 +3549,7 @@ async fn ptyshell_create_reuses_the_pane_s_existing_shell_instead_of_spawning_a_
 
     // The agent block's pointer is unchanged — `create` didn't mint a
     // second, independent shell and repoint it there instead of reusing.
-    let agent_block: crate::backend::obj::Block = state.wstore.must_get(&agent_block_id).unwrap();
+    let agent_block: crate::backend::obj::Block = state.mstore.must_get(&agent_block_id).unwrap();
     assert_eq!(
         agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
         Some(human_shell_id.as_str())
@@ -3586,7 +3586,7 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
         },
         ..Default::default()
     };
-    state.wstore.insert(&mut foreign).expect("insert foreign block");
+    state.mstore.insert(&mut foreign).expect("insert foreign block");
 
     let (_, json) = post_json(
         &app,
@@ -3623,7 +3623,7 @@ async fn ptyshell_rejects_operating_on_a_block_outside_the_calling_agents_own_pa
 
     // The foreign block must still exist and be untouched.
     let still_there: Result<crate::backend::obj::Block, _> =
-        state.wstore.must_get("someone-elses-real-pane");
+        state.mstore.must_get("someone-elses-real-pane");
     assert!(still_there.is_ok(), "ptyshell/* must not delete a block outside the caller's own pane");
 
     // The LEGITIMATE owner (matching agent_block_id) can still act on it —
@@ -3661,7 +3661,7 @@ async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
         },
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let (status, json) = post_json(
         &app,
@@ -3672,7 +3672,7 @@ async fn ptyshell_create_defaults_cwd_from_the_agent_block() {
     assert_eq!(status, StatusCode::OK);
     let shell_id = json["shell_id"].as_str().unwrap().to_string();
 
-    let block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let block: crate::backend::obj::Block = state.mstore.must_get(&shell_id).unwrap();
     assert_eq!(
         block.meta.get(blockcontroller::META_KEY_CMD_CWD).and_then(|v| v.as_str()),
         Some(cwd.as_str())
@@ -3748,7 +3748,7 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
         oid: agent_block_id.clone(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
     let mut shell = crate::backend::obj::Block {
         oid: shell_id.clone(),
         parentoref: format!("block:{agent_block_id}"),
@@ -3759,7 +3759,7 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
         },
         ..Default::default()
     };
-    state.wstore.insert(&mut shell).expect("insert shell block");
+    state.mstore.insert(&mut shell).expect("insert shell block");
 
     let before = agentmux_common::time::now_ms();
     let (_, json) = post_json(
@@ -3777,7 +3777,7 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
     // The lock must be set by the real HTTP call itself — unconditionally,
     // before the (here, failing) write is even attempted — not merely
     // something this test simulates after the fact.
-    let locked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let locked_block: crate::backend::obj::Block = state.mstore.must_get(&shell_id).unwrap();
     let until = locked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).and_then(|v| v.as_i64()).unwrap();
     assert!(until > before, "lock expiry must be in the future");
     assert!(until <= before + AGENT_LOCK_WINDOW_MS + 1000, "lock window should be short, not indefinite");
@@ -3790,7 +3790,7 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
     .await;
     assert_eq!(json["released"], serde_json::json!(true));
 
-    let unlocked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let unlocked_block: crate::backend::obj::Block = state.mstore.must_get(&shell_id).unwrap();
     assert!(
         unlocked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).is_none(),
         "stop must clear the lock, not just let it expire"
@@ -3798,7 +3798,7 @@ async fn ptyshell_input_locks_the_shell_and_stop_releases_it_early() {
 
     // The block itself must still exist — stop() never deletes it (this
     // shell is shared/pane-scoped now, not a private disposable one).
-    assert!(state.wstore.get::<crate::backend::obj::Block>(&shell_id).unwrap().is_some());
+    assert!(state.mstore.get::<crate::backend::obj::Block>(&shell_id).unwrap().is_some());
 }
 
 /// Real end-to-end PTY spawn: create a shell, type a command, read the
@@ -3831,7 +3831,7 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
         oid: "test-agent-block".to_string(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let (status, json) = post_json(
         &app,
@@ -3858,7 +3858,7 @@ async fn ptyshell_create_input_read_stop_round_trips_through_a_real_pty() {
     // A successful write must lock the shell out from human input — the
     // whole point of the feature. Assert it directly against the store
     // rather than adding a frontend round trip to this backend test.
-    let locked_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let locked_block: crate::backend::obj::Block = state.mstore.must_get(&shell_id).unwrap();
     let lock_until = locked_block.meta.get(META_KEY_AGENT_LOCK_UNTIL).and_then(|v| v.as_i64());
     assert!(
         lock_until.is_some_and(|until| until > agentmux_common::time::now_ms()),
@@ -3956,7 +3956,7 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
         oid: "test-agent-block".to_string(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let (status, json) = post_json(
         &app,
@@ -4020,7 +4020,7 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
 
     // The pane's pointer must now follow the fresh shell, not the dead one.
     let agent_block: crate::backend::obj::Block =
-        state.wstore.must_get("test-agent-block").expect("agent block exists");
+        state.mstore.must_get("test-agent-block").expect("agent block exists");
     assert_eq!(
         agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
         Some(second_shell_id.as_str())
@@ -4061,7 +4061,7 @@ async fn an_exited_shell_does_not_keep_the_agent_lease() {
         oid: "lease-exit-agent-block".to_string(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let (status, json) = post_json(
         &app,
@@ -4160,7 +4160,7 @@ async fn ptyshell_create_does_not_close_the_parented_shell_pane_after_exit() {
         oid: "test-agent-block".to_string(),
         ..Default::default()
     };
-    state.wstore.insert(&mut agent_block).expect("insert agent block");
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
 
     let (status, json) = post_json(
         &app,
@@ -4173,7 +4173,7 @@ async fn ptyshell_create_does_not_close_the_parented_shell_pane_after_exit() {
 
     // Sanity: this block really is parented — the property the exclusion
     // is keyed on.
-    let shell_block: crate::backend::obj::Block = state.wstore.must_get(&shell_id).unwrap();
+    let shell_block: crate::backend::obj::Block = state.mstore.must_get(&shell_id).unwrap();
     assert_eq!(shell_block.parentoref, "block:test-agent-block");
 
     let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
@@ -4254,7 +4254,7 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
         meta,
         ..Default::default()
     };
-    state.wstore.insert(&mut block).expect("insert block");
+    state.mstore.insert(&mut block).expect("insert block");
 
     let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -4265,7 +4265,7 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
         },
     ));
 
-    let registry = state.wstore.shared_agent_registry();
+    let registry = state.mstore.shared_agent_registry();
     blockcontroller::resync_controller(
         &block,
         "test-real-tab-1",
@@ -4274,7 +4274,7 @@ async fn shell_pane_with_no_parent_closes_itself_after_exit() {
         true,
         Some(state.broker.clone()),
         Some(state.event_bus.clone()),
-        Some(state.wstore.clone()),
+        Some(state.mstore.clone()),
         Some(state.filestore.clone()),
         registry,
         state.boot_id.clone(),
@@ -4361,7 +4361,7 @@ async fn force_restart_does_not_close_the_pane_via_the_old_controllers_exit() {
         meta,
         ..Default::default()
     };
-    state.wstore.insert(&mut block).expect("insert block");
+    state.mstore.insert(&mut block).expect("insert block");
 
     let closed: std::sync::Arc<std::sync::Mutex<Option<(String, String)>>> =
         std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -4381,9 +4381,9 @@ async fn force_restart_does_not_close_the_pane_via_the_old_controllers_exit() {
             true,
             Some(state.broker.clone()),
             Some(state.event_bus.clone()),
-            Some(state.wstore.clone()),
+            Some(state.mstore.clone()),
             Some(state.filestore.clone()),
-            state.wstore.shared_agent_registry(),
+            state.mstore.shared_agent_registry(),
             state.boot_id.clone(),
         )
     };

@@ -38,7 +38,7 @@ vi.mock("@/app/store/services", () => ({
 const getObjectValue = vi.fn();
 vi.mock("@/app/store/global", () => ({
     pushNotification: vi.fn(),
-    WOS: {
+    MOS: {
         getObjectValue: (...args: unknown[]) => getObjectValue(...args),
         makeORef: (kind: string, id: string) => `${kind}:${id}`,
     },

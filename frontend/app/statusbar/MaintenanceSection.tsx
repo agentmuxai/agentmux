@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, getApi } from "@/store/global";
-import { WpsEvent } from "@/store/wps-events";
+import { WpsEvent } from "@/store/mps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
 
@@ -69,7 +69,7 @@ export const MaintenanceSection = (): JSX.Element => {
         onCleanup(() => clearInterval(id));
     });
 
-    // Subscribe to migration progress events (from CEF, not WPS WebSocket)
+    // Subscribe to migration progress events (from CEF, not MPS WebSocket)
     onMount(() => {
         let unlisten: (() => void) | null = null;
         getApi().listen(WpsEvent.UpgradeMigrationEvent, (payload: any) => {

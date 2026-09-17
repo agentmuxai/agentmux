@@ -17,7 +17,7 @@ describe("token-usage store — cache-hit-rate normalization", () => {
     });
 
     it("reagentx/codex P2 on PR #2658 — normalizes the backend TokenCounts shape (input = fresh only, no freshInput field)", () => {
-        // gotypes.d.ts's TokenCounts shape, as passed by
+        // srv-types.d.ts's TokenCounts shape, as passed by
         // useNextPromptSuggestion/useAgentActivitySummary/ActivityDock/
         // swarm-view's ambient `result.tokens` — `input` means fresh-only
         // here, and there is no separate `freshInput` field at all.

@@ -29,7 +29,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::backend::storage::work_queue::{ClaimFilter, WorkItem};
-use crate::backend::wps::MuxEvent;
+use crate::backend::mps::MuxEvent;
 
 use super::AppState;
 

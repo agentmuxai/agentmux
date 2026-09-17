@@ -126,7 +126,7 @@ pub(super) fn handle_rename_workspace(state: &mut State, workspace_id: String, n
 /// Phase E.5.3 — pass-through validation + emit for workspace
 /// meta updates. The reducer does NOT mutate meta in state (it
 /// doesn't track meta in WorkspaceRecord); the persist subscriber
-/// applies the patch directly to wstore. This keeps the reducer's
+/// applies the patch directly to mstore. This keeps the reducer's
 /// state shape unchanged while still routing every meta mutation
 /// through the broadcast bus for observers.
 pub(super) fn handle_update_workspace_meta(
