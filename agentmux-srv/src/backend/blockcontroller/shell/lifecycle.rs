@@ -562,21 +562,6 @@ impl Controller for ShellController {
 
             let mut c = CommandBuilder::new(&shell_path);
 
-            // Strip this instance's identity before anything else touches the
-            // environment. `CommandBuilder::new` seeds from `std::env::vars_os()`,
-            // so without this the pane inherits srv's whole `AGENTMUX_*` set and
-            // anything launched from the pane — including another AgentMux build —
-            // adopts THIS instance's channel, data dir and cache dir. See
-            // `backend::pane_env` and
-            // docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md.
-            //
-            // Deliberately before the explicit `.env()` calls below: this path
-            // re-sets everything a pane actually needs (BLOCKID, TABID, VERSION,
-            // LOG_DIR, LOCAL_URL, AGENTMUX) a few lines down, so stripping first
-            // costs nothing and keeps the allowlist honest.
-            for key in crate::backend::pane_env::keys_to_strip() {
-                c.env_remove(&key);
-            }
 
             // Apply shell-specific startup args (--rcfile, -File, etc.)
             if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home) {
@@ -613,11 +598,8 @@ impl Controller for ShellController {
                 c.env("AGENTMUX_LOCAL_URL", &local_url);
             }
 
-            // AGENTMUX is a plain "1" sentinel — wsh has been retired.
-            // Shell integrations check for the presence of AGENTMUX but no
-            // longer prepend a path to $PATH based on its value.
-            // See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
-            c.env("AGENTMUX", "1");
+            // The AGENTMUX sentinel is set by pane_env::sanitize_pty_command
+            // after the if/else, so every branch gets it — not just this one.
 
             // Wire AgentMux-managed tool dirs into the agent's PATH.
             //
@@ -746,6 +728,12 @@ impl Controller for ShellController {
 
             c
         };
+
+        // Applied to ALL THREE branches above, not just the interactive shell.
+        // The direct-spawn branch launches agent CLIs and the shell-wrapped `cmd`
+        // branch can launch anything; both inherited the full instance identity
+        // while this lived inside the third branch (ReAgent P0 on PR #3326).
+        crate::backend::pane_env::sanitize_pty_command(&mut cmd);
 
         // Set working directory if specified
         let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");

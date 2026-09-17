@@ -92,6 +92,37 @@ no loss at all: `AGENTMUX_INSTANCE_DIR`, `AGENTMUX_CEF_CACHE_DIR`,
 `AGENTMUX_CONFIG_HOME`, `AGENTMUX_APP_PATH`, `AGENTMUX_SRV_PIPE_PATH`,
 `AGENTMUX_PATH_SOURCE`, `AGENTMUX_EXTRACTED_RUN`, `AGENTMUX_SPLASH_READY_FILE`.
 
+### 3.2a Every spawn path, via one helper
+
+The first revision applied the strip inline at a single call site and missed
+most of them. Review (ReAgent, two P0s on PR #3326) found that
+`shell/lifecycle.rs` builds its `CommandBuilder` in **three** branches — direct
+spawn (agent CLIs launched with args), shell-wrapped `cmd`, and the interactive
+shell — and only the third was patched, so a directly-launched agent CLI still
+inherited everything. It also found `shell_node.rs` (`POST /api/v1/shell/create`,
+the MCP `Shell` tool that CLAUDE.md names as the way for an agent to launch
+`task dev`/`task package`) entirely unpatched — the single most likely path for
+this bug to occur in practice.
+
+A follow-up sweep of every spawn construction in `agentmux-srv` found a third
+agent-facing path the review had not named: `server/shell_handlers.rs`'s
+`shellexec`, whose own comment notes it "fires on every MCP Shell tool call".
+
+So the policy is now applied through one helper per command type —
+`pane_env::sanitize_pty_command` / `sanitize_process_command`, each doing strip
+*and* sentinel — at four sites:
+
+| Site | What it spawns |
+|---|---|
+| `shell/lifecycle.rs` (after the if/else) | all three PTY branches |
+| `blockcontroller/core.rs` | agent subprocesses |
+| `backend/shell_node.rs` | `/api/v1/shell/create` — MCP `Shell` |
+| `server/shell_handlers.rs` | `shellexec` — MCP `Shell` calls |
+
+Applying it *after* the if/else rather than inside a branch is deliberate: a
+per-branch call is exactly the shape that silently half-applies, which is how
+the first revision shipped a fix that left the most important path open.
+
 ### 3.3 Strip before the overlay
 
 Both call sites strip *before* applying their own explicit `.env()` values. The

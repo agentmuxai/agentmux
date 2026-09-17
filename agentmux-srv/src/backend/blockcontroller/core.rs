@@ -79,17 +79,7 @@ pub(crate) fn apply_working_dir(
     // agent pane — and every process the agent launches from its shell tool —
     // otherwise receives this instance's channel, data dir and cache dir.
     // See `backend::pane_env`.
-    for key in crate::backend::pane_env::keys_to_strip() {
-        cmd.env_remove(&key);
-    }
-
-    // Mark the child as running inside AgentMux. `agentmux-launcher`'s
-    // `data_dir.rs` treats this as "ignore ambient AGENTMUX_* and re-derive
-    // from my own exe path" — the guard that already existed but fired only
-    // for terminal panes, because this path never set the sentinel and the
-    // only other setter (`shellexec.rs::build_mux_env`) has no callers. Every
-    // confirmed failure in the retro came through this gap.
-    cmd.env(crate::backend::pane_env::NESTING_SENTINEL_KEY, "1");
+    crate::backend::pane_env::sanitize_process_command(cmd);
 
     for (k, v) in env_vars {
         let expanded = crate::backend::base::expand_home_dir_safe(v);

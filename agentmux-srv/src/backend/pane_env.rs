@@ -100,6 +100,38 @@ pub fn should_strip(key: &str) -> bool {
     !PANE_ENV_KEEP.contains(&key)
 }
 
+
+/// Apply the policy to a PTY command: strip inherited identity, then mark the
+/// child as running inside AgentMux.
+///
+/// Exists so a caller cannot apply half of it. The first version of this fix
+/// inlined the strip at ONE of `shell/lifecycle.rs`'s three `CommandBuilder`
+/// branches, leaving the direct-spawn path (agent CLIs launched with args) and
+/// the shell-wrapped `cmd` path fully leaking — caught in review as a P0.
+/// Call this once on the finished command instead.
+///
+/// Safe to call after the caller's own `.env()` values: everything a pane
+/// legitimately sets is on [`PANE_ENV_KEEP`], so nothing it just set is removed.
+pub fn sanitize_pty_command(c: &mut portable_pty::CommandBuilder) {
+    for key in keys_to_strip() {
+        c.env_remove(&key);
+    }
+    c.env(NESTING_SENTINEL_KEY, "1");
+}
+
+/// `sanitize_pty_command` for a `tokio::process::Command` — agent subprocesses,
+/// and the `/api/v1/shell/create` runner behind the MCP `Shell` tool, which is
+/// how CLAUDE.md tells agents to launch `task dev` / `task package`. That path
+/// was missed entirely by the first revision of this fix (ReAgent P0), which is
+/// notable because it is the single most likely way for an agent to start a
+/// second instance.
+pub fn sanitize_process_command(cmd: &mut tokio::process::Command) {
+    for key in keys_to_strip() {
+        cmd.env_remove(&key);
+    }
+    cmd.env(NESTING_SENTINEL_KEY, "1");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
