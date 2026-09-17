@@ -16,7 +16,7 @@ export const WpsEvent = {
     // backend transition (e.g. CloseTab's [update workspace, delete tab]
     // pair) — applied in one Solid batch() flush so the UI can't paint a
     // half-applied intermediate state. Mirrors
-    // WS_EVENT_WAVE_OBJ_BATCHED_UPDATES in
+    // WS_EVENT_MUX_OBJ_BATCHED_UPDATES in
     // agentmux-srv/src/backend/eventbus.rs. See
     // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
     MuxObjBatchedUpdates: "waveobj:batchedupdates",

@@ -47,7 +47,7 @@ pub fn send_mux_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
 
     if let Some(obj) = obj_json {
         broker.publish(MuxEvent {
-            event: mps::EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: mps::EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec![oref.to_string()],
             sender: String::new(),
             persist: 0,

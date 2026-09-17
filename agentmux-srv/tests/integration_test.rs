@@ -325,7 +325,7 @@ fn restore_last_session_survives_a_real_process_restart() {
     // --- Process 1: create a window, add a marked block, close gracefully ---
     let (guard1, web_addr, _ws_addr, auth_key) = spawn_backend_with_data_dir(data_dir.path());
 
-    // Mirror the real frontend cold-start path (`initHostWave` in
+    // Mirror the real frontend cold-start path (`initHostMux` in
     // `app-init.ts`): a fresh server has already bootstrapped a "Starter
     // workspace" window via `ensure_initial_data` at startup, so
     // `Client.windowids` is non-empty here — the frontend reuses

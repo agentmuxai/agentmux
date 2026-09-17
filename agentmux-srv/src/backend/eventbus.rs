@@ -20,7 +20,7 @@ pub const WS_EVENT_RPC: &str = "rpc";
 /// backend transition. Mirrored in `frontend/app/store/mps-events.ts`
 /// (`WpsEvent.MuxObjBatchedUpdates`) — the frontend applies the whole array
 /// in one Solid `batch()` flush. See `broadcast_mux_obj_updates` below.
-pub const WS_EVENT_WAVE_OBJ_BATCHED_UPDATES: &str = "waveobj:batchedupdates";
+pub const WS_EVENT_MUX_OBJ_BATCHED_UPDATES: &str = "waveobj:batchedupdates";
 
 /// Egress priority lane for a server→client event.
 ///
@@ -199,7 +199,7 @@ impl EventBus {
             }
         };
         self.broadcast_event(&WSEventType {
-            eventtype: WS_EVENT_WAVE_OBJ_BATCHED_UPDATES.to_string(),
+            eventtype: WS_EVENT_MUX_OBJ_BATCHED_UPDATES.to_string(),
             oref: String::new(),
             data: Some(data),
         });
@@ -403,7 +403,7 @@ mod tests {
         let msg = rx.priority.try_recv().expect("one frame expected");
         assert_eq!(
             msg.get("eventtype").and_then(|v| v.as_str()),
-            Some(WS_EVENT_WAVE_OBJ_BATCHED_UPDATES),
+            Some(WS_EVENT_MUX_OBJ_BATCHED_UPDATES),
         );
         let arr = msg.get("data").and_then(|d| d.as_array()).expect("array payload");
         assert_eq!(arr.len(), 2);
