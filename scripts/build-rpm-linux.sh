@@ -93,11 +93,15 @@ chmod +x "$PKGROOT/usr/bin/agentmux"
 mkdir -p "$PKGROOT/usr/share/applications"
 cp assets/linux/agentmux.desktop "$PKGROOT/usr/share/applications/agentmux.desktop"
 sed -i 's|^Exec=.*|Exec=/usr/bin/agentmux %F|' "$PKGROOT/usr/share/applications/agentmux.desktop"
-# rpm builds don't set AGENTMUX_BUILD_CHANNEL_DEFAULT, so the bundled
-# binary falls back to "stable" (agentmux-common/src/data_paths.rs) — match
-# that here so StartupWMClass equals the app_id the binary actually
-# advertises (window_settings.rs::linux_app_id()).
-sed -i "s|__WMCLASS__|agentmux-stable-${VERSION}|" "$PKGROOT/usr/share/applications/agentmux.desktop"
+# StartupWMClass must match the app_id the bundled binary actually
+# advertises (window_settings.rs::linux_app_id() = agentmux-<channel>-
+# <version>). `task package:linux:rpm` (package-linux.sh --format=rpm)
+# exports AGENTMUX_BUILD_CHANNEL_DEFAULT to a real per-build local-*
+# channel before compiling — same as the AppImage path — so this must read
+# it rather than assume "stable"; only `task package:release:linux:rpm`
+# (RELEASE_CHANNEL=stable) actually bakes "stable".
+BUILD_CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
+sed -i "s|__WMCLASS__|agentmux-${BUILD_CHANNEL}-${VERSION}|" "$PKGROOT/usr/share/applications/agentmux.desktop"
 
 for size in 16 32 48 64 128 256 512; do
     src="assets/linux/icons/hicolor/${size}x${size}/apps/agentmux.png"

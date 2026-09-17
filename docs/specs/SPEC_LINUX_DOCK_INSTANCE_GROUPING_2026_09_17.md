@@ -78,14 +78,21 @@ marker: `usr/share/agentmux/CHANNEL` (written from `AGENTMUX_BUILD_CHANNEL_DEFAU
 default `stable`), combined with an `AGENTMUX_CHANNEL` env override check — the same
 two-input resolution as the Rust side, so the two can never disagree.
 
-`.deb`/`.rpm` packaging (`build-deb-linux.sh`/`build-rpm-linux.sh`) has no channel
-concept and always builds against the `stable` fallback, so their static
-`/usr/share/applications/agentmux.desktop` substitutes `agentmux-stable-<version>`
-for `StartupWMClass` at build time. The AppImage's own internal top-level
-`.desktop` (read by some desktop-integration tools directly, not just the
-runtime-installed copy) does the equivalent substitution in
-`build-appimage-linux.sh` using the same `AGENTMUX_BUILD_CHANNEL_DEFAULT`/`VERSION`
-values baked into that specific build.
+`.deb`/`.rpm` packaging (`build-deb-linux.sh`/`build-rpm-linux.sh`) and the
+AppImage's own internal top-level `.desktop` (read by some desktop-integration
+tools directly, not just the runtime-installed copy, `build-appimage-linux.sh`)
+all substitute `StartupWMClass` at build time from
+`${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}` and `VERSION` — the same two inputs
+`window_settings.rs::linux_app_id()` resolves at compile time. This matters
+because `task package:linux:deb`/`:rpm` (like `task package:linux`) export
+`AGENTMUX_BUILD_CHANNEL_DEFAULT` to a real per-build `local-*` channel before
+compiling (`package-linux.sh`) — only the `package:release:linux:*` variants
+(`RELEASE_CHANNEL=stable`) actually bake `stable`. An earlier revision of this
+paragraph assumed `.deb`/`.rpm` builds never set the channel env var and
+hardcoded `agentmux-stable-<version>` unconditionally; ReAgent caught that
+this desyncs `StartupWMClass` from the real app_id for a local `.deb`/`.rpm`
+build, reintroducing the exact bug this spec fixes for that one packaging
+path (PR #3323).
 
 ### 3.3 Non-goals
 
