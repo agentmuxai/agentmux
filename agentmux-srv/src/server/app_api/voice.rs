@@ -18,22 +18,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     register_voice_check_path(engine);
 }
 
-#[derive(serde::Deserialize)]
-struct VoiceCheckPathReq {
-    path: String,
-}
-
 fn register_voice_check_path(engine: &Arc<WshRpcEngine>) {
-    engine.register_handler(
+    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1): the
+    // request/response structs are named in `rpc_types` and carry
+    // `#[derive(ts_rs::TS)]`, so `frontend/types/rpc/` gets them generated
+    // and `scripts/check-rpc-bindings.sh` fails the build if the two sides
+    // drift. Replaces a private `VoiceCheckPathReq` + an anonymous
+    // `json!({"exists": ..})`, neither of which the generator could see.
+    engine.register_typed(
         COMMAND_VOICE_CHECK_PATH,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let req: VoiceCheckPathReq = serde_json::from_value(data)
-                    .map_err(|e| format!("voice.checkPath: {e}"))?;
-                let trimmed = req.path.trim();
-                let exists = !trimmed.is_empty() && std::path::Path::new(trimmed).exists();
-                Ok(Some(json!({ "exists": exists })))
-            })
-        }),
+        move |req: CommandVoiceCheckPathData, _ctx| async move {
+            let trimmed = req.path.trim();
+            let exists = !trimmed.is_empty() && std::path::Path::new(trimmed).exists();
+            Ok(VoiceCheckPathResult { exists })
+        },
     );
 }
