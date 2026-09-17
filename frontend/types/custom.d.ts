@@ -543,15 +543,20 @@ declare global {
          *  surface must span more than the content box alone (terminal's
          *  background image + drag overlay). Identity by default. */
         wrapContent?: (content: JSX.Element) => JSX.Element;
-        /** Extra `pane.open` params to contribute when a new tab is added to
-         *  THIS pane, given the view type being added. Lets a pane carry
-         *  context from the tab you're on into the new one — terminal
-         *  returns the current shell's `cwd` for a new `term` tab, so it
-         *  opens in the same directory the way a real terminal's "new tab"
-         *  does. Returns undefined to contribute nothing (the common case,
-         *  including for a view type it doesn't recognise), which keeps the
-         *  widget picker itself entirely view-agnostic. */
-        newTabParams?: (view: string | undefined) => Record<string, unknown> | undefined;
+        /** Extra block META to contribute when a new tab is added to THIS
+         *  pane, given the view type being added. Lets a pane carry context
+         *  from the tab you're on into the new one — terminal returns
+         *  `{ "cmd:cwd": … }` for a new `term` tab so it opens in the same
+         *  directory the way a real terminal's "new tab" does. Returns
+         *  undefined to contribute nothing (the common case, including for
+         *  a view type it doesn't recognise), which keeps the widget picker
+         *  itself entirely view-agnostic.
+         *
+         *  Contribute META keys, not top-level `pane.open` args: srv only
+         *  reads args like `cwd`/`url` inside `build_pane_meta`, which it
+         *  skips whenever `meta` is supplied — and this path always supplies
+         *  it. See `addWidgetAsPaneTab`'s own comment. */
+        newTabMeta?: (view: string | undefined) => Record<string, unknown> | undefined;
         /** Extra class on the chrome's own root, so a view type can keep
          *  CSS hooks it already has without the chrome knowing about it. */
         rootClass?: string;

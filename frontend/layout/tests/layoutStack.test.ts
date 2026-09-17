@@ -667,21 +667,40 @@ describe("addWidgetAsPaneTab", () => {
         expect(data.activeBlockId).toBe("b2");
     });
 
-    it("forwards a destination pane's extra params (terminal's cwd) into pane.open", async () => {
+    // ReAgent P0 on #3351: the first version of this sent the contributed
+    // key as a TOP-LEVEL pane.open arg (`cwd`), which srv silently drops —
+    // `open_pane` only consults the top-level args inside `build_pane_meta`,
+    // and skips that entirely whenever `meta` is supplied, which this path
+    // always does. So the assertion that matters is that the key lands
+    // INSIDE meta, not merely that it was somewhere in the payload.
+    it("merges a destination pane's contributed keys INTO meta, where srv will actually read them", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");
         rpcCall.mockResolvedValue({ block_id: "b2" });
 
-        await addWidgetAsPaneTab(model, nodeId, { meta: { view: "term" } } as BlockDef, { cwd: "/tmp/here" });
+        await addWidgetAsPaneTab(
+            model,
+            nodeId,
+            { meta: { view: "term", controller: "shell" } } as BlockDef,
+            { "cmd:cwd": "/tmp/here" }
+        );
 
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            { view: "term", skip_placement: true, meta: { view: "term" }, cwd: "/tmp/here" },
+            {
+                view: "term",
+                skip_placement: true,
+                meta: { view: "term", controller: "shell", "cmd:cwd": "/tmp/here" },
+            },
             {}
         );
+        // Belt and braces: nothing may ride along at the top level, since
+        // that is precisely the shape srv ignores.
+        const sent = rpcCall.mock.calls[0][1] as Record<string, unknown>;
+        expect(sent).not.toHaveProperty("cwd");
     });
 
-    it("omits extra params entirely when the pane contributes none", async () => {
+    it("leaves meta exactly as the blockdef had it when the pane contributes nothing", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");
         rpcCall.mockResolvedValue({ block_id: "b2" });

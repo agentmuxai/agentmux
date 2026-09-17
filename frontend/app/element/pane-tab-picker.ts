@@ -31,11 +31,11 @@ export function openPaneTabWidgetPicker(
     model: LayoutModel,
     nodeId: string,
     e: MouseEvent,
-    /** The destination pane's own `PaneChromeModel.newTabParams`, if it has
+    /** The destination pane's own `PaneChromeModel.newTabMeta`, if it has
      *  one — see that field's doc comment. Passed in rather than read here
      *  so this stays a pure "open picker, add what's picked" helper with no
      *  knowledge of any view type. */
-    newTabParams?: (view: string | undefined) => Record<string, unknown> | undefined
+    newTabMeta?: (view: string | undefined) => Record<string, unknown> | undefined
 ): void {
     const wmap = atoms.fullConfigAtom()?.widgets ?? {};
     const settings = atoms.fullConfigAtom()?.settings ?? {};
@@ -45,7 +45,7 @@ export function openPaneTabWidgetPicker(
         // and folding it in here means the eight other pane types that
         // previously failed silently get the same feedback.
         const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"] as string | undefined;
-        void addWidgetAsPaneTab(model, nodeId, blockDef, newTabParams?.(view)).catch((err: unknown) => {
+        void addWidgetAsPaneTab(model, nodeId, blockDef, newTabMeta?.(view)).catch((err: unknown) => {
             pushNotification({
                 icon: "fa-triangle-exclamation",
                 title: "New tab failed",

@@ -244,7 +244,7 @@ describe("renderPaneChromeShell — activate/close/add wiring", () => {
 
         // Simulate the user picking the item the mocked picker returned.
         capturedOnSelect!({ meta: { view: "browser" } });
-        // 4th arg is the destination pane's own newTabParams contribution —
+        // 4th arg is the destination pane's own newTabMeta contribution —
         // undefined here, since this pane supplies no PaneChromeModel.
         expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "browser" } }, undefined);
     });
@@ -388,22 +388,22 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
         expect(root.classList.contains("pane-stack-focused")).toBe(true);
     });
 
-    it("newTabParams reaches the add path, so a pane can carry context into the new tab", () => {
+    it("newTabMeta reaches the add path, so a pane can carry context into the new tab", () => {
         // Terminal's cwd inheritance rides on this: the picker stays
         // view-agnostic and the destination pane contributes the params.
         renderWithModel({
-            newTabParams: (view: string) => (view === "term" ? { cwd: "/tmp/here" } : undefined),
+            newTabMeta: (view: string) => (view === "term" ? { "cmd:cwd": "/tmp/here" } : undefined),
         });
 
         headerCalls[0].onAdd({ clientX: 1, clientY: 1 } as unknown as MouseEvent);
         capturedOnSelect!({ meta: { view: "term" } });
 
-        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "term" } }, { cwd: "/tmp/here" });
+        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "term" } }, { "cmd:cwd": "/tmp/here" });
     });
 
     it("contributes nothing for a view type the pane doesn't recognise", () => {
         renderWithModel({
-            newTabParams: (view: string) => (view === "term" ? { cwd: "/tmp/here" } : undefined),
+            newTabMeta: (view: string) => (view === "term" ? { "cmd:cwd": "/tmp/here" } : undefined),
         });
 
         headerCalls[0].onAdd({ clientX: 1, clientY: 1 } as unknown as MouseEvent);

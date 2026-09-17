@@ -79,17 +79,30 @@ export async function addWidgetAsPaneTab(
     model: LayoutModel,
     nodeId: string,
     blockDef: BlockDef,
-    /** Extra `pane.open` params the destination pane contributes — context
-     *  carried from the tab you were on into the one being created (today:
-     *  terminal's `cwd`, so a new shell starts where the current one is).
-     *  Supplied by the pane's own `PaneChromeModel.newTabParams`; the
-     *  picker itself stays view-agnostic. */
-    extraParams?: Record<string, unknown>
+    /** Extra block META the destination pane contributes — context carried
+     *  from the tab you were on into the one being created (today:
+     *  terminal's `cmd:cwd`, so a new shell starts where the current one
+     *  is). Supplied by the pane's own `PaneChromeModel.newTabMeta`; the
+     *  picker itself stays view-agnostic.
+     *
+     *  META specifically, NOT a top-level `pane.open` param: srv's
+     *  `open_pane` does `match cmd.meta { Some(m) => m, None =>
+     *  build_pane_meta(&cmd)? }`, and the top-level convenience args
+     *  (`cwd`, `url`, …) are only ever consumed INSIDE `build_pane_meta`.
+     *  This call always sends `meta`, so that branch never runs and a
+     *  top-level arg would be silently dropped server-side — caught by
+     *  ReAgent as a P0 on the first version of this (#3351), where the RPC
+     *  carried `cwd` and the new shell still opened in the default
+     *  directory. Merging into meta is what the old pre-#3335
+     *  `handleTermTabAdd` effectively got from `build_pane_meta`'s own
+     *  `meta.insert("cmd:cwd", …)`. */
+    extraMeta?: Record<string, unknown>
 ): Promise<void> {
+    const meta = extraMeta ? { ...(blockDef.meta as Record<string, unknown>), ...extraMeta } : blockDef.meta;
     const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"];
     const paneOpenResult = (await TabRpcClient.rpcCall(
         "pane.open",
-        { view, skip_placement: true, meta: blockDef.meta, ...(extraParams ?? {}) },
+        { view, skip_placement: true, meta },
         {}
     )) as { block_id: string };
     const node = findNode(model.treeState.rootNode, nodeId);

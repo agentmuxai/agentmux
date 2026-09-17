@@ -692,10 +692,13 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
         // became the shared widget picker, so it applies to a terminal
         // added from this pane's picker and to nothing else (any other view
         // type gets undefined and is unaffected).
-        newTabParams: (view: string | undefined) => {
+        newTabMeta: (view: string | undefined) => {
             if (view !== "term") return undefined;
             const cwd = activeBlockData()?.meta?.["cmd:cwd"] as string | undefined;
-            return cwd ? { cwd } : undefined;
+            // The same key `build_pane_meta`'s own "term" branch writes from
+            // a top-level `cwd` arg (pane.rs) — set directly here because
+            // this path always supplies `meta`, so that branch never runs.
+            return cwd ? { "cmd:cwd": cwd } : undefined;
         },
         rootClass: "term-pane-stack",
         contentClass: "term-pane-stack-content",
