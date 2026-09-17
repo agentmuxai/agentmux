@@ -488,21 +488,53 @@ mod delete_memory_tests {
             assert_eq!(row["requestName"], "CommandDeleteBundleData");
             assert_eq!(row["responseName"], "DeleteBundleResult");
         }
-        // listmemories/getmemory/upsertmemory/reorderglobalbrain/
-        // upsertsystemmemory are deliberately NOT migrated (Bundle-shaped
-        // responses, or upsert bodies that ARE the storage entity) and must
-        // stay absent from the schema.
-        for cmd in [
-            COMMAND_LIST_MEMORIES,
-            COMMAND_GET_MEMORY,
-            COMMAND_UPSERT_MEMORY,
-            COMMAND_REORDER_GLOBAL_BRAIN,
-            COMMAND_UPSERT_SYSTEM_MEMORY,
+        // The rest of the bundle CRUD surface is now migrated too. This block
+        // previously asserted these five were ABSENT from the schema, which was
+        // a statement about a temporary state ("not migrated yet"), not an
+        // invariant -- so migrating them correctly made it fail. It now asserts
+        // what each one actually records, which is the thing worth pinning.
+        //
+        // `upsertmemory`/`upsertsystemmemory` take `Bundle` itself as the
+        // request because the upsert body IS the storage entity; only `id` and
+        // `name` are required on the wire (every other field has a serde
+        // default), which is what `BundleUpsertInput` expresses on the
+        // frontend side.
+        for (cmd, req, resp) in [
+            (COMMAND_GET_MEMORY, "CommandGetBundleData", "Bundle"),
+            (COMMAND_UPSERT_MEMORY, "Bundle", "Bundle"),
+            (COMMAND_UPSERT_SYSTEM_MEMORY, "Bundle", "Bundle"),
+            (
+                COMMAND_REORDER_GLOBAL_BRAIN,
+                "CommandReorderGlobalBundlesData",
+                "ReorderGlobalBundlesResult",
+            ),
+            (
+                COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
+                "CommandGetClaudeGlobalConfigData",
+                "ClaudeGlobalConfig",
+            ),
         ] {
-            assert!(
-                rows.iter().all(|r| r["command"] != cmd),
-                "{cmd} is not migrated and must not appear in the schema",
-            );
+            let row = rows
+                .iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"));
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert_eq!(row["responseName"], resp, "{cmd} response");
         }
+
+        // `listmemories` answers with `Vec<Bundle>`. `short_name` deliberately
+        // leaves a generic whole (truncating `Vec<a::B>` at the last `::`
+        // would yield `B>`, which names nothing), so match on the shape rather
+        // than pinning the full crate path.
+        let list = rows
+            .iter()
+            .find(|r| r["command"] == COMMAND_LIST_MEMORIES)
+            .expect("listmemories missing from the schema");
+        assert_eq!(list["requestName"], "CommandListBundlesData");
+        let list_resp = list["responseName"].as_str().unwrap_or_default();
+        assert!(
+            list_resp.starts_with("alloc::vec::Vec<") && list_resp.ends_with("::Bundle>"),
+            "listmemories should answer with a Vec of Bundle, got {list_resp}"
+        );
     }
 }
