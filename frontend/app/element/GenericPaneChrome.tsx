@@ -33,6 +33,7 @@ import { ErrorBoundary } from "@/element/errorboundary";
 import { addWidgetAsPaneTab, closeBlockInStack, getLayoutModelForStaticTab, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
+import "./GenericPaneChrome.scss";
 
 interface GenericPaneTab {
     blockId: string;
