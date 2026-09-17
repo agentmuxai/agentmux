@@ -46,16 +46,16 @@ const nativeMemoryListMock = vi.fn();
 
 // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md's own tests drive
 // `agent:memory:changed:{id}` events through this hub, same pattern as
-// bundle-mcp-model.test.ts's own waveEventSubscribe mock — extended here to
+// bundle-mcp-model.test.ts's own muxEventSubscribe mock — extended here to
 // accept the VARIADIC multi-subscription call NativeMemoryManager makes
-// (one subscription per grid agent in a single waveEventSubscribe(...) call,
+// (one subscription per grid agent in a single muxEventSubscribe(...) call,
 // not bundle-mcp-model.ts's single-subscription shape).
 const wpsHub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((...subs: Array<{ eventType: string; handler: (e: unknown) => void }>) => {
+    muxEventSubscribe: vi.fn((...subs: Array<{ eventType: string; handler: (e: unknown) => void }>) => {
         for (const sub of subs) wpsHub.handlers.set(sub.eventType, sub.handler);
         return () => {
             for (const sub of subs) wpsHub.handlers.delete(sub.eventType);
@@ -626,7 +626,7 @@ describe("NativeMemoryManager — reactive updates", () => {
             // Schedule a1's debounced refetch (250ms), then — BEFORE it
             // fires — an unrelated agent (a3) appears elsewhere in the app.
             // useAgentDefinitions() itself subscribes to "agents:changed"
-            // (AgentPicker.tsx) via the same mocked waveEventSubscribe hub,
+            // (AgentPicker.tsx) via the same mocked muxEventSubscribe hub,
             // so triggering that here re-fetches the agent list for real,
             // exactly as it would from a genuine unrelated create/edit.
             wpsHub.handlers.get("agent:memory:changed:a1")?.({});

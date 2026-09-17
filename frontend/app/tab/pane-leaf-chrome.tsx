@@ -71,13 +71,13 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     const nodeModel = props.nodeModel;
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
 
-    // Effective view type of the ACTIVE member, reactive — getWaveObjectAtom
-    // inside a memo, not useWaveObjectValue, the same reactive-oref pattern
+    // Effective view type of the ACTIVE member, reactive — getMuxObjectAtom
+    // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
     // PR #3134 established for BlockFrame_Header (frontend/app/store/wos.ts's
-    // own doc comments explain why: useWaveObjectValue's onCleanup-ref-count
+    // own doc comments explain why: useMuxObjectValue's onCleanup-ref-count
     // is tied to THIS component's mount, and never re-subscribes if the
     // oref it was called with later changes).
-    const activeBlockData = createMemo(() => WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+    const activeBlockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
     const effectiveViewType = createMemo(() => resolveEffectiveViewType(activeBlockData()?.meta?.view ?? ""));
 
     // Hoist for EVERY agent pane, not just ones whose stack has already

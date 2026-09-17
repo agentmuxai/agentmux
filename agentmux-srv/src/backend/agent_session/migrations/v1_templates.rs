@@ -460,7 +460,7 @@ fn move_zone(
     // of keeping the destination, matching the R4 semantics — the
     // common case for a clean first-time retry where both sides
     // hold identical bytes.
-    let dest_meta: std::collections::HashMap<String, crate::backend::storage::filestore::WaveFile> = filestore
+    let dest_meta: std::collections::HashMap<String, crate::backend::storage::filestore::MuxFile> = filestore
         .list_files(new_zone)
         .map_err(|e| format!("list_files (new): {e}"))?
         .into_iter()

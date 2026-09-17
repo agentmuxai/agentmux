@@ -5,7 +5,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { WOS } from "@/app/store/global";
 import { callBackendService } from "@/store/wos";
@@ -358,7 +358,7 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
  * `"Agent"` fallback string is for, unchanged since 2026-06-22) — that's a
  * real, transient loading state on a real block, and from "the fetch for
  * this oref just hasn't resolved yet" (`isLoading`) — `WOS.
- * getWaveObjectAtom` seeds a freshly-tracked oref with `{ value: null,
+ * getMuxObjectAtom` seeds a freshly-tracked oref with `{ value: null,
  * loading: true }` (`wos.ts:152-153`) until its async `GetObject` fetch
  * resolves, so a genuinely real, just-spawned block's row would otherwise
  * read identically to a phantom one on the very first `buildTree()` pass —
@@ -796,9 +796,9 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
         setEntries((prev) => mergeDispatchActivityEntries(prev, incoming));
     };
 
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: "dispatch:activity",
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             const data = event?.data as any;
             if (data?.dispatchId !== dispatchId) return;
             const members = (data?.members as { agentId: string; events: SubagentEvent[] }[]) ?? [];
@@ -1100,13 +1100,13 @@ export class SwarmViewModel implements ViewModel {
         // handlers below — no response to await here.
         void callBackendService("subagent", "ResolveUnnamedBacklog", []);
 
-        const unsubSpawned = waveEventSubscribe({
+        const unsubSpawned = muxEventSubscribe({
             eventType: "subagent:spawned",
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubSpawned) this.unsubs.push(unsubSpawned);
 
-        const unsubCompleted = waveEventSubscribe({
+        const unsubCompleted = muxEventSubscribe({
             eventType: "subagent:completed",
             handler: () => this.scheduleLoadSubagents(),
         });
@@ -1122,7 +1122,7 @@ export class SwarmViewModel implements ViewModel {
         // listener is simply inert until #2234 lands (subagent:abandoned
         // is never emitted yet), not broken; #2234's own PR description
         // covers the same sequencing from the backend side.
-        const unsubAbandoned = waveEventSubscribe({
+        const unsubAbandoned = muxEventSubscribe({
             eventType: "subagent:abandoned",
             handler: () => this.scheduleLoadSubagents(),
         });
@@ -1132,7 +1132,7 @@ export class SwarmViewModel implements ViewModel {
         // a member count/status change on either warrants the same reload
         // used for subagent spawn/completion (they're closely correlated:
         // a workflow member spawning/completing IS a dispatch update).
-        const unsubDispatchUpdated = waveEventSubscribe({
+        const unsubDispatchUpdated = muxEventSubscribe({
             eventType: "dispatch:updated",
             handler: () => this.scheduleLoadSubagents(),
         });
@@ -1142,7 +1142,7 @@ export class SwarmViewModel implements ViewModel {
         // (SubagentWatcher::prune_block, backstopped against BlockDeleted/
         // TabDeleted/WorkspaceDeleted) — reload so the ghost row this used
         // to leave behind (visible until srv restart) disappears promptly.
-        const unsubBlockPruned = waveEventSubscribe({
+        const unsubBlockPruned = muxEventSubscribe({
             eventType: "subagent:block_pruned",
             handler: () => this.scheduleLoadSubagents(),
         });
@@ -1150,7 +1150,7 @@ export class SwarmViewModel implements ViewModel {
 
         // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).
         // shell_node_create — a new shell appeared, reload the active list.
-        const unsubShellCreate = waveEventSubscribe({
+        const unsubShellCreate = muxEventSubscribe({
             eventType: "shell_node_create",
             handler: () => this.scheduleLoadShells(),
         });
@@ -1159,9 +1159,9 @@ export class SwarmViewModel implements ViewModel {
         // shell_chunk fires per output line too — only reload on the
         // terminal "exit" op, not every line of stdout/stderr (that would
         // re-fetch the whole active-shells list on every chunk).
-        const unsubShellChunk = waveEventSubscribe({
+        const unsubShellChunk = muxEventSubscribe({
             eventType: "shell_chunk",
-            handler: (event: WaveEvent) => {
+            handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 if (data?.op === "exit") this.scheduleLoadShells();
             },
@@ -1171,7 +1171,7 @@ export class SwarmViewModel implements ViewModel {
         // Cron bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 2).
         // Payload-free — any create/fire/pause/resume/delete just triggers a
         // full reload of the (already-cheap, unfiltered) active list.
-        const unsubCronChanged = waveEventSubscribe({
+        const unsubCronChanged = muxEventSubscribe({
             eventType: "cron_changed",
             handler: () => this.scheduleLoadCrons(),
         });
@@ -1180,9 +1180,9 @@ export class SwarmViewModel implements ViewModel {
         // Todo checklist + in-flight tool. Unlike the buckets above this
         // carries its whole payload on the event, so there's nothing to
         // reload — store it keyed by block and let buildTree read it.
-        const unsubProgress = waveEventSubscribe({
+        const unsubProgress = muxEventSubscribe({
             eventType: "agent:progress",
-            handler: (event: WaveEvent) => {
+            handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 const blockId = data?.blockId;
                 if (typeof blockId !== "string" || !blockId) return;
@@ -1210,9 +1210,9 @@ export class SwarmViewModel implements ViewModel {
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
         // not just the one whose expand click triggered subagent.GenerateName.
-        const unsubNamed = waveEventSubscribe({
+        const unsubNamed = muxEventSubscribe({
             eventType: "subagent:named",
-            handler: (event: WaveEvent) => {
+            handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 const agentId = data?.agentId;
                 const displayName = data?.displayName;
@@ -1225,13 +1225,13 @@ export class SwarmViewModel implements ViewModel {
         if (unsubNamed) this.unsubs.push(unsubNamed);
 
         // When process trackers change, refresh the block list
-        const unsubProcAdded = waveEventSubscribe({
+        const unsubProcAdded = muxEventSubscribe({
             eventType: "agent:process-added",
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubProcAdded) this.unsubs.push(unsubProcAdded);
 
-        const unsubProcExited = waveEventSubscribe({
+        const unsubProcExited = muxEventSubscribe({
             eventType: "agent:process-exited",
             handler: () => void this.loadTrackedBlocks(),
         });
@@ -1241,13 +1241,13 @@ export class SwarmViewModel implements ViewModel {
         // unregisters, refresh the block list. These events are distinct from
         // agent:process-added / agent:process-exited so useProcessCount doesn't
         // treat reactive registrations as phantom OS processes.
-        const unsubReactiveReg = waveEventSubscribe({
+        const unsubReactiveReg = muxEventSubscribe({
             eventType: "agent:reactive-registered",
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubReactiveReg) this.unsubs.push(unsubReactiveReg);
 
-        const unsubReactiveUnreg = waveEventSubscribe({
+        const unsubReactiveUnreg = muxEventSubscribe({
             eventType: "agent:reactive-unregistered",
             handler: () => void this.loadTrackedBlocks(),
         });
@@ -1264,7 +1264,7 @@ export class SwarmViewModel implements ViewModel {
         // restored agent's controller could register successfully server-side
         // while this list stayed stale client-side indefinitely. See
         // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
-        const unsubTrackedBlocksChanged = waveEventSubscribe({
+        const unsubTrackedBlocksChanged = muxEventSubscribe({
             eventType: "processbroker:tracked-blocks-changed",
             handler: () => void this.loadTrackedBlocks(),
         });
@@ -1886,7 +1886,7 @@ export class SwarmViewModel implements ViewModel {
                 .catch(() => {/* keep idle default */});
 
             const scope = WOS.makeORef("block", blockId);
-            const unsub = waveEventSubscribe({
+            const unsub = muxEventSubscribe({
                 eventType: WpsEvent.ControllerStatus,
                 scope,
                 handler: (ev) => {
@@ -1926,14 +1926,14 @@ export class SwarmViewModel implements ViewModel {
         const liveGroupKeys = new Set<string>();
         const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.flatMap((blockId) => {
-            const blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+            const blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
             // isLoading distinguishes "this oref hasn't resolved yet" from
             // "this oref resolved to nothing" — both read as block == null,
             // but only the latter means the id is genuinely phantom.
-            // getWaveObjectLoadingAtom returns `null` while loading, `false`
+            // getMuxObjectLoadingAtom returns `null` while loading, `false`
             // once GetObject has resolved either way (wos.ts:232-238).
-            const isLoading = WOS.getWaveObjectLoadingAtom(`block:${blockId}`)() !== false;
+            const isLoading = WOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =
                 (block?.meta?.["agentName"] as string | undefined)?.trim() ||

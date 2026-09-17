@@ -24,7 +24,7 @@
  * replay per `(route_id, event, scope)` and is only cleared on a true
  * route reconnect (`unsubscribe_all`), while `registerPane` resets
  * `AgentPaneState.reconnecting` to `null` on every mount regardless. Relying
- * on `waveEventSubscribe`'s replay alone would silently reproduce this PR's
+ * on `muxEventSubscribe`'s replay alone would silently reproduce this PR's
  * own "did it crash?" gap for exactly the pane-hidden-during-a-retry case.
  * Fixed by explicitly reading current history via `EventReadHistoryCommand`
  * on mount (same pattern `sysinfo-model.ts`'s `loadInitialData` already
@@ -34,7 +34,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -86,7 +86,7 @@ export function useResumeRetryStream(opts: UseResumeRetryStreamOptions): void {
     // still-in-flight read is simply discarded rather than applied.
     let receivedLiveEvent = false;
 
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: WpsEvent.AgentResumeRetry,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {

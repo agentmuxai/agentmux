@@ -3,7 +3,7 @@
 
 import type { DataItem } from "./sysinfo-types";
 
-export function convertWaveEventToDataItem(event: WaveEvent): DataItem {
+export function convertMuxEventToDataItem(event: MuxEvent): DataItem {
     const eventData: TimeSeriesData = event.data;
     if (eventData == null || eventData.ts == null || eventData.values == null) {
         return null;

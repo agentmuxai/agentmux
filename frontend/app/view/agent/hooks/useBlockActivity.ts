@@ -32,7 +32,7 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { makeORef } from "@/app/store/wos";
 import { ObjectService } from "@/app/store/services";
@@ -56,7 +56,7 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
     onMount(() => {
         let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.BlockActivity,
             scope: makeORef("block", opts.blockId),
             handler: (event) => {
@@ -82,7 +82,7 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
         // the label every time the pane remounts (tab switch), and Claude
         // Code only emits OSC titles once per session so no new event would
         // restore it.
-        const unsubStatus = waveEventSubscribe({
+        const unsubStatus = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: makeORef("block", opts.blockId),
             handler: (event) => {

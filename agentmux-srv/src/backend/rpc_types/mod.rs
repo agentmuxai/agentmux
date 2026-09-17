@@ -329,14 +329,14 @@ mod tests {
     }
 
     #[test]
-    fn test_wave_info_data_roundtrip() {
-        let info = WaveInfoData {
+    fn test_mux_info_data_roundtrip() {
+        let info = MuxInfoData {
             version: "0.12.15".to_string(),
             clientid: "client-123".to_string(),
             ..Default::default()
         };
         let json = serde_json::to_string(&info).unwrap();
-        let parsed: WaveInfoData = serde_json::from_str(&json).unwrap();
+        let parsed: MuxInfoData = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.version, "0.12.15");
     }
 

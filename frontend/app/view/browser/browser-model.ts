@@ -24,7 +24,7 @@ import {
 import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 
 /**
@@ -263,7 +263,7 @@ export class BrowserViewModel implements ViewModel {
         this.nodeModel = nodeModel;
         this.diag(`viewmodel-constructed`);
 
-        this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
+        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
 
         const ctorMetaUrl = (this.blockAtom()?.meta?.["url"] as string | undefined) ?? "";
         console.log(`[browser-pane:diag][${blockId.slice(0, 7)}] ctor meta.url=${JSON.stringify(ctorMetaUrl)}`);

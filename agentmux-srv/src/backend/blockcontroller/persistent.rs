@@ -170,7 +170,7 @@ fn publish_resume_retry_status(broker: &Option<Arc<wps::Broker>>, block_id: &str
     if status == "retrying" {
         data["startedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
     }
-    broker.publish(wps::WaveEvent {
+    broker.publish(wps::MuxEvent {
         event: wps::EVENT_AGENT_RESUME_RETRY.to_string(),
         scopes: vec![format!("block:{}", block_id)],
         sender: String::new(),
@@ -1519,7 +1519,7 @@ impl PersistentSubprocessController {
     fn emit_message_accepted(&self, message_id: Option<&str>) {
         let Some(id) = message_id else { return };
         let Some(ref broker) = self.broker else { return };
-        let event = crate::backend::wps::WaveEvent {
+        let event = crate::backend::wps::MuxEvent {
             event: crate::backend::wps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
             scopes: vec![format!("block:{}", self.block_id)],
             sender: String::new(),
@@ -1713,7 +1713,7 @@ impl PersistentSubprocessController {
         // exit code exists for this now-superseded turn.
         if let Some(failure) = classify_exit_line(None, &line) {
             core::persist_last_failure(&self.block_id, Some(&failure), &self.wstore, &self.event_bus);
-            broker.publish(wps::WaveEvent {
+            broker.publish(wps::MuxEvent {
                 event: wps::EVENT_AGENT_FAILURE.to_string(),
                 scopes: vec![format!("block:{}", self.block_id)],
                 sender: String::new(),
@@ -2860,7 +2860,7 @@ impl PersistentSubprocessController {
                     // handler entirely, so it needs its own mirror call
                     // exactly like that handler does.
                     if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        let data_dir = crate::backend::base::get_mux_data_dir();
                         crate::backend::reactive::registry::write_with_nonce(
                             &data_dir,
                             agent_id,
@@ -3272,7 +3272,7 @@ impl PersistentSubprocessController {
                                             flushed_failure_this_tick = true;
                                             core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
                                             if let Some(ref broker) = broker_read {
-                                                broker.publish(wps::WaveEvent {
+                                                broker.publish(wps::MuxEvent {
                                                     event: wps::EVENT_AGENT_FAILURE.to_string(),
                                                     scopes: vec![format!("block:{}", block_id_read)],
                                                     sender: String::new(),
@@ -3366,7 +3366,7 @@ impl PersistentSubprocessController {
                                             flushed_failure_this_tick = true;
                                             core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
                                             if let Some(ref broker) = broker_read {
-                                                broker.publish(wps::WaveEvent {
+                                                broker.publish(wps::MuxEvent {
                                                     event: wps::EVENT_AGENT_FAILURE.to_string(),
                                                     scopes: vec![format!("block:{}", block_id_read)],
                                                     sender: String::new(),
@@ -3400,7 +3400,7 @@ impl PersistentSubprocessController {
                         let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
                         core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
                         if let Some(ref broker) = broker_read {
-                            broker.publish(wps::WaveEvent {
+                            broker.publish(wps::MuxEvent {
                                 event: wps::EVENT_AGENT_FAILURE.to_string(),
                                 scopes: vec![format!("block:{}", block_id_read)],
                                 sender: String::new(),
@@ -3700,7 +3700,7 @@ impl PersistentSubprocessController {
                         let registration_was_ours = crate::backend::reactive::get_global_handler()
                             .unregister_block_if_nonce(&block_id_wait, nonce_wait);
                         if let Some(ref agent_id) = agent_id_wait {
-                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            let data_dir = crate::backend::base::get_mux_data_dir();
                             crate::backend::reactive::registry::remove_if_nonce(
                                 &data_dir,
                                 agent_id,
@@ -3815,7 +3815,7 @@ impl PersistentSubprocessController {
                                 if let Some(failure) = classify_exit_line(Some(exit_code), &line) {
                                     core::persist_last_failure(&block_id_wait, Some(&failure), &wstore_wait, &event_bus_wait);
                                     if let Some(ref broker) = broker_wait {
-                                        broker.publish(wps::WaveEvent {
+                                        broker.publish(wps::MuxEvent {
                                             event: wps::EVENT_AGENT_FAILURE.to_string(),
                                             scopes: vec![format!("block:{}", block_id_wait)],
                                             sender: String::new(),
@@ -4130,7 +4130,7 @@ impl PersistentSubprocessController {
                         let registration_was_ours = crate::backend::reactive::get_global_handler()
                             .unregister_block_if_nonce(&block_id_wait, nonce_wait);
                         if let Some(ref agent_id) = agent_id_wait {
-                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            let data_dir = crate::backend::base::get_mux_data_dir();
                             crate::backend::reactive::registry::remove_if_nonce(
                                 &data_dir,
                                 agent_id,

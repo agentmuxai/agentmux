@@ -96,7 +96,7 @@ use SttError::{NotConfigured, Upstream};
 
 /// Read settings.json once; `None` if absent/unparseable.
 fn read_settings_json() -> Option<serde_json::Value> {
-    let path = crate::backend::base::get_wave_config_dir().join("settings.json");
+    let path = crate::backend::base::get_mux_config_dir().join("settings.json");
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
@@ -260,7 +260,7 @@ async fn ensure_local_model(
         return Err(NotConfigured(format!("invalid voice:whisperModel name: {name}")));
     }
 
-    let dir = crate::backend::base::get_wave_config_dir().join("whisper-models");
+    let dir = crate::backend::base::get_mux_config_dir().join("whisper-models");
     let path = dir.join(format!("ggml-{name}.bin"));
     if path.exists() {
         return Ok(path);

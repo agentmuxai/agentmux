@@ -14,7 +14,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 
 export class AgentSkillModel {
     readonly agentId: string;
@@ -43,7 +43,7 @@ export class AgentSkillModel {
             return this.skillsAtom().find((s) => s.id === id) ?? null;
         });
         void this.refresh();
-        this.unsubChanged = waveEventSubscribe({
+        this.unsubChanged = muxEventSubscribe({
             eventType: "skills:changed",
             handler: () => void this.refresh(),
         });

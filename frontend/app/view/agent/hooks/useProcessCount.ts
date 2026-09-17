@@ -18,7 +18,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 
 export function useProcessCount(blockId: string): Accessor<number> {
@@ -35,7 +35,7 @@ export function useProcessCount(blockId: string): Accessor<number> {
         let seeded = false;
         let deltaSincePreSeed = 0;
 
-        const unsubAdded = waveEventSubscribe({
+        const unsubAdded = muxEventSubscribe({
             eventType: "agent:process-added",
             scope: WOS.makeORef("block", blockId),
             handler: () => {
@@ -43,7 +43,7 @@ export function useProcessCount(blockId: string): Accessor<number> {
                 else deltaSincePreSeed += 1;
             },
         });
-        const unsubExited = waveEventSubscribe({
+        const unsubExited = muxEventSubscribe({
             eventType: "agent:process-exited",
             scope: WOS.makeORef("block", blockId),
             handler: () => {

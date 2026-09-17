@@ -318,7 +318,7 @@ const ChangeConnectionBlockModal = ({
     nodeModel: NodeModel;
 }) => {
     const [connSelected, setConnSelected] = createSignal("");
-    const [blockData] = WOS.useWaveObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
     const isNodeFocused = nodeModel.isFocused;
     const connection = () => blockData()?.meta?.connection;
     const connStatus = () => getConnStatusAtom(connection())();
@@ -477,9 +477,9 @@ const ChangeConnectionBlockModal = ({
         return list;
     };
 
-    const handleTypeAheadKeyDown = (waveEvent: WaveKeyboardEvent): boolean => {
+    const handleTypeAheadKeyDown = (muxEvent: MuxKeyboardEvent): boolean => {
         const sl = selectionList();
-        if (keyutil.checkKeyPressed(waveEvent, "Enter")) {
+        if (keyutil.checkKeyPressed(muxEvent, "Enter")) {
             const rowItem = sl[rowIndex()];
             if ("onSelect" in rowItem && rowItem.onSelect) {
                 rowItem.onSelect(rowItem.value);
@@ -491,17 +491,17 @@ const ChangeConnectionBlockModal = ({
             setRowIndex(0);
             return true;
         }
-        if (keyutil.checkKeyPressed(waveEvent, "Escape")) {
+        if (keyutil.checkKeyPressed(muxEvent, "Escape")) {
             setChangeConnModalOpen(false);
             setConnSelected("");
             globalRefocusWithTimeout(10);
             return true;
         }
-        if (keyutil.checkKeyPressed(waveEvent, "ArrowUp")) {
+        if (keyutil.checkKeyPressed(muxEvent, "ArrowUp")) {
             setRowIndex((idx) => Math.max(idx - 1, 0));
             return true;
         }
-        if (keyutil.checkKeyPressed(waveEvent, "ArrowDown")) {
+        if (keyutil.checkKeyPressed(muxEvent, "ArrowDown")) {
             setRowIndex((idx) => Math.min(idx + 1, sl.length - 1));
             return true;
         }

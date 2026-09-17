@@ -45,9 +45,9 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 vi.mock("@/app/store/wps", () => ({
-    // waveEventSubscribe is a no-op here — live broadcasts are simulated
+    // muxEventSubscribe is a no-op here — live broadcasts are simulated
     // directly via __applyClaimForTests.
-    waveEventSubscribe: vi.fn(() => () => {}),
+    muxEventSubscribe: vi.fn(() => () => {}),
 }));
 
 vi.mock("@/util/launcher-events", () => ({

@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { handleWaveEvent } from "@/app/store/wps";
+import { handleMuxEvent } from "@/app/store/wps";
 import * as util from "@/util/util";
 import debug from "debug";
 
@@ -83,7 +83,7 @@ class RpcRouter {
         }
         // handle events
         if (msg.command == "eventrecv") {
-            handleWaveEvent(msg.data);
+            handleMuxEvent(msg.data);
             return;
         }
         if (!util.isBlank(msg.command)) {

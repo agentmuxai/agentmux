@@ -3,7 +3,7 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, type Accessor } from "solid-js";
 
 // Section ids are internal and stay stable across renames (they're
@@ -81,7 +81,7 @@ export class ArmoryViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
+        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
         this.zoomAtom = useBlockAtom(blockId, "armory-zoom", () =>
             createMemo<number>(() => {
                 const z = this.blockAtom()?.meta?.["term:zoom"];

@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::backend::providers::resolve_provider_alias;
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 use crate::backend::storage::StoreError;
-use crate::backend::wps::{Broker, WaveEvent};
+use crate::backend::wps::{Broker, MuxEvent};
 
 use super::errors::SpawnGateError;
 use super::oauth_probe::{oauth_status, probe_oauth_status};
@@ -273,7 +273,7 @@ fn resolve_bindings_for_instance(
             instance.identity_id,
         );
         if let Some(b) = broker {
-            b.publish(WaveEvent {
+            b.publish(MuxEvent {
                 event: "identity:no-direct-links".to_string(),
                 scopes: vec![],
                 sender: String::new(),
@@ -860,7 +860,7 @@ pub fn inject_identity_env_with_broker(
                                 // column without a reload — the account
                                 // row itself is what changed.
                                 if let Some(b) = broker.as_ref() {
-                                    b.publish(WaveEvent {
+                                    b.publish(MuxEvent {
                                         event: "identityaccounts:changed".to_string(),
                                         scopes: vec![],
                                         sender: String::new(),
@@ -2350,7 +2350,7 @@ mod tests {
     #[test]
     fn inject_no_direct_links_publishes_event() {
         // Same setup as inject_no_direct_links_injects_nothing, but
-        // asserts the diagnostic WaveEvent fires — the standing signal
+        // asserts the diagnostic MuxEvent fires — the standing signal
         // for #1624 so a future frontend surface (or just log triage) can
         // see when a non-sentinel identity resolves to zero direct links.
         let store = make_store();

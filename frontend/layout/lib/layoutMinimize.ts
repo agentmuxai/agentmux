@@ -136,7 +136,7 @@ function _finishToggle(model: LayoutModel, nodeId: string, minimized: boolean) {
  * (the first `updateTree()` pass — see `layoutGeometry.ts::updateTree` —
  * rebuilds it authoritatively moments later regardless; this just avoids a
  * flash of wrong button state before that first pass runs). Called once
- * during `initializeFromWaveObject`.
+ * during `initializeFromMuxObject`.
  *
  * Migration rules (one-way, in place):
  * - `minimizedSize` (leaf was size-squeezed): restore `size` to the recorded

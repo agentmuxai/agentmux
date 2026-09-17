@@ -1072,7 +1072,7 @@ pub(super) async fn handle_reactive_inject(
 
     if is_not_found {
         // Tier 2: same-host, different sidecar (file registry → HTTP loopback)
-        let data_dir = base::get_wave_data_dir();
+        let data_dir = base::get_mux_data_dir();
         if let Some(entry) = agent_registry::lookup(&data_dir, &req.target_agent) {
             // Guard against self-forwarding loops.
             if entry.local_url != state.local_web_url {
@@ -1513,7 +1513,7 @@ pub(super) async fn handle_reactive_register(
 
             // Also write to cross-instance file registry so other AgentMux
             // instances can forward inject requests to this one.
-            let data_dir = base::get_wave_data_dir();
+            let data_dir = base::get_mux_data_dir();
             agent_registry::write(&data_dir, &req.agent_id, &state.local_web_url, &req.block_id);
 
             // And to the host-global shared registry (Tier 2b) so instances
@@ -1617,7 +1617,7 @@ pub(super) async fn handle_reactive_register(
             // (which subscribes to agent:process-added / agent:process-exited)
             // doesn't treat this as a phantom OS process and show a spurious ⚙ N
             // badge or trigger the kill-tree modal on pane close.
-            state.broker.publish(crate::backend::wps::WaveEvent {
+            state.broker.publish(crate::backend::wps::MuxEvent {
                 event: "agent:reactive-registered".to_string(),
                 scopes: vec![format!("block:{}", req.block_id)],
                 sender: String::new(),
@@ -1710,7 +1710,7 @@ pub(super) async fn handle_reactive_unregister(
 
     state.reactive_handler.unregister_agent(&req.agent_id);
     // Also remove from cross-instance file registry.
-    let data_dir = base::get_wave_data_dir();
+    let data_dir = base::get_mux_data_dir();
     agent_registry::remove(&data_dir, &req.agent_id);
     // And from the host-global shared registry (Tier 2b).
     agent_registry::remove_shared_from_env(&req.agent_id);
@@ -1726,7 +1726,7 @@ pub(super) async fn handle_reactive_unregister(
 
     // Symmetric refresh: tell the Swarm view this pane is gone.
     if let Some(bid) = block_id {
-        state.broker.publish(crate::backend::wps::WaveEvent {
+        state.broker.publish(crate::backend::wps::MuxEvent {
             event: "agent:reactive-unregistered".to_string(),
             scopes: vec![format!("block:{}", bid)],
             sender: String::new(),

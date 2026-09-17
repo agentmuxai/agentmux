@@ -23,7 +23,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/wps", () => ({ waveEventSubscribe: vi.fn(() => () => {}) }));
+vi.mock("@/app/store/wps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
 vi.mock("@/app/store/global", () => ({
     atoms: { fullConfigAtom: () => ({}) },
     getSettingsKeyAtom: () => () => false,

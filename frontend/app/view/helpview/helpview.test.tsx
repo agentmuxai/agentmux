@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/app/store/global", () => ({
     WOS: {
         makeORef: (type: string, id: string) => `${type}:${id}`,
-        getWaveObjectAtom: () => () => ({ meta: {} }),
+        getMuxObjectAtom: () => () => ({ meta: {} }),
     },
 }));
 

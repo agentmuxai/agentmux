@@ -25,7 +25,7 @@ mod shell_handlers;
 mod tool_handlers;
 mod providers_handlers;
 mod voice;
-pub(crate) mod wave_obj_bridge;
+pub(crate) mod mux_obj_bridge;
 mod websocket;
 mod drone_handlers;
 mod cron;
@@ -333,8 +333,8 @@ pub fn build_router(state: AppState) -> Router {
         // callers (Response.headers.get(...) silently returns null) unless
         // explicitly exposed here — a browser CORS default, not an
         // allow_headers concern (that list governs REQUEST headers only).
-        // `X-ZoneFileInfo` (files.rs's handle_wave_file) is read by
-        // `fetchWaveFile` on every blockfile GET; without this, any 200
+        // `X-ZoneFileInfo` (files.rs's handle_mux_file) is read by
+        // `fetchMuxFile` on every blockfile GET; without this, any 200
         // response is indistinguishable from a malformed one to the
         // frontend ("missing zone file info for ..." — the exact failure
         // mode `TermWrap.loadInitialTerminalData()` hit once terminal
@@ -425,7 +425,7 @@ pub fn build_router(state: AppState) -> Router {
     let authed_routes = Router::new()
         .route("/ws", get(websocket::handle_ws))
         .route("/agentmux/service", post(service::handle_service))
-        .route("/agentmux/file", get(files::handle_wave_file))
+        .route("/agentmux/file", get(files::handle_mux_file))
         .route("/agentmux/stream-file", get(stub_501))
         .route("/agentmux/stream-file/*path", get(stub_501))
         .route("/agentmux/stream-local-file", get(files::handle_stream_local_file))
@@ -890,7 +890,7 @@ async fn handle_wps_publish(
     // a harmless no-op broadcast like any other WPS event — left as-is
     // rather than removing the route, since deleting it isn't warranted
     // just to avoid one no-op publish.
-    let event = crate::backend::wps::WaveEvent {
+    let event = crate::backend::wps::MuxEvent {
         event: req.event,
         scopes: req.scopes,
         sender: String::new(),
@@ -985,7 +985,7 @@ async fn handle_shell_create(
     // shells lost their create event while their shell_chunk events at
     // persist: 1024 still replayed, causing the reducer to silently drop
     // orphaned chunks.)
-    state.broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::MuxEvent {
         event: crate::backend::wps::EVENT_SHELL_NODE_CREATE.to_string(),
         scopes: vec![format!("block:{}", req.agent_block_id)],
         sender: String::new(),
@@ -1158,11 +1158,11 @@ fn broadcast_meta_update(
     state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
         eventtype: "waveobj:update".to_string(),
         oref: oref_str,
-        data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+        data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "block".into(),
             oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::wave_obj_to_value(&block)),
+            obj: Some(crate::backend::obj::mux_obj_to_value(&block)),
         }).unwrap_or_default()),
     });
     Ok(())
@@ -1288,11 +1288,11 @@ async fn try_attach_to_existing_shell(
                         state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                             eventtype: "waveobj:update".to_string(),
                             oref: format!("block:{agent_block_id}"),
-                            data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                            data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
                                 updatetype: "update".into(),
                                 otype: "block".into(),
                                 oid: agent_block_id.to_string(),
-                                obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                                obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
                             }).unwrap_or_default()),
                         });
                     }
@@ -1564,11 +1564,11 @@ async fn handle_pty_shell_create(
                 state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: "block".into(),
                         oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
                     }).unwrap_or_default()),
                 });
             }
@@ -1585,11 +1585,11 @@ async fn handle_pty_shell_create(
                 state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: "block".into(),
                         oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
                     }).unwrap_or_default()),
                 });
             }
@@ -1656,11 +1656,11 @@ async fn handle_pty_shell_create(
                 state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: format!("block:{}", req.agent_block_id),
-                    data: Some(serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: "block".into(),
                         oid: req.agent_block_id.clone(),
-                        obj: Some(crate::backend::obj::wave_obj_to_value(&parent)),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
                     }).unwrap_or_default()),
                 });
             }

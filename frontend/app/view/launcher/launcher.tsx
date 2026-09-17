@@ -111,7 +111,7 @@ export class LauncherViewModel implements ViewModel {
         return false;
     }
 
-    keyDownHandler(e: WaveKeyboardEvent): boolean {
+    keyDownHandler(e: MuxKeyboardEvent): boolean {
         if (this.gridLayout == null) return false;
         const gridLayout = this.gridLayout;
         const filteredWidgets = this.filteredWidgets();

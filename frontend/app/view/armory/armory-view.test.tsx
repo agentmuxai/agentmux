@@ -58,7 +58,7 @@ vi.mock("@/app/view/skill/skill-manager", () => ({
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
 vi.mock("@/app/store/wos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
-    getWaveObjectAtom: () => () => ({ meta: blockMeta() }),
+    getMuxObjectAtom: () => () => ({ meta: blockMeta() }),
     // global.ts/window-identity.ts evaluate a `tabAtom` createMemo at
     // module-init time that calls WOS.getObjectValue — without this stub
     // the import chain crashes during test setup (same gap browser-model

@@ -29,7 +29,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::backend::storage::work_queue::{ClaimFilter, WorkItem};
-use crate::backend::wps::WaveEvent;
+use crate::backend::wps::MuxEvent;
 
 use super::AppState;
 
@@ -48,7 +48,7 @@ fn now_ms() -> i64 {
 }
 
 fn publish_changed(state: &AppState) {
-    state.broker.publish(WaveEvent {
+    state.broker.publish(MuxEvent {
         event: EVENT_WORK_QUEUE_CHANGED.to_string(),
         scopes: vec![],
         sender: String::new(),

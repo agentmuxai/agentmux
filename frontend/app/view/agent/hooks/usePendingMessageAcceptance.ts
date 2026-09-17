@@ -16,7 +16,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { trail } from "@/log/render-trail";
@@ -61,7 +61,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
     // pending zone into a real `user_message` document node. That
     // color shift (amber → accent blue) is the user's visible
     // "accepted" transition for the user.
-    const acceptedUnsub = waveEventSubscribe({
+    const acceptedUnsub = muxEventSubscribe({
         eventType: WpsEvent.AgentMessageAccepted,
         scope: WOS.makeORef("block", opts.blockId),
         handler: (event) => {

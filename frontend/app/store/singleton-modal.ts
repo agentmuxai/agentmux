@@ -27,7 +27,7 @@
  *      claim and replays it to any window that subscribes later — so the
  *      "which window holds kind K" registry is simply the most-recent
  *      persisted event. No bespoke registry RPC, no Rust change.
- *   2. **Cross-window delivery.** `waveEventSubscribe` in every window
+ *   2. **Cross-window delivery.** `muxEventSubscribe` in every window
  *      receives every claim/release; non-holders react (render a banner).
  *   3. **Focus action.** The banner's button calls the existing
  *      `getApi().focusWindow(label)` (same primitive InstancePanel uses).
@@ -63,7 +63,7 @@ import { getApi, openWindowEntriesAtom } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { subscribeLauncherEvent } from "@/util/launcher-events";
 
 /** WPS event name carrying singleton claim/release broadcasts. */
@@ -234,10 +234,10 @@ function ensureWired(kind: SingletonKind, st: KindState): void {
     void resolveMyLabel();
 
     // 1. Subscribe to live claim/release broadcasts for this kind.
-    waveEventSubscribe({
+    muxEventSubscribe({
         eventType: EVENT_SINGLETON_CLAIM,
         scope: scopeFor(kind),
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             const payload = parsePayload(event.data);
             if (payload && payload.kind === kind) applyClaim(payload);
         },

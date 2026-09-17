@@ -5,7 +5,7 @@ import { Block } from "@/app/block/block";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sendWSCommand } from "@/app/store/ws";
@@ -98,7 +98,7 @@ class TermViewModel implements ViewModel {
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
-        this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         this.termMode = createMemo(() => {
             const blockData = this.blockAtom();
@@ -330,7 +330,7 @@ class TermViewModel implements ViewModel {
         initialShellProcStatus.then((rts) => {
             this.updateShellProcStatus(rts);
         });
-        this.shellProcStatusUnsubFn = waveEventSubscribe({
+        this.shellProcStatusUnsubFn = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", blockId),
             handler: (event) => {
@@ -516,19 +516,19 @@ class TermViewModel implements ViewModel {
         return false;
     }
 
-    keyDownHandler(waveEvent: WaveKeyboardEvent): boolean {
+    keyDownHandler(muxEvent: MuxKeyboardEvent): boolean {
         return false;
     }
 
     handleTerminalKeydown(event: KeyboardEvent): boolean {
-        const waveEvent = keyutil.adaptFromReactOrNativeKeyEvent(event);
-        if (waveEvent.type != "keydown") return true;
-        if (this.keyDownHandler(waveEvent)) {
+        const muxEvent = keyutil.adaptFromReactOrNativeKeyEvent(event);
+        if (muxEvent.type != "keydown") return true;
+        if (this.keyDownHandler(muxEvent)) {
             event.preventDefault();
             event.stopPropagation();
             return false;
         }
-        if (keyutil.checkKeyPressed(waveEvent, "Shift:Enter")) {
+        if (keyutil.checkKeyPressed(muxEvent, "Shift:Enter")) {
             const shiftEnterNewlineAtom = getOverrideConfigAtom(this.blockId, "term:shiftenternewline");
             const shiftEnterNewlineEnabled = shiftEnterNewlineAtom() ?? false;
             if (shiftEnterNewlineEnabled) {
@@ -538,7 +538,7 @@ class TermViewModel implements ViewModel {
                 return false;
             }
         }
-        if (keyutil.checkKeyPressed(waveEvent, "Ctrl:Shift:v")) {
+        if (keyutil.checkKeyPressed(muxEvent, "Ctrl:Shift:v")) {
             clipboardReadText()
                 .then((text) => {
                     this.termRef.current?.terminal.paste(text);
@@ -547,24 +547,24 @@ class TermViewModel implements ViewModel {
             event.preventDefault();
             event.stopPropagation();
             return false;
-        } else if (keyutil.checkKeyPressed(waveEvent, "Ctrl:Shift:c")) {
+        } else if (keyutil.checkKeyPressed(muxEvent, "Ctrl:Shift:c")) {
             const sel = this.termRef.current?.terminal.getSelection();
             clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
             event.preventDefault();
             event.stopPropagation();
             return false;
-        } else if (keyutil.checkKeyPressed(waveEvent, "Cmd:k")) {
+        } else if (keyutil.checkKeyPressed(muxEvent, "Cmd:k")) {
             event.preventDefault();
             event.stopPropagation();
             this.termRef.current?.terminal?.clear();
             return false;
         }
         const shellProcStatus = this.shellProcStatus();
-        if (shellProcStatus == "done" && keyutil.checkKeyPressed(waveEvent, "Enter")) {
+        if (shellProcStatus == "done" && keyutil.checkKeyPressed(muxEvent, "Enter")) {
             this.forceRestartController();
             return false;
         }
-        const appHandled = appHandleKeyDown(waveEvent);
+        const appHandled = appHandleKeyDown(muxEvent);
         if (appHandled) {
             event.preventDefault();
             event.stopPropagation();

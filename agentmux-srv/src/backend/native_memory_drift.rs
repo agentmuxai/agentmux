@@ -170,7 +170,7 @@ pub(crate) fn reconciliation_sweep_once(
         }
         if deleted_notified.insert(key) {
             tracing::info!(agent_id = %agent_id, filename = %filename, "native_memory_drift: detected an out-of-band deletion");
-            broker.publish(crate::backend::wps::WaveEvent {
+            broker.publish(crate::backend::wps::MuxEvent {
                 event: format!("agent:memory:changed:{agent_id}"),
                 scopes: vec![],
                 sender: String::new(),
@@ -228,7 +228,7 @@ fn sweep_one_agent_dir(
                 // runs once per sweep tick per watched agent, and firing on
                 // every no-op tick would mean an event for every agent every
                 // 30s regardless of whether anything happened.
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: format!("agent:memory:changed:{agent_id}"),
                     scopes: vec![],
                     sender: String::new(),
@@ -342,7 +342,7 @@ fn spawn_fast_path(
                         Ok(true) => {
                             tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
                             // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
-                            broker.publish(crate::backend::wps::WaveEvent {
+                            broker.publish(crate::backend::wps::MuxEvent {
                                 event: format!("agent:memory:changed:{agent_id}"),
                                 scopes: vec![],
                                 sender: String::new(),

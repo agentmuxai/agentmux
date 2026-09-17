@@ -15,7 +15,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 
 export interface SkillDraft {
     id?: string;
@@ -86,7 +86,7 @@ export class SkillCatalogModel {
         });
         void this.refresh();
         void this.loadAgents();
-        this.unsubChanged = waveEventSubscribe({
+        this.unsubChanged = muxEventSubscribe({
             eventType: "skills:changed",
             handler: () => void this.refresh(),
         });

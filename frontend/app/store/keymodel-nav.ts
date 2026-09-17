@@ -16,7 +16,7 @@ export function getFocusedBlockInStaticTab() {
 function getStaticTabBlockCount(): number {
     const tabId = atoms.activeTabId();
     const tabORef = WOS.makeORef("tab", tabId);
-    const tabAtom = WOS.getWaveObjectAtom<Tab>(tabORef);
+    const tabAtom = WOS.getMuxObjectAtom<Tab>(tabORef);
     const tabData = tabAtom();
     return tabData?.blockids?.length ?? 0;
 }

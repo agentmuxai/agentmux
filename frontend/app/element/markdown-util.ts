@@ -4,7 +4,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { formatRemoteUri } from "@/util/waveutil";
+import { formatRemoteUri } from "@/util/muxutil";
 import parseSrcSet from "parse-srcset";
 
 export type MarkdownContentBlockType = {
@@ -36,7 +36,7 @@ function parseOptions(str: string): Record<string, any> {
     }
 }
 
-function makeMarkdownWaveBlockKey(block: MarkdownContentBlockType): string {
+function makeMarkdownMuxBlockKey(block: MarkdownContentBlockType): string {
     return `${block.type}[${block.id}]`;
 }
 
@@ -114,7 +114,7 @@ export function transformBlocks(content: string): { content: string; blocks: Map
             }
 
             // Found matching end - store block and add placeholder
-            const key = makeMarkdownWaveBlockKey(currentBlock);
+            const key = makeMarkdownMuxBlockKey(currentBlock);
             blocks.set(key, {
                 type: currentBlock.type,
                 id: currentBlock.id,
@@ -138,7 +138,7 @@ export function transformBlocks(content: string): { content: string; blocks: Map
 
     // Handle unclosed block - add what we have so far
     if (currentBlock) {
-        const key = makeMarkdownWaveBlockKey(currentBlock);
+        const key = makeMarkdownMuxBlockKey(currentBlock);
         blocks.set(key, {
             type: currentBlock.type,
             id: currentBlock.id,

@@ -55,7 +55,7 @@ import { pushNotification, prefersReducedMotionAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { ConfirmModal } from "@/element/modal";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { ObjectService } from "@/app/store/services";
@@ -438,7 +438,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
 
     // Refetch when a new agent definition is created (e.g. via agent.define)
     // so the stub instance appears immediately without needing a restart.
-    const unsubAgents = waveEventSubscribe({
+    const unsubAgents = muxEventSubscribe({
         eventType: "agents:changed",
         handler: () => void refetch(),
     });

@@ -35,7 +35,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
@@ -215,7 +215,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         // check is false and it just records the failure.
         if (pf) opts.model.dispatchPane({ type: "FailureObserved", failure: pf, at: Date.now() });
 
-        const unsubFailure = waveEventSubscribe({
+        const unsubFailure = muxEventSubscribe({
             eventType: WpsEvent.AgentFailure,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {

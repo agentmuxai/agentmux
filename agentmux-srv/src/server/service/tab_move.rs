@@ -114,27 +114,27 @@ pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallTyp
     }
     let mut updates = vec![];
     if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: source_tab_id.clone(),
-            obj: Some(wave_obj_to_value(&src)),
+            obj: Some(mux_obj_to_value(&src)),
         });
     }
     if let Ok(dst) = store.must_get::<Tab>(&dest_tab_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: dest_tab_id.clone(),
-            obj: Some(wave_obj_to_value(&dst)),
+            obj: Some(mux_obj_to_value(&dst)),
         });
     }
     if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_WORKSPACE.to_string(),
             oid: ws_id.clone(),
-            obj: Some(wave_obj_to_value(&ws)),
+            obj: Some(mux_obj_to_value(&ws)),
         });
     }
     WebReturnType::success_with_updates(updates)
@@ -238,27 +238,27 @@ pub(crate) async fn handle_promote_block_to_tab(state: &AppState, call: &WebCall
 
     let mut updates = vec![];
     if let Ok(new_tab) = store.must_get::<Tab>(&new_tab_oid) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: new_tab_oid.clone(),
-            obj: Some(wave_obj_to_value(&new_tab)),
+            obj: Some(mux_obj_to_value(&new_tab)),
         });
     }
     if let Ok(src) = store.must_get::<Tab>(&source_tab_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: source_tab_id.clone(),
-            obj: Some(wave_obj_to_value(&src)),
+            obj: Some(mux_obj_to_value(&src)),
         });
     }
     if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_WORKSPACE.to_string(),
             oid: ws_id.clone(),
-            obj: Some(wave_obj_to_value(&ws)),
+            obj: Some(mux_obj_to_value(&ws)),
         });
     }
     WebReturnType::success_data_updates(
@@ -360,19 +360,19 @@ pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCal
     publish_events(state, &events);
     let mut updates = Vec::new();
     if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_WORKSPACE.to_string(),
             oid: source_ws_id.clone(),
-            obj: Some(wave_obj_to_value(&src_ws)),
+            obj: Some(mux_obj_to_value(&src_ws)),
         });
     }
     if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_WORKSPACE.to_string(),
             oid: dest_ws_id.clone(),
-            obj: Some(wave_obj_to_value(&dst_ws)),
+            obj: Some(mux_obj_to_value(&dst_ws)),
         });
     }
     WebReturnType::success_with_updates(updates)
@@ -415,15 +415,15 @@ pub(crate) async fn handle_restore_torn_off_tab(state: &AppState, call: &WebCall
             let mut updates = Vec::new();
             match store.get::<Workspace>(&source_ws_id) {
                 Ok(Some(src_ws)) => {
-                    updates.push(WaveObjUpdate {
+                    updates.push(MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: OTYPE_WORKSPACE.to_string(),
                         oid: source_ws_id.clone(),
-                        obj: Some(wave_obj_to_value(&src_ws)),
+                        obj: Some(mux_obj_to_value(&src_ws)),
                     });
                 }
                 Ok(None) => {
-                    updates.push(WaveObjUpdate {
+                    updates.push(MuxObjUpdate {
                         updatetype: "delete".into(),
                         otype: OTYPE_WORKSPACE.to_string(),
                         oid: source_ws_id.clone(),
@@ -433,11 +433,11 @@ pub(crate) async fn handle_restore_torn_off_tab(state: &AppState, call: &WebCall
                 Err(_) => {}
             }
             if let Ok(dst_ws) = store.must_get::<Workspace>(&dest_ws_id) {
-                updates.push(WaveObjUpdate {
+                updates.push(MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: OTYPE_WORKSPACE.to_string(),
                     oid: dest_ws_id.clone(),
-                    obj: Some(wave_obj_to_value(&dst_ws)),
+                    obj: Some(mux_obj_to_value(&dst_ws)),
                 });
             }
             WebReturnType::success_with_updates(updates)

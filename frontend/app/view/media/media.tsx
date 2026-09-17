@@ -14,8 +14,8 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
@@ -88,7 +88,7 @@ function streamUrl(path: string): string {
 // query-string `?authkey=` fallback is deliberately restricted to the
 // `/ws` upgrade route only — see auth_middleware's 2026-05-11 audit
 // comment in agentmux-srv/src/server/mod.rs). Fetch the bytes ourselves
-// with the header (same pattern as fetchWaveFile in wave-file.ts) and
+// with the header (same pattern as fetchMuxFile in mux-file.ts) and
 // hand the element a blob object URL instead. Caller owns revoking it.
 async function fetchMediaBlob(path: string): Promise<Blob> {
     const headers: Record<string, string> = {};
@@ -121,7 +121,7 @@ class MediaViewModel implements ViewModel {
         // subscribers reliably see updates.
         this.viewName = useBlockAtom(blockId, "media-view-name", () =>
             createMemo<string>(() => {
-                const blockData = getWaveObjectAtom<Block>(makeORef("block", blockId))();
+                const blockData = getMuxObjectAtom<Block>(makeORef("block", blockId))();
                 const path = blockData?.meta?.[META_PATH];
                 return typeof path === "string" && path.length > 0 ? basenameOf(path) : "Media";
             }),
@@ -171,7 +171,7 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
                 extensions: ALL_MEDIA_EXTENSIONS,
             }),
         );
-        unsubFileChanged = waveEventSubscribe({
+        unsubFileChanged = muxEventSubscribe({
             eventType: WpsEvent.MediaFileChanged,
             scope: makeORef("block", model.blockId),
             handler: (event) => {
@@ -214,7 +214,7 @@ function MediaView({ model }: { model: MediaViewModel }): JSX.Element {
     };
 
     onMount(() => {
-        const blockData = getWaveObjectAtom<Block>(makeORef("block", model.blockId))();
+        const blockData = getMuxObjectAtom<Block>(makeORef("block", model.blockId))();
         const saved = blockData?.meta?.[META_PATH];
         if (typeof saved === "string" && saved.length > 0) {
             showPath(saved);

@@ -94,7 +94,7 @@ import {
     rebuildMinimizedSet as rebuildMinimizedSetImpl,
 } from "./layoutMinimize";
 import {
-    initializeFromWaveObject as initializeFromWaveObjectImpl,
+    initializeFromMuxObject as initializeFromMuxObjectImpl,
     onBackendUpdate as onBackendUpdateImpl,
     persistToBackend as persistToBackendImpl,
 } from "./layoutPersistence";
@@ -124,15 +124,15 @@ export class LayoutModel {
      */
     treeState: LayoutTreeState;
     /**
-     * Reference to the tab accessor for accessing WaveObject
+     * Reference to the tab accessor for accessing MuxObject
      * @internal
      */
     tabAtom: () => Tab;
     /**
-     * WaveObject signal atom for persistence
+     * MuxObject signal atom for persistence
      * @internal
      */
-    waveObjectAtom: WritableWaveObjectAtom<LayoutState>;
+    muxObjectAtom: WritableMuxObjectAtom<LayoutState>;
     /**
      * Debounce timer for persistence
      * @internal
@@ -419,7 +419,7 @@ export class LayoutModel {
             this.persistDebounceTimer = null;
             this.processedActionIds = new Set();
 
-            this.waveObjectAtom = getLayoutStateAtomFromTab(tabAtom);
+            this.muxObjectAtom = getLayoutStateAtomFromTab(tabAtom);
 
             this.localTreeStateAtom = createSignalAtom<LayoutTreeState>({
                 rootNode: undefined,
@@ -534,12 +534,12 @@ export class LayoutModel {
                 return this.getPlaceholderTransform(pendingAction);
             });
 
-            this.initializeFromWaveObject();
+            this.initializeFromMuxObject();
         });
     }
 
-    private initializeFromWaveObject() {
-        initializeFromWaveObjectImpl(this);
+    private initializeFromMuxObject() {
+        initializeFromMuxObjectImpl(this);
     }
 
     onBackendUpdate() {

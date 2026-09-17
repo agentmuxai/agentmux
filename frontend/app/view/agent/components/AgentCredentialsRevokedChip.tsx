@@ -21,7 +21,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { PaneRow } from "./PaneRow";
 
 interface AgentCredentialsRevokedChipProps {
@@ -44,9 +44,9 @@ export const AgentCredentialsRevokedChip = (
     // wrapper remounts on change), so a plain subscribe/cleanup pair is
     // enough — mirrors AgentIdentityLinksPanel's subscription to the
     // sibling `agentidentities:changed:<id>` event.
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: `agentcredentials:revoked:${props.agentId}`,
-        handler: (event: WaveEvent) => {
+        handler: (event: MuxEvent) => {
             const provider =
                 typeof event?.data?.provider === "string" ? event.data.provider : "";
             setRevoked((prev) => {

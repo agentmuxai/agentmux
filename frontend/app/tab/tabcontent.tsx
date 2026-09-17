@@ -31,7 +31,7 @@ function buildEmptyTabMenu(): ContextMenuItem[] {
 
 function TabContent(props: { tabId: string }): JSX.Element {
     const oref = createMemo(() => WOS.makeORef("tab", props.tabId));
-    const tabAtom = createMemo(() => WOS.getWaveObjectAtom<Tab>(oref()));
+    const tabAtom = createMemo(() => WOS.getMuxObjectAtom<Tab>(oref()));
     const tabData = createMemo(() => tabAtom()());
 
     const tileGapSize = createMemo(() => {

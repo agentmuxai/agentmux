@@ -34,7 +34,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { NativeMemoryHistoryPanel } from "@/app/view/agent/components/NativeMemoryHistoryPanel";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
@@ -394,7 +394,7 @@ export function NativeMemoryManager(): JSX.Element {
             }
         }
 
-        const unsub = waveEventSubscribe(
+        const unsub = muxEventSubscribe(
             ...list.map((agent) => ({
                 eventType: `agent:memory:changed:${agent.id}`,
                 handler: () => {

@@ -198,7 +198,7 @@ function registerGlobalKeys() {
             return true;
         });
     }
-    function activateSearch(event: WaveKeyboardEvent): boolean {
+    function activateSearch(event: MuxKeyboardEvent): boolean {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm == null) return false;
         // Ctrl+f is reserved in most shells

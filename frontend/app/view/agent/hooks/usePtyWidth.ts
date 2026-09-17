@@ -34,7 +34,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService } from "@/app/store/services";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { onCleanup, onMount, type Accessor } from "solid-js";
@@ -201,7 +201,7 @@ export function usePtyWidth(opts: UsePtyWidthOpts): void {
         // channel is ready (shell.rs). Clear readiness on "done" so a resize
         // made while the agent is idle is coalesced and re-applied when the
         // next turn starts, rather than failing against a dead PTY.
-        const unsubStatus = waveEventSubscribe({
+        const unsubStatus = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {

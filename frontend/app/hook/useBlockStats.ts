@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createSignal, createEffect, onCleanup } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 
 export interface BlockStats {
@@ -14,7 +14,7 @@ export function useBlockStats(blockId: string): () => BlockStats | null {
     const [stats, setStats] = createSignal<BlockStats | null>(null);
 
     createEffect(() => {
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.BlockStats,
             scope: `block:${blockId}`,
             handler: (event: any) => {

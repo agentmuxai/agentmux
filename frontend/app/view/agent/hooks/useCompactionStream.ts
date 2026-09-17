@@ -71,7 +71,7 @@
 
 import { createEffect, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
@@ -163,7 +163,7 @@ export function compactionStartedNodeId(startedAt: number): string {
 }
 
 export function useCompactionStream(opts: UseCompactionStreamOptions): void {
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: WpsEvent.CompactionStarted,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {

@@ -66,7 +66,7 @@ pub(super) async fn handle_service(
     Json(run_service_call(&state, &call).await)
 }
 
-/// Dispatch a service call and broadcast any resulting `WaveObjUpdate`s to the
+/// Dispatch a service call and broadcast any resulting `MuxObjUpdate`s to the
 /// event bus — the shared core of `handle_service`. Factored out so the typed
 /// first-class agent-API verbs (e.g. `/api/v1/window/name`) get byte-identical
 /// persistence + broadcast to a raw `/agentmux/service` call without
@@ -87,7 +87,7 @@ pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> We
         elapsed.as_secs_f64() * 1000.0,
     );
 
-    // Broadcast every WaveObjUpdate the handler returned so other
+    // Broadcast every MuxObjUpdate the handler returned so other
     // clients (additional windows, test harnesses, etc.) learn about
     // changes they didn't initiate. The calling HTTP client also gets
     // `updates` in the response body — this broadcast is for
@@ -100,12 +100,12 @@ pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> We
     // reach the CALLING renderer, and they land BEFORE the HTTP response
     // body — so N individual frames repaint the UI in N unbatched steps
     // and the response body's batched application (wos.ts
-    // `updateWaveObjects`) arrives too late to matter (version-guarded to
+    // `updateMuxObjects`) arrives too late to matter (version-guarded to
     // a no-op). CloseTab's `[delete tab, update workspace]` pair sent as
     // two frames is exactly the blank-tab flash of
     // SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
     if let Some(updates) = &result.updates {
-        state.event_bus.broadcast_wave_obj_updates(updates);
+        state.event_bus.broadcast_mux_obj_updates(updates);
     }
 
     result

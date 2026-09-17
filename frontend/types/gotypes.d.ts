@@ -57,7 +57,7 @@ declare global {
     };
 
     // waveobj.Block
-    type Block = WaveObj & {
+    type Block = MuxObj & {
         parentoref?: string;
         runtimeopts?: RuntimeOpts;
         stickers?: StickerType[];
@@ -141,7 +141,7 @@ declare global {
     };
 
     // waveobj.Client
-    type Client = WaveObj & {
+    type Client = MuxObj & {
         windowids: string[];
         tosagreed?: number;
         hasoldhistory?: boolean;
@@ -1138,11 +1138,6 @@ declare global {
         oref: ORef;
     };
 
-    // wshrpc.CommandGetWaveAIChatData
-    type CommandGetWaveAIChatData = {
-        chatid: string;
-    };
-
     // wshrpc.CommandMessageData
     type CommandMessageData = {
         oref: ORef;
@@ -1229,21 +1224,6 @@ declare global {
     type CommandWaitForRouteData = {
         routeid: string;
         waitms: number;
-    };
-
-    // wshrpc.CommandWaveAIAddContextData
-    type CommandWaveAIAddContextData = {
-        files?: AIAttachedFile[];
-        text?: string;
-        submit?: boolean;
-        newchat?: boolean;
-    };
-
-    // wshrpc.CommandWaveAIToolApproveData
-    type CommandWaveAIToolApproveData = {
-        toolcallid: string;
-        keepalive?: boolean;
-        approval?: string;
     };
 
     // wshrpc.CommandWebSelectorData
@@ -1462,7 +1442,7 @@ declare global {
     };
 
     // waveobj.LayoutState
-    type LayoutState = WaveObj & {
+    type LayoutState = MuxObj & {
         rootnode?: any;
         magnifiednodeid?: string;
         focusednodeid?: string;
@@ -1965,7 +1945,7 @@ declare global {
     };
 
     // waveobj.Tab
-    type Tab = WaveObj & {
+    type Tab = MuxObj & {
         name: string;
         layoutstate: string;
         blockids: string[];
@@ -2122,55 +2102,8 @@ declare global {
         fullconfig: FullConfigType;
     };
 
-    // wshrpc.WaveAIOptsType
-    type WaveAIOptsType = {
-        model: string;
-        apitype?: string;
-        apitoken: string;
-        orgid?: string;
-        apiversion?: string;
-        baseurl?: string;
-        proxyurl?: string;
-        maxtokens?: number;
-        maxchoices?: number;
-        timeoutms?: number;
-    };
-
-    // wshrpc.WaveAIPacketType
-    type WaveAIPacketType = {
-        type: string;
-        model?: string;
-        created?: number;
-        finish_reason?: string;
-        usage?: WaveAIUsageType;
-        index?: number;
-        text?: string;
-        error?: string;
-    };
-
-    // wshrpc.WaveAIPromptMessageType
-    type WaveAIPromptMessageType = {
-        role: string;
-        content: string;
-        name?: string;
-    };
-
-    // wshrpc.WaveAIStreamRequest
-    type WaveAIStreamRequest = {
-        clientid?: string;
-        opts: WaveAIOptsType;
-        prompt: WaveAIPromptMessageType[];
-    };
-
-    // wshrpc.WaveAIUsageType
-    type WaveAIUsageType = {
-        prompt_tokens?: number;
-        completion_tokens?: number;
-        total_tokens?: number;
-    };
-
-    // wps.WaveEvent
-    type WaveEvent = {
+    // wps.MuxEvent
+    type MuxEvent = {
         event: string;
         scopes?: string[];
         sender?: string;
@@ -2178,8 +2111,8 @@ declare global {
         data?: any;
     };
 
-    // filestore.WaveFile
-    type WaveFile = {
+    // filestore.MuxFile
+    type MuxFile = {
         zoneid: string;
         name: string;
         opts: FileOpts;
@@ -2189,8 +2122,8 @@ declare global {
         meta: {[key: string]: any};
     };
 
-    // wshrpc.WaveInfoData
-    type WaveInfoData = {
+    // wshrpc.MuxInfoData
+    type MuxInfoData = {
         version: string;
         clientid: string;
         buildtime: string;
@@ -2198,8 +2131,8 @@ declare global {
         datadir: string;
     };
 
-    // vdom.WaveKeyboardEvent
-    type WaveKeyboardEvent = {
+    // vdom.MuxKeyboardEvent
+    type MuxKeyboardEvent = {
         type: "keydown"|"keyup"|"keypress"|"unknown";
         key: string;
         code: string;
@@ -2213,51 +2146,31 @@ declare global {
         option?: boolean;
     };
 
-    // wshrpc.WaveNotificationOptions
-    type WaveNotificationOptions = {
+    // wshrpc.MuxNotificationOptions
+    type MuxNotificationOptions = {
         title?: string;
         body?: string;
         silent?: boolean;
     };
 
-    // waveobj.WaveObj
-    type WaveObj = {
+    // waveobj.MuxObj
+    type MuxObj = {
         otype: string;
         oid: string;
         version: number;
         meta: MetaType;
     };
 
-    // waveobj.WaveObjUpdate
-    type WaveObjUpdate = {
+    // waveobj.MuxObjUpdate
+    type MuxObjUpdate = {
         updatetype: string;
         otype: string;
         oid: string;
-        obj?: WaveObj;
-    };
-
-    // vdom.WavePointerData
-    type WavePointerData = {
-        button: number;
-        buttons: number;
-        clientx?: number;
-        clienty?: number;
-        pagex?: number;
-        pagey?: number;
-        screenx?: number;
-        screeny?: number;
-        movementx?: number;
-        movementy?: number;
-        shift?: boolean;
-        control?: boolean;
-        alt?: boolean;
-        meta?: boolean;
-        cmd?: boolean;
-        option?: boolean;
+        obj?: MuxObj;
     };
 
     // waveobj.Window
-    type WaveWindow = WaveObj & {
+    type MuxWindow = MuxObj & {
         workspaceid: string;
         isnew?: boolean;
         pos: Point;
@@ -2288,7 +2201,7 @@ declare global {
         success?: boolean;
         error?: string;
         data?: any;
-        updates?: WaveObjUpdate[];
+        updates?: MuxObjUpdate[];
     };
 
     // wshrpc.WebSelectorOpts
@@ -2318,7 +2231,7 @@ declare global {
     };
 
     // waveobj.Workspace
-    type Workspace = WaveObj & {
+    type Workspace = MuxObj & {
         name?: string;
         tabids: string[];
         pinnedtabids: string[];

@@ -116,27 +116,27 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
 
     let mut updates = Vec::new();
     if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: source_tab_id.clone(),
-            obj: Some(wave_obj_to_value(&src_tab)),
+            obj: Some(mux_obj_to_value(&src_tab)),
         });
     }
     if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_WORKSPACE.to_string(),
             oid: source_ws_id.clone(),
-            obj: Some(wave_obj_to_value(&src_ws)),
+            obj: Some(mux_obj_to_value(&src_ws)),
         });
     }
     if let Ok(new_ws) = store.must_get::<Workspace>(&new_ws_oid) {
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_WORKSPACE.to_string(),
             oid: new_ws_oid.clone(),
-            obj: Some(wave_obj_to_value(&new_ws)),
+            obj: Some(mux_obj_to_value(&new_ws)),
         });
     }
     WebReturnType::success_data_updates(
@@ -253,37 +253,37 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // the re-read always sees the appended actions.
     if let Ok(src_tab) = store.must_get::<Tab>(&source_tab_id) {
         if let Ok(src_layout) = store.must_get::<LayoutState>(&src_tab.layoutstate) {
-            updates.push(WaveObjUpdate {
+            updates.push(MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: OTYPE_LAYOUT.to_string(),
                 oid: src_tab.layoutstate.clone(),
-                obj: Some(wave_obj_to_value(&src_layout)),
+                obj: Some(mux_obj_to_value(&src_layout)),
             });
         }
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: source_tab_id.clone(),
-            obj: Some(wave_obj_to_value(&src_tab)),
+            obj: Some(mux_obj_to_value(&src_tab)),
         });
     }
     if let Ok(dst_tab) = store.must_get::<Tab>(&target_tab_id) {
         if let Ok(dst_layout) = store.must_get::<LayoutState>(&dst_tab.layoutstate) {
-            updates.push(WaveObjUpdate {
+            updates.push(MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: OTYPE_LAYOUT.to_string(),
                 oid: dst_tab.layoutstate.clone(),
-                obj: Some(wave_obj_to_value(&dst_layout)),
+                obj: Some(mux_obj_to_value(&dst_layout)),
             });
         }
-        updates.push(WaveObjUpdate {
+        updates.push(MuxObjUpdate {
             updatetype: "update".into(),
             otype: OTYPE_TAB.to_string(),
             oid: target_tab_id.clone(),
-            obj: Some(wave_obj_to_value(&dst_tab)),
+            obj: Some(mux_obj_to_value(&dst_tab)),
         });
     }
-    // CRITICAL: WaveObjUpdates in the response only reach the
+    // CRITICAL: MuxObjUpdates in the response only reach the
     // CALLING renderer (the floater that's about to close). The
     // TARGET window's renderer is a different process and won't
     // see the layout change unless we explicitly broadcast on
@@ -291,8 +291,8 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // Without this the target tab.blockids includes the new
     // block but its layout.leaforder doesn't → block invisible.
     // One batched frame so the renderer applies all of them in a single
-    // reactive flush — see EventBus::broadcast_wave_obj_updates.
-    state.event_bus.broadcast_wave_obj_updates(&updates);
+    // reactive flush — see EventBus::broadcast_mux_obj_updates.
+    state.event_bus.broadcast_mux_obj_updates(&updates);
 
     WebReturnType::success_data_updates(
         serde_json::json!({
@@ -330,19 +330,19 @@ pub(crate) async fn handle_tear_off_tab(state: &AppState, call: &WebCallType) ->
                 .to_string();
             let mut updates = Vec::new();
             if let Ok(src_ws) = store.must_get::<Workspace>(&source_ws_id) {
-                updates.push(WaveObjUpdate {
+                updates.push(MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: OTYPE_WORKSPACE.to_string(),
                     oid: source_ws_id.clone(),
-                    obj: Some(wave_obj_to_value(&src_ws)),
+                    obj: Some(mux_obj_to_value(&src_ws)),
                 });
             }
             if let Ok(new_ws) = store.must_get::<Workspace>(&new_ws_oid) {
-                updates.push(WaveObjUpdate {
+                updates.push(MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: OTYPE_WORKSPACE.to_string(),
                     oid: new_ws_oid.clone(),
-                    obj: Some(wave_obj_to_value(&new_ws)),
+                    obj: Some(mux_obj_to_value(&new_ws)),
                 });
             }
             WebReturnType::success_data_updates(

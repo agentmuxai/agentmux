@@ -18,7 +18,7 @@ import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms, staticTabId, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { sendWSCommand } from "@/app/store/ws";
 import { TermWrap } from "@/app/view/term/termwrap";
@@ -103,15 +103,15 @@ const BASE_FONT_SIZE = 13;
  * fail), WITHOUT triggering a new one — see the onMount IIFE below for why a
  * second fetch must be avoided (reagentx P1 on #2522: `subBlockAtom`'s
  * `createMemo` already eagerly fetches this exact oref at component
- * construction). `getWaveObjectLoadingAtom` returns `null` while loading and
+ * construction). `getMuxObjectLoadingAtom` returns `null` while loading and
  * `false` once settled (regardless of whether the value ended up populated
  * or null) — see its doc comment in wos.ts. Bounded by `timeoutMs` since a
  * genuine network failure can leave the loading atom stuck at "loading"
  * forever (wos.ts's own comment on GetObject rejections other than a
  * definitive "not found").
  */
-async function waitForWaveObjectSettled(oref: string, timeoutMs = 2000): Promise<void> {
-    const loadingAtom = WOS.getWaveObjectLoadingAtom(oref);
+async function waitForMuxObjectSettled(oref: string, timeoutMs = 2000): Promise<void> {
+    const loadingAtom = WOS.getMuxObjectLoadingAtom(oref);
     const start = Date.now();
     while (loadingAtom() === null) {
         if (Date.now() - start >= timeoutMs) return;
@@ -153,7 +153,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // This is what makes zoom a property of the terminal, not the agent pane.
     const subBlockAtom = createMemo(() => {
         const id = subBlockId();
-        return id ? WOS.getWaveObjectAtom<Block>(`block:${id}`) : null;
+        return id ? WOS.getMuxObjectAtom<Block>(`block:${id}`) : null;
     });
 
     const termZoom = createMemo(() => {
@@ -237,7 +237,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // one exits gets its own scope, and must arm independently.
         let sawRunning = false;
         let exitNotified = false;
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
             scope: WOS.makeORef("block", id),
             handler: (event) => {
@@ -576,13 +576,13 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             // (the already-correct default of 1.0 applies), so only the
             // reused-existing-block path needs to wait for anything.
             //
-            // Deliberately does NOT call WOS.reloadWaveObject here: the
+            // Deliberately does NOT call WOS.reloadMuxObject here: the
             // `subBlockAtom` memo above already triggered a fetch for
             // this exact oref as a side effect of being constructed
-            // (WOS.getWaveObjectAtom → getWaveObjectValue eagerly fetches
+            // (WOS.getMuxObjectAtom → getMuxObjectValue eagerly fetches
             // on first read, and that memo runs synchronously at
             // component construction, before this async IIFE even
-            // starts). Calling reloadWaveObject here would force a
+            // starts). Calling reloadMuxObject here would force a
             // SECOND, redundant GetObject round-trip for the same object
             // on every reused-sub-block drawer open (reagentx P1 on
             // #2522). Instead, just wait for that already-in-flight
@@ -594,7 +594,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             // times out; the live-update effect below corrects it later
             // if a subsequent fetch/push succeeds.
             if (isExistingBlock) {
-                await waitForWaveObjectSettled(WOS.makeORef("block", id));
+                await waitForMuxObjectSettled(WOS.makeORef("block", id));
             }
             if (isStale()) return;
             setZoomSeeded(true);

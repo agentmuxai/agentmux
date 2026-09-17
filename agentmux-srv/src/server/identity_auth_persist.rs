@@ -84,7 +84,7 @@ fn persist_oauth_direct_account(
         );
         return None;
     }
-    broker.publish(crate::backend::wps::WaveEvent {
+    broker.publish(crate::backend::wps::MuxEvent {
         event: "identityaccounts:changed".to_string(),
         scopes: vec![],
         sender: String::new(),

@@ -779,7 +779,7 @@ impl Controller for ShellController {
                     // auto-register path bypasses the HTTP register handler
                     // entirely, so it needs its own mirror call too.
                     if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
-                        let data_dir = crate::backend::base::get_wave_data_dir();
+                        let data_dir = crate::backend::base::get_mux_data_dir();
                         crate::backend::reactive::registry::write(
                             &data_dir,
                             agent_id,
@@ -836,11 +836,11 @@ impl Controller for ShellController {
                                 // to SQLite — it does NOT send a WebSocket event on its own).
                                 if let Ok(updated_block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) {
                                     if let Some(ref event_bus) = self.event_bus {
-                                        let update_data = serde_json::to_value(&obj::WaveObjUpdate {
+                                        let update_data = serde_json::to_value(&obj::MuxObjUpdate {
                                             updatetype: "update".into(),
                                             otype: "block".into(),
                                             oid: self.block_id.clone(),
-                                            obj: Some(obj::wave_obj_to_value(&updated_block)),
+                                            obj: Some(obj::mux_obj_to_value(&updated_block)),
                                         }).ok();
                                         event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                                             eventtype: "waveobj:update".to_string(),
@@ -1237,7 +1237,7 @@ impl Controller for ShellController {
 
                 // Also remove from cross-instance file registry and cloud subscriber.
                 if let Some(ref agent_id) = agent_id_wait {
-                    let data_dir = crate::backend::base::get_wave_data_dir();
+                    let data_dir = crate::backend::base::get_mux_data_dir();
                     crate::backend::reactive::registry::remove(&data_dir, agent_id);
                     crate::backend::reactive::registry::remove_shared_from_env(agent_id);
                     if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
@@ -2177,11 +2177,11 @@ pub(super) mod pty_output_flusher_tests {
     /// `Broker::set_client` takes ownership of the client, so the test needs
     /// its own handle to read events back out afterward.
     struct RecordingClient {
-        events: Arc<Mutex<Vec<wps::WaveEvent>>>,
+        events: Arc<Mutex<Vec<wps::MuxEvent>>>,
     }
 
     impl wps::WpsClient for RecordingClient {
-        fn send_event(&self, _route_id: &str, event: wps::WaveEvent) {
+        fn send_event(&self, _route_id: &str, event: wps::MuxEvent) {
             self.events.lock().unwrap().push(event);
         }
     }
@@ -2189,7 +2189,7 @@ pub(super) mod pty_output_flusher_tests {
     /// A broker wired to a `RecordingClient`, subscribed (all-scopes, so
     /// this doesn't need to know the exact `block:<id>` scope string) to
     /// `EVENT_BLOCK_FILE` — the event `handle_append_block_file` publishes.
-    pub(super) fn broker_recording_block_file_events() -> (wps::Broker, Arc<Mutex<Vec<wps::WaveEvent>>>) {
+    pub(super) fn broker_recording_block_file_events() -> (wps::Broker, Arc<Mutex<Vec<wps::MuxEvent>>>) {
         let broker = wps::Broker::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         broker.set_client(Box::new(RecordingClient {
@@ -2208,7 +2208,7 @@ pub(super) mod pty_output_flusher_tests {
 
     /// Decode the base64 `data64` payload of a `term`-file `EVENT_BLOCK_FILE`
     /// broadcast back to raw bytes, for asserting on content.
-    fn decode_event_data(event: &wps::WaveEvent) -> Vec<u8> {
+    fn decode_event_data(event: &wps::MuxEvent) -> Vec<u8> {
         use base64::Engine;
         let data: wps::WSFileEventData =
             serde_json::from_value(event.data.clone().expect("event has data")).expect("valid WSFileEventData");

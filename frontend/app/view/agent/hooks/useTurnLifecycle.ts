@@ -21,7 +21,7 @@
  */
 
 import { createEffect, onCleanup } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import * as WOS from "@/app/store/wos";
 import { recordTurn } from "@/store/token-usage";
@@ -170,7 +170,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // `ControllerStatus: done` only fires on crash or session teardown.
     // Auto-retry: `ControllerStatus: running` cancels any pending timer.
     let procExitGraceTimer: number | null = null;
-    const procExitUnsub = waveEventSubscribe({
+    const procExitUnsub = muxEventSubscribe({
         eventType: WpsEvent.ControllerStatus,
         scope: WOS.makeORef("block", opts.blockId),
         handler: (event) => {
@@ -326,7 +326,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // unsubscribed and A's timer handle is cleared, so a stale event for A
     // literally has nothing left to disarm by the time episode B's own
     // fresh timer/listener pair is live. Deliberately a per-run LOCAL
-    // variable, not one shared across the whole hook — if `waveEventSubscribe`
+    // variable, not one shared across the whole hook — if `muxEventSubscribe`
     // ever delivered to an already-unsubscribed handler (a transport-level
     // race this hook has no control over), that stale handler's closure
     // would still only ever see episode A's own (already cleared or
@@ -342,7 +342,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
                 opts.model.dispatchPane({ type: "SubmitTimeoutElapsed", at: Date.now() });
             }
         }, SUBMIT_TIMEOUT_MS);
-        const acceptedUnsub = waveEventSubscribe({
+        const acceptedUnsub = muxEventSubscribe({
             eventType: WpsEvent.AgentMessageAccepted,
             scope: WOS.makeORef("block", opts.blockId),
             handler: () => {

@@ -1,16 +1,16 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! WaveObjUpdate broadcast bridge.
+//! MuxObjUpdate broadcast bridge.
 //!
 //! Subscribes to `srv_events_tx` (the internal sidecar event bus that the
 //! reducer publishes mutations to) and translates each event into one or
-//! more `WaveObjUpdate` records, broadcast to all connected WS clients via
+//! more `MuxObjUpdate` records, broadcast to all connected WS clients via
 //! the existing `event_bus.broadcast_event(...)` plumbing — the same path
 //! that `service.rs:39-52`'s response-broadcast loop uses.
 //!
 //! Why this exists: per-RPC handlers were responsible for attaching
-//! `WaveObjUpdate`s to their responses (`success_with_updates(...)`).
+//! `MuxObjUpdate`s to their responses (`success_with_updates(...)`).
 //! Forgetting that call left the frontend WOS cache stale (e.g. workspace
 //! renames not propagating to the OS title or the InstancePanel — see
 //! `docs/specs/SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md`).
@@ -33,15 +33,15 @@ use tokio::sync::broadcast;
 
 use crate::backend::eventbus::{EventBus, WSEventType};
 use crate::backend::obj::{
-    wave_obj_to_value, Client, Tab, StoreObj, OTYPE_BLOCK, OTYPE_CLIENT, OTYPE_LAYOUT, OTYPE_TAB,
+    mux_obj_to_value, Client, Tab, StoreObj, OTYPE_BLOCK, OTYPE_CLIENT, OTYPE_LAYOUT, OTYPE_TAB,
     OTYPE_WINDOW, OTYPE_WORKSPACE,
 };
 use crate::backend::storage::store::Store;
 
 /// JSON shape that gets broadcast as the `data` payload of a
-/// `waveobj:update` WS event. Matches the shape of `WaveObjUpdate` in
+/// `waveobj:update` WS event. Matches the shape of `MuxObjUpdate` in
 /// `agentmux-srv/src/backend/obj.rs:465-474` so the frontend's existing
-/// `updateWaveObject` handler accepts it without changes.
+/// `updateMuxObject` handler accepts it without changes.
 fn build_update_payload(
     updatetype: &str,
     otype: &str,
@@ -58,7 +58,7 @@ fn build_update_payload(
     serde_json::Value::Object(map)
 }
 
-/// Push one `WaveObjUpdate` payload to all connected WS clients via the
+/// Push one `MuxObjUpdate` payload to all connected WS clients via the
 /// shared event_bus. Mirrors the response-broadcast loop in
 /// `service.rs:39-52`.
 fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value) {
@@ -93,7 +93,7 @@ async fn emit_fetched<T: StoreObj + Send + 'static>(
                 "update",
                 otype,
                 &oid,
-                Some(wave_obj_to_value(&obj)),
+                Some(mux_obj_to_value(&obj)),
             );
             emit(event_bus, otype, &oid, payload);
         }
@@ -122,7 +122,7 @@ async fn emit_fetched<T: StoreObj + Send + 'static>(
 }
 
 /// Broadcast a "delete" `waveobj:update` for the given oid. No fetch
-/// needed — the frontend's `updateWaveObject` (`wos.ts:263-265`) handles
+/// needed — the frontend's `updateMuxObject` (`wos.ts:263-265`) handles
 /// the delete arm with just the oid.
 fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
     let payload = build_update_payload("delete", otype, oid, None);
@@ -153,7 +153,7 @@ async fn emit_client_singleton(
                     "update",
                     OTYPE_CLIENT,
                     &oid,
-                    Some(wave_obj_to_value(&client)),
+                    Some(mux_obj_to_value(&client)),
                 );
                 emit(event_bus, OTYPE_CLIENT, &oid, payload);
             } else {
@@ -215,7 +215,7 @@ async fn emit_layout_for_tab(
                 "update",
                 OTYPE_LAYOUT,
                 &layout_id,
-                Some(wave_obj_to_value(&layout)),
+                Some(mux_obj_to_value(&layout)),
             );
             emit(event_bus, OTYPE_LAYOUT, &layout_id, payload);
         }
@@ -469,7 +469,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         }
         // Without this, a backend-queued layout action reaches a frontend
         // ONLY if that frontend happens to construct its `LayoutModel`
-        // afterward — `initializeFromWaveObject` reads
+        // afterward — `initializeFromMuxObject` reads
         // `pendingbackendactions` once at init
         // (`frontend/layout/lib/layoutPersistence.ts`). That was invisible
         // for as long as the queue's only producer was tear-off/redock,
@@ -524,15 +524,15 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
 /// order relative to the persist subscriber. For Phase 1's workspace
 /// events the HTTP RPC handler applies SQLite synchronously before
 /// publishing the event, so the bridge always sees post-event state.
-pub fn spawn_wave_obj_bridge(
+pub fn spawn_mux_obj_bridge(
     events_rx: broadcast::Receiver<Event>,
     wstore: Arc<Store>,
     event_bus: Arc<EventBus>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run_wave_obj_bridge(events_rx, wstore, event_bus))
+    tokio::spawn(run_mux_obj_bridge(events_rx, wstore, event_bus))
 }
 
-async fn run_wave_obj_bridge(
+async fn run_mux_obj_bridge(
     mut events_rx: broadcast::Receiver<Event>,
     wstore: Arc<Store>,
     event_bus: Arc<EventBus>,
@@ -740,7 +740,7 @@ mod tests {
     /// SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md §14: queueing a backend
     /// layout action must broadcast the owning tab's LayoutState, or the
     /// queue reaches a frontend only if that frontend happens to build its
-    /// `LayoutModel` afterward (`initializeFromWaveObject` reads
+    /// `LayoutModel` afterward (`initializeFromMuxObject` reads
     /// `pendingbackendactions` once, at init). Tear-off/redock hid this for
     /// years by always creating a new window; close-on-exit is the first
     /// producer that queues for an already-open one, and without this arm

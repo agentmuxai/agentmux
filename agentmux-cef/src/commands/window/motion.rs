@@ -272,7 +272,7 @@ pub fn start_window_drag(state: &Arc<AppState>, args: &serde_json::Value) -> Res
 /// (cursor is over the desktop, an external app, etc.). `window_id`
 /// is the backend windowId mapped via the launcher's
 /// `BackendWindowIdRegistered` projection — frontend uses it to
-/// load the WaveWindow / Workspace and figure out the active tab.
+/// load the MuxWindow / Workspace and figure out the active tab.
 ///
 /// Instance / version isolation is free: another agentmux instance's
 /// HWNDs are NOT in this process's `window_hwnds` map, so cross-

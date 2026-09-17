@@ -9,7 +9,7 @@ const hub = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         if (sub.eventType === "controllerstatus") hub.handler = sub.handler;
         return () => {
             hub.handler = null;

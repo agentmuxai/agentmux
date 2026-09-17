@@ -12,7 +12,7 @@
  * persisted session. These tests drive that exact race directly against
  * the hook's state machine (not just the pure `resolveBackfillStatus`
  * resolver), mirroring `useControllerStatusEvents.test.ts`'s
- * `createRoot` + mocked-`waveEventSubscribe` harness.
+ * `createRoot` + mocked-`muxEventSubscribe` harness.
  */
 
 import { createRoot, createSignal } from "solid-js";
@@ -23,7 +23,7 @@ const hub = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handler = sub.handler;
         return () => {
             hub.handler = null;

@@ -291,32 +291,32 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     {
         let mut updates = Vec::new();
         if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
-            updates.push(obj::WaveObjUpdate {
+            updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "block".into(),
                 oid: block_id.clone(),
-                obj: Some(obj::wave_obj_to_value(&updated_block)),
+                obj: Some(obj::mux_obj_to_value(&updated_block)),
             });
         }
         if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
-            updates.push(obj::WaveObjUpdate {
+            updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "tab".into(),
                 oid: tab_id.clone(),
-                obj: Some(obj::wave_obj_to_value(&updated_tab)),
+                obj: Some(obj::mux_obj_to_value(&updated_tab)),
             });
             if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
-                updates.push(obj::WaveObjUpdate {
+                updates.push(obj::MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: "layout".into(),
                     oid: updated_tab.layoutstate.clone(),
-                    obj: Some(obj::wave_obj_to_value(&updated_layout)),
+                    obj: Some(obj::mux_obj_to_value(&updated_layout)),
                 });
             }
         }
         // One batched frame so the renderer applies all of them in a single
-        // reactive flush — see EventBus::broadcast_wave_obj_updates.
-        event_bus.broadcast_wave_obj_updates(&updates);
+        // reactive flush — see EventBus::broadcast_mux_obj_updates.
+        event_bus.broadcast_mux_obj_updates(&updates);
     }
 
     Ok(PaneOpenResult {
@@ -495,7 +495,7 @@ pub(crate) async fn agent_define_core(
                     (None, false)
                 };
                 if stub_new {
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: "agents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -569,7 +569,7 @@ pub(crate) async fn agent_define_core(
                 } else {
                     None
                 };
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -613,7 +613,7 @@ pub(crate) async fn agent_define_core(
     } else {
         None
     };
-    broker.publish(crate::backend::wps::WaveEvent {
+    broker.publish(crate::backend::wps::MuxEvent {
         event: "agents:changed".to_string(),
         scopes: vec![],
         sender: String::new(),
@@ -1072,7 +1072,7 @@ pub(crate) fn memory_write_impl(
     // subscriber can ever match — the exact class of bug this file's own
     // `resolve_agent_uuid` doc comment already warns about for version
     // storage; the same reasoning applies to this event.
-    state.broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::MuxEvent {
         event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1233,7 +1233,7 @@ pub(crate) fn global_memory_write_impl(
         }
     }
 
-    state.broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::MuxEvent {
         event: "memories:changed".to_string(),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1304,7 +1304,7 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     bundle.is_global = false;
     bundle.updated_at = agentmux_common::time::now_ms();
     state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
-    state.broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::MuxEvent {
         event: "memories:changed".to_string(),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1683,7 +1683,7 @@ pub(crate) fn memory_revert_impl(
 
     // See memory_write_impl's own comment on why this is version_agent_id
     // (canonical UUID), not the raw agent_id slug parameter.
-    state.broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::MuxEvent {
         event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });

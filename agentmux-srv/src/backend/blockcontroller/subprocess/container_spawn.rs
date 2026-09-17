@@ -602,7 +602,7 @@ impl SubprocessController {
             // reconnecting subscribers also receive the last failure without a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(ref b)) = (run_failure.as_ref(), broker.as_ref()) {
-                b.publish(wps::WaveEvent {
+                b.publish(wps::MuxEvent {
                     event: wps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id)],
                     sender: String::new(),

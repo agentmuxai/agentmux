@@ -18,7 +18,7 @@
  */
 
 import { callBackendService } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { createBackfillAwareTrigger } from "./backfill-tracker";
@@ -103,11 +103,11 @@ const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh()
 // refresh itself stays immediate (undebounced) — see that module's
 // identical comment for why.
 void refresh();
-waveEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
-waveEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
-waveEventSubscribe({ eventType: "subagent:named", handler: () => trigger() });
-waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
-waveEventSubscribe({ eventType: "dispatch:updated", handler: () => trigger() });
+muxEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
+muxEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
+muxEventSubscribe({ eventType: "subagent:named", handler: () => trigger() });
+muxEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
+muxEventSubscribe({ eventType: "dispatch:updated", handler: () => trigger() });
 
 /** Every tracked dispatch (Solo or Workflow) currently known, across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */

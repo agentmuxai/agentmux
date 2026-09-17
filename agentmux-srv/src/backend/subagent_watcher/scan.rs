@@ -37,7 +37,7 @@ const RECONCILE_RETRY_INTERVAL_MS: u64 = 3_000;
 /// section 5.
 fn publish_backfill_status(watcher: &SubagentWatcher, parent_block_id: &str, status: &str) {
     let Some(broker) = watcher.broker.lock().unwrap().clone() else { return };
-    broker.publish(wps::WaveEvent {
+    broker.publish(wps::MuxEvent {
         event: wps::EVENT_SUBAGENT_BACKFILL_STATUS.to_string(),
         scopes: vec![format!("block:{}", parent_block_id)],
         sender: String::new(),
@@ -516,7 +516,7 @@ impl SubagentWatcher {
     /// batch-not-spam precedent `dispatch:activity` already established in
     /// this file for the same reason.
     ///
-    /// The frontend `waveEventSubscribe({ eventType: "subagent:abandoned",
+    /// The frontend `muxEventSubscribe({ eventType: "subagent:abandoned",
     /// ... })` listener lands in the immediately-following PR (Phase B,
     /// #2235 — SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20),
     /// not this one. Broadcasting with no subscriber yet is inert, not

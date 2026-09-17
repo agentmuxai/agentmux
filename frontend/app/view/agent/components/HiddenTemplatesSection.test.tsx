@@ -24,7 +24,7 @@ vi.mock("@/app/store/rpc-api", () => {
 });
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn(() => () => {}),
+    muxEventSubscribe: vi.fn(() => () => {}),
 }));
 vi.mock("@/element/ProviderLogo", () => ({
     ProviderLogo: (props: any) => (

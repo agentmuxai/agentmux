@@ -17,7 +17,7 @@ declare global {
         clientId: Accessor<string>;
         client: Accessor<Client>;
         uiContext: Accessor<UIContext>;
-        waveWindow: Accessor<WaveWindow>;
+        muxWindow: Accessor<MuxWindow>;
         workspace: Accessor<Workspace>;
         fullConfigAtom: Accessor<FullConfigType>;
         settingsAtom: Accessor<SettingsType>;
@@ -61,7 +61,7 @@ declare global {
         mtime?: number; // unix millis
     };
 
-    type WritableWaveObjectAtom<T extends WaveObj> = SignalAtom<T>;
+    type WritableMuxObjectAtom<T extends MuxObj> = SignalAtom<T>;
 
     type ThrottledValueAtom<T> = SignalAtom<T>;
 
@@ -141,7 +141,7 @@ declare global {
         installAppUpdate: () => void;
         onMenuItemAbout: (callback: () => void) => void;
         updateWindowControlsOverlay: (rect: Dimensions) => void;
-        onReinjectKey: (callback: (waveEvent: WaveKeyboardEvent) => void) => void;
+        onReinjectKey: (callback: (muxEvent: MuxKeyboardEvent) => void) => void;
         onControlShiftStateUpdate: (callback: (state: boolean) => void) => void;
         openNewWindow: () => Promise<string>;
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
@@ -544,7 +544,7 @@ declare global {
             canGoForward?: boolean;
         }) => ContextMenuItem[];
         giveFocus?: () => boolean;
-        keyDownHandler?: (e: WaveKeyboardEvent) => boolean;
+        keyDownHandler?: (e: MuxKeyboardEvent) => boolean;
         dispose?: () => void;
         /** Views that support voice input expose a handle accessor. Called
          *  by BlockFrame_Header (to render the mic button) and by the

@@ -13,7 +13,7 @@
  *
  * Mock design note: mirrors the REAL wos.ts shape — one signal per oref
  * holding `{ value, loading }` together (not two independent signals), with
- * `getWaveObjectAtom` and `getWaveObjectLoadingAtom` both reading from it.
+ * `getMuxObjectAtom` and `getMuxObjectLoadingAtom` both reading from it.
  * The signal starts at `{ value: null, loading: true }` and is only resolved
  * when the test explicitly calls `resolveSeedFetch`, simulating a real
  * network round-trip that takes measurable time — deliberately NOT
@@ -57,7 +57,7 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
 // invisible to all 12 tests. `queuePersistedStatus` puts an event in that
 // replay slot instead.
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
+    muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
         const key = `${opts.eventType}|${opts.scope}`;
         wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
         const persisted = wpsPersisted.get(key);
@@ -127,13 +127,13 @@ vi.mock("@/app/store/global", async () => {
 
     const WOS = {
         makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
-        getWaveObjectAtom: (oref: string) => {
+        getMuxObjectAtom: (oref: string) => {
             const [get] = getOrCreateDataSignal(oref);
             return () => get().value;
         },
         // Mirrors the real wos.ts implementation exactly: null while
         // loading, false once settled (regardless of resulting value).
-        getWaveObjectLoadingAtom: (oref: string) => {
+        getMuxObjectLoadingAtom: (oref: string) => {
             const [get] = getOrCreateDataSignal(oref);
             return () => (get().loading ? null : get().loading);
         },
@@ -171,12 +171,12 @@ vi.mock("@/app/view/term/termwrap", () => {
             id: string,
             _container: HTMLElement,
             options: { fontSize: number },
-            waveOptions: { sendDataHandler: (data: string) => void }
+            muxOptions: { sendDataHandler: (data: string) => void }
         ) {
             this.id = id;
             this.fontSize = options.fontSize;
             this.terminal.options.fontSize = options.fontSize;
-            this.sendDataHandler = waveOptions.sendDataHandler;
+            this.sendDataHandler = muxOptions.sendDataHandler;
             termWrapInstances.push(this as any);
         }
         async init() {
@@ -318,7 +318,7 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
         ));
 
         // subBlockAtom's own createMemo is the ONLY thing that should have
-        // created this oref's signal (via getWaveObjectAtom) — confirm it
+        // created this oref's signal (via getMuxObjectAtom) — confirm it
         // exists (proves the memo ran) without the component itself ever
         // needing a second, separate fetch primitive.
         expect(blockDataSignals.has(oref)).toBe(true);

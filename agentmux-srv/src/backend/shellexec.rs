@@ -339,7 +339,7 @@ pub fn detect_shell_type(shell_path: &str) -> &'static str {
 }
 
 /// Build standard AGENTMUX_* environment variables.
-pub fn build_wave_env(
+pub fn build_mux_env(
     block_id: &str,
     tab_id: &str,
     workspace_id: &str,
@@ -384,8 +384,8 @@ mod tests {
     }
 
     #[test]
-    fn test_build_wave_env() {
-        let env = build_wave_env("block1", "tab1", "ws1", "client1", "local", "0.19.0");
+    fn test_build_mux_env() {
+        let env = build_mux_env("block1", "tab1", "ws1", "client1", "local", "0.19.0");
         assert_eq!(env.get("AGENTMUX").unwrap(), "1");
         assert_eq!(env.get("AGENTMUX_BLOCKID").unwrap(), "block1");
         assert_eq!(env.get("AGENTMUX_TABID").unwrap(), "tab1");

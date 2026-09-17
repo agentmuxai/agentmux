@@ -19,7 +19,7 @@ import { openModal } from "./modalmodel";
 import { AboutModal } from "@/app/modals/about";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as WOS from "./wos";
-import { getFileSubject, waveEventSubscribe } from "./wps";
+import { getFileSubject, muxEventSubscribe } from "./wps";
 import { getApi } from "./app-api";
 import {
     fullConfigAtom,
@@ -41,7 +41,7 @@ import {
     staticTabId,
     setStaticTabId,
     client,
-    waveWindow,
+    muxWindow,
     workspace,
     tabAtom,
     activeTabId,
@@ -131,7 +131,7 @@ export const atoms = {
     clientId: clientId,
     uiContext: uiContext,
     client: client,
-    waveWindow: waveWindow,
+    muxWindow: muxWindow,
     workspace: workspace,
     fullConfigAtom: fullConfigAtom,
     settingsAtom: settingsAtom,
@@ -221,24 +221,24 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 }
 
 export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
-    waveEventSubscribe(
+    muxEventSubscribe(
         {
-            eventType: WpsEvent.WaveObjUpdate,
+            eventType: WpsEvent.MuxObjUpdate,
             handler: (event) => {
-                const update: WaveObjUpdate = event.data;
-                WOS.updateWaveObject(update);
+                const update: MuxObjUpdate = event.data;
+                WOS.updateMuxObject(update);
             },
         },
         {
-            eventType: WpsEvent.WaveObjBatchedUpdates,
+            eventType: WpsEvent.MuxObjBatchedUpdates,
             handler: (event) => {
                 // All updates from one atomic backend transition, applied in
-                // one batch() flush (updateWaveObjects) so the UI can't paint
+                // one batch() flush (updateMuxObjects) so the UI can't paint
                 // a half-applied state — e.g. CloseTab's tab delete blanking
                 // the still-mounted tab before the workspace update unmounts
                 // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
-                const updates: WaveObjUpdate[] = event.data ?? [];
-                WOS.updateWaveObjects(updates);
+                const updates: MuxObjUpdate[] = event.data ?? [];
+                WOS.updateMuxObjects(updates);
             },
         },
         {
@@ -337,7 +337,7 @@ export {
 export {
     staticTabId,
     client,
-    waveWindow,
+    muxWindow,
     workspace,
     tabAtom,
     activeTabId,
@@ -365,9 +365,9 @@ export {
     openOrFocusPaneByView,
 } from "./block-component-registry";
 
-// Wave file fetching — moved to wave-file.ts; re-exported below for
+// AgentMux file fetching — moved to mux-file.ts; re-exported below for
 // backward-compat (97 files import from this module).
-export { fetchWaveFile } from "./wave-file";
+export { fetchMuxFile } from "./mux-file";
 
 // Connection status — moved to conn-status.ts; re-exported below for
 // backward-compat (97 files import from this module). Also imported above

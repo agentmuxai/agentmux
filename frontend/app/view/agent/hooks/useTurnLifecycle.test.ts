@@ -15,7 +15,7 @@ const hub = vi.hoisted(() => ({
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+    muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         if (sub.eventType === "agent-message-accepted") hub.acceptedHistory.push(sub.handler);
         return () => {

@@ -202,7 +202,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         let blockViewLabel: string | undefined;
         let workspaceName: string | undefined;
         if (entry.windowId) {
-            const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
+            const win = getObjectValue<MuxWindow>(makeORef("window", entry.windowId));
             if (win?.workspaceid) {
                 const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
                 workspaceName = ws?.name;
@@ -220,7 +220,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         return resolveFloatingPaneName({ blockViewLabel, workspaceName, indexInOpenPanes: idx });
     };
 
-    // For THIS window's row, fall back to atoms.waveWindow()?.oid when
+    // For THIS window's row, fall back to atoms.muxWindow()?.oid when
     // the entry's windowId is still null. WindowEntry.windowId is null
     // for the first ~100ms after a window opens — until the
     // registerBackendWindow IPC round-trip completes (see comment at
@@ -230,20 +230,20 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // workspace name — visible inconsistency the user reported.
     const resolveEntryWindowId = (entry: WindowEntry): string | null => {
         if (entry.windowId) return entry.windowId;
-        if (entry.label === myLabel()) return atoms.waveWindow()?.oid ?? null;
+        if (entry.label === myLabel()) return atoms.muxWindow()?.oid ?? null;
         return null;
     };
 
     // Resolve a row's display name via the shared helper so the panel and
     // the OS window title (driven from app-init.ts) agree by construction.
-    // Reactive via Wave's object subscriptions because getObjectValue reads
+    // Reactive via AgentMux's object subscriptions because getObjectValue reads
     // through atoms — when meta or workspace.name changes, this re-runs.
     const resolveName = (entry: WindowEntry, idx: number): string => {
         let displayName: string | undefined;
         let workspaceName: string | undefined;
         const windowId = resolveEntryWindowId(entry);
         if (windowId) {
-            const win = getObjectValue<WaveWindow>(makeORef("window", windowId));
+            const win = getObjectValue<MuxWindow>(makeORef("window", windowId));
             displayName = win?.meta?.[DISPLAY_NAME_META_KEY] as string | undefined;
             if (win?.workspaceid) {
                 const ws = getObjectValue<Workspace>(makeORef("workspace", win.workspaceid));
@@ -274,7 +274,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
 
     const enterRename = (entry: WindowEntry, currentName: string) => {
         // Same fallback as resolveName: for this window's row we can use
-        // atoms.waveWindow()?.oid when the entry's windowId hasn't been
+        // atoms.muxWindow()?.oid when the entry's windowId hasn't been
         // populated yet via the registerBackendWindow round-trip.
         if (!resolveEntryWindowId(entry)) return;
         setEditingLabel(entry.label);
@@ -528,7 +528,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         const currentName = () => resolveName(entry, i());
                         const currentOpacity = () => {
                             if (!entry.windowId) return 1.0;
-                            const win = getObjectValue<WaveWindow>(makeORef("window", entry.windowId));
+                            const win = getObjectValue<MuxWindow>(makeORef("window", entry.windowId));
                             return (win?.meta?.["window:opacity"] as number | undefined) ?? 1.0;
                         };
                         return (

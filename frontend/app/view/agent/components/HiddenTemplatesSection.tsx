@@ -43,7 +43,7 @@ import {
 } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { ProviderLogo } from "@/element/ProviderLogo";
 
 export const HiddenTemplatesSection = (): JSX.Element => {
@@ -70,7 +70,7 @@ export const HiddenTemplatesSection = (): JSX.Element => {
     // fires that event from both `agentdefhide` and `agentdefunhide`,
     // so any state change reflects here without a manual refresh.
     void load();
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: "agents:changed",
         handler: () => void load(),
     });
@@ -94,7 +94,7 @@ export const HiddenTemplatesSection = (): JSX.Element => {
             await RpcApi.AgentDefUnhideCommand(TabRpcClient, {
                 definition_id: agent.id,
             });
-            // The waveEvent refresh will repopulate, but optimistic
+            // The muxEvent refresh will repopulate, but optimistic
             // local update keeps the click snappy.
             setHidden((rows) => rows.filter((r) => r.id !== agent.id));
         } catch (err) {

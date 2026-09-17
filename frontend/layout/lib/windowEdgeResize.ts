@@ -383,7 +383,7 @@ function onSessionEnd(): void {
 
 /**
  * Install the host-event listeners. Call once per window at startup (from
- * initWave, alongside the other host-event listener installs). On platforms
+ * initMux, alongside the other host-event listener installs). On platforms
  * whose host never emits `windowresize:*` (mac/linux — spec §3.4 phase 2)
  * the listeners are inert.
  */

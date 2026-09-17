@@ -34,12 +34,12 @@ const MarkdownSource = ({
     );
 };
 
-interface WaveBlockProps {
+interface MuxBlockProps {
     blockkey: string;
     blockmap: Map<string, MarkdownContentBlockType>;
 }
 
-const WaveBlock = (props: WaveBlockProps) => {
+const MuxBlock = (props: MuxBlockProps) => {
     const { blockkey, blockmap } = props;
     const block = blockmap.get(blockkey);
     if (block == null) {
@@ -118,4 +118,4 @@ const MarkdownImg = ({
     );
 };
 
-export { MarkdownSource, MarkdownImg, WaveBlock };
+export { MarkdownSource, MarkdownImg, MuxBlock };

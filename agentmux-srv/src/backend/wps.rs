@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wave Pub/Sub system: event brokering with scoped subscriptions.
+//! AgentMux Pub/Sub system: event brokering with scoped subscriptions.
 //! Port of Go's pkg/wps/wps.go + wpstypes.go.
 
 //!
@@ -116,7 +116,7 @@ const REMAKE_ARR_THRESHOLD: usize = 10 * 1024;
 // ---- Types ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaveEvent {
+pub struct MuxEvent {
     pub event: String,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub scopes: Vec<String>,
@@ -132,7 +132,7 @@ fn is_zero(v: &usize) -> bool {
     *v == 0
 }
 
-impl WaveEvent {
+impl MuxEvent {
     #[allow(dead_code)]
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.iter().any(|s| s == scope)
@@ -168,7 +168,7 @@ pub struct WSFileEventData {
 
 /// Trait for event delivery to connected clients.
 pub trait WpsClient: Send + Sync {
-    fn send_event(&self, route_id: &str, event: WaveEvent);
+    fn send_event(&self, route_id: &str, event: MuxEvent);
 }
 
 // ---- Subscription internals ----
@@ -197,12 +197,12 @@ struct PersistKey {
 
 struct PersistEventWrap {
     arr_total_adds: usize,
-    events: Vec<WaveEvent>,
+    events: Vec<MuxEvent>,
 }
 
 // ---- Broker ----
 
-/// The central pub/sub broker for WaveEvents.
+/// The central pub/sub broker for MuxEvents.
 pub struct Broker {
     inner: Mutex<BrokerInner>,
 }
@@ -315,7 +315,7 @@ impl Broker {
             }
         }
 
-        let mut to_send: Vec<WaveEvent> = Vec::new();
+        let mut to_send: Vec<MuxEvent> = Vec::new();
         for scope in scopes_to_deliver {
             let key = (route_id.to_string(), sub.event.clone(), scope.clone());
             if inner.replayed.contains(&key) {
@@ -385,7 +385,7 @@ impl Broker {
     }
 
     /// Publish an event to all matching subscribers.
-    pub fn publish(&self, event: WaveEvent) {
+    pub fn publish(&self, event: MuxEvent) {
         let mut inner = self.inner.lock().unwrap();
 
         // Persist if requested
@@ -410,7 +410,7 @@ impl Broker {
         event_type: &str,
         scope: &str,
         max_items: usize,
-    ) -> Vec<WaveEvent> {
+    ) -> Vec<MuxEvent> {
         if max_items == 0 {
             return Vec::new();
         }
@@ -428,7 +428,7 @@ impl Broker {
         }
     }
 
-    fn persist_event(inner: &mut BrokerInner, event: &WaveEvent) {
+    fn persist_event(inner: &mut BrokerInner, event: &MuxEvent) {
         let num_persist = event.persist.min(MAX_PERSIST);
         let mut scope_set: Vec<String> = event.scopes.clone();
         scope_set.push(String::new()); // "" scope for global persistence
@@ -452,14 +452,14 @@ impl Broker {
             }
             // Compact if too many additions (reduce memory fragmentation)
             if pe.arr_total_adds > REMAKE_ARR_THRESHOLD {
-                let compacted: Vec<WaveEvent> = pe.events.drain(..).collect();
+                let compacted: Vec<MuxEvent> = pe.events.drain(..).collect();
                 pe.events = compacted;
                 pe.arr_total_adds = pe.events.len();
             }
         }
     }
 
-    fn get_matching_routes(inner: &BrokerInner, event: &WaveEvent) -> Vec<String> {
+    fn get_matching_routes(inner: &BrokerInner, event: &MuxEvent) -> Vec<String> {
         let bs = match inner.sub_map.get(&event.event) {
             Some(bs) => bs,
             None => return Vec::new(),
@@ -559,7 +559,7 @@ fn remove_from_all_scopes(map: &mut HashMap<String, Vec<String>>, route_id: &str
 /// and displays each message as a log line in the agent presentation view.
 pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) {
     let scope = format!("block:{}", block_id);
-    broker.publish(WaveEvent {
+    broker.publish(MuxEvent {
         event: EVENT_INSTALL_PROGRESS.to_string(),
         scopes: vec![scope],
         sender: String::new(),
@@ -574,7 +574,7 @@ pub fn publish_install_progress(broker: &Broker, block_id: &str, message: &str) 
 /// `term:osc_title` block metadata, which the tab label reads.
 pub fn publish_block_activity(broker: &Broker, block_id: &str, activity: &str) {
     let scope = format!("block:{}", block_id);
-    broker.publish(WaveEvent {
+    broker.publish(MuxEvent {
         event: EVENT_BLOCK_ACTIVITY.to_string(),
         scopes: vec![scope],
         sender: String::new(),
@@ -593,7 +593,7 @@ mod tests {
     use std::sync::Arc;
 
     struct TestClient {
-        events: Mutex<Vec<(String, WaveEvent)>>,
+        events: Mutex<Vec<(String, MuxEvent)>>,
     }
 
     impl TestClient {
@@ -603,13 +603,13 @@ mod tests {
             }
         }
 
-        fn received_events(&self) -> Vec<(String, WaveEvent)> {
+        fn received_events(&self) -> Vec<(String, MuxEvent)> {
             self.events.lock().unwrap().clone()
         }
     }
 
     impl WpsClient for TestClient {
-        fn send_event(&self, route_id: &str, event: WaveEvent) {
+        fn send_event(&self, route_id: &str, event: MuxEvent) {
             self.events
                 .lock()
                 .unwrap()
@@ -618,7 +618,7 @@ mod tests {
     }
 
     impl WpsClient for Arc<TestClient> {
-        fn send_event(&self, route_id: &str, event: WaveEvent) {
+        fn send_event(&self, route_id: &str, event: MuxEvent) {
             self.events
                 .lock()
                 .unwrap()
@@ -641,7 +641,7 @@ mod tests {
             },
         );
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
@@ -670,7 +670,7 @@ mod tests {
         );
 
         // Should match
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
@@ -679,7 +679,7 @@ mod tests {
         });
 
         // Should NOT match
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec!["block:xyz".to_string()],
             sender: String::new(),
@@ -706,7 +706,7 @@ mod tests {
             },
         );
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
@@ -714,7 +714,7 @@ mod tests {
             data: None,
         });
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec!["tab:xyz".to_string()],
             sender: String::new(),
@@ -743,7 +743,7 @@ mod tests {
 
         broker.unsubscribe("route-1", EVENT_BLOCK_CLOSE);
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_BLOCK_CLOSE.to_string(),
             scopes: vec![],
             sender: String::new(),
@@ -779,14 +779,14 @@ mod tests {
 
         broker.unsubscribe_all("route-1");
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_BLOCK_CLOSE.to_string(),
             scopes: vec![],
             sender: String::new(),
             persist: 0,
             data: None,
         });
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_CONFIG.to_string(),
             scopes: vec![],
             sender: String::new(),
@@ -808,7 +808,7 @@ mod tests {
 
         // Publish 5 persisted events BEFORE any subscriber exists.
         for i in 0..5 {
-            broker.publish(WaveEvent {
+            broker.publish(MuxEvent {
                 event: "tool_chunk".to_string(),
                 scopes: vec!["block:abc".to_string()],
                 sender: String::new(),
@@ -849,7 +849,7 @@ mod tests {
         broker.set_client(Box::new(Arc::clone(&client)));
 
         for i in 0..3 {
-            broker.publish(WaveEvent {
+            broker.publish(MuxEvent {
                 event: "tool_chunk".to_string(),
                 scopes: vec!["block:abc".to_string()],
                 sender: String::new(),
@@ -881,7 +881,7 @@ mod tests {
         );
 
         // Live publish after re-subscribe still delivers.
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: "tool_chunk".to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
@@ -913,7 +913,7 @@ mod tests {
         let client = Arc::new(TestClient::new());
         broker.set_client(Box::new(Arc::clone(&client)));
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: "tool_chunk".to_string(),
             scopes: vec!["block:xyz".to_string()],
             sender: String::new(),
@@ -952,7 +952,7 @@ mod tests {
 
         // Publish persistent events
         for i in 0..5 {
-            broker.publish(WaveEvent {
+            broker.publish(MuxEvent {
                 event: EVENT_SYS_INFO.to_string(),
                 scopes: vec!["cpu".to_string()],
                 sender: String::new(),
@@ -979,21 +979,21 @@ mod tests {
         // Two different event names persisted under the same scope
         // (block:abc), plus one persisted under a different scope
         // (block:xyz) that must survive the purge.
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: "install_progress".to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
             persist: 5,
             data: Some(serde_json::json!("a")),
         });
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_BLOCK_ACTIVITY.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
             persist: 5,
             data: Some(serde_json::json!("b")),
         });
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: "install_progress".to_string(),
             scopes: vec!["block:xyz".to_string()],
             sender: String::new(),
@@ -1031,8 +1031,8 @@ mod tests {
     }
 
     #[test]
-    fn test_wave_event_serialization() {
-        let event = WaveEvent {
+    fn test_mux_event_serialization() {
+        let event = MuxEvent {
             event: "test".to_string(),
             scopes: vec!["scope1".to_string()],
             sender: String::new(),
@@ -1040,7 +1040,7 @@ mod tests {
             data: Some(serde_json::json!({"key": "value"})),
         };
         let json = serde_json::to_string(&event).unwrap();
-        let parsed: WaveEvent = serde_json::from_str(&json).unwrap();
+        let parsed: MuxEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.event, "test");
         assert_eq!(parsed.scopes, vec!["scope1"]);
         // Empty sender and zero persist should be omitted
@@ -1064,7 +1064,7 @@ mod tests {
     fn test_no_client_publish_does_not_panic() {
         let broker = Broker::new();
         // No client set — should not panic
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: "test".to_string(),
             scopes: vec![],
             sender: String::new(),
@@ -1088,7 +1088,7 @@ mod tests {
             },
         );
 
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc:def".to_string()],
             sender: String::new(),

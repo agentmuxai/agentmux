@@ -148,11 +148,11 @@ pub(crate) fn persist_session_id(
                 store.must_get::<crate::backend::obj::Block>(block_id)
             {
                 let update_data = serde_json::to_value(
-                    &crate::backend::obj::WaveObjUpdate {
+                    &crate::backend::obj::MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: "block".into(),
                         oid: block_id.to_string(),
-                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
                     },
                 )
                 .ok();
@@ -291,11 +291,11 @@ pub(crate) fn persist_last_failure(
                 store.must_get::<crate::backend::obj::Block>(block_id)
             {
                 let update_data = serde_json::to_value(
-                    &crate::backend::obj::WaveObjUpdate {
+                    &crate::backend::obj::MuxObjUpdate {
                         updatetype: "update".into(),
                         otype: "block".into(),
                         oid: block_id.to_string(),
-                        obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
                     },
                 )
                 .ok();

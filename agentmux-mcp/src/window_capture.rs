@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use crate::agent_slug;
 
 /// Where `CaptureWindow` writes its PNGs. Mirrors `agentmux-srv`'s own
-/// `get_wave_data_dir()` (`AGENTMUX_DATA_HOME` env var, else `~/.agentmux`)
+/// `get_mux_data_dir()` (`AGENTMUX_DATA_HOME` env var, else `~/.agentmux`)
 /// rather than the shared OS temp dir — reagent P2 on this tool's own PR
 /// (#2709 round 1): `std::env::temp_dir()` is world-readable on a
 /// multi-user host, and CaptureWindow can capture arbitrary OS windows

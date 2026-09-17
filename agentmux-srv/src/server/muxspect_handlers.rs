@@ -637,7 +637,7 @@ impl From<crate::backend::storage::background_tasks::BackgroundTask> for Backgro
 /// are synchronous. `exit_code` in the body is what `--verify` would exit
 /// with (0 or 3), so the CLI can mirror it.
 pub async fn handle_muxspect_migrations() -> impl IntoResponse {
-    let data_dir = crate::backend::base::get_wave_data_dir();
+    let data_dir = crate::backend::base::get_mux_data_dir();
     let report = tokio::task::spawn_blocking(move || crate::migrations::doctor_report_for_instance(&data_dir))
         .await
         .map_err(|e| format!("doctor task panicked: {e}"))
@@ -712,7 +712,7 @@ pub async fn handle_muxspect_dock_clear(
             .into_response();
     }
 
-    state.broker.publish(crate::backend::wps::WaveEvent {
+    state.broker.publish(crate::backend::wps::MuxEvent {
         event: crate::backend::wps::EVENT_DOCK_CLEAR.to_string(),
         scopes: vec![format!("block:{}", req.block_id)],
         sender: String::new(),

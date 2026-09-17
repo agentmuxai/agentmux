@@ -3106,7 +3106,7 @@ mod tests {
     }
 
     /// `AGENTMUX_DATA_HOME`, when set, must win over the `~/.agentmux` default
-    /// — the same override `agentmux-srv`'s own `get_wave_data_dir()` honors,
+    /// — the same override `agentmux-srv`'s own `get_mux_data_dir()` honors,
     /// which this function replicates rather than reinventing.
     #[test]
     fn capture_window_dir_honors_agentmux_data_home_override() {

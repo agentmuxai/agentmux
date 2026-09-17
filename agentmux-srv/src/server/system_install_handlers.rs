@@ -30,7 +30,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::wps::{Broker, WaveEvent};
+use crate::backend::wps::{Broker, MuxEvent};
 use crate::server::install_handlers::resolve_tool_path;
 use crate::server::AppState;
 
@@ -531,7 +531,7 @@ fn spawn_system_install_task(
         // no new event type to render this.
         let scope = format!("install:{}", session_id);
         let emit_line = |broker: &Broker, line: String, stream: &'static str| {
-            broker.publish(WaveEvent {
+            broker.publish(MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
                 sender: String::new(),
@@ -540,7 +540,7 @@ fn spawn_system_install_task(
             });
         };
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
-            broker.publish(WaveEvent {
+            broker.publish(MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
                 sender: String::new(),
@@ -586,7 +586,7 @@ fn spawn_system_install_task(
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                broker_out.publish(WaveEvent {
+                broker_out.publish(MuxEvent {
                     event: "install_chunk".to_string(),
                     scopes: vec![scope_out.clone()],
                     sender: String::new(),
@@ -602,7 +602,7 @@ fn spawn_system_install_task(
         let stderr_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                broker_err.publish(WaveEvent {
+                broker_err.publish(MuxEvent {
                     event: "install_chunk".to_string(),
                     scopes: vec![scope_err.clone()],
                     sender: String::new(),

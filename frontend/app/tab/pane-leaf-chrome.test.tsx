@@ -83,7 +83,7 @@ function setBlockView(blockId: string, view: string | undefined) {
 vi.mock("@/app/store/global", () => ({
     WOS: {
         makeORef: (_otype: string, oid: string) => oid,
-        getWaveObjectAtom: (oid: string) => {
+        getMuxObjectAtom: (oid: string) => {
             if (!blockMetaSignals.has(oid)) {
                 blockMetaSignals.set(oid, createSignal<{ meta?: { view?: string } }>({ meta: {} }));
             }

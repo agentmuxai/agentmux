@@ -242,7 +242,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // 2026_08_14.md §3.2, "strong reading").
                 wstore.agent_def_provision_and_bind_bundle(&id_store, &mut new_def, now);
 
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -296,7 +296,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .agent_def_set_hidden(&cmd.definition_id, true)
                     .map_err(|e| format!("agentdefhide: {e}"))?;
                 if ok {
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: "agents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -328,7 +328,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .agent_def_set_hidden(&cmd.definition_id, false)
                     .map_err(|e| format!("agentdefunhide: {e}"))?;
                 if ok {
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: "agents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -502,7 +502,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
                 }
 
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -606,7 +606,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     );
                 }
 
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),

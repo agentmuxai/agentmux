@@ -81,14 +81,14 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     });
 
     // Auto-close the floating window when its only pane is closed.
-    // The Workspace WaveObj has `tabids` but NO `blockids` field — the
+    // The Workspace MuxObj has `tabids` but NO `blockids` field — the
     // block-membership signal lives on the Tab (`tab.blockids`, see
     // `frontend/types/gotypes.d.ts:1491`). We subscribe to the active
     // tab and trigger close as soon as its blockids array transitions
     // from non-empty → empty. The `hadBlocks` latch avoids closing on
     // the brief empty state during initial workspace load.
     //
-    // useWaveObjectValue installs an onCleanup tied to the surrounding
+    // useMuxObjectValue installs an onCleanup tied to the surrounding
     // reactive owner — calling it inside createEffect refreshes the
     // subscription whenever tabId changes (the prior effect run's
     // cleanup decrements the previous refcount).
@@ -100,7 +100,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     createEffect(() => {
         const tid = tabId();
         if (!tid) return;
-        const [tab] = WOS.useWaveObjectValue<Tab>(WOS.makeORef("tab", tid));
+        const [tab] = WOS.useMuxObjectValue<Tab>(WOS.makeORef("tab", tid));
         const t = tab();
         if (!t) return;
         const blockids = t.blockids ?? [];
@@ -840,19 +840,19 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                 return;
             }
 
-            // Resolve target's active tab via the WaveObj graph:
+            // Resolve target's active tab via the MuxObj graph:
             // window → workspace.activetabid. Use the non-pinning
-            // `reloadWaveObject` — `loadAndPinWaveObject` would bump
+            // `reloadMuxObject` — `loadAndPinMuxObject` would bump
             // `refCount` with no matching unpin in this async flow,
             // leaking one ref on each of the target Window + Workspace
             // per successful redock so the cache cleanup never evicts
             // them.
             let targetWs: Workspace;
             try {
-                const targetWindow = await WOS.reloadWaveObject<WaveWindow>(
+                const targetWindow = await WOS.reloadMuxObject<MuxWindow>(
                     WOS.makeORef("window", target.window_id),
                 );
-                targetWs = await WOS.reloadWaveObject<Workspace>(
+                targetWs = await WOS.reloadMuxObject<Workspace>(
                     WOS.makeORef("workspace", targetWindow.workspaceid),
                 );
             } catch (e) {
@@ -877,7 +877,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             const sourceWs = ws();
             if (!sourceTabId || !sourceWs) return;
             const sourceWsId = sourceWs.oid;
-            // Non-reactive read: `useWaveObjectValue` would register an
+            // Non-reactive read: `useMuxObjectValue` would register an
             // `onCleanup` against the current reactive owner, but we're inside
             // an async mouseup callback with no owner — the refCount would
             // never get decremented and we'd leak a Tab subscription per drop.

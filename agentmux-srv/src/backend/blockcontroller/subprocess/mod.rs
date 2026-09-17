@@ -154,7 +154,7 @@ pub struct SubprocessController {
     broker: Option<Arc<wps::Broker>>,
     /// Event bus for obj:update broadcasts.
     event_bus: Option<Arc<EventBus>>,
-    /// Wave object store for block metadata persistence.
+    /// AgentMux object store for block metadata persistence.
     wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
@@ -302,7 +302,7 @@ impl SubprocessController {
     fn emit_message_accepted(&self, config: &SubprocessSpawnConfig) {
         let Some(id) = config.message_id.as_deref() else { return };
         let Some(ref broker) = self.broker else { return };
-        let event = super::super::wps::WaveEvent {
+        let event = super::super::wps::MuxEvent {
             event: super::super::wps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
             scopes: vec![format!("block:{}", self.block_id)],
             sender: String::new(),

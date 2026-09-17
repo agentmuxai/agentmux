@@ -7,10 +7,10 @@
 use crate::backend::oref::ORef;
 use crate::backend::storage::store::Store;
 use crate::backend::obj::*;
-use crate::backend::wps::{self, Broker, WaveEvent};
+use crate::backend::wps::{self, Broker, MuxEvent};
 
 /// Publish a StoreObj update event through the broker.
-pub fn send_wave_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
+pub fn send_mux_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
     let obj_json = match oref.otype.as_str() {
         OTYPE_CLIENT => store
             .get::<Client>(&oref.oid)
@@ -46,7 +46,7 @@ pub fn send_wave_obj_update(broker: &Broker, store: &Store, oref: &ORef) {
     };
 
     if let Some(obj) = obj_json {
-        broker.publish(WaveEvent {
+        broker.publish(MuxEvent {
             event: wps::EVENT_WAVE_OBJ_UPDATE.to_string(),
             scopes: vec![oref.to_string()],
             sender: String::new(),

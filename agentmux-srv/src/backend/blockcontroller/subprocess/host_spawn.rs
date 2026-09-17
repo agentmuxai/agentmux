@@ -662,7 +662,7 @@ impl SubprocessController {
             // subscribers also receive the last failure without needing a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
-                broker.publish(wps::WaveEvent {
+                broker.publish(wps::MuxEvent {
                     event: wps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id_wait)],
                     sender: String::new(),

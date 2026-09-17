@@ -183,11 +183,11 @@ pub fn release_and_clear_meta(
     }
     let Some(event_bus) = event_bus else { return was_locked };
     if let Ok(updated) = store.must_get::<crate::backend::obj::Block>(block_id) {
-        let data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+        let data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "block".into(),
             oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::wave_obj_to_value(&updated)),
+            obj: Some(crate::backend::obj::mux_obj_to_value(&updated)),
         })
         .ok();
         event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {

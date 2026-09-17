@@ -12,7 +12,7 @@ import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
 import { ObjectService } from "../store/services";
-import { makeORef, useWaveObjectValue } from "../store/wos";
+import { makeORef, useMuxObjectValue } from "../store/wos";
 import { measureTabWidth } from "./tab-measure";
 import "./tab.scss";
 
@@ -115,7 +115,7 @@ interface TabProps {
 }
 
 function Tab(props: TabProps): JSX.Element {
-    const [tabData] = useWaveObjectValue<Tab>(makeORef("tab", props.id));
+    const [tabData] = useMuxObjectValue<Tab>(makeORef("tab", props.id));
     const [originalName, setOriginalName] = createSignal("");
     const [isEditable, setIsEditable] = createSignal(false);
     const [showColorPicker, setShowColorPicker] = createSignal(false);

@@ -67,7 +67,7 @@ vi.mock("@/app/store/contextmenu", () => ({
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn(() => () => {}),
+    muxEventSubscribe: vi.fn(() => () => {}),
 }));
 
 const modalLayerOpen = vi.fn();

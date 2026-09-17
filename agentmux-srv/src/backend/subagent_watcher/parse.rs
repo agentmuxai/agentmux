@@ -99,7 +99,7 @@ fn result_content_text(content: &serde_json::Value) -> String {
 /// `WorkspaceDeleted` never emit a per-block event of their own — see
 /// `reducer/tab.rs::handle_delete_tab`'s doc comment — so `block_ids` is the
 /// only signal for a block that cascaded out via its tab/workspace) and
-/// `server/wave_obj_bridge.rs::run_wave_obj_bridge`'s subscribe-loop
+/// `server/mux_obj_bridge.rs::run_mux_obj_bridge`'s subscribe-loop
 /// plumbing (lag/close handling).
 pub fn spawn_block_prune_subscriber(
     watcher: Arc<SubagentWatcher>,
@@ -123,7 +123,7 @@ pub fn spawn_block_prune_subscriber(
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     // Same non-fatal, no-automatic-recovery handling as
-                    // wave_obj_bridge.rs's identical arm: a lag here means a
+                    // mux_obj_bridge.rs's identical arm: a lag here means a
                     // stale swarm-pane row could persist until its block's
                     // next delete-adjacent event, not silent data loss.
                     tracing::warn!(

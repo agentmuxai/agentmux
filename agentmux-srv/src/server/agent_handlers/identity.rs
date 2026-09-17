@@ -211,7 +211,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .identity_upsert_with_mirror(&identity_store, &account)
                     .map_err(|e| format!("upsertidentityaccount: {e}"))?;
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "identityaccounts:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -360,7 +360,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                     return Err(format!("account.key.verify: {e}"));
                 }
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "identityaccounts:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -526,7 +526,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.delete: account removed (deleteidentityaccount)"
                 );
                 if deleted {
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: "identityaccounts:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -553,14 +553,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             "identity.delete: running agent(s) affected"
                         );
                         for agent_id in &affected_agents {
-                            broker.publish(crate::backend::wps::WaveEvent {
+                            broker.publish(crate::backend::wps::MuxEvent {
                                 event: format!("agentidentities:changed:{agent_id}"),
                                 scopes: vec![],
                                 sender: String::new(),
                                 persist: 0,
                                 data: None,
                             });
-                            broker.publish(crate::backend::wps::WaveEvent {
+                            broker.publish(crate::backend::wps::MuxEvent {
                                 event: format!("agentcredentials:revoked:{agent_id}"),
                                 scopes: vec![],
                                 sender: String::new(),
@@ -598,7 +598,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
                     .map_err(|e| format!("linkagentidentity: {e}"))?;
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: format!("agentidentities:changed:{}", cmd.agent_id),
                     scopes: vec![],
                     sender: String::new(),
@@ -639,7 +639,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: agent-identity link removed (unlinkagentidentity)"
                 );
                 if removed {
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: format!("agentidentities:changed:{}", cmd.agent_id),
                         scopes: vec![],
                         sender: String::new(),
@@ -653,7 +653,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // unbind — see CommandUnlinkAgentIdentityData's doc
                     // comment; reagent P2 on PR #2414).
                     if !cmd.silent {
-                        broker.publish(crate::backend::wps::WaveEvent {
+                        broker.publish(crate::backend::wps::MuxEvent {
                             event: format!("agentcredentials:revoked:{}", cmd.agent_id),
                             scopes: vec![],
                             sender: String::new(),
@@ -978,7 +978,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .instance_set_hidden(&cmd.id, true)
                     .map_err(|e| format!("hidenamedagent: {e}"))?;
                 if hidden {
-                    broker.publish(crate::backend::wps::WaveEvent {
+                    broker.publish(crate::backend::wps::MuxEvent {
                         event: "namedagents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),

@@ -31,7 +31,7 @@
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 
 export interface AmbientNarration {
@@ -53,7 +53,7 @@ const MAX_RETAINED = 5;
 export function useAmbientNarration(blockId: string): Accessor<AmbientNarration[]> {
     const [narrations, setNarrations] = createSignal<AmbientNarration[]>([]);
 
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: WpsEvent.AmbientNarration,
         scope: `block:${blockId}`,
         handler: (event: unknown) => {

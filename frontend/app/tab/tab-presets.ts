@@ -77,9 +77,9 @@ function resolveBlockDef(widgetKey: WidgetKey): BlockDef | null {
     return widget.blockdef;
 }
 
-// The new tab's WaveObj + LayoutState propagate via subscription after
+// The new tab's MuxObj + LayoutState propagate via subscription after
 // CreateTab returns. Poll briefly for the layout model to be ready
-// rather than racing against the WaveObj queue.
+// rather than racing against the MuxObj queue.
 //
 // Exported: any caller that creates a block in a freshly-created tab via
 // a raw pane.open (bypassing applyTabPreset's own createBlockOnModel path)
@@ -183,7 +183,7 @@ async function applyNode(
 // created + layout updated" in the srv log) and STILL never renders,
 // because the tab's client-side layoutModel — even once
 // waitForLayoutModel() confirms the object exists — isn't yet
-// subscribed to receive the backend's layout:update WaveObj broadcast
+// subscribed to receive the backend's layout:update MuxObj broadcast
 // for that specific brand-new tab. Going through treeReducer() directly
 // sidesteps that gap entirely (same reactive path applyTabPreset already
 // relies on). See EditorViewModel.openInNewTab in

@@ -13,7 +13,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import type {
     LspInitializeResult,
     LspMessageEnvelope,
@@ -242,7 +242,7 @@ export class LspClient {
 
     private subscribe(): void {
         if (this.unsubscribeWs) return;
-        this.unsubscribeWs = waveEventSubscribe({
+        this.unsubscribeWs = muxEventSubscribe({
             eventType: "lsp:message",
             handler: (event) => {
                 const envelope = event.data as LspMessageEnvelope | undefined;
