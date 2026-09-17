@@ -335,13 +335,21 @@ pub struct InjectionResponse {
 }
 
 /// Agent registration record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `#[ts(type = "number")]` on the u64 timestamps: ts-rs maps 64-bit integers
+/// to `bigint`, which is not assignable to `number` in TypeScript and would
+/// break every consumer that treats these as JS millisecond timestamps. See
+/// the same annotation on `BrowserBookmark::created_at` (PR #3293).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentRegistration {
     pub agent_id: String,
     pub block_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tab_id: Option<String>,
+    #[ts(type = "number")]
     pub registered_at: u64,
+    #[ts(type = "number")]
     pub last_seen: u64,
     /// Process-wide unique nonce of the persistent-controller spawn this
     /// registration belongs to; 0 = not recorded (HTTP register handler,
@@ -354,6 +362,7 @@ pub struct AgentRegistration {
     /// instead of blindly wiping a fallback respawn's (or replacement
     /// controller's) fresh registration (issue #2363).
     #[serde(default)]
+    #[ts(type = "number")]
     pub registration_nonce: u64,
 }
 

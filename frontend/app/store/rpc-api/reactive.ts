@@ -11,43 +11,27 @@
 
 import { RpcClient } from "../rpc-client";
 
-/** Mirrors agentmux-srv's `AgentRegistration` (backend/reactive/types.rs). */
-export interface ReactiveAgentRegistration {
-    agent_id: string;
-    block_id: string;
-    tab_id?: string;
-    registered_at: number;
-    last_seen: number;
-    registration_nonce: number;
-}
+// The four shapes below are GENERATED from their Rust definitions by ts-rs and
+// re-exported here under the names the frontend already uses, so the public
+// import surface (`@/app/store/rpc-api`) is unchanged. They were previously
+// four hand-written interfaces, one of which literally said "Mirrors
+// agentmux-srv's AgentRegistration (backend/reactive/types.rs)" — exactly the
+// kind of promise `scripts/check-rpc-bindings.sh` now enforces instead.
+// See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.4 step 2.
+export type { AgentRegistration as ReactiveAgentRegistration } from "@/types/rpc/AgentRegistration";
+export type { RemoteRegistrationEntry as ReactiveRemoteRegistration } from "@/types/rpc/RemoteRegistrationEntry";
+export type { MismatchAuditSummary as ReactiveMismatchSummary } from "@/types/rpc/MismatchAuditSummary";
+export type { ReactiveRegistrationsResult } from "@/types/rpc/ReactiveRegistrationsResult";
 
-/** One OTHER instance/channel on this host also claiming this agent_id —
- *  the actual risk signal the "registered elsewhere too" badge surfaces. */
-export interface ReactiveRemoteRegistration {
-    channel: string;
-    pid: number;
-    updated_at: number;
-}
-
-/** Most recent #2695 identity-mismatch audit entry for this agent, if any. */
-export interface ReactiveMismatchSummary {
-    timestamp: number;
-    block_id: string;
-    error_message?: string;
-}
-
-export interface ReactiveRegistrationsResult {
-    local: ReactiveAgentRegistration | null;
-    remote: ReactiveRemoteRegistration[];
-    recent_mismatch: ReactiveMismatchSummary | null;
-}
+import type { ReactiveRegistrationsParams } from "@/types/rpc/ReactiveRegistrationsParams";
+import type { ReactiveRegistrationsResult as ReactiveRegistrationsResultT } from "@/types/rpc/ReactiveRegistrationsResult";
 
 export const ReactiveApi = {
     GetReactiveRegistrationsCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: ReactiveRegistrationsParams,
         opts?: RpcOpts,
-    ): Promise<ReactiveRegistrationsResult> {
+    ): Promise<ReactiveRegistrationsResultT> {
         return client.rpcCall("reactive.registrations", data, opts);
     },
 };
