@@ -7,7 +7,7 @@
  * picked to THIS pane's stack as a new Pane Tab.
  *
  * Extracted so agent and term use the identical action the nine
- * GenericPaneChrome-driven widget types already did, rather than each
+ * PaneChrome-driven widget types already did, rather than each
  * keeping its own single-purpose handler ("+ forks another agent" /
  * "+ opens another shell"). Those handlers made agent/term the only pane
  * types you could NOT add a different widget type to — you were stuck with

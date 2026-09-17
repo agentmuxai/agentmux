@@ -3,6 +3,7 @@
 
 import { Block } from "@/app/block/block";
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -30,7 +31,7 @@ import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
 import { boundNumber, createSignalAtom, sleep, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
-import { createComponent, createMemo, createSignal } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import type { NodeModel } from "@/layout/index";
 
@@ -47,15 +48,11 @@ let _terminalViewComponent: ViewComponent = null;
 
 // Same late-binding trick as _terminalViewComponent above, for the same
 // reason: term.tsx imports this module, so this module can't import it back.
-// `renderPaneChrome` below instantiates whatever term.tsx registers here.
-let _termPaneChromeComponent:
-    | ((props: { anchorBlockId: string; nodeModel: NodeModel; children: JSX.Element }) => JSX.Element)
-    | null = null;
+// `paneChromeModel` below returns whatever term.tsx registers here.
+let _termPaneChromeModel: ((anchorBlockId: string, nodeModel: NodeModel) => PaneChromeModel) | null = null;
 
-export function setTermPaneChromeComponent(
-    component: (props: { anchorBlockId: string; nodeModel: NodeModel; children: JSX.Element }) => JSX.Element,
-) {
-    _termPaneChromeComponent = component;
+export function setTermPaneChromeModel(builder: (anchorBlockId: string, nodeModel: NodeModel) => PaneChromeModel) {
+    _termPaneChromeModel = builder;
 }
 
 export function setTerminalViewComponent(component: ViewComponent) {
@@ -355,20 +352,16 @@ class TermViewModel implements ViewModel {
         return () => this.nodeModel.paneChromeHoisted === true;
     }
 
-    /** Renders `TermPaneChrome` (term.tsx) wrapped around the switch-scoped
-     *  content — see that component's own doc comment.
-     *  `createComponent`, not a bare call: this is a .ts file so it can't
-     *  use JSX syntax, but a plain function call would attach the
-     *  component's own effects/cleanups to whatever reactive scope happened
-     *  to be ambient at THIS call rather than to chrome's real mount. */
-    renderPaneChrome = (leafNodeModel: NodeModel, content: JSX.Element): JSX.Element => {
-        if (_termPaneChromeComponent == null) return content;
-        return createComponent(_termPaneChromeComponent, {
-            anchorBlockId: this.blockId,
-            nodeModel: leafNodeModel,
-            children: content,
-        });
-    };
+    /** Terminal now renders through the ONE shared chrome like every other
+     *  widget type; what used to be `TermPaneChrome`'s bespoke component is
+     *  the capability model below (term.tsx's buildTermPaneChromeModel). */
+    renderPaneChrome = renderPaneChromeShell;
+
+    /** Called once by the shared chrome at its own mount, in its own
+     *  reactive scope — which is exactly the ownership the old
+     *  `createComponent(TermPaneChrome, …)` dance existed to get. */
+    paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
+        _termPaneChromeModel?.(this.blockId, leafNodeModel) ?? {};
 
     isBasicTerm(): boolean {
         const blockData = this.blockAtom();

@@ -282,24 +282,6 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
                         <Show when={pickerVisible()}>
                             <div
                                 class="agent-picker-host"
-                                // Strip clearance — mirrors chrome's own
-                                // tab-strip-visibility state
-                                // (AgentPaneChrome writes it via
-                                // model.setTabStripVisible, the same
-                                // bridging pattern as progressBarMount,
-                                // since chrome and content are now separate
-                                // trees). The floating strip still
-                                // physically overlaps this box (it's
-                                // position:absolute within the same
-                                // .agent-pane-stack-content containing
-                                // block content's own .block wrapper is a
-                                // normal-flow child of), even though
-                                // they're no longer DOM siblings.
-                                style={{
-                                    "--pane-tab-strip-reserve": model.tabStripVisible()
-                                        ? "var(--pane-tab-strip-height, 28px)"
-                                        : "0px",
-                                }}
                                 classList={{
                                     // Applied the instant agentId() is set
                                     // (same render as AgentPresentationView
@@ -352,14 +334,18 @@ AgentBlockContent.displayName = "AgentBlockContent";
  * (`getOwnNode`, below) — the leaf's own id, stable regardless of which
  * stack members come and go.
  */
-export const AgentPaneChrome = (props: {
-    anchorBlockId: string;
-    nodeModel: NodeModel;
-    children: JSX.Element;
-}): JSX.Element => {
+/**
+ * Agent's opt-in to the ONE shared pane chrome
+ * (`renderPaneChromeShell`) — see `PaneChromeModel` (custom.d.ts).
+ * Everything the old `AgentPaneChrome` component rendered around the
+ * content (root box, focus ring, header row, ErrorBoundary) is the shared
+ * chrome's job now; what stays here is only what is genuinely agent's:
+ * its tab model (fork lineage merged with this pane's own stack, rename,
+ * per-pane zoom) and the below-header slot its turn-progress bar portals
+ * into. That slot is a generic capability — any view type can take it.
+ */
+export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
     const layoutModel = getLayoutModelForStaticTab();
-    const nodeModel = props.nodeModel;
-    const anchorBlockId = props.anchorBlockId;
 
     // ReAgent P0 on this PR: resolving the owning node via
     // layoutModel.getNodeByBlockId(anchorBlockId) — anchorBlockId's own
@@ -528,7 +514,7 @@ export const AgentPaneChrome = (props: {
         // tab like any other pane's. Label/icon it the way every generic
         // pane does rather than through the agent-specific
         // agentName/definitionId path below, which would render a Sysinfo
-        // tab as "New Agent".
+        // tab as "Agent".
         if (view && view !== "agent") {
             const genericLabel = (meta?.["frame:title"] as string | undefined) ?? blockViewToName(view);
             return cachedTab(id, {
@@ -549,7 +535,7 @@ export const AgentPaneChrome = (props: {
             // the same copied agentName in its own meta.
             return cachedTab(id, { blockId: id, label: "History", isHistoryTab: true });
         }
-        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
+        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "Agent";
         return cachedTab(id, { blockId: id, label, definitionId });
     };
     const stackTabs = createMemo<PaneTab[]>(() => {
@@ -583,7 +569,7 @@ export const AgentPaneChrome = (props: {
     // it on a fresh, unlaunched picker pane (tab-strip-visibility.ts,
     // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md), but that made it the
     // one widget type whose header behaved differently from every other
-    // pane (every GenericPaneChrome-driven type, and term, always show
+    // pane (every PaneChrome-driven type, and term, always show
     // "+"). Repo-owner-confirmed: agent should be no different.
     // Per-pane zoom for the tab strip itself — mirrors
     // AgentPresentationView's own zoomFactor memo (term:zoom block meta +
@@ -716,136 +702,51 @@ export const AgentPaneChrome = (props: {
             vm?.setProgressBarMount?.(null);
         });
     });
-    // Same bridging pattern for the tab-strip-visible flag AgentBlockContent's
-    // picker-host reads for its own strip-clearance padding (see that
-    // component's own comment) — chrome and content are separate trees now,
-    // so this can no longer be a plain shared local read. Always true — see
-    // the strip-visibility comment above.
-    createEffect(() => {
-        const vm = nodeModel.activeViewModel?.() as AgentViewModel | null;
-        vm?.setTabStripVisible?.(true);
-        onCleanup(() => {
-            vm?.setTabStripVisible?.(false);
-        });
-    });
-
     // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
     // §4.1) — factored out so the ErrorBoundary fallback below can render
     // the exact same header with `viewModel={null}` (mirrors the old
     // headerElemNoView pattern) instead of duplicating every prop twice.
-    const renderAgentPaneHeader = (viewModel: ViewModel | null): JSX.Element => (
-        <PaneHeaderTabStrip
-            tabs={visibleTabs()}
-            activeId={activeBlockId()}
-            zoomFactor={tabStripZoomFactor}
-            getId={(t) => t.blockId}
-            getLabel={(t) => t.label}
-            onActivate={handleTabSwitch}
-            onClose={handleTabClose}
-            onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
-            renderLabel={(t) =>
-                renamingBlockId() === t.blockId && t.definitionId ? (
-                    <PaneTabRenameInput
-                        initialValue={t.label}
-                        onConfirm={(title) => void handleTabRenameConfirm(t, title)}
-                        onCancel={() => setRenamingBlockId(null)}
-                    />
-                ) : (
-                    <span class="pane-tab-label">{t.label}</span>
-                )
-            }
-            getIcon={(t) => t.icon}
-            onAdd={(e) => e && openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e)}
-            addTitle="Add tab"
-            nodeModel={nodeModel}
-            viewModel={viewModel}
-            activeBlockId={activeBlockId}
-        />
-    );
+    return {
+        tabs: visibleTabs,
+        getId: (t: any) => t.blockId,
+        getLabel: (t: any) => t.label,
+        getIcon: (t: any) => t.icon,
+        // Both return true ("handled"): an agent tab may live in a
+        // DIFFERENT pane (a fork open as its own top-level pane), so
+        // activating/closing it isn't necessarily this pane's own stack
+        // operation — handleTabSwitch/handleTabClose resolve the owning
+        // node themselves.
+        onActivate: (id: string) => {
+            handleTabSwitch(id);
+            return true;
+        },
+        onClose: (id: string) => {
+            handleTabClose(id);
+            return true;
+        },
+        onTabDoubleClick: (t: any) => t.definitionId && setRenamingBlockId(t.blockId),
+        renderLabel: (t: any) =>
+            renamingBlockId() === t.blockId && t.definitionId ? (
+                <PaneTabRenameInput
+                    initialValue={t.label}
+                    onConfirm={(title) => void handleTabRenameConfirm(t, title)}
+                    onCancel={() => setRenamingBlockId(null)}
+                />
+            ) : (
+                <span class="pane-tab-label">{t.label}</span>
+            ),
+        zoomFactor: tabStripZoomFactor,
+        rootClass: "agent-pane-stack",
+        contentClass: "agent-pane-stack-content",
+        // The marching-ants turn-progress bar. Empty div; its only content
+        // is whatever the active AgentPresentationView portals into it via
+        // progressBarMount. Floats over the content without reserving
+        // layout space (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md,
+        // positioned in agent-view.scss).
+        renderBelowHeader: () => <div class="agent-pane-progress-bar-slot" ref={(el) => setSlotEl(el)} />,
+    };
+}
 
-    return (
-        // Flex-column stack: strip on top, content filling the rest.
-        // `.agent-pane-stack-content`'s own containing-block role (relative
-        // positioning) is what `> .pane-tab-strip`'s `position: absolute;
-        // top: 0` resolves against — `content` (the switch-scoped `<Block>`,
-        // itself `.block`/`BlockFrame`'s own wrapper) must render as ITS
-        // direct sibling here, not merely "somewhere below," for the strip
-        // to float over the right box. See agent-view.scss's own comments
-        // on `.agent-pane-stack`/`.agent-pane-stack-content` for the full
-        // positioning chain this depends on.
-        //
-        // data-blockid={activeBlockId()} — codex P1 on this PR: the CEF
-        // browser API (agentmux-cef/src/browser_api/routes.rs) resolves an
-        // agent's own pane for UIQuery/UIClick/screenshot-clip via a plain
-        // `document.querySelector('[data-blockid="<id>"]')`, then scopes to
-        // THAT element's subtree. Only the nested, switch-scoped <Block>
-        // (content, below) carries this attribute otherwise — chrome
-        // (tab strip, header) lives outside that subtree once hoisted, so
-        // an agent's own self-targeting UIQuery/UIClick could no longer
-        // find its own tab strip or header. Duplicating the same attribute
-        // (same value, when this pane IS the active member) on this outer,
-        // persistent root fixes it: `querySelector` returns the FIRST match
-        // in document order, and this element precedes the nested one, so
-        // it resolves to the wider root that actually contains everything.
-        <div
-            class="agent-pane-stack"
-            classList={{
-                "agent-pane-stack-focused": isFocused() && !isAlone(),
-                // Only alone+focused suppresses the ring to transparent —
-                // matches .pane-alone .block-mask's own nesting under
-                // .block-focused (block.scss): alone-but-UNfocused still
-                // gets the ordinary dim border, same as any other unfocused
-                // pane (reagent P2, PR #3226). A bare "-alone" class here
-                // would wrongly suppress that dim border too.
-                "agent-pane-stack-focused-alone": isFocused() && isAlone(),
-            }}
-            style={{ "--pane-ring-color": ringBorderColor() }}
-            data-blockid={activeBlockId()}
-            // codex P2 on this PR: the hoisted header is a SIBLING above the
-            // nested `.block`, so clicks/focus on it no longer bubble to the
-            // BlockFrame handlers inside BlockFull that call
-            // nodeModel.focusNode() (BlockFrame_Header itself only handles
-            // context menu + double-click magnify). Without this, clicking an
-            // agent pane's own header left a DIFFERENT pane selected and
-            // receiving pane-scoped keyboard actions. Focus from here
-            // instead — leaf-scoped, so it's correct regardless of which
-            // stack member is active. Cheap and idempotent: focusNode()
-            // no-ops when this node is already the focused one.
-            onClick={() => nodeModel.focusNode()}
-            onFocusIn={() => nodeModel.focusNode()}
-        >
-            {/* Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-                §4.1) — ONE unified row replaces the old headerElem (full
-                BlockFrame_Header) + separate .agent-pane-stack-content +
-                PaneTabStrip structure. visibleTabs() keeps its exact
-                pre-existing meaning — a lone conversation still shows no
-                self-pill (empty tabs), just the plain "Agent" identity — but
-                "+" is now always shown, even on a fresh/unlaunched picker
-                pane, matching every other pane type (agent no longer has its
-                own tab-strip-visibility gate). This row just always exists
-                as ONE row instead of a full header conditionally topped by a
-                floating strip overlay. Same ErrorBoundary isolation
-                BlockFrame_Default_Component itself uses, so a
-                broken header computation blanks only the header row, not
-                the whole pane. */}
-            <ErrorBoundary fallback={renderAgentPaneHeader(null)}>
-                {renderAgentPaneHeader(activeViewModelOrUndefined() ?? null)}
-            </ErrorBoundary>
-            {/* Progress bar's own overlay strip — floats above the content,
-                never reserving layout space (SPEC_AGENT_PANE_
-                PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md). Empty div; its
-                only content is whatever the active AgentPresentationView
-                portals into it via progressBarMount above. Positioned in
-                agent-view.scss (.agent-pane-progress-bar-slot). */}
-            <div class="agent-pane-progress-bar-slot" ref={(el) => setSlotEl(el)} />
-            <div class="agent-pane-stack-content">
-                {props.children}
-            </div>
-        </div>
-    );
-};
-
-AgentPaneChrome.displayName = "AgentPaneChrome";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
 // docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.

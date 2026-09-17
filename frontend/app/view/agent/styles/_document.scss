@@ -109,27 +109,13 @@
         // the strip's height is a known formula, not something that needs
         // live measurement the way AgentWorkingRow's variable content does.
         //
-        // Deliberately NOT multiplied by any zoom factor, despite this
-        // needing to track the strip's real (zoom-scaled) height —
-        // `.agent-document` is a descendant of `.agent-view`, which already
-        // has `style={{ zoom: zoomFactor() }}` applied (agent-view.tsx).
-        // Every length in this subtree, including this padding-top's
-        // resolved value, is already auto-scaled by that ambient zoom by
-        // the browser — multiplying by `--agent-pane-zoom` here as well
-        // double-scales it (baseline×zoom² instead of baseline×zoom):
-        // over-reserving space at zoom>1 and, more seriously,
-        // under-reserving at zoom<1 (min clamp 0.5), reintroducing the
-        // exact "first message hidden behind the strip" bug this rule
-        // exists to fix. Caught in review on PR #2566. The plain baseline
-        // (`--pane-tab-strip-height`, unscaled) is correct as-is: it's
-        // written once here in this subtree's own local (pre-ambient-zoom)
-        // coordinate space, and the browser's zoom scales it up/down to
-        // match the strip's real on-screen height automatically — the two
-        // zoom factors (this pane's ambient zoom, and the tab strip's own,
-        // `--pane-tab-strip-zoom` in PaneTabStrip.scss) are always equal
-        // for the agent pane specifically (both derive from the same
-        // active block's term:zoom meta, §A.3), so they cancel exactly.
-        padding-top: calc(var(--space-0-5) + var(--pane-tab-strip-height, 28px));
+        // No tab-strip reservation any more: the strip used to FLOAT over
+        // this content (SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md), so
+        // the first message needed the strip's height reserved or it
+        // rendered behind it. The strip is now a normal-flow row in the
+        // pane header (the unified-row redesign), so reserving it here just
+        // left dead space at the top of every conversation.
+        padding-top: var(--space-0-5);
         // No working-row reservation here any more: this used to add
         // AgentWorkingRow's measured height so scrolling to true bottom left
         // the last message above the floating row rather than hidden under

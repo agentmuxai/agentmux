@@ -4,9 +4,9 @@
 /**
  * PaneHeaderTabStrip — the unified Pane header: ONE row containing the tab
  * strip and the pane-level chrome (ConnectionButton, status text, minimize/
- * magnify/close), where today's chrome (`AgentPaneChrome`/`TermPaneChrome`)
- * renders those as TWO separate rows — a full `BlockFrame_Header` on top,
- * `PaneTabStrip` below it.
+ * magnify/close). The chrome this replaced (the former
+ * `AgentPaneChrome`/`TermPaneChrome`) rendered those as TWO separate rows
+ * — a full `BlockFrame_Header` on top, `PaneTabStrip` below it.
  *
  * Deliberately a THIN wrapper around the real `BlockFrame_Header`, not a
  * reimplementation of any part of it. `BlockFrame_Header` gained two props

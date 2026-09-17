@@ -47,11 +47,13 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
  * inline BlockFrame header and its hoisted one will both render.
  */
 // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-// §5, Task Group C): "agent"/"term" keep their own richer, domain-specific
-// Chrome components (AgentPaneChrome/TermPaneChrome); every other widget
-// type here registers the SAME shared GenericPaneChrome
-// (`genericRenderPaneChrome`) via a one-line `this.renderPaneChrome =`
-// field in its own ViewModel — see any of those files for the pattern.
+// §5, Task Group C): EVERY view type here registers the same shared
+// `renderPaneChromeShell` (PaneChrome.tsx) via a one-line
+// `this.renderPaneChrome =` field in its own ViewModel. There is no
+// per-type chrome component any more — agent and term used to have their
+// own (AgentPaneChrome/TermPaneChrome) and now express what was special
+// about them through the optional `paneChromeModel` capability hook
+// instead (custom.d.ts's `PaneChromeModel`).
 // "cpuplot" is sysinfo's own secondary registered view key
 // (block-registry.ts), same ViewModel class as "sysinfo".
 const HOISTS_OWN_CHROME = new Set([
@@ -179,7 +181,7 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // kept-alive Block calls `setActiveViewModel` once at its OWN mount, not
     // on every switch, so the shared slot would end up holding whichever
     // tab happened to mount MOST RECENTLY — not necessarily the one
-    // currently visible. `TermPaneChrome`'s own `runtimeLabel` and the
+    // currently visible. Terminal's own `runtimeLabel` and the
     // header's `viewModel` prop both read `nodeModel.activeViewModel()`
     // expecting it to track the ACTIVE tab on every switch (they don't
     // latch), so this isn't just a chrome-identity concern the way

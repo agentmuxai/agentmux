@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { QuickTips } from "@/app/element/quicktips";
-import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -27,7 +27,7 @@ class HelpViewModel implements ViewModel {
     // constructed as `new ctor(blockId, nodeModel)` (block.tsx's
     // `makeViewModel`); previously unused here, now needed for `noHeader`.
     nodeModel: BlockNodeModel;
-    renderPaneChrome = genericRenderPaneChrome;
+    renderPaneChrome = renderPaneChromeShell;
     noHeader = () => this.nodeModel.paneChromeHoisted === true;
 
     constructor(blockId: string, nodeModel: BlockNodeModel) {
