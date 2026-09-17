@@ -27,6 +27,7 @@
 import { createSignal, onCleanup } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { SessionResumePreflightResult } from "@/app/store/rpc-api";
 
 /**
  * How long to let the preflight run before showing its progress list. The

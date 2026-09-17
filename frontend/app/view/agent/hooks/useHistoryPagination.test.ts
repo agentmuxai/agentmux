@@ -11,7 +11,9 @@
  * back to the per-block NDJSON ring-buffer replay when the read
  * returns no content (or when no `definitionId` is passed).
  *
- * Spec: SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+ * Spec: none — the SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23 doc this
+ * used to name was never committed. The zone layout in
+ * agentmux-srv/src/backend/agent_session/mod.rs is the contract.
  */
 
 import { createRoot, type Owner } from "solid-js";
@@ -129,10 +131,11 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
     });
 
     it("falls through to NDJSON replay when AgentSessionRead returns no content", async () => {
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
-            content: null,
-            modts: null,
-        });
+        // `{}`, not `{content: null}`: both fields are
+        // `skip_serializing_if = "Option::is_none"`, so the server OMITS the keys
+        // rather than sending null. The generated AgentSessionReadResult says
+        // `content?: string` accordingly.
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
         vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
 
         const model = makeMockModel();
