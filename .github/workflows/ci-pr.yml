@@ -188,6 +188,15 @@ jobs:
       - name: RPC bindings are current
         run: bash scripts/check-rpc-bindings.sh
 
+      # Four checks the gate above CANNOT make: it verifies a generated file
+      # exists per type and is current with the Rust, which a file can be while
+      # still describing a wire format nobody speaks. Each of these was written
+      # after the same defect got past review more than once. Pure node, no
+      # extra toolchain, runs in under a second.
+      # See scripts/check-rpc-codegen-hygiene.mjs.
+      - name: RPC codegen hygiene
+        run: node scripts/check-rpc-codegen-hygiene.mjs
+
   docs:
     name: doc status + grep gates
     runs-on: ubuntu-latest

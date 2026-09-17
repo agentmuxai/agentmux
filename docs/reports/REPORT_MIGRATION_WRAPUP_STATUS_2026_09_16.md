@@ -461,7 +461,8 @@ The field generates under its *Rust* name — a key nothing sends and nothing re
 every gate stays green, because the generated file is internally consistent and simply
 describes a wire format that does not exist. Three sightings: `oauth_config_dir` (#3320),
 `FlowNode.type` → `node_type` (#3329), `pathSource` → `path_source` (#3344). All three
-were caught by *reading generated output*, not by any check. There is now a scan for it.
+were caught by *reading generated output*, not by any check. There is one now —
+`scripts/check-rpc-codegen-hygiene.mjs`, wired into `ci-pr.yml` beside the bindings gate.
 
 **Wrong, and retracted in #3345: ts-rs does NOT ignore `#[serde(rename_all)]`.** #3329
 added `#[ts(rename_all)]` to two enums with a comment asserting it did, and an earlier
@@ -475,6 +476,32 @@ the proof they were inert.
 Worth recording as a method note: the first version of the scan for this matched
 `rename_all` too and reported 44 hits. Investigating them is what surfaced the error. A
 noisy check that gets read beats a quiet one that gets trusted.
+
+#### 5.4e-bis The four checks, and why none of them is `tsc`
+
+`scripts/check-rpc-codegen-hygiene.mjs` carries four checks, each written after the same
+defect got past review more than once. They share one property worth stating plainly:
+**every failure they catch compiles, typechecks, AND passes `check-rpc-bindings.sh`.**
+
+`cargo check` sees only the Rust half. `tsc` checks the frontend against the *generated*
+types, never against the backend — so a binding that describes a wire format nobody speaks
+typechecks cleanly on both sides. And the bindings gate verifies a generated file *exists*
+per type and is *current* with the Rust, which a file can be while still being wrong about
+the wire.
+
+| check | what it catches | prior sightings |
+|---|---|---|
+| ambient duplicates | a global shadowing its own generated replacement; consumers that do not import silently resolve to the stale one | #3318, #3320 (×2), #3327 |
+| `serde(rename)` without `ts(rename)` | a field generated under its Rust name — a key nothing sends and nothing reads | #3320, #3329, #3344 |
+| typed handler hand-serializing | registry records `Value` instead of the real response type; wire bytes identical, so nothing else notices | #3327, #3331 |
+| unused generated imports | leftovers from a migration | an earlier slice left nine |
+
+Two of the four had a **false-negative or false-positive bug of their own** before they
+were correct: the hand-serialize check originally matched `to_value` but not inline
+`json!`, and passed `movescratchfile` clean while a test caught it (#3331); the
+unused-import check ignored `X as XT` aliases and reported eleven healthy imports as dead.
+Both are worth knowing about — a check is a piece of software with its own defects, and an
+unexamined green is not evidence.
 
 #### 5.4f "No argument" has two encodings, and the stubs disagree
 
