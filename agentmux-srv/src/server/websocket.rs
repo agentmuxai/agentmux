@@ -861,12 +861,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // setmeta → update object metadata in the DB, broadcast update event
-    let wstore_sm = state.mstore.clone();
+    let mstore_sm = state.mstore.clone();
     let event_bus_sm = state.event_bus.clone();
     engine.register_handler(
         COMMAND_SET_META,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_sm.clone();
+            let mstore = mstore_sm.clone();
             let event_bus = event_bus_sm.clone();
             Box::pin(async move {
                 let cmd: CommandSetMetaData =
@@ -921,11 +921,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // getmeta → return metadata for a wave object
-    let wstore_gm = state.mstore.clone();
+    let mstore_gm = state.mstore.clone();
     engine.register_handler(
         COMMAND_GET_META,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_gm.clone();
+            let mstore = mstore_gm.clone();
             Box::pin(async move {
                 let cmd: CommandGetMetaData =
                     serde_json::from_value(data).map_err(|e| format!("getmeta: {e}"))?;
@@ -976,7 +976,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // controllerresync → load block from DB, create/restart controller with PTY
-    let wstore_resync = state.mstore.clone();
+    let mstore_resync = state.mstore.clone();
     let broker_resync = state.broker.clone();
     let event_bus_resync = state.event_bus.clone();
     let filestore_resync = state.filestore.clone();
@@ -984,7 +984,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     engine.register_handler(
         COMMAND_CONTROLLER_RESYNC,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_resync.clone();
+            let mstore = mstore_resync.clone();
             let broker = broker_resync.clone();
             let event_bus = event_bus_resync.clone();
             let filestore = filestore_resync.clone();
@@ -1075,11 +1075,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // createsubblock → create a headless sub-block (no tab/layout entry)
     // parented to an existing block, e.g. a `term`-view PTY embedded in an
     // agent pane's details drawer.
-    let wstore_csb = state.mstore.clone();
+    let mstore_csb = state.mstore.clone();
     engine.register_handler(
         COMMAND_CREATE_SUB_BLOCK,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_csb.clone();
+            let mstore = mstore_csb.clone();
             Box::pin(async move {
                 let cmd: CommandCreateSubBlockData = serde_json::from_value(data)
                     .map_err(|e| format!("createsubblock: {e}"))?;
@@ -1156,11 +1156,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Kill-first ordering matches sagas/delete_block.rs; unlike that saga,
     // this does NOT touch tab bookkeeping — sub-blocks are never
     // tab-referenced, so delete_block.rs's precondition would reject them.
-    let wstore_dsb = state.mstore.clone();
+    let mstore_dsb = state.mstore.clone();
     engine.register_handler(
         COMMAND_DELETE_SUB_BLOCK,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_dsb.clone();
+            let mstore = mstore_dsb.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteSubBlockData = serde_json::from_value(data)
                     .map_err(|e| format!("deletesubblock: {e}"))?;
@@ -1289,13 +1289,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // holds the RPC open. Every failure path is silence — the narrated action
     // has already happened and the UI already reflects it, so a missing line is
     // a missing nicety, not a missing state change.
-    let wstore_narrate = state.mstore.clone();
+    let mstore_narrate = state.mstore.clone();
     let broker_narrate = state.broker.clone();
     let narrated = state.narrated_events.clone();
     engine.register_handler(
         COMMAND_AMBIENT_NARRATE,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_narrate.clone();
+            let mstore = mstore_narrate.clone();
             let broker = broker_narrate.clone();
             let narrated = narrated.clone();
             Box::pin(async move {
@@ -1366,14 +1366,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    let wstore_dns = state.mstore.clone();
+    let mstore_dns = state.mstore.clone();
     let pending_pids_dns = state.pending_background_pids.clone();
     let broker_dns = state.broker.clone();
     engine.register_handler(
         COMMAND_DOCK_NODE_STATUS,
         Box::new(move |data, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
-            let mstore = wstore_dns.clone();
+            let mstore = mstore_dns.clone();
             let pending_pids = pending_pids_dns.clone();
             let broker = broker_dns.clone();
             Box::pin(async move {
@@ -1412,10 +1412,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     // pending_background_pids.rs's module doc for why that
                     // matters (Codex/reagentx findings on PR #2681).
                     let node_id = cmd.node_id.clone();
-                    let wstore_apply = mstore.clone();
+                    let mstore_apply = mstore.clone();
                     let result: Result<(), crate::backend::storage::StoreError> = pending_pids
                         .observe_and_apply(&cmd.node_id, observed_at, |pid| {
-                            wstore_apply.background_task_set_pid(&node_id, pid)
+                            mstore_apply.background_task_set_pid(&node_id, pid)
                         });
                     if let Err(e) = result {
                         tracing::warn!(
@@ -1457,12 +1457,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // `push_delta` fully overwrites a node's snapshot, and this event has no
     // `tool_name`/original `run_in_background` value to carry forward — the
     // exact bug class #2520 already fixed once for a different call site.
-    let wstore_btc = state.mstore.clone();
+    let mstore_btc = state.mstore.clone();
     let broker_btc = state.broker.clone();
     engine.register_handler(
         COMMAND_BACKGROUND_TASK_COMPLETION,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_btc.clone();
+            let mstore = mstore_btc.clone();
             let broker = broker_btc.clone();
             Box::pin(async move {
                 let cmd: CommandBackgroundTaskCompletionData = serde_json::from_value(data)
@@ -1506,13 +1506,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // retry a write that will never succeed — stash it instead, and
     // `COMMAND_DOCK_NODE_STATUS`'s handler applies it the moment the row
     // exists. See Codex/reagentx findings on PR #2681.
-    let wstore_btp = state.mstore.clone();
+    let mstore_btp = state.mstore.clone();
     let pending_pids_btp = state.pending_background_pids.clone();
     let broker_btp = state.broker.clone();
     engine.register_handler(
         COMMAND_BACKGROUND_TASK_PID,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_btp.clone();
+            let mstore = mstore_btp.clone();
             let pending_pids = pending_pids_btp.clone();
             let broker = broker_btp.clone();
             Box::pin(async move {
@@ -1523,9 +1523,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .unwrap_or_default()
                     .as_millis() as i64;
                 let node_id = cmd.node_id.clone();
-                let wstore_set = mstore.clone();
+                let mstore_set = mstore.clone();
                 let result = pending_pids.set_or_stash(&cmd.node_id, cmd.pid as i64, now_ms, |pid| {
-                    wstore_set.background_task_set_pid(&node_id, pid)
+                    mstore_set.background_task_set_pid(&node_id, pid)
                 });
                 match result {
                     Ok(()) => publish_background_task_updated(&broker, &cmd.blockid),
@@ -1550,11 +1550,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // ever launching it — Phase B of
     // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md).
     // See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
-    let wstore_lbt = state.mstore.clone();
+    let mstore_lbt = state.mstore.clone();
     engine.register_handler(
         COMMAND_LIST_BACKGROUND_TASKS,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_lbt.clone();
+            let mstore = mstore_lbt.clone();
             Box::pin(async move {
                 let cmd: CommandListBackgroundTasksData = serde_json::from_value(data)
                     .map_err(|e| format!("listbackgroundtasks: {e}"))?;

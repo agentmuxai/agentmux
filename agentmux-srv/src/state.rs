@@ -95,7 +95,7 @@ pub struct TabRecord {
     /// follow-up PRs). `None` represents an empty tree (no panes).
     ///
     /// **Status: scaffolded; bootstrap-loaded.** `persist::
-    /// bootstrap_state_from_wstore` populates this from
+    /// bootstrap_state_from_mstore` populates this from
     /// `LayoutState.rootnode` at startup. Production writers still
     /// go through the wcore-direct path (per
     /// `srv-phase-e4b-implementation-plan-2026-05-03.md` Phase 7);

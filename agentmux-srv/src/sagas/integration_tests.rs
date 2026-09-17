@@ -27,7 +27,7 @@
 use agentmux_common::ipc::{Command, Event};
 
 use crate::backend::obj::{Block, Tab, Workspace};
-use crate::persist_subscriber::apply_event_to_wstore;
+use crate::persist_subscriber::apply_event_to_mstore;
 use crate::sagas;
 use crate::server::tests::test_state;
 use crate::server::AppState;
@@ -40,7 +40,7 @@ use crate::server::AppState;
 async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
     let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
     for ev in &events {
-        apply_event_to_wstore(ev, &state.mstore).unwrap();
+        apply_event_to_mstore(ev, &state.mstore).unwrap();
     }
     events
 }
@@ -503,7 +503,7 @@ async fn crash_recovery_tear_off_tab_partial_apply_compensates_on_restart() {
     );
     // Bootstrap the fresh reducer state from mstore so reducer +
     // mstore views agree (this is what main.rs does at startup).
-    crate::persist::bootstrap_state_from_wstore(&fresh.srv_state, &fresh.mstore).await;
+    crate::persist::bootstrap_state_from_mstore(&fresh.srv_state, &fresh.mstore).await;
 
     let resumed = sagas::recovery::compensate_unresolved(&fresh)
         .await
@@ -630,7 +630,7 @@ async fn crash_recovery_mid_step_failure_compensates_succeeded_prefix() {
         std::sync::Arc::clone(&original.mstore),
         std::sync::Arc::clone(&saga_log),
     );
-    crate::persist::bootstrap_state_from_wstore(&fresh.srv_state, &fresh.mstore).await;
+    crate::persist::bootstrap_state_from_mstore(&fresh.srv_state, &fresh.mstore).await;
 
     let resumed = sagas::recovery::compensate_unresolved(&fresh)
         .await

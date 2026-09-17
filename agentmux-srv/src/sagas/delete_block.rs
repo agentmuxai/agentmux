@@ -119,7 +119,7 @@ pub async fn run(
     //     P2: side-effect leak if start_saga collides.
     //   * Round 2 (this PR): conditional on result.is_ok() → codex P2
     //     round 2: leaks PTY when reducer succeeds but
-    //     `apply_event_to_wstore` fails inside `SagaCtx::dispatch`
+    //     `apply_event_to_mstore` fails inside `SagaCtx::dispatch`
     //     (block already removed from reducer state, RPC returns
     //     error, retry pre-check sees "block not found" → controller
     //     never cleaned up).
@@ -257,7 +257,7 @@ mod tests {
     ) -> Vec<agentmux_common::ipc::Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }

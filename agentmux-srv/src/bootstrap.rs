@@ -621,7 +621,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         }
     }
 
-    let wstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
+    let mstore_raw = Store::open(&db_dir.join("objects.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open object store: {}", e);
         std::process::exit(1);
     });
@@ -650,10 +650,10 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                         tracing::info!(filled, "registry: backfilled session_id for cross-channel resume (startup pass)");
                     }
                 }
-                wstore_raw.set_registry(Arc::new(reg));
+                mstore_raw.set_registry(Arc::new(reg));
                 if let Some(base) = std::env::var_os("AGENTMUX_AGENTS_DIR") {
                     if !base.is_empty() {
-                        wstore_raw
+                        mstore_raw
                             .set_registry_agents_base(std::path::PathBuf::from(base));
                     }
                 }
@@ -685,7 +685,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                         .map(|v| v.into_iter().map(|r| r.data.id).collect())
                         .unwrap_or_default()
                 });
-                wstore_raw.set_def_registry(Arc::new(def_store));
+                mstore_raw.set_def_registry(Arc::new(def_store));
                 tracing::info!(dir = %def_dir.display(), "def registry: global definition store attached");
             }
             Err(e) => tracing::warn!(
@@ -705,15 +705,15 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // whose card never went away. New deletes sweep the registry themselves
     // (`Store::agent_def_delete`); this is for the orphans already on disk.
     if let (Some(reg), Some(defs)) = (
-        wstore_raw.shared_agent_registry(),
-        wstore_raw.shared_def_registry(),
+        mstore_raw.shared_agent_registry(),
+        mstore_raw.shared_def_registry(),
     ) {
         let pruned = backend::registry_reconcile::prune_tombstoned_instance_records(&reg, &defs);
         if pruned > 0 {
             tracing::info!(pruned, "registry: dropped instance records for deleted agents (startup pass)");
         }
     }
-    let mstore = Arc::new(wstore_raw);
+    let mstore = Arc::new(mstore_raw);
     let filestore = Arc::new(FileStore::open(&db_dir.join("filestore.db")).unwrap_or_else(|e| {
         tracing::error!("Failed to open file store: {}", e);
         std::process::exit(1);
@@ -1073,12 +1073,12 @@ pub fn spawn_background_subsystems(
     // Push a live Haiku activity summary per registered agent (swarm feed) —
     // reads reactive::get_global_handler() as its registry, so it needs no
     // AppState and can start before AppState is built (matches sysinfo/watchdog above).
-    let activity_wstore = Arc::clone(mstore);
+    let activity_mstore = Arc::clone(mstore);
     let activity_filestore = Arc::clone(filestore);
     let activity_broker = broker.clone();
     tokio::spawn(async move {
         backend::reactive::activity_watcher::run_agent_summary_loop(
-            activity_wstore, activity_filestore, activity_broker,
+            activity_mstore, activity_filestore, activity_broker,
         ).await;
     });
 
@@ -1658,7 +1658,7 @@ pub async fn spawn_reducer_plumbing(
     event_bus: &Arc<EventBus>,
     subagent_watcher: &Arc<backend::subagent_watcher::SubagentWatcher>,
 ) -> ReducerPlumbing {
-    let wstore_for_persist = Arc::clone(mstore);
+    let mstore_for_persist = Arc::clone(mstore);
     let srv_state = std::sync::Arc::new(tokio::sync::Mutex::new(state::State::default()));
     let (srv_events_tx, _) =
         tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
@@ -1669,7 +1669,7 @@ pub async fn spawn_reducer_plumbing(
     // Bootstrap reducer state from SQLite. Always runs (even in
     // `task dev` where there's no pipe IPC server) so RPC handlers
     // dispatching through the reducer see populated state.
-    persist::bootstrap_state_from_wstore(&srv_state, &wstore_for_persist).await;
+    persist::bootstrap_state_from_mstore(&srv_state, &mstore_for_persist).await;
 
     // Spawn the disk writer (forensic log of every reducer event)
     // and the persist subscriber (idempotent SQLite write-back).
@@ -1679,7 +1679,7 @@ pub async fn spawn_reducer_plumbing(
     let subscriber_rx = srv_events_tx.subscribe();
     persist_subscriber::spawn_persist_subscriber(
         subscriber_rx,
-        std::sync::Arc::clone(&wstore_for_persist),
+        std::sync::Arc::clone(&mstore_for_persist),
         std::sync::Arc::clone(&srv_state),
     );
 
@@ -1698,7 +1698,7 @@ pub async fn spawn_reducer_plumbing(
     let bridge_rx = srv_events_tx.subscribe();
     let bridge_handle = server::mux_obj_bridge::spawn_mux_obj_bridge(
         bridge_rx,
-        std::sync::Arc::clone(&wstore_for_persist),
+        std::sync::Arc::clone(&mstore_for_persist),
         std::sync::Arc::clone(event_bus),
     );
     tokio::spawn(async move {
@@ -1979,7 +1979,7 @@ pub fn install_shutdown_handlers() -> tokio_util::sync::CancellationToken {
 /// the next pass. (SPEC_WINDOWS_LIFECYCLE_ROBUSTNESS_2026_06_26 §4.E)
 pub fn spawn_wal_checkpoint_loop(
     token: tokio_util::sync::CancellationToken,
-    wal_wstore: Arc<Store>,
+    wal_mstore: Arc<Store>,
     wal_filestore: Arc<FileStore>,
 ) {
     tokio::spawn(async move {
@@ -1989,7 +1989,7 @@ pub fn spawn_wal_checkpoint_loop(
                 _ = tokio::time::sleep(INTERVAL) => {}
                 _ = token.cancelled() => break,
             }
-            if let Err(e) = wal_wstore.checkpoint() {
+            if let Err(e) = wal_mstore.checkpoint() {
                 tracing::warn!(error = %e, "wal_checkpoint(TRUNCATE) on objects.db failed");
             } else {
                 tracing::debug!("wal_checkpoint(TRUNCATE): objects.db ok");

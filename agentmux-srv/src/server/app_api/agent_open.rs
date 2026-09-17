@@ -673,7 +673,7 @@ pub(crate) async fn open_agent_impl(
                     })
                     .ok_or_else(|| "agent.open: CreateBlock emitted no BlockCreated".to_string())?;
                 for ev in &create_events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &mstore) {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
                         tracing::warn!("agent.open: CreateBlock mstore apply failed: {e}");
                     }
                 }

@@ -934,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_list_global_reports_bound_count_from_the_wstore_side() {
+    fn managed_list_global_reports_bound_count_from_the_mstore_side() {
         let mstore = mstore();
         let catalog = catalog_store();
         insert_agent(&mstore, "agent-1");
@@ -971,7 +971,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_is_accessible_to_checks_globality_in_catalog_and_binding_in_wstore() {
+    fn managed_is_accessible_to_checks_globality_in_catalog_and_binding_in_mstore() {
         let mstore = mstore();
         let catalog = catalog_store();
         insert_agent(&mstore, "agent-1");
@@ -1036,7 +1036,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_delete_purges_wstore_refs_and_removes_the_catalog_row() {
+    fn managed_delete_purges_mstore_refs_and_removes_the_catalog_row() {
         let mstore = mstore();
         let catalog = catalog_store();
         insert_agent(&mstore, "agent-1");

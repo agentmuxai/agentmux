@@ -72,7 +72,7 @@ pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallTyp
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "MoveBlockToTab: SQLite write failed: {}",
                 e
@@ -106,7 +106,7 @@ pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallTyp
                 )
                 .await;
                 for ev in &close_events {
-                    let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                    let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
                 }
                 publish_events(state, &close_events);
             }
@@ -197,7 +197,7 @@ pub(crate) async fn handle_promote_block_to_tab(state: &AppState, call: &WebCall
     )
     .await;
     for ev in &active_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             tracing::warn!("PromoteBlockToTab: SetActiveTab apply failed: {}", e);
         }
     }
@@ -229,7 +229,7 @@ pub(crate) async fn handle_promote_block_to_tab(state: &AppState, call: &WebCall
                 )
                 .await;
                 for ev in &close_events {
-                    let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                    let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
                 }
                 publish_events(state, &close_events);
             }
@@ -350,7 +350,7 @@ pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCal
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "MoveTabToWorkspace: SQLite write failed: {}",
                 e

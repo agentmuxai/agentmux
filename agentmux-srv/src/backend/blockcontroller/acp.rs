@@ -313,7 +313,7 @@ impl AcpController {
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
         let outstanding_prompt_ids_clone = self.outstanding_prompt_ids.clone();
-        let wstore_clone = self.mstore.clone();
+        let mstore_clone = self.mstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
@@ -429,7 +429,7 @@ impl AcpController {
                             // "My Agents" reattach path can read agent:sessionid from
                             // block.meta. ACP previously captured the ID in memory only —
                             // this mirrors the careful path from persistent.rs / subprocess.rs.
-                            core::persist_session_id(&block_id_stdout, &sid_owned, &wstore_clone, &event_bus_clone);
+                            core::persist_session_id(&block_id_stdout, &sid_owned, &mstore_clone, &event_bus_clone);
                         }
                     }
 

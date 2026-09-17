@@ -769,12 +769,12 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
 }
 
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore_list = state.mstore.clone();
+    let mstore_list = state.mstore.clone();
     let id_store_list = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_LIST,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_list.clone();
+            let mstore = mstore_list.clone();
             let id_store = id_store_list.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryListData = serde_json::from_value(data)
@@ -973,12 +973,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_read = state.mstore.clone();
+    let mstore_read = state.mstore.clone();
     let id_store_read = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_READ_FILE,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_read.clone();
+            let mstore = mstore_read.clone();
             let id_store = id_store_read.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryReadFileData = serde_json::from_value(data)
@@ -1071,13 +1071,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_write = state.mstore.clone();
+    let mstore_write = state.mstore.clone();
     let id_store_write = state.id_store.clone();
     let broker_write = state.broker.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_WRITE_FILE,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_write.clone();
+            let mstore = mstore_write.clone();
             let id_store = id_store_write.clone();
             let broker = broker_write.clone();
             Box::pin(async move {
@@ -1207,12 +1207,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_history = state.mstore.clone();
+    let mstore_history = state.mstore.clone();
     let id_store_history = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_HISTORY,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_history.clone();
+            let mstore = mstore_history.clone();
             let id_store = id_store_history.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryHistoryData = serde_json::from_value(data)
@@ -1246,12 +1246,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_diff = state.mstore.clone();
+    let mstore_diff = state.mstore.clone();
     let id_store_diff = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_DIFF,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_diff.clone();
+            let mstore = mstore_diff.clone();
             let id_store = id_store_diff.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryDiffData = serde_json::from_value(data)
@@ -1300,13 +1300,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_revert = state.mstore.clone();
+    let mstore_revert = state.mstore.clone();
     let id_store_revert = state.id_store.clone();
     let broker_revert = state.broker.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_REVERT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_revert.clone();
+            let mstore = mstore_revert.clone();
             let id_store = id_store_revert.clone();
             let broker = broker_revert.clone();
             Box::pin(async move {

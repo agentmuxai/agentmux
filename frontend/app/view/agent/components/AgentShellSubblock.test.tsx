@@ -27,11 +27,11 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
-const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, resyncRejections } = vi.hoisted(() => {
+const { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, resyncRejections } = vi.hoisted(() => {
     const blockDataSignals = new Map<string, ReturnType<typeof import("solid-js").createSignal<any>>>();
     const seedData = new Map<string, Record<string, any>>();
-    const wpsHandlers = new Map<string, Array<(event: any) => void>>();
-    const wpsPersisted = new Map<string, Record<string, unknown>>();
+    const mpsHandlers = new Map<string, Array<(event: any) => void>>();
+    const mpsPersisted = new Map<string, Record<string, unknown>>();
     // Per-block-id controllable resolution for ControllerResyncCommand —
     // lets a test hold a specific resync open to construct an
     // out-of-order-completion race between two overlapping attach
@@ -41,7 +41,7 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
     // Ids for which ControllerResyncCommand rejects immediately, forcing
     // attachShell down the create-new-block fallback path.
     const resyncRejections = new Set<string>();
-    return { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, resyncRejections };
+    return { blockDataSignals, seedData, mpsHandlers, mpsPersisted, resyncDeferreds, resyncRejections };
 });
 
 // Records subscriptions by "<eventType>|<scope>" so a test can emit to ONE
@@ -59,16 +59,16 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
 vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
         const key = `${opts.eventType}|${opts.scope}`;
-        wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
-        const persisted = wpsPersisted.get(key);
+        mpsHandlers.set(key, [...(mpsHandlers.get(key) ?? []), opts.handler]);
+        const persisted = mpsPersisted.get(key);
         if (persisted !== undefined) {
             // Synchronously, inside subscribe — exactly how the broker does it.
             opts.handler({ data: persisted });
         }
         return () => {
-            wpsHandlers.set(
+            mpsHandlers.set(
                 key,
-                (wpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
+                (mpsHandlers.get(key) ?? []).filter((h) => h !== opts.handler)
             );
         };
     },
@@ -219,12 +219,12 @@ function resolveSeedFetch(oref: string) {
 /** The status the broker will replay synchronously to the NEXT subscriber for
  *  `blockId` — the `persist: 1` behaviour, not a post-mount emission. */
 function queuePersistedStatus(blockId: string, data: Record<string, unknown>) {
-    wpsPersisted.set(`controllerstatus|block:${blockId}`, data);
+    mpsPersisted.set(`controllerstatus|block:${blockId}`, data);
 }
 
 /** Emit a `controllerstatus` event to whoever subscribed for `blockId`. */
 function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
-    for (const handler of wpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
+    for (const handler of mpsHandlers.get(`controllerstatus|block:${blockId}`) ?? []) {
         handler({ data });
     }
 }
@@ -232,8 +232,8 @@ function emitControllerStatus(blockId: string, data: Record<string, unknown>) {
 beforeEach(() => {
     blockDataSignals.clear();
     seedData.clear();
-    wpsHandlers.clear();
-    wpsPersisted.clear();
+    mpsHandlers.clear();
+    mpsPersisted.clear();
     resyncDeferreds.clear();
     resyncRejections.clear();
     termWrapInstances.length = 0;

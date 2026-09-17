@@ -65,7 +65,7 @@ export interface ReplayResult {
     stats: {
         streamLinesParsed: number;
         nodesAppended: number;
-        wpsEvents: number;
+        mpsEvents: number;
         toolChunksApplied: number;
         dispatchEvents: number;
         eventsDropped: number;
@@ -96,7 +96,7 @@ export function replayInstant(
     const stats = {
         streamLinesParsed: 0,
         nodesAppended: 0,
-        wpsEvents: 0,
+        mpsEvents: 0,
         toolChunksApplied: 0,
         dispatchEvents: 0,
         eventsDropped: 0,
@@ -180,7 +180,7 @@ function handleWpsEvent(
     stats: ReplayResult["stats"],
     warnings: string[],
 ): void {
-    stats.wpsEvents += 1;
+    stats.mpsEvents += 1;
     if (ev.event !== "tool_chunk") {
         // Recognized but unhandled — extend the demuxer when a test
         // needs controller-status / blockfile replay.

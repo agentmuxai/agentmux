@@ -77,7 +77,7 @@ pub(super) async fn open_pane_floating(
         })
         .ok_or_else(|| "pane.open: floating: CreateBlock emitted no BlockCreated".to_string())?;
     for ev in &create_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, mstore) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
             tracing::warn!("pane.open: floating: CreateBlock mstore apply failed: {e}");
         }
     }
@@ -370,7 +370,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     )
     .await;
     for ev in &meta_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, mstore) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
             tracing::warn!("pane.open: reuse: UpdateBlockMeta mstore apply failed: {e}");
         }
     }
@@ -504,7 +504,7 @@ mod close_pane_tests {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &evs {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         evs
     }

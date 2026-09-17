@@ -190,7 +190,7 @@ impl<'a> SagaCtx<'a> {
             return Err(message);
         }
         for ev in &events {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.mstore)
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &self.state.mstore)
             {
                 // (reagent P1 PR #631 round 2) Mark the step as
                 // failed in the durable log BEFORE returning. Without
@@ -279,7 +279,7 @@ impl<'a> SagaCtx<'a> {
         }
         for ev in &events {
             if let Err(e) =
-                crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.mstore)
+                crate::persist_subscriber::apply_event_to_mstore(ev, &self.state.mstore)
             {
                 tracing::warn!(
                     saga_id = self.saga_id,

@@ -224,8 +224,8 @@ async fn run_loop(
     // disconnected/backing off, which the old ping-tick-only check could not.
     let scheduler = crate::broker::init_global(Duration::from_secs(BROKER_SWEEP_INTERVAL_SECS));
     {
-        let wstore_fresh = mstore.clone();
-        let wstore_refresh = mstore.clone();
+        let mstore_fresh = mstore.clone();
+        let mstore_refresh = mstore.clone();
         let http_refresh = http.clone();
         scheduler
             .register(
@@ -249,7 +249,7 @@ async fn run_loop(
                 // to keychain reads elsewhere (see
                 // app_api/mod.rs's account_validate_impl).
                 move || {
-                    let mstore = wstore_fresh.clone();
+                    let mstore = mstore_fresh.clone();
                     Box::pin(async move {
                         tokio::task::spawn_blocking(move || mstore.muxbus_is_fresh())
                             .await
@@ -257,7 +257,7 @@ async fn run_loop(
                     })
                 },
                 move || {
-                    let mstore = wstore_refresh.clone();
+                    let mstore = mstore_refresh.clone();
                     let http = http_refresh.clone();
                     Box::pin(async move {
                         let load_store = mstore.clone();

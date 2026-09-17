@@ -781,7 +781,7 @@ pub async fn run_agent_turn(
 
 pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // subprocessspawn → spawn agent CLI as subprocess for a single turn
-    let wstore_spawn = state.mstore.clone();
+    let mstore_spawn = state.mstore.clone();
     let broker_spawn = state.broker.clone();
     let event_bus_spawn = state.event_bus.clone();
     let filestore_spawn = state.filestore.clone();
@@ -789,7 +789,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     engine.register_handler(
         COMMAND_SUBPROCESS_SPAWN,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_spawn.clone();
+            let mstore = mstore_spawn.clone();
             let broker = broker_spawn.clone();
             let event_bus = event_bus_spawn.clone();
             let filestore = filestore_spawn.clone();

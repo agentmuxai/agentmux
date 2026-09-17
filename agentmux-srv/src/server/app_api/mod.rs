@@ -193,7 +193,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
             })
             .ok_or_else(|| "pane.open: skip_placement: CreateBlock emitted no BlockCreated".to_string())?;
         for ev in &create_events {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &mstore) {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
                 tracing::warn!("pane.open: skip_placement: CreateBlock mstore apply failed: {e}");
             }
         }
@@ -240,7 +240,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         })
         .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
     for ev in &create_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &mstore) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
             tracing::warn!("pane.open: CreateBlock mstore apply failed: {e}");
         }
     }
@@ -2618,7 +2618,7 @@ mod pane_open_reducer_tests {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &evs {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         evs
     }

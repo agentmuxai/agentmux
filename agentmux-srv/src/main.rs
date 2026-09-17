@@ -181,7 +181,7 @@ async fn main() {
     // 7. Build router and serve on both listeners
     // Clone Arcs that are needed after `state` is moved into build_router.
     let shell_sessions_shutdown = state.shell_sessions.clone();
-    let wal_wstore = Arc::clone(&state.mstore);
+    let wal_mstore = Arc::clone(&state.mstore);
     let wal_filestore = Arc::clone(&state.filestore);
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let router = build_router(state);
@@ -205,7 +205,7 @@ async fn main() {
 
     // Periodic WAL checkpoint — prevents unbounded WAL file growth during
     // long-running sessions.
-    bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_wstore, wal_filestore);
+    bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
 
     // Run both servers until shutdown
     tokio::select! {

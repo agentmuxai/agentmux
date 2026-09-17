@@ -71,7 +71,7 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
     // failure — same pattern as CreateWorkspace in E.2c.2).
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }
@@ -114,7 +114,7 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
             let mut active_err: Option<String> = None;
             for ev in &active_events {
                 if let Err(e) =
-                    crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
                 {
                     active_err = Some(e.to_string());
                     break;
@@ -208,7 +208,7 @@ pub(crate) async fn handle_set_active_tab(state: &AppState, call: &WebCallType) 
     // is a UI-driven action; the user can retry.)
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }
@@ -316,7 +316,7 @@ pub(crate) async fn handle_update_tab_ids(state: &AppState, call: &WebCallType) 
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "UpdateTabIds: SQLite write failed: {}",
                 e
@@ -382,7 +382,7 @@ pub(crate) async fn handle_reorder_tab(state: &AppState, call: &WebCallType) -> 
     }
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }

@@ -861,16 +861,16 @@ mod tests {
 
         // Channel A carries first: its id survives.
         let dir_a = tempfile::tempdir().unwrap();
-        let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
-        wstore_a.skill_insert_raw(&skill("id-from-a", "My Custom Global", "", true)).unwrap();
-        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
+        let mstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
+        mstore_a.skill_insert_raw(&skill("id-from-a", "My Custom Global", "", true)).unwrap();
+        carry_skills(&mstore_a, &identity_store, "channel-a").unwrap();
 
         // Channel B carries the SAME name+type, under a different id — must
         // converge onto A's id, not create a second row.
         let dir_b = tempfile::tempdir().unwrap();
-        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
-        wstore_b.skill_insert_raw(&skill("id-from-b", "My Custom Global", "", true)).unwrap();
-        let (carried, rewritten) = carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+        let mstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        mstore_b.skill_insert_raw(&skill("id-from-b", "My Custom Global", "", true)).unwrap();
+        let (carried, rewritten) = carry_skills(&mstore_b, &identity_store, "channel-b").unwrap();
         assert_eq!(carried, 0, "id-from-a already occupies the identity store under its own id — B adds nothing new there");
         // `rewritten` counts actual ref ROWS repointed, not "an id changed" —
         // this fixture never binds "id-from-b" to any agent/bundle, so there
@@ -879,10 +879,10 @@ mod tests {
         // the case where a real ref row exists).
         assert_eq!(rewritten, 0);
         assert!(
-            wstore_b.skill_get("id-from-a").unwrap().is_some(),
+            mstore_b.skill_get("id-from-a").unwrap().is_some(),
             "B's own local store gets a copy under A's id too, so pre-redirect code keeps resolving it"
         );
-        assert!(wstore_b.skill_get("id-from-b").unwrap().is_none(), "the superseded local row must be removed");
+        assert!(mstore_b.skill_get("id-from-b").unwrap().is_none(), "the superseded local row must be removed");
 
         assert!(identity_store.skill_get("id-from-a").unwrap().is_some());
         assert!(identity_store.skill_get("id-from-b").unwrap().is_none(), "must not create a second row for the same name+type");
@@ -904,24 +904,24 @@ mod tests {
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
         let dir_a = tempfile::tempdir().unwrap();
-        let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
+        let mstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
         let mut skill_a = skill("id-from-a", "Deploy", "", true);
         skill_a.skill_type = "prompt".to_string();
-        wstore_a.skill_insert_raw(&skill_a).unwrap();
-        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
+        mstore_a.skill_insert_raw(&skill_a).unwrap();
+        carry_skills(&mstore_a, &identity_store, "channel-a").unwrap();
 
         let dir_b = tempfile::tempdir().unwrap();
-        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        let mstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
         let mut skill_b = skill("id-from-b", "Deploy", "", true);
         skill_b.skill_type = "agent-skill".to_string();
-        wstore_b.skill_insert_raw(&skill_b).unwrap();
+        mstore_b.skill_insert_raw(&skill_b).unwrap();
         rusqlite::Connection::open(dir_b.path().join("objects.db")).unwrap().execute(
             "INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')",
             [],
         ).unwrap();
-        wstore_b.skill_bind(&wstore_b, "agent-1", "id-from-b").unwrap();
+        mstore_b.skill_bind(&mstore_b, "agent-1", "id-from-b").unwrap();
 
-        let (carried, rewritten) = carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+        let (carried, rewritten) = carry_skills(&mstore_b, &identity_store, "channel-b").unwrap();
         assert_eq!(carried, 0, "A's row already occupies the name — B adds nothing new to the identity store");
         assert_eq!(rewritten, 1, "B's own agent-1 ref must be repointed at A's surviving id");
 
@@ -933,10 +933,10 @@ mod tests {
 
         // B's local mirror must resolve to A's id too — the whole point:
         // nothing is left pointing at an id the identity store doesn't hold.
-        assert!(wstore_b.skill_get("id-from-a").unwrap().is_some());
-        assert!(wstore_b.skill_get("id-from-b").unwrap().is_none());
-        assert!(wstore_b.skill_is_bound_to("agent-1", "id-from-a").unwrap());
-        assert!(!wstore_b.skill_is_bound_to("agent-1", "id-from-b").unwrap());
+        assert!(mstore_b.skill_get("id-from-a").unwrap().is_some());
+        assert!(mstore_b.skill_get("id-from-b").unwrap().is_none());
+        assert!(mstore_b.skill_is_bound_to("agent-1", "id-from-a").unwrap());
+        assert!(!mstore_b.skill_is_bound_to("agent-1", "id-from-b").unwrap());
     }
 
     #[test]
@@ -952,9 +952,9 @@ mod tests {
         identity_store.skill_insert_raw(&skill("id-from-a", "Racing Global", "prompt", true)).unwrap();
 
         let dir_b = tempfile::tempdir().unwrap();
-        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
-        wstore_b.skill_insert_raw(&skill("id-from-b", "Racing Global", "prompt", true)).unwrap();
-        carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+        let mstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        mstore_b.skill_insert_raw(&skill("id-from-b", "Racing Global", "prompt", true)).unwrap();
+        carry_skills(&mstore_b, &identity_store, "channel-b").unwrap();
 
         let matches: Vec<_> = [
             identity_store.skill_get("id-from-a").unwrap(),
@@ -973,14 +973,14 @@ mod tests {
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
         let dir_a = tempfile::tempdir().unwrap();
-        let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
-        wstore_a.skill_insert_raw(&skill("private-a", "Deploy", "", false)).unwrap();
-        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
+        let mstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
+        mstore_a.skill_insert_raw(&skill("private-a", "Deploy", "", false)).unwrap();
+        carry_skills(&mstore_a, &identity_store, "channel-a").unwrap();
 
         let dir_b = tempfile::tempdir().unwrap();
-        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
-        wstore_b.skill_insert_raw(&skill("private-b", "Deploy", "", false)).unwrap();
-        carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+        let mstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        mstore_b.skill_insert_raw(&skill("private-b", "Deploy", "", false)).unwrap();
+        carry_skills(&mstore_b, &identity_store, "channel-b").unwrap();
 
         // Both rows survive as distinct resources — merging two different
         // owners' private skills because they share a name would create an
@@ -1132,20 +1132,20 @@ mod tests {
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
         let dir_a = tempfile::tempdir().unwrap();
-        let wstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
+        let mstore_a = Store::open(&dir_a.path().join("objects.db")).unwrap();
         let mut skill_a = skill("id-from-a", "My Custom Global", "", true);
         skill_a.content = "A's content".to_string();
-        wstore_a.skill_insert_raw(&skill_a).unwrap();
-        carry_skills(&wstore_a, &identity_store, "channel-a").unwrap();
+        mstore_a.skill_insert_raw(&skill_a).unwrap();
+        carry_skills(&mstore_a, &identity_store, "channel-a").unwrap();
 
         let dir_b = tempfile::tempdir().unwrap();
-        let wstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
+        let mstore_b = Store::open(&dir_b.path().join("objects.db")).unwrap();
         let mut skill_b = skill("id-from-b", "My Custom Global", "", true);
         skill_b.content = "B's own (different, stale) content".to_string();
-        wstore_b.skill_insert_raw(&skill_b).unwrap();
-        carry_skills(&wstore_b, &identity_store, "channel-b").unwrap();
+        mstore_b.skill_insert_raw(&skill_b).unwrap();
+        carry_skills(&mstore_b, &identity_store, "channel-b").unwrap();
 
-        let local_copy = wstore_b.skill_get("id-from-a").unwrap().unwrap();
+        let local_copy = mstore_b.skill_get("id-from-a").unwrap().unwrap();
         assert_eq!(
             local_copy.content, "A's content",
             "the local fallback copy must mirror the identity store's winning content, not this channel's own stale content"

@@ -277,7 +277,7 @@ async fn apply_and_publish(
     events: &[Event],
 ) -> Result<(), String> {
     for ev in events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
             return Err(format!("SQLite write failed: {}", e));
         }
     }
@@ -608,7 +608,7 @@ mod tests {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }

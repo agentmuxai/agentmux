@@ -41,7 +41,7 @@ pub(crate) async fn handle_switch_workspace(state: &AppState, call: &WebCallType
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "SwitchWorkspace: SQLite write failed: {}",
                 e

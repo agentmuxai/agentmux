@@ -98,13 +98,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //  - `name` non-empty, ≤200 chars, and not already taken by any
     //    `is_seeded = 0` row. Avoids collisions in the picker's
     //    "My Agents" list.
-    let wstore_act = state.mstore.clone();
+    let mstore_act = state.mstore.clone();
     let id_store_act = state.id_store.clone();
     let broker_act = state.broker.clone();
     engine.register_typed(
         COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
         move |cmd: CommandAgentDefCreateFromTemplateData, _ctx| {
-            let mstore = wstore_act.clone();
+            let mstore = mstore_act.clone();
             let id_store = id_store_act.clone();
             let broker = broker_act.clone();
             async move {
@@ -278,7 +278,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //
     // Broadcasts `agents:changed` so the picker refetches and the card
     // disappears (existing list query already excludes hidden by default).
-    let wstore_hide = state.mstore.clone();
+    let mstore_hide = state.mstore.clone();
     let broker_hide = state.broker.clone();
     // Registered through `register_typed` (rather than `register_handler`)
     // so this command's request/response pair lands in the engine's
@@ -289,7 +289,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(
         COMMAND_AGENT_DEF_HIDE,
         move |cmd: CommandAgentDefHideData, _ctx| {
-            let mstore = wstore_hide.clone();
+            let mstore = mstore_hide.clone();
             let broker = broker_hide.clone();
             async move {
                 let ok = mstore
@@ -316,12 +316,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // agentdefunhide → set user_hidden = 0 on a seeded template,
     // bringing it back into the picker. Same validation + broadcast as
     // agentdefhide. Phase 2 of the two-tier picker spec.
-    let wstore_unhide = state.mstore.clone();
+    let mstore_unhide = state.mstore.clone();
     let broker_unhide = state.broker.clone();
     engine.register_typed(
         COMMAND_AGENT_DEF_UNHIDE,
         move |cmd: CommandAgentDefHideData, _ctx| {
-            let mstore = wstore_unhide.clone();
+            let mstore = mstore_unhide.clone();
             let broker = broker_unhide.clone();
             async move {
                 let ok = mstore
@@ -349,11 +349,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // (is_seeded = 1 AND user_hidden = 1). Used by the settings panel
     // to render the unhide list. The picker proper never calls this —
     // it uses `listagents` with the default-filter-out behaviour.
-    let wstore_lh = state.mstore.clone();
+    let mstore_lh = state.mstore.clone();
     engine.register_handler(
         COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
         Box::new(move |_data, _ctx| {
-            let mstore = wstore_lh.clone();
+            let mstore = mstore_lh.clone();
             Box::pin(async move {
                 let agents = mstore
                     .agent_def_list()
@@ -517,11 +517,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Definition fork suggest (read-only — no mutation) ----
 
-    let wstore_sug = state.mstore.clone();
+    let mstore_sug = state.mstore.clone();
     engine.register_typed(
         COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
         move |cmd: CommandForkAgentDefinitionSuggestData, _ctx| {
-            let mstore = wstore_sug.clone();
+            let mstore = mstore_sug.clone();
             async move {
                 let all = mstore
                     .agent_def_list()
@@ -548,12 +548,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // the field `fork-set.ts`'s `titleOf()` actually displays: `branch_label`
     // when the row already has one (a fork), else `name` (a lineage root).
     // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
-    let wstore_rn = state.mstore.clone();
+    let mstore_rn = state.mstore.clone();
     let broker_rn = state.broker.clone();
     engine.register_handler(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_rn.clone();
+            let mstore = mstore_rn.clone();
             let broker = broker_rn.clone();
             Box::pin(async move {
                 let cmd: CommandRenameAgentDefinitionTitleData = serde_json::from_value(data)

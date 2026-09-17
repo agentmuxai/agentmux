@@ -82,7 +82,7 @@ function debugLogBackendCall(methodName: string, durationStr: string, args: any[
     console.log("[service]", methodName, durationStr);
 }
 
-function wpsSubscribeToObject(oref: string): () => void {
+function mpsSubscribeToObject(oref: string): () => void {
     return muxEventSubscribe({
         eventType: WpsEvent.MuxObjUpdate,
         scope: oref,
@@ -342,5 +342,5 @@ export {
     updateMuxObject,
     updateMuxObjects,
     useMuxObjectValue,
-    wpsSubscribeToObject,
+    mpsSubscribeToObject,
 };

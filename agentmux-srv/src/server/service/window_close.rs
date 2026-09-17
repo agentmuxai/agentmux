@@ -180,7 +180,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
         return WebReturnType::success_empty();
     }
     for ev in &close_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "CloseWindow: SQLite write failed: {}",
                 e

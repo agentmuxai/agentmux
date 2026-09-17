@@ -376,7 +376,7 @@ fn list_archives_rejects_bad_definition_id() {
 
 // ---- Migration tests ----
 
-fn open_temp_wstore(dir: &Path) -> Arc<Store> {
+fn open_temp_mstore(dir: &Path) -> Arc<Store> {
     let path = dir.join("objects.db");
     Arc::new(Store::open(&path).expect("open mstore"))
 }
@@ -409,7 +409,7 @@ fn seed_block_snapshot(filestore: &Arc<FileStore>, block_id: &str, body: &str) {
 #[test]
 fn migration_backfills_archives_and_seeds_current() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     // Two blocks for the same definition. Block 2 is written later
@@ -470,7 +470,7 @@ fn migration_backfills_archives_and_seeds_current() {
 #[test]
 fn migration_is_idempotent() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let block = insert_agent_block(&mstore, "def-a");
@@ -512,7 +512,7 @@ fn a_stale_marker_no_longer_skips_unmigrated_blocks() {
     // the helper returned early on the flag and every block's conversation
     // stayed unmigrated for good.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
     std::fs::write(dir.path().join(MIGRATION_MARKER_V1), b"v1\n").unwrap();
 
@@ -536,7 +536,7 @@ fn a_stale_marker_no_longer_skips_unmigrated_blocks() {
 #[test]
 fn block_zones_look_incomplete_is_false_with_no_blocks_empty_snapshots_or_populated_current() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
     assert!(!block_zones_look_incomplete(&mstore, &filestore).unwrap(), "nothing at all");
 
@@ -629,7 +629,7 @@ fn insert_named_instance(
 #[test]
 fn template_promote_clones_template_and_moves_zones() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     // Seeded template "Claude Code" with a current session zone +
@@ -721,7 +721,7 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
     // (#2594, same pattern as `agent_def_create_from_template`/
     // `forkagentdefinition`).
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let bundle = Bundle {
@@ -769,7 +769,7 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
 #[test]
 fn template_promote_is_idempotent_on_second_run() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -806,7 +806,7 @@ fn template_promote_runs_when_seeded_def_grows_zone_after_first_run() {
     // re-runs the migration on every startup. This test simulates
     // that exact sequence and asserts the second run DOES promote.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     // First startup: a seeded template with no session zone yet.
@@ -854,7 +854,7 @@ fn template_promote_does_not_reuse_clone_with_active_zone() {
     // The reuse target must be an empty-zone clone (partial-
     // failure shape) only.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -965,7 +965,7 @@ fn template_promote_preserves_user_continuation_on_clone() {
     // The fix: `move_zone` detects a non-empty destination and
     // drops the stale source instead of copying.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -1068,7 +1068,7 @@ fn template_promote_recovers_partial_copy_at_zone() {
     // file). After retry: clone has BOTH files; seeded zone
     // is drained.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -1175,7 +1175,7 @@ fn template_promote_promotes_newer_source_over_stale_destination() {
     // source SECOND (newer modts). After retry: destination
     // has the source's bytes; source drained.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -1260,7 +1260,7 @@ fn template_promote_uses_deterministic_clone_id() {
     // safe under any partial-failure mode without ever
     // splitting one logical agent across multiple clone ids.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -1293,7 +1293,7 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
     // re-runs move_zone (idempotent: write replaces if newer,
     // delete is best-effort), and converges.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-claude", "Claude Code", "claude");
@@ -1409,7 +1409,7 @@ fn template_promote_ignores_legacy_marker_file() {
     // migration from running. The 2026-05-24 rework leaves any
     // existing marker file in place but doesn't read it.
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     // Place a vestigial marker as if a prior startup wrote one.
@@ -1428,7 +1428,7 @@ fn template_promote_ignores_legacy_marker_file() {
 #[test]
 fn template_promote_falls_back_to_template_name_when_no_named_instance() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     let template = insert_template(&mstore, "tpl-x", "Cursor", "cursor");
@@ -1450,7 +1450,7 @@ fn template_promote_falls_back_to_template_name_when_no_named_instance() {
 #[test]
 fn template_promote_skips_already_user_owned_definitions() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     // A user-owned definition (is_seeded = 0) with a session — the
@@ -1508,7 +1508,7 @@ fn template_promote_skips_already_user_owned_definitions() {
 #[test]
 fn migration_skips_non_agent_and_empty_blocks() {
     let dir = tempdir().unwrap();
-    let mstore = open_temp_wstore(dir.path());
+    let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
 
     // A "term" block (not agent) — must be skipped.

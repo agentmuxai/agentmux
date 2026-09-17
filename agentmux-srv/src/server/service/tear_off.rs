@@ -107,7 +107,7 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
                 )
                 .await;
                 for ev in &close_events {
-                    let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                    let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
                 }
                 publish_events(state, &close_events);
             }

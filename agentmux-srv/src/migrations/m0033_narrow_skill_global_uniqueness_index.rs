@@ -64,7 +64,7 @@ struct GlobalSkillRow {
 
 /// Collapse every group of global `db_skills` rows sharing a `name` (however
 /// large) to the earliest-`created_at` row (ties broken by `id`, for
-/// determinism), rewriting `channel_wstore`'s own ref rows (if given) and
+/// determinism), rewriting `channel_mstore`'s own ref rows (if given) and
 /// deleting the loser(s) from `identity_conn`'s `db_skills` — then swaps the
 /// uniqueness index. Returns the number of rows collapsed away.
 ///
@@ -73,7 +73,7 @@ struct GlobalSkillRow {
 /// `registry::resolve_identity_store_path`'s env-var-driven resolution (the
 /// same reason `m0031`'s `carry_skills`/`carry_mcp_servers` take explicit
 /// `Store` params instead of opening their own).
-fn collapse_and_reindex(identity_conn: &Connection, channel_wstore: Option<&Store>) -> Result<usize, String> {
+fn collapse_and_reindex(identity_conn: &Connection, channel_mstore: Option<&Store>) -> Result<usize, String> {
     let mut stmt = identity_conn
         .prepare("SELECT id, name, created_at FROM db_skills WHERE is_global = 1 ORDER BY name, created_at ASC, id ASC")
         .map_err(|e| format!("prepare global skills scan: {e}"))?;
@@ -108,7 +108,7 @@ fn collapse_and_reindex(identity_conn: &Connection, channel_wstore: Option<&Stor
         members.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
         let survivor_id = members[0].id.clone();
         for loser in &members[1..] {
-            if let Some(mstore) = channel_wstore {
+            if let Some(mstore) = channel_mstore {
                 mstore
                     .skill_rewrite_ref_id(&loser.id, &survivor_id)
                     .map_err(|e| format!("rewrite refs for collapsed skill {}: {e}", loser.id))?;
@@ -177,7 +177,7 @@ impl Migration for M0033NarrowSkillGlobalUniquenessIndex {
             return Ok(());
         }
 
-        let channel_wstore = if ctx.channel_store_path.exists() {
+        let channel_mstore = if ctx.channel_store_path.exists() {
             Some(
                 Store::open(&ctx.channel_store_path)
                     .map_err(|e| MigrationError(format!("narrow_skill_global_uniqueness_index: open mstore: {e}")))?,
@@ -186,7 +186,7 @@ impl Migration for M0033NarrowSkillGlobalUniquenessIndex {
             None
         };
 
-        let collapsed = collapse_and_reindex(&conn, channel_wstore.as_ref())
+        let collapsed = collapse_and_reindex(&conn, channel_mstore.as_ref())
             .map_err(|e| MigrationError(format!("narrow_skill_global_uniqueness_index: {e}")))?;
         tracing::info!(collapsed, "m0033_narrow_skill_global_uniqueness_index: complete");
         Ok(())

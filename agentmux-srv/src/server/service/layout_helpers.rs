@@ -212,7 +212,7 @@ mod tests {
         async fn dispatch_apply(state: &crate::server::AppState, cmd: Command) -> Vec<Event> {
             let events = super::super::reducer_helpers::dispatch_to_reducer(state, cmd).await;
             for ev in &events {
-                crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+                crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
             }
             events
         }

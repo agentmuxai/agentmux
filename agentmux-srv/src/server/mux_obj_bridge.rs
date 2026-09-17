@@ -247,14 +247,14 @@ async fn emit_layout_for_tab(
 ///
 /// **Read source — post-event state guarantee:**
 /// For events emitted via the HTTP `service.rs` RPC handlers,
-/// `apply_event_to_wstore` is called synchronously (`service.rs:1297-1304`
+/// `apply_event_to_mstore` is called synchronously (`service.rs:1297-1304`
 /// for workspace; equivalent path for tab/block/window/layout commands)
 /// before `publish_events` (`service.rs:1305`). So when the bridge
 /// receives such an event, SQLite is already up-to-date.
 ///
 /// **IPC-path caveat:** the launcher → IPC path in `srv_ipc/server.rs:295`
 /// dispatches reducer events directly without first calling
-/// `apply_event_to_wstore`; the persist subscriber and bridge then race.
+/// `apply_event_to_mstore`; the persist subscriber and bridge then race.
 /// At time of writing none of the events the bridge handles are emitted
 /// via that path (verified for `Command::UpdateWindowMeta` and the
 /// workspace family). When that changes, options are: (a) make the IPC
@@ -446,7 +446,7 @@ async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBu
 
         // ----- Layout (Phase 2 — partial) -----
         // Focused/Magnified + Cleared/TreeReplaced are now persisted by
-        // `apply_event_to_wstore` (persist_subscriber.rs), so the bridge
+        // `apply_event_to_mstore` (persist_subscriber.rs), so the bridge
         // can safely re-read LayoutState and broadcast it: the HTTP RPC
         // path applies SQLite synchronously before publishing the event
         // (see the post-event-state guarantee above), so the read sees

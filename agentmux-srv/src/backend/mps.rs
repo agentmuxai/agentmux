@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! AgentMux Pub/Sub system: event brokering with scoped subscriptions.
-//! Port of Go's pkg/mps/mps.go + wpstypes.go.
+//! Port of Go's pkg/wps/wps.go + wpstypes.go (Wave Terminal's original names).
 
 //!
 //! The Broker supports:

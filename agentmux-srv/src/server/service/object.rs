@@ -103,7 +103,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             });
             let mut apply_err: Option<String> = None;
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     apply_err = Some(e.to_string());
                     break;
                 }
@@ -346,7 +346,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 return WebReturnType::error(err_msg);
             }
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     return WebReturnType::error(format!(
                         "UpdateObjectMeta: SQLite write failed: {}",
                         e
@@ -423,7 +423,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 return WebReturnType::error(err_msg);
             }
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     return WebReturnType::error(format!(
                         "UpdateTabName: SQLite write failed: {}",
                         e
@@ -542,7 +542,7 @@ async fn update_layout_via_reducer(
                 .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
             if !has_error {
                 for ev in &events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                         apply_err = Some(e.to_string());
                         break;
                     }
@@ -571,7 +571,7 @@ async fn update_layout_via_reducer(
                     let rb_events = crate::reducer::update(&mut s, rollback_cmd, &ctx);
                     for ev in &rb_events {
                         if let Err(e) =
-                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                            crate::persist_subscriber::apply_event_to_mstore(ev, store)
                         {
                             tracing::warn!(
                                 error = %e,

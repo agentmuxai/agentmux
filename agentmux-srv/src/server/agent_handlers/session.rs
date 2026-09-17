@@ -508,7 +508,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 // Fire-and-forget: generation (a real Haiku
                                 // CLI round-trip) must not block this
                                 // response.
-                                let wstore_bg = mstore.clone();
+                                let mstore_bg = mstore.clone();
                                 let filestore_bg = filestore.clone();
                                 let broker_bg = broker.clone();
                                 let definition_id_bg = inst.definition_id.clone();
@@ -516,7 +516,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let provider_id_bg = def.map(|d| d.provider.clone()).unwrap_or_default();
                                 tokio::spawn(async move {
                                     let result = crate::server::app_api::session::generate_definition_activity_summary(
-                                        &wstore_bg,
+                                        &mstore_bg,
                                         &filestore_bg,
                                         &broker_bg,
                                         &definition_id_bg,

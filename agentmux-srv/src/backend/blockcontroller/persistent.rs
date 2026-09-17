@@ -2725,7 +2725,7 @@ impl PersistentSubprocessController {
         let stderr_reader_handle: Option<tokio::task::JoinHandle<()>> = stderr.map(|stderr_pipe| {
             let block_id_stderr = self.block_id.clone();
             let inner_stderr = Arc::clone(&self.inner);
-            let wstore_stderr = self.mstore.clone();
+            let mstore_stderr = self.mstore.clone();
             let event_bus_stderr = self.event_bus.clone();
             let attempted_resume_sid = attempted_resume_sid.clone();
             let my_generation_stderr = my_generation;
@@ -2759,14 +2759,14 @@ impl PersistentSubprocessController {
                                 "stale --resume session id unreachable under the current config dir — \
                                  clearing so the next message starts a fresh conversation"
                             );
-                            core::persist_session_id(&block_id_stderr, "", &wstore_stderr, &event_bus_stderr);
+                            core::persist_session_id(&block_id_stderr, "", &mstore_stderr, &event_bus_stderr);
                             // Surface this to the user — previously silent
                             // (only the warn! above). See
                             // SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md
                             // §4.2: a resumed conversation silently starting
                             // fresh, with no indication anything happened, is
                             // exactly the failure mode this flag exists to close.
-                            if let Some(ref store) = wstore_stderr {
+                            if let Some(ref store) = mstore_stderr {
                                 crate::backend::blockcontroller::session_recovery::mark_resume_failed(
                                     store,
                                     &event_bus_stderr,
@@ -2951,7 +2951,7 @@ impl PersistentSubprocessController {
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
         let inner_read = Arc::clone(&self.inner);
-        let wstore_read = self.mstore.clone();
+        let mstore_read = self.mstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
@@ -3009,7 +3009,7 @@ impl PersistentSubprocessController {
                 stdout_seq_read.fetch_add(1, Ordering::Relaxed);
 
                 // Track session metadata (debounced 1 s)
-                stats.record_line(line.len(), &wstore_read);
+                stats.record_line(line.len(), &mstore_read);
 
                 // Set (instead of persisted immediately) when this line turns
                 // out to be a terminal `result`/`is_error:true` event arriving
@@ -3190,7 +3190,7 @@ impl PersistentSubprocessController {
                                     session_id = %sid_string,
                                     "persistent session ID captured"
                                 );
-                                core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
+                                core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
                             }
                             // reagentx P0 on PR #2373: resolving tracking
                             // here can legitimately flush a held-back
@@ -3226,7 +3226,7 @@ impl PersistentSubprocessController {
                                         // below. See
                                         // `session_recovery::clear_resume_failed`.
                                         if matches!(outcome, persistent_resume::SessionOutcome::Resumed) {
-                                            if let Some(ref store) = wstore_read {
+                                            if let Some(ref store) = mstore_read {
                                                 super::session_recovery::clear_resume_failed(
                                                     store,
                                                     &event_bus_read,
@@ -3270,7 +3270,7 @@ impl PersistentSubprocessController {
                                         // now-superseded turn.
                                         if let Some(failure) = classify_exit_line(None, &line) {
                                             flushed_failure_this_tick = true;
-                                            core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
+                                            core::persist_last_failure(&block_id_read, Some(&failure), &mstore_read, &event_bus_read);
                                             if let Some(ref broker) = broker_read {
                                                 broker.publish(mps::MuxEvent {
                                                     event: mps::EVENT_AGENT_FAILURE.to_string(),
@@ -3364,7 +3364,7 @@ impl PersistentSubprocessController {
                                         // clear-on-success step below.
                                         if let Some(failure) = classify_exit_line(None, &old_line) {
                                             flushed_failure_this_tick = true;
-                                            core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
+                                            core::persist_last_failure(&block_id_read, Some(&failure), &mstore_read, &event_bus_read);
                                             if let Some(ref broker) = broker_read {
                                                 broker.publish(mps::MuxEvent {
                                                     event: mps::EVENT_AGENT_FAILURE.to_string(),
@@ -3398,7 +3398,7 @@ impl PersistentSubprocessController {
                     // classify() only runs once this error is confirmed final.
                     if is_error_result && !hold_back_for_resume_retry {
                         let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
-                        core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
+                        core::persist_last_failure(&block_id_read, Some(&failure), &mstore_read, &event_bus_read);
                         if let Some(ref broker) = broker_read {
                             broker.publish(mps::MuxEvent {
                                 event: mps::EVENT_AGENT_FAILURE.to_string(),
@@ -3424,7 +3424,7 @@ impl PersistentSubprocessController {
                         // just persisted a freshly-flushed OLDER failure this
                         // same tick — that state must survive, not be
                         // immediately wiped by this frame's own success.
-                        core::persist_last_failure(&block_id_read, None, &wstore_read, &event_bus_read);
+                        core::persist_last_failure(&block_id_read, None, &mstore_read, &event_bus_read);
                     }
                 }
 
@@ -3470,7 +3470,7 @@ impl PersistentSubprocessController {
         let block_id_wait = self.block_id.clone();
         let inner_wait = Arc::clone(&self.inner);
         let broker_wait = self.broker.clone();
-        let wstore_wait = self.mstore.clone();
+        let mstore_wait = self.mstore.clone();
         // Needed to persist a classified failure (rate-limit/overloaded/etc.)
         // into block meta alongside the MPS publish below — mirrors
         // `event_bus_read`'s equivalent clone for the stdout-reader task.
@@ -3728,7 +3728,7 @@ impl PersistentSubprocessController {
                         // respawn may have re-registered a fresh pid on a
                         // parallel task between the generation gate above
                         // and this call.
-                        if let Some(ref mstore) = wstore_wait {
+                        if let Some(ref mstore) = mstore_wait {
                             super::session_recovery::clear_active_pid_if_pid(mstore, &block_id_wait, pid_wait);
                         }
                     }
@@ -3765,7 +3765,7 @@ impl PersistentSubprocessController {
                                 // than on which arm produced it, so it stays
                                 // correct if that ever changes.
                                 if matches!(outcome, persistent_resume::SessionOutcome::Resumed) {
-                                    if let Some(ref store) = wstore_wait {
+                                    if let Some(ref store) = mstore_wait {
                                         super::session_recovery::clear_resume_failed(
                                             store,
                                             &event_bus_wait,
@@ -3813,7 +3813,7 @@ impl PersistentSubprocessController {
                                 // FireRetry below, which must stay invisible to
                                 // the user).
                                 if let Some(failure) = classify_exit_line(Some(exit_code), &line) {
-                                    core::persist_last_failure(&block_id_wait, Some(&failure), &wstore_wait, &event_bus_wait);
+                                    core::persist_last_failure(&block_id_wait, Some(&failure), &mstore_wait, &event_bus_wait);
                                     if let Some(ref broker) = broker_wait {
                                         broker.publish(mps::MuxEvent {
                                             event: mps::EVENT_AGENT_FAILURE.to_string(),
@@ -4158,7 +4158,7 @@ impl PersistentSubprocessController {
                         // above was read once under the lock, and a fallback
                         // respawn's re-registration can land between that
                         // read and this call.
-                        if let Some(ref mstore) = wstore_wait {
+                        if let Some(ref mstore) = mstore_wait {
                             super::session_recovery::clear_active_pid_if_pid(mstore, &block_id_wait, pid_wait);
                         }
                     }

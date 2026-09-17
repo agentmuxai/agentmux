@@ -38,7 +38,7 @@ use crate::state::{BlockRecord, State, TabRecord, WindowRecord, WorkspaceRecord}
 /// independent — a workspace-load failure does not prevent the tab
 /// load from being attempted (and vice versa), since pipe commands
 /// later in the session can populate either map.
-pub async fn bootstrap_state_from_wstore(state: &Arc<Mutex<State>>, mstore: &Store) {
+pub async fn bootstrap_state_from_mstore(state: &Arc<Mutex<State>>, mstore: &Store) {
     let workspaces = mstore.get_all::<Workspace>().unwrap_or_else(|e| {
         tracing::warn!(
             target: "srv-persist",

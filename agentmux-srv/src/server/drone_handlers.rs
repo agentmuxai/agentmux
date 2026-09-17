@@ -227,7 +227,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Drain on a background task; on completion, UPDATE
                 // the placeholder row in place.
-                let wstore_for_drain = mstore.clone();
+                let mstore_for_drain = mstore.clone();
                 let broker_for_drain = broker.clone();
                 let run_id_for_drain = run_id.clone();
                 let drone_id_for_drain = drone_id.clone();
@@ -276,7 +276,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 output: output.clone(),
                                 error: error.clone(),
                             };
-                            match wstore_for_drain.drone_run_update(&row) {
+                            match mstore_for_drain.drone_run_update(&row) {
                                 Ok(0) => tracing::warn!(
                                     run_id = %run_id_for_drain,
                                     "drone_run_update: placeholder row missing (race?)"

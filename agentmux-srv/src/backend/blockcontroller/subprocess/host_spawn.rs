@@ -263,7 +263,7 @@ impl SubprocessController {
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
         let inner_read = Arc::clone(&self.inner);
-        let wstore_read = self.mstore.clone();
+        let mstore_read = self.mstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let session_id_field = config.session_id_field.clone();
@@ -308,7 +308,7 @@ impl SubprocessController {
                         // Track session metadata (debounced 1 s).
                         // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
                         // so token_estimate stays consistent across controller types.
-                        stats.record_line(line.len(), &wstore_read);
+                        stats.record_line(line.len(), &mstore_read);
 
                         // Retain the terminal `result` frame for failure
                         // classification.
@@ -352,7 +352,7 @@ impl SubprocessController {
                                         session_id = %sid_string,
                                         "captured session id"
                                     );
-                                    core::persist_session_id(&block_id_read, &sid_string, &wstore_read, &event_bus_read);
+                                    core::persist_session_id(&block_id_read, &sid_string, &mstore_read, &event_bus_read);
                                 }
                             }
                         }
@@ -485,7 +485,7 @@ impl SubprocessController {
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
         let last_inband_error_wait = Arc::clone(&last_inband_error);
-        let wstore_wait = self.mstore.clone();
+        let mstore_wait = self.mstore.clone();
         let event_bus_wait = self.event_bus.clone();
         let lease_store_wait = self.lease_store.clone();
         let claimed_lease_wait = claimed_lease;
@@ -653,7 +653,7 @@ impl SubprocessController {
             core::persist_last_failure(
                 &block_id_wait,
                 run_failure.as_ref(),
-                &wstore_wait,
+                &mstore_wait,
                 &event_bus_wait,
             );
 

@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { wpsReconnectHandler } from "@/app/store/mps";
+import { mpsReconnectHandler } from "@/app/store/mps";
 import { TabClient } from "@/app/store/tabrpcclient";
 import { makeTabRouteId, RpcRouter } from "@/app/store/rpc-router";
 import { getWSServerEndpoint } from "@/util/endpoints";
@@ -32,7 +32,7 @@ function initWshrpc(tabId: string): WSControl {
     addWSReconnectHandler(() => {
         DefaultRouter.reannounceRoutes();
     });
-    addWSReconnectHandler(wpsReconnectHandler);
+    addWSReconnectHandler(mpsReconnectHandler);
     return globalWS;
 }
 

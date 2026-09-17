@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Store: generic OID-based CRUD for StoreObj types.
-//! Port of Go's pkg/mstore/wstore_dbops.go + wstore_dbsetup.go.
+//! Port of Go's pkg/mstore/mstore_dbops.go + mstore_dbsetup.go.
 //!
 //! Uses `Mutex<Connection>` matching Go's `MaxOpenConns(1)`.
 //! SQLite WAL mode + 5s busy timeout (same as Go).

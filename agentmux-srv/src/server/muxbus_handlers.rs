@@ -58,12 +58,12 @@ struct MuxBusStatusResp {
 
 pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // muxbus.login — PKCE browser flow, returns when browser login completes
-    let wstore_login = state.id_store.clone();
+    let mstore_login = state.id_store.clone();
     let http_client_login = state.http_client.clone();
     engine.register_handler(
         COMMAND_MUXBUS_LOGIN,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_login.clone();
+            let mstore = mstore_login.clone();
             let http = http_client_login.clone();
             Box::pin(async move {
                 let req: MuxBusLoginReq = serde_json::from_value(data)
@@ -164,11 +164,11 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // muxbus.status — return current credential state
-    let wstore_status = state.id_store.clone();
+    let mstore_status = state.id_store.clone();
     engine.register_handler(
         COMMAND_MUXBUS_STATUS,
         Box::new(move |_data, _ctx| {
-            let mstore = wstore_status.clone();
+            let mstore = mstore_status.clone();
             Box::pin(async move {
                 // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
                 // HostPopover.tsx` mounts globally and polls this handler on
@@ -228,11 +228,11 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // muxbus.disconnect — clear credentials
-    let wstore_disconnect = state.id_store.clone();
+    let mstore_disconnect = state.id_store.clone();
     engine.register_handler(
         COMMAND_MUXBUS_DISCONNECT,
         Box::new(move |_data, _ctx| {
-            let mstore = wstore_disconnect.clone();
+            let mstore = mstore_disconnect.clone();
             Box::pin(async move {
                 // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
                 // synchronous OS-keychain delete, same concern as every

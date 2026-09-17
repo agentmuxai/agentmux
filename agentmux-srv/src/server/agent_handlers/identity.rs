@@ -381,12 +381,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ── Armory service OAuth (scaffold) ──
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
-    let oauth_wstore = state.id_store.clone();
+    let oauth_mstore = state.id_store.clone();
     let oauth_identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_OAUTH_START,
         Box::new(move |data, _ctx| {
-            let mstore = oauth_wstore.clone();
+            let mstore = oauth_mstore.clone();
             let identity_store = oauth_identity_store.clone();
             Box::pin(async move {
                 let req: OAuthStartReq = serde_json::from_value(data)

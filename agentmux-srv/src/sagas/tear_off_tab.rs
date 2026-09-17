@@ -191,7 +191,7 @@ mod tests {
         )
         .await;
         for ev in &ws_events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         let ws_id = ws_events
             .iter()
@@ -211,7 +211,7 @@ mod tests {
             )
             .await;
             for ev in &tab_events {
-                crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+                crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
             }
             tab_ids.push(
                 tab_events
@@ -261,7 +261,7 @@ mod tests {
         )
         .await;
         for ev in &ws_events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         let ws_id = ws_events
             .iter()
@@ -279,7 +279,7 @@ mod tests {
         )
         .await;
         for ev in &tab_events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         let only_tab = tab_events
             .iter()

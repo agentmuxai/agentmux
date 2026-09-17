@@ -79,12 +79,12 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Container agents: docker exec <container> sh -c <cmd> via bollard.
     //                   The host cmd:cwd is not valid inside the container — the
     //                   command runs in the container's own working directory.
-    let wstore_se = state.mstore.clone();
+    let mstore_se = state.mstore.clone();
     let container_manager = state.container_manager.clone();
     engine.register_handler(
         COMMAND_SHELL_EXEC,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_se.clone();
+            let mstore = mstore_se.clone();
             let cm_opt = container_manager.clone();
             Box::pin(async move {
                 let cmd: CommandShellExecData = serde_json::from_value(data)

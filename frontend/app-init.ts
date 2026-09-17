@@ -1107,7 +1107,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     loadAllWorkspaceTabs(ws);
-    MOS.wpsSubscribeToObject(MOS.makeORef("workspace", muxWindow.workspaceid));
+    MOS.mpsSubscribeToObject(MOS.makeORef("workspace", muxWindow.workspaceid));
     tlog("loadAllWorkspaceTabs", t);
 
     installWindowTitleEffect(initOpts.windowId);

@@ -15,12 +15,12 @@ use super::super::AppState;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // appendagenthistory → append a history entry, broadcast agenthistory:changed
-    let wstore_afh = state.mstore.clone();
+    let mstore_afh = state.mstore.clone();
     let broker_afh = state.broker.clone();
     engine.register_handler(
         COMMAND_APPEND_AGENT_HISTORY,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_afh.clone();
+            let mstore = mstore_afh.clone();
             let broker = broker_afh.clone();
             Box::pin(async move {
                 let cmd: CommandAppendAgentHistoryData = serde_json::from_value(data)
@@ -40,11 +40,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // listagenthistory → return history entries with pagination
-    let wstore_lfh = state.mstore.clone();
+    let mstore_lfh = state.mstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_HISTORY,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_lfh.clone();
+            let mstore = mstore_lfh.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentHistoryData = serde_json::from_value(data)
                     .map_err(|e| format!("listagenthistory: {e}"))?;
@@ -60,11 +60,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // searchagenthistory → search history entries by query
-    let wstore_sfh = state.mstore.clone();
+    let mstore_sfh = state.mstore.clone();
     engine.register_handler(
         COMMAND_SEARCH_AGENT_HISTORY,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_sfh.clone();
+            let mstore = mstore_sfh.clone();
             Box::pin(async move {
                 let cmd: CommandSearchAgentHistoryData = serde_json::from_value(data)
                     .map_err(|e| format!("searchagenthistory: {e}"))?;

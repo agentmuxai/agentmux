@@ -10,7 +10,7 @@ use crate::backend::wcore;
 
 use super::super::AppState;
 use super::reducer_helpers::{
-    compensate_via_reducer, dispatch_to_reducer, publish_events, wstore_workspace_exists,
+    compensate_via_reducer, dispatch_to_reducer, publish_events, mstore_workspace_exists,
 };
 
 pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
@@ -35,7 +35,7 @@ pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType
     // persisted (codex P2 #615).
     let mut apply_err: Option<String> = None;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             apply_err = Some(e.to_string());
             break;
         }
@@ -124,7 +124,7 @@ pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType
     // SQLite). The saga runs its own existence check; we mirror
     // the legacy NotFound semantics here for backward-compat
     // error messages.
-    let exists_in_wstore = match wstore_workspace_exists(store, &ws_id) {
+    let exists_in_mstore = match mstore_workspace_exists(store, &ws_id) {
         Ok(v) => v,
         Err(e) => {
             return WebReturnType::error(format!(
@@ -133,7 +133,7 @@ pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType
             ))
         }
     };
-    if !exists_in_wstore {
+    if !exists_in_mstore {
         let exists_in_state = state
             .srv_state
             .lock()
@@ -183,7 +183,7 @@ pub(crate) async fn handle_update_workspace(state: &AppState, call: &WebCallType
         return WebReturnType::error(err_msg);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "UpdateWorkspace: SQLite write failed: {}",
                 e

@@ -42,11 +42,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // user-owned definitions are unaffected (their `user_hidden` is
     // always 0 by backend invariant; `agent_def_set_hidden` rejects
     // non-template ids).
-    let wstore_lfa = state.mstore.clone();
+    let mstore_lfa = state.mstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENTS,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_lfa.clone();
+            let mstore = mstore_lfa.clone();
             Box::pin(async move {
                 // unwrap_or_default — both `null` and `{}` deserialize
                 // to the default (no filter). Anything malformed falls
@@ -79,13 +79,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // createagent → insert new agent, broadcast agents:changed
-    let wstore_cfa = state.mstore.clone();
+    let mstore_cfa = state.mstore.clone();
     let id_store_cfa = state.id_store.clone();
     let broker_cfa = state.broker.clone();
     engine.register_handler(
         COMMAND_CREATE_AGENT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_cfa.clone();
+            let mstore = mstore_cfa.clone();
             let id_store = id_store_cfa.clone();
             let broker = broker_cfa.clone();
             Box::pin(async move {
@@ -170,12 +170,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // updateagent → update existing agent, broadcast agents:changed
-    let wstore_ufa = state.mstore.clone();
+    let mstore_ufa = state.mstore.clone();
     let broker_ufa = state.broker.clone();
     engine.register_handler(
         COMMAND_UPDATE_AGENT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_ufa.clone();
+            let mstore = mstore_ufa.clone();
             let broker = broker_ufa.clone();
             Box::pin(async move {
                 let cmd: CommandUpdateAgentDefinitionData = serde_json::from_value(data)
@@ -290,13 +290,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // deleteagent → delete agent by id, broadcast agents:changed
-    let wstore_dfa = state.mstore.clone();
+    let mstore_dfa = state.mstore.clone();
     let broker_dfa = state.broker.clone();
     let identity_store_dfa = state.identity_store.clone();
     engine.register_handler(
         COMMAND_DELETE_AGENT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_dfa.clone();
+            let mstore = mstore_dfa.clone();
             let broker = broker_dfa.clone();
             let identity_store = identity_store_dfa.clone();
             Box::pin(async move {
@@ -339,11 +339,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // getagentcontent → return a single content blob for an agent
-    let wstore_gfc = state.mstore.clone();
+    let mstore_gfc = state.mstore.clone();
     engine.register_handler(
         COMMAND_GET_AGENT_CONTENT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_gfc.clone();
+            let mstore = mstore_gfc.clone();
             Box::pin(async move {
                 let cmd: CommandGetAgentContentData = serde_json::from_value(data)
                     .map_err(|e| format!("getagentcontent: {e}"))?;
@@ -355,12 +355,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // setagentcontent → upsert a content blob, broadcast agentcontent:changed
-    let wstore_sfc = state.mstore.clone();
+    let mstore_sfc = state.mstore.clone();
     let broker_sfc = state.broker.clone();
     engine.register_handler(
         COMMAND_SET_AGENT_CONTENT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_sfc.clone();
+            let mstore = mstore_sfc.clone();
             let broker = broker_sfc.clone();
             Box::pin(async move {
                 let cmd: CommandSetAgentContentData = serde_json::from_value(data)
@@ -389,11 +389,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // getallagentcontent → return all content blobs for an agent
-    let wstore_gafc = state.mstore.clone();
+    let mstore_gafc = state.mstore.clone();
     engine.register_handler(
         COMMAND_GET_ALL_AGENT_CONTENT,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_gafc.clone();
+            let mstore = mstore_gafc.clone();
             Box::pin(async move {
                 let cmd: CommandGetAllAgentContentData = serde_json::from_value(data)
                     .map_err(|e| format!("getallagentcontent: {e}"))?;
@@ -407,13 +407,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ── Agent Import handler ───────────────────────────────────────────────
 
     // importagentfromclaw → read claw workspace, create agent + content
-    let wstore_ifc = state.mstore.clone();
+    let mstore_ifc = state.mstore.clone();
     let id_store_ifc = state.id_store.clone();
     let broker_ifc = state.broker.clone();
     engine.register_handler(
         COMMAND_IMPORT_AGENT_FROM_CLAW,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_ifc.clone();
+            let mstore = mstore_ifc.clone();
             let id_store = id_store_ifc.clone();
             let broker = broker_ifc.clone();
             Box::pin(async move {
@@ -522,12 +522,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // reseedagents → delete all seeded agents and re-run seed from manifest
-    let wstore_rsfa = state.mstore.clone();
+    let mstore_rsfa = state.mstore.clone();
     let broker_rsfa = state.broker.clone();
     engine.register_handler(
         COMMAND_RESEED_AGENTS,
         Box::new(move |_data, _ctx| {
-            let mstore = wstore_rsfa.clone();
+            let mstore = mstore_rsfa.clone();
             let broker = broker_rsfa.clone();
             Box::pin(async move {
                 // Delete all previously seeded agents (cascade deletes content, skills, history)
@@ -555,13 +555,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // importagents — bulk import from JSON export format
-    let wstore_ifa = state.mstore.clone();
+    let mstore_ifa = state.mstore.clone();
     let id_store_ifa = state.id_store.clone();
     let broker_ifa = state.broker.clone();
     engine.register_handler(
         COMMAND_IMPORT_AGENTS,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_ifa.clone();
+            let mstore = mstore_ifa.clone();
             let id_store = id_store_ifa.clone();
             let broker = broker_ifa.clone();
             Box::pin(async move {
@@ -684,12 +684,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // exportagents — export all agent definitions with content and skills
-    let wstore_efa = state.mstore.clone();
+    let mstore_efa = state.mstore.clone();
     let id_store_efa = state.id_store.clone();
     engine.register_handler(
         COMMAND_EXPORT_AGENTS,
         Box::new(move |_data, _ctx| {
-            let mstore = wstore_efa.clone();
+            let mstore = mstore_efa.clone();
             let id_store = id_store_efa.clone();
             Box::pin(async move {
                 let agents = mstore.agent_def_list()

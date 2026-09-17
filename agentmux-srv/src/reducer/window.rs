@@ -118,7 +118,7 @@ pub(super) fn handle_switch_workspace(
 /// nothing downstream caught it either). The guard is safe because
 /// `state.windows` reliably mirrors real windows: every runtime
 /// creation goes through `handle_create_window`, and
-/// `persist::bootstrap_state_from_wstore` hydrates pre-existing windows
+/// `persist::bootstrap_state_from_mstore` hydrates pre-existing windows
 /// (including the wcore-seeded first-launch window, created before
 /// hydration runs) at startup. The old "wcore-direct paths won't appear
 /// here" caveat this comment used to carry predates that hydration.

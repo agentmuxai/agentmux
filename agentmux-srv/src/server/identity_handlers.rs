@@ -175,7 +175,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
     let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
-    let wstore_for_ensure_dir = mstore.clone();
+    let mstore_for_ensure_dir = mstore.clone();
     engine.register_handler(
         COMMAND_AUTH_START,
         Box::new(move |data, _ctx| {
@@ -344,7 +344,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
     engine.register_handler(
         COMMAND_ENSURE_ACCOUNT_DIR,
         Box::new(move |data, _ctx| {
-            let mstore = wstore_for_ensure_dir.clone();
+            let mstore = mstore_for_ensure_dir.clone();
             Box::pin(async move {
                 let req: EnsureAccountDirReq = serde_json::from_value(data)
                     .map_err(|e| format!("identity.ensureaccountdir: {e}"))?;

@@ -803,7 +803,7 @@ impl Controller for ShellController {
         }
         tracing::info!(
             block_id = %self.block_id,
-            wstore_present = self.mstore.is_some(),
+            mstore_present = self.mstore.is_some(),
             event_bus_present = self.event_bus.is_some(),
             "[dnd-debug] pre-seed state after spawn"
         );
@@ -1068,7 +1068,7 @@ impl Controller for ShellController {
         // For the agent-lease release below: clearing the `term:agentlockuntil`
         // meta copy (not just the in-memory registry) needs both, since that
         // is what the frontend's own gate reads.
-        let wstore_wait = self.mstore.clone();
+        let mstore_wait = self.mstore.clone();
         let event_bus_wait = self.event_bus.clone();
         let run_lock = Arc::clone(&self.run_lock);
         // Async outer task, not a bare spawn_blocking (reagentx P1 on PR
@@ -1284,7 +1284,7 @@ impl Controller for ShellController {
                 release_lease_if_current(
                     &block_id_wait,
                     &inner_wait,
-                    &wstore_wait,
+                    &mstore_wait,
                     &event_bus_wait,
                 );
 

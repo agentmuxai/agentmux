@@ -1552,12 +1552,12 @@ async fn window_name_malformed_id_is_400() {
 
 /// Happy path: renaming the seeded window succeeds and persists
 /// `window:displayname` in mstore. srv_state is hydrated from mstore via
-/// the same `bootstrap_state_from_wstore` production runs, so the new
+/// the same `bootstrap_state_from_mstore` production runs, so the new
 /// reducer existence guard sees the seeded window exactly as it would live.
 #[tokio::test]
 async fn window_name_renames_seeded_window_and_persists() {
     let state = test_state();
-    crate::persist::bootstrap_state_from_wstore(&state.srv_state, &state.mstore).await;
+    crate::persist::bootstrap_state_from_mstore(&state.srv_state, &state.mstore).await;
     let mstore = state.mstore.clone();
     let window = mstore
         .get_all::<crate::backend::obj::Window>()
@@ -1615,7 +1615,7 @@ async fn update_object_layout_push_single_write_and_coherent_reducer() {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -1768,7 +1768,7 @@ async fn update_object_layout_parse_failure_falls_back_with_focus_dispatch() {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -1862,7 +1862,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -2008,7 +2008,7 @@ async fn layout_stays_coherent_across_full_mutation_lifecycle() {
             events
         );
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }

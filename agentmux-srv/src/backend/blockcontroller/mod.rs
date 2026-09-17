@@ -603,7 +603,7 @@ pub fn resync_controller(
     tracing::info!(
         block_id = %block_id,
         controller_type = %controller_type,
-        wstore_present = mstore.is_some(),
+        mstore_present = mstore.is_some(),
         event_bus_present = event_bus.is_some(),
         force,
         "[dnd-debug] resync_controller entry"

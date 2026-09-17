@@ -96,7 +96,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
             }
             for ev in &ws_events {
                 if let Err(e) =
-                    crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
                 {
                     return WebReturnType::error(format!(
                         "CreateWindow: SQLite write failed: {}",
@@ -141,14 +141,14 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 )
                 .await;
                 for ev in &comp {
-                    let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                    let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
                 }
                 publish_events(state, &comp);
                 return WebReturnType::error(err_msg);
             }
             for ev in &tab_events {
                 if let Err(e) =
-                    crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                    crate::persist_subscriber::apply_event_to_mstore(ev, store)
                 {
                     return WebReturnType::error(format!(
                         "CreateWindow: SQLite write failed: {}",
@@ -227,7 +227,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     }
                     for ev in &evs {
                         if let Err(e) =
-                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                            crate::persist_subscriber::apply_event_to_mstore(ev, store)
                         {
                             tracing::warn!(
                                 tab_id = %new_tab_id,
@@ -337,14 +337,14 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
             )
             .await;
             for ev in &comp {
-                let _ = crate::persist_subscriber::apply_event_to_wstore(ev, store);
+                let _ = crate::persist_subscriber::apply_event_to_mstore(ev, store);
             }
             publish_events(state, &comp);
         }
         return WebReturnType::error(err_msg);
     }
     for ev in &win_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             return WebReturnType::error(format!(
                 "CreateWindow: SQLite write failed: {}",
                 e
@@ -385,7 +385,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
         )
         .await;
         for ev in &evs {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                 tracing::warn!(
                     window_id = %window_id,
                     error = %e,

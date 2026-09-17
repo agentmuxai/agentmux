@@ -323,7 +323,7 @@ async fn dispatch_inverse(state: &AppState, cmd: Command) -> Result<Vec<Event>, 
         return Err(message);
     }
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore) {
             return Err(format!("mstore apply failed: {}", e));
         }
     }

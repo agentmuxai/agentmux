@@ -49,7 +49,7 @@ pub(crate) async fn compensate_via_reducer(
 ) {
     let events = dispatch_to_reducer(state, cmd).await;
     for ev in &events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
             tracing::warn!(
                 "compensation: SQLite cleanup failed for event {:?}: {}",
                 std::mem::discriminant(ev),
@@ -112,7 +112,7 @@ pub(crate) async fn seed_layout_via_reducer(
             .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
         if !has_error {
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     apply_err = Some(e.to_string());
                     break;
                 }
@@ -128,7 +128,7 @@ pub(crate) async fn seed_layout_via_reducer(
                 };
                 let rb_events = crate::reducer::update(&mut s, rollback, &ctx);
                 for ev in &rb_events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                         tracing::warn!(
                             error = %e,
                             "seed_layout_via_reducer: rollback SQLite mirror failed"
@@ -195,7 +195,7 @@ pub(crate) async fn queue_layout_actions_via_reducer(
             .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
         if !has_error {
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     apply_err = Some(e.to_string());
                     break;
                 }
@@ -225,7 +225,7 @@ pub(crate) async fn queue_layout_actions_via_reducer(
 /// led to silent successes when SQLite was unhealthy: reducer would
 /// delete its own copy and report success while the disk row was
 /// never touched).
-pub(crate) fn wstore_workspace_exists(
+pub(crate) fn mstore_workspace_exists(
     store: &Store,
     workspace_id: &str,
 ) -> Result<bool, StoreError> {

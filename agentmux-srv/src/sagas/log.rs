@@ -15,7 +15,7 @@
 // reducer's persistence path. (The two-store atomicity concern from
 // spec §2.1 is not load-bearing for PR 1; saga steps are written
 // after the reducer-emitted event has already been applied to
-// mstore by `apply_event_to_wstore`. Compensate-on-restart in PR 2
+// mstore by `apply_event_to_mstore`. Compensate-on-restart in PR 2
 // will reconcile any divergence by walking succeeded steps in
 // reverse.)
 //
