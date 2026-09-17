@@ -100,9 +100,26 @@ architectural decision — that needs a repo-owner call before anyone builds it.
 ### 2.3 Architecture refactor A1–A15 (#1549) — 13.5 of 15 ✅ **[verified]**
 
 - **A9 — done.** PR #3044 routed the 11 raw dispatches and added a guard test.
-- **A6 — half done.** PR #3054 killed the `AgentAtoms` mirror; `model.state`/`model.document`
-  are now the single reactive source, pinned by `agent-pane-view.test.ts`. The remaining half
-  (scroll/expansion unification) moved to `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`.
+- **A6 — done in substance; the "remaining half" was itself mostly already shipped.**
+  PR #3054 killed the `AgentAtoms` mirror; `model.state`/`model.document` are the single
+  reactive source, pinned by `agent-pane-view.test.ts`. This report previously described the
+  other half as "scroll/expansion unification, moved to
+  `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`", which implied that whole spec was pending.
+
+  **Re-verified against code 2026-09-17: it was not.** Of that spec's five phases, four had
+  shipped — Phase 3 (slice owns positions, TanStack retired) on **2026-06-05 in #1270**,
+  three days after the spec was written, and Phase 4 in #1281. Only Phase 1 remains, and it
+  reduces to **one component-local signal** (`MarkdownBlock.expanded`); the spec's other
+  named sources are either already routed, deleted, or out of scope by its own §3.4.
+
+  Why this was missed: that spec's `**Status:**` line still read *"Phase 0 implemented …
+  no render-path wiring yet"*. It was wrong for fifteen months, and this audit trusted it.
+  See §3.1.
+
+  Also note A6's own title — "collapse agent-pane 4 parallel state systems" — is misleading
+  today. The four surviving files are `agent-model`, `agent-mcp-model`, `agent-skill-model`
+  and `agent-native-memory-model`: four **different domains**, not four parallel systems for
+  the same state. The genuinely parallel thing was the mirror, and #3054 removed it.
 - **A10 — re-verified 2026-09-17, and the issue's own framing is slightly off.** It reads
   "consolidate data-dir resolution onto `DataPaths`", which implies duplicated resolution
   logic. There is not much: `agentmux-launcher`'s `DataPaths` is a documented compat shape
@@ -172,6 +189,45 @@ implemented) returned **32 candidates**. Four were verified individually; three 
 definitively wrong and are corrected here (§4).
 
 This should be institutionalised rather than repeated by hand — §5.6.
+
+---
+
+### 3.1 The status-line trap — the sharpest instance of §3, found by falling into it
+
+§3 catalogues docs that describe the past. This one is worth its own entry because of *how*
+it misleads and *how cheap* the defence is.
+
+`SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` carried:
+
+> **Status:** Design resolved (§11); **Phase 0 implemented** — pure slice core + store + tests (no render-path wiring yet)
+
+Phase 3 landed three days later (#1270, 2026-06-05) and retired TanStack outright. The
+status line was never touched. Fifteen months on, **two independent readers took it at face
+value** — this report's own §2.3, and then a 2026-09-17 scoping pass that went as far as
+producing an ROI argument and a phase-by-phase work estimate for three phases that were
+already shipped. The error was only caught by running `grep -n tanstack package.json` and
+finding nothing.
+
+**Why the existing instrumentation cannot catch this.** `check-doc-status.sh` enforces the
+Status *vocabulary* (the closed enum) and that a `superseded` pointer resolves. Neither rule
+asks whether the status is TRUE, and no cheap rule can — truth here means "compare the
+document's claim to the shipped code", which is a judgement, not a grep.
+
+**The defence that does work, and costs nothing:** a spec that lists migration phases should
+record, per phase, **how to verify its state in one command** — not a single status line at
+the top. That spec now does:
+
+| phase | verify |
+|---|---|
+| 0 | `ls frontend/app/store/agent-pane-layout/` |
+| 2 | `grep -n "RowMeasured\|EstimateSet" …/AgentDocumentVirtualList.tsx` |
+| 3 | `grep -n tanstack package.json` returns nothing |
+
+**The rule for readers, which is the transferable part:** *a status line is the
+least-maintained line in any document and the first one a reader trusts.* Before planning
+work off a spec, check the artifact — the dependency, the exported symbol, the call site.
+It costs one command. Both times it was skipped here, the estimate was wrong by most of the
+work.
 
 ---
 
@@ -624,8 +680,11 @@ named code artifact” is necessary but not sufficient — the artifact has to c
 
 ### 5.8 `agent-view.tsx` 🟡
 
-3,017 lines and growing through the refactor meant to shrink it. A6's remaining half is tracked
-in `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`; nothing caps the file's growth meanwhile.
+**2,980 lines** as of 2026-09-17 — down 37 from the 3,017 this report first recorded, so it
+has stopped climbing, but that is a plateau and not evidence the underlying pressure is
+resolved. A6's genuinely-remaining work is Phase 1 of
+`SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md` (one signal — see §2.3); nothing caps the
+file's growth meanwhile.
 
 ---
 
