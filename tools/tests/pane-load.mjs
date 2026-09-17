@@ -31,9 +31,25 @@
 //                                       repaint work per frame
 //   spinner  many tiny writes         → per-write/per-frame overhead: WS
 //                                       frames, event dispatch, the coalescing
-//                                       path (PTY_COALESCE_WINDOW)
+//                                       path (PTY_COALESCE_WINDOW) — ONLY at
+//                                       --unpaced or a --throttle-ms tuned to
+//                                       exceed it; see the note below
 //   mixed    rotates all three        → default; use it to find out IF it
 //                                       reproduces, then narrow with one mode
+//
+// SPINNER'S CLAIM NEEDS A CAVEAT (Codex P2 on PR #3286). The backend's own
+// output flusher (`run_pty_output_flusher`, `shell/lifecycle.rs`) coalesces
+// PTY reads for up to `PTY_COALESCE_WINDOW` (20ms) or `PTY_COALESCE_MAX_BYTES`
+// (256 KiB), whichever comes first, before broadcasting even one WS frame.
+// At this script's DEFAULT auto-paced rate (~6.4 MB/s), every mode stays well
+// under that byte threshold, so the 20ms window is what triggers each flush —
+// meaning text, paint, and spinner all produce roughly the SAME downstream
+// broadcast rate regardless of how many tiny writes spinner made to get
+// there. The "many small writes" story is real on the PRODUCER side (this
+// process's own writes to the PTY) but does not by itself prove anything
+// about WS-frame count downstream unless the write rate is fast enough to
+// blow through the coalescing window — i.e. `--unpaced`, or a `--throttle-ms`
+// picked deliberately low enough to matter, not the default.
 //
 // Usage (inside a terminal pane, or an agent pane's shell drawer):
 //
@@ -110,6 +126,15 @@ if (!Number.isFinite(SECS) || SECS <= 0) {
     process.stderr.write(`pane-load: --secs must be a positive number\n`);
     process.exit(2);
 }
+// ReAgent P1 on PR #3286: an unvalidated --max-mb defeats the disk-safety
+// valve silently rather than loudly. A non-numeric value makes maxBytes NaN,
+// and `bytes >= NaN` is always false in JS — so the cap this flag exists to
+// enforce would simply never fire, for exactly the failure mode (bad/typo'd
+// argument) a safety valve is supposed to catch.
+if (!Number.isFinite(MAX_MB) || MAX_MB <= 0) {
+    process.stderr.write(`pane-load: --max-mb must be a positive number\n`);
+    process.exit(2);
+}
 
 const ESC = "\x1b[";
 const COLORS = [31, 32, 33, 34, 35, 36, 91, 92, 93, 94, 95, 96];
@@ -163,7 +188,21 @@ function spinnerFrame(n) {
     return `\r${ESC}${COLORS[n % COLORS.length]}m${glyph} [${bar}] ${String(pct).padStart(3)}%${ESC}0m`;
 }
 
-function frameFor(mode, n) {
+// Rotation period for `mixed` mode, in wall-clock ms — see `frameFor` below
+// for why this has to be TIME, not a frame count.
+const MIXED_ROTATE_MS = 2000;
+// The concrete load shapes `mixed` cycles through — deliberately NOT
+// `VALID_MODES` (which also contains `"mixed"` itself, for CLI validation).
+// `% VALID_MODES.length` was briefly tried and is a real bug, not a style
+// choice: its length is 4, so one rotation index in four selects `"mixed"`,
+// which recurses into `frameFor` with the SAME `elapsedMs` it was just
+// called with — landing on index 3 again, forever. Caught by actually
+// running the rotation with debug counters instead of trusting the diff;
+// it manifests as a synchronous infinite recursion (stack overflow), not a
+// subtle imbalance.
+const MIXED_ROTATION_MODES = ["text", "paint", "spinner"];
+
+function frameFor(mode, n, elapsedMs) {
     switch (mode) {
         case "text":
             return textFrame(n);
@@ -171,11 +210,22 @@ function frameFor(mode, n) {
             return paintFrame(n);
         case "spinner":
             return spinnerFrame(n);
-        default:
-            // Rotate in blocks rather than per-frame, so each class gets a
-            // sustained run — a single stuttering frame among three is not
-            // something a human can attribute, but a second of each is.
-            return frameFor(VALID_MODES[Math.floor(n / 120) % 3], n);
+        default: {
+            // Codex P2 on PR #3286: this used to rotate every 120 FRAMES,
+            // not every fixed time interval — and frame cost varies by two
+            // orders of magnitude across modes (a spinner frame is ~20
+            // bytes; a paint frame redraws the whole terminal). At the
+            // default auto-paced rate, 120 spinner frames complete in well
+            // under a millisecond while 120 paint frames take tens of
+            // milliseconds, so "mixed" spent almost no time actually
+            // applying spinner-shaped load — directly contradicting this
+            // function's own former doc comment, which promised each class
+            // "a sustained run" ("a second of each"). Rotating on elapsed
+            // wall-clock time instead gives every class the same real
+            // duration regardless of how cheap or expensive its frames are.
+            const modeIdx = Math.floor(elapsedMs / MIXED_ROTATE_MS) % MIXED_ROTATION_MODES.length;
+            return frameFor(MIXED_ROTATION_MODES[modeIdx], n, elapsedMs);
+        }
     }
 }
 
@@ -213,7 +263,7 @@ async function main() {
             cappedEarly = true;
             break;
         }
-        const frame = frameFor(MODE, n++);
+        const frame = frameFor(MODE, n++, Date.now() - started);
         const pending = write(frame);
         bytes += Buffer.byteLength(frame);
         writes++;
@@ -233,7 +283,16 @@ async function main() {
         `${ESC}0m\npane-load: FLOOD END${tag}\n` +
             `pane-load: ${mb.toFixed(1)} MB in ${elapsed.toFixed(1)}s ` +
             `(${(mb / elapsed).toFixed(2)} MB/s), ` +
-            `${writes.toLocaleString()} writes (${Math.round(writes / elapsed).toLocaleString()}/s)\n`
+            `${writes.toLocaleString()} writes (${Math.round(writes / elapsed).toLocaleString()}/s)\n` +
+            // ReAgent P2 on PR #3286: cappedEarly was computed and then never
+            // read — losing exactly the diagnostic this tool's own README
+            // verification relied on to tell "ran the full window" apart from
+            // "hit the disk cap and stopped short".
+            (cappedEarly
+                ? `pane-load: STOPPED EARLY at the ${MAX_MB} MB cap — the flood ran ` +
+                  `${elapsed.toFixed(1)}s of the requested ${SECS}s. For a longer typing window, ` +
+                  `throttle (--throttle-ms 1) rather than raising --max-mb: same stutter, far less disk.\n`
+                : "")
     );
 }
 

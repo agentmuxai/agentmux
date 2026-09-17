@@ -110,8 +110,18 @@ different mechanism, so narrowing tells you where to look:
 |---|---|---|
 | `text` | bulk bytes, moderate writes | WS egress, FileStore write-through, xterm raw parse |
 | `paint` | bulk escape sequences | xterm parser + renderer; real repaint work per frame |
-| `spinner` | many tiny writes | per-write overhead: WS frames, event dispatch, `PTY_COALESCE_WINDOW` |
+| `spinner` | many tiny writes | per-write overhead: WS frames, event dispatch, `PTY_COALESCE_WINDOW` — **only past the coalescing window, see below** |
 | `mixed` | rotates all three | default — find out *if* it reproduces, then narrow |
+
+**Spinner's claim needs a caveat at the default pacing.** The backend batches
+PTY reads for up to `PTY_COALESCE_WINDOW` (20ms) or 256 KiB before sending even
+one WS frame downstream. At this script's default auto-paced rate (~6.4 MB/s),
+every mode stays under that byte threshold, so all three end up flushing on the
+same 20ms clock regardless of how many tiny writes spinner made getting there
+— the "many small writes" story is real on the *producer* side but proves
+nothing about downstream WS-frame count unless the write rate is fast enough
+to blow through that window. Use `--unpaced`, or a `--throttle-ms` picked
+deliberately low, if you actually want to isolate that layer.
 
 **Why not just `yes`:** `bench-term-cross-pane.mjs` floods with `yes` — a
 stream of `y
