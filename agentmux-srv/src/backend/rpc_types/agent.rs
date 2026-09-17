@@ -598,21 +598,28 @@ pub struct CommandDeleteAgentSkillData {
 // ---- Agent History command data types ----
 
 /// Input for appendagenthistory
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAppendAgentHistoryData {
     pub agent_id: String,
     pub entry: String,
 }
 
 /// Input for listagenthistory
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListAgentHistoryData {
     pub agent_id: String,
     #[serde(default)]
+    #[ts(optional)]
     pub session_date: Option<String>,
+    /// `serde(default)` -> 50, which ts-rs cannot express on a non-`Option`
+    /// field; the stub derives `ListAgentHistoryInput` to restore it.
     #[serde(default = "default_history_limit")]
+    #[ts(type = "number")]
     pub limit: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub offset: i64,
 }
 
@@ -621,11 +628,13 @@ fn default_history_limit() -> i64 {
 }
 
 /// Input for searchagenthistory
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandSearchAgentHistoryData {
     pub agent_id: String,
     pub query: String,
     #[serde(default = "default_history_limit")]
+    #[ts(type = "number")]
     pub limit: i64,
 }
 
