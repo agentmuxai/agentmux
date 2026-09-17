@@ -69,8 +69,7 @@ async fn warm_node() {
     // `tokio::process::Command` (unlike `std`'s) `creation_flags` is an
     // inherent method, so importing the extension trait only earns an
     // unused-import warning.
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
     if let Ok(mut child) = cmd.spawn() {
         // Bounded so a pathological runner can't stall the suite here; the
         // caller's own timeout is the one that decides pass/fail.
@@ -97,8 +96,7 @@ fn spawn_node(script: &str, extra_args: &[&str]) -> tokio::process::Child {
     // Match production: suppress console window on Windows
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
     }
 
     cmd.spawn().expect("failed to spawn node — is it on PATH?")

@@ -24,7 +24,7 @@ pub const EVENT_BLOCK_CLOSE: &str = "blockclose";
 pub const EVENT_CONN_CHANGE: &str = "connchange";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
-pub const EVENT_WAVE_OBJ_UPDATE: &str = "waveobj:update";
+pub const EVENT_MUX_OBJ_UPDATE: &str = "waveobj:update";
 pub const EVENT_BLOCK_FILE: &str = "blockfile";
 pub const EVENT_INSTALL_PROGRESS: &str = "install_progress";
 #[allow(dead_code)]
@@ -635,14 +635,14 @@ mod tests {
         broker.subscribe(
             "route-1",
             SubscriptionRequest {
-                event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+                event: EVENT_MUX_OBJ_UPDATE.to_string(),
                 scopes: vec![],
                 allscopes: true,
             },
         );
 
         broker.publish(MuxEvent {
-            event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
             persist: 0,
@@ -663,7 +663,7 @@ mod tests {
         broker.subscribe(
             "route-1",
             SubscriptionRequest {
-                event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+                event: EVENT_MUX_OBJ_UPDATE.to_string(),
                 scopes: vec!["block:abc".to_string()],
                 allscopes: false,
             },
@@ -671,7 +671,7 @@ mod tests {
 
         // Should match
         broker.publish(MuxEvent {
-            event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
             persist: 0,
@@ -680,7 +680,7 @@ mod tests {
 
         // Should NOT match
         broker.publish(MuxEvent {
-            event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec!["block:xyz".to_string()],
             sender: String::new(),
             persist: 0,
@@ -700,14 +700,14 @@ mod tests {
         broker.subscribe(
             "route-1",
             SubscriptionRequest {
-                event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+                event: EVENT_MUX_OBJ_UPDATE.to_string(),
                 scopes: vec!["block:*".to_string()],
                 allscopes: false,
             },
         );
 
         broker.publish(MuxEvent {
-            event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc".to_string()],
             sender: String::new(),
             persist: 0,
@@ -715,7 +715,7 @@ mod tests {
         });
 
         broker.publish(MuxEvent {
-            event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec!["tab:xyz".to_string()],
             sender: String::new(),
             persist: 0,
@@ -1082,14 +1082,14 @@ mod tests {
         broker.subscribe(
             "route-1",
             SubscriptionRequest {
-                event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+                event: EVENT_MUX_OBJ_UPDATE.to_string(),
                 scopes: vec!["**".to_string()],
                 allscopes: false,
             },
         );
 
         broker.publish(MuxEvent {
-            event: EVENT_WAVE_OBJ_UPDATE.to_string(),
+            event: EVENT_MUX_OBJ_UPDATE.to_string(),
             scopes: vec!["block:abc:def".to_string()],
             sender: String::new(),
             persist: 0,

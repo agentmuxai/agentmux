@@ -1,7 +1,9 @@
 # Report: migrations wrap-up — re-verification of the 09-06 audit, ten days on
 
-**Status:** implemented — every doc correction this report recommends for itself
-was made in the same PR (§4). The items in §5 are handed off, not done.
+**Status:** active — living status doc, updated as its own §5 items land. Every doc
+correction it recommends for itself was made in the PR that created it (§4). Since then:
+§5.4 (Wave → Mux, #851) is **done and the issue closed**, and §5.4a records DRY/modularity
+closing four of five causes. Remaining open items are §5.1-5.3 and §5.5-5.9.
 **Date:** 2026-09-16
 **Author:** Manoz (manoz-0803a)
 **Baseline:** `main` @ `65958f84e` (post-v0.56.2)
@@ -121,7 +123,9 @@ sweep did not follow the lift: 29 files still name `CREATE_NO_WINDOW` locally an
 define their own `fn now_ms`", and called it the same "additive half landed, removing half
 skipped" shape. **That was wrong, and it was my own error repeating the DRY audits metric
 without checking what it counted.** Verified directly: exactly ONE `const CREATE_NO_WINDOW`
-exists in the tree (`agentmux-common/src/win32.rs`), zero files re-declare it, and 24 import
+exists in the tree (`agentmux-common/src/win32.rs`) — after this PR also migrated two
+test-local copies in `agentmux-srv/tests/subprocess_io.rs` that an earlier `agentmux-*/src`
+search had missed, because integration tests live outside `src/` (codex P3 on #3291) — and 24 import
 it correctly. The 23 `fn now_ms` "duplicates" are three-line delegators —
 `fn now_ms() -> i64 { agentmux_common::time::now_ms() }` — so the logic exists once and the
 short local call site is deliberate. Counting usages and delegators as duplication overstates
@@ -202,13 +206,118 @@ end to end**, and `persistent.rs` still auto-allows every tool call. This is exa
 the 09-06 audit's closing note described, and it is a security-adjacent surface, which makes it
 the highest-value *functional* item left.
 
-### 5.4 Wave → Mux rename (#851) — decide, don't drift 🔴 **[verified]**
+### 5.4 Wave → Mux rename (#851) — ✅ **DONE 2026-09-16, issue closed**
 
-Open 125 days, zero comments, explicitly deferred the day it was filed. It is **getting worse**:
-`WaveEvent` 223 → **232**, `WaveObjUpdate` 93 → **103**, source files containing any `wave`
-reference 285 → **306**. The audit asked for a decision and none was made. Schedule it or close
-it — an open rename issue signals "we are mid-migration" to every new reader, which is the most
-expensive of the three states.
+*Was:* open 125 days, zero comments, deferred the day it was filed, and measurably getting
+worse (`WaveEvent` 223 → 232, source files containing any `wave` reference 285 → 306).
+This section asked for a schedule-or-close decision. Both halves were answered:
+
+- **#3285 (phase 1)** — every Wave-derived identifier: types, camelCase, Rust snake_case,
+  three file renames, plus 9 dead Wave Terminal AI types deleted.
+- **#3287 (phase 3)** — the abbreviations: `WOS`/`wos` → `MOS`/`mos`, `WPS`/`wps` →
+  `MPS`/`mps`, `wstore` → `mstore`, `gotypes.d.ts` → `srv-types.d.ts`, five module files.
+
+**Result: zero Wave-derived identifiers remain. Source files containing any `wave`
+reference: 306 → 91**, and every one of those 91 is a deliberate string contract.
+
+*This claim was wrong twice before it was right, which is worth recording in full because it
+is the report's own thesis happening to the report.*
+
+- **First version** was produced by patterns matching `Wave[A-Z]`, `<char>Wave[A-Z]` and
+  `wave[A-Z]`. None match SCREAMING_SNAKE, so every `WAVE_*` constant was invisible; and the
+  globs were `agentmux-*/src`, so `agentmux-srv/tests/` was out of scope entirely.
+  (codex P2 on #3291 and #3292.)
+- **Second version** claimed verification "against a case-insensitive sweep" — but that
+  sweep used `[A-Za-z_][A-Za-z0-9_]*[Ww][Aa][Vv][Ee]…`, whose **mandatory leading character**
+  means it cannot match an identifier that *starts* with `WAVE`. So `WAVE_DATA_HOME_ENV`,
+  `WAVE_APP_PATH_ENV`, `WAVE_DEV_ENV`, `WAVE_DEV_VITE_ENV`, `WAVE_JWT_TOKEN_ENV`,
+  `WAVE_SWAP_TOKEN_ENV`, `WAVE_DB_DIR` and the `WAVE_VERSION` OnceLock survived a sweep
+  advertised as exhaustive — in the very file the PR was editing. (reagent P1 on #3292.)
+
+**Verification method, stated so it can be re-run rather than trusted:**
+
+```bash
+grep -rhoE "[A-Za-z0-9_]*[Ww][Aa][Vv][Ee][A-Za-z0-9_]*" \
+  --include=*.rs --include=*.ts --include=*.tsx --include=*.d.ts \
+  agentmux-*/src agentmux-srv/tests frontend | sort -u
+```
+
+The leading quantifier is `*`, not a mandatory character — that single difference is what the
+second version got wrong. Everything it returns is now either a retained string contract or
+the English word "waves" in an audio test.
+
+All thirteen renamed constants keep their string VALUES untouched: `"wave.lock"` is a real
+lockfile on disk, `"waveobj:update"` / `"waveobj:batchedupdates"` are wire events, and the
+rest already read `"AGENTMUX_*"`. One stale comment referencing the renamed `initHostWave`
+was fixed too.
+
+Still deliberately retained, all string contracts rather than branding: `db_wave_file`,
+`waveobj:*` and the `raw_waveobj_update` / `handle_wps_publish` handlers named after the wire
+events they serve, the `__WAVE_SERVER_*_ENDPOINT__` window globals (a host↔renderer contract),
+`getwaveairatelimit`, `--wavedata`, and the `WAVEMUX_AGENT_ID` / `~/.waveterm` /
+`wavepwsh.ps1` legacy trio.
+
+**Phase 2 (the strings) was deliberately NOT done, and the issue is closed saying so.** The
+deciding evidence came from doing phase 3: it shipped a P1 that neither the compiler nor
+2,960 tests caught — the frontend caller kept POSTing to `/agentmux/mps/publish` while srv
+registers `/agentmux/wps/publish`, fire-and-forget, so it 404'd silently and broke
+cross-window singleton coordination. A reviewer caught it. Phase 2 is *entirely* that class
+of change: `"waveobj:update"` (WS discriminator), `db_wave_file` (needs an `ALTER TABLE`
+against real user data), `/agentmux/wps/publish` (needs a compat alias — bashwrap is a
+separate binary invoked from shell-integration scripts on disk), `waveblock` (SCSS lockstep).
+Zero user-visible benefit, no automated safety net, one of them touching persisted data.
+
+Three more must **never** change, being compatibility rather than branding — a naive
+"finish the rename" sweep breaks all of them: `~/.waveterm` (the real legacy directory
+`m0001` migrates users off), `WAVEMUX_AGENT_ID` (documented legacy env fallback, still read),
+`wavepwsh.ps1` (a script filename on disk that user shell profiles reference).
+
+### 5.4a DRY / modularity (row 12) — four of five causes closed or dismissed 🟡
+
+Worked 2026-09-16. Each cause was re-verified against code before acting, and **three of
+the five turned out not to be what the audit's metric implied** — the metric counted named
+causes and raw occurrences rather than actionable duplication.
+
+| Cause | Outcome |
+|---|---|
+| 1. No Rust↔TS codegen | **Template shipped, ~5% migrated** — #3291 merged. See below. |
+| 2. `agentmux-common` underuse | **Done** — #3289. See §2.6's correction. |
+| 3. Platform-forked `zoom.*.ts` | Already done before this report (#3034). |
+| 4. `mcp` ↔ `skill` twin primitives | **Verified real, recommended against.** |
+| 5. Parallel saga/reducer frameworks | **Not duplication.** |
+
+**Cause 1 was mis-framed, and the real gap was sharper.** The audit said "no Rust↔TS
+codegen". In fact `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.4 step 1 had shipped —
+`register_typed`, the `RpcSchema` registry, ts-rs export and `scripts/check-rpc-bindings.sh`
+were all live with 12 generated types. What had not happened is step 2, and specifically:
+**nothing in the frontend imported a single generated type.** All 12 were generated, gated
+against drift, and unused, while the hand-written stubs kept inline duplicates of the same
+shapes — a pipeline built and never connected at the far end. #3291 connects it end to end
+for `voice.checkPath` and gives the remaining 16 stub files a template.
+
+**This is a template, not a completed cause, and the scoreboard says so deliberately.**
+Measured after #3291 merged: **286 hand-written stub functions across 16 files, exactly one of
+which imports a generated type; 14 generated bindings against 195 `rpc_types` structs; 12
+`register_typed` call sites against 232 `register_handler`; `srv-types.d.ts` still 2,755
+hand-maintained lines.** Roughly 5%. The spec's step 2 (migrate domain by domain, deleting
+each stub) and step 3 (delete `rpc-api/` once empty) are essentially untouched, and `agent.ts`
+alone is 466 lines. Counting this cause as "closed" because one command works would be the
+same named-cause-instead-of-work error this report keeps finding elsewhere. (That spec's own
+Status still reads "no generator exists yet" — the same stale-status pattern §0 is about.)
+
+**Cause 4 — real duplication, but abstracting it would be premature.** `McpCatalogModel` and
+`SkillCatalogModel` share 10 method names, and the bodies are near-identical (`saveDraft`
+differs only in the RPC payload and one validation step). But there are exactly **two**
+instances, they already diverge (mcp has catalog-picker methods skill has not), the view
+layer is *already* shared via `PrimitiveListDetail` across 9 files, and a generic base would
+buy ~150 lines while adding indirection to live reactive UI state. `bundle-mcp-model` is not
+a third instance — it binds rather than managing a catalog. Recommend leaving these until a
+genuine third primitive appears.
+
+**Cause 5 — not duplication at all.** The launcher and srv saga/reducer systems share
+exactly one type name (`Ctx`, a generic) and operate on different domains: window
+pools/pipes/respawn versus blocks/tabs/workspaces/layout. The DRY audit's own wording was
+"sharing only vocabulary", which is accurate — it was then scored as a defect anyway.
 
 ### 5.5 Docs status backlog — flat at 357, and already instrumented 🟡 **[verified]**
 
@@ -306,19 +415,40 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟡 **2/5** | codegen; twin primitives; saga/reducer duplication; call-site sweep |
-| 13 | Wave → Mux (#851) | 🔴 | 🔴 **worse** | decide: schedule or close |
+| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~5% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Cause 1 is the one with ongoing cost and it is **286 hand-written stubs across 16 files, 1 of which imports a generated type; 12 `register_typed` vs 232 `register_handler`; `srv-types.d.ts` still 2,755 hand-maintained lines.** §5.4a |
+| 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 
 ---
 
 ## 8. Recommendation
 
-1. **§5.6 — automate the reverse staleness check.** Everything in §2 and §4 was found by one
-   query that nothing runs on a schedule. This is the fix that stops the next audit being needed.
-2. **§5.3 — finish the decision-prompt wiring (#551 / #1469).** The most valuable functional
-   half-migration left, and security-adjacent.
-3. **§5.4 — make the #851 call.** Costs one comment, stops four months of drift.
+**Updated 2026-09-16** as items landed. Original three, with outcomes:
 
-Phase C (§5.1) and ABF §7 are both one-decision-away items owned by the repo owner, not
+1. ~~**§5.6 — automate the reverse staleness check.**~~ **Still the top item, still not done.**
+   Everything in §2 and §4 was found by one query that nothing runs on a schedule, and the
+   pattern kept repeating all day: `SPEC_RPC_BINDINGS_CODEGEN`'s Status still says "no
+   generator exists yet" while its generator, gate and 14 bindings are live (§5.4a). This is
+   the fix that stops the next audit being needed.
+2. **§5.3 — finish the decision-prompt wiring (#551 / #1469).** Unchanged, and now the most
+   valuable functional item left: scaffolding exists, `persistent.rs` still auto-allows every
+   tool call, security-adjacent.
+3. ~~**§5.4 — make the #851 call.**~~ ✅ **Done.** Decided by doing: the identifier half
+   shipped (#3285, #3287), the string half was declined with reasons, and #851 is closed.
+
+Phase C (§5.1) and ABF §7 remain one-decision-away items owned by the repo owner, not
 engineering backlog. Neither should be picked up by an agent unilaterally.
+
+### What the day actually taught
+
+Five separate audit claims were checked against code and **four were wrong in the
+"actually done" or "not really a problem" direction**: mandatory ABF (§2.2), migration
+failure being silent (§2.1), the `agentmux-common` call-site sweep (§2.6's correction), and
+DRY causes 4 and 5 (§5.4a). One was wrong in the other direction and nearly shipped a bug:
+the jekt trust spec looked complete enough to restamp `implemented` when only its host half
+had landed (§5.9).
+
+The common thread is that **these reports' metrics are load-bearing and unverified**. Counts
+of occurrences, files, or named causes get read as counts of problems. Before acting on any
+line in this document, re-derive it — that is what §5.6 exists to automate, and why it stays
+at the top of this list.
