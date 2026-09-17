@@ -125,13 +125,15 @@ could still reference the old path.
 ## Execution phases
 
 1. **This spec** (done).
-2. Create `services/local` + migrate the 8 keys via `secrets update`
-   (changelog-enforced). Originals untouched in `services/infra`.
+2. **Done.** Create `services/local` + migrate the 7 keys — executed via
+   the raw-AWS-CLI fallback described in §1, not `secrets update` as
+   originally planned (that path wasn't available until
+   `a5af/dev-tools#370` shipped). Originals untouched in `services/infra`.
 3. Grep the full repo and any operator-side scripts/tooling outside this
    repo for direct references to the migrated key names, to confirm no
    consumer breaks.
 4. Remove originals from `services/infra` — **only after explicit
    go-ahead**, separate from the go-ahead for phase 2.
-5. Docs update per §4 above.
+5. **Done.** Docs update per §4 above — `a5af/shared-infrastructure#475`.
 
 Phases 2 onward require explicit confirmation before execution, per phase.
