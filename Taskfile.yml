@@ -1207,9 +1207,10 @@ tasks:
 
                 # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
                 # writes Exec=$DEV_DIR/agentmux-cef into the user's
-                # ~/.local/share/applications/agentmux.desktop, and that path
-                # has to stay valid between dev sessions for dock-clicks to
-                # work. Unix: each `dev:serve` start wipes + recreates the
+                # ~/.local/share/applications/agentmux-dev-<branch>-<version>.desktop
+                # (per-app_id filename as of SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17),
+                # and that path has to stay valid between dev sessions for
+                # dock-clicks to work. Unix: each `dev:serve` start wipes + recreates the
                 # fixed $DEV_DIR, so leaving it around is safe (no stale
                 # binaries leak across versions). Windows: each run creates a
                 # fresh dist/cef-dev-<epoch> dir and never wipes it; old dirs
