@@ -6,6 +6,48 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The toolchain wire shapes are GENERATED from their Rust definitions by
+// ts-rs. `toolchain.env` and `toolchain.versions` built their responses from
+// inline `json!({..})`, so neither end had a name to share.
+export type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
+export type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
+export type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
+export type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
+export type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
+export type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
+export type { ToolchainEnvReq } from "@/types/rpc/ToolchainEnvReq";
+export type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
+export type { ToolchainPackage } from "@/types/rpc/ToolchainPackage";
+export type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
+
+import type { CommandResolveCliData } from "@/types/rpc/CommandResolveCliData";
+import type { ResolveCliResult } from "@/types/rpc/ResolveCliResult";
+import type { CommandCheckCliAuthData } from "@/types/rpc/CommandCheckCliAuthData";
+import type { CheckCliAuthResult } from "@/types/rpc/CheckCliAuthResult";
+import type { CommandRunCliLoginData } from "@/types/rpc/CommandRunCliLoginData";
+import type { RunCliLoginResult } from "@/types/rpc/RunCliLoginResult";
+import type { ToolchainEnvReq } from "@/types/rpc/ToolchainEnvReq";
+
+/**
+ * What a `resolvecli` caller may send.
+ *
+ * `block_id` is `#[serde(default)]` on a `String` -- omitting it means "do
+ * not stream install output anywhere", which is what every caller but the
+ * Toolchain modal wants. ts-rs can only mark a field optional for
+ * `Option<T>`, so the generated type calls it required; deriving restores
+ * exactly what the hand-written declaration said.
+ *
+ * The two install-command fields are `serde(default)` too, but stay REQUIRED
+ * here: the hand-written type required them, every caller passes them, and a
+ * resolve that silently falls back to an empty install command is a worse
+ * failure than a compile error.
+ */
+export type ResolveCliInput = Omit<CommandResolveCliData, "block_id"> &
+    Partial<Pick<CommandResolveCliData, "block_id">>;
+import type { ToolchainEnvResult } from "@/types/rpc/ToolchainEnvResult";
+import type { ToolchainPackage } from "@/types/rpc/ToolchainPackage";
+import type { ToolchainVersionsReq } from "@/types/rpc/ToolchainVersionsReq";
+
 // The tool-status shapes are GENERATED from their Rust definitions by ts-rs.
 // The rest of this file is still hand-written: workspace spans four handler
 // files and is being migrated one at a time.
@@ -101,7 +143,7 @@ export const WorkspaceApi = {
         return client.rpcCall("wsllist", null, opts);
     },
 
-    ResolveCliCommand(client: RpcClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
+    ResolveCliCommand(client: RpcClient, data: ResolveCliInput, opts?: RpcOpts): Promise<ResolveCliResult> {
         return client.rpcCall("resolvecli", data, opts);
     },
 
@@ -110,8 +152,13 @@ export const WorkspaceApi = {
     ToolchainEnvCommand(
         client: RpcClient,
         opts?: RpcOpts,
-    ): Promise<{ path: string; pathSource: string; os: string; arch: string }> {
-        return client.rpcCall("toolchain.env", {}, opts);
+    ): Promise<ToolchainEnvResult> {
+        // An empty struct rather than no request type: the client sends `{}`
+        // for a no-argument call, and serde deserializes `()` only from JSON
+        // `null`. The server takes `Option<ToolchainEnvReq>` so both work,
+        // but this stub keeps sending the object it always sent.
+        const data: ToolchainEnvReq = {};
+        return client.rpcCall("toolchain.env", data, opts);
     },
 
     // command "toolchain.versions" [call] — fetch latest published npm versions for
@@ -119,7 +166,7 @@ export const WorkspaceApi = {
     // Each lookup is independent; a network error yields null for that entry.
     ToolchainVersionsCommand(
         client: RpcClient,
-        data: { packages: Array<{ id: string; package: string }> },
+        data: ToolchainVersionsReq,
         opts?: RpcOpts,
     ): Promise<Record<string, string | null>> {
         return client.rpcCall("toolchain.versions", data, opts);

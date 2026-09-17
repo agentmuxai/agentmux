@@ -30,6 +30,23 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    CheckCliAuthResult,
+    CommandCheckCliAuthData,
+    CommandResolveCliData,
+    CommandRunCliLoginData,
+    ResolveCliInput,
+    ResolveCliResult,
+    RunCliLoginResult,
+    ToolchainEnvReq,
+    ToolchainEnvResult,
+    ToolchainPackage,
+    ToolchainVersionsReq,
+} from "./workspace";
+export type {
+    WidgetApiResult,
+    WidgetHealthResult,
+} from "./misc";
+export type {
     UnwatchMediaDirReq,
     WatchEditorFileReq,
     WatchMediaDirReq,

@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
+    ToolchainEnvReq, ToolchainEnvResult, ToolchainVersionsReq,
+    WidgetApiResult, WidgetHealthResult,
     CheckCliAuthResult, CommandCheckCliAuthData, CommandResolveCliData, CommandRunCliLoginData,
     ResolveCliResult, RunCliLoginResult, COMMAND_CHECK_CLI_AUTH, COMMAND_RESOLVE_CLI,
 };
@@ -20,15 +22,13 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // launch path; resolved via `DataPaths::from_env()`).
     // Never falls back to system PATH for npm-backed providers.
     let broker_resolve = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_RESOLVE_CLI,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandResolveCliData, _ctx| {
             let broker = broker_resolve.clone();
-            Box::pin(async move {
+            async move {
                 const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-                let cmd: CommandResolveCliData = serde_json::from_value(data)
-                    .map_err(|e| format!("resolvecli: {e}"))?;
                 tracing::info!(
                     provider = %cmd.provider_id,
                     cli = %cmd.cli_command,
@@ -67,11 +67,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         path = %npm_bin, version = %version,
                         "CLI found in versioned install"
                     );
-                    return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                    return Ok(ResolveCliResult {
                         cli_path: npm_bin,
                         version,
                         source: "local_install".to_string(),
-                    }).unwrap()));
+                    });
                 }
 
                 // Step 2: Not in versioned dir — check system PATH for non-npm CLIs.
@@ -82,11 +82,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             path = %path, version = %version,
                             "CLI found on system PATH"
                         );
-                        return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                        return Ok(ResolveCliResult {
                             cli_path: path,
                             version,
                             source: "system_path".to_string(),
-                        }).unwrap()));
+                        });
                     }
                     // This branch fires for PATH-only providers
                     // (`npm_package` empty) whose CLI isn't on the
@@ -251,11 +251,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if std::path::Path::new(&npm_bin).exists() {
                         let version = get_cli_version(&npm_bin).await;
                         tracing::info!(path = %npm_bin, version = %version, "CLI installed (npm)");
-                        return Ok(Some(serde_json::to_value(&ResolveCliResult {
+                        return Ok(ResolveCliResult {
                             cli_path: npm_bin,
                             version,
                             source: "installed".to_string(),
-                        }).unwrap()));
+                        });
                     }
 
                     Err(agentmux_common::AgentMuxError::CliShimMissing {
@@ -265,19 +265,17 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .to_wire()
                     .to_string())
                 }
-            })
-        }),
+            }
+        },
     );
 
     // checkcliauth → check if a CLI tool is authenticated
     // For Claude: reads ~/.claude/.credentials.json directly (instant, no subprocess).
     // For other providers: falls back to running the CLI auth check command.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_CHECK_CLI_AUTH,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                let cmd: CommandCheckCliAuthData = serde_json::from_value(data)
-                    .map_err(|e| format!("checkcliauth: {e}"))?;
+        |cmd: CommandCheckCliAuthData, _ctx| {
+            async move {
                 tracing::info!(cli = %cmd.cli_path, "CheckCliAuth");
 
                 // Two-phase auth check for Claude; single-phase for other providers.
@@ -401,7 +399,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 auth_method: None,
                                 raw_output: "no credentials found".to_string(),
                             };
-                            return Ok(Some(serde_json::to_value(&result).unwrap()));
+                            return Ok(result);
                         }
                         #[cfg(target_os = "macos")]
                         tracing::info!(
@@ -444,18 +442,16 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     auth_method,
                     raw_output,
                 };
-                Ok(Some(serde_json::to_value(&result).unwrap()))
-            })
-        }),
+                Ok(result)
+            }
+        },
     );
 
     // runclilogin → spawn CLI login flow, extract OAuth URL from output, return immediately
-    engine.register_handler(
+    engine.register_typed(
         "runclilogin",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                let cmd: CommandRunCliLoginData = serde_json::from_value(data)
-                    .map_err(|e| format!("runclilogin: {e}"))?;
+        |cmd: CommandRunCliLoginData, _ctx| {
+            async move {
                 tracing::info!(cli = %cmd.cli_path, args = ?cmd.login_args, "RunCliLogin");
 
                 // Dead path: the active login flow is the CEF host IPC
@@ -463,31 +459,30 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // + timeout reaper). This srv-side variant previously spawned a
                 // DETACHED, unkillable `auth login` child here — a process leak if
                 // ever invoked. It has no live caller; do NOT spawn.
-                let result = RunCliLoginResult { auth_url: None, raw_output: String::new() };
-                Ok(Some(serde_json::to_value(&result).unwrap()))
-            })
-        }),
+                Ok(RunCliLoginResult { auth_url: None, raw_output: String::new() })
+            }
+        },
     );
 
     // toolchain.env — report the environment the srv resolves tools in: the
     // effective PATH, how it was derived (set by the host/srv PATH enricher,
     // see SPEC_TOOLCHAIN_MANAGER §3), and OS/arch. Powers the Toolchain
     // modal's Environment section so PATH problems are diagnosable.
-    engine.register_handler(
+    engine.register_typed(
         "toolchain.env",
-        Box::new(|_data, _ctx| {
-            Box::pin(async move {
-                let path = std::env::var("PATH").unwrap_or_default();
-                let path_source =
-                    std::env::var("AGENTMUX_PATH_SOURCE").unwrap_or_else(|_| "inherited".to_string());
-                Ok(Some(serde_json::json!({
-                    "path": path,
-                    "pathSource": path_source,
-                    "os": std::env::consts::OS,
-                    "arch": std::env::consts::ARCH,
-                })))
-            })
-        }),
+        // `Option<_>` -- see `ToolchainEnvReq`: it is what makes both encodings
+        // of "no argument" deserialize.
+        |_req: Option<ToolchainEnvReq>, _ctx| {
+            async move {
+                Ok(ToolchainEnvResult {
+                    path: std::env::var("PATH").unwrap_or_default(),
+                    path_source: std::env::var("AGENTMUX_PATH_SOURCE")
+                        .unwrap_or_else(|_| "inherited".to_string()),
+                    os: std::env::consts::OS.to_string(),
+                    arch: std::env::consts::ARCH.to_string(),
+                })
+            }
+        },
     );
 
     // widget.health — HTTP liveness probe for an external widget server running
@@ -496,13 +491,21 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Connection-refused or timeout → { healthy: false } (not an RPC error).
     // health_check_body_contains lets callers distinguish services that share
     // a default port (e.g. Flowise and Grafana both default to 3000).
-    engine.register_handler(
+    // Registered with `serde_json::Value` as the REQUEST type rather than a
+    // struct. `Value` deserializes from anything, so this is exactly as
+    // tolerant as the untyped handler it replaces -- and the handler needs that
+    // tolerance: a bad port or path is answered with `healthy: false`, not an
+    // RPC error, which a typed request would turn into a deserialize failure.
+    //
+    // What it buys over `register_handler` is the RESPONSE type, which is the
+    // half that was actually drifting.
+    engine.register_typed(
         "widget.health",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
+        |data: serde_json::Value, _ctx| {
+            async move {
                 let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
                 if port_raw == 0 || port_raw > 65535 {
-                    return Ok(Some(serde_json::json!({ "healthy": false, "status_code": null })));
+                    return Ok(WidgetHealthResult { healthy: false, status_code: None });
                 }
                 let port = port_raw as u16;
                 let path = data
@@ -524,7 +527,10 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let status = resp.status().as_u16();
                         let ok_status = resp.status().is_success();
                         if !ok_status {
-                            return Ok(Some(serde_json::json!({ "healthy": false, "status_code": status })));
+                            return Ok(WidgetHealthResult {
+                                healthy: false,
+                                status_code: Some(status),
+                            });
                         }
                         // Optionally verify response body for service identity.
                         let healthy = if let Some(needle) = body_contains {
@@ -533,12 +539,12 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         } else {
                             true
                         };
-                        Ok(Some(serde_json::json!({ "healthy": healthy, "status_code": status })))
+                        Ok(WidgetHealthResult { healthy, status_code: Some(status) })
                     }
-                    Err(_) => Ok(Some(serde_json::json!({ "healthy": false, "status_code": null }))),
+                    Err(_) => Ok(WidgetHealthResult { healthy: false, status_code: None }),
                 }
-            })
-        }),
+            }
+        },
     );
 
     // widget.api — HTTP proxy to a widget's local server. Bypasses browser CORS
@@ -546,16 +552,21 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // and gets back { ok, status_code, body, error? }. Agents use this to call
     // ComfyUI /prompt, Grafana /api/query, etc. without needing a CORS header.
     // 30-second timeout accommodates generative tasks (image synthesis, etc.).
-    engine.register_handler(
+    // `Value` request for the same reason as `widget.health` above: an invalid
+    // port or path is a `ok: false` ANSWER, not a rejected request.
+    engine.register_typed(
         "widget.api",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
+        |data: serde_json::Value, _ctx| {
+            async move {
+                let reject = |why: &str| WidgetApiResult {
+                    ok: false,
+                    status_code: None,
+                    body: None,
+                    error: Some(why.to_string()),
+                };
                 let port_raw = data.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
                 if port_raw == 0 || port_raw > 65535 {
-                    return Ok(Some(serde_json::json!({
-                        "ok": false, "status_code": null, "body": null,
-                        "error": "invalid port"
-                    })));
+                    return Ok(reject("invalid port"));
                 }
                 let port = port_raw as u16;
                 let path = data.get("path").and_then(|v| v.as_str()).unwrap_or("/").to_string();
@@ -563,10 +574,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // no '@' (user-info injection: 127.0.0.1@evil.com), no backslash,
                 // no protocol-relative '//' prefix.
                 if !path.starts_with('/') || path.contains('@') || path.contains('\\') || path.starts_with("//") {
-                    return Ok(Some(serde_json::json!({
-                        "ok": false, "status_code": null, "body": null,
-                        "error": "invalid path"
-                    })));
+                    return Ok(reject("invalid path"));
                 }
                 let method = data
                     .get("method")
@@ -614,15 +622,17 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Ok(resp) => {
                         let status = resp.status().as_u16();
                         let body = resp.text().await.unwrap_or_default();
-                        Ok(Some(serde_json::json!({ "ok": true, "status_code": status, "body": body })))
+                        Ok(WidgetApiResult {
+                            ok: true,
+                            status_code: Some(status),
+                            body: Some(body),
+                            error: None,
+                        })
                     }
-                    Err(e) => Ok(Some(serde_json::json!({
-                        "ok": false, "status_code": null, "body": null,
-                        "error": e.to_string()
-                    }))),
+                    Err(e) => Ok(reject(&e.to_string())),
                 }
-            })
-        }),
+            }
+        },
     );
 
     // toolchain.versions — fetch the latest published version for a list of npm
@@ -630,16 +640,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Output: { id: "x.y.z" | null, ... }. Each lookup is independent — a
     // network error for one package yields null for that entry, not a failure.
     // 5-second per-request timeout; all lookups run concurrently.
-    engine.register_handler(
+    engine.register_typed(
         "toolchain.versions",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Pkg { id: String, package: String }
-                let packages: Vec<Pkg> = data
-                    .get("packages")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok())
-                    .unwrap_or_default();
+        |req: ToolchainVersionsReq, _ctx| {
+            async move {
+                let packages = req.packages;
 
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(5))
@@ -663,13 +668,16 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }).collect();
 
                 let results = futures_util::future::join_all(futs).await;
-                let mut out = serde_json::Map::new();
+                // A map keyed by the caller's own `id`s, so the response type
+                // is the map itself rather than a named struct -- there is no
+                // fixed set of fields to name.
+                let mut out = std::collections::HashMap::new();
                 for (id, version) in results {
-                    out.insert(id, version.map(serde_json::Value::String).unwrap_or(serde_json::Value::Null));
+                    out.insert(id, version);
                 }
-                Ok(Some(serde_json::Value::Object(out)))
-            })
-        }),
+                Ok(out)
+            }
+        },
     );
 }
 
@@ -813,3 +821,113 @@ async fn get_cli_version(cli_path: &str) -> String {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// All seven cli/toolchain/widget commands record their request and
+    /// response types.
+    ///
+    /// The two widget commands are the interesting entries. They read their
+    /// payload field-by-field off a `serde_json::Value` and turn a bad port or
+    /// path into an `ok: false` ANSWER rather than an error, so they cannot
+    /// take a struct request. Earlier slices concluded such handlers had to
+    /// stay on `register_handler` entirely -- but `Value` deserializes from
+    /// anything, so registering it AS the request type is exactly as tolerant
+    /// while still recording the response. That is what this asserts.
+    #[tokio::test]
+    async fn register_typed_records_every_cli_command() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register_cli_handlers(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
+        };
+
+        for (cmd, req, resp) in [
+            (COMMAND_RESOLVE_CLI, "CommandResolveCliData", "ResolveCliResult"),
+            (COMMAND_CHECK_CLI_AUTH, "CommandCheckCliAuthData", "CheckCliAuthResult"),
+            ("runclilogin", "CommandRunCliLoginData", "RunCliLoginResult"),
+            ("toolchain.versions", "ToolchainVersionsReq", "HashMap<alloc::string::String, core::option::Option<alloc::string::String>>"),
+        ] {
+            let row = find(cmd);
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert!(
+                row["responseName"].as_str().unwrap().contains(resp.split('<').next().unwrap()),
+                "{cmd} response should mention {resp}, got {:?}",
+                row["responseName"],
+            );
+        }
+
+        // The widget pair: `Value` request, named response.
+        for cmd in ["widget.health", "widget.api"] {
+            let row = find(cmd);
+            assert_eq!(
+                row["requestName"], "Value",
+                "{cmd} keeps a Value request so a bad port stays an answer, not an error",
+            );
+        }
+        assert_eq!(find("widget.health")["responseName"], "WidgetHealthResult");
+        assert_eq!(find("widget.api")["responseName"], "WidgetApiResult");
+
+        // `toolchain.env` takes no argument, so `Option<_>` of an empty struct.
+        let env = find("toolchain.env");
+        let env_req = env["requestName"].as_str().unwrap();
+        assert!(
+            env_req.starts_with("core::option::Option<") && env_req.contains("ToolchainEnvReq"),
+            "toolchain.env should take Option<ToolchainEnvReq>, got {env_req:?}",
+        );
+        assert_eq!(env["responseName"], "ToolchainEnvResult");
+    }
+
+    /// A `Value` request really does accept everything, which is the whole
+    /// reason it is safe to use here. If this ever stops holding, the two
+    /// widget commands silently start rejecting payloads they used to answer.
+    #[test]
+    fn a_value_request_deserializes_from_any_payload() {
+        for payload in [
+            serde_json::json!({ "port": 3000 }),
+            serde_json::json!({ "port": "not a number" }),
+            serde_json::json!({}),
+            serde_json::json!([1, 2, 3]),
+            serde_json::Value::Null,
+        ] {
+            serde_json::from_value::<serde_json::Value>(payload.clone())
+                .unwrap_or_else(|e| panic!("{payload} should deserialize as Value, got {e}"));
+        }
+    }
+
+    /// `toolchain.env`'s `pathSource` is camelCase on the wire while every
+    /// other field in that response is lowercase, so it needs BOTH
+    /// `serde(rename)` and `ts(rename)` -- ts-rs does not read the serde one.
+    /// Without the second the generated key is `path_source`, which nothing
+    /// sends and nothing reads, and every gate still passes.
+    #[test]
+    fn toolchain_env_reports_path_source_as_camel_case() {
+        let v = serde_json::to_value(ToolchainEnvResult {
+            path: "/usr/bin".to_string(),
+            path_source: "inherited".to_string(),
+            os: "linux".to_string(),
+            arch: "x86_64".to_string(),
+        })
+        .unwrap();
+        assert_eq!(v["pathSource"], "inherited");
+        assert!(v.get("path_source").is_none(), "the Rust field name must not reach the wire: {v}");
+
+        // Match the DECLARATION, not any mention: the doc comment on this
+        // field names `path_source` on purpose (explaining why the rename
+        // exists), and a bare substring check matched that instead of the
+        // field and failed on a correct binding.
+        let ts = <ToolchainEnvResult as ts_rs::TS>::inline();
+        assert!(ts.contains("pathSource: string"), "generated TS lost the rename: {ts}");
+        assert!(
+            !ts.contains("path_source: string"),
+            "generated TS kept the Rust name as a field: {ts}",
+        );
+    }
+}

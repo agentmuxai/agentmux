@@ -27,6 +27,7 @@ mod mcp;
 mod misc;
 mod session;
 mod skill;
+mod toolchain;
 
 pub use agent::*;
 pub use block::*;
@@ -44,6 +45,7 @@ pub use mcp::*;
 pub use misc::*;
 pub use session::*;
 pub use skill::*;
+pub use toolchain::*;
 
 // ---- RpcMessage wire format ----
 
