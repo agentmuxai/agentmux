@@ -132,6 +132,41 @@ pub fn sanitize_process_command(cmd: &mut tokio::process::Command) {
     cmd.env(NESTING_SENTINEL_KEY, "1");
 }
 
+
+/// Strip **every** `AGENTMUX_*` variable, including the in-pane helper keep-set.
+///
+/// For processes that are neither ours nor helpers: provider CLIs launched for
+/// OAuth login (`server/identity_auth_spawn.rs`). Those are third-party,
+/// network-connected binaries, so even [`PANE_ENV_KEEP`] is too generous —
+/// `AGENTMUX_LOCAL_URL` would hand them this instance's API endpoint, and
+/// `AGENTMUX_AUTH_KEY` the credential to it. `muxsh` needs those; `claude
+/// login` does not.
+///
+/// The nesting sentinel is still set: it carries no identity, and it stops a
+/// launcher started anywhere below from adopting ambient state.
+pub fn sanitize_external_command(cmd: &mut tokio::process::Command) {
+    for key in all_agentmux_keys() {
+        cmd.env_remove(&key);
+    }
+    cmd.env(NESTING_SENTINEL_KEY, "1");
+}
+
+/// `sanitize_external_command` for a PTY command.
+pub fn sanitize_external_pty_command(c: &mut portable_pty::CommandBuilder) {
+    for key in all_agentmux_keys() {
+        c.env_remove(&key);
+    }
+    c.env(NESTING_SENTINEL_KEY, "1");
+}
+
+/// Every `AGENTMUX*` key in this process's environment except the sentinel.
+fn all_agentmux_keys() -> Vec<String> {
+    std::env::vars_os()
+        .filter_map(|(k, _)| k.into_string().ok())
+        .filter(|k| k.starts_with("AGENTMUX") && k != NESTING_SENTINEL_KEY)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +224,20 @@ mod tests {
     #[test]
     fn the_nesting_sentinel_is_never_stripped() {
         assert!(!should_strip(NESTING_SENTINEL_KEY));
+    }
+
+    /// The external policy must be stricter than the pane one: a provider CLI
+    /// doing OAuth has no business holding this instance's API endpoint, and
+    /// would hold its credential too if one were present in the environment.
+    #[test]
+    fn the_external_policy_strips_even_the_helper_keep_set() {
+        std::env::set_var("AGENTMUX_LOCAL_URL", "http://127.0.0.1:1");
+        let stripped = all_agentmux_keys();
+        assert!(stripped.iter().any(|k| k == "AGENTMUX_LOCAL_URL"),
+            "external processes must not receive the instance API endpoint");
+        assert!(!stripped.iter().any(|k| k == NESTING_SENTINEL_KEY),
+            "the sentinel carries no identity and must survive");
+        std::env::remove_var("AGENTMUX_LOCAL_URL");
     }
 
     #[test]

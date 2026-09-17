@@ -118,6 +118,25 @@ So the policy is now applied through one helper per command type —
 | `blockcontroller/core.rs` | agent subprocesses |
 | `backend/shell_node.rs` | `/api/v1/shell/create` — MCP `Shell` |
 | `server/shell_handlers.rs` | `shellexec` — MCP `Shell` calls |
+| `server/identity_auth_spawn.rs` ×2 | provider CLIs for OAuth login |
+
+### 3.2b A stricter policy for processes that are not ours
+
+Review round 2 found both spawn sites in `identity_auth_spawn.rs` unpatched: the
+PTY and non-PTY paths that launch a provider CLI for OAuth login. Those are
+third-party, network-connected binaries, and they were inheriting the full
+instance identity.
+
+They get `sanitize_external_command` / `sanitize_external_pty_command`, which
+strip **every** `AGENTMUX_*` including the helper keep-set. `muxsh` needs
+`AGENTMUX_LOCAL_URL` and `AGENTMUX_AUTH_KEY`; `claude login` does not, and
+handing an external binary this instance's API endpoint — or the credential to
+it — is the one case where the keep-set is plainly too generous. The nesting
+sentinel still goes through: it carries no identity.
+
+This was in my own sweep output and I deprioritised it as "less about launching
+builds". That was the wrong call — it is the most security-relevant site in the
+list.
 
 Applying it *after* the if/else rather than inside a branch is deliberate: a
 per-branch call is exactly the shape that silently half-applies, which is how
