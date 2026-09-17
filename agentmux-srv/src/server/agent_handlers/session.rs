@@ -647,33 +647,26 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- agent:session:read ----
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_SESSION_READ,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentSessionReadData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentSessionReadData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:session:read: {e}"))?;
+            async move {
                 let (content, modts) =
                     crate::backend::agent_session::read_session_state(&filestore, &cmd.definition_id)
                         .map_err(|e| format!("agent:session:read: {e}"))?;
-                Ok(Some(
-                    serde_json::to_value(&AgentSessionReadResult { content, modts })
-                        .unwrap_or_default(),
-                ))
-            })
-        }),
+                Ok(AgentSessionReadResult { content, modts })
+            }
+        },
     );
 
     // ---- agent:session:write_state ----
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_SESSION_WRITE_STATE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentSessionWriteStateData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentSessionWriteStateData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:session:write_state: {e}"))?;
+            async move {
                 let bytes = cmd.content.as_bytes();
                 let bytes_written = bytes.len() as u64;
                 crate::backend::agent_session::write_session_state(
@@ -682,46 +675,36 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     bytes,
                 )
                 .map_err(|e| format!("agent:session:write_state: {e}"))?;
-                Ok(Some(
-                    serde_json::to_value(&AgentSessionWriteStateResult { bytes_written })
-                        .unwrap_or_default(),
-                ))
-            })
-        }),
+                Ok(AgentSessionWriteStateResult { bytes_written })
+            }
+        },
     );
 
     // ---- agent:session:append_output ----
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_SESSION_APPEND_OUTPUT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentSessionAppendOutputData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentSessionAppendOutputData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:session:append_output: {e}"))?;
+            async move {
                 let bytes_written = crate::backend::agent_session::append_session_output(
                     &filestore,
                     &cmd.definition_id,
                     &cmd.line,
                 )
                 .map_err(|e| format!("agent:session:append_output: {e}"))?;
-                Ok(Some(
-                    serde_json::to_value(&AgentSessionAppendOutputResult { bytes_written })
-                        .unwrap_or_default(),
-                ))
-            })
-        }),
+                Ok(AgentSessionAppendOutputResult { bytes_written })
+            }
+        },
     );
 
     // ---- agent:session:archive ----
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_SESSION_ARCHIVE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentSessionArchiveData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentSessionArchiveData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:session:archive: {e}"))?;
+            async move {
                 let result =
                     crate::backend::agent_session::archive_session(&filestore, &cmd.definition_id)
                         .map_err(|e| format!("agent:session:archive: {e}"))?;
@@ -729,26 +712,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Some((z, ts)) => (z, ts),
                     None => (String::new(), 0),
                 };
-                Ok(Some(
-                    serde_json::to_value(&AgentSessionArchiveResult {
-                        archive_zoneid,
-                        archived_at_ms,
-                    })
-                    .unwrap_or_default(),
-                ))
-            })
-        }),
+                Ok(AgentSessionArchiveResult {
+                    archive_zoneid,
+                    archived_at_ms,
+                })
+            }
+        },
     );
 
     // ---- agent:session:list_archives ----
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_SESSION_LIST_ARCHIVES,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAgentSessionListArchivesData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandAgentSessionListArchivesData =
-                    serde_json::from_value(data).unwrap_or_default();
+            async move {
                 let summaries = crate::backend::agent_session::list_archives(
                     &filestore,
                     &cmd.definition_id,
@@ -764,9 +742,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         node_count: s.node_count,
                     })
                     .collect();
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
-            })
-        }),
+                Ok(rows)
+            }
+        },
     );
 }
 

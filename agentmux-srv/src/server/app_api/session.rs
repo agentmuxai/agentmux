@@ -22,15 +22,13 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SESSION_RESUME_PREFLIGHT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandSessionResumePreflightData, _ctx| {
             let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
-            Box::pin(async move {
-                let cmd: CommandSessionResumePreflightData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+            async move {
 
                 let block = mstore
                     .must_get::<Block>(&cmd.block_id)
@@ -59,29 +57,26 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                     "session:resume_preflight"
                 );
 
-                Ok(Some(
-                    serde_json::to_value(&SessionResumePreflightResult {
-                        block_id: cmd.block_id,
-                        verdict: result.verdict.as_str().to_string(),
-                        session_id: result.session_id,
-                        recoverable_session_id: result.recoverable_session_id,
-                        steps: result
-                            .steps
-                            .into_iter()
-                            .map(|s| ResumePreflightStep {
-                                id: s.id.to_string(),
-                                label: s.label,
-                                ok: s.ok,
-                                detail: s.detail,
-                                duration_ms: s.duration_ms,
-                            })
-                            .collect(),
-                        duration_ms: result.duration_ms,
-                    })
-                    .unwrap(),
-                ))
-            })
-        }),
+                Ok(SessionResumePreflightResult {
+                    block_id: cmd.block_id,
+                    verdict: result.verdict.as_str().to_string(),
+                    session_id: result.session_id,
+                    recoverable_session_id: result.recoverable_session_id,
+                    steps: result
+                        .steps
+                        .into_iter()
+                        .map(|s| ResumePreflightStep {
+                            id: s.id.to_string(),
+                            label: s.label,
+                            ok: s.ok,
+                            detail: s.detail,
+                            duration_ms: s.duration_ms,
+                        })
+                        .collect(),
+                    duration_ms: result.duration_ms,
+                })
+            }
+        },
     );
 }
 
@@ -150,14 +145,12 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SESSION_ARCHIVE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandSessionArchiveData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandSessionArchiveData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:archive: {e}"))?;
+            async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:archive");
 
@@ -171,13 +164,13 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                     &archive_dir,
                 )?;
 
-                Ok(Some(serde_json::to_value(&SessionArchiveResult {
-                    block_id: cmd.block_id,
-                    archived_bytes,
-                    archived_at,
-                }).unwrap()))
+                Ok(SessionArchiveResult {
+                block_id: cmd.block_id,
+                archived_bytes,
+                archived_at,
             })
-        }),
+            }
+        },
     );
 }
 
@@ -185,14 +178,12 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SESSION_RESTORE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandSessionRestoreData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandSessionRestoreData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:restore: {e}"))?;
+            async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:restore");
 
@@ -202,12 +193,12 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                     &cmd.block_id,
                 )?;
 
-                Ok(Some(serde_json::to_value(&SessionRestoreResult {
-                    block_id: cmd.block_id,
-                    restored_bytes,
-                }).unwrap()))
+                Ok(SessionRestoreResult {
+                block_id: cmd.block_id,
+                restored_bytes,
             })
-        }),
+            }
+        },
     );
 }
 
@@ -215,14 +206,12 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SESSION_EXPORT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandSessionExportData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandSessionExportData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:export: {e}"))?;
+            async move {
 
                 tracing::info!(block_id = %cmd.block_id, "session:export");
 
@@ -235,13 +224,13 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
                 let byte_count = raw_bytes.len() as u64;
                 let content = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
 
-                Ok(Some(serde_json::to_value(&SessionExportResult {
-                    content,
-                    line_count,
-                    byte_count,
-                }).unwrap()))
+                Ok(SessionExportResult {
+                content,
+                line_count,
+                byte_count,
             })
-        }),
+            }
+        },
     );
 }
 
@@ -274,8 +263,8 @@ const AMBIENT_PURPOSE_ACTIVITY_SUMMARY: &str = "activity_summary";
 /// the same block.
 const AMBIENT_PURPOSE_ACTIVITY_SUMMARY_PUSHED: &str = "activity_summary_pushed";
 
-fn empty_summary_result() -> serde_json::Value {
-    serde_json::to_value(&ActivitySummaryResult { summary: String::new(), tokens: None }).unwrap()
+fn empty_summary_result() -> ActivitySummaryResult {
+    ActivitySummaryResult { summary: String::new(), tokens: None }
 }
 
 /// Pushed counterpart of `register_session_activity_summary`'s handler body —
@@ -727,14 +716,12 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandActivitySummaryData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandActivitySummaryData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:activity_summary: {e}"))?;
+            async move {
 
                 // Admit through the Ambient Model Call gateway BEFORE doing any
                 // work: a stale (superseded) request does zero FileStore reads
@@ -747,7 +734,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 let guard = match crate::ambient::gateway().admit(key, cmd.generation) {
                     crate::ambient::Admission::Proceed(guard) => guard,
                     crate::ambient::Admission::StaleOnArrival => {
-                        return Ok(Some(empty_summary_result()));
+                        return Ok(empty_summary_result());
                     }
                 };
                 let cancel = guard.cancellation();
@@ -763,7 +750,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 };
                 let Some(_permit) = permit else {
                     drop(guard);
-                    return Ok(Some(empty_summary_result()));
+                    return Ok(empty_summary_result());
                 };
 
                 let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
@@ -793,13 +780,13 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // Nothing to anchor a title on AND nothing new to evaluate —
                 // matches the old digest-empty early return.
                 if user_message.is_none() && current_title.is_empty() {
-                    return Ok(Some(empty_summary_result()));
+                    return Ok(empty_summary_result());
                 }
 
                 let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
                 if cli_path.is_empty() {
                     tracing::debug!(block_id = %cmd.block_id, "session:activity_summary: no CLI path in meta");
-                    return Ok(Some(empty_summary_result()));
+                    return Ok(empty_summary_result());
                 }
 
                 let prompt = build_session_title_prompt(&current_title, user_message.as_deref(), word_target);
@@ -820,9 +807,9 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // response so it can discard results from turns that were
                 // superseded before they returned (belt-and-suspenders on top of
                 // the gateway's own cancellation).
-                Ok(Some(serde_json::to_value(&ActivitySummaryResult { summary, tokens }).unwrap()))
-            })
-        }),
+                Ok(ActivitySummaryResult { summary, tokens })
+            }
+        },
     );
 }
 
@@ -830,22 +817,20 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 /// docs/specs/SPEC_AMBIENT_GHOST_TEXT_NEXT_PROMPT_2026_07_03.md.
 const AMBIENT_PURPOSE_NEXT_PROMPT_SUGGESTION: &str = "next_prompt_suggestion";
 
-fn empty_suggestion_result() -> serde_json::Value {
-    serde_json::to_value(&NextPromptSuggestionResult { suggestion: String::new(), tokens: None }).unwrap()
+fn empty_suggestion_result() -> NextPromptSuggestionResult {
+    NextPromptSuggestionResult { suggestion: String::new(), tokens: None }
 }
 
 fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SESSION_NEXT_PROMPT_SUGGESTION,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNextPromptSuggestionData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandNextPromptSuggestionData = serde_json::from_value(data)
-                    .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?;
+            async move {
 
                 // Same admission discipline as activity_summary — see that
                 // handler's comment. Ghost text has a sharper failure mode
@@ -859,7 +844,7 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 let guard = match crate::ambient::gateway().admit(key, cmd.generation) {
                     crate::ambient::Admission::Proceed(guard) => guard,
                     crate::ambient::Admission::StaleOnArrival => {
-                        return Ok(Some(empty_suggestion_result()));
+                        return Ok(empty_suggestion_result());
                     }
                 };
                 let cancel = guard.cancellation();
@@ -874,7 +859,7 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 };
                 let Some(_permit) = permit else {
                     drop(guard);
-                    return Ok(Some(empty_suggestion_result()));
+                    return Ok(empty_suggestion_result());
                 };
 
                 let block: Block = mstore
@@ -883,13 +868,13 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
                 let Some(extracted) = read_recent_activity_digest(&filestore, &cmd.block_id) else {
-                    return Ok(Some(empty_suggestion_result()));
+                    return Ok(empty_suggestion_result());
                 };
 
                 let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
                 if cli_path.is_empty() {
                     tracing::debug!(block_id = %cmd.block_id, "session:next_prompt_suggestion: no CLI path in meta");
-                    return Ok(Some(empty_suggestion_result()));
+                    return Ok(empty_suggestion_result());
                 }
 
                 let prompt = format!(
@@ -917,9 +902,9 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 // guard is held until here — same rationale as activity_summary.
                 drop(guard);
 
-                Ok(Some(serde_json::to_value(&NextPromptSuggestionResult { suggestion, tokens }).unwrap()))
-            })
-        }),
+                Ok(NextPromptSuggestionResult { suggestion, tokens })
+            }
+        },
     );
 }
 

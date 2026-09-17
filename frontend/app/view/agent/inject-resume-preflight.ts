@@ -12,6 +12,7 @@
  */
 
 import type { DocumentNode, ResumePreflightNode } from "./types";
+import type { SessionResumePreflightResult } from "@/app/store/rpc-api";
 
 /**
  * Build the notice node, or `null` when there's nothing worth saying.
