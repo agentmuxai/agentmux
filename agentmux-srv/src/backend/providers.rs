@@ -292,7 +292,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
-    pinned_version: "2.1.263",
+    pinned_version: "2.1.274",
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
@@ -367,7 +367,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     auth_extra_env: &[("GEMINI_FORCE_FILE_STORAGE", "true")],
     unset_env: &[],
     npm_package: "@google/gemini-cli",
-    pinned_version: "0.58.0",
+    pinned_version: "0.60.0",
     base_url_env_var: None,
     supported_vendors: &["google"],
     // Confirmed: Gemini CLI docs — context files default to GEMINI.md;
@@ -411,7 +411,7 @@ static QWEN: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
-    pinned_version: "0.23.0",
+    pinned_version: "0.24.0",
     // Note: qwen's default backend already routes through an OpenAI-compatible
     // endpoint (see comment above) as a fixed part of its auth setup — but
     // that's baked-in default routing, not a confirmed user-configurable
@@ -506,7 +506,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "openclaw",
-    pinned_version: "2026.9.2",
+    pinned_version: "2026.9.4",
     base_url_env_var: None,
     supported_vendors: &["openai", "anthropic", "google"],
     // Confirmed convention, UNCONFIRMED path: docs.openclaw.ai/reference/AGENTS.default
@@ -623,7 +623,7 @@ static COPILOT: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@github/copilot",
-    pinned_version: "1.0.83",
+    pinned_version: "1.0.85",
     base_url_env_var: None,
     supported_vendors: &["github"],
     // Confirmed: GitHub Copilot CLI custom-instructions docs — supports
