@@ -130,7 +130,28 @@ function stripKatexLegacyFonts(): Plugin {
 export default defineConfig({
     root: ".",
     build: {
-        target: ["es2021", "chrome97", "safari13"],
+        // No `safari13`. It is a leftover from the Tauri/WebKitGTK era — the
+        // frontend has rendered in CEF (bundled Chromium) on every platform
+        // since, and every remaining WebKit mention in this tree is a historical
+        // comment.
+        //
+        // It was not merely obsolete, it was harmful. Safari 13 predates logical
+        // assignment, so esbuild lowered `a ||= {}` — and on xterm.js 6.0.0's
+        // `requestMode` it lowered it WRONG: given `let r;` it constant-folds the
+        // always-undefined read to `void 0`, drops the declaration as unused, and
+        // keeps the write, emitting `void 0 || (r = {})`. ES modules are strict,
+        // so that orphaned assignment throws `ReferenceError: r is not defined`.
+        //
+        // requestMode handles DECRQM, so the throw came from inside xterm's
+        // escape-sequence parser (`parse -> parse -> requestMode`), aborting it
+        // mid-buffer and leaving the pane unable to render or accept input — the
+        // "vim freezes the terminal, but only in a packaged build" report. Dev
+        // never minifies, which is why `task dev` was always fine.
+        //
+        // Verified against esbuild 0.28.1: safari13 miscompiles, es2021 /
+        // chrome97 / es2022 are all correct. See
+        // docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md.
+        target: ["es2021", "chrome97"],
         // Always emit `.map` files so the runtime source-map resolver
         // (frontend/log/source-map-resolver.ts) can rewrite raw
         // `error.stack` positions into original-file frames before
