@@ -30,6 +30,18 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    CommandReadEditorFileData,
+    CommandReadEditorFileResult,
+    CommandWriteEditorFileData,
+    DirEntry,
+    EditorDrive,
+    EditorRootsReq,
+    GetEditorHomeResult,
+    GetEditorRootsResult,
+    ListEditorDirReq,
+    ListEditorDirResult,
+} from "./file";
+export type {
     CreateEditorDirReq,
     CreateEditorDirResult,
     CreateEditorFileReq,

@@ -11,6 +11,9 @@ use crate::backend::rpc_types::{
 use crate::backend::agent_config::BUNDLE_SECTION_HEADING;
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc_types::{
+    CommandReadEditorFileData, CommandReadEditorFileResult, CommandWriteEditorFileData,
+    DirEntry, EditorDrive, EditorRootsReq, GetEditorHomeResult, GetEditorRootsResult,
+    ListEditorDirReq, ListEditorDirResult,
     CreateEditorDirReq, CreateEditorDirResult, CreateEditorFileReq, CreateEditorFileResult,
     CreateScratchFileReq, CreateScratchFileResult, DeleteEditorFileReq, MoveScratchFileReq,
     MoveScratchFileResult, OpenInShellReq, RenameEditorFileReq, RenameEditorFileResult,
@@ -36,15 +39,15 @@ fn scratch_session_token() -> &'static str {
 /// filesystem root + mounts.
 /// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up).
 #[cfg(target_os = "windows")]
-fn list_drives() -> Vec<serde_json::Value> {
+fn list_drives() -> Vec<EditorDrive> {
     let mut drives = Vec::new();
     for letter in b'A'..=b'Z' {
         let path = format!("{}:\\", letter as char);
         if std::path::Path::new(&path).exists() {
-            drives.push(serde_json::json!({
-                "name": format!("{}:", letter as char),
-                "path": path,
-            }));
+            drives.push(EditorDrive {
+                name: format!("{}:", letter as char),
+                path,
+            });
         }
     }
     drives
@@ -58,23 +61,23 @@ fn list_drives() -> Vec<serde_json::Value> {
 // symlink under HOME can resolve outside it; macOS TCC remains the actual gate
 // for protected locations.
 #[cfg(target_os = "macos")]
-fn list_drives() -> Vec<serde_json::Value> {
+fn list_drives() -> Vec<EditorDrive> {
     Vec::new()
 }
 
 // Linux (and any other non-Windows, non-macOS unix): filesystem root + mounts.
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn list_drives() -> Vec<serde_json::Value> {
-    let mut drives = vec![serde_json::json!({ "name": "/", "path": "/" })];
+fn list_drives() -> Vec<EditorDrive> {
+    let mut drives = vec![EditorDrive { name: "/".to_string(), path: "/".to_string() }];
     for mount_dir in ["/mnt", "/media", "/Volumes"] {
         if let Ok(entries) = std::fs::read_dir(mount_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
-                    drives.push(serde_json::json!({
-                        "name": entry.file_name().to_string_lossy().to_string(),
-                        "path": path.to_string_lossy().to_string(),
-                    }));
+                    drives.push(EditorDrive {
+                        name: entry.file_name().to_string_lossy().to_string(),
+                        path: path.to_string_lossy().to_string(),
+                    });
                 }
             }
         }
@@ -397,14 +400,10 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // readeditorfile → read file from disk for the editor pane
-    engine.register_handler(
+    engine.register_typed(
         "readeditorfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { path: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("readeditorfile: {e}"))?;
+        |cmd: CommandReadEditorFileData, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
 
@@ -426,39 +425,23 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let decoded = crate::backend::text_encoding::decode_file(&bytes);
                 let read_only = metadata.permissions().readonly();
 
-                Ok(Some(serde_json::json!({
-                    "content": decoded.content,
-                    "encoding": decoded.encoding,
-                    "bom": decoded.bom,
-                    "line_ending": decoded.line_ending,
-                    "had_decode_errors": decoded.had_decode_errors,
-                    "read_only": read_only,
-                })))
-            })
-        }),
+                Ok(CommandReadEditorFileResult {
+                    content: decoded.content,
+                    encoding: decoded.encoding,
+                    bom: decoded.bom.to_string(),
+                    line_ending: decoded.line_ending.to_string(),
+                    had_decode_errors: decoded.had_decode_errors,
+                    read_only,
+                })
+            }
+        },
     );
 
     // writeeditorfile → write file to disk from the editor pane
-    engine.register_handler(
+    engine.register_typed(
         "writeeditorfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd {
-                    path: String,
-                    content: String,
-                    // Encoding to write back in (defaults preserve old UTF-8
-                    // behavior when a caller doesn't send them).
-                    #[serde(default)]
-                    encoding: Option<String>,
-                    #[serde(default)]
-                    bom: Option<String>,
-                    #[serde(default)]
-                    line_ending: Option<String>,
-                }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("writeeditorfile: {e}"))?;
-
+        |cmd: CommandWriteEditorFileData, _ctx| {
+            async move {
                 // Size guard: match readeditorfile's 10MB limit
                 if cmd.content.len() > 10_000_000 {
                     return Err("Content too large (>10MB)".to_string());
@@ -517,30 +500,26 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("writeeditorfile: {e}"))?;
                 tracing::info!(path = %canonical.display(), bytes = out_bytes.len(), "editor file saved");
 
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // listeditordir → list directory contents for the editor's file-tree pane.
     // Symlinks are followed (matches VS Code semantics; the frontend marks
     // followed symlinks with a ↗ overlay).
     // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
-    engine.register_handler(
+    engine.register_typed(
         "listeditordir",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { path: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("listeditordir: {e}"))?;
+        |cmd: ListEditorDirReq, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let canonical = expanded.canonicalize()
                     .map_err(|e| format!("listeditordir: {e}"))?;
                 let read_dir = std::fs::read_dir(&canonical)
                     .map_err(|e| format!("listeditordir: {e}"))?;
 
-                let mut entries: Vec<serde_json::Value> = Vec::new();
+                let mut entries: Vec<DirEntry> = Vec::new();
                 for entry in read_dir.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     // `file_type()` returns the entry's own type — symlinks
@@ -564,72 +543,62 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|d| d.as_millis() as u64);
 
-                    let mut entry_obj = serde_json::json!({
-                        "name": name,
-                        "is_dir": is_dir,
-                        "is_symlink": is_symlink,
-                    });
-                    if let Some(s) = size {
-                        entry_obj["size"] = serde_json::json!(s);
-                    }
-                    if let Some(m) = mtime {
-                        entry_obj["mtime"] = serde_json::json!(m);
-                    }
-                    entries.push(entry_obj);
+                    entries.push(DirEntry { name, is_dir, is_symlink, size, mtime });
                 }
 
                 // Folders first, then files; alphabetical, case-insensitive.
+                // Reads the fields directly now rather than re-parsing them
+                // back out of a `Value` -- the old `a["is_dir"].as_bool()`
+                // silently sorted everything as a file if that key were ever
+                // renamed.
                 entries.sort_by(|a, b| {
-                    let a_dir = a["is_dir"].as_bool().unwrap_or(false);
-                    let b_dir = b["is_dir"].as_bool().unwrap_or(false);
-                    let a_name = a["name"].as_str().unwrap_or("").to_lowercase();
-                    let b_name = b["name"].as_str().unwrap_or("").to_lowercase();
-                    match (a_dir, b_dir) {
+                    match (a.is_dir, b.is_dir) {
                         (true, false) => std::cmp::Ordering::Less,
                         (false, true) => std::cmp::Ordering::Greater,
-                        _ => a_name.cmp(&b_name),
+                        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                     }
                 });
 
-                Ok(Some(serde_json::json!({
-                    "path": canonical.to_string_lossy(),
-                    "entries": entries,
-                })))
-            })
-        }),
+                Ok(ListEditorDirResult {
+                    path: canonical.to_string_lossy().into_owned(),
+                    entries,
+                })
+            }
+        },
     );
 
     // geteditorhome → OS home directory, used as the editor file-tree default root.
-    engine.register_handler(
+    engine.register_typed(
         "geteditorhome",
-        Box::new(|_data, _ctx| {
-            Box::pin(async move {
+        // `Option<_>` -- see `EditorRootsReq`: it is what makes both encodings
+        // of "no argument" deserialize.
+        |_req: Option<EditorRootsReq>, _ctx| {
+            async move {
                 let home = dirs::home_dir()
                     .ok_or_else(|| "geteditorhome: cannot determine home directory".to_string())?;
-                Ok(Some(serde_json::json!({
-                    "home": home.to_string_lossy(),
-                })))
-            })
-        }),
+                Ok(GetEditorHomeResult {
+                    home: home.to_string_lossy().into_owned(),
+                })
+            }
+        },
     );
 
     // geteditorroots → home + (Linux/Windows) the filesystem root and mounts,
     // rendered as sibling top-level roots. On macOS `list_drives` returns none,
     // so the editor file-tree is scoped to $HOME only.
     // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up)
-    engine.register_handler(
+    engine.register_typed(
         "geteditorroots",
-        Box::new(|_data, _ctx| {
-            Box::pin(async move {
+        |_req: Option<EditorRootsReq>, _ctx| {
+            async move {
                 let home = dirs::home_dir()
                     .ok_or_else(|| "geteditorroots: cannot determine home directory".to_string())?;
-                let drives = list_drives();
-                Ok(Some(serde_json::json!({
-                    "home": home.to_string_lossy(),
-                    "drives": drives,
-                })))
-            })
-        }),
+                Ok(GetEditorRootsResult {
+                    home: home.to_string_lossy().into_owned(),
+                    drives: list_drives(),
+                })
+            }
+        },
     );
 
     // ── Editor file-tree mutations ─────────────────────────────────────
@@ -1002,7 +971,127 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 #[cfg(test)]
 mod tests {
     use crate::backend::rpc_types::AgentConfigFile;
-    use crate::backend::rpc_types::{CreateScratchFileReq, DeleteEditorFileReq};
+    use crate::backend::rpc_types::{
+        CommandReadEditorFileResult, CreateScratchFileReq, DeleteEditorFileReq, DirEntry,
+    };
+
+    /// The five read commands record their request and response types too, so
+    /// the only thing left untyped in this file is the four watchers (plus
+    /// `writeagentconfig`, which is not an editor command).
+    #[tokio::test]
+    async fn register_typed_records_the_editor_read_commands() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        super::register_editor_handlers(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
+        };
+
+        for (cmd, resp) in [
+            ("readeditorfile", "CommandReadEditorFileResult"),
+            ("writeeditorfile", "()"),
+            ("listeditordir", "ListEditorDirResult"),
+            ("geteditorhome", "GetEditorHomeResult"),
+            ("geteditorroots", "GetEditorRootsResult"),
+        ] {
+            assert_eq!(find(cmd)["responseName"], resp, "{cmd} response");
+        }
+        assert_eq!(find("readeditorfile")["requestName"], "CommandReadEditorFileData");
+        assert_eq!(find("writeeditorfile")["requestName"], "CommandWriteEditorFileData");
+        assert_eq!(find("listeditordir")["requestName"], "ListEditorDirReq");
+    }
+
+    /// `geteditorhome` and `geteditorroots` take no argument, and the two
+    /// encodings of that both reach the server -- the stub sends `{}`, a client
+    /// that omits `data` sends `null`. `Option<EditorRootsReq>` takes both;
+    /// a bare struct rejects the second and `()` rejects the first.
+    #[tokio::test]
+    async fn the_no_argument_read_commands_accept_both_encodings() {
+        let state = crate::server::tests::test_state();
+        let (engine, mut rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        super::register_editor_handlers(&engine, &state);
+
+        for cmd in ["geteditorhome", "geteditorroots"] {
+            for (i, payload) in [serde_json::json!({}), serde_json::Value::Null]
+                .into_iter()
+                .enumerate()
+            {
+                engine.handle_message(crate::backend::rpc_types::RpcMessage {
+                    command: cmd.to_string(),
+                    reqid: format!("{cmd}-{i}"),
+                    data: Some(payload.clone()),
+                    ..Default::default()
+                });
+                let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    resp.error.is_empty(),
+                    "{cmd} should accept {payload}, got error: {}",
+                    resp.error,
+                );
+            }
+        }
+    }
+
+    /// `readeditorfile`'s four encoding fields were typed `?:` by hand "for
+    /// back-compat; absent ⇒ treat as UTF-8", but the server has never omitted
+    /// them: `decode_file` returns all four unconditionally. Pin that, because
+    /// the generated type now says they are required and this is the only
+    /// thing that would notice if the handler started omitting one.
+    #[test]
+    fn readeditorfile_always_reports_the_encoding_fields() {
+        let decoded = crate::backend::text_encoding::decode_file(b"hello");
+        let v = serde_json::to_value(CommandReadEditorFileResult {
+            content: decoded.content,
+            encoding: decoded.encoding,
+            bom: decoded.bom.to_string(),
+            line_ending: decoded.line_ending.to_string(),
+            had_decode_errors: decoded.had_decode_errors,
+            read_only: false,
+        })
+        .unwrap();
+        for key in ["content", "encoding", "bom", "line_ending", "had_decode_errors", "read_only"] {
+            assert!(v.get(key).is_some(), "{key} must always be present, got {v}");
+        }
+        assert_eq!(v["encoding"], "UTF-8");
+        assert_eq!(v["bom"], "none");
+        assert_eq!(v["line_ending"], "lf");
+    }
+
+    /// `DirEntry.size` / `.mtime` really are absent rather than zero: a
+    /// directory has no meaningful size, and `0` would be indistinguishable
+    /// from a real empty file. The generated TS says `size?: number`, and this
+    /// is the half of that claim the TS cannot check.
+    #[test]
+    fn a_directory_entry_omits_size_rather_than_sending_zero() {
+        let dir = DirEntry {
+            name: "src".to_string(),
+            is_dir: true,
+            is_symlink: false,
+            size: None,
+            mtime: None,
+        };
+        let v = serde_json::to_value(&dir).unwrap();
+        assert!(v.get("size").is_none(), "expected size omitted, got {v}");
+        assert!(v.get("mtime").is_none(), "expected mtime omitted, got {v}");
+
+        let file = DirEntry {
+            name: "main.rs".to_string(),
+            is_dir: false,
+            is_symlink: false,
+            size: Some(0),
+            mtime: Some(1_700_000_000_000),
+        };
+        let v = serde_json::to_value(&file).unwrap();
+        assert_eq!(v["size"], 0, "a real empty file still reports its size");
+        assert_eq!(v["mtime"], 1_700_000_000_000u64);
+    }
 
     /// The seven file-tree mutation commands record their request and response
     /// types.
