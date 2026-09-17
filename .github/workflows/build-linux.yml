@@ -223,9 +223,22 @@ jobs:
       #    §2.1). The ubuntu-22.04 runner ships Ruby; fpm's `-t deb` backend
       #    is pure-Ruby, but `-t rpm` shells out to `rpmbuild` (NOT pure Ruby),
       #    hence the separate `rpm` apt package below (Debian/Ubuntu's cross-
-      #    packaging path — see build-rpm-linux.sh's header comment). ──
+      #    packaging path — see build-rpm-linux.sh's header comment).
+      #
+      #    `sudo` (2026-09-16): this job hadn't run since 2026-07-19 — the
+      #    next run (PR #3283's release build) failed with
+      #    Gem::FilePermissionError, "You don't have write permissions for
+      #    the /var/lib/gems/3.0.0 directory." Unqualified `gem install`
+      #    writes into the runner's SYSTEM Ruby's gem directory, owned by
+      #    root; whatever let the unqualified form work as of the last
+      #    success two months ago no longer holds (most likely a
+      #    ubuntu-22.04 runner-image update to how the bundled Ruby's gem
+      #    dir is owned — nothing in this repo changed between those two
+      #    runs). `sudo` installs into the same system location `fpm`
+      #    already resolves on PATH afterward, so no other step needs to
+      #    change. ──
       - name: Install fpm
-        run: gem install --no-document fpm
+        run: sudo gem install --no-document fpm
 
       - name: Install rpmbuild
         run: sudo apt-get install -y --no-install-recommends rpm
