@@ -44,6 +44,14 @@ export type {
     RenameEditorFileResult,
 } from "./file";
 export type {
+    AgentInstance,
+    CommandCreateAgentInstanceData,
+    CommandGetAgentInstanceData,
+    CommandListAgentInstancesData,
+    CommandUpdateAgentInstanceData,
+    CreateAgentInstanceInput,
+} from "./agent";
+export type {
     BlockKind,
     DeleteDroneReq,
     DeleteDroneResp,
