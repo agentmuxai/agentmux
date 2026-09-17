@@ -45,6 +45,31 @@ export type {
     NativeMemoryRevertResult,
     NativeMemoryVersionMeta,
 } from "./native-memory";
+export type {
+    ActivitySummaryResult,
+    AgentArchiveRow,
+    AgentSessionAppendOutputResult,
+    AgentSessionArchiveResult,
+    AgentSessionReadResult,
+    AgentSessionWriteStateResult,
+    CommandActivitySummaryData,
+    CommandAgentSessionAppendOutputData,
+    CommandAgentSessionArchiveData,
+    CommandAgentSessionListArchivesData,
+    CommandAgentSessionReadData,
+    CommandAgentSessionWriteStateData,
+    CommandNextPromptSuggestionData,
+    CommandSessionArchiveData,
+    CommandSessionExportData,
+    CommandSessionRestoreData,
+    CommandSessionResumePreflightData,
+    NextPromptSuggestionResult,
+    ResumePreflightStep,
+    SessionArchiveResult,
+    SessionExportResult,
+    SessionRestoreResult,
+    SessionResumePreflightResult,
+} from "./session";
 
 // WshServerCommandToDeclMap
 export const RpcApi = {

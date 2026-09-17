@@ -35,7 +35,9 @@ vi.mock("@/app/store/rpc-api", () => {
         // trigger the fetch; the drift-regression tests below set their
         // own `.mockResolvedValue`.
         GetBundleCommand: vi.fn().mockResolvedValue(undefined),
-        AgentSessionReadCommand: vi.fn().mockResolvedValue({ content: null, modts: null }),
+        // `{}` is what the server actually sends when there is no snapshot —
+        // both fields are omitted, never null. See AgentSessionReadResult.
+        AgentSessionReadCommand: vi.fn().mockResolvedValue({}),
         AgentSessionArchiveCommand: vi.fn().mockResolvedValue({}),
         AgentDefCreateFromTemplateCommand: vi.fn().mockResolvedValue({
             definition_id: "new-def",

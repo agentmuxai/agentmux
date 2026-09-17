@@ -129,10 +129,11 @@ describe("useHistoryPagination — Option E agent-anchored snapshot read", () =>
     });
 
     it("falls through to NDJSON replay when AgentSessionRead returns no content", async () => {
-        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({
-            content: null,
-            modts: null,
-        });
+        // `{}`, not `{content: null}`: both fields are
+        // `skip_serializing_if = "Option::is_none"`, so the server OMITS the keys
+        // rather than sending null. The generated AgentSessionReadResult says
+        // `content?: string` accordingly.
+        vi.mocked(RpcApi.AgentSessionReadCommand).mockResolvedValue({});
         vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: 0 });
 
         const model = makeMockModel();

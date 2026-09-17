@@ -1,6 +1,8 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ResumePreflightStep } from "@/app/store/rpc-api";
+
 /**
  * Type definitions for the unified agent widget
  *

@@ -132,16 +132,27 @@ pub enum CompactionTrigger {
     Manual,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+// Generated for the session domain (ActivitySummaryResult.tokens). The
+// hand-written global `TokenCounts` in srv-types.d.ts stays for now: four other
+// global types reference it and a global cannot import, so it can only be
+// deleted once those domains migrate too. Both shapes are identical --
+// `rename_all = "camelCase"` gives `cacheCreation`/`cacheRead`, which is what
+// the hand-written copy already says.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
 pub struct TokenCounts {
     #[serde(default)]
+    #[ts(type = "number")]
     pub input: u64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub output: u64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub cache_creation: u64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub cache_read: u64,
 }
 
