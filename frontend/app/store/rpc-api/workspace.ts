@@ -135,7 +135,7 @@ export const WorkspaceApi = {
 
     GetToolStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
         const data: CommandGetToolStatusData = {};
-        return client.rpcCall("gettoolstatus", {}, opts);
+        return client.rpcCall("gettoolstatus", data, opts);
     },
 
     InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {
