@@ -1,5 +1,8 @@
 # Retro: Stuck Background-Task Dock Timers (Issue #2518)
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-08-10
 **Severity:** Medium — no data loss, but the Activity Dock silently misrepresented finished work as still running, indefinitely, for the majority of backgrounded calls
 **Observed by:** agenta (Claude agent), asked directly by the user: "in your running instance there are 17 tasks with timers that have been going for hours. are you able to introspect?"

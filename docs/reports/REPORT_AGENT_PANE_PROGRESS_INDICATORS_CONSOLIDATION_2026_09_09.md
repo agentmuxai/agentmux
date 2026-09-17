@@ -1,5 +1,8 @@
 # REPORT: Agent pane progress indicators — desync, background handoff, and ambient narration
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Status:** active
 **Date:** 2026-09-09
 **Area:** agent pane / working state / activity dock
@@ -52,7 +55,14 @@ This constrains §8.1: the fix is that the two **indicators** derive from one pr
 
 ### 2.3 The indicators have exactly one meaning — and it is the input gate
 
-Stated by the repo owner, 2026-09-09, and authoritative for this work:
+> **⚠️ Superseded 2026-09-17 — see §2.3a immediately below.** The ruling in
+> this section no longer holds for the backgrounded/dock-promoted case. It
+> is kept verbatim (not rewritten) so the reasoning that produced §3.1's
+> analysis and the original `working-indicator.ts` doc comment remains
+> legible — do not silently edit history here.
+
+Stated by the repo owner, 2026-09-09, and authoritative for this work *as of
+that date*:
 
 > Both indicators mean: **if you type now, your message will be queued until the
 > next turn.** If neither is present, the agent responds immediately. Work the
@@ -80,6 +90,46 @@ stands down when the dock takes over — which is precisely §3.1's divergence. 
 §2.3 that stand-down is a defect: input is still queued during a promoted call, so
 hiding the row tells the user the opposite of the truth. That spec needs an
 explicit correction, not a silent code change around it.
+
+### 2.3a Supersession (2026-09-17) — backgrounding now releases the foreground
+
+§2.3's ruling and §3.1's application of it to dock promotion are **superseded**,
+confirmed directly by the repo owner, 2026-09-17. This report shipped with an
+internal contradiction that went unnoticed through §10's own "Open questions"
+pass: §2.3 declared the indicators must stay lit (input still queued) for a
+promoted/backgrounded call, while §8.2 — in the same document — recommended
+the opposite ("the composer gate must open ... once every in-flight foreground
+call ... has been accepted as backgrounded") with no cross-reference to §2.3
+at all. Both cannot be the live design simultaneously.
+
+**§8.2 is now the live design, not a proposal in tension with §2.3.** The new
+rule:
+
+> A promoted/backgrounded call no longer keeps the composer gate closed once
+> no OTHER foreground call is blocking. The dock row remains as the live
+> indicator of the still-running work — the pane simply stops *also* claiming
+> the foreground for it. This applies identically to the bar, the working
+> row, and the footer (they remain one predicate, per §3's own thesis) and to
+> the actual send-timing behavior (previously: silently queued until Esc;
+> now: delivered immediately).
+
+Practical effect: `working-indicator.ts`'s `paneBusyForInput` and the send-
+gate in `useAgentCommands.ts` both gained a carve-out — while `turnPhase` is
+`Streaming` and the block has attached background work, busy-ness reduces to
+"is there still a genuinely blocking (non-backgrounded) foreground tool call
+running," not "is the turn nominally still in flight at all." Submitting and
+Interrupting are unaffected (still unconditionally busy) — see the code
+comment on `paneBusyForInput` for the exact boundary.
+
+§3.1's specific conclusion ("the bar is correct here and the row is wrong")
+is retracted along with §2.3: under the superseding rule, once a Bash call is
+promoted to the dock (`TOOL_PROMOTION_MS`) and nothing else is blocking, the
+row standing down is now *correct*, and the bar not following it was the
+actual residual bug (closed as part of this work). This also means
+`SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01`'s original intent (row
+stands down when the dock takes over) no longer needs the "correction" §2.3
+called for — check that spec directly for any note added when §2.3 first
+landed and revert/update it to match.
 
 ## 3. Problem 1 — the indicators are three copies of one predicate
 

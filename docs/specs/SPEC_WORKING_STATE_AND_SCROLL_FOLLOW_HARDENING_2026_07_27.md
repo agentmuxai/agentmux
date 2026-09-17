@@ -1,5 +1,8 @@
 # SPEC: Harden the "Working…" indicator and message-list auto-follow against four related recurring bugs
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-07-27
 **Status:** implemented — this pass's mechanisms shipped; of §5's two deferred items, the tool-liveness gap was closed by the attached-task axis (PR #2489 + #2472) and the scroll input-gating race remains open, conditional on live reports. Verified 2026-08-10.
 **Author:** Agent1

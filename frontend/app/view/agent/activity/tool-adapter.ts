@@ -114,6 +114,35 @@ export function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
     return typeof text === "string" && text.startsWith(BACKGROUND_LAUNCH_ACCEPTED_PREFIX);
 }
 
+/** Non-terminal `ToolNode.status` values that mean "the turn cannot proceed
+ *  without this call resolving" — includes the two decision-gated statuses
+ *  (`pending_approval`, `awaiting_answer`), not just `running`. */
+const BLOCKING_TOOL_STATUSES = new Set(["running", "pending_approval", "awaiting_answer"]);
+
+/**
+ * True if some running/gated tool call for this block is still genuinely
+ * blocking the turn — i.e. NOT an accepted background launch. Used by
+ * `working-indicator.ts`'s §2.3a carve-out (see its doc comment) to decide
+ * whether a turn that's technically `Streaming` only because of backgrounded
+ * work should actually still gate the composer.
+ *
+ * Does not special-case `isAcceptedBackgroundLaunch` explicitly: that
+ * classifier can only ever return true for a `status: "success"` node (its
+ * own first check), so a node in one of BLOCKING_TOOL_STATUSES can never BE
+ * an accepted background launch in the first place — the ToolNode for one
+ * of those goes terminal within ~a second of acceptance (see
+ * `isAcceptedBackgroundLaunch`'s doc comment). A merely-promoted-to-the-dock
+ * ordinary Bash call (`TOOL_PROMOTION_MS`, still synchronously running) is
+ * NOT an accepted background launch and correctly stays `running` here —
+ * that is the whole point of this function existing as a second check
+ * alongside `hasAttachedBackgroundWork` rather than relying on attachment
+ * status alone (attachment is set for EITHER case; only a genuinely
+ * detached launch should free the composer).
+ */
+export function hasBlockingForegroundToolCall(nodes: ReadonlyArray<DocumentNode>): boolean {
+    return nodes.some((n) => n.type === "tool" && BLOCKING_TOOL_STATUSES.has(n.status));
+}
+
 /**
  * Parses a single `<task-notification>` user message into the
  * `tool_use_id` it belongs to and its terminal status. Exported so both

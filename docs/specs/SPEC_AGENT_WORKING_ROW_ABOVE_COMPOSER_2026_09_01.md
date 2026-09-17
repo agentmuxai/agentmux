@@ -1,5 +1,8 @@
 # Working row: stand down on promotion, and sit above the composer
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-09-01
 **Status:** Implemented (§1 corrected 2026-09-09 — stand-down reverted, see the notice below)
 **Supersedes (in part):** `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.2,

@@ -33,6 +33,8 @@ import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "../launch-args";
+import { hasBlockingForegroundToolCall } from "../activity/tool-adapter";
+import { paneBusyForInput } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
@@ -61,6 +63,17 @@ export interface UseAgentCommandsOptions {
     provider: Accessor<ProviderDefinition | undefined>;
     /** Reactive accessor for the pane document nodes (`model.document`). */
     documentNodes: Accessor<DocumentNode[]>;
+    /**
+     * The view's own launch/auth-activity flag, threaded in so the §2.3a
+     * eager-flush below can evaluate the WHOLE `paneBusyForInput` predicate
+     * rather than a subset of it. Optional, defaulting to `false`: every
+     * non-view caller (tests) is by construction not mid-launch, and a
+     * missing value must never make the gate look *less* busy than it is —
+     * `false` here is the only safe default because the flush is additionally
+     * gated on the turn being `Streaming` with accepted background work,
+     * which a launching pane never is.
+     */
+    showingLaunchActivity?: Accessor<boolean>;
     log: LogFn;
     setAuthUrl: (url: string | null) => void;
     /**
@@ -1036,6 +1049,50 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 return;
             }
             heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime, authFailureToPreserve: null, initiatedTurnOptimistically: false });
+            // §2.3a (2026-09-17): if the turn is only still open because work
+            // has been accepted as backgrounded, drain the queue NOW instead
+            // of waiting for the normal trigger. The ordinary drain fires at
+            // the next tool-call boundary — but a turn whose sole remaining
+            // work is a detached dev server may not produce another tool call
+            // for minutes, or at all, so the message would sit in the "send
+            // now" panel indefinitely. The indicator has already gone dark and
+            // told the user they'd be answered immediately (see
+            // working-indicator.ts); this is what makes that true rather than
+            // a lie. Deliberately still pushed-then-flushed rather than
+            // delivered inline: the code below this branch is the "pane is
+            // idle, initiating a new turn" path and assumes exactly that, but
+            // flushHeldMessages already delivers mid-turn with
+            // initiatesTurn=false and is explicitly safe to call while a turn
+            // is genuinely active (see its own doc comment). Awaited, not
+            // fire-and-forget, so sendMessage still resolves after the message
+            // has actually gone out.
+            //
+            // Gated on the WHOLE `paneBusyForInput` predicate — literally "the
+            // indicator is dark" — not on the turn carve-out alone. An earlier
+            // revision of this called `turnHeldOnlyByBackgroundWork` directly
+            // and so ignored `compacting`/`reconnecting`, which
+            // `paneBusyForInput` ORs in on top of the turn check: a compaction
+            // in flight during a Streaming turn with only an attached
+            // background task left the indicator correctly lit while this code
+            // flushed anyway, delivering mid-compaction. That is the same
+            // indicator/gate divergence in a new place, and this eager flush
+            // made it reproducible precisely when compaction is the only thing
+            // running. ReAgent P1 on PR #3340. Do not narrow this back to a
+            // subset of the predicate.
+            const live = paneSnapshot(opts.blockId);
+            if (
+                !paneBusyForInput({
+                    showingLaunchActivity: opts.showingLaunchActivity?.() ?? false,
+                    turnPhase: live?.turnPhase ?? { kind: "Idle" },
+                    compacting: live?.compacting ?? null,
+                    reconnecting: live?.reconnecting ?? null,
+                    hasAttachedBackgroundWork:
+                        live?.attachedTask != null || live?.registryAttachedTaskSince != null,
+                    hasBlockingForegroundToolCall: hasBlockingForegroundToolCall(opts.documentNodes()),
+                })
+            ) {
+                await flushHeldMessages();
+            }
             return;
         }
 

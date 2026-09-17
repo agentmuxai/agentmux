@@ -1,5 +1,8 @@
 # Report: why "Working…" appears with no reason, and what telemetry would let an agent self-diagnose it
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-07-27
 **Author:** Agent3
 **Verified against:** `main` @ `128633ced`.
