@@ -30,6 +30,23 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    BlockKind,
+    DeleteDroneReq,
+    DeleteDroneResp,
+    DroneBlockState,
+    DroneDefinition,
+    DroneFlowEdge,
+    DroneFlowNode,
+    DroneGraph,
+    DroneRun,
+    DroneViewport,
+    GetDroneReq,
+    ListDroneRunsInput,
+    ListDronesReq,
+    RunDroneReq,
+    RunDroneResp,
+} from "./agent";
+export type {
     AgentContent,
     AgentDefinition,
     AgentDefinitionCreateInput,

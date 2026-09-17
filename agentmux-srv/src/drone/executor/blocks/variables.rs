@@ -53,7 +53,7 @@ mod tests {
                     { "name": "greeting", "value": "hi" }
                 ]
             }),
-            node_type: String::new(),
+            node_type: None,
         };
         let mut scope = ExecutionScope::new();
         let out = run(&node, &mut scope).await.unwrap();
