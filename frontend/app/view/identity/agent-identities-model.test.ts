@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { joinAgentIdentityRows } from "./agent-identities-model";
 import type { Account } from "./identity-model";
+import type { AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 function mkAccount(overrides: Partial<Account> & Pick<Account, "id">): Account {
     return {

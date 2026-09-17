@@ -320,44 +320,6 @@ declare global {
 
     // ── v6: identity, instance, junction ────────────────────────────────────
 
-    /**
-     * Discriminated-union secret reference. Stored as JSON in
-     * `IdentityAccount.secret_ref`. The actual secret value is NEVER stored;
-     * only how to look it up at launch time. `plaintext_dev` is dev-only.
-     */
-    type SecretRef =
-        | { backend: "env"; env_var: string }
-        | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
-        | { backend: "plaintext_dev"; plaintext_dev: string }
-        // Armory API keys: pointer into the OS keychain. Plaintext is
-        // never carried here. See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
-        | { backend: "keychain"; service: string; account: string }
-        // OAuth credentials as a filesystem pointer: the provider CLI reads
-        // its tokens from this dir at spawn time; agentmux holds only the
-        // path. See SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md and the Rust
-        // SecretRef::OAuthConfigDir variant (storage/identities.rs).
-        | { backend: "oauth_config_dir"; dir: string };
-
-    type IdentityAccount = {
-        id: string;
-        name: string;
-        provider: string; // "github" | "aws" | "anthropic" | "custom"
-        kind: string;     // "pat" | "role" | "api_key" | "env_ref"
-        display_name?: string;
-        secret_ref: SecretRef;
-        /** Free-form per-provider context. Frontend types it by `provider`. */
-        context: Record<string, unknown>;
-        status?: string; // "unknown" | "ok" | "expired" | "invalid"
-        created_at: number;
-        updated_at: number;
-    };
-
-    type AgentDefinitionIdentity = {
-        agent_id: string;
-        account_id: string;
-        provider: string;
-    };
-
     // ── v7 — Bundles ────────────────────────────────────────────
 
     // ── Browser pane bookmarks ───────────────────────────────────────────

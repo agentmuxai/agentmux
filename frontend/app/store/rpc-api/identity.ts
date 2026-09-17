@@ -56,6 +56,35 @@ export type AuthStartInput = Pick<
     "providerId" | "cliPath" | "authLoginArgs" | "authCheckArgs"
 > &
     Partial<Omit<StartProviderAuthReq, "providerId" | "cliPath" | "authLoginArgs" | "authCheckArgs">>;
+export type { IdentityAccount } from "@/types/rpc/IdentityAccount";
+export type { SecretRef } from "@/types/rpc/SecretRef";
+export type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
+export type { CommandListIdentityAccountsData } from "@/types/rpc/CommandListIdentityAccountsData";
+export type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
+export type { CommandLinkAgentIdentityData } from "@/types/rpc/CommandLinkAgentIdentityData";
+export type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
+export type { CommandListAgentIdentitiesData } from "@/types/rpc/CommandListAgentIdentitiesData";
+export type { CommandListAllAgentIdentitiesData } from "@/types/rpc/CommandListAllAgentIdentitiesData";
+export type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
+export type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
+export type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
+import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
+import type { SecretRef } from "@/types/rpc/SecretRef";
+import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
+import type { CommandListIdentityAccountsData } from "@/types/rpc/CommandListIdentityAccountsData";
+import type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
+import type { CommandLinkAgentIdentityData } from "@/types/rpc/CommandLinkAgentIdentityData";
+import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
+import type { CommandListAgentIdentitiesData } from "@/types/rpc/CommandListAgentIdentitiesData";
+import type { CommandListAllAgentIdentitiesData } from "@/types/rpc/CommandListAllAgentIdentitiesData";
+import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
+import type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
+import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
+
+// The frontend has always called the agent<->account link row
+// `AgentDefinitionIdentity`; the Rust type is `AgentIdentityLink`. Same three
+// fields, so this is a naming alias rather than a second declaration.
+export type { AgentIdentityLink as AgentDefinitionIdentity } from "@/types/rpc/AgentIdentityLink";
 import type { OAuthFlowStatus } from "./types";
 
 export const IdentityApi = {
@@ -71,7 +100,7 @@ export const IdentityApi = {
 
     GetIdentityAccountCommand(
         client: RpcClient,
-        data: { id: string },
+        data: CommandGetIdentityAccountData,
         opts?: RpcOpts,
     ): Promise<IdentityAccount> {
         return client.rpcCall("getidentityaccount", data, opts);
@@ -153,15 +182,15 @@ export const IdentityApi = {
 
     AccountOAuthCancelCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: OAuthSessionReq,
         opts?: RpcOpts,
-    ): Promise<{ cancelled: boolean }> {
+    ): Promise<AccountOAuthCancelResult> {
         return client.rpcCall("account.oauth.cancel", data, opts);
     },
 
     LinkAgentIdentityCommand(
         client: RpcClient,
-        data: { agent_id: string; account_id: string; provider: string },
+        data: CommandLinkAgentIdentityData,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("linkagentidentity", data, opts);
@@ -178,15 +207,15 @@ export const IdentityApi = {
             silent?: boolean;
         },
         opts?: RpcOpts,
-    ): Promise<{ unlinked: boolean }> {
+    ): Promise<UnlinkAgentIdentityResult> {
         return client.rpcCall("unlinkagentidentity", data, opts);
     },
 
     ListAgentIdentitiesCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: CommandListAgentIdentitiesData,
         opts?: RpcOpts,
-    ): Promise<AgentDefinitionIdentity[]> {
+    ): Promise<AgentIdentityLink[]> {
         return client.rpcCall("listagentidentities", data, opts);
     },
 
@@ -195,9 +224,9 @@ export const IdentityApi = {
     // up front rather than one ListAgentIdentitiesCommand call per rail row.
     ListAllAgentIdentitiesCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: CommandListAllAgentIdentitiesData = {},
         opts?: RpcOpts,
-    ): Promise<AgentDefinitionIdentity[]> {
+    ): Promise<AgentIdentityLink[]> {
         return client.rpcCall("listallagentidentities", data, opts);
     },
 

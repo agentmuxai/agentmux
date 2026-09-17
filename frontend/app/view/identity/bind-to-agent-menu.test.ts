@@ -41,6 +41,7 @@ import {
 } from "./bind-to-agent-menu";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { Account } from "./identity-model";
+import type { AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 function mkAccount(over: Partial<Account> = {}): Account {
     return {

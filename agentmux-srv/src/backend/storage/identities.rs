@@ -37,7 +37,8 @@ use super::store::Store;
 /// look it up at launch time (env var, secrets-manager path, etc.).
 /// `PlaintextDev` exists for local dev convenience and must never be
 /// the default path in production builds.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub enum SecretRef {
     Env {
@@ -46,6 +47,7 @@ pub enum SecretRef {
     SecretsManager {
         sm_path: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         sm_json_path: Option<String>,
     },
     PlaintextDev {
@@ -77,7 +79,16 @@ pub enum SecretRef {
     /// it would just move the "My Agents empty" incident to a different set
     /// of accounts. Serialization always writes the canonical
     /// `oauth_config_dir`; only deserialization accepts both.
+    /// ts-rs does NOT pick up the `serde(rename)` above — it emits the
+    /// derive-default `o_auth_config_dir`, i.e. exactly the legacy tag this
+    /// rename exists to stop writing. Without the `ts(rename)` below, the
+    /// generated binding would tell the frontend to discriminate on a tag the
+    /// server never serializes, silently reintroducing the "My Agents empty"
+    /// incident described above. No CI gate catches this: tsc passes (the
+    /// union simply never matches at runtime) and check-rpc-bindings passes
+    /// (the type exists and is current).
     #[serde(rename = "oauth_config_dir", alias = "o_auth_config_dir")]
+    #[ts(rename = "oauth_config_dir")]
     OAuthConfigDir {
         /// Absolute path to the per-bundle, per-provider config
         /// directory — e.g. `~/.agentmux/shared/identities/<id>/claude/`,
@@ -103,7 +114,8 @@ pub enum SecretRef {
 /// An identity account (reusable credential, linked to agents via the
 /// `db_agent_identity_links` junction). Replaces the browser
 /// localStorage identity store.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct IdentityAccount {
     pub id: String,
     pub name: String,
@@ -114,7 +126,14 @@ pub struct IdentityAccount {
     pub secret_ref: SecretRef,
     /// Free-form JSON context (username, scopes, role ARN, etc.). Stored
     /// verbatim; frontend types it by `provider`.
+    /// ts-rs has no `TS` impl for `serde_json::Value`, so this needs an
+    /// explicit type. `Record<string, unknown>` rather than bare `unknown`:
+    /// `default_context_json` is `{}` and every writer stores an object, so
+    /// the hand-written declaration's narrower type was accurate and emitting
+    /// `unknown` would lose real information (the same mistake a bare
+    /// `string` would be for a closed-set field).
     #[serde(default = "default_context_json")]
+    #[ts(type = "Record<string, unknown>")]
     pub context: serde_json::Value,
     #[serde(default = "default_identity_status")]
     pub status: String, // "unknown" | "ok" | "expired" | "invalid"
@@ -128,8 +147,10 @@ pub struct IdentityAccount {
     // failed 100% of the time with no visible
     // error (report: REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
     #[serde(default)]
+    #[ts(type = "number")]
     pub created_at: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub updated_at: i64,
 }
 
@@ -169,7 +190,8 @@ fn repair_bare_backslashes(raw: &str) -> String {
 }
 
 /// Junction row: which identity an agent uses for a given provider.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentIdentityLink {
     pub agent_id: String,
     pub account_id: String,
@@ -1193,5 +1215,66 @@ mod tests {
             .unwrap();
         let links = store.agent_identity_list_for_agent("agent-x").unwrap();
         assert_eq!(links.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod secret_ref_wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    // THE REASON `#[ts(rename)]` EXISTS ON OAuthConfigDir.
+    //
+    // ts-rs does not pick up `#[serde(rename = "oauth_config_dir")]`; left
+    // alone it emits the derive-default `o_auth_config_dir` — the legacy tag
+    // this rename exists to STOP writing. A frontend discriminating on that
+    // tag would never match a real OAuth account, which is the
+    // "My Agents empty" incident the variant's doc comment describes.
+    //
+    // No CI gate catches that: tsc passes (the union simply never matches at
+    // runtime) and check-rpc-bindings passes (the type exists and is current).
+    // So pin the serialized tag here, in Rust, where it is checkable.
+    #[test]
+    fn oauth_config_dir_serializes_with_the_canonical_tag() {
+        let v = serde_json::to_value(SecretRef::OAuthConfigDir {
+            dir: "/home/u/.claude".to_string(),
+        })
+        .expect("serializable");
+        assert_eq!(v["backend"], "oauth_config_dir");
+        assert_ne!(
+            v["backend"], "o_auth_config_dir",
+            "the derive-default tag must never be written; it is read-only legacy"
+        );
+    }
+
+    // The alias is still accepted on the way in — dropping it would strand
+    // accounts persisted while the buggy tag was canonical.
+    #[test]
+    fn both_tags_still_deserialize() {
+        for tag in ["oauth_config_dir", "o_auth_config_dir"] {
+            let parsed: SecretRef =
+                serde_json::from_value(json!({"backend": tag, "dir": "/d"})).unwrap_or_else(|e| {
+                    panic!("tag {tag} must still deserialize: {e}")
+                });
+            assert!(matches!(parsed, SecretRef::OAuthConfigDir { .. }));
+        }
+    }
+
+    // display_name and status are #[serde(default)] on non-Option fields with
+    // no skip_serializing_if, so the server ALWAYS writes them. The
+    // hand-written declaration marked both optional, which the wire never was;
+    // the generated binding makes them required.
+    #[test]
+    fn identity_account_always_writes_display_name_and_status() {
+        let a: IdentityAccount = serde_json::from_value(json!({
+            "id": "a1", "name": "n", "provider": "anthropic", "kind": "api_key",
+            "secret_ref": {"backend": "env", "env_var": "K"},
+        }))
+        .expect("minimal account");
+        let v = serde_json::to_value(&a).expect("serializable");
+        let obj = v.as_object().expect("object");
+        assert!(obj.contains_key("display_name"), "display_name is never omitted");
+        assert!(obj.contains_key("status"), "status is never omitted");
+        assert_eq!(v["context"], json!({}), "context defaults to an object, not null");
     }
 }
