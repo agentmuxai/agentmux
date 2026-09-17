@@ -36,6 +36,14 @@ export type {
     SecretRef,
 } from "./identity";
 export type {
+    CommandInstallToolData,
+    GetToolStatusResult,
+    InstallFailure,
+    InstallToolResult,
+    ToolStatus,
+    ToolStatusEntry,
+} from "./workspace";
+export type {
     BlockfileLineCountResult,
     BlockfileReadRangeResult,
     BlockfileReadStateResult,

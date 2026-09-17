@@ -2063,42 +2063,6 @@ declare global {
         raw_output: string;
     };
 
-    // tool_store.ToolStatus
-    type ToolStatus = "installed_system" | "installed_bundled" | "installed_managed" | "missing" | "unavailable";
-
-    // tool_store.ToolStatusEntry
-    type ToolStatusEntry = {
-        id: string;
-        display: string;
-        description: string;
-        tier: number;
-        status: ToolStatus;
-        version?: string;
-        path?: string;
-    };
-
-    // wshrpc.GetToolStatusResult
-    type GetToolStatusResult = {
-        tools: ToolStatusEntry[];
-    };
-
-    // wshrpc.CommandInstallToolData
-    type CommandInstallToolData = {
-        tool_ids: string[];
-    };
-
-    // wshrpc.InstallFailure
-    type InstallFailure = {
-        id: string;
-        error: string;
-    };
-
-    // wshrpc.InstallToolResult
-    type InstallToolResult = {
-        installed: string[];
-        failed: InstallFailure[];
-    };
-
     // The ONLY native-memory type still hand-written here; its siblings are now
     // ts-rs-generated under frontend/types/rpc/ and re-exported from
     // app/store/rpc-api/native-memory.ts. This one cannot be generated: `detail`

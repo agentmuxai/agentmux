@@ -283,23 +283,27 @@ pub struct RemoteInfo {
 
 // ---- Tool store command data types ----
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandInstallToolData {
     pub tool_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct GetToolStatusResult {
     pub tools: Vec<crate::backend::tool_store::ToolStatusEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct InstallToolResult {
     pub installed: Vec<String>,
     pub failed: Vec<InstallFailure>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct InstallFailure {
     pub id: String,
     pub error: String,
@@ -351,3 +355,10 @@ pub struct CommandBookmarksSetData {
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandBookmarksListData {}
+
+/// Request for `gettoolstatus`. The handler ignores its payload, but this must
+/// be a struct rather than `()`: the stub calls it with no argument, which the
+/// RPC client sends as `{}`, and serde deserializes `()` only from JSON `null`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandGetToolStatusData {}
