@@ -1,31 +1,48 @@
 #!/usr/bin/env bash
-# Install agentmux.desktop + hicolor icon files for the current user so that
-# Wayland/X11 window managers (GNOME Shell, KWin, sway) can match the running
-# AgentMux window to a desktop entry and display the AgentMux logo in the
-# taskbar/dock/launcher.
+# Install a per-(channel,version) agentmux-<app-id>.desktop + hicolor icon
+# files for the current user so that Wayland/X11 window managers (GNOME
+# Shell, KWin, sway) can match the running AgentMux window to a desktop
+# entry and display the AgentMux logo in the taskbar/dock/launcher.
 #
 # Idempotent: re-runs are safe and update the .desktop's Exec= line if it
 # changed (e.g. switching between dev binary, portable bundle, and AppImage).
 #
 # The matching contract:
-#   - agentmux-cef sets xdg_toplevel.app_id = "agentmux" via the
-#     WindowDelegate::linux_window_properties override (agentmux-cef/src/app.rs).
-#   - This script installs ~/.local/share/applications/agentmux.desktop —
-#     basename matches the app_id.
-#   - The .desktop's Icon=agentmux references icons installed under
-#     ~/.local/share/icons/hicolor/<size>x<size>/apps/agentmux.png.
+#   - agentmux-cef sets xdg_toplevel.app_id = "agentmux-<channel>-<version>"
+#     via the WindowDelegate::linux_window_properties override
+#     (agentmux-cef/src/app/window_settings.rs::linux_app_id()).
+#   - This script installs ~/.local/share/applications/<app-id>.desktop —
+#     basename and StartupWMClass both match that app_id.
+#   - The .desktop's Icon=agentmux references the shared icon installed
+#     under ~/.local/share/icons/hicolor/<size>x<size>/apps/agentmux.png
+#     (icons are identical across channels/versions, so they aren't
+#     duplicated per app_id).
+#
+# One file per app_id means two different instances (different channel
+# and/or version) each get their own desktop entry and thus their own dock
+# icon, instead of one instance's install overwriting the other's — that
+# overwrite was the root cause of two isolated AgentMux instances sharing
+# a single dock entry.
 #
 # Usage:
-#   bash scripts/install-linux-desktop.sh <exec-path>
+#   bash scripts/install-linux-desktop.sh <exec-path> [app-id]
 #       <exec-path>  absolute path to the binary or AppImage that the
 #                    .desktop's Exec= should point to.
+#       [app-id]     the wayland_app_id/WM_CLASS this instance's window(s)
+#                    advertise (see linux_app_id() above). Defaults to the
+#                    legacy static "agentmux" for callers that don't know
+#                    their channel/version at install time.
 
 set -euo pipefail
 
-EXEC_PATH="${1:?usage: $0 <absolute-exec-path>}"
+EXEC_PATH="${1:?usage: $0 <absolute-exec-path> [app-id]}"
 case "$EXEC_PATH" in
     /*) ;;
     *) echo "ERROR: <exec-path> must be absolute, got: $EXEC_PATH" >&2; exit 1 ;;
+esac
+APP_ID="${2:-agentmux}"
+case "$APP_ID" in
+    */*) echo "ERROR: <app-id> must not contain '/', got: $APP_ID" >&2; exit 1 ;;
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -93,9 +110,11 @@ escape_for_desktop_exec() {
 }
 quoted_exec="$(escape_for_desktop_exec "$EXEC_PATH")"
 
-desktop="$APPS_DIR/agentmux.desktop"
+desktop="$APPS_DIR/${APP_ID}.desktop"
 template_content="$(<"$TEMPLATE")"
-printf '%s\n' "${template_content//__EXEC__/$quoted_exec}" > "$desktop"
+template_content="${template_content//__EXEC__/$quoted_exec}"
+template_content="${template_content//__WMCLASS__/$APP_ID}"
+printf '%s\n' "$template_content" > "$desktop"
 chmod 644 "$desktop"
 
 # 4. Refresh caches (best-effort; tools may be absent on minimal systems)

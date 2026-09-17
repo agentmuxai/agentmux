@@ -125,8 +125,14 @@ cp -r assets/linux "$APPDIR/assets/"
 # --- 8. Top-level desktop file (required by appimagetool) ---
 # appimagetool wants Exec=AppRun (relative); the user-installed copy gets
 # Exec=$APPIMAGE substituted at runtime by install-linux-desktop.sh.
+# StartupWMClass must match the app_id this build's binary will advertise
+# (window_settings.rs::linux_app_id() = agentmux-<channel>-<version>) so
+# desktop-integration tools that read this file directly (not the
+# runtime-installed copy) still resolve the right icon.
 cp assets/linux/agentmux.desktop "$APPDIR/agentmux.desktop"
 sed -i 's|^Exec=.*|Exec=AppRun %F|' "$APPDIR/agentmux.desktop"
+BUILD_CHANNEL="${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}"
+sed -i "s|__WMCLASS__|agentmux-${BUILD_CHANNEL}-${VERSION}|" "$APPDIR/agentmux.desktop"
 
 # --- 9. Top-level icon + .DirIcon (REAL COPY, not symlink — appimagetool's
 #        default creates an absolute symlink that's broken outside this build

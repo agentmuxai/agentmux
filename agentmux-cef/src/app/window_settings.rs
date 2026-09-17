@@ -13,7 +13,7 @@
 /// cef 146.7.0 wrapper (`Clear` variant gets dropped during writeback).
 ///
 /// Without this, CEF emits `xdg_toplevel.set_app_id("")` and GNOME / KWin /
-/// sway can't match the window to `agentmux.desktop`, so the AgentMux icon
+/// sway can't match the window to its `.desktop` file, so the AgentMux icon
 /// never appears in the taskbar/dock/launcher.
 ///
 /// Must be called once on every `WindowDelegate` we create (top-level, popup,
@@ -31,10 +31,49 @@ pub fn install_linux_window_properties_override(delegate: &cef::WindowDelegate) 
     }
 }
 
+/// Build-time default channel — same resolution `agentmux_common::DataPaths`
+/// uses for `Installed`/`Portable` modes absent an `AGENTMUX_CHANNEL`
+/// override. Duplicated locally rather than imported (same pattern already
+/// used by `commands/platform.rs` and `agentmux-common/src/data_paths.rs`)
+/// so this module doesn't need a cross-crate call during window creation.
+#[cfg(target_os = "linux")]
+const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
+    Some(s) => s,
+    None => "stable",
+};
+
+/// The app_id / WM_CLASS this process advertises to the Wayland/X11 window
+/// manager: `agentmux-<channel>-<version>`, resolved once and cached.
+///
+/// Must stay in lockstep with `scripts/install-linux-desktop.sh`'s
+/// StartupWMClass computation (same "AGENTMUX_CHANNEL env override, else
+/// compile-time default" resolution, joined with the crate version) — that
+/// script installs the `.desktop` file this app_id needs to match for icon
+/// lookup to succeed at all (see the module doc comment above).
+///
+/// Distinct per (channel, version) so two independently-running AgentMux
+/// instances — e.g. two local builds, or an old release running alongside a
+/// new one — register as separate applications to the desktop environment
+/// instead of merging into one dock/taskbar icon. Previously this was a
+/// single hardcoded `b"agentmux"` shared by every build regardless of
+/// channel or version, which is exactly why that merge happened.
+#[cfg(target_os = "linux")]
+fn linux_app_id() -> &'static [u8] {
+    static APP_ID: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    APP_ID.get_or_init(|| {
+        let channel = std::env::var("AGENTMUX_CHANNEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| BUILD_CHANNEL_DEFAULT.to_string());
+        format!("agentmux-{channel}-{}", env!("CARGO_PKG_VERSION")).into_bytes()
+    })
+}
+
 /// Custom extern "C" shim invoked by libcef to populate
-/// `_cef_linux_window_properties_t`. Writes "agentmux" to wayland_app_id
-/// and the X11 wm_class fields via cef-dll-sys utf8→utf16 setters,
-/// then returns 1 so libcef uses the values.
+/// `_cef_linux_window_properties_t`. Writes the per-(channel,version)
+/// app_id (see `linux_app_id()`) to wayland_app_id and the X11 wm_class
+/// fields via cef-dll-sys utf8→utf16 setters, then returns 1 so libcef uses
+/// the values.
 #[cfg(target_os = "linux")]
 extern "C" fn write_linux_window_properties(
     _self_: *mut cef::sys::_cef_window_delegate_t,
@@ -44,7 +83,7 @@ extern "C" fn write_linux_window_properties(
     if properties.is_null() {
         return 0;
     }
-    const APP_ID: &[u8] = b"agentmux";
+    let app_id = linux_app_id();
     unsafe {
         let props = &mut *properties;
         // The C struct's strings start zeroed (libcef constructs a default
@@ -52,13 +91,13 @@ extern "C" fn write_linux_window_properties(
         // new utf-16 buffer and assigns it to the dest cef_string_utf16_t;
         // ownership transfers to libcef which calls dtor when done.
         cef::sys::cef_string_utf8_to_utf16(
-            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wayland_app_id,
+            app_id.as_ptr().cast(), app_id.len(), &mut props.wayland_app_id,
         );
         cef::sys::cef_string_utf8_to_utf16(
-            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_class,
+            app_id.as_ptr().cast(), app_id.len(), &mut props.wm_class_class,
         );
         cef::sys::cef_string_utf8_to_utf16(
-            APP_ID.as_ptr().cast(), APP_ID.len(), &mut props.wm_class_name,
+            app_id.as_ptr().cast(), app_id.len(), &mut props.wm_class_name,
         );
     }
     1

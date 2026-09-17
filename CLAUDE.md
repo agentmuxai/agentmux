@@ -542,8 +542,22 @@ ls -la squashfs-root/.DirIcon   # must be a regular file, not a symlink
 Also clear Nautilus's thumbnail cache if the old icon was cached: `rm -rf ~/.cache/thumbnails/`
 
 ### Wayland app_id and desktop file matching
-The Wayland `xdg_toplevel.app_id` is `"agentmux"` (the binary name). GNOME matches
-the running window to `agentmux.desktop` only. Only `agentmux.desktop` is needed.
+As of `docs/specs/SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17.md`, the Wayland
+`xdg_toplevel.app_id` / X11 `WM_CLASS` is `agentmux-<channel>-<version>` (computed
+once per process by `window_settings.rs::linux_app_id()`), not a static `"agentmux"`.
+A static app_id shared by every build meant two independently-running instances
+(different channel and/or version, each already fully isolated at the data-dir/pipe
+level) got merged into a single dock/taskbar icon by the desktop environment, which
+groups purely on this string — the isolation work never touched it. `scripts/
+install-linux-desktop.sh` now installs one `~/.local/share/applications/<app_id>.desktop`
+per app_id (read by `scripts/linux-apprun.sh` from `usr/share/agentmux/CHANNEL`+`VERSION`
+markers staged by `scripts/stage-linux-runtime.sh`), instead of always overwriting a
+single shared `agentmux.desktop` — that overwrite was the second half of the bug: even
+after grouping, the last-installed instance's Exec= would win for every icon click.
+`.deb`/`.rpm` builds (which don't set a channel — always `stable`) and the AppImage's
+own internal top-level `.desktop` compute the matching `StartupWMClass` at build time
+instead. Icons stay shared (`Icon=agentmux`) — only `StartupWMClass` and the desktop
+filename vary.
 
 ### CRITICAL: Never Kill AgentMux by Image Name
 - **NEVER** use `taskkill //im agentmux-cef.exe` or `taskkill //im agentmux-srv.x64.exe`

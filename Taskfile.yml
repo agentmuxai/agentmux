@@ -1075,8 +1075,28 @@ tasks:
                 # in the taskbar/dock instead of a generic cog. Idempotent —
                 # safe to run on every dev launch. Best-effort: a missing
                 # `convert`/`gtk-update-icon-cache` doesn't fail the launch.
+                #
+                # AGENTMUX_CHANNEL here is exported (not just a local var) so
+                # the launcher/host exec later in this same script inherits
+                # it — window_settings.rs::linux_app_id() reads it directly.
+                # linux_app_id() never consults RuntimeMode's dev-branch
+                # auto-detection (that's a separate code path used only by
+                # data-dir resolution) — absent this export it falls back to
+                # the compile-time BUILD_CHANNEL_DEFAULT ("stable" for a
+                # plain `task dev`), so the dev binary would advertise the
+                # generic agentmux-stable-<version> while this .desktop
+                # file's StartupWMClass stayed at the legacy "agentmux"
+                # default — a 3-way mismatch breaking icon-matching for the
+                # single most common dev workflow (reagent P1 on PR #3323).
+                # This override only affects the WM app_id — dev mode's own
+                # data-dir isolation intentionally ignores AGENTMUX_CHANNEL
+                # (see agentmux-common/src/data_paths.rs), so this has no
+                # effect on which data dir the dev instance actually uses.
                 if [ "{{OS}}" = "linux" ]; then
+                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+                  export AGENTMUX_CHANNEL="dev-${DEV_BRANCH_SLUG:-default}"
                   bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
+                    "agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}" \
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
@@ -1191,9 +1211,10 @@ tasks:
 
                 # Don't `rm -rf $DEV_DIR` on exit — install-linux-desktop.sh
                 # writes Exec=$DEV_DIR/agentmux-cef into the user's
-                # ~/.local/share/applications/agentmux.desktop, and that path
-                # has to stay valid between dev sessions for dock-clicks to
-                # work. Unix: each `dev:serve` start wipes + recreates the
+                # ~/.local/share/applications/agentmux-dev-<branch>-<version>.desktop
+                # (per-app_id filename as of SPEC_LINUX_DOCK_INSTANCE_GROUPING_2026_09_17),
+                # and that path has to stay valid between dev sessions for
+                # dock-clicks to work. Unix: each `dev:serve` start wipes + recreates the
                 # fixed $DEV_DIR, so leaving it around is safe (no stale
                 # binaries leak across versions). Windows: each run creates a
                 # fresh dist/cef-dev-<epoch> dir and never wipes it; old dirs
@@ -1286,8 +1307,15 @@ tasks:
                 mkdir -p "$DEV_DIR"
                 cp -r dist/cef/* "$DEV_DIR"/
 
+                # See dev:serve's identical block for why AGENTMUX_CHANNEL is
+                # exported here (must match window_settings.rs::linux_app_id()'s
+                # env read so this .desktop's StartupWMClass matches the
+                # dev binary's real app_id/WM_CLASS).
                 if [ "{{OS}}" = "linux" ]; then
+                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+                  export AGENTMUX_CHANNEL="dev-${DEV_BRANCH_SLUG:-default}"
                   bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
+                    "agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}" \
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
