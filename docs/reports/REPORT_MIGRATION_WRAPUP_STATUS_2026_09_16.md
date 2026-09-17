@@ -220,20 +220,42 @@ This section asked for a schedule-or-close decision. Both halves were answered:
 **Result: zero Wave-derived identifiers remain. Source files containing any `wave`
 reference: 306 → 91**, and every one of those 91 is a deliberate string contract.
 
-*Corrected after review (codex P2 on #3292):* the first version of that claim was made from a
-search that missed two shapes — SCREAMING_SNAKE constants (`WAVE_LOCK_FILE`,
-`EVENT_WAVE_OBJ_UPDATE`, `WS_EVENT_WAVE_OBJ_BATCHED_UPDATES`, `WAVE_CONFIG_HOME_ENV`,
-`REMOTE_WAVE_HOME_DIR_NAME`), which no `Wave[A-Z]`/`wave[A-Z]` pattern matches, and the
-`agentmux-srv/tests/` tree, which sits outside `src/`. All five constants are renamed here
-with **their string values untouched** (`"wave.lock"` is a real lockfile on disk;
-`"waveobj:update"` and `"waveobj:batchedupdates"` are wire events), plus one stale comment
-referencing the renamed `initHostWave`. The claim now holds against a case-insensitive sweep
-over `src/`, `tests/` and `frontend/`.
+*This claim was wrong twice before it was right, which is worth recording in full because it
+is the report's own thesis happening to the report.*
+
+- **First version** was produced by patterns matching `Wave[A-Z]`, `<char>Wave[A-Z]` and
+  `wave[A-Z]`. None match SCREAMING_SNAKE, so every `WAVE_*` constant was invisible; and the
+  globs were `agentmux-*/src`, so `agentmux-srv/tests/` was out of scope entirely.
+  (codex P2 on #3291 and #3292.)
+- **Second version** claimed verification "against a case-insensitive sweep" — but that
+  sweep used `[A-Za-z_][A-Za-z0-9_]*[Ww][Aa][Vv][Ee]…`, whose **mandatory leading character**
+  means it cannot match an identifier that *starts* with `WAVE`. So `WAVE_DATA_HOME_ENV`,
+  `WAVE_APP_PATH_ENV`, `WAVE_DEV_ENV`, `WAVE_DEV_VITE_ENV`, `WAVE_JWT_TOKEN_ENV`,
+  `WAVE_SWAP_TOKEN_ENV`, `WAVE_DB_DIR` and the `WAVE_VERSION` OnceLock survived a sweep
+  advertised as exhaustive — in the very file the PR was editing. (reagent P1 on #3292.)
+
+**Verification method, stated so it can be re-run rather than trusted:**
+
+```bash
+grep -rhoE "[A-Za-z0-9_]*[Ww][Aa][Vv][Ee][A-Za-z0-9_]*" \
+  --include=*.rs --include=*.ts --include=*.tsx --include=*.d.ts \
+  agentmux-*/src agentmux-srv/tests frontend | sort -u
+```
+
+The leading quantifier is `*`, not a mandatory character — that single difference is what the
+second version got wrong. Everything it returns is now either a retained string contract or
+the English word "waves" in an audio test.
+
+All thirteen renamed constants keep their string VALUES untouched: `"wave.lock"` is a real
+lockfile on disk, `"waveobj:update"` / `"waveobj:batchedupdates"` are wire events, and the
+rest already read `"AGENTMUX_*"`. One stale comment referencing the renamed `initHostWave`
+was fixed too.
 
 Still deliberately retained, all string contracts rather than branding: `db_wave_file`,
-`waveobj:*` and the `raw_waveobj_update`/`handle_wps_publish` handlers named after the wire
-events they serve, `__WAVE_SERVER_*_ENDPOINT__` window globals, `getwaveairatelimit`,
-`--wavedata`, and the `WAVEMUX_AGENT_ID` / `~/.waveterm` / `wavepwsh.ps1` legacy trio.
+`waveobj:*` and the `raw_waveobj_update` / `handle_wps_publish` handlers named after the wire
+events they serve, the `__WAVE_SERVER_*_ENDPOINT__` window globals (a host↔renderer contract),
+`getwaveairatelimit`, `--wavedata`, and the `WAVEMUX_AGENT_ID` / `~/.waveterm` /
+`wavepwsh.ps1` legacy trio.
 
 **Phase 2 (the strings) was deliberately NOT done, and the issue is closed saying so.** The
 deciding evidence came from doing phase 3: it shipped a P1 that neither the compiler nor
@@ -258,7 +280,7 @@ causes and raw occurrences rather than actionable duplication.
 
 | Cause | Outcome |
 |---|---|
-| 1. No Rust↔TS codegen | Loop closed for one command — **#3291, open and approved at time of writing, not yet merged.** See below. |
+| 1. No Rust↔TS codegen | **Loop closed for one command — #3291, merged.** See below. |
 | 2. `agentmux-common` underuse | **Done** — #3289. See §2.6's correction. |
 | 3. Platform-forked `zoom.*.ts` | Already done before this report (#3034). |
 | 4. `mcp` ↔ `skill` twin primitives | **Verified real, recommended against.** |
@@ -270,7 +292,7 @@ codegen". In fact `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.4 step 1 had shi
 were all live with 12 generated types. What had not happened is step 2, and specifically:
 **nothing in the frontend imported a single generated type.** All 12 were generated, gated
 against drift, and unused, while the hand-written stubs kept inline duplicates of the same
-shapes — a pipeline built and never connected at the far end. #3291 (open, approved) connects it end to end
+shapes — a pipeline built and never connected at the far end. #3291 connects it end to end
 for `voice.checkPath` and gives the remaining 16 stub files a template. (That spec's own
 Status still reads "no generator exists yet" — the same stale-status pattern §0 is about.)
 
@@ -384,7 +406,7 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟢 **4/5 closed or dismissed** | cause 2 merged (#3289), 3 already done (#3034), 1 open in #3291; 4 recommended against, 5 was never duplication — §5.4a. Remaining: migrate the other 16 RPC stub domains |
+| 12 | DRY / modularity | 🔴 1/5 | 🟢 **4/5 closed or dismissed** | causes 1-3 merged (#3291, #3289, #3034); 4 recommended against, 5 was never duplication — §5.4a. Remaining: migrate the other 16 RPC stub domains |
 | 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 

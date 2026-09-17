@@ -14,31 +14,31 @@ use std::sync::OnceLock;
 // ---- Environment variable names ----
 
 pub const MUX_CONFIG_HOME_ENV: &str = "AGENTMUX_CONFIG_HOME";
-pub const WAVE_DATA_HOME_ENV: &str = "AGENTMUX_DATA_HOME";
-pub const WAVE_APP_PATH_ENV: &str = "AGENTMUX_APP_PATH";
-pub const WAVE_DEV_ENV: &str = "AGENTMUX_DEV";
-pub const WAVE_DEV_VITE_ENV: &str = "AGENTMUX_DEV_VITE";
-pub const WAVE_JWT_TOKEN_ENV: &str = "AGENTMUX_JWT";
-pub const WAVE_SWAP_TOKEN_ENV: &str = "AGENTMUX_SWAPTOKEN";
+pub const MUX_DATA_HOME_ENV: &str = "AGENTMUX_DATA_HOME";
+pub const MUX_APP_PATH_ENV: &str = "AGENTMUX_APP_PATH";
+pub const MUX_DEV_ENV: &str = "AGENTMUX_DEV";
+pub const MUX_DEV_VITE_ENV: &str = "AGENTMUX_DEV_VITE";
+pub const MUX_JWT_TOKEN_ENV: &str = "AGENTMUX_JWT";
+pub const MUX_SWAP_TOKEN_ENV: &str = "AGENTMUX_SWAPTOKEN";
 
 // ---- File/directory constants ----
 
 pub const MUX_LOCK_FILE: &str = "wave.lock";
 pub const DOMAIN_SOCKET_BASE_NAME: &str = "wave.sock";
 pub const REMOTE_DOMAIN_SOCKET_BASE_NAME: &str = "wave-remote.sock";
-pub const WAVE_DB_DIR: &str = "db";
+pub const MUX_DB_DIR: &str = "db";
 pub const CONFIG_DIR: &str = "config";
 pub const REMOTE_MUX_HOME_DIR_NAME: &str = ".agentmux";
 pub const REMOTE_FULL_DOMAIN_SOCKET_PATH: &str = "~/.agentmux/wave-remote.sock";
 
 // ---- Version info (set at startup) ----
 
-static WAVE_VERSION: OnceLock<String> = OnceLock::new();
+static MUX_VERSION: OnceLock<String> = OnceLock::new();
 static BUILD_TIME: OnceLock<String> = OnceLock::new();
 
 /// Set the application version (called once at startup).
 pub fn set_version(version: &str) {
-    let _ = WAVE_VERSION.set(version.to_string());
+    let _ = MUX_VERSION.set(version.to_string());
 }
 
 /// Set the build time (called once at startup).
@@ -48,7 +48,7 @@ pub fn set_build_time(time: &str) {
 
 /// Get the application version.
 pub fn get_version() -> &'static str {
-    WAVE_VERSION.get().map_or("0.0.0", |v| v.as_str())
+    MUX_VERSION.get().map_or("0.0.0", |v| v.as_str())
 }
 
 /// Get the build time.
@@ -66,7 +66,7 @@ pub fn get_home_dir() -> PathBuf {
 /// Get the AgentMux data directory.
 /// Uses `AGENTMUX_DATA_HOME` env var, or defaults to `~/.agentmux`.
 pub fn get_mux_data_dir() -> PathBuf {
-    if let Ok(dir) = env::var(WAVE_DATA_HOME_ENV) {
+    if let Ok(dir) = env::var(MUX_DATA_HOME_ENV) {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
@@ -130,12 +130,12 @@ pub fn get_mux_config_dir() -> PathBuf {
 
 /// Get the AgentMux DB directory (`~/.agentmux/db`).
 pub fn get_mux_db_dir() -> PathBuf {
-    get_mux_data_dir().join(WAVE_DB_DIR)
+    get_mux_data_dir().join(MUX_DB_DIR)
 }
 
 /// Get the AgentMux app path from env.
 pub fn get_mux_app_path() -> Option<PathBuf> {
-    env::var(WAVE_APP_PATH_ENV).ok().map(PathBuf::from)
+    env::var(MUX_APP_PATH_ENV).ok().map(PathBuf::from)
 }
 
 /// Get the AgentMux app bin path.
@@ -238,7 +238,7 @@ impl MuxLock {
 
 /// Check if AgentMux is in dev mode.
 pub fn is_dev_mode() -> bool {
-    env::var(WAVE_DEV_ENV)
+    env::var(MUX_DEV_ENV)
         .map(|v| !v.is_empty())
         .unwrap_or(false)
 }
@@ -495,15 +495,15 @@ mod tests {
     #[test]
     fn test_env_var_constants() {
         assert_eq!(MUX_CONFIG_HOME_ENV, "AGENTMUX_CONFIG_HOME");
-        assert_eq!(WAVE_DATA_HOME_ENV, "AGENTMUX_DATA_HOME");
-        assert_eq!(WAVE_DEV_ENV, "AGENTMUX_DEV");
+        assert_eq!(MUX_DATA_HOME_ENV, "AGENTMUX_DATA_HOME");
+        assert_eq!(MUX_DEV_ENV, "AGENTMUX_DEV");
     }
 
     #[test]
     fn test_file_constants() {
         assert_eq!(MUX_LOCK_FILE, "wave.lock");
         assert_eq!(DOMAIN_SOCKET_BASE_NAME, "wave.sock");
-        assert_eq!(WAVE_DB_DIR, "db");
+        assert_eq!(MUX_DB_DIR, "db");
         assert_eq!(CONFIG_DIR, "config");
     }
 
