@@ -100,6 +100,29 @@ export type AgentDefinitionUpdateInput = Pick<
     "id" | "name" | "icon" | "provider"
 > &
     Partial<Omit<CommandUpdateAgentDefinitionData, "id" | "name" | "icon" | "provider">>;
+// The template/fork request shapes are GENERATED from their Rust definitions by
+// ts-rs. agent.ts spans twelve handler files and is migrating one file at a
+// time; this covers agent_handlers/template.rs.
+export type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgentDefinitionData";
+export type { CommandListHiddenTemplatesData } from "@/types/rpc/CommandListHiddenTemplatesData";
+export type { CommandRenameAgentDefinitionTitleData } from "@/types/rpc/CommandRenameAgentDefinitionTitleData";
+
+import type { CommandForkAgentDefinitionData } from "@/types/rpc/CommandForkAgentDefinitionData";
+import type { CommandListHiddenTemplatesData } from "@/types/rpc/CommandListHiddenTemplatesData";
+import type { CommandRenameAgentDefinitionTitleData } from "@/types/rpc/CommandRenameAgentDefinitionTitleData";
+
+/**
+ * What a fork caller may send.
+ *
+ * Not `CommandForkAgentDefinitionData` directly: `branch_label` is
+ * `#[serde(default)]` on a `String`, so the server accepts it missing — but
+ * ts-rs can only mark a field optional when the Rust type is `Option<T>`, so
+ * the generated type calls it required. Deriving from the generated type keeps
+ * the field names and types authoritative (a rename in Rust breaks this line)
+ * while restoring the one thing ts-rs cannot express.
+ */
+export type ForkAgentDefinitionInput = Omit<CommandForkAgentDefinitionData, "branch_label"> &
+    Partial<Pick<CommandForkAgentDefinitionData, "branch_label">>;
 
 export const AgentApi = {
     //
@@ -153,7 +176,13 @@ export const AgentApi = {
         client: RpcClient,
         opts?: RpcOpts,
     ): Promise<AgentDefinition[]> {
-        return client.rpcCall("agentdeflisthiddentemplates", {}, opts);
+        // An empty struct rather than no request type: the client sends `{}`
+        // for a call with no argument, and serde deserializes `()` only from
+        // JSON `null`, so a unit Req would reject every call this stub makes.
+        // The server takes `Option<_>` of it, so a client that omits the
+        // payload entirely still works — but this stub always sends the object.
+        const data: CommandListHiddenTemplatesData = {};
+        return client.rpcCall("agentdeflisthiddentemplates", data, opts);
     },
 
     //
@@ -425,7 +454,7 @@ export const AgentApi = {
 
     ForkAgentDefinitionCommand(
         client: RpcClient,
-        data: { source_id: string; branch_label?: string },
+        data: ForkAgentDefinitionInput,
         opts?: RpcOpts,
     ): Promise<AgentDefinition> {
         return client.rpcCall("forkagentdefinition", data, opts);
@@ -444,7 +473,7 @@ export const AgentApi = {
     // SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
     RenameAgentDefinitionTitleCommand(
         client: RpcClient,
-        data: { id: string; title: string },
+        data: CommandRenameAgentDefinitionTitleData,
         opts?: RpcOpts,
     ): Promise<AgentDefinition> {
         return client.rpcCall("renameagentdefinitiontitle", data, opts);
