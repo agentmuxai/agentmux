@@ -300,3 +300,102 @@ describe("genericRenderPaneChrome — error isolation", () => {
         expect(screen.getByTestId("pane-header-tab-strip")).toBeInTheDocument();
     });
 });
+
+// The trait-like opt-in surface (ViewModel.paneChromeModel) — what makes
+// ONE chrome able to serve every view type instead of agent/term keeping
+// their own components. Nothing here is view-type-specific: these same
+// hooks are available to any pane.
+describe("genericRenderPaneChrome — PaneChromeModel capabilities", () => {
+    function renderWithModel(model: any, stack = ["b1", "b2"], nodeOverrides: Record<string, any> = {}) {
+        mockLayoutModel = fakeLayoutModel(stack);
+        const nodeModel = fakeNodeModel({
+            activeViewModel: () => ({ paneChromeModel: () => model }),
+            ...nodeOverrides,
+        });
+        const res = render(() => genericRenderPaneChrome(nodeModel, <div>content</div>) as any);
+        return { ...res, nodeModel };
+    }
+
+    it("a view type supplying `tabs` replaces the blockStack-derived list (cross-pane tabs)", () => {
+        renderWithModel({
+            tabs: () => [{ id: "x", title: "Elsewhere" }],
+            getId: (t: any) => t.id,
+            getLabel: (t: any) => t.title,
+        });
+        expect(headerCalls[0].tabs).toEqual([{ id: "x", title: "Elsewhere" }]);
+        expect(screen.getByText("Elsewhere")).toBeInTheDocument();
+    });
+
+    it("onActivate returning true means handled — the default stack switch is skipped", () => {
+        const onActivate = vi.fn().mockReturnValue(true);
+        renderWithModel({ onActivate });
+
+        headerCalls[0].onActivate("b2");
+
+        expect(onActivate).toHaveBeenCalledWith("b2");
+        expect(setActiveBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("onActivate returning nothing falls through to the default stack switch", () => {
+        const onActivate = vi.fn();
+        renderWithModel({ onActivate });
+
+        headerCalls[0].onActivate("b2");
+
+        expect(onActivate).toHaveBeenCalledWith("b2");
+        expect(setActiveBlockInStack).toHaveBeenCalledWith(mockLayoutModel, "node-1", "b2");
+    });
+
+    it("onClose returning true means handled — the default stack close is skipped", () => {
+        const onClose = vi.fn().mockReturnValue(true);
+        renderWithModel({ onClose });
+
+        headerCalls[0].onClose("b2");
+
+        expect(onClose).toHaveBeenCalledWith("b2");
+        expect(closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("renderBelowHeader is mounted between the header and the content region", () => {
+        const { container } = renderWithModel({
+            renderBelowHeader: () => <div data-testid="below-header" />,
+        });
+
+        const root = container.querySelector(".generic-pane-stack")!;
+        const kids = Array.from(root.children).map((el) => el.getAttribute("data-testid") ?? el.className);
+        expect(kids).toEqual(["pane-header-tab-strip", "below-header", "generic-pane-stack-content"]);
+    });
+
+    it("wrapContent wraps the content region, for a surface spanning more than the content box", () => {
+        const { container } = renderWithModel({
+            wrapContent: (c: any) => <div class="my-body">{c}</div>,
+        });
+
+        expect(container.querySelector(".my-body > .generic-pane-stack-content")).toBeTruthy();
+    });
+
+    it("rootClass is applied alongside the chrome's own classes, not instead of them", () => {
+        const { container } = renderWithModel(
+            { rootClass: "term-pane-stack" },
+            ["b1", "b2"],
+            { isFocused: () => true, numLeafs: () => 2 }
+        );
+
+        const root = container.querySelector(".generic-pane-stack")!;
+        expect(root.classList.contains("term-pane-stack")).toBe(true);
+        expect(root.classList.contains("generic-pane-stack-focused")).toBe(true);
+    });
+
+    it("a view type that opts out entirely (no paneChromeModel) keeps every default", () => {
+        setObjectValue("block:b1", { meta: { "frame:title": "One" } });
+        setObjectValue("block:b2", { meta: { "frame:title": "Two" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => genericRenderPaneChrome(fakeNodeModel(), <div>content</div>) as any);
+
+        expect(headerCalls[0].addTitle).toBe("Add tab");
+        expect(headerCalls[0].tabs).toEqual([
+            expect.objectContaining({ blockId: "b1", label: "One" }),
+            expect.objectContaining({ blockId: "b2", label: "Two" }),
+        ]);
+    });
+});
