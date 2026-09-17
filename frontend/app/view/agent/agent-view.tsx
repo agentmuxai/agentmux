@@ -794,7 +794,6 @@ export const AgentPaneChrome = (props: {
             }
             onAdd={showTabStrip() ? () => void handleNewAgentTab() : undefined}
             addTitle="New agent"
-            emptyLabel="Agent"
             nodeModel={nodeModel}
             viewModel={viewModel}
             activeBlockId={activeBlockId}
