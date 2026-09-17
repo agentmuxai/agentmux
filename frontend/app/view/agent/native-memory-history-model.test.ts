@@ -16,6 +16,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { NativeMemoryHistoryModel, orderVersionsOldestFirst } from "./native-memory-history-model";
+import type { NativeMemoryDiffResult, NativeMemoryReadFileResult, NativeMemoryVersionMeta } from "@/app/store/rpc-api";
 
 function meta(id: string): NativeMemoryVersionMeta {
     return {

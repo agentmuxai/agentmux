@@ -13,35 +13,46 @@ use serde::{Deserialize, Serialize};
 // ---- Native memory RPCs — agent:memory:list / read / write ----
 
 /// Metadata for one `*.md` file in the agent's native memory folder.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryFileMeta {
     pub filename: String,
     /// True only for `MEMORY.md` (the Claude Code index file).
     pub is_index: bool,
     /// Parsed from YAML frontmatter `type:` field. Null when absent.
     pub metadata_type: Option<String>,
+    // ts-rs maps 64-bit integers to `bigint`; every consumer treats this as a
+    // plain JS number. See BrowserBookmark::created_at (PR #3293).
+    #[ts(type = "number")]
     pub size_bytes: u64,
+    // ts-rs maps 64-bit integers to `bigint`; every consumer treats this as a
+    // plain JS number. See BrowserBookmark::created_at (PR #3293).
+    #[ts(type = "number")]
     /// Unix timestamp in milliseconds.
     pub modified_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryListData {
     pub agent_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryListResult {
     pub files: Vec<NativeMemoryFileMeta>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryReadFileData {
     pub agent_id: String,
     pub filename: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryReadFileResult {
     pub content: String,
 }
@@ -52,6 +63,19 @@ pub struct NativeMemoryReadFileResult {
 /// the handler layer — fully backward compatible with callers that don't
 /// know about this field yet.
 /// See docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.1.
+// DELIBERATELY NOT ts-rs-generated, unlike every other type in this file.
+// `detail` is a `serde_json::Value` that the frontend has always treated as an
+// OPTIONAL property (`detail?: unknown`) — every caller constructs
+// `{ source: "human" }` with no detail. ts-rs rejects `#[ts(optional)]` on
+// anything that is not `Option<T>` ("optional can only be used on an Option<T>
+// type"), and it has no other way to emit an optional property, so this shape
+// is not expressible by the generator today.
+//
+// The alternative — changing the field to `Option<serde_json::Value>` — would
+// be letting the codegen dictate wire behaviour: `default_detail()` exists
+// precisely so an omitted detail becomes `{}` rather than `null`, which the
+// comment on that function documents as a real bug it fixed. So this one type
+// stays hand-written in srv-types.d.ts and is referenced by name below.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NativeMemoryWriteProvenance {
     /// `"human"` | `"agent_inferred"` | `"jekt"` — not validated against an
@@ -68,6 +92,11 @@ pub struct NativeMemoryWriteProvenance {
     /// `"{}"` every no-provenance write elsewhere in this module already
     /// uses as its default `source_detail`. `default_detail()` below keeps
     /// the two cases consistent.
+    // ts-rs cannot derive TS for `serde_json::Value` (no impl), and the
+    // frontend has always typed this `detail?: unknown`. `optional` is
+    // load-bearing, not cosmetic: every caller constructs provenance as
+    // `{ source: "human" }` with no detail (agent-native-memory-model.ts),
+    // so a required field would fail to compile on the frontend.
     #[serde(default = "default_detail")]
     pub detail: serde_json::Value,
 }
@@ -76,12 +105,18 @@ fn default_detail() -> serde_json::Value {
     serde_json::json!({})
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryWriteFileData {
     pub agent_id: String,
     pub filename: String,
     pub content: String,
+    // Points at the hand-written `NativeMemoryWriteProvenance` in
+    // srv-types.d.ts (see the note on that struct above for why it is not
+    // generated). `optional` is valid here because THIS field really is
+    // `Option<T>`.
     #[serde(default)]
+    #[ts(optional, type = "NativeMemoryWriteProvenance")]
     pub provenance: Option<NativeMemoryWriteProvenance>,
 }
 
@@ -94,7 +129,8 @@ pub struct CommandNativeMemoryWriteFileData {
 /// separate type (rather than deriving Serialize on the storage struct
 /// directly) so the storage layer never needs a serde dependency just to
 /// satisfy an RPC wire shape.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryVersionMeta {
     pub id: String,
     pub content_hash: String,
@@ -102,23 +138,29 @@ pub struct NativeMemoryVersionMeta {
     pub source: String,
     pub source_detail: String,
     pub session_id: String,
+    // ts-rs maps 64-bit integers to `bigint`; every consumer treats this as a
+    // plain JS number. See BrowserBookmark::created_at (PR #3293).
+    #[ts(type = "number")]
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryHistoryData {
     pub agent_id: String,
     pub filename: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryHistoryResult {
     /// Newest first — matches `agent_native_memory_version_list`'s own
     /// ordering.
     pub versions: Vec<NativeMemoryVersionMeta>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryDiffData {
     /// reagent P1: required so the handler can verify BOTH versions belong
     /// to this agent before returning their content — unlike list/read/
@@ -131,7 +173,8 @@ pub struct CommandNativeMemoryDiffData {
     pub to_version_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryDiffResult {
     /// A minimal line-based diff: one line per input line, prefixed `"  "`
     /// (context), `"- "` (removed, present in `from` only), or `"+ "`
@@ -139,14 +182,16 @@ pub struct NativeMemoryDiffResult {
     pub diff: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandNativeMemoryRevertData {
     pub agent_id: String,
     pub filename: String,
     pub target_version_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct NativeMemoryRevertResult {
     /// The newly created version (source `"revert"`) whose content now
     /// matches `target_version_id` — the prior latest version is left

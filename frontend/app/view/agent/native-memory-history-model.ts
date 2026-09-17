@@ -15,6 +15,7 @@
 import { createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { NativeMemoryVersionMeta } from "@/app/store/rpc-api";
 
 /** Order two version ids oldest-first, given `versions` in the model's own
  *  newest-first order (matches `agent:memory:history`'s response order —
