@@ -58,11 +58,23 @@ outside it depending on the current key — confirm before renaming.
 
 ### 1. Create `services/local`
 
-Created via `secrets update services/local`, **not** a raw write — this is
-the CLI's changelog-protocol-enforced path, so the bucket's creation and
-the initial migration both land in `$changelog` from the start, matching
-`services/infra`/`services/dev`/`services/prod`/`services/qa`'s existing
-schema:
+**As planned, then revised once executed:** the original plan below was to
+create the bucket via `secrets update services/local` (the CLI's
+changelog-protocol-enforced path) end to end. In practice `secrets update`
+refused to operate on a not-yet-existing secret ("can't find the specified
+secret") — the `@a5af/secrets` CLI has no `create`/`init` subcommand at all;
+every `services/*` bucket, including `infra`/`dev`/`qa`/`prod`, was
+originally provisioned out-of-band the same way (confirmed via
+`shared-infrastructure`: `services/{stage}` secrets are only ever
+`Secret.fromSecretNameV2`-imported, never `new secretsmanager.Secret(...)`-
+created, in that repo's CDK).
+
+What was actually executed: `aws secretsmanager create-secret` (empty
+placeholder), then — since `secrets update` still errored on the freshly
+created secret pending `a5af/dev-tools#370`'s `$environment` fix — a
+hand-built JSON payload replicating the exact schema shape read back from
+an existing bucket (`services/qa`), written via
+`aws secretsmanager put-secret-value`:
 
 - `$schema_version`
 - `$changelog`
@@ -70,8 +82,13 @@ schema:
 - `$last_updated`
 - `$updated_by`
 
-The first changelog entry documents this migration itself (source bucket,
-keys moved, this spec's filename) — not a bare "created bucket" line.
+The first (and so far only) `$changelog` entry documents this migration
+itself (source bucket, keys moved, this spec's filename). This is a
+manual replication of the CLI's schema, not CLI-enforced — `secrets
+verify`/`update` can't operate on this bucket until `a5af/dev-tools#370`
+merges and publishes; once it does, treat all *future* changes to
+`services/local` as going through `secrets update` normally, the same as
+any other bucket.
 
 ### 2. Migrate the seven local-machine keys listed above
 
