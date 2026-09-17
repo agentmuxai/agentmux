@@ -26,6 +26,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 import { RpcApi } from "@/app/store/rpc-api";
+import type { BundleImportPreviewResponse } from "@/app/store/rpc-api";
 
 afterEach(() => {
     cleanup();
@@ -33,6 +34,10 @@ afterEach(() => {
 
 function makePreview(): BundleImportPreviewResponse {
     return {
+        // The server has always sent this list; it was simply missing from the
+        // hand-written response type, so this fixture could omit it. Generating
+        // the type from Rust surfaced that.
+        project_instructions: [],
         name: "test-bundle",
         description: "",
         instructions_preview: "",
