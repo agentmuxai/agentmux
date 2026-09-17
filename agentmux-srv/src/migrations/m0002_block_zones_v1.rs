@@ -17,9 +17,9 @@ impl Migration for M0002BlockZonesV1 {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("block_zones_v1: open wstore: {}", e)))?,
+                .map_err(|e| MigrationError(format!("block_zones_v1: open mstore: {}", e)))?,
         );
         let filestore_path = ctx.data_dir.join("db").join("filestore.db");
         let filestore = Arc::new(
@@ -28,7 +28,7 @@ impl Migration for M0002BlockZonesV1 {
         );
         // A scan that could not even read the blocks table is a failed
         // migration, not an applied one (codex P1 on #3070).
-        crate::backend::agent_session::migrate_block_zones_v1(&wstore, &filestore, &ctx.data_dir)
+        crate::backend::agent_session::migrate_block_zones_v1(&mstore, &filestore, &ctx.data_dir)
             .map_err(|e| MigrationError(format!("block_zones_v1: {}", e)))?;
         Ok(())
     }
@@ -51,7 +51,7 @@ impl Migration for M0002BlockZonesV1 {
         // Read-only openers, like every other verifier: no WAL pragma, no
         // schema setup, no version stamp, works on a read-only backup
         // (codex P2 on #3070).
-        let wstore = match Store::open_read_only(&ctx.channel_store_path) {
+        let mstore = match Store::open_read_only(&ctx.channel_store_path) {
             Ok(s) => s,
             Err(e) => return VerifyOutcome::Error(format!("open channel store read-only: {}", e)),
         };
@@ -61,7 +61,7 @@ impl Migration for M0002BlockZonesV1 {
         };
         let marker = ctx.data_dir.join(crate::backend::agent_session::MIGRATION_MARKER_V1);
         let marker_note = if marker.exists() { "marker present" } else { "marker absent" };
-        match crate::backend::agent_session::block_zones_look_incomplete(&wstore, &filestore) {
+        match crate::backend::agent_session::block_zones_look_incomplete(&mstore, &filestore) {
             Ok(true) => VerifyOutcome::Mismatch(format!(
                 "an agent block still holds a snapshot whose agent :current zone is empty — recorded applied, zones not migrated ({})",
                 marker_note
@@ -91,7 +91,7 @@ mod tests {
             shared_store_path: dir.path().join("shared").join("store.db"),
             channel_store_path: db.join("objects.db"),
         };
-        let wstore = Store::open(&ctx.channel_store_path).unwrap();
+        let mstore = Store::open(&ctx.channel_store_path).unwrap();
         let filestore = FileStore::open(&db.join("filestore.db")).unwrap();
         let mut meta = MetaMapType::new();
         meta.insert("view".to_string(), serde_json::json!("agent"));
@@ -105,7 +105,7 @@ mod tests {
             meta,
             subblockids: None,
         };
-        wstore.insert(&mut block).unwrap();
+        mstore.insert(&mut block).unwrap();
         filestore.make_file("block-v", "output.state.json", FileMeta::default(), FileOpts::default()).unwrap();
         filestore.write_file("block-v", "output.state.json", br#"{"nodes":[]}"#).unwrap();
         (dir, ctx)

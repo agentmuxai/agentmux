@@ -6,7 +6,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, atoms, getApi } from "@/app/store/global";
+import { MOS, atoms, getApi } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fireAndForget } from "@/util/util";
@@ -68,7 +68,7 @@ export function handleOscMuxCommand(data: string, blockId: string, loaded: boole
         });
     } else {
         fireAndForget(() => {
-            return services.ObjectService.UpdateObjectMeta(WOS.makeORef("block", blockId), meta);
+            return services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), meta);
         });
     }
     return true;
@@ -116,13 +116,13 @@ export function handleOsc7Command(data: string, blockId: string, loaded: boolean
 
     setTimeout(() => {
         fireAndForget(async () => {
-            await services.ObjectService.UpdateObjectMeta(WOS.makeORef("block", blockId), {
+            await services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), {
                 "cmd:cwd": pathPart,
             });
 
             const rtInfo = { "cmd:hascurcwd": true };
             const rtInfoData: CommandSetRTInfoData = {
-                oref: WOS.makeORef("block", blockId),
+                oref: MOS.makeORef("block", blockId),
                 data: rtInfo,
             };
             await RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>
@@ -163,7 +163,7 @@ export function handleOscTitleCommand(data: string, blockId: string, loaded: boo
     const timeout = setTimeout(() => {
         titleUpdateDebounceMap.delete(blockId);
         fireAndForget(async () => {
-            await services.ObjectService.UpdateObjectMeta(WOS.makeORef("block", blockId), {
+            await services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), {
                 "term:osc_title": activity,
             } as any);
         });
@@ -264,7 +264,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                 setTimeout(() => {
                     fireAndForget(async () => {
                         await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: WOS.makeORef("block", blockId),
+                            oref: MOS.makeORef("block", blockId),
                             meta: { "cmd:env": cmd.data },
                         }).catch((e) => console.log("error setting cmd:env (OSC 16162 E)", e));
                     });
@@ -278,7 +278,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                 setTimeout(() => {
                     fireAndForget(async () => {
                         await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: WOS.makeORef("block", blockId),
+                            oref: MOS.makeORef("block", blockId),
                             meta: { "cmd:env": null },
                         }).catch((e) => console.log("error clearing cmd:env", e));
                     });
@@ -321,7 +321,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
         setTimeout(() => {
             fireAndForget(async () => {
                 const rtInfoData: CommandSetRTInfoData = {
-                    oref: WOS.makeORef("block", blockId),
+                    oref: MOS.makeORef("block", blockId),
                     data: rtInfo,
                 };
                 await RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>

@@ -10,14 +10,14 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use super::wps::{MuxEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS, EVENT_BLOCK_FILE};
+use super::mps::{MuxEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS, EVENT_BLOCK_FILE};
 
 // ---- Event type constants ----
 
 pub const WS_EVENT_RPC: &str = "rpc";
 
 /// One WS frame carrying an ARRAY of `MuxObjUpdate`s from a single atomic
-/// backend transition. Mirrored in `frontend/app/store/wps-events.ts`
+/// backend transition. Mirrored in `frontend/app/store/mps-events.ts`
 /// (`WpsEvent.MuxObjBatchedUpdates`) — the frontend applies the whole array
 /// in one Solid `batch()` flush. See `broadcast_mux_obj_updates` below.
 pub const WS_EVENT_WAVE_OBJ_BATCHED_UPDATES: &str = "waveobj:batchedupdates";
@@ -273,7 +273,7 @@ impl Default for EventBus {
     }
 }
 
-/// Bridge from WPS Broker to EventBus.
+/// Bridge from MPS Broker to EventBus.
 /// Wraps MuxEvents as RPC eventrecv messages and broadcasts them to all WS clients.
 pub struct EventBusBridge {
     event_bus: Arc<EventBus>,

@@ -18,7 +18,7 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
-import { WOS, workspace, setActiveTab, getApi } from "@/app/store/global";
+import { MOS, workspace, setActiveTab, getApi } from "@/app/store/global";
 
 export async function focusBlock(blockId: string): Promise<void> {
     // Fast path: search the current window's workspace.
@@ -47,10 +47,10 @@ export async function focusBlock(blockId: string): Promise<void> {
         const wsData = wsInfo.workspacedata;
         const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
         for (const tabId of allTabIds) {
-            const oref = WOS.makeORef("tab", tabId);
+            const oref = MOS.makeORef("tab", tabId);
             // Use cached value when available; reloadMuxObject on cache miss.
-            const cached = WOS.getObjectValue<Tab>(oref);
-            const tab = cached ?? (await WOS.reloadMuxObject<Tab>(oref));
+            const cached = MOS.getObjectValue<Tab>(oref);
+            const tab = cached ?? (await MOS.reloadMuxObject<Tab>(oref));
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
             const instances = await getApi().listWindowInstances();

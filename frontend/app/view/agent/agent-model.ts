@@ -8,7 +8,7 @@ import type { NodeModel } from "@/layout/index";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { atoms, getApi, WOS } from "@/app/store/global";
+import { atoms, getApi, MOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
 import { AgentBlockContent, AgentPaneChrome } from "./agent-view";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
@@ -97,7 +97,7 @@ export class AgentViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
         // createComponent (not a plain `AgentPaneChrome({...})` call) —
         // this file is a plain .ts, so it can't use JSX's `<AgentPaneChrome>`
@@ -203,7 +203,7 @@ export class AgentViewModel implements ViewModel {
         this.noHeader = () => this.nodeModel.paneChromeHoisted === true;
         this.setViewName = async (name: string) => {
             if (!name.trim()) return;
-            const oref = WOS.makeORef("block", this.blockId);
+            const oref = MOS.makeORef("block", this.blockId);
             await RpcApi.SetMetaCommand(TabRpcClient, { oref, meta: { agentName: name.trim() } });
         };
 
@@ -250,7 +250,7 @@ export class AgentViewModel implements ViewModel {
      * useAgentCommands.back (which delegates here).
      */
     backToPicker = async (): Promise<void> => {
-        const oref = WOS.makeORef("block", this.blockId);
+        const oref = MOS.makeORef("block", this.blockId);
         try {
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref,
@@ -302,7 +302,7 @@ export class AgentViewModel implements ViewModel {
             outputFormat: provider.styledOutputFormat,
         });
 
-        const oref = WOS.makeORef("block", this.blockId);
+        const oref = MOS.makeORef("block", this.blockId);
         const blockId = this.blockId;
 
         // Build CLI args: use persistent args if available, otherwise standard launch args
@@ -622,7 +622,7 @@ export class AgentViewModel implements ViewModel {
         const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName, provider.id);
 
         const blockId = targetBlockId ?? this.blockId;
-        const oref = WOS.makeORef("block", blockId);
+        const oref = MOS.makeORef("block", blockId);
         try {
             // Whether the work_dir was constructed by us (and is thus
             // eligible for `<base>-N` collision suffixing) or was

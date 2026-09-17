@@ -75,7 +75,7 @@ fn record_credential_failure(agent_id: &str) {
 /// shared-token fallback, not block delivery.
 pub async fn ensure_agent_credential(
     agent_id: &str,
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Option<String> {
     let key = agent_id.to_lowercase();
@@ -87,13 +87,13 @@ pub async fn ensure_agent_credential(
         return None;
     }
 
-    let creds = wstore.agent_credential_load(&key).ok().flatten();
+    let creds = mstore.agent_credential_load(&key).ok().flatten();
 
     let creds = match creds {
         Some(c) if !c.client_id.is_empty() => c,
         _ => {
             // Not provisioned yet — do it now, once.
-            if let Err(e) = provision_agent_client(&key, wstore, http).await {
+            if let Err(e) = provision_agent_client(&key, mstore, http).await {
                 tracing::warn!(
                     agent_id = %key, error = %e,
                     "muxbus: agent credential provisioning failed, backing off {}s",
@@ -102,7 +102,7 @@ pub async fn ensure_agent_credential(
                 record_credential_failure(&key);
                 return None;
             }
-            wstore.agent_credential_load(&key).ok().flatten()?
+            mstore.agent_credential_load(&key).ok().flatten()?
         }
     };
 
@@ -110,7 +110,7 @@ pub async fn ensure_agent_credential(
         return Some(creds.access_token);
     }
 
-    match fetch_m2m_token(&key, &creds.client_id, &creds.client_secret, &creds.token_endpoint, wstore, http).await {
+    match fetch_m2m_token(&key, &creds.client_id, &creds.client_secret, &creds.token_endpoint, mstore, http).await {
         Ok(access_token) => Some(access_token),
         Err(e) => {
             tracing::warn!(
@@ -131,8 +131,8 @@ pub async fn ensure_agent_credential(
 /// rejected token forever. Best-effort: a store error here just means the
 /// stale token survives until its local expiry, matching the pre-existing
 /// failure mode rather than introducing a new one. reagentx P1 on PR #2342.
-pub fn invalidate_cached_token(agent_id: &str, wstore: &Arc<Store>) {
-    if let Err(e) = wstore.agent_credential_invalidate_token(&agent_id.to_lowercase()) {
+pub fn invalidate_cached_token(agent_id: &str, mstore: &Arc<Store>) {
+    if let Err(e) = mstore.agent_credential_invalidate_token(&agent_id.to_lowercase()) {
         tracing::warn!(
             agent_id = %agent_id, error = %e,
             "muxbus: failed to invalidate stale per-agent credential",
@@ -161,9 +161,9 @@ pub fn invalidate_cached_token(agent_id: &str, wstore: &Arc<Store>) {
 /// existing cooldown here bounds that to once per
 /// `CREDENTIAL_RETRY_COOLDOWN` window instead of once per broadcast, same
 /// throttling this module already applies to a provisioning/fetch failure.
-pub fn invalidate_binding_mismatched_credential(agent_id: &str, wstore: &Arc<Store>) {
+pub fn invalidate_binding_mismatched_credential(agent_id: &str, mstore: &Arc<Store>) {
     let key = agent_id.to_lowercase();
-    invalidate_cached_token(&key, wstore);
+    invalidate_cached_token(&key, mstore);
     record_credential_failure(&key);
 }
 
@@ -197,11 +197,11 @@ mod tests {
     // cooldown.
     #[test]
     fn invalidate_binding_mismatched_credential_starts_a_cooldown() {
-        let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
         let agent_id = "test-agent-credentials-binding-mismatch";
         assert!(!credential_recently_failed(agent_id));
 
-        invalidate_binding_mismatched_credential(agent_id, &wstore);
+        invalidate_binding_mismatched_credential(agent_id, &mstore);
 
         assert!(
             credential_recently_failed(agent_id),
@@ -215,10 +215,10 @@ mod tests {
     // window every time its token simply expires.
     #[test]
     fn invalidate_cached_token_alone_does_not_start_a_cooldown() {
-        let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
         let agent_id = "test-agent-credentials-plain-401";
 
-        invalidate_cached_token(agent_id, &wstore);
+        invalidate_cached_token(agent_id, &mstore);
 
         assert!(!credential_recently_failed(agent_id));
     }
@@ -227,7 +227,7 @@ mod tests {
 /// Calls POST /agents/provision (authenticated with the human's own PKCE
 /// token — an M2M agent credential can never provision another one) and
 /// caches the returned client_id/client_secret.
-async fn provision_agent_client(agent_id: &str, wstore: &Arc<Store>, http: &reqwest::Client) -> Result<(), String> {
+async fn provision_agent_client(agent_id: &str, mstore: &Arc<Store>, http: &reqwest::Client) -> Result<(), String> {
     // The scheduler is a process-wide singleton, initialized by
     // cloud_subscriber::run_loop before any WS session (and therefore any
     // handle_server_msg call reaching this function) can start — see
@@ -236,7 +236,7 @@ async fn provision_agent_client(agent_id: &str, wstore: &Arc<Store>, http: &reqw
     // the already-running scheduler ensure_fresh uses for the shared token.
     let scheduler = crate::broker::get_global()
         .ok_or_else(|| "muxbus refresh scheduler not initialized yet".to_string())?;
-    let user_token = load_valid_token(wstore, &scheduler)
+    let user_token = load_valid_token(mstore, &scheduler)
         .await
         .ok_or_else(|| "no valid user-level muxbus login to provision from".to_string())?;
 
@@ -272,7 +272,7 @@ async fn provision_agent_client(agent_id: &str, wstore: &Arc<Store>, http: &reqw
         .await
         .map_err(|e| format!("provision response parse failed: {e}"))?;
 
-    wstore
+    mstore
         .agent_credential_save(agent_id, &parsed.client_id, &parsed.client_secret, &parsed.token_endpoint)
         .map_err(|e| format!("failed to save agent credential: {e}"))?;
 
@@ -288,7 +288,7 @@ async fn fetch_m2m_token(
     client_id: &str,
     client_secret: &str,
     token_endpoint: &str,
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<String, String> {
     if client_id.is_empty() || token_endpoint.is_empty() {
@@ -329,7 +329,7 @@ async fn fetch_m2m_token(
         .as_secs() as i64)
         + expires_in;
 
-    if let Err(e) = wstore.agent_credential_save_token(agent_id, &access_token, expires_at) {
+    if let Err(e) = mstore.agent_credential_save_token(agent_id, &access_token, expires_at) {
         tracing::warn!(agent_id = %agent_id, error = %e, "muxbus: failed to cache m2m token (will re-fetch next time)");
     }
 

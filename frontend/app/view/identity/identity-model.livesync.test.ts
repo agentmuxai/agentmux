@@ -11,7 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const subscribeCalls: Array<{ eventType: string; handler: () => void }> = [];
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: () => void }) => {
         subscribeCalls.push(sub);
         return () => {};

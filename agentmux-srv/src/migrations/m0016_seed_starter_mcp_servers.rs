@@ -39,16 +39,16 @@ impl Migration for M0016SeedStarterMcpServers {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("seed_starter_mcp_servers: open wstore: {}", e)))?,
+                .map_err(|e| MigrationError(format!("seed_starter_mcp_servers: open mstore: {}", e)))?,
         );
-        if any_starter_mcp_server_name_exists(&wstore)
+        if any_starter_mcp_server_name_exists(&mstore)
             .map_err(|e| MigrationError(format!("seed_starter_mcp_servers: check existing: {}", e)))?
         {
             return Ok(());
         }
-        seed_starter_mcp_servers(&wstore)
+        seed_starter_mcp_servers(&mstore)
             .map(|_| ())
             .map_err(|e| MigrationError(format!("seed_starter_mcp_servers: {}", e)))
     }
@@ -76,8 +76,8 @@ mod tests {
 
         M0016SeedStarterMcpServers.up(&ctx_for(tmp.path())).unwrap();
 
-        let wstore = Store::open(tmp.path()).unwrap();
-        assert_eq!(wstore.mcp_server_list_global(&wstore).unwrap().len(), 6);
+        let mstore = Store::open(tmp.path()).unwrap();
+        assert_eq!(mstore.mcp_server_list_global(&mstore).unwrap().len(), 6);
     }
 
     #[test]
@@ -86,23 +86,23 @@ mod tests {
         // tracking (not mcp_seed's own logic) is what must prevent
         // reseeding — reproduce that gate here rather than trusting it.
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let wstore = Store::open(tmp.path()).unwrap();
+        let mstore = Store::open(tmp.path()).unwrap();
         let ctx = ctx_for(tmp.path());
 
         M0016SeedStarterMcpServers.up(&ctx).unwrap();
-        wstore.migration_mark_applied("0016_seed_starter_mcp_servers", "channel", 0).unwrap();
-        assert_eq!(wstore.mcp_server_list_global(&wstore).unwrap().len(), 6);
+        mstore.migration_mark_applied("0016_seed_starter_mcp_servers", "channel", 0).unwrap();
+        assert_eq!(mstore.mcp_server_list_global(&mstore).unwrap().len(), 6);
 
-        for item in wstore.mcp_server_list_global(&wstore).unwrap() {
-            wstore.mcp_server_delete(&wstore, &item.server.id).unwrap();
+        for item in mstore.mcp_server_list_global(&mstore).unwrap() {
+            mstore.mcp_server_delete(&mstore, &item.server.id).unwrap();
         }
-        assert!(wstore.mcp_server_list_global(&wstore).unwrap().is_empty());
+        assert!(mstore.mcp_server_list_global(&mstore).unwrap().is_empty());
 
         // The real runner (runner.rs) never calls `up()` again once
         // `migration_is_applied` is true — assert that precondition holds,
         // matching the actual gate every real boot goes through.
         assert!(
-            wstore.migration_is_applied("0016_seed_starter_mcp_servers"),
+            mstore.migration_is_applied("0016_seed_starter_mcp_servers"),
             "once applied, the tracking row must persist regardless of catalog contents"
         );
     }
@@ -115,7 +115,7 @@ mod tests {
         // directly and confirm `up()` succeeds as a no-op instead of
         // erroring on the name-uniqueness collision.
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let wstore = Store::open(tmp.path()).unwrap();
+        let mstore = Store::open(tmp.path()).unwrap();
         let ctx = ctx_for(tmp.path());
 
         let pre_existing = crate::backend::storage::mcp_servers::McpServer {
@@ -127,11 +127,11 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         };
-        wstore.mcp_server_upsert_unique_global(&pre_existing).unwrap();
+        mstore.mcp_server_upsert_unique_global(&pre_existing).unwrap();
 
         M0016SeedStarterMcpServers.up(&ctx).unwrap();
 
-        let after = wstore.mcp_server_list_global(&wstore).unwrap();
+        let after = mstore.mcp_server_list_global(&mstore).unwrap();
         assert_eq!(
             after.len(),
             1,

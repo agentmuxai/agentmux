@@ -226,7 +226,7 @@ pub(super) struct SessionWatch {
 /// Cap on `SubagentState.events` — without it, a long-running subagent (or a
 /// long-lived srv process accumulating many subagents) grows this Vec
 /// unboundedly; `info.event_count` still tracks the true total separately
-/// (mirrors `wps.rs`'s `arr_total_adds` vs. capped `PersistEventWrap.events`).
+/// (mirrors `mps.rs`'s `arr_total_adds` vs. capped `PersistEventWrap.events`).
 /// `get_history`'s `limit` is a request ceiling, not a guarantee — this is
 /// the hard ceiling on what's retained to serve it from.
 pub(super) const MAX_SUBAGENT_EVENTS: usize = 2048;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useToolChunkStream — the single per-block WPS subscription for `tool_chunk`
+ * useToolChunkStream — the single per-block MPS subscription for `tool_chunk`
  * events (`agentmux-bashwrap exec` output). Pushes every chunk into the
  * shared `StreamFlushQueue` rather than dispatching or scheduling its own
  * flush — a second independent RAF/`batch()` here would reintroduce the
@@ -18,7 +18,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -33,7 +33,7 @@ export interface UseToolChunkStreamOptions {
  * OS pid for a declared-background invocation — see bash_wrap.rs). Returns
  * `null` for anything else, including a `"pid"` op missing a valid
  * `tool_id`/`pid`, so the caller can fail closed with one check. Extracted
- * from the WPS handler below purely for unit-testability, mirroring
+ * from the MPS handler below purely for unit-testability, mirroring
  * `useCompactionStream.ts`'s `resolveCompactionStart` pattern.
  */
 export function parsePidChunk(data: unknown): { toolId: string; pid: number } | null {
@@ -47,7 +47,7 @@ export function parsePidChunk(data: unknown): { toolId: string; pid: number } | 
 }
 
 export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
-    // Single per-block WPS subscription for `tool_chunk` events.
+    // Single per-block MPS subscription for `tool_chunk` events.
     // `agentmux-bashwrap exec` publishes every stdout/stderr line to a
     // fixed event name with `scopes: ["block:<id>"]` and the tool_use_id
     // in the payload. The broker persists ~1024 events per scope, so

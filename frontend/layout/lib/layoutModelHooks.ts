@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useOnResize } from "@/app/hook/useDimensions";
-import { atoms, WOS } from "@/app/store/global";
+import { atoms, MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
@@ -39,8 +39,8 @@ function getLayoutModelForTab(tabAtom: () => Tab): LayoutModel {
 }
 
 export function getLayoutModelForTabById(tabId: string) {
-    const tabOref = WOS.makeORef("tab", tabId);
-    const tabAtom = WOS.getMuxObjectAtom<Tab>(tabOref);
+    const tabOref = MOS.makeORef("tab", tabId);
+    const tabAtom = MOS.getMuxObjectAtom<Tab>(tabOref);
     return getLayoutModelForTab(tabAtom);
 }
 

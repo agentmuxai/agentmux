@@ -3,8 +3,8 @@
 
 import { atoms, backendDeathInfoAtom, getApi, setBackendStatusAtom, termRendererAtom } from "@/store/global";
 import { setRestartInProgress } from "@/store/backendStatus";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { getGpuInfo } from "@/util/gpuutil";
 import { Accessor, createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";

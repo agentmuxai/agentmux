@@ -10,7 +10,7 @@ import {
     getConnStatusAtom,
     getHostName,
     getUserName,
-    WOS,
+    MOS,
 } from "@/app/store/global";
 import { globalRefocusWithTimeout } from "@/app/store/keymodel";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -318,7 +318,7 @@ const ChangeConnectionBlockModal = ({
     nodeModel: NodeModel;
 }) => {
     const [connSelected, setConnSelected] = createSignal("");
-    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", blockId));
     const isNodeFocused = nodeModel.isFocused;
     const connection = () => blockData()?.meta?.connection;
     const connStatus = () => getConnStatusAtom(connection())();
@@ -371,13 +371,13 @@ const ChangeConnectionBlockModal = ({
             newFile = "~";
         }
         await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", blockId),
+            oref: MOS.makeORef("block", blockId),
             meta: { connection: connName, file: newFile, "cmd:cwd": null },
         });
 
         const rtInfo = { "cmd:hascurcwd": null };
         const rtInfoData: CommandSetRTInfoData = {
-            oref: WOS.makeORef("block", blockId),
+            oref: MOS.makeORef("block", blockId),
             data: rtInfo,
         };
         RpcApi.SetRTInfoCommand(TabRpcClient, rtInfoData).catch((e) =>

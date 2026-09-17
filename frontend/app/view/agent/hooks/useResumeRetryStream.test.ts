@@ -7,7 +7,7 @@ import { resolveResumeRetryEvent } from "./useResumeRetryStream";
 // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
 // Unlike useCompactionStream's resolveCompactionStart, there is no
 // staleness/clock-skew guard here — both "retrying" and "resolved" travel
-// over the SAME reliable, `persist: 2` WPS channel, so whichever status is
+// over the SAME reliable, `persist: 2` MPS channel, so whichever status is
 // most recently observed is always the correct current state.
 
 describe("resolveResumeRetryEvent", () => {

@@ -89,7 +89,7 @@
 import { createEffect, on, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { makeORef } from "@/app/store/wos";
+import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";

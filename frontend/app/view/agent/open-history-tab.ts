@@ -26,7 +26,7 @@
 import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
-import { pushNotification, WOS } from "@/app/store/global";
+import { pushNotification, MOS } from "@/app/store/global";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 
 /** Block-meta key marking a block as a read-only history reader for the
@@ -44,11 +44,11 @@ export const HISTORY_TAB_FOR_META_KEY = "agent:historyTabFor";
 export const HISTORY_SOURCE_BLOCK_ID_META_KEY = "agent:historySourceBlockId";
 
 /** True if `blockId` is (or has ever been opened as) a history-tab block
- *  for `agentId`. Reads persisted meta directly (WOS store), not a
+ *  for `agentId`. Reads persisted meta directly (MOS store), not a
  *  reactive block atom — this runs outside any component's reactive scope
  *  and only needs a point-in-time answer. */
 function isHistoryTabFor(blockId: string, agentId: string): boolean {
-    const meta = WOS.getObjectValue<Block>(WOS.makeORef("block", blockId))?.meta;
+    const meta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta;
     return meta?.[HISTORY_TAB_FOR_META_KEY] === agentId;
 }
 
@@ -101,7 +101,7 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
         // `agentName` — same read shape, different block) — a bare
         // `agent:historyTabFor` block otherwise has no provider/name info of
         // its own, since it's never actually launched.
-        const liveMeta = WOS.getObjectValue<Block>(WOS.makeORef("block", currentBlockId))?.meta;
+        const liveMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", currentBlockId))?.meta;
 
         let paneOpenResult: { block_id: string };
         try {

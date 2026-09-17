@@ -11,7 +11,7 @@ import { ContentRenderer, NodeModel, PreviewRenderer, TileLayout } from "@/layou
 import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/store/global";
 import * as services from "@/store/services";
-import * as WOS from "@/store/wos";
+import * as MOS from "@/store/mos";
 import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { createMemo, Show } from "solid-js";
 import type { JSX } from "solid-js";
@@ -30,8 +30,8 @@ function buildEmptyTabMenu(): ContextMenuItem[] {
 }
 
 function TabContent(props: { tabId: string }): JSX.Element {
-    const oref = createMemo(() => WOS.makeORef("tab", props.tabId));
-    const tabAtom = createMemo(() => WOS.getMuxObjectAtom<Tab>(oref()));
+    const oref = createMemo(() => MOS.makeORef("tab", props.tabId));
+    const tabAtom = createMemo(() => MOS.getMuxObjectAtom<Tab>(oref()));
     const tabData = createMemo(() => tabAtom()());
 
     const tileGapSize = createMemo(() => {

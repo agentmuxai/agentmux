@@ -6,13 +6,13 @@
 //! Phase-1.5 lineage spec retired in #1928.
 //!
 //! Wire format is camelCase via `serde(rename_all)` so the TS
-//! mirror in `frontend/types/gotypes.d.ts` requires no field
+//! mirror in `frontend/types/srv-types.d.ts` requires no field
 //! translation.
 
 use serde::{Deserialize, Serialize};
 
 /// Identifies "which agent." Empty-string sentinels match the
-/// existing wstore `AgentInstance` conventions. All fields optional
+/// existing mstore `AgentInstance` conventions. All fields optional
 /// so callers can construct anything from "blank claude with ambient
 /// creds" (all empty) up to a fully-pinned named-agent continuation.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,7 +180,7 @@ mod tests {
 
     // ────────────────────────────────────────────────────────────────
     // Wire format — verify camelCase on the JSON side. The TS mirror
-    // in `frontend/types/gotypes.d.ts` depends on this; any drift
+    // in `frontend/types/srv-types.d.ts` depends on this; any drift
     // becomes silent type errors at the IPC seam.
     // ────────────────────────────────────────────────────────────────
 
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn agent_ref_defaults_round_trip() {
-        // Empty-string sentinels match the wstore convention so the
+        // Empty-string sentinels match the mstore convention so the
         // frontend can omit fields it doesn't set.
         let r: AgentRef = serde_json::from_value(json!({})).unwrap();
         assert_eq!(r, AgentRef::default());

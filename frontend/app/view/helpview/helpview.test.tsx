@@ -16,7 +16,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/global", () => ({
-    WOS: {
+    MOS: {
         makeORef: (type: string, id: string) => `${type}:${id}`,
         getMuxObjectAtom: () => () => ({ meta: {} }),
     },

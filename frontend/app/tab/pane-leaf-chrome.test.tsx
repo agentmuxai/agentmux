@@ -25,7 +25,7 @@ import type { NodeModel } from "@/layout/index";
 let renderPaneChromeCallCount = { count: 0 };
 
 // Hoisted mocks — factories run before imports, so the real Block/
-// resolveEffectiveViewType and the real WOS store are replaced with
+// resolveEffectiveViewType and the real MOS store are replaced with
 // controllable test doubles before pane-leaf-chrome.tsx (which imports
 // both) is ever loaded.
 //
@@ -81,7 +81,7 @@ function setBlockView(blockId: string, view: string | undefined) {
 }
 
 vi.mock("@/app/store/global", () => ({
-    WOS: {
+    MOS: {
         makeORef: (_otype: string, oid: string) => oid,
         getMuxObjectAtom: (oid: string) => {
             if (!blockMetaSignals.has(oid)) {

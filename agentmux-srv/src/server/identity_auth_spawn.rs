@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::backend::storage::store::Store;
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 
 use super::identity_auth_persist::persist_oauth_success;
 
@@ -44,7 +44,7 @@ use super::identity_auth_persist::persist_oauth_success;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_auth_cli(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
@@ -77,7 +77,7 @@ pub(crate) fn spawn_auth_cli(
     if requires_tty {
         spawn_auth_cli_pty(
             mgr,
-            wstore,
+            mstore,
             identity_store,
             broker,
             session_id,
@@ -101,7 +101,7 @@ pub(crate) fn spawn_auth_cli(
     let cli_path_for_check = cli_path.clone();
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
-    let wstore_for_task = wstore.clone();
+    let mstore_for_task = mstore.clone();
     let identity_store_for_task = identity_store.clone();
     let broker_for_task = broker.clone();
     let into_bundle_id_for_task = into_bundle_id.clone();
@@ -194,7 +194,7 @@ pub(crate) fn spawn_auth_cli(
         let cli_path_stdout = cli_path_for_check.clone();
         let check_args_stdout = auth_check_args_for_check.clone();
         let check_env_stdout = auth_env_for_check.clone();
-        let wstore_stdout = wstore_for_task.clone();
+        let mstore_stdout = mstore_for_task.clone();
         let identity_store_stdout = identity_store_for_task.clone();
         let broker_stdout = broker_for_task.clone();
         let into_bundle_id_stdout = into_bundle_id_for_task.clone();
@@ -240,7 +240,7 @@ pub(crate) fn spawn_auth_cli(
                         // resolve at spawn, persist_oauth_success skips
                         // persistence and the session still succeeds.
                         let (bundle_id, account_id) = persist_oauth_success(
-                            &wstore_stdout,
+                            &mstore_stdout,
                             &identity_store_stdout,
                             &broker_stdout,
                             direct_account,
@@ -305,7 +305,7 @@ pub(crate) fn spawn_auth_cli(
                     .await
                     {
                         let (bundle_id, account_id) = persist_oauth_success(
-                            &wstore_for_task,
+                            &mstore_for_task,
                             &identity_store_for_task,
                             &broker_for_task,
                             direct_account,
@@ -357,7 +357,7 @@ pub(crate) fn spawn_auth_cli(
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
@@ -380,7 +380,7 @@ fn spawn_auth_cli_pty(
     let cli_path_for_check = cli_path.clone();
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
-    let wstore_for_task = wstore.clone();
+    let mstore_for_task = mstore.clone();
     let identity_store_for_task = identity_store.clone();
     let broker_for_task = broker.clone();
     let into_bundle_id_for_task = into_bundle_id.clone();
@@ -514,7 +514,7 @@ fn spawn_auth_cli_pty(
         let cli_path_drain = cli_path_for_check.clone();
         let check_args_drain = auth_check_args_for_check.clone();
         let check_env_drain = auth_env_for_check.clone();
-        let wstore_drain = wstore_for_task.clone();
+        let mstore_drain = mstore_for_task.clone();
         let identity_store_drain = identity_store_for_task.clone();
         let broker_drain = broker_for_task.clone();
         let into_bundle_id_drain = into_bundle_id_for_task.clone();
@@ -572,7 +572,7 @@ fn spawn_auth_cli_pty(
                             let env = check_env_drain.clone();
                             let mgr2 = mgr_drain.clone();
                             let sid2 = sid_drain.clone();
-                            let wstore2 = wstore_drain.clone();
+                            let mstore2 = mstore_drain.clone();
                             let identity_store2 = identity_store_drain.clone();
                             let broker2 = broker_drain.clone();
                             let into_bundle_id2 = into_bundle_id_drain.clone();
@@ -583,7 +583,7 @@ fn spawn_auth_cli_pty(
                             let handle = tokio::runtime::Handle::current().spawn(async move {
                                 if confirm_authenticated(&cli, &args, &env).await {
                                     let (bundle_id, account_id) = persist_oauth_success(
-                                        &wstore2,
+                                        &mstore2,
                                         &identity_store2,
                                         &broker2,
                                         direct_account,
@@ -659,7 +659,7 @@ fn spawn_auth_cli_pty(
                     .await
                     {
                         let (bundle_id, account_id) = persist_oauth_success(
-                            &wstore_for_task,
+                            &mstore_for_task,
                             &identity_store_for_task,
                             &broker_for_task,
                             direct_account,

@@ -34,7 +34,7 @@ pub struct TemplatePromoteStats {
     /// Total archive zones moved across all promotions.
     pub archives_moved: usize,
     /// Total instances repointed via
-    /// `wstore.instance_repoint_definition`.
+    /// `mstore.instance_repoint_definition`.
     pub instances_repointed: usize,
     pub failures: usize,
 }
@@ -92,7 +92,7 @@ pub struct TemplatePromoteStats {
 /// leave its zones in place; the next startup retries (no marker
 /// gate to block retry).
 pub fn migrate_promote_template_sessions_v1(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     _data_dir: &Path,
 ) -> TemplatePromoteStats {
@@ -141,7 +141,7 @@ pub fn migrate_promote_template_sessions_v1(
 
     // Fetch all definitions ONCE so per-template lookups don't re-hit
     // SQLite in a loop.
-    let defs = match wstore.agent_def_list() {
+    let defs = match mstore.agent_def_list() {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(
@@ -179,7 +179,7 @@ pub fn migrate_promote_template_sessions_v1(
         // definition; the head row is whatever they originally
         // named the agent. Picking the most-recent continuation
         // surfaces the same `instance_name` they used last.
-        let new_name = match wstore.instance_list_named(
+        let new_name = match mstore.instance_list_named(
             1,
             Some(&old_def_id),
             /* identity_id */ None,
@@ -231,7 +231,7 @@ pub fn migrate_promote_template_sessions_v1(
             "deterministic promote-target id must satisfy the zone-id charset"
         );
 
-        let existing_target = match wstore.agent_def_get(&promote_target_id) {
+        let existing_target = match mstore.agent_def_get(&promote_target_id) {
             Ok(Some(def)) => Some(def),
             Ok(None) => None,
             Err(e) => {
@@ -261,11 +261,11 @@ pub fn migrate_promote_template_sessions_v1(
             // one, not the possibly-drifted `db_agent_definitions.provider`
             // column directly (#2594, same pattern as
             // `agent_def_create_from_template`/`forkagentdefinition`). Only
-            // `wstore` is available in this migration (no id_store/shared
+            // `mstore` is available in this migration (no id_store/shared
             // store handoff at this point in the boot sequence) — falls
             // back to `template.provider` when the bundle isn't found via
             // this store, same as it did before this fix.
-            let effective_provider = wstore.resolve_effective_provider_id(template);
+            let effective_provider = mstore.resolve_effective_provider_id(template);
             let mut new_def = crate::backend::storage::store::AgentDefinition {
                 id: promote_target_id.clone(),
                 slug: String::new(),
@@ -302,7 +302,7 @@ pub fn migrate_promote_template_sessions_v1(
                 // fresh instantiation).
                 conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             };
-            if let Err(e) = wstore.agent_def_insert(&mut new_def) {
+            if let Err(e) = mstore.agent_def_insert(&mut new_def) {
                 tracing::warn!(
                     template_id = %old_def_id,
                     promote_target_id = %promote_target_id,
@@ -350,7 +350,7 @@ pub fn migrate_promote_template_sessions_v1(
         // the new user-owned definition. Without this, the existing
         // continueOfInstanceId reattach flow would still look up the
         // template and pass through the un-promoted definition_id.
-        let repointed = match wstore.instance_repoint_definition(&old_def_id, &new_def.id) {
+        let repointed = match mstore.instance_repoint_definition(&old_def_id, &new_def.id) {
             Ok(n) => n,
             Err(e) => {
                 tracing::warn!(

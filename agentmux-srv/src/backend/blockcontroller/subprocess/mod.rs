@@ -14,7 +14,7 @@
 //!   DONE ─(new message)─> RUNNING (re-spawn with --resume)
 //!
 //! I/O model (2 async tasks per turn):
-//! 1. stdout_reader: piped stdout → .jsonl persistence + WPS blockfile events on "output" subject
+//! 1. stdout_reader: piped stdout → .jsonl persistence + MPS blockfile events on "output" subject
 //! 2. process_waiter: wait for exit, update status, publish lifecycle event
 //!
 //! ## Module layout
@@ -47,7 +47,7 @@ use super::{BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_IN
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps;
+use crate::backend::mps;
 
 mod argv;
 mod container_spawn;
@@ -56,7 +56,7 @@ mod session;
 #[cfg(test)]
 mod tests;
 
-/// WPS file subject name for subprocess output (replaces "term" from PTY).
+/// MPS file subject name for subprocess output (replaces "term" from PTY).
 pub const SUBPROCESS_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_SUBPROCESS: &str = "subprocess";
@@ -150,12 +150,12 @@ pub struct SubprocessController {
     run_lock: Arc<AtomicBool>,
     /// Protected inner state.
     inner: Arc<Mutex<SubprocessControllerInner>>,
-    /// WPS broker for publishing events (blockfile, controllerstatus).
-    broker: Option<Arc<wps::Broker>>,
+    /// MPS broker for publishing events (blockfile, controllerstatus).
+    broker: Option<Arc<mps::Broker>>,
     /// Event bus for obj:update broadcasts.
     event_bus: Option<Arc<EventBus>>,
     /// AgentMux object store for block metadata persistence.
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
     /// Per-block turn-activity tracker.
@@ -185,9 +185,9 @@ impl SubprocessController {
     pub fn new(
         tab_id: String,
         block_id: String,
-        broker: Option<Arc<wps::Broker>>,
+        broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
         registry: Option<Arc<crate::registry::Registry>>,
         boot_id: Arc<str>,
@@ -220,7 +220,7 @@ impl SubprocessController {
             })),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
             health_monitor,
             self_ref: Mutex::new(None),
@@ -287,7 +287,7 @@ impl SubprocessController {
         Self::build_status_snapshot(&inner, &self.block_id, self.health_monitor.is_active_turn())
     }
 
-    /// Publish current controller status via the WPS broker.
+    /// Publish current controller status via the MPS broker.
     fn publish_status(&self) {
         if let Some(ref broker) = self.broker {
             let status = self.get_status_snapshot();
@@ -302,8 +302,8 @@ impl SubprocessController {
     fn emit_message_accepted(&self, config: &SubprocessSpawnConfig) {
         let Some(id) = config.message_id.as_deref() else { return };
         let Some(ref broker) = self.broker else { return };
-        let event = super::super::wps::MuxEvent {
-            event: super::super::wps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
+        let event = super::super::mps::MuxEvent {
+            event: super::super::mps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
             scopes: vec![format!("block:{}", self.block_id)],
             sender: String::new(),
             persist: 0,

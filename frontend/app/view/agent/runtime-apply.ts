@@ -35,7 +35,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { staticTabId } from "@/app/store/global";
 import { buildRuntimeArgs } from "./buildRuntimeArgs";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "./launch-args";
@@ -72,7 +72,7 @@ export async function applyRuntimeChange(
     blockMeta?: Record<string, unknown>,
 ): Promise<void> {
     const agentMode = blockMeta?.["agentMode"] as string | undefined;
-    const oref = WOS.makeORef("block", blockId);
+    const oref = MOS.makeORef("block", blockId);
     await RpcApi.SetMetaCommand(TabRpcClient, {
         oref,
         meta: { "agent:runtime": updated },

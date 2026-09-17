@@ -19,11 +19,11 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 // Same hub pattern bundle-skill-model.test.ts / global-bundle-model.test.ts use.
-const wpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
-vi.mock("@/app/store/wps", () => ({
+const mpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
-        wpsHub.handlers.set(sub.eventType, sub.handler);
-        return () => wpsHub.handlers.delete(sub.eventType);
+        mpsHub.handlers.set(sub.eventType, sub.handler);
+        return () => mpsHub.handlers.delete(sub.eventType);
     }),
 }));
 
@@ -34,7 +34,7 @@ beforeEach(() => {
     skillCatalogListMock.mockResolvedValue([]);
     listAgentDefinitionsMock.mockClear();
     listAgentDefinitionsMock.mockResolvedValue([]);
-    wpsHub.handlers.clear();
+    mpsHub.handlers.clear();
 });
 
 describe("SkillCatalogModel — reactive updates", () => {
@@ -43,7 +43,7 @@ describe("SkillCatalogModel — reactive updates", () => {
         await Promise.resolve();
         skillCatalogListMock.mockClear();
 
-        wpsHub.handlers.get("skills:changed")?.({});
+        mpsHub.handlers.get("skills:changed")?.({});
         await Promise.resolve();
 
         expect(skillCatalogListMock).toHaveBeenCalledTimes(1);
@@ -54,7 +54,7 @@ describe("SkillCatalogModel — reactive updates", () => {
         await Promise.resolve();
         skillCatalogListMock.mockClear();
 
-        wpsHub.handlers.get("mcp:changed")?.({});
+        mpsHub.handlers.get("mcp:changed")?.({});
         await Promise.resolve();
 
         expect(skillCatalogListMock).not.toHaveBeenCalled();
@@ -63,10 +63,10 @@ describe("SkillCatalogModel — reactive updates", () => {
     test("unsubscribes on dispose", async () => {
         const model = new SkillCatalogModel();
         await Promise.resolve();
-        expect(wpsHub.handlers.has("skills:changed")).toBe(true);
+        expect(mpsHub.handlers.has("skills:changed")).toBe(true);
 
         model.dispose();
 
-        expect(wpsHub.handlers.has("skills:changed")).toBe(false);
+        expect(mpsHub.handlers.has("skills:changed")).toBe(false);
     });
 });

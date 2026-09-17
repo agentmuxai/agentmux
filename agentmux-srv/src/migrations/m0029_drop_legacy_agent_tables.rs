@@ -67,7 +67,7 @@ impl Migration for M0029DropLegacyAgentTables {
         // is safe rather than a special case).
         drop(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("drop_legacy_agent_tables: open wstore: {e}")))?,
+                .map_err(|e| MigrationError(format!("drop_legacy_agent_tables: open mstore: {e}")))?,
         );
         let conn = Connection::open(&ctx.channel_store_path)
             .map_err(|e| MigrationError(format!("drop_legacy_agent_tables: open: {e}")))?;

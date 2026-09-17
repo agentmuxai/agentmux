@@ -54,8 +54,8 @@
  */
 
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { addWSReconnectHandler } from "@/app/store/ws";

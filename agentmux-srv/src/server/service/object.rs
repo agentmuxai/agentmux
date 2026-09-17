@@ -14,7 +14,7 @@ use super::object_helpers::{
 use super::reducer_helpers::{compensate_via_reducer, dispatch_to_reducer, publish_events};
 
 pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     match call.method.as_str() {
         "GetObject" => {
@@ -103,7 +103,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             });
             let mut apply_err: Option<String> = None;
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     apply_err = Some(e.to_string());
                     break;
                 }
@@ -287,7 +287,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
         // reducer. Decomposes by otype to the typed Update*Meta
         // command. Reducer is pass-through (validates entity exists;
         // emits event); subscriber's apply_*_meta_updated does the
-        // shallow merge against wstore.
+        // shallow merge against mstore.
         "UpdateObjectMeta" => {
             let oref_str: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -346,7 +346,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 return WebReturnType::error(err_msg);
             }
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     return WebReturnType::error(format!(
                         "UpdateObjectMeta: SQLite write failed: {}",
                         e
@@ -375,7 +375,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                     }
                 }
             }
-            // Return the updated object so the frontend WOS cache stays in sync.
+            // Return the updated object so the frontend MOS cache stays in sync.
             if oref.otype == OTYPE_BLOCK {
                 if let Ok(block) = store.must_get::<Block>(&oref.oid) {
                     return WebReturnType::success_with_updates(vec![MuxObjUpdate {
@@ -423,7 +423,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 return WebReturnType::error(err_msg);
             }
             for ev in &events {
-                if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                     return WebReturnType::error(format!(
                         "UpdateTabName: SQLite write failed: {}",
                         e
@@ -475,7 +475,7 @@ async fn update_layout_via_reducer(
     tab_id: String,
     new_tree: Option<agentmux_common::LayoutNode>,
 ) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let oid = mux_obj_value
         .get("oid")
         .and_then(|v| v.as_str())
@@ -542,7 +542,7 @@ async fn update_layout_via_reducer(
                 .any(|e| matches!(e, agentmux_common::ipc::Event::Error { .. }));
             if !has_error {
                 for ev in &events {
-                    if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, store) {
+                    if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, store) {
                         apply_err = Some(e.to_string());
                         break;
                     }
@@ -571,7 +571,7 @@ async fn update_layout_via_reducer(
                     let rb_events = crate::reducer::update(&mut s, rollback_cmd, &ctx);
                     for ev in &rb_events {
                         if let Err(e) =
-                            crate::persist_subscriber::apply_event_to_wstore(ev, store)
+                            crate::persist_subscriber::apply_event_to_mstore(ev, store)
                         {
                             tracing::warn!(
                                 error = %e,
@@ -599,7 +599,7 @@ async fn update_layout_via_reducer(
     }
     publish_events(state, &events);
 
-    // Return the committed row (fresh version) so the pusher's WOS cache
+    // Return the committed row (fresh version) so the pusher's MOS cache
     // stays in sync — same response shape as the legacy path.
     match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
         Ok(obj_val) => WebReturnType::success_with_updates(vec![MuxObjUpdate {

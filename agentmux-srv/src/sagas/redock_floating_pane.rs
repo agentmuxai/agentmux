@@ -182,7 +182,7 @@ mod tests {
     ) -> Vec<agentmux_common::ipc::Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -293,9 +293,9 @@ mod tests {
 
         // SQLite: matches.
         drop(s);
-        let dst_tab_obj = state.wstore.get::<Tab>(&dst_tab).unwrap().unwrap();
+        let dst_tab_obj = state.mstore.get::<Tab>(&dst_tab).unwrap().unwrap();
         assert_eq!(dst_tab_obj.blockids, vec![block_id.clone()]);
-        let block = state.wstore.get::<Block>(&block_id).unwrap().unwrap();
+        let block = state.mstore.get::<Block>(&block_id).unwrap().unwrap();
         assert_eq!(block.parentoref, format!("tab:{}", dst_tab));
     }
 

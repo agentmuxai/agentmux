@@ -118,7 +118,7 @@ fn register_agent_kill_tree(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
@@ -132,7 +132,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(
         COMMAND_AGENT_SEND,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
@@ -149,7 +149,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .ok_or_else(|| format!("NOT_RUNNING: no controller for block {}", cmd.block_id))?;
 
                 // Re-read spawn config from block metadata (same pattern as agentinput)
-                let block: Block = wstore
+                let block: Block = mstore
                     .get(&cmd.block_id)
                     .map_err(|e| format!("agent.send: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
@@ -182,7 +182,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // via the `error_during_execution` frame (rendered as an
                 // agent_error node) and abort before the CLI is created.
                 env_vars = match crate::identity::resolver::inject_identity_env_async(
-                    wstore.clone(),
+                    mstore.clone(),
                     id_store.clone(),
                     identity_store.clone(),
                     Some(broker.clone()),
@@ -228,11 +228,11 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         crate::backend::blockcontroller::core::persist_last_failure(
                             &cmd.block_id,
                             Some(&gate_failure),
-                            &Some(wstore.clone()),
+                            &Some(mstore.clone()),
                             &Some(event_bus.clone()),
                         );
-                        broker.publish(crate::backend::wps::MuxEvent {
-                            event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
+                        broker.publish(crate::backend::mps::MuxEvent {
+                            event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
                             scopes: vec![format!("block:{}", cmd.block_id)],
                             sender: String::new(),
                             persist: 1,
@@ -469,17 +469,17 @@ fn register_agent_stop(engine: &Arc<WshRpcEngine>, _state: &AppState) {
 }
 
 fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
 
     engine.register_handler(
         COMMAND_AGENT_STATUS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandAgentStatusData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.status: {e}"))?;
 
-                let block: Block = wstore
+                let block: Block = mstore
                     .get(&cmd.block_id)
                     .map_err(|e| format!("agent.status: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
@@ -517,20 +517,20 @@ fn register_agent_status(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_agent_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
 
     engine.register_handler(
         COMMAND_AGENT_LIST,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
-                let tabs: Vec<Tab> = wstore.get_all::<Tab>()
+                let tabs: Vec<Tab> = mstore.get_all::<Tab>()
                     .map_err(|e| format!("agent.list: {e}"))?;
 
                 let mut agents = Vec::new();
                 for tab in &tabs {
                     for block_id in &tab.blockids {
-                        if let Ok(Some(block)) = wstore.get::<Block>(block_id) {
+                        if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
                             let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
                             if agent_id.is_empty() {
                                 continue;
@@ -580,7 +580,7 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut all_lines: Vec<String> = Vec::new();
                 {
                     let events = broker.read_event_history(
-                        crate::backend::wps::EVENT_BLOCK_FILE,
+                        crate::backend::mps::EVENT_BLOCK_FILE,
                         &scope,
                         max + after, // read enough to cover offset
                     );

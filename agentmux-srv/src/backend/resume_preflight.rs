@@ -71,7 +71,7 @@ pub enum Verdict {
 }
 
 impl Verdict {
-    /// Wire form, matching the TS union in `gotypes.d.ts`.
+    /// Wire form, matching the TS union in `srv-types.d.ts`.
     pub fn as_str(self) -> &'static str {
         match self {
             Verdict::Resume => "resume",

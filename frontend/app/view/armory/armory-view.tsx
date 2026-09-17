@@ -136,7 +136,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                      * All six manager components stay mounted (AccountsManager,
                      * GlobalBundleManager, NativeMemoryManager, SkillManager,
                      * McpManager, BundleManager) — toggling is instant and
-                     * never re-fetches. All stay consistent via WPS *:changed events.
+                     * never re-fetches. All stay consistent via MPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
                         <AccountsManager />

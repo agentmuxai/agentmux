@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { IconButton } from "@/app/element/iconbutton";
-import { atoms, WOS } from "@/store/global";
+import { atoms, MOS } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
@@ -43,7 +43,7 @@ function TitleBar(props: TitleBarProps): JSX.Element {
         if (trimmedTitle !== props.title) {
             fireAndForget(async () => {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", props.blockId),
+                    oref: MOS.makeORef("block", props.blockId),
                     meta: { "pane-title": trimmedTitle } as any,
                 });
             });

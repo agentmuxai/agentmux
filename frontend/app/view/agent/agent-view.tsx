@@ -32,12 +32,12 @@ import {
     openOrFocusPaneByView,
     pushNotification,
     refocusNode,
-    WOS,
+    MOS,
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService, ObjectService } from "@/app/store/services";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
@@ -390,8 +390,8 @@ export const AgentPaneChrome = (props: {
     // ViewModel instance first rendered this chrome) — getMuxObjectAtom
     // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
     // PR #3134 already established for BlockFrame_Header
-    // (frontend/app/store/wos.ts's own doc comments explain why).
-    const activeBlockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+    // (frontend/app/store/mos.ts's own doc comments explain why).
+    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
     const agentId = () => activeBlockData()?.meta?.["agentId"];
     const isHistoryTab = () => !!activeBlockData()?.meta?.[HISTORY_TAB_FOR_META_KEY];
 
@@ -525,7 +525,7 @@ export const AgentPaneChrome = (props: {
         // (activeBlockData, already memoized above); every other (dormant)
         // stack member isn't the active read target — read its
         // last-persisted meta directly, same as term.tsx's termTabs does.
-        const meta = id === activeBlockId() ? activeBlockData()?.meta : WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta;
+        const meta = id === activeBlockId() ? activeBlockData()?.meta : MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta;
         const definitionId = meta?.["agentId"] as string | undefined;
         const isHistoryTabFlag = !!meta?.[HISTORY_TAB_FOR_META_KEY];
         if (isHistoryTabFlag) {
@@ -746,7 +746,7 @@ export const AgentPaneChrome = (props: {
         // catches up on the agent's next launch (launchAgentDefinition
         // rewrites agentName from the definition).
         await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", tab.blockId),
+            oref: MOS.makeORef("block", tab.blockId),
             meta: { agentName: title } as any,
         }).catch(() => {});
     };
@@ -1083,7 +1083,7 @@ const AgentPresentationView = ({
         createEffect(() => {
             const tokens = (paneModel.state.lastContextTokens ?? null);
             void RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "term:ctx-tokens": tokens ?? null } as any,
             });
         });
@@ -1186,7 +1186,7 @@ const AgentPresentationView = ({
             setMeta: (args) =>
                 RpcApi.SetMetaCommand(TabRpcClient, { oref: args.oref, meta: args.meta as any }),
             deleteSubBlock: (args) => RpcApi.DeleteSubBlockCommand(TabRpcClient, args),
-            makeORef: WOS.makeORef,
+            makeORef: MOS.makeORef,
         }).catch((err) => {
             // Best-effort teardown: the drawer has already collapsed (that
             // part is synchronous, above), so a failed RPC costs a leaked
@@ -1696,7 +1696,7 @@ const AgentPresentationView = ({
     // (onControllerStatus above) is one-shot, and the live useControllerStatusEvents
     // subscription only self-heals a missed turn-end if a LATER live event
     // arrives. If the single turn-end push is missed (backgrounded window, a
-    // WPS reconnect gap, a pane remount that doesn't re-trigger the WPS
+    // MPS reconnect gap, a pane remount that doesn't re-trigger the MPS
     // persisted-event replay — see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
     // §3/§4 item 5) nothing else corrects it until the *next* turn starts.
     // Re-poll on every background→foreground transition to drive the two
@@ -2983,7 +2983,7 @@ const AgentPresentationView = ({
                                 agentPaneZoom={zoomFactor}
                                 onSubBlockCreated={(subBlockId) => {
                                     void RpcApi.SetMetaCommand(TabRpcClient, {
-                                        oref: WOS.makeORef("block", model.blockId),
+                                        oref: MOS.makeORef("block", model.blockId),
                                         meta: { "term:shellsubblockid": subBlockId } as any,
                                     });
                                 }}

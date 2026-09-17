@@ -21,7 +21,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { PaneRow } from "./PaneRow";
 
 interface AgentCredentialsRevokedChipProps {

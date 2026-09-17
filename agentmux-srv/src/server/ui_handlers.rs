@@ -68,7 +68,7 @@ pub(crate) fn verified_block_id(state: &AppState, auth: &UiAutomationAuth) -> Re
     {
         return Err("signature timestamp missing or outside the freshness window".to_string());
     }
-    let key = match state.wstore.agent_jekt_key_load(&auth.agent_id) {
+    let key = match state.mstore.agent_jekt_key_load(&auth.agent_id) {
         Ok(Some(k)) => k,
         Ok(None) => {
             return Err(format!(

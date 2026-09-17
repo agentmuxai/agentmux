@@ -10,7 +10,7 @@ use crate::backend::wcore;
 use super::super::AppState;
 
 pub(super) async fn handle_client_service(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     match call.method.as_str() {
         "GetClientData" => match wcore::get_client(store) {

@@ -108,7 +108,7 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
 
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let editor_file_watcher = state.editor_file_watcher.clone();
     let media_file_watcher = state.media_file_watcher.clone();
 
@@ -210,7 +210,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         COMMAND_WRITE_AGENT_CONFIG,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let mut cmd: CommandWriteAgentConfigData = serde_json::from_value(data)
                     .map_err(|e| format!("writeagentconfig: {e}"))?;
@@ -242,7 +242,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if let Some(agent_slug) = agent_slug {
                         if let Some(rewritten) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
                             &cmd.files[pos].content,
-                            &wstore,
+                            &mstore,
                             &agent_slug,
                         ) {
                             cmd.files[pos].content = rewritten;

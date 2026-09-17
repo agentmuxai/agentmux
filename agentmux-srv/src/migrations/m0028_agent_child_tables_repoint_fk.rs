@@ -375,7 +375,7 @@ impl Migration for M0028AgentChildTablesRepointFk {
         // the new FK) before the raw connection below touches anything.
         drop(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("agent_child_tables_repoint_fk: open wstore: {e}")))?,
+                .map_err(|e| MigrationError(format!("agent_child_tables_repoint_fk: open mstore: {e}")))?,
         );
         let mut conn = Connection::open(&ctx.channel_store_path)
             .map_err(|e| MigrationError(format!("agent_child_tables_repoint_fk: open: {e}")))?;

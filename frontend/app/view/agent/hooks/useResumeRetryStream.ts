@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useResumeRetryStream — the single per-block WPS subscription for
+ * useResumeRetryStream — the single per-block MPS subscription for
  * `agent-resume-retry`, published by the persistent controller's
  * stale-`--resume` recovery path (`retry_after_resume_failure` /
  * `publish_resume_retry_status` in `agentmux-srv`) so the pane can show a
@@ -13,14 +13,14 @@
  *
  * Simpler than `useCompactionStream.ts`'s sibling hook in one respect: both
  * the "retrying" and "resolved" ends of this signal travel over this SAME
- * WPS channel (backend publishes with `persist: 2`, keeping the latest
+ * MPS channel (backend publishes with `persist: 2`, keeping the latest
  * pair), so there's no cross-channel staleness race to guard against — a
  * fresh subscribe from a genuinely new WebSocket connection always replays
  * the correct current pair.
  *
  * reagentx P1 (PR #2776, round 2): a same-connection pane unmount+remount
  * (switching tabs/panes away and back) does NOT get a fresh replay —
- * `Broker::replay_to_route` (`agentmux-srv/src/backend/wps.rs`) dedupes
+ * `Broker::replay_to_route` (`agentmux-srv/src/backend/mps.rs`) dedupes
  * replay per `(route_id, event, scope)` and is only cleared on a true
  * route reconnect (`unsubscribe_all`), while `registerPane` resets
  * `AgentPaneState.reconnecting` to `null` on every mount regardless. Relying
@@ -34,8 +34,8 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -46,7 +46,7 @@ export interface UseResumeRetryStreamOptions {
 }
 
 /**
- * Resolve a raw `agent-resume-retry` WPS payload into a dispatchable pane
+ * Resolve a raw `agent-resume-retry` MPS payload into a dispatchable pane
  * command, or `null` to ignore it (malformed shape). Pure and exported for
  * direct unit coverage, same rationale as `resolveCompactionStart`.
  */

@@ -24,7 +24,7 @@ import {
 import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 
 /**

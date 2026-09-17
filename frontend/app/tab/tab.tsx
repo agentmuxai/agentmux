@@ -12,7 +12,7 @@ import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
 import { ObjectService } from "../store/services";
-import { makeORef, useMuxObjectValue } from "../store/wos";
+import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
 import "./tab.scss";
 

@@ -4,7 +4,7 @@
 //! Store extension methods for `db_drone_definitions` +
 //! `db_drone_runs`. Lives in the drone module because the table
 //! schema is local to this feature; if Drone ever ships separately
-//! we can pull these methods out into a wstore module without changing
+//! we can pull these methods out into a mstore module without changing
 //! call sites.
 
 use rusqlite::params;

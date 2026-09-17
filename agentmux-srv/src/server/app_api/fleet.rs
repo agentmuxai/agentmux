@@ -349,11 +349,11 @@ fn now_ms() -> i64 {
 }
 
 fn register_fleet_group_create(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_FLEET_GROUP_CREATE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandFleetGroupCreateData = serde_json::from_value(data)
                     .map_err(|e| format!("fleet.group.create: {e}"))?;
@@ -362,7 +362,7 @@ fn register_fleet_group_create(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 let id = uuid::Uuid::new_v4().to_string();
                 let created_at = now_ms();
-                wstore
+                mstore
                     .agent_group_create(&id, cmd.name.trim(), &cmd.member_ids, created_at)
                     .map_err(|e| format!("fleet.group.create: {e}"))?;
                 Ok(Some(serde_json::to_value(&FleetGroup {
@@ -377,13 +377,13 @@ fn register_fleet_group_create(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_fleet_group_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_FLEET_GROUP_LIST,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
-                let groups = wstore.agent_group_list().map_err(|e| format!("fleet.group.list: {e}"))?;
+                let groups = mstore.agent_group_list().map_err(|e| format!("fleet.group.list: {e}"))?;
                 let groups = groups
                     .into_iter()
                     .map(|g| FleetGroup { id: g.id, name: g.name, member_ids: g.member_ids, created_at: g.created_at })
@@ -395,11 +395,11 @@ fn register_fleet_group_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_fleet_group_update(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_FLEET_GROUP_UPDATE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandFleetGroupUpdateData = serde_json::from_value(data)
                     .map_err(|e| format!("fleet.group.update: {e}"))?;
@@ -407,13 +407,13 @@ fn register_fleet_group_update(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if matches!(name, Some("")) {
                     return Err("fleet.group.update: name cannot be blank".to_string());
                 }
-                let updated = wstore
+                let updated = mstore
                     .agent_group_update(&cmd.id, name, cmd.member_ids.as_deref())
                     .map_err(|e| format!("fleet.group.update: {e}"))?;
                 if !updated {
                     return Err(format!("fleet.group.update: no group with id {}", cmd.id));
                 }
-                let group = wstore
+                let group = mstore
                     .agent_group_get(&cmd.id)
                     .map_err(|e| format!("fleet.group.update: {e}"))?
                     .ok_or_else(|| format!("fleet.group.update: group {} vanished after update", cmd.id))?;
@@ -429,15 +429,15 @@ fn register_fleet_group_update(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 fn register_fleet_group_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_FLEET_GROUP_DELETE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandFleetGroupDeleteData = serde_json::from_value(data)
                     .map_err(|e| format!("fleet.group.delete: {e}"))?;
-                let deleted = wstore.agent_group_delete(&cmd.id).map_err(|e| format!("fleet.group.delete: {e}"))?;
+                let deleted = mstore.agent_group_delete(&cmd.id).map_err(|e| format!("fleet.group.delete: {e}"))?;
                 Ok(Some(serde_json::json!({ "ok": deleted })))
             })
         }),

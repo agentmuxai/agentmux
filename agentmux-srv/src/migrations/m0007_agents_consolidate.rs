@@ -17,11 +17,11 @@ impl Migration for M0007AgentsConsolidate {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("agents_consolidate: open wstore: {}", e)))?,
+                .map_err(|e| MigrationError(format!("agents_consolidate: open mstore: {}", e)))?,
         );
-        let stats = wstore
+        let stats = mstore
             .run_agents_consolidate(Some(&ctx.data_dir))
             .map_err(|e| MigrationError(format!("agents_consolidate: {}", e)))?;
         // Phase 0c hardening: log the outcome instead of discarding it —

@@ -83,7 +83,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// view, enqueues a layout action (split or insert), and broadcasts the
 /// block/tab/layout updates so the frontend renders the new pane.
 pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<PaneOpenResult, String> {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let event_bus = state.event_bus.clone();
 
     tracing::info!(view = %cmd.view, "pane.open");
@@ -147,11 +147,11 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     } else if let Some(derived) = cmd
         .split_reference_block_id
         .as_deref()
-        .and_then(|id| resolve_tab_id_for_block(&wstore, id).ok())
+        .and_then(|id| resolve_tab_id_for_block(&mstore, id).ok())
     {
         derived
     } else {
-        resolve_tab_id(&wstore, None)?
+        resolve_tab_id(&mstore, None)?
     };
 
     // Floating path (SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16):
@@ -159,7 +159,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     // the existing tear_off_block saga) and signal the source window's frontend
     // to materialize the chromeless OS window — srv can't open windows itself.
     if cmd.floating == Some(true) {
-        return pane::open_pane_floating(state, &wstore, &event_bus, cmd.view, tab_id, meta).await;
+        return pane::open_pane_floating(state, &mstore, &event_bus, cmd.view, tab_id, meta).await;
     }
 
     // Skip-placement path (in-pane tabs — SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md
@@ -193,8 +193,8 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
             })
             .ok_or_else(|| "pane.open: skip_placement: CreateBlock emitted no BlockCreated".to_string())?;
         for ev in &create_events {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
-                tracing::warn!("pane.open: skip_placement: CreateBlock wstore apply failed: {e}");
+            if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+                tracing::warn!("pane.open: skip_placement: CreateBlock mstore apply failed: {e}");
             }
         }
         crate::server::service::publish_events(state, &create_events);
@@ -214,7 +214,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     // renders fine (frontend reads SQLite) but a later TearOffBlock /
     // RedockFloatingPane is rejected "block not found" because the saga
     // pre-conditions check the reducer. The BlockCreated event carries meta,
-    // which apply_block_created writes to the wstore Block. Mirrors the
+    // which apply_block_created writes to the mstore Block. Mirrors the
     // already-correct open_pane_floating path.
     let meta_val = serde_json::to_value(&meta)
         .map_err(|e| format!("pane.open: meta serialize: {e}"))?;
@@ -240,8 +240,8 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         })
         .ok_or_else(|| "pane.open: CreateBlock emitted no BlockCreated".to_string())?;
     for ev in &create_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &wstore) {
-            tracing::warn!("pane.open: CreateBlock wstore apply failed: {e}");
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, &mstore) {
+            tracing::warn!("pane.open: CreateBlock mstore apply failed: {e}");
         }
     }
     crate::server::service::publish_events(state, &create_events);
@@ -290,7 +290,7 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
     // Broadcast block + tab + layout updates
     {
         let mut updates = Vec::new();
-        if let Ok(updated_block) = wstore.must_get::<Block>(&block_id) {
+        if let Ok(updated_block) = mstore.must_get::<Block>(&block_id) {
             updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "block".into(),
@@ -298,14 +298,14 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
                 obj: Some(obj::mux_obj_to_value(&updated_block)),
             });
         }
-        if let Ok(updated_tab) = wstore.must_get::<Tab>(&tab_id) {
+        if let Ok(updated_tab) = mstore.must_get::<Tab>(&tab_id) {
             updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "tab".into(),
                 oid: tab_id.clone(),
                 obj: Some(obj::mux_obj_to_value(&updated_tab)),
             });
-            if let Ok(updated_layout) = wstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
+            if let Ok(updated_layout) = mstore.must_get::<obj::LayoutState>(&updated_tab.layoutstate) {
                 updates.push(obj::MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: "layout".into(),
@@ -368,9 +368,9 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 }
 
 pub(crate) async fn agent_define_core(
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     id_store: Arc<Store>,
-    broker: Arc<crate::backend::wps::Broker>,
+    broker: Arc<crate::backend::mps::Broker>,
     cmd: CommandAgentDefineData,
 ) -> Result<AgentDefineResult, String> {
     if cmd.name.trim().is_empty() {
@@ -471,7 +471,7 @@ pub(crate) async fn agent_define_core(
     // Atomic check-then-insert.
     // Returns Some(existing) if a row matched by name/slug already exists;
     // None if the row was freshly inserted (def.slug now holds resolved slug).
-    let existing_opt = wstore.agent_def_find_or_insert(&mut def)
+    let existing_opt = mstore.agent_def_find_or_insert(&mut def)
         .map_err(|e| format!("agent.define: find_or_insert: {e}"))?;
 
     if let Some(existing) = existing_opt {
@@ -484,7 +484,7 @@ pub(crate) async fn agent_define_core(
                 // with create_instance_stub=true should make it visible in My Agents.
                 // Only fire agents:changed when the stub was actually newly inserted.
                 let (stub_id, stub_new) = if create_stub {
-                    match agent_define::make_stub_idempotent(&wstore, &existing.id, &existing.name, now) {
+                    match agent_define::make_stub_idempotent(&mstore, &existing.id, &existing.name, now) {
                         Ok((id, new)) => (Some(id), new),
                         Err(e) => {
                             tracing::warn!(id = %existing.id, err = %e, "agent.define: skip stub failed (non-fatal)");
@@ -495,7 +495,7 @@ pub(crate) async fn agent_define_core(
                     (None, false)
                 };
                 if stub_new {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "agents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -552,14 +552,14 @@ pub(crate) async fn agent_define_core(
                 if !cmd.environment.is_empty() { updated.environment = cmd.environment.clone(); }
                 // name update intentionally omitted — the slug is immutable;
                 // renaming would create a slug mismatch. Use updateagent for renames.
-                let did_update = wstore.agent_def_update(&mut updated)
+                let did_update = mstore.agent_def_update(&mut updated)
                     .map_err(|e| format!("agent.define: update: {e}"))?;
                 if !did_update {
                     return Err("agent.define: update: row was deleted between find and update".to_string());
                 }
-                agent_define::persist_define_content(&wstore, &updated.id, &cmd, now);
+                agent_define::persist_define_content(&mstore, &updated.id, &cmd, now);
                 let stub_id = if create_stub {
-                    match agent_define::make_stub_idempotent(&wstore, &updated.id, &updated.name, now) {
+                    match agent_define::make_stub_idempotent(&mstore, &updated.id, &updated.name, now) {
                         Ok((id, _new)) => Some(id),
                         Err(e) => {
                             tracing::warn!(id = %updated.id, err = %e, "agent.define: update stub failed (non-fatal)");
@@ -569,7 +569,7 @@ pub(crate) async fn agent_define_core(
                 } else {
                     None
                 };
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -597,13 +597,13 @@ pub(crate) async fn agent_define_core(
     // NEW definition — not before, or every idempotent `if_exists=skip`/
     // `update` call against an existing name would leak an unbound bundle
     // (see `agent_def_provision_and_bind_bundle`'s own doc comment).
-    wstore.agent_def_provision_and_bind_bundle(&id_store, &mut def, now);
+    mstore.agent_def_provision_and_bind_bundle(&id_store, &mut def, now);
     // Create the stub first so that listeners handling agents:changed can
     // immediately find the new agent via ListRecentSessionsCommand. The
     // definition is already committed; a stub failure is non-fatal (log +
     // continue) and we still broadcast so callers see the new definition.
     let stub_id = if create_stub {
-        match agent_define::make_stub_idempotent(&wstore, &def.id, &def.name, now) {
+        match agent_define::make_stub_idempotent(&mstore, &def.id, &def.name, now) {
             Ok((id, _new)) => Some(id),
             Err(e) => {
                 tracing::warn!(id = %def.id, err = %e, "agent.define: stub failed (definition committed, non-fatal)");
@@ -613,14 +613,14 @@ pub(crate) async fn agent_define_core(
     } else {
         None
     };
-    broker.publish(crate::backend::wps::MuxEvent {
+    broker.publish(crate::backend::mps::MuxEvent {
         event: "agents:changed".to_string(),
         scopes: vec![],
         sender: String::new(),
         persist: 0,
         data: None,
     });
-    agent_define::persist_define_content(&wstore, &def.id, &cmd, now);
+    agent_define::persist_define_content(&mstore, &def.id, &cmd, now);
 
     tracing::info!(
         id = %def.id,
@@ -803,7 +803,7 @@ pub(crate) async fn bundle_get_impl(
 /// (`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4). An unsaved
 /// draft has no bindings, so it is still checked without touching the store.
 pub(crate) fn bundle_validate_impl(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     identity_store: &crate::backend::storage::store::Store,
     data: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
@@ -816,7 +816,7 @@ pub(crate) fn bundle_validate_impl(
         // that would return a clean, apparently-successful report for a check
         // that never ran (Codex, PR #3153). The UI is built to show a failed
         // validate; give it one.
-        let resolved = bundle::resolve_bundle_components(wstore, identity_store, &memory.id)
+        let resolved = bundle::resolve_bundle_components(mstore, identity_store, &memory.id)
             .map_err(|e| format!("bundle.validate: {e}"))?;
         (resolved.mcp_entries, resolved.warnings)
     };
@@ -848,7 +848,7 @@ pub(crate) async fn bundle_self_get_impl(
     state: &AppState,
     agent_id: &str,
 ) -> Result<serde_json::Value, String> {
-    let instance = state.wstore.instance_get_by_slug(agent_id)
+    let instance = state.mstore.instance_get_by_slug(agent_id)
         .map_err(|e| format!("bundle.self.get: {e}"))?;
     // `instance_get_by_slug` only ever hits the local `db_agents` table — a
     // live agent that only exists in the global named-agent registry (never
@@ -885,7 +885,7 @@ pub(crate) fn memory_list_impl(
     agent_id: &str,
 ) -> Result<serde_json::Value, String> {
     let memory_dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.wstore, agent_id,
+        &state.mstore, agent_id,
     ).map_err(|e| format!("memory.list: {e}"))?;
 
     let mut files: Vec<NativeMemoryFileMeta> = Vec::new();
@@ -941,7 +941,7 @@ pub(crate) fn memory_read_impl(
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.read: {e}"))?;
     let path = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.wstore, agent_id,
+        &state.mstore, agent_id,
     ).map_err(|e| format!("memory.read: {e}"))?.join(filename);
 
     let file_type = std::fs::symlink_metadata(&path)
@@ -983,7 +983,7 @@ pub(crate) fn memory_write_impl(
         return Err(format!("memory.write: content too large ({} bytes, max {MAX})", content.len()));
     }
     let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.wstore, agent_id,
+        &state.mstore, agent_id,
     ).map_err(|e| format!("memory.write: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.write: mkdir: {e}"))?;
 
@@ -1014,7 +1014,7 @@ pub(crate) fn memory_write_impl(
     // disjoint-keyspace bug (a write invisible to history/diff/revert) this
     // PR exists to fix. A visible, retriable write failure is strictly
     // safer than a silent data-integrity split.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
         .map_err(|e| format!("memory.write: {e}"))?;
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
@@ -1072,7 +1072,7 @@ pub(crate) fn memory_write_impl(
     // subscriber can ever match — the exact class of bug this file's own
     // `resolve_agent_uuid` doc comment already warns about for version
     // storage; the same reasoning applies to this event.
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1233,7 +1233,7 @@ pub(crate) fn global_memory_write_impl(
         }
     }
 
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: "memories:changed".to_string(),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1304,7 +1304,7 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     bundle.is_global = false;
     bundle.updated_at = agentmux_common::time::now_ms();
     state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: "memories:changed".to_string(),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1541,7 +1541,7 @@ pub(crate) fn memory_history_impl(
         .map_err(|e| format!("memory.history: {e}"))?;
     // See memory_write_impl's own comment — must key by the same resolved
     // canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
         .map_err(|e| format!("memory.history: {e}"))?;
     let versions: Vec<crate::backend::rpc_types::NativeMemoryVersionMeta> = state
         .id_store
@@ -1570,7 +1570,7 @@ pub(crate) fn memory_diff_impl(
 ) -> Result<serde_json::Value, String> {
     // See memory_write_impl's own comment — must compare against the same
     // resolved canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
         .map_err(|e| format!("memory.diff: {e}"))?;
     let from = state
         .id_store
@@ -1610,7 +1610,7 @@ pub(crate) fn memory_revert_impl(
 
     // See memory_write_impl's own comment — must key/compare against the
     // same resolved canonical id that write used, not the raw slug.
-    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.mstore, agent_id)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
     let target = state
@@ -1625,7 +1625,7 @@ pub(crate) fn memory_revert_impl(
     }
 
     let dir = crate::server::native_memory_handlers::memory_dir_for_agent(
-        &state.wstore, agent_id,
+        &state.mstore, agent_id,
     ).map_err(|e| format!("memory.revert: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.revert: mkdir: {e}"))?;
 
@@ -1683,7 +1683,7 @@ pub(crate) fn memory_revert_impl(
 
     // See memory_write_impl's own comment on why this is version_agent_id
     // (canonical UUID), not the raw agent_id slug parameter.
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1741,7 +1741,7 @@ mod memory_version_impl_tests {
         }
     }
 
-    /// `test_state()` sets `id_store: wstore.clone()`, so both are the same
+    /// `test_state()` sets `id_store: mstore.clone()`, so both are the same
     /// in-memory `Store` (`run_object_schema`) — good enough for these
     /// wiring-level tests, since the version-chain logic itself is already
     /// covered by `native_memory_handlers.rs`'s tests against the same
@@ -1755,9 +1755,9 @@ mod memory_version_impl_tests {
     fn state_with_agent(agent_id: &str, working_directory: &std::path::Path) -> AppState {
         let state = crate::server::tests::test_state();
         let mut def = agent_def(agent_id, &working_directory.to_string_lossy());
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .agent_content_set(&crate::backend::storage::AgentContent {
                 agent_id: agent_id.to_string(),
                 content_type: "env".to_string(),
@@ -1814,9 +1814,9 @@ mod memory_version_impl_tests {
         let mut state = crate::server::tests::test_state();
         let mut def = agent_def("agent-real-uuid-pub", &tmp.path().to_string_lossy());
         def.slug = "agent-friendly-slug-pub".to_string();
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .agent_content_set(&crate::backend::storage::AgentContent {
                 agent_id: def.id.clone(),
                 content_type: "env".to_string(),
@@ -1898,11 +1898,11 @@ mod memory_version_impl_tests {
         let state = crate::server::tests::test_state();
         let mut def_a = agent_def("agent-diff-a", &tmp_a.path().to_string_lossy());
         let mut def_b = agent_def("agent-diff-b", &tmp_b.path().to_string_lossy());
-        state.wstore.agent_def_insert(&mut def_a).unwrap();
-        state.wstore.agent_def_insert(&mut def_b).unwrap();
+        state.mstore.agent_def_insert(&mut def_a).unwrap();
+        state.mstore.agent_def_insert(&mut def_b).unwrap();
         for (id, dir) in [("agent-diff-a", tmp_a.path()), ("agent-diff-b", tmp_b.path())] {
             state
-                .wstore
+                .mstore
                 .agent_content_set(&crate::backend::storage::AgentContent {
                     agent_id: id.to_string(),
                     content_type: "env".to_string(),
@@ -2009,11 +2009,11 @@ mod memory_version_impl_tests {
         let state = crate::server::tests::test_state();
         let mut def_a = agent_def("agent-app-5a", &tmp_a.path().to_string_lossy());
         let mut def_b = agent_def("agent-app-5b", &tmp_b.path().to_string_lossy());
-        state.wstore.agent_def_insert(&mut def_a).unwrap();
-        state.wstore.agent_def_insert(&mut def_b).unwrap();
+        state.mstore.agent_def_insert(&mut def_a).unwrap();
+        state.mstore.agent_def_insert(&mut def_b).unwrap();
         for (id, dir) in [("agent-app-5a", tmp_a.path()), ("agent-app-5b", tmp_b.path())] {
             state
-                .wstore
+                .mstore
                 .agent_content_set(&crate::backend::storage::AgentContent {
                     agent_id: id.to_string(),
                     content_type: "env".to_string(),
@@ -2047,9 +2047,9 @@ mod memory_version_impl_tests {
         let state = crate::server::tests::test_state();
         let mut def = agent_def("agent-real-uuid-999", &tmp.path().to_string_lossy());
         def.slug = "agent-friendly-slug".to_string();
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .agent_content_set(&crate::backend::storage::AgentContent {
                 agent_id: def.id.clone(),
                 content_type: "env".to_string(),
@@ -2100,7 +2100,7 @@ mod memory_version_impl_tests {
 pub(super) fn global_output_source(
     _per_channel: &Arc<crate::backend::storage::filestore::FileStore>,
     global: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
-    wstore: &Arc<crate::backend::storage::store::Store>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
     block_id: &str,
     filename: &str,
 ) -> Option<(Arc<crate::backend::storage::filestore::FileStore>, String)> {
@@ -2108,7 +2108,7 @@ pub(super) fn global_output_source(
         return None;
     }
     let gfs = global.as_ref()?;
-    let block = wstore.get::<Block>(block_id).ok().flatten()?;
+    let block = mstore.get::<Block>(block_id).ok().flatten()?;
     let archived = block
         .meta
         .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
@@ -2180,13 +2180,13 @@ pub(super) fn global_zone_line_count(
 }
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
-pub(super) fn resolve_tab_id(wstore: &Store, explicit: Option<&str>) -> Result<String, String> {
+pub(super) fn resolve_tab_id(mstore: &Store, explicit: Option<&str>) -> Result<String, String> {
     if let Some(tid) = explicit {
         return Ok(tid.to_string());
     }
 
     // Fall back to first workspace's active tab
-    let workspaces: Vec<Workspace> = wstore.get_all::<Workspace>()
+    let workspaces: Vec<Workspace> = mstore.get_all::<Workspace>()
         .map_err(|e| format!("agent.open: list workspaces: {e}"))?;
 
     for ws in &workspaces {
@@ -2202,12 +2202,12 @@ pub(super) fn resolve_tab_id(wstore: &Store, explicit: Option<&str>) -> Result<S
 }
 
 /// Find an existing agent block in a tab by agent ID.
-pub(super) fn find_agent_block(wstore: &Store, tab_id: &str, agent_id: &str) -> Result<Option<Block>, String> {
-    let tab: Tab = wstore.must_get(tab_id)
+pub(super) fn find_agent_block(mstore: &Store, tab_id: &str, agent_id: &str) -> Result<Option<Block>, String> {
+    let tab: Tab = mstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
 
     for block_id in &tab.blockids {
-        if let Ok(Some(block)) = wstore.get::<Block>(block_id) {
+        if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
             let block_agent_id = obj::meta_get_string(&block.meta, "agentId", "");
             if block_agent_id == agent_id {
                 return Ok(Some(block));
@@ -2222,8 +2222,8 @@ pub(super) fn find_agent_block(wstore: &Store, tab_id: &str, agent_id: &str) -> 
 /// explicit tab_id or "the active tab" — neither answers "which tab is MY
 /// OWN block in," which a caller passing its own block id (e.g. an MCP
 /// tool's `split_reference_block_id`) actually needs.
-pub(super) fn resolve_tab_id_for_block(wstore: &Store, block_id: &str) -> Result<String, String> {
-    let tabs: Vec<Tab> = wstore.get_all::<Tab>()
+pub(super) fn resolve_tab_id_for_block(mstore: &Store, block_id: &str) -> Result<String, String> {
+    let tabs: Vec<Tab> = mstore.get_all::<Tab>()
         .map_err(|e| format!("resolve_tab_id_for_block: list tabs: {e}"))?;
     for tab in tabs {
         if tab.blockids.iter().any(|b| b == block_id) {
@@ -2236,12 +2236,12 @@ pub(super) fn resolve_tab_id_for_block(wstore: &Store, block_id: &str) -> Result
 /// Find an existing Editor-view block in a tab, if any. Direct sibling of
 /// `find_agent_block` above, checking `meta.view == "editor"` instead of
 /// `meta.agentId`.
-pub(super) fn find_editor_block(wstore: &Store, tab_id: &str) -> Result<Option<Block>, String> {
-    let tab: Tab = wstore.must_get(tab_id)
+pub(super) fn find_editor_block(mstore: &Store, tab_id: &str) -> Result<Option<Block>, String> {
+    let tab: Tab = mstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
 
     for block_id in &tab.blockids {
-        if let Ok(Some(block)) = wstore.get::<Block>(block_id) {
+        if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
             if obj::meta_get_string(&block.meta, "view", "") == "editor" {
                 return Ok(Some(block));
             }
@@ -2289,12 +2289,12 @@ pub(super) fn resolve_agent_definition_id(
     state: &AppState,
     agent_id: &str,
 ) -> Result<String, String> {
-    if let Ok(Some(instance)) = state.wstore.instance_get_by_slug(agent_id) {
+    if let Ok(Some(instance)) = state.mstore.instance_get_by_slug(agent_id) {
         if !instance.definition_id.is_empty() {
             return Ok(instance.definition_id);
         }
     }
-    if let Ok(Some(_)) = state.wstore.agent_def_get(agent_id) {
+    if let Ok(Some(_)) = state.mstore.agent_def_get(agent_id) {
         return Ok(agent_id.to_string());
     }
     // reagentx P1 on PR #2428 (round 4): `instance_get_by_slug` only ever
@@ -2352,7 +2352,7 @@ mod cross_channel_tests {
         fs.append_data(zone, OUTPUT_FILE, body).unwrap();
     }
 
-    fn insert_agent_block(wstore: &Arc<Store>, def_id: &str) -> String {
+    fn insert_agent_block(mstore: &Arc<Store>, def_id: &str) -> String {
         let oid = uuid::Uuid::new_v4().to_string();
         let mut meta = MetaMapType::new();
         meta.insert("view".to_string(), serde_json::json!("agent"));
@@ -2366,7 +2366,7 @@ mod cross_channel_tests {
             meta,
             subblockids: None,
         };
-        wstore.insert(&mut block).expect("insert block");
+        mstore.insert(&mut block).expect("insert block");
         oid
     }
 
@@ -2374,8 +2374,8 @@ mod cross_channel_tests {
     fn global_output_source_falls_back_when_local_empty() {
         let per_channel = mem_store();
         let global = mem_store();
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        let block_id = insert_agent_block(&wstore, "def-cc-1");
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = insert_agent_block(&mstore, "def-cc-1");
 
         // No local output for the block, but the global zone has content.
         seed_output(&global, "agent:def-cc-1:current", b"{\"type\":\"user\"}\n");
@@ -2383,7 +2383,7 @@ mod cross_channel_tests {
         let resolved = global_output_source(
             &per_channel,
             &Some(global.clone()),
-            &wstore,
+            &mstore,
             &block_id,
             "output",
         );
@@ -2399,8 +2399,8 @@ mod cross_channel_tests {
         // session's lines.
         let per_channel = mem_store();
         let global = mem_store();
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        let block_id = insert_agent_block(&wstore, "def-cc-2");
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = insert_agent_block(&mstore, "def-cc-2");
 
         seed_output(&per_channel, &block_id, b"{\"type\":\"local\"}\n");
         seed_output(&global, "agent:def-cc-2:current", b"{\"type\":\"global\"}\n");
@@ -2408,7 +2408,7 @@ mod cross_channel_tests {
         let resolved = global_output_source(
             &per_channel,
             &Some(global.clone()),
-            &wstore,
+            &mstore,
             &block_id,
             "output",
         );
@@ -2420,16 +2420,16 @@ mod cross_channel_tests {
     fn global_output_source_only_for_output_and_with_global_store() {
         let per_channel = mem_store();
         let global = mem_store();
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        let block_id = insert_agent_block(&wstore, "def-cc-3");
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        let block_id = insert_agent_block(&mstore, "def-cc-3");
         seed_output(&global, "agent:def-cc-3:current", b"{\"x\":1}\n");
 
         // Non-"output" filename is never globalized.
-        assert!(global_output_source(&per_channel, &Some(global.clone()), &wstore, &block_id, "term").is_none());
+        assert!(global_output_source(&per_channel, &Some(global.clone()), &mstore, &block_id, "term").is_none());
         // No global store configured → None.
-        assert!(global_output_source(&per_channel, &None, &wstore, &block_id, "output").is_none());
+        assert!(global_output_source(&per_channel, &None, &mstore, &block_id, "output").is_none());
         // Non-agent block id → None.
-        assert!(global_output_source(&per_channel, &Some(global), &wstore, "not-a-block", "output").is_none());
+        assert!(global_output_source(&per_channel, &Some(global), &mstore, "not-a-block", "output").is_none());
     }
 
     #[test]
@@ -2439,7 +2439,7 @@ mod cross_channel_tests {
         // reopen archived/empty as pre-PR. (reagent P1 #1399.)
         let per_channel = mem_store();
         let global = mem_store();
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
 
         let oid = uuid::Uuid::new_v4().to_string();
         let mut meta = MetaMapType::new();
@@ -2458,12 +2458,12 @@ mod cross_channel_tests {
             meta,
             subblockids: None,
         };
-        wstore.insert(&mut block).expect("insert block");
+        mstore.insert(&mut block).expect("insert block");
 
         // Global zone has content, but the block is archived → no fallback.
         seed_output(&global, "agent:def-cc-arch:current", b"{\"type\":\"user\"}\n");
         assert!(
-            global_output_source(&per_channel, &Some(global), &wstore, &oid, "output").is_none(),
+            global_output_source(&per_channel, &Some(global), &mstore, &oid, "output").is_none(),
             "archived block must not fall back to the global mirror",
         );
     }
@@ -2589,7 +2589,7 @@ mod cross_channel_tests {
     fn global_zone_line_count_still_builds_when_no_index_exists() {
         // The one case that must still pay for a build: without it the
         // line_count handler falls through to `session:line_count` (absent for
-        // a zone this channel never wrote) and then the capped WPS ring, so a
+        // a zone this channel never wrote) and then the capped MPS ring, so a
         // fresh cross-channel open would under-report and render a near-empty
         // pane. Paid once per zone, not once per 30-second poll.
         let global = mem_store();
@@ -2618,7 +2618,7 @@ mod pane_open_reducer_tests {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &evs {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         evs
     }
@@ -2632,7 +2632,7 @@ mod pane_open_reducer_tests {
     async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         let state = test_state();
 
-        // Workspace + tab through the reducer (→ srv_state AND, via apply, wstore).
+        // Workspace + tab through the reducer (→ srv_state AND, via apply, mstore).
         let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
         let ws_id = ws_evs
             .iter()
@@ -3009,7 +3009,7 @@ mod pane_open_reducer_tests {
             assert_eq!(res.block_id, first_editor.block_id);
         }
 
-        let block: Block = state.wstore.must_get(&first_editor.block_id).unwrap();
+        let block: Block = state.mstore.must_get(&first_editor.block_id).unwrap();
         let pending = block
             .meta
             .get("editor:pending_open_files")
@@ -3268,7 +3268,7 @@ mod bundle_self_get_registry_fallback_tests {
             })
             .unwrap();
 
-        // No `db_agents` row for "agenty" exists in `state.wstore` — this
+        // No `db_agents` row for "agenty" exists in `state.mstore` — this
         // must resolve entirely through the registry fallback.
         let resp = bundle_self_get_impl(&state, "agenty").await;
 
@@ -3344,11 +3344,11 @@ mod identity_self_accounts_tests {
             auto_continue_enabled: 0,
             memory_id: String::new(),
         };
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
 
-        state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
+        state.mstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
         {
-            let conn = state.wstore.conn().lock().unwrap();
+            let conn = state.mstore.conn().lock().unwrap();
             conn.execute(
                 "INSERT INTO db_accounts
                     (id, name, provider, kind, display_name, secret_ref, context,
@@ -3360,8 +3360,8 @@ mod identity_self_accounts_tests {
             )
             .unwrap();
         }
-        state.wstore.agent_identity_link(&def.id, "acct-good", "claude").unwrap();
-        state.wstore.agent_identity_link(&def.id, "acct-bad", "github").unwrap();
+        state.mstore.agent_identity_link(&def.id, "acct-good", "claude").unwrap();
+        state.mstore.agent_identity_link(&def.id, "acct-bad", "github").unwrap();
 
         let result = identity_self_accounts_impl(&state, &def.id)
             .await
@@ -3419,9 +3419,9 @@ mod identity_self_accounts_tests {
             auto_continue_enabled: 0,
             memory_id: String::new(),
         };
-        state.wstore.agent_def_insert(&mut def).unwrap();
-        state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
-        state.wstore.agent_identity_link(&def.id, "acct-good", "claude").unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
+        state.mstore.agent_identity_link(&def.id, "acct-good", "claude").unwrap();
 
         // Deliberately NO `instance_create` call — this agent exists only
         // in the global registry, exactly like a real live-launched agent

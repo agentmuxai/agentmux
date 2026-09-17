@@ -3,7 +3,7 @@
 
 //! Agent-facing introspection: `AgentContext` resolution plus the read-only
 //! window → workspace → tab → pane snapshots that back `/api/v1/self`,
-//! `/api/v1/layout`, and the naming verbs. Pure wstore reads — no reducer.
+//! `/api/v1/layout`, and the naming verbs. Pure mstore reads — no reducer.
 
 use serde_json::json;
 
@@ -38,7 +38,7 @@ pub(crate) fn workspace_id_for_tab(store: &Store, tab_id: &str) -> Option<String
 }
 
 /// Read-only snapshot of the window → workspace → tab → pane tree, for agent
-/// introspection (`GET /api/v1/layout`). Pure wstore reads — no reducer, so
+/// introspection (`GET /api/v1/layout`). Pure mstore reads — no reducer, so
 /// it's hermetic and safe. Lookups use linear scans (a handful of objects).
 pub(crate) fn agent_layout(store: &Store) -> serde_json::Value {
     let windows = store.get_all::<Window>().unwrap_or_default();

@@ -7,8 +7,8 @@
 
 import { createMemo, createSignal } from "solid-js";
 import { isBlank } from "@/util/util";
-import { WpsEvent } from "@/app/store/wps-events";
-import { muxEventSubscribe } from "./wps";
+import { WpsEvent } from "@/app/store/mps-events";
+import { muxEventSubscribe } from "./mps";
 import { ClientService } from "./services";
 
 // Connection status map: connName → ConnStatus signal

@@ -9,7 +9,7 @@
  * component this one was cloned from.
  *
  * `@/app/view/agent/quick-fork` is mocked to just the one string constant
- * this component actually needs — the real module pulls in RpcApi/WOS/
+ * this component actually needs — the real module pulls in RpcApi/MOS/
  * layout, none of which a pure render test should have to satisfy.
  */
 

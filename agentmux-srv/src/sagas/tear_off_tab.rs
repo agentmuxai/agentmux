@@ -72,7 +72,7 @@ pub async fn run(
     // the membership check — bootstrap merges them into the reducer's
     // `tab_ids`, but legacy SQLite rows may still carry the entry.
     {
-        let src_ws = match state.wstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
+        let src_ws = match state.mstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
             Ok(Some(ws)) => ws,
             Ok(None) => {
                 return Err(format!(
@@ -191,7 +191,7 @@ mod tests {
         )
         .await;
         for ev in &ws_events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         let ws_id = ws_events
             .iter()
@@ -211,7 +211,7 @@ mod tests {
             )
             .await;
             for ev in &tab_events {
-                crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+                crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
             }
             tab_ids.push(
                 tab_events
@@ -239,8 +239,8 @@ mod tests {
         assert_eq!(s.tabs[&tab_a].workspace_id, new_ws_id);
 
         // SQLite view: same.
-        let src_persist = state.wstore.get::<Workspace>(&src_ws).unwrap().unwrap();
-        let new_persist = state.wstore.get::<Workspace>(new_ws_id).unwrap().unwrap();
+        let src_persist = state.mstore.get::<Workspace>(&src_ws).unwrap().unwrap();
+        let new_persist = state.mstore.get::<Workspace>(new_ws_id).unwrap().unwrap();
         assert_eq!(src_persist.tabids, vec![tab_b]);
         assert_eq!(new_persist.tabids, vec![tab_a]);
     }
@@ -261,7 +261,7 @@ mod tests {
         )
         .await;
         for ev in &ws_events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         let ws_id = ws_events
             .iter()
@@ -279,7 +279,7 @@ mod tests {
         )
         .await;
         for ev in &tab_events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         let only_tab = tab_events
             .iter()

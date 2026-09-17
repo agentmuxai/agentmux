@@ -1311,7 +1311,7 @@ pub fn write_claude_md_respecting_ownership(
 /// See `docs/specs/REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md`.
 pub fn inject_jekt_signing_keys_into_mcp_json(
     content: &str,
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     agent_slug: &str,
 ) -> Option<String> {
     let mut mcp_json: Value = serde_json::from_str(content).ok()?;
@@ -1320,13 +1320,13 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         .and_then(|v| v.as_object_mut())?;
 
     let mut patched = false;
-    if let Ok(key) = wstore.agent_jekt_key_ensure(agent_slug) {
+    if let Ok(key) = mstore.agent_jekt_key_ensure(agent_slug) {
         use base64::Engine as _;
         let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
         env.insert("AGENTMUX_JEKT_KEY".to_string(), json!(key_b64));
         patched = true;
     }
-    if let Ok(keypair) = wstore.agent_lan_key_ensure(agent_slug) {
+    if let Ok(keypair) = mstore.agent_lan_key_ensure(agent_slug) {
         env.insert("AGENTMUX_LAN_KEY".to_string(), json!(keypair.private_key));
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5 (Phase B): the
         // cross-channel signature binds the sending channel into the signed

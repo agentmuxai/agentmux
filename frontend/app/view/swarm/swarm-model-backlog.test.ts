@@ -9,20 +9,20 @@
  * moment `SwarmViewModel` is constructed (block-registry.ts's "swarm" view),
  * never from the headless per-agent-pane backfill scan.
  *
- * Mocking follows subagent-source.test.ts's pattern: only `wps` is
+ * Mocking follows subagent-source.test.ts's pattern: only `mps` is
  * module-mocked (to capture handlers synchronously instead of the real WAVE
- * event bus); `wos` is left real except for `callBackendService`, which is
+ * event bus); `mos` is left real except for `callBackendService`, which is
  * spied on so other real exports this import graph needs stay intact.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as wos from "@/store/wos";
+import * as mos from "@/store/mos";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);
@@ -44,7 +44,7 @@ const unnamedSubagent = {
     display_name: null,
 } as any;
 
-const callBackendServiceSpy = vi.spyOn(wos, "callBackendService").mockImplementation(async (service, method) => {
+const callBackendServiceSpy = vi.spyOn(mos, "callBackendService").mockImplementation(async (service, method) => {
     if (service === "subagent" && method === "ListActive") return [unnamedSubagent];
     return [];
 });

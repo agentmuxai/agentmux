@@ -3,7 +3,7 @@
 //
 // SolidJS migration: Jotai Atom/Getter replaced by SolidJS signal accessors.
 
-import { WOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 import type { SignalAtom } from "@/util/util";
 
 /** Returns a SignalAtom for the LayoutState belonging to the given tab. */
@@ -11,21 +11,21 @@ export function getLayoutStateAtomFromTab(tabAccessor: () => Tab): SignalAtom<La
     function getOref(): string | null {
         const tabData = tabAccessor();
         if (!tabData) return null;
-        return WOS.makeORef("layout", tabData.layoutstate);
+        return MOS.makeORef("layout", tabData.layoutstate);
     }
 
     const atom = () => {
         const oref = getOref();
         if (!oref) return undefined;
-        return WOS.getMuxObjectAtom<LayoutState>(oref)();
+        return MOS.getMuxObjectAtom<LayoutState>(oref)();
     };
 
     (atom as any)._set = (value: LayoutState | ((prev: LayoutState) => LayoutState)) => {
         const oref = getOref();
         if (!oref) return;
-        const wovAtom = WOS.getMuxObjectAtom<LayoutState>(oref);
+        const wovAtom = MOS.getMuxObjectAtom<LayoutState>(oref);
         const nextValue = typeof value === "function" ? (value as (prev: LayoutState) => LayoutState)(wovAtom()) : value;
-        WOS.setObjectValue(nextValue, true);
+        MOS.setObjectValue(nextValue, true);
     };
 
     return atom as unknown as SignalAtom<LayoutState>;

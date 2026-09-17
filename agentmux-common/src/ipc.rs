@@ -194,7 +194,7 @@ pub enum Command {
     /// Phase B.5 (window_id_map step a) — host reports the
     /// frontend's `register_backend_window` call: a window's label
     /// → backend window ID (a srv-side UUID the frontend resolves
-    /// via `WOS.makeORef`). The launcher mirrors it for the same
+    /// via `MOS.makeORef`). The launcher mirrors it for the same
     /// reasons it mirrors `instance_registry`: host's authoritative
     /// copy will be retired through the a→b→c→d→e ratchet.
     ReportBackendWindowIdRegistered {
@@ -410,7 +410,7 @@ pub enum Command {
     /// Phase E.5.3 — apply a meta-patch to a workspace. The reducer
     /// validates the entity exists and emits `Event::WorkspaceMetaUpdated`
     /// with the patch payload; the persist subscriber performs the
-    /// actual merge against wstore. Reducer state does NOT track meta
+    /// actual merge against mstore. Reducer state does NOT track meta
     /// in E.5.3 — pass-through preserves the reducer's small footprint
     /// without losing the migration property (every mutation goes
     /// through the reducer's broadcast bus).
@@ -1406,7 +1406,7 @@ pub enum Event {
     },
     /// Phase E.5.x (issue #855) — meta-patch applied to a window's
     /// `meta` map. Same shape as `WorkspaceMetaUpdated`. Persist
-    /// subscriber merges into wstore; MuxObjUpdate bridge translates
+    /// subscriber merges into mstore; MuxObjUpdate bridge translates
     /// to a frontend `waveobj:update` broadcast.
     WindowMetaUpdated {
         window_id: String,

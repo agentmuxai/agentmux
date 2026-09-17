@@ -36,7 +36,7 @@ function makeLayoutStateSignal(oid: string): SignalAtom<LayoutState> {
 
 vi.mock("@/app/store/global", () => {
     return {
-        WOS: {
+        MOS: {
             makeORef: (_otype: string, oid: string) => oid,
             getMuxObjectAtom: (oid: string) => {
                 if (!layoutStateSignals.has(oid)) {

@@ -3,7 +3,7 @@
 
 import { Block, resolveEffectiveViewType } from "@/app/block/block";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
-import { WOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import { Key } from "@solid-primitives/keyed";
@@ -73,11 +73,11 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
 
     // Effective view type of the ACTIVE member, reactive — getMuxObjectAtom
     // inside a memo, not useMuxObjectValue, the same reactive-oref pattern
-    // PR #3134 established for BlockFrame_Header (frontend/app/store/wos.ts's
+    // PR #3134 established for BlockFrame_Header (frontend/app/store/mos.ts's
     // own doc comments explain why: useMuxObjectValue's onCleanup-ref-count
     // is tied to THIS component's mount, and never re-subscribes if the
     // oref it was called with later changes).
-    const activeBlockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
     const effectiveViewType = createMemo(() => resolveEffectiveViewType(activeBlockData()?.meta?.view ?? ""));
 
     // Hoist for EVERY agent pane, not just ones whose stack has already

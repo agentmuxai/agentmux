@@ -19,13 +19,13 @@ use super::types::*;
 use super::*;
 
 fn fixture_watcher() -> SubagentWatcher {
-    let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+    let mstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
     // id_store/identity_store don't need to be genuinely separate stores for
     // these tests — none of them exercise real identity binding resolution
     // (that's covered by identity::resolver::inject's own test suite);
-    // reusing `wstore` for all three mirrors the existing test-fixture
+    // reusing `mstore` for all three mirrors the existing test-fixture
     // convention elsewhere (server/agent_handlers/mod.rs, server/tests.rs).
-    SubagentWatcher::new(Arc::new(EventBus::new()), wstore.clone(), wstore.clone(), wstore)
+    SubagentWatcher::new(Arc::new(EventBus::new()), mstore.clone(), mstore.clone(), mstore)
 }
 
 /// Write a minimal terminated subagent JSONL file with an explicit mtime
@@ -374,7 +374,7 @@ fn session_belongs_to_block_matches_only_the_blocks_own_persisted_session() {
         meta,
         ..Default::default()
     };
-    watcher.wstore.insert(&mut block).unwrap();
+    watcher.mstore.insert(&mut block).unwrap();
 
     assert!(watcher.session_belongs_to_block("block-1", "s1"));
     assert!(
@@ -1261,7 +1261,7 @@ async fn recheck_all_watched_agents_skips_an_agent_whose_block_no_longer_exists(
     std::fs::create_dir_all(&explicit_dir).unwrap();
 
     let watcher = Arc::new(fixture_watcher());
-    // "block-ghost" is never inserted into wstore — simulates a closed
+    // "block-ghost" is never inserted into mstore — simulates a closed
     // pane, or any caller whose block_id doesn't correspond to a real row.
     watcher.watch_agent("agent-1", "block-ghost", explicit_dir.clone());
 
@@ -1303,7 +1303,7 @@ async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_
         serde_json::Value::String(session_id.to_string()),
     );
     let mut block = crate::backend::obj::Block { oid: "block-1".to_string(), meta, ..Default::default() };
-    watcher.wstore.insert(&mut block).unwrap();
+    watcher.mstore.insert(&mut block).unwrap();
 
     watcher.watch_agent("agent-1", "block-1", old_dir.clone());
     assert_eq!(watcher.list_active().len(), 0, "nothing backfilled yet — watching the wrong dir");
@@ -1455,7 +1455,7 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
         },
         ..Default::default()
     };
-    watcher.wstore.insert(&mut owner_block).unwrap();
+    watcher.mstore.insert(&mut owner_block).unwrap();
 
     let mut other_block = crate::backend::obj::Block {
         oid: "block-other".to_string(),
@@ -1469,7 +1469,7 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
         },
         ..Default::default()
     };
-    watcher.wstore.insert(&mut other_block).unwrap();
+    watcher.mstore.insert(&mut other_block).unwrap();
 
     // Both watch the SAME shared config_dir — simulating two agents
     // without a per-identity bundle override.
@@ -1617,12 +1617,12 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
     .unwrap();
 
     let watcher = fixture_watcher();
-    let broker = Arc::new(crate::backend::wps::Broker::new());
+    let broker = Arc::new(crate::backend::mps::Broker::new());
     watcher.set_broker(broker.clone());
     watcher.scan_session_subagents("parent-1", "block-status-found", &config_dir, target_session);
 
     let history = broker.read_event_history(
-        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        crate::backend::mps::EVENT_SUBAGENT_BACKFILL_STATUS,
         "block:block-status-found",
         10,
     );
@@ -1646,12 +1646,12 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found(
     std::fs::create_dir_all(config_dir.join("projects")).unwrap();
 
     let watcher = fixture_watcher();
-    let broker = Arc::new(crate::backend::wps::Broker::new());
+    let broker = Arc::new(crate::backend::mps::Broker::new());
     watcher.set_broker(broker.clone());
     watcher.scan_session_subagents("parent-1", "block-status-notfound", &config_dir, "never-existed");
 
     let history = broker.read_event_history(
-        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        crate::backend::mps::EVENT_SUBAGENT_BACKFILL_STATUS,
         "block:block-status-notfound",
         10,
     );

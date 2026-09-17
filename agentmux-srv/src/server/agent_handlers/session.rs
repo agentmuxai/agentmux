@@ -51,7 +51,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // continueOfInstanceId + workDirOverride (see PR #977). This RPC
     // is a more discoverable surface for finding sessions to continue
     // — particularly orphaned ones whose pane crashed.
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let id_store_lrs = state.id_store.clone();
     let identity_store_lrs = state.identity_store.clone();
     let filestore = state.filestore.clone();
@@ -59,7 +59,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(
         COMMAND_LIST_RECENT_SESSIONS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store_lrs.clone();
             let identity_store = identity_store_lrs.clone();
             let filestore = filestore.clone();
@@ -114,9 +114,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // registry couldn't be resolved (CI / odd envs). Cross-channel rows
                 // arrive as synthetic instances (no live block); the per-instance
                 // snapshot enrichment below lights up the ones that ALSO ran here.
-                let instances: Vec<AgentInstance> = match wstore.shared_agent_registry() {
+                let instances: Vec<AgentInstance> = match mstore.shared_agent_registry() {
                     Some(reg) => {
-                        let agents_root = wstore.registry_agents_base();
+                        let agents_root = mstore.registry_agents_base();
                         let mut records = match reg.list_active() {
                             Ok(v) => v,
                             Err(e) => {
@@ -161,7 +161,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // (definition_id, instance_name) — the SAME key the registry
                         // dedup uses — keeping the newest, so overlay AND the
                         // local-only append agree on identity (reagent P1).
-                        let local = wstore
+                        let local = mstore
                             .instance_list_named(raw_limit, None, identity_filter, true)
                             .unwrap_or_else(|e| {
                                 tracing::warn!(
@@ -265,7 +265,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                         out
                     }
-                    None => wstore
+                    None => mstore
                         .instance_list_named(raw_limit, None, identity_filter, true)
                         .unwrap_or_else(|e| {
                             tracing::warn!(
@@ -278,7 +278,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }),
                 };
 
-                let defs = wstore.agent_def_list().unwrap_or_else(|e| {
+                let defs = mstore.agent_def_list().unwrap_or_else(|e| {
                     tracing::warn!(
                         error = %e,
                         "listrecentsessions: agent_def_list failed — degrading to empty \
@@ -475,7 +475,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // text, which is accurate for that case: this channel
                     // genuinely has nothing).
                     if !has_snapshot && !inst.block_id.is_empty() {
-                        match wstore.agent_activity_summary_get(&inst.definition_id) {
+                        match mstore.agent_activity_summary_get(&inst.definition_id) {
                             Ok(Some(existing)) if !existing.summary.is_empty() => {
                                 preview = existing.summary;
                             }
@@ -508,7 +508,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 // Fire-and-forget: generation (a real Haiku
                                 // CLI round-trip) must not block this
                                 // response.
-                                let wstore_bg = wstore.clone();
+                                let mstore_bg = mstore.clone();
                                 let filestore_bg = filestore.clone();
                                 let broker_bg = broker.clone();
                                 let definition_id_bg = inst.definition_id.clone();
@@ -516,7 +516,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let provider_id_bg = def.map(|d| d.provider.clone()).unwrap_or_default();
                                 tokio::spawn(async move {
                                     let result = crate::server::app_api::session::generate_definition_activity_summary(
-                                        &wstore_bg,
+                                        &mstore_bg,
                                         &filestore_bg,
                                         &broker_bg,
                                         &definition_id_bg,
@@ -813,7 +813,7 @@ mod tests {
         }
     }
 
-    /// Seeds `state.wstore` with N cross-channel registry + definition
+    /// Seeds `state.mstore` with N cross-channel registry + definition
     /// records (as they'd exist on a REAL machine before a fresh channel
     /// ever boots) and returns the dispatch machinery ready to call
     /// `listrecentsessions`.
@@ -837,8 +837,8 @@ mod tests {
             registry.upsert(&named_record(&id, &def_id)).unwrap();
             def_store.upsert(&definition_record(&def_id)).unwrap();
         }
-        state.wstore.set_registry(std::sync::Arc::new(registry));
-        state.wstore.set_def_registry(std::sync::Arc::new(def_store));
+        state.mstore.set_registry(std::sync::Arc::new(registry));
+        state.mstore.set_def_registry(std::sync::Arc::new(def_store));
 
         let (engine, output_rx) = WshRpcEngine::new();
         register(&engine, &state);
@@ -918,7 +918,7 @@ mod tests {
         // genuine `identity_list` error (e.g. a real DB failure); it's
         // simply no longer reachable via this specific fixture.
         {
-            let conn = state.wstore.conn().lock().unwrap();
+            let conn = state.mstore.conn().lock().unwrap();
             conn.execute(
                 "INSERT INTO db_accounts
                     (id, name, provider, kind, display_name, secret_ref, context, status, created_at, updated_at)
@@ -982,7 +982,7 @@ mod tests {
             setup_with_n_cross_channel_agents(2);
 
         {
-            let conn = state.wstore.conn().lock().unwrap();
+            let conn = state.mstore.conn().lock().unwrap();
             conn.execute("DROP TABLE db_agent_identity_links", []).unwrap();
         }
 
@@ -1076,13 +1076,13 @@ mod tests {
     async fn snapshot_less_row_uses_a_persisted_definition_summary_as_preview() {
         let state = test_state();
         let mut def = local_agent_def("def-local-1");
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .instance_create(&local_agent_instance("inst-local-1", "def-local-1", "block-local-1"))
             .unwrap();
         state
-            .wstore
+            .mstore
             .agent_activity_summary_set("def-local-1", "Fixed the login race condition", 1000)
             .unwrap();
 
@@ -1113,9 +1113,9 @@ mod tests {
     async fn snapshot_less_row_with_no_persisted_summary_leaves_preview_empty() {
         let state = test_state();
         let mut def = local_agent_def("def-local-2");
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .instance_create(&local_agent_instance("inst-local-2", "def-local-2", "block-local-2"))
             .unwrap();
 
@@ -1146,13 +1146,13 @@ mod tests {
         tmpl.name = "Template".to_string();
         tmpl.provider = "claude".to_string();
         tmpl.agent_type = "standalone".to_string();
-        state.wstore.agent_def_insert(&mut tmpl).unwrap();
+        state.mstore.agent_def_insert(&mut tmpl).unwrap();
 
         let mut own = local_agent_def("agent-drift");
         own.parent_id = "tmpl-drift".to_string();
-        state.wstore.agent_def_insert(&mut own).unwrap();
+        state.mstore.agent_def_insert(&mut own).unwrap();
         state
-            .wstore
+            .mstore
             .instance_create(&local_agent_instance("launch-1", "agent-drift", "block-drift"))
             .unwrap();
 
@@ -1160,7 +1160,7 @@ mod tests {
         own.name = "Renamed by the user".to_string();
         own.provider = "codex".to_string();
         own.agent_type = "orchestrator".to_string();
-        state.wstore.agent_def_update(&mut own).unwrap();
+        state.mstore.agent_def_update(&mut own).unwrap();
 
         let (engine, mut output_rx) = WshRpcEngine::new();
         register(&engine, &state);
@@ -1188,9 +1188,9 @@ mod tests {
     async fn filestore_stat_error_is_distinguished_from_genuinely_no_snapshot() {
         let state = test_state();
         let mut def = local_agent_def("def-local-3");
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .instance_create(&local_agent_instance("inst-local-3", "def-local-3", "block-local-3"))
             .unwrap();
 
@@ -1230,9 +1230,9 @@ mod tests {
     async fn genuinely_missing_snapshot_does_not_set_the_check_failed_flag() {
         let state = test_state();
         let mut def = local_agent_def("def-local-4");
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .instance_create(&local_agent_instance("inst-local-4", "def-local-4", "block-local-4"))
             .unwrap();
 

@@ -6,7 +6,7 @@
  * currently tracked for a given agent block.
  *
  * Drives the `⚙ N` badge on each agent pane's status line. Subscribes
- * to `agent:process-added` / `agent:process-exited` WPS events for the
+ * to `agent:process-added` / `agent:process-exited` MPS events for the
  * block scope and keeps a local count. Also fetches the initial count
  * once on mount via `RpcApi.AgentProcessListCommand` so the badge
  * doesn't lag the true state when a pane re-opens with an already-
@@ -17,8 +17,8 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as WOS from "@/app/store/wos";
-import { muxEventSubscribe } from "@/app/store/wps";
+import * as MOS from "@/app/store/mos";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 
 export function useProcessCount(blockId: string): Accessor<number> {
@@ -37,7 +37,7 @@ export function useProcessCount(blockId: string): Accessor<number> {
 
         const unsubAdded = muxEventSubscribe({
             eventType: "agent:process-added",
-            scope: WOS.makeORef("block", blockId),
+            scope: MOS.makeORef("block", blockId),
             handler: () => {
                 if (seeded) setCount((c) => c + 1);
                 else deltaSincePreSeed += 1;
@@ -45,7 +45,7 @@ export function useProcessCount(blockId: string): Accessor<number> {
         });
         const unsubExited = muxEventSubscribe({
             eventType: "agent:process-exited",
-            scope: WOS.makeORef("block", blockId),
+            scope: MOS.makeORef("block", blockId),
             handler: () => {
                 if (seeded) setCount((c) => Math.max(0, c - 1));
                 else deltaSincePreSeed -= 1;

@@ -44,7 +44,7 @@
 // brief's pragma: log a warning on dispatch failure, no automatic
 // re-create. The reducer's `DeleteBlock` is silent-no-op on missing
 // inputs (see reducer.rs handle_delete_block), so the only failure
-// path is wstore write errors surfaced by the persist subscriber —
+// path is mstore write errors surfaced by the persist subscriber —
 // in which case the controller is already gone (intentional; the
 // PTY can't be partially-killed) and the SQLite row may or may not
 // have been written. PR 2's `compensate_unresolved` resume scan
@@ -119,23 +119,23 @@ pub async fn run(
     //     P2: side-effect leak if start_saga collides.
     //   * Round 2 (this PR): conditional on result.is_ok() → codex P2
     //     round 2: leaks PTY when reducer succeeds but
-    //     `apply_event_to_wstore` fails inside `SagaCtx::dispatch`
+    //     `apply_event_to_mstore` fails inside `SagaCtx::dispatch`
     //     (block already removed from reducer state, RPC returns
     //     error, retry pre-check sees "block not found" → controller
     //     never cleaned up).
     //   * Round 3 (this fix): kill controller whenever the reducer
     //     dispatched DeleteBlock — i.e., whenever block was removed
     //     from reducer state. This includes both success and the
-    //     reducer-succeeded-wstore-failed cases. We approximate this
+    //     reducer-succeeded-mstore-failed cases. We approximate this
     //     by checking reducer state for the block: if it's gone, the
-    //     reducer dispatched (regardless of wstore outcome), so kill
+    //     reducer dispatched (regardless of mstore outcome), so kill
     //     the controller. Idempotent on missing controller.
     {
         let block_still_in_reducer =
             state.srv_state.lock().await.blocks.contains_key(&block_id);
         if !block_still_in_reducer {
             crate::backend::blockcontroller::delete_controller(&block_id);
-            // WPS persist_map is keyed by (event, scope) and its key set is
+            // MPS persist_map is keyed by (event, scope) and its key set is
             // never otherwise pruned — a deleted block's persisted history
             // (install_progress, block:activity, ...) would linger for the
             // life of the process. Purge it alongside the controller kill.
@@ -257,7 +257,7 @@ mod tests {
     ) -> Vec<agentmux_common::ipc::Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -325,7 +325,7 @@ mod tests {
             assert!(s.blocks.contains_key(&block_id));
             assert_eq!(s.tabs[&tab_id].block_ids, vec![block_id.clone()]);
         }
-        assert!(state.wstore.get::<Block>(&block_id).unwrap().is_some());
+        assert!(state.mstore.get::<Block>(&block_id).unwrap().is_some());
 
         let result = run(&state, tab_id.clone(), block_id.clone()).await.unwrap();
         assert_eq!(result["block_id"], block_id);
@@ -338,7 +338,7 @@ mod tests {
         drop(s);
 
         // SQLite: block gone.
-        assert!(state.wstore.get::<Block>(&block_id).unwrap().is_none());
+        assert!(state.mstore.get::<Block>(&block_id).unwrap().is_none());
     }
 
     #[tokio::test]
@@ -377,13 +377,13 @@ mod tests {
             assert!(s.tabs[&tab_id].rootnode.is_some());
         }
         let layout_id = state
-            .wstore
+            .mstore
             .get::<crate::backend::obj::Tab>(&tab_id)
             .unwrap()
             .unwrap()
             .layoutstate;
         assert!(state
-            .wstore
+            .mstore
             .get::<crate::backend::obj::LayoutState>(&layout_id)
             .unwrap()
             .unwrap()
@@ -403,7 +403,7 @@ mod tests {
         // db_layout: matches the reducer (tree_cleared persisted the wipe).
         assert!(
             state
-                .wstore
+                .mstore
                 .get::<crate::backend::obj::LayoutState>(&layout_id)
                 .unwrap()
                 .unwrap()
@@ -446,11 +446,11 @@ mod tests {
         run(&state, tab_id.clone(), block_id.clone()).await.unwrap();
 
         let tab = state
-            .wstore
+            .mstore
             .must_get::<crate::backend::obj::Tab>(&tab_id)
             .unwrap();
         let layout = state
-            .wstore
+            .mstore
             .must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate)
             .unwrap();
         let actions = layout.pendingbackendactions.unwrap_or_default();

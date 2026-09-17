@@ -19,7 +19,7 @@
  * single clearly-named case with idempotency rules, and the unit
  * tests pin every combo.
  *
- * Backend wire types are mirrored in `frontend/types/gotypes.d.ts`
+ * Backend wire types are mirrored in `frontend/types/srv-types.d.ts`
  * (`AuthSessionStatus` etc.). This module imports those globals so
  * `Selected` / `Polled` carry the same shapes the RPC handlers
  * return.
@@ -30,7 +30,7 @@
  *  `rename_all_fields`).
  *
  *  Intentionally duplicates the global `AuthSessionStatus` type in
- *  `frontend/types/gotypes.d.ts` (added in PR #850). The duplication
+ *  `frontend/types/srv-types.d.ts` (added in PR #850). The duplication
  *  is so that the reducer's command surface is self-contained —
  *  `auth-state.ts` declares its own types without depending on the
  *  ambient global `declare`, which makes the file importable and

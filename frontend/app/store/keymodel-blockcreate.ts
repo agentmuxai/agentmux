@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, WOS } from "@/app/store/global";
+import { createBlock, createBlockSplitHorizontally, createBlockSplitVertically, getSettingsKeyAtom, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
 function getDefaultNewBlockDef(): BlockDef {
@@ -24,7 +24,7 @@ function getDefaultNewBlockDef(): BlockDef {
     const layoutModel = getLayoutModelForStaticTab();
     const focusedNode = layoutModel.focusedNode?.();
     if (focusedNode != null) {
-        const blockAtom = WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", focusedNode.data?.blockId));
+        const blockAtom = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", focusedNode.data?.blockId));
         const blockData = blockAtom();
         if (blockData?.meta?.view == "term") {
             if (blockData?.meta?.["cmd:cwd"] != null) {

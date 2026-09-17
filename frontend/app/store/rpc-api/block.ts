@@ -53,14 +53,14 @@ export const BlockApi = {
     // outcome (parsed from its <task-notification> message), into the
     // durable Background Task Registry. Deliberately separate from
     // DockNodeStatusCommand above — see CommandBackgroundTaskCompletionData's
-    // doc comment in gotypes.d.ts for why. Spec:
+    // doc comment in srv-types.d.ts for why. Spec:
     // docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
     BackgroundTaskCompletionCommand(client: RpcClient, data: CommandBackgroundTaskCompletionData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("backgroundtaskcompletion", data, opts);
     },
 
     // Fire-and-forget push of a declared-background task's real OS pid,
-    // relayed from bashwrap's own WPS "pid" chunk. Spec:
+    // relayed from bashwrap's own MPS "pid" chunk. Spec:
     // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
     BackgroundTaskPidCommand(client: RpcClient, data: CommandBackgroundTaskPidData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("backgroundtaskpid", data, opts);

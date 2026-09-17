@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * useBlockActivity — subscribes to `block:activity` WPS events and writes
+ * useBlockActivity — subscribes to `block:activity` MPS events and writes
  * the payload to `term:osc_title` block metadata so the agent-pane tab
  * label shows the Claude Code session topic.
  *
@@ -32,9 +32,9 @@
  */
 
 import { onCleanup, onMount } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
-import { makeORef } from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 

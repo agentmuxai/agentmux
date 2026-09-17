@@ -92,7 +92,7 @@ describe("identity-model SecretRef field-name translation", () => {
 
     it("every backend SecretRef variant maps to a defined frontend SecretRef", () => {
         // Exhaustiveness net: if the Rust enum grows another variant and
-        // gotypes/this module lag, the specific new variant can't be listed
+        // srv-types/this module lag, the specific new variant can't be listed
         // here yet — but every *known* variant must at minimum round-trip
         // to a defined object, and the view additionally guards with `?.`.
         const wires: Parameters<typeof __internal__.secretRefFromBackend>[0][] = [

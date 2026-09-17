@@ -4,7 +4,7 @@
 //! Agent-event extraction and translation (Phase 1.5 PR 1). Feeds agent-pane
 //! stdout through the Claude stream-json translator and publishes `AgentEvent`s.
 
-use crate::backend::wps;
+use crate::backend::mps;
 
 /// Maximum size of the per-block line buffer used by the agent-event
 /// translation path. Past this, the buffer is reset (a producer that
@@ -22,7 +22,7 @@ pub(super) const AGENT_LINE_BUFFER_CAP: usize = 1024 * 1024;
 /// the complete line arrives. Decoding each chunk lossily would
 /// insert U+FFFD into the middle of words for non-ASCII content
 /// (CJK, emoji, accented chars), silently corrupting
-/// `AssistantText`/`Done.response` while the parallel raw-byte WPS
+/// `AssistantText`/`Done.response` while the parallel raw-byte MPS
 /// path stays correct — drone consumers would have no way to
 /// recover. Reagent P1 + codex P2 on PR #833.
 ///
@@ -63,19 +63,19 @@ pub(super) fn extract_agent_events(
     out
 }
 
-/// Publish the events `extract_agent_events` produced on the WPS
+/// Publish the events `extract_agent_events` produced on the MPS
 /// scope `agent_event:<block_id>`. Phase 1.5 PR 1 hook for agent
 /// panes. Called only when `is_agent` is true at spawn time (see
 /// read-task closure in `start()`).
 pub(super) fn accumulate_and_translate(
-    broker: &wps::Broker,
+    broker: &mps::Broker,
     block_id: &str,
     line_buf: &mut Vec<u8>,
     chunk: &[u8],
     translator: &mut crate::agents::translator::claude::ClaudeTranslator,
 ) {
     for event in extract_agent_events(line_buf, chunk, translator) {
-        broker.publish(wps::MuxEvent {
+        broker.publish(mps::MuxEvent {
             event: format!("agent_event:{}", block_id),
             scopes: vec![],
             sender: String::new(),

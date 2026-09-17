@@ -3,7 +3,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, WOS } from "@/store/global";
+import { atoms, getBlockMetaKeyAtom, getSettingsKeyAtom, MOS } from "@/store/global";
 import type { TermViewModel } from "./termViewModel";
 
 export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] {
@@ -45,7 +45,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         checked: transparencyMeta == null,
         click: () => {
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "term:transparency": null },
             });
         },
@@ -56,7 +56,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         checked: transparencyMeta == 0.5,
         click: () => {
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "term:transparency": 0.5 },
             });
         },
@@ -67,7 +67,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         checked: transparencyMeta == 0,
         click: () => {
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "term:transparency": 0 },
             });
         },
@@ -82,7 +82,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: overrideFontSize == fontSize,
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "term:fontsize": fontSize },
                     });
                 },
@@ -95,7 +95,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         checked: overrideFontSize == null,
         click: () => {
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "term:fontsize": null },
             });
         },
@@ -112,7 +112,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
             checked: Math.abs(currentZoom - zoom) < 0.01,
             click: () => {
                 RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", model.blockId),
+                    oref: MOS.makeORef("block", model.blockId),
                     meta: { "term:zoom": zoom === 1.0 ? null : zoom },
                 });
             },
@@ -123,7 +123,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         label: "Reset to Default",
         click: () => {
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "term:zoom": null },
             });
         },
@@ -149,7 +149,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: isClearOnStart,
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "cmd:clearonstart": true },
                     });
                 },
@@ -160,7 +160,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: !isClearOnStart,
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "cmd:clearonstart": false },
                     });
                 },
@@ -178,7 +178,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: runOnStart,
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "cmd:runonstart": true },
                     });
                 },
@@ -189,7 +189,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: !runOnStart,
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "cmd:runonstart": false },
                     });
                 },
@@ -217,7 +217,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: !debugConn,
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "term:conndebug": null },
                     });
                 },
@@ -228,7 +228,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: debugConn == "info",
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "term:conndebug": "info" },
                     });
                 },
@@ -239,7 +239,7 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                 checked: debugConn == "debug",
                 click: () => {
                     RpcApi.SetMetaCommand(TabRpcClient, {
-                        oref: WOS.makeORef("block", model.blockId),
+                        oref: MOS.makeORef("block", model.blockId),
                         meta: { "term:conndebug": "debug" },
                     });
                 },

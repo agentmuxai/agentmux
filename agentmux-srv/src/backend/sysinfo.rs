@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Sysinfo data collection loop: collects CPU, memory, and network metrics
-//! and publishes them via the WPS broker. Sampling interval is configurable
+//! and publishes them via the MPS broker. Sampling interval is configurable
 //! via the `telemetry:interval` setting (0.1s–2.0s, default 1.0s).
 
 use std::collections::{HashMap, HashSet};
@@ -16,7 +16,7 @@ use crate::backend::blockcontroller::pidregistry;
 use crate::backend::blockcontroller::process_tree;
 use crate::backend::rpc_types::TimeSeriesData;
 use crate::backend::wconfig::ConfigState;
-use crate::backend::wps::{Broker, MuxEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
+use crate::backend::mps::{Broker, MuxEvent, EVENT_BLOCK_STATS, EVENT_SYS_INFO};
 
 const BYTES_PER_GB: f64 = 1_073_741_824.0;
 const BYTES_PER_MB: f64 = 1_048_576.0;

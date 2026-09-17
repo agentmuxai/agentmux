@@ -33,7 +33,7 @@ use super::pty::{
 use super::translation::accumulate_and_translate;
 use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::ShellProc;
-use crate::backend::wps;
+use crate::backend::mps;
 
 /// One PTY read's worth of already-OSC-cleaned output, on its way from the
 /// blocking read loop to the coalescing flusher (`start()`, below). See
@@ -63,7 +63,7 @@ struct PtyReadChunk {
 /// once per coalesced batch instead of once per (up to 4KB) PTY read.
 #[allow(clippy::too_many_arguments)]
 fn flush_pty_batch(
-    broker: &wps::Broker,
+    broker: &mps::Broker,
     block_id: &str,
     data: &[u8],
     osc_events: &[crate::backend::osc_extractor::OscEvent],
@@ -91,7 +91,7 @@ fn flush_pty_batch(
     );
 
     for ev in osc_events {
-        wps::publish_block_activity(broker, block_id, &ev.payload);
+        mps::publish_block_activity(broker, block_id, &ev.payload);
     }
 
     if let Some(t) = translator {
@@ -111,7 +111,7 @@ fn flush_pty_batch(
 /// PTY — see `pty_output_flusher_tests` below.
 async fn run_pty_output_flusher(
     mut rx: mpsc::Receiver<PtyReadChunk>,
-    broker: Option<Arc<wps::Broker>>,
+    broker: Option<Arc<mps::Broker>>,
     block_id: String,
     filestore: Option<Arc<crate::backend::storage::filestore::FileStore>>,
     is_agent: bool,
@@ -125,7 +125,7 @@ async fn run_pty_output_flusher(
     // Phase 1.5 PR 1 (additive): if this is an agent pane, also try to
     // interpret stdout as Claude Code stream-json line-by-line, feeding
     // successful parses through ClaudeTranslator and emitting AgentEvents
-    // on a new WPS scope `agent_event:<block_id>`. The existing raw-chunk
+    // on a new MPS scope `agent_event:<block_id>`. The existing raw-chunk
     // path stays byte-equal — interactive panes (which don't emit JSON) see
     // no behavior change because every line fails the JSON parse and is
     // silently dropped. The future stream-json-mode pane and the drone
@@ -463,7 +463,7 @@ impl Controller for ShellController {
         // on the `block:` prefix specifically, the same discriminator
         // `websocket.rs`'s `strip_prefix("block:")` already uses.
         let is_sub_block = self
-            .wstore
+            .mstore
             .as_ref()
             .and_then(|store| store.get::<obj::Block>(&self.block_id).ok().flatten())
             .map(|b| b.parentoref.starts_with("block:"))
@@ -803,14 +803,14 @@ impl Controller for ShellController {
         }
         tracing::info!(
             block_id = %self.block_id,
-            wstore_present = self.wstore.is_some(),
+            mstore_present = self.mstore.is_some(),
             event_bus_present = self.event_bus.is_some(),
             "[dnd-debug] pre-seed state after spawn"
         );
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
-        if let Some(ref store) = self.wstore {
+        if let Some(ref store) = self.mstore {
             let effective_cwd = if !cwd.is_empty() {
                 cwd.clone()
             } else {
@@ -1068,7 +1068,7 @@ impl Controller for ShellController {
         // For the agent-lease release below: clearing the `term:agentlockuntil`
         // meta copy (not just the in-memory registry) needs both, since that
         // is what the frontend's own gate reads.
-        let wstore_wait = self.wstore.clone();
+        let mstore_wait = self.mstore.clone();
         let event_bus_wait = self.event_bus.clone();
         let run_lock = Arc::clone(&self.run_lock);
         // Async outer task, not a bare spawn_blocking (reagentx P1 on PR
@@ -1284,7 +1284,7 @@ impl Controller for ShellController {
                 release_lease_if_current(
                     &block_id_wait,
                     &inner_wait,
-                    &wstore_wait,
+                    &mstore_wait,
                     &event_bus_wait,
                 );
 
@@ -1468,7 +1468,7 @@ impl Controller for ShellController {
         // isn't process-group-based, so `delete_controller`'s existing
         // whole-job close already reaches it there, unchanged.
         #[cfg(unix)]
-        if let Some(store) = &self.wstore {
+        if let Some(store) = &self.mstore {
             match store.background_task_list_for_block(&self.block_id) {
                 Ok(tasks) => {
                     for task in tasks {
@@ -1861,7 +1861,7 @@ async fn flush_barrier(
 pub(super) fn release_lease_if_current(
     block_id: &str,
     inner: &Arc<std::sync::Mutex<super::controller::ShellControllerInner>>,
-    wstore: &Option<Arc<crate::backend::storage::store::Store>>,
+    mstore: &Option<Arc<crate::backend::storage::store::Store>>,
     event_bus: &Option<Arc<crate::backend::eventbus::EventBus>>,
 ) -> bool {
     let is_current = super::super::get_controller(block_id)
@@ -1879,7 +1879,7 @@ pub(super) fn release_lease_if_current(
         );
         return false;
     }
-    super::super::agent_lock::release_and_clear_meta(block_id, wstore, event_bus);
+    super::super::agent_lock::release_and_clear_meta(block_id, mstore, event_bus);
     true
 }
 
@@ -2166,7 +2166,7 @@ mod controller_agent_id_tests {
 pub(super) mod pty_output_flusher_tests {
     use super::{flush_pty_batch, run_pty_output_flusher, PtyReadChunk, PTY_CHANNEL_CAPACITY};
     use crate::backend::storage::filestore::FileStore;
-    use crate::backend::wps;
+    use crate::backend::mps;
     use std::sync::{Arc, Mutex};
 
     /// Records every event delivered to it — lets a test count broadcasts
@@ -2177,11 +2177,11 @@ pub(super) mod pty_output_flusher_tests {
     /// `Broker::set_client` takes ownership of the client, so the test needs
     /// its own handle to read events back out afterward.
     struct RecordingClient {
-        events: Arc<Mutex<Vec<wps::MuxEvent>>>,
+        events: Arc<Mutex<Vec<mps::MuxEvent>>>,
     }
 
-    impl wps::WpsClient for RecordingClient {
-        fn send_event(&self, _route_id: &str, event: wps::MuxEvent) {
+    impl mps::WpsClient for RecordingClient {
+        fn send_event(&self, _route_id: &str, event: mps::MuxEvent) {
             self.events.lock().unwrap().push(event);
         }
     }
@@ -2189,16 +2189,16 @@ pub(super) mod pty_output_flusher_tests {
     /// A broker wired to a `RecordingClient`, subscribed (all-scopes, so
     /// this doesn't need to know the exact `block:<id>` scope string) to
     /// `EVENT_BLOCK_FILE` — the event `handle_append_block_file` publishes.
-    pub(super) fn broker_recording_block_file_events() -> (wps::Broker, Arc<Mutex<Vec<wps::MuxEvent>>>) {
-        let broker = wps::Broker::new();
+    pub(super) fn broker_recording_block_file_events() -> (mps::Broker, Arc<Mutex<Vec<mps::MuxEvent>>>) {
+        let broker = mps::Broker::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         broker.set_client(Box::new(RecordingClient {
             events: events.clone(),
         }));
         broker.subscribe(
             "test-route",
-            wps::SubscriptionRequest {
-                event: wps::EVENT_BLOCK_FILE.to_string(),
+            mps::SubscriptionRequest {
+                event: mps::EVENT_BLOCK_FILE.to_string(),
                 scopes: vec![],
                 allscopes: true,
             },
@@ -2208,9 +2208,9 @@ pub(super) mod pty_output_flusher_tests {
 
     /// Decode the base64 `data64` payload of a `term`-file `EVENT_BLOCK_FILE`
     /// broadcast back to raw bytes, for asserting on content.
-    fn decode_event_data(event: &wps::MuxEvent) -> Vec<u8> {
+    fn decode_event_data(event: &mps::MuxEvent) -> Vec<u8> {
         use base64::Engine;
-        let data: wps::WSFileEventData =
+        let data: mps::WSFileEventData =
             serde_json::from_value(event.data.clone().expect("event has data")).expect("valid WSFileEventData");
         base64::engine::general_purpose::STANDARD
             .decode(&data.data64)

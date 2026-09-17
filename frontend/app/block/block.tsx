@@ -20,7 +20,7 @@ import {
     registerBlockComponentModel,
     unregisterBlockComponentModel,
 } from "@/store/global";
-import { getMuxObjectAtom, makeORef, useMuxObjectValue } from "@/store/wos";
+import { getMuxObjectAtom, makeORef, useMuxObjectValue } from "@/store/mos";
 import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";

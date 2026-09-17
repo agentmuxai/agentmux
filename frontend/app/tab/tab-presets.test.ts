@@ -41,7 +41,7 @@ const widgets: Record<string, any> = {
 
 vi.mock("@/app/store/global", () => ({
     fullConfigAtom: () => ({ widgets }),
-    WOS: {
+    MOS: {
         getObjectValue: () => ({ oid: "tab-1" }),
         makeORef: (kind: string, id: string) => `${kind}:${id}`,
     },

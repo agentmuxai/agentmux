@@ -161,15 +161,15 @@ fn reject_duplicate_triggers(manifest: &[StarterSkill]) -> Result<(), StoreError
 /// seeding entirely rather than attempting an insert that would collide on
 /// `skill_upsert_unique_global`'s name-uniqueness check and permanently
 /// fail the migration on every subsequent boot (reagent P1, PR #2144).
-pub(crate) fn any_starter_skill_name_exists(wstore: &Arc<Store>) -> Result<bool, StoreError> {
+pub(crate) fn any_starter_skill_name_exists(mstore: &Arc<Store>) -> Result<bool, StoreError> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
     // Pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's catalog
     // redirect — this migration always operated on one store's own
-    // db_skills, so `wstore` plays both the ref-owner and catalog role here
+    // db_skills, so `mstore` plays both the ref-owner and catalog role here
     // (the later carry-across migration, m0031, is what moves these rows
     // into identity_store).
-    let existing = wstore.skill_list_global(wstore)?;
+    let existing = mstore.skill_list_global(mstore)?;
     Ok(manifest
         .iter()
         .any(|entry| existing.iter().any(|item| item.skill.name == entry.name)))
@@ -191,7 +191,7 @@ pub(crate) fn any_starter_skill_name_exists(wstore: &Arc<Store>) -> Result<bool,
 /// migration returns `Err`, since it's never marked applied) would hit
 /// `skill_upsert_unique_global`'s name-uniqueness rejection on the skills
 /// already stranded from the failed attempt (reagent P2, PR #2141 round 1).
-pub(crate) fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport, StoreError> {
+pub(crate) fn seed_starter_skills(mstore: &Arc<Store>) -> Result<SkillSeedReport, StoreError> {
     let manifest: Vec<StarterSkill> = serde_json::from_str(STARTER_SKILLS_JSON)
         .map_err(|e| StoreError::Other(format!("skill seed: parse manifest: {e}")))?;
     reject_duplicate_triggers(&manifest)?;
@@ -214,9 +214,9 @@ pub(crate) fn seed_starter_skills(wstore: &Arc<Store>) -> Result<SkillSeedReport
             created_at: now,
             updated_at: now,
         };
-        if let Err(e) = wstore.skill_upsert_unique_global(&skill) {
+        if let Err(e) = mstore.skill_upsert_unique_global(&skill) {
             for id in &inserted_ids {
-                if let Err(cleanup_err) = wstore.skill_delete(wstore, id) {
+                if let Err(cleanup_err) = mstore.skill_delete(mstore, id) {
                     tracing::error!(
                         "skill seed: cleanup after partial failure could not remove {id}: {cleanup_err}"
                     );
@@ -316,13 +316,13 @@ mod tests {
 
     #[test]
     fn seeds_six_skills_into_an_empty_catalog() {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        assert!(wstore.skill_list_global(&wstore).unwrap().is_empty());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        assert!(mstore.skill_list_global(&mstore).unwrap().is_empty());
 
-        let report = seed_starter_skills(&wstore).unwrap();
+        let report = seed_starter_skills(&mstore).unwrap();
 
         assert_eq!(report.created, 6);
-        let after = wstore.skill_list_global(&wstore).unwrap();
+        let after = mstore.skill_list_global(&mstore).unwrap();
         assert_eq!(after.len(), 6, "all six starter skills should be seeded");
         assert!(after.iter().all(|item| item.skill.is_global));
     }
@@ -337,7 +337,7 @@ mod tests {
         // names) — this forces seed_starter_skills to fail partway through
         // the manifest, and the catalog must end up back at exactly the
         // one pre-existing skill, not a stranded partial starter set.
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -358,12 +358,12 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        wstore.skill_upsert_unique_global(&colliding).unwrap();
+        mstore.skill_upsert_unique_global(&colliding).unwrap();
 
-        let result = seed_starter_skills(&wstore);
+        let result = seed_starter_skills(&mstore);
         assert!(result.is_err(), "seeding must fail when a name collides");
 
-        let after = wstore.skill_list_global(&wstore).unwrap();
+        let after = mstore.skill_list_global(&mstore).unwrap();
         assert_eq!(
             after.len(),
             1,

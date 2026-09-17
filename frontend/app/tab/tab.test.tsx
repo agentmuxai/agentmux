@@ -27,7 +27,7 @@ vi.mock("@/app/store/services", () => ({
         UpdateObjectMeta: vi.fn(() => Promise.resolve()),
     },
 }));
-vi.mock("@/app/store/wos", () => ({
+vi.mock("@/app/store/mos", () => ({
     makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
     useMuxObjectValue: () => [
         () => ({ otype: "tab", oid: "tab-1", version: 1, name: "Tab One", meta: {} }),

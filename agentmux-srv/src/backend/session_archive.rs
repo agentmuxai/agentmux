@@ -97,7 +97,7 @@ fn ensure_archive_dir(archive_dir: &Path) -> Result<(), String> {
 /// Returns `(archived_bytes, archived_at_ms)`.
 /// If the FileStore entry is missing or empty, returns `(0, now_ms)` — no-op.
 pub fn archive_session_output(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,
     archive_dir: &Path,
@@ -134,7 +134,7 @@ pub fn archive_session_output(
     );
 
     let oref_str = format!("block:{}", block_id);
-    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+    if let Err(e) = crate::server::service::update_object_meta(mstore, &oref_str, &meta) {
         // Roll back the archive file so we don't leak disk on retry
         let _ = std::fs::remove_file(&archive_path);
         return Err(format!("update_object_meta: {e}"));
@@ -187,14 +187,14 @@ pub fn archive_session_output(
 ///   2. Decompress and write bytes back via `make_file` + `append_data`.
 ///   3. Clear archive meta keys (keep the .gz file as backup).
 pub fn restore_session_output(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,
 ) -> Result<u64, String> {
     // Read archive path from block meta
-    let block: Block = wstore
+    let block: Block = mstore
         .get(block_id)
-        .map_err(|e| format!("wstore.get: {e}"))?
+        .map_err(|e| format!("mstore.get: {e}"))?
         .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", block_id))?;
 
     let archive_path_str = block
@@ -250,7 +250,7 @@ pub fn restore_session_output(
     meta.insert(META_SESSION_ARCHIVE_PATH.to_string(), serde_json::Value::Null);
 
     let oref_str = format!("block:{}", block_id);
-    crate::server::service::update_object_meta(wstore, &oref_str, &meta)
+    crate::server::service::update_object_meta(mstore, &oref_str, &meta)
         .map_err(|e| format!("update_object_meta: {e}"))?;
 
     tracing::info!(
@@ -270,14 +270,14 @@ pub fn restore_session_output(
 /// Read the raw session output bytes, whether from FileStore (live) or archive.
 /// Returns `(bytes, line_count)`.
 pub fn read_session_output(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     block_id: &str,
 ) -> Result<(Vec<u8>, u64), String> {
     // Check if session is archived
-    let block: Block = wstore
+    let block: Block = mstore
         .get(block_id)
-        .map_err(|e| format!("wstore.get: {e}"))?
+        .map_err(|e| format!("mstore.get: {e}"))?
         .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", block_id))?;
 
     let is_archived = block
@@ -327,7 +327,7 @@ pub fn default_archive_dir() -> Option<PathBuf> {
 
 /// Periodic session archival + storage cap enforcement.
 pub struct SessionArchiver {
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     filestore: Arc<FileStore>,
     /// Sessions with no activity for this many days get archived.
     pub inactive_days: u64,
@@ -347,13 +347,13 @@ pub struct SessionArchiverStats {
 
 impl SessionArchiver {
     pub fn new(
-        wstore: Arc<Store>,
+        mstore: Arc<Store>,
         filestore: Arc<FileStore>,
         inactive_days: u64,
         max_total_bytes: u64,
         archive_dir: PathBuf,
     ) -> Self {
-        Self { wstore, filestore, inactive_days, max_total_bytes, archive_dir }
+        Self { mstore, filestore, inactive_days, max_total_bytes, archive_dir }
     }
 
     /// Run one sweep:
@@ -367,7 +367,7 @@ impl SessionArchiver {
 
         // Collect all blocks
         let all_blocks: Vec<Block> = self
-            .wstore
+            .mstore
             .get_all::<Block>()
             .map_err(|e| format!("get_all blocks: {e}"))?;
 
@@ -415,7 +415,7 @@ impl SessionArchiver {
 
             // Archive it
             match archive_session_output(
-                &self.wstore,
+                &self.mstore,
                 &self.filestore,
                 &block.oid,
                 &self.archive_dir,
@@ -544,8 +544,8 @@ mod tests {
         // In-memory Store
         let db_dir = tmp_dir.path().join("wdb");
         std::fs::create_dir_all(&db_dir).unwrap();
-        let wstore = Arc::new(
-            Store::open(&db_dir.join("objects.db")).expect("wstore"),
+        let mstore = Arc::new(
+            Store::open(&db_dir.join("objects.db")).expect("mstore"),
         );
 
         // Insert a fake Block object with required meta
@@ -569,11 +569,11 @@ mod tests {
             meta,
             subblockids: None,
         };
-        wstore.insert(&mut block).expect("wstore insert");
+        mstore.insert(&mut block).expect("mstore insert");
 
         // Run the archiver (1-day inactive threshold to keep test fast)
         let archiver = SessionArchiver::new(
-            wstore.clone(),
+            mstore.clone(),
             filestore.clone(),
             1, // 1 day inactive threshold
             2 * 1024 * 1024 * 1024,
@@ -593,7 +593,7 @@ mod tests {
         assert!(gz_path.exists(), ".gz file should exist");
 
         // Verify the block meta was updated
-        let updated_block: Option<Block> = wstore.get(block_id).unwrap();
+        let updated_block: Option<Block> = mstore.get(block_id).unwrap();
         let updated_block = updated_block.expect("block still in store");
         let archived_at = updated_block
             .meta

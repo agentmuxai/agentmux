@@ -33,7 +33,7 @@ use super::workspace_lifecycle::{
 };
 
 pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     // Phase E.2c.2 — workspace lifecycle dispatches through the
     // srv reducer for event emission (sagas / renderer / persist
     // subscriber consume them) AND synchronously applies the
@@ -49,7 +49,7 @@ pub(super) async fn handle_workspace_service(state: &AppState, call: &WebCallTyp
     // state before writing. (Both reagent + codex flagged this
     // race as P1 #615.)
     //
-    // Reads (`GetWorkspace` / `ListWorkspaces`) stay on wstore
+    // Reads (`GetWorkspace` / `ListWorkspaces`) stay on mstore
     // until the tab + block RPC layers also migrate (E.2c.3 +
     // E.2c.4). The reducer's `WorkspaceRecord` doesn't track
     // `pinnedtabids` and its `tabids` / `activetabid` go stale

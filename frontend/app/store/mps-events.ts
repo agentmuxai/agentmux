@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// WPS event-name constants — mirrors agentmux-srv/src/backend/wps.rs:22-54.
+// MPS event-name constants — mirrors agentmux-srv/src/backend/mps.rs:22-54.
 // Use these instead of bare string literals so typos are caught at build time
 // and grepping for an event name finds all its usages in one search.
 

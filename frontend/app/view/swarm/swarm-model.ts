@@ -5,10 +5,10 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
-import { WOS } from "@/app/store/global";
-import { callBackendService } from "@/store/wos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
+import { MOS } from "@/app/store/global";
+import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readActivitySummary } from "@/app/store/activitySummary";
 import { createSignal, type Accessor, type Setter } from "solid-js";
@@ -352,14 +352,14 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
 
 /**
  * Whether a blockId in `buildTree()`'s row list should actually render a
- * row — false only when the id's WOS oref has been definitively resolved
+ * row — false only when the id's MOS oref has been definitively resolved
  * to nothing. This is distinct from "the block exists but `agentName`
  * hasn't propagated to its meta yet" (the case `buildTree()`'s own
  * `"Agent"` fallback string is for, unchanged since 2026-06-22) — that's a
  * real, transient loading state on a real block, and from "the fetch for
- * this oref just hasn't resolved yet" (`isLoading`) — `WOS.
+ * this oref just hasn't resolved yet" (`isLoading`) — `MOS.
  * getMuxObjectAtom` seeds a freshly-tracked oref with `{ value: null,
- * loading: true }` (`wos.ts:152-153`) until its async `GetObject` fetch
+ * loading: true }` (`mos.ts:152-153`) until its async `GetObject` fetch
  * resolves, so a genuinely real, just-spawned block's row would otherwise
  * read identically to a phantom one on the very first `buildTree()` pass —
  * reagentx P1 on #2438, and very plausibly the explanation for the
@@ -380,7 +380,7 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
  * not rendering it — indistinguishable from a real agent to the user, and
  * any dispatch grouped under it shows as an empty "No activity yet" row
  * beside it. Extracted as a pure predicate so it's directly unit-testable
- * without instantiating `SwarmViewModel` or mocking WOS, same rationale as
+ * without instantiating `SwarmViewModel` or mocking MOS, same rationale as
  * `buildShellRows`/`buildCronRows` above.
  * See RETRO_SWARM_PHANTOM_ROWS_AND_STALE_TRACKING_2026_08_06.md.
  */
@@ -1282,9 +1282,9 @@ export class SwarmViewModel implements ViewModel {
         );
 
         // term:osc_title / term:ambient_summary meta changes — force re-read
-        // of block meta. The block atom in WOS updates reactively, so the
+        // of block meta. The block atom in MOS updates reactively, so the
         // memo in the view already reacts; no explicit handler needed here
-        // beyond the WOS atom.
+        // beyond the MOS atom.
     }
 
     loadAll = async (): Promise<void> => {
@@ -1321,7 +1321,7 @@ export class SwarmViewModel implements ViewModel {
             this.setTrackedBlockIds(ids);
             // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
             // rebuilds every per-block status subscription (each unsub/sub
-            // flushes its own WPS eventsub command) plus issues a fresh
+            // flushes its own MPS eventsub command) plus issues a fresh
             // GetControllerStatus per block — necessary when membership
             // actually changed, pure overhead when it didn't. With the
             // safety-net poll below calling this every
@@ -1885,7 +1885,7 @@ export class SwarmViewModel implements ViewModel {
                 })
                 .catch(() => {/* keep idle default */});
 
-            const scope = WOS.makeORef("block", blockId);
+            const scope = MOS.makeORef("block", blockId);
             const unsub = muxEventSubscribe({
                 eventType: WpsEvent.ControllerStatus,
                 scope,
@@ -1926,14 +1926,14 @@ export class SwarmViewModel implements ViewModel {
         const liveGroupKeys = new Set<string>();
         const retired = this.retiredRowKeysAtom();
         const nodes = allBlockIds.flatMap((blockId) => {
-            const blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
+            const blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
             const block = blockAtom();
             // isLoading distinguishes "this oref hasn't resolved yet" from
             // "this oref resolved to nothing" — both read as block == null,
             // but only the latter means the id is genuinely phantom.
             // getMuxObjectLoadingAtom returns `null` while loading, `false`
-            // once GetObject has resolved either way (wos.ts:232-238).
-            const isLoading = WOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
+            // once GetObject has resolved either way (mos.ts:232-238).
+            const isLoading = MOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =
                 (block?.meta?.["agentName"] as string | undefined)?.trim() ||

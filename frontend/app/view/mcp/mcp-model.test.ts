@@ -19,11 +19,11 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 // Same hub pattern bundle-mcp-model.test.ts / global-bundle-model.test.ts use.
-const wpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
-vi.mock("@/app/store/wps", () => ({
+const mpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
-        wpsHub.handlers.set(sub.eventType, sub.handler);
-        return () => wpsHub.handlers.delete(sub.eventType);
+        mpsHub.handlers.set(sub.eventType, sub.handler);
+        return () => mpsHub.handlers.delete(sub.eventType);
     }),
 }));
 
@@ -34,7 +34,7 @@ beforeEach(() => {
     mcpCatalogListMock.mockResolvedValue([]);
     listAgentDefinitionsMock.mockClear();
     listAgentDefinitionsMock.mockResolvedValue([]);
-    wpsHub.handlers.clear();
+    mpsHub.handlers.clear();
 });
 
 describe("McpCatalogModel — reactive updates", () => {
@@ -43,7 +43,7 @@ describe("McpCatalogModel — reactive updates", () => {
         await Promise.resolve();
         mcpCatalogListMock.mockClear();
 
-        wpsHub.handlers.get("mcp:changed")?.({});
+        mpsHub.handlers.get("mcp:changed")?.({});
         await Promise.resolve();
 
         expect(mcpCatalogListMock).toHaveBeenCalledTimes(1);
@@ -54,7 +54,7 @@ describe("McpCatalogModel — reactive updates", () => {
         await Promise.resolve();
         mcpCatalogListMock.mockClear();
 
-        wpsHub.handlers.get("skills:changed")?.({});
+        mpsHub.handlers.get("skills:changed")?.({});
         await Promise.resolve();
 
         expect(mcpCatalogListMock).not.toHaveBeenCalled();
@@ -63,10 +63,10 @@ describe("McpCatalogModel — reactive updates", () => {
     test("unsubscribes on dispose", async () => {
         const model = new McpCatalogModel();
         await Promise.resolve();
-        expect(wpsHub.handlers.has("mcp:changed")).toBe(true);
+        expect(mpsHub.handlers.has("mcp:changed")).toBe(true);
 
         model.dispose();
 
-        expect(wpsHub.handlers.has("mcp:changed")).toBe(false);
+        expect(mpsHub.handlers.has("mcp:changed")).toBe(false);
     });
 });

@@ -36,7 +36,7 @@
  * matters).
  */
 
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 
 const backfillingBlocks = new Map<string, ReturnType<typeof setTimeout>>();
 const settleListeners = new Set<() => void>();
@@ -141,7 +141,7 @@ export function createBackfillAwareTrigger(scheduleDebouncedRefresh: () => void,
 // No `scope` — this needs every open pane's block, not just one, unlike
 // `useSubagentBackfillGate.ts`'s per-block-scoped subscription (that hook
 // and this tracker both listen to the same backend event independently and
-// safely: `wps.ts`'s `dispatchToSubjects` fans one incoming message out to
+// safely: `mps.ts`'s `dispatchToSubjects` fans one incoming message out to
 // every registered listener, filtering by each listener's own `scope`).
 muxEventSubscribe({
     eventType: "subagent:backfill_status",

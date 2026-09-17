@@ -11,7 +11,7 @@
 //!
 //! Why this exists: per-RPC handlers were responsible for attaching
 //! `MuxObjUpdate`s to their responses (`success_with_updates(...)`).
-//! Forgetting that call left the frontend WOS cache stale (e.g. workspace
+//! Forgetting that call left the frontend MOS cache stale (e.g. workspace
 //! renames not propagating to the OS title or the InstancePanel — see
 //! `docs/specs/SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md`).
 //!
@@ -78,14 +78,14 @@ fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value
 /// the §8.15 idempotency contract — duplicate or stale events fold to
 /// no-op.
 async fn emit_fetched<T: StoreObj + Send + 'static>(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     otype: &'static str,
     oid: String,
     context: &'static str,
 ) {
     let id = oid.clone();
-    let store = Arc::clone(wstore);
+    let store = Arc::clone(mstore);
     let result = tokio::task::spawn_blocking(move || store.get::<T>(&id)).await;
     match result {
         Ok(Ok(Some(obj))) => {
@@ -101,14 +101,14 @@ async fn emit_fetched<T: StoreObj + Send + 'static>(
             tracing::warn!(
                 target: "wave-obj-bridge",
                 oid = %oid, otype = otype, ctx = context,
-                "object not found in wstore; skipping broadcast"
+                "object not found in mstore; skipping broadcast"
             );
         }
         Ok(Err(e)) => {
             tracing::error!(
                 target: "wave-obj-bridge",
                 oid = %oid, otype = otype, ctx = context, error = %e,
-                "wstore.get failed; skipping broadcast"
+                "mstore.get failed; skipping broadcast"
             );
         }
         Err(join_err) => {
@@ -122,7 +122,7 @@ async fn emit_fetched<T: StoreObj + Send + 'static>(
 }
 
 /// Broadcast a "delete" `waveobj:update` for the given oid. No fetch
-/// needed — the frontend's `updateMuxObject` (`wos.ts:263-265`) handles
+/// needed — the frontend's `updateMuxObject` (`mos.ts:263-265`) handles
 /// the delete arm with just the oid.
 fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
     let payload = build_update_payload("delete", otype, oid, None);
@@ -139,11 +139,11 @@ fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
 /// Client is a singleton — the first `get_all::<Client>()` row is THE
 /// client. Same lookup pattern persist_subscriber uses.
 async fn emit_client_singleton(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     context: &'static str,
 ) {
-    let store = Arc::clone(wstore);
+    let store = Arc::clone(mstore);
     let result = tokio::task::spawn_blocking(move || store.get_all::<Client>()).await;
     match result {
         Ok(Ok(clients)) => {
@@ -160,7 +160,7 @@ async fn emit_client_singleton(
                 tracing::warn!(
                     target: "wave-obj-bridge",
                     ctx = context,
-                    "no Client row in wstore; skipping Client broadcast"
+                    "no Client row in mstore; skipping Client broadcast"
                 );
             }
         }
@@ -168,7 +168,7 @@ async fn emit_client_singleton(
             tracing::error!(
                 target: "wave-obj-bridge",
                 ctx = context, error = %e,
-                "wstore.get_all::<Client> failed; skipping broadcast"
+                "mstore.get_all::<Client> failed; skipping broadcast"
             );
         }
         Err(je) => {
@@ -186,14 +186,14 @@ async fn emit_client_singleton(
 /// SQLite reads chained inside one `spawn_blocking` to keep the lock
 /// hold short.
 async fn emit_layout_for_tab(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     event_bus: &Arc<EventBus>,
     tab_id: String,
     context: &'static str,
 ) {
     use crate::backend::obj::LayoutState;
     let id_for_log = tab_id.clone();
-    let store = Arc::clone(wstore);
+    let store = Arc::clone(mstore);
     let result = tokio::task::spawn_blocking(move || -> Result<Option<LayoutState>, _> {
         match store.get::<Tab>(&tab_id) {
             Ok(Some(tab)) => {
@@ -230,7 +230,7 @@ async fn emit_layout_for_tab(
             tracing::error!(
                 target: "wave-obj-bridge",
                 tab_id = %id_for_log, ctx = context, error = %e,
-                "wstore.get failed during layout resolution; skipping broadcast"
+                "mstore.get failed during layout resolution; skipping broadcast"
             );
         }
         Err(join_err) => {
@@ -247,14 +247,14 @@ async fn emit_layout_for_tab(
 ///
 /// **Read source — post-event state guarantee:**
 /// For events emitted via the HTTP `service.rs` RPC handlers,
-/// `apply_event_to_wstore` is called synchronously (`service.rs:1297-1304`
+/// `apply_event_to_mstore` is called synchronously (`service.rs:1297-1304`
 /// for workspace; equivalent path for tab/block/window/layout commands)
 /// before `publish_events` (`service.rs:1305`). So when the bridge
 /// receives such an event, SQLite is already up-to-date.
 ///
 /// **IPC-path caveat:** the launcher → IPC path in `srv_ipc/server.rs:295`
 /// dispatches reducer events directly without first calling
-/// `apply_event_to_wstore`; the persist subscriber and bridge then race.
+/// `apply_event_to_mstore`; the persist subscriber and bridge then race.
 /// At time of writing none of the events the bridge handles are emitted
 /// via that path (verified for `Command::UpdateWindowMeta` and the
 /// workspace family). When that changes, options are: (a) make the IPC
@@ -262,7 +262,7 @@ async fn emit_layout_for_tab(
 /// in-memory `srv_state` reducer rather than SQLite. Tracked in
 /// `SPEC_OBJ_UPDATE_BRIDGE §11.1`.
 ///
-/// **Lock discipline (per ReAgent P1 on PR #852):** every `wstore.get<T>()`
+/// **Lock discipline (per ReAgent P1 on PR #852):** every `mstore.get<T>()`
 /// is wrapped in `tokio::task::spawn_blocking` via the helpers above so
 /// the async runtime stays responsive even under reducer-transaction
 /// contention.
@@ -270,7 +270,7 @@ async fn emit_layout_for_tab(
 /// **Coverage:** Phase 1 + 2 covers workspace, window, tab, block, layout
 /// events. Saga events, OS facts, launcher-domain events all fall through
 /// to the catch-all `_ => {}` arm.
-async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBus>) {
+async fn dispatch_event(event: Event, mstore: Arc<Store>, event_bus: Arc<EventBus>) {
     use crate::backend::obj::{Block, Window, Workspace};
 
     match event {
@@ -279,7 +279,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         | Event::WorkspaceMetaUpdated { workspace_id, .. }
         | Event::WorkspaceCreated { workspace_id, .. } => {
             emit_fetched::<Workspace>(
-                &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "Workspace*",
+                &mstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "Workspace*",
             )
             .await;
         }
@@ -290,13 +290,13 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         // ----- Window (Phase 2 + #855) -----
         Event::WindowMetaUpdated { window_id, .. } => {
             emit_fetched::<Window>(
-                &wstore, &event_bus, OTYPE_WINDOW, window_id, "WindowMetaUpdated",
+                &mstore, &event_bus, OTYPE_WINDOW, window_id, "WindowMetaUpdated",
             )
             .await;
         }
         Event::SrvWindowWorkspaceChanged { window_id, .. } => {
             emit_fetched::<Window>(
-                &wstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowWorkspaceChanged",
+                &mstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowWorkspaceChanged",
             )
             .await;
         }
@@ -308,30 +308,30 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         // until reload. (Codex P2 on PR #861.)
         Event::SrvWindowOpened { window_id, .. } => {
             emit_fetched::<Window>(
-                &wstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowOpened",
+                &mstore, &event_bus, OTYPE_WINDOW, window_id, "SrvWindowOpened",
             )
             .await;
-            emit_client_singleton(&wstore, &event_bus, "SrvWindowOpened").await;
+            emit_client_singleton(&mstore, &event_bus, "SrvWindowOpened").await;
         }
         // Parent (Client singleton) update first, window delete second —
         // same delete-ordering rationale as the TabDeleted arm below.
         Event::SrvWindowClosed { window_id, .. } => {
-            emit_client_singleton(&wstore, &event_bus, "SrvWindowClosed").await;
+            emit_client_singleton(&mstore, &event_bus, "SrvWindowClosed").await;
             emit_delete(&event_bus, OTYPE_WINDOW, &window_id);
         }
 
         // ----- Tab (Phase 2) -----
         // TabCreated also touches the parent workspace's tab_ids field
         // (reducer mutates both in one dispatch). Broadcast both so the
-        // frontend WOS sees the new Tab AND the updated parent ordering.
+        // frontend MOS sees the new Tab AND the updated parent ordering.
         Event::TabCreated {
             workspace_id,
             tab_id,
             ..
         } => {
-            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "TabCreated").await;
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "TabCreated").await;
             emit_fetched::<Workspace>(
-                &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabCreated parent",
+                &mstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabCreated parent",
             )
             .await;
         }
@@ -351,19 +351,19 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             ..
         } => {
             emit_fetched::<Workspace>(
-                &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabDeleted parent",
+                &mstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabDeleted parent",
             )
             .await;
             emit_delete(&event_bus, OTYPE_TAB, &tab_id);
         }
         Event::TabRenamed { tab_id, .. } | Event::TabMetaUpdated { tab_id, .. } => {
-            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "Tab*").await;
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "Tab*").await;
         }
         Event::ActiveTabChanged { workspace_id, .. }
         | Event::TabReordered { workspace_id, .. }
         | Event::TabsReorderedBulk { workspace_id, .. } => {
             emit_fetched::<Workspace>(
-                &wstore,
+                &mstore,
                 &event_bus,
                 OTYPE_WORKSPACE,
                 workspace_id,
@@ -377,9 +377,9 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             dst_workspace_id,
             ..
         } => {
-            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "TabMoved").await;
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, tab_id, "TabMoved").await;
             emit_fetched::<Workspace>(
-                &wstore,
+                &mstore,
                 &event_bus,
                 OTYPE_WORKSPACE,
                 src_workspace_id,
@@ -387,7 +387,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             )
             .await;
             emit_fetched::<Workspace>(
-                &wstore,
+                &mstore,
                 &event_bus,
                 OTYPE_WORKSPACE,
                 dst_workspace_id,
@@ -402,11 +402,11 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             tab_id, block_id, ..
         } => {
             emit_fetched::<Block>(
-                &wstore, &event_bus, OTYPE_BLOCK, block_id, "BlockCreated",
+                &mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockCreated",
             )
             .await;
             emit_fetched::<Tab>(
-                &wstore, &event_bus, OTYPE_TAB, tab_id, "BlockCreated parent",
+                &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockCreated parent",
             )
             .await;
         }
@@ -416,14 +416,14 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             tab_id, block_id, ..
         } => {
             emit_fetched::<Tab>(
-                &wstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
+                &mstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
             )
             .await;
             emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
         }
         Event::BlockMetaUpdated { block_id, .. } => {
             emit_fetched::<Block>(
-                &wstore,
+                &mstore,
                 &event_bus,
                 OTYPE_BLOCK,
                 block_id,
@@ -437,16 +437,16 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             dst_tab_id,
             ..
         } => {
-            emit_fetched::<Block>(&wstore, &event_bus, OTYPE_BLOCK, block_id, "BlockMoved").await;
-            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, src_tab_id, "BlockMoved src")
+            emit_fetched::<Block>(&mstore, &event_bus, OTYPE_BLOCK, block_id, "BlockMoved").await;
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, src_tab_id, "BlockMoved src")
                 .await;
-            emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, dst_tab_id, "BlockMoved dst")
+            emit_fetched::<Tab>(&mstore, &event_bus, OTYPE_TAB, dst_tab_id, "BlockMoved dst")
                 .await;
         }
 
         // ----- Layout (Phase 2 — partial) -----
         // Focused/Magnified + Cleared/TreeReplaced are now persisted by
-        // `apply_event_to_wstore` (persist_subscriber.rs), so the bridge
+        // `apply_event_to_mstore` (persist_subscriber.rs), so the bridge
         // can safely re-read LayoutState and broadcast it: the HTTP RPC
         // path applies SQLite synchronously before publishing the event
         // (see the post-event-state guarantee above), so the read sees
@@ -462,10 +462,10 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         // broadcasts (Codex P2 on PR #861).
         Event::FocusedNodeChanged { tab_id, .. }
         | Event::MagnifiedNodeChanged { tab_id, .. } => {
-            emit_layout_for_tab(&wstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
+            emit_layout_for_tab(&mstore, &event_bus, tab_id, "Focused/MagnifiedNodeChanged").await;
         }
         Event::LayoutCleared { tab_id, .. } | Event::LayoutTreeReplaced { tab_id, .. } => {
-            emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
+            emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutCleared/TreeReplaced").await;
         }
         // Without this, a backend-queued layout action reaches a frontend
         // ONLY if that frontend happens to construct its `LayoutModel`
@@ -491,7 +491,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         // before calling `publish_events`, so this re-read of LayoutState
         // cannot observe pre-event state.
         Event::LayoutBackendActionsQueued { tab_id, .. } => {
-            emit_layout_for_tab(&wstore, &event_bus, tab_id, "LayoutBackendActionsQueued").await;
+            emit_layout_for_tab(&mstore, &event_bus, tab_id, "LayoutBackendActionsQueued").await;
         }
         // The 7 granular structural events (LayoutNodeMoved/…/InsertedAtIndex)
         // are persisted by the subscriber (they carry `new_tree`), but are
@@ -518,7 +518,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
 /// panic inside `dispatch_event` is caught and logged, and the loop
 /// continues processing subsequent events. Without this, a single
 /// malformed event could silently kill the entire bridge task and
-/// frontend WOS would stop seeing updates.
+/// frontend MOS would stop seeing updates.
 ///
 /// Subscribe ordering: per `SPEC §11.1` the bridge can subscribe in any
 /// order relative to the persist subscriber. For Phase 1's workspace
@@ -526,15 +526,15 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
 /// publishing the event, so the bridge always sees post-event state.
 pub fn spawn_mux_obj_bridge(
     events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     event_bus: Arc<EventBus>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run_mux_obj_bridge(events_rx, wstore, event_bus))
+    tokio::spawn(run_mux_obj_bridge(events_rx, mstore, event_bus))
 }
 
 async fn run_mux_obj_bridge(
     mut events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     event_bus: Arc<EventBus>,
 ) {
     tracing::info!(target: "wave-obj-bridge", "[wave-obj-bridge] started (Phase 1: workspace events)");
@@ -549,7 +549,7 @@ async fn run_mux_obj_bridge(
                 // immediately so events still process serially (matching
                 // the broadcast channel's send order), but a panic in one
                 // event can't kill the bridge.
-                let store = Arc::clone(&wstore);
+                let store = Arc::clone(&mstore);
                 let bus = Arc::clone(&event_bus);
                 let event_dbg = format!("{:?}", &event);
                 let join = tokio::spawn(dispatch_event(event, store, bus)).await;
@@ -573,7 +573,7 @@ async fn run_mux_obj_bridge(
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 // The broadcast channel has 1024 capacity (main.rs:624).
-                // If we lag, frontend WOS state diverges silently — log it
+                // If we lag, frontend MOS state diverges silently — log it
                 // loudly so operators can correlate with user-visible drift
                 // (e.g. the InstancePanel/title showing stale names).
                 // No automatic recovery; the next event resyncs the affected
@@ -581,7 +581,7 @@ async fn run_mux_obj_bridge(
                 tracing::error!(
                     target: "wave-obj-bridge",
                     skipped = n,
-                    "broadcast channel lagged; some waveobj:update events were dropped — frontend WOS may show stale state until the affected object is mutated again"
+                    "broadcast channel lagged; some waveobj:update events were dropped — frontend MOS may show stale state until the affected object is mutated again"
                 );
             }
             Err(broadcast::error::RecvError::Closed) => {
@@ -632,7 +632,7 @@ mod tests {
     #[tokio::test]
     async fn test_tab_deleted_broadcasts_parent_update_before_tab_delete() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
         let event_bus = Arc::new(EventBus::new());
 
         let ws_id = "11111111-1111-1111-1111-111111111111";
@@ -640,7 +640,7 @@ mod tests {
         let surviving_tab_id = "33333333-3333-3333-3333-333333333333";
         // Post-delete state: the workspace no longer lists the deleted tab.
         let mut ws = test_workspace(ws_id, vec![surviving_tab_id.to_string()]);
-        wstore.insert(&mut ws).unwrap();
+        mstore.insert(&mut ws).unwrap();
 
         let mut receivers = event_bus.register_ws("test-conn", "test-tab");
 
@@ -651,7 +651,7 @@ mod tests {
                 block_ids: vec![],
                 version: 1,
             },
-            Arc::clone(&wstore),
+            Arc::clone(&mstore),
             Arc::clone(&event_bus),
         )
         .await;
@@ -691,13 +691,13 @@ mod tests {
     #[tokio::test]
     async fn test_block_deleted_broadcasts_parent_update_before_block_delete() {
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
         let event_bus = Arc::new(EventBus::new());
 
         let tab_id = "44444444-4444-4444-4444-444444444444";
         let deleted_block_id = "55555555-5555-5555-5555-555555555555";
         let mut tab = test_tab(tab_id);
-        wstore.insert(&mut tab).unwrap();
+        mstore.insert(&mut tab).unwrap();
 
         let mut receivers = event_bus.register_ws("test-conn", "test-tab");
 
@@ -707,7 +707,7 @@ mod tests {
                 block_id: deleted_block_id.to_string(),
                 version: 1,
             },
-            Arc::clone(&wstore),
+            Arc::clone(&mstore),
             Arc::clone(&event_bus),
         )
         .await;
@@ -751,7 +751,7 @@ mod tests {
         use crate::backend::obj::LayoutState;
 
         let tmp = tempfile::tempdir().unwrap();
-        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let mstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
         let event_bus = Arc::new(EventBus::new());
 
         let tab_id = "66666666-6666-6666-6666-666666666666";
@@ -761,10 +761,10 @@ mod tests {
             version: 1,
             ..Default::default()
         };
-        wstore.insert(&mut layout).unwrap();
+        mstore.insert(&mut layout).unwrap();
         let mut tab = test_tab(tab_id);
         tab.layoutstate = layout_id.to_string();
-        wstore.insert(&mut tab).unwrap();
+        mstore.insert(&mut tab).unwrap();
 
         let mut receivers = event_bus.register_ws("test-conn", "test-tab");
 
@@ -775,7 +775,7 @@ mod tests {
                 correlation_id: String::new(),
                 version: 1,
             },
-            Arc::clone(&wstore),
+            Arc::clone(&mstore),
             Arc::clone(&event_bus),
         )
         .await;

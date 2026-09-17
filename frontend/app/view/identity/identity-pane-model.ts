@@ -21,7 +21,7 @@
 // `undefined` and the view degrades to a context-free empty state.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, type Accessor } from "solid-js";
 
 export class IdentityPaneViewModel implements ViewModel {

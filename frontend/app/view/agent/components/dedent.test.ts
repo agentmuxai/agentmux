@@ -221,7 +221,7 @@ describe("formatReadPreview — real transcript sample", () => {
         "4\t//! Pre-launch OAuth flow RPC handlers.\n" +
         "125\t        Box::new(move |data, _ctx| {\n" +
         "126\t            let mgr = mgr.clone();\n" +
-        "127\t            let wstore = wstore.clone();\n" +
+        "127\t            let mstore = mstore.clone();\n" +
         "128\t            let broker = broker.clone();\n" +
         "129\t            Box::pin(async move {\n" +
         "130\t                let req: StartProviderAuthReq = serde_json::from_value(data)";

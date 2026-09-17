@@ -110,7 +110,7 @@ export type AgentDocumentCommand =
      * SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md §3.3.
      */
     | { type: "ToolChunkAppend"; toolId: string; chunk: ToolLogChunk }
-    /** Create a new ShellNode in the document (fired on shell_node_create WPS event). */
+    /** Create a new ShellNode in the document (fired on shell_node_create MPS event). */
     | { type: "ShellNodeCreate"; node: ShellNode }
     /** Append a streaming chunk to a ShellNode's live-log. */
     | { type: "ShellChunkAppend"; shellId: string; chunk: ToolLogChunk }
@@ -155,7 +155,7 @@ export type AgentDocumentCommand =
     /**
      * Force one specific `ToolNode` to `status: "canceled"`, regardless of
      * how long it's been running or whether a session boundary has
-     * happened. Dispatched when a `dock:clear` WPS event arrives (a
+     * happened. Dispatched when a `dock:clear` MPS event arrives (a
      * `muxspect dock clear` request for this pane's block) — the manual
      * escape hatch for a stuck node, distinct from `ScrubOrphanedInProgress`'s
      * blanket sweep. No-op (empty events) if `nodeId` isn't a currently

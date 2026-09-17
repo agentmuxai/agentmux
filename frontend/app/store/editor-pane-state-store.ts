@@ -5,8 +5,9 @@
  * Editor pane state store — slice #10 of the frontend reducer roadmap.
  * Phase 1A: pure reducer + slot store + audit-ring integration. No view
  * wiring, no saga, no CodeMirror references — those land in Phase 1B/1C.
- * Spec: `docs/specs/SPEC_EDITOR_TABS_2026-05-26.md` §"State management" and
- * §"Phase 1A".
+ * The editor-tabs spec this was written against (§"State management",
+ * §"Phase 1A") was never committed — no such file has ever existed in
+ * git history, so the path is removed rather than left dangling.
  *
  * The editor pane today owns one file at a time; this slice is the
  * foundation for the multi-file tab strip. The slot cell owns:
@@ -216,7 +217,7 @@ export interface ReducerResult {
  *
  * **The `\\?\` strip closes a real live-reload bug**, confirmed by live
  * repro (2026-08-22): `EditorFileWatcher`'s published `editor:file_changed`
- * WPS event carries a path produced by Rust's `Path::canonicalize()`,
+ * MPS event carries a path produced by Rust's `Path::canonicalize()`,
  * which on Windows unconditionally prepends `\\?\` (`\\?\UNC\` for a
  * network share) — well-documented std behavior, and something this
  * backend's own comments already flag in two other places

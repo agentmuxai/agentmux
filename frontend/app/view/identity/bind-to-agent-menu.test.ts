@@ -30,7 +30,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/global", () => ({ WOS: {}, workspace: () => null }));
+vi.mock("@/app/store/global", () => ({ MOS: {}, workspace: () => null }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ getOpenDefinitionMap: () => new Map() }));
 
 import {

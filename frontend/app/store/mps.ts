@@ -27,7 +27,7 @@ type MuxEventUnsubscribe = {
 const fileSubjects = new Map<string, SubjectWithRef<WSFileEventData>>();
 const muxEventSubjects = new Map<string, MuxEventSubjectContainer[]>();
 
-function wpsReconnectHandler() {
+function mpsReconnectHandler() {
     for (const eventType of muxEventSubjects.keys()) {
         updateMuxEventSub(eventType);
     }
@@ -154,4 +154,4 @@ function handleMuxEvent(event: MuxEvent) {
     dispatchToSubjects(event);
 }
 
-export { getFileSubject, handleMuxEvent, muxEventSubscribe, wpsReconnectHandler };
+export { getFileSubject, handleMuxEvent, muxEventSubscribe, mpsReconnectHandler };

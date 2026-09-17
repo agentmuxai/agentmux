@@ -13,7 +13,7 @@ const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);
@@ -224,7 +224,7 @@ describe("createBackfillAwareTrigger", () => {
     });
 });
 
-describe("the live WPS subscription wired at module load", () => {
+describe("the live MPS subscription wired at module load", () => {
     it("registered a handler for subagent:backfill_status", () => {
         expect(hub.handlers.has("subagent:backfill_status")).toBe(true);
     });

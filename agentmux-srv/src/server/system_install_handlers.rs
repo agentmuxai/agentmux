@@ -30,7 +30,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::wps::{Broker, MuxEvent};
+use crate::backend::mps::{Broker, MuxEvent};
 use crate::server::install_handlers::resolve_tool_path;
 use crate::server::AppState;
 

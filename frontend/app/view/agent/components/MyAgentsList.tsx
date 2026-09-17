@@ -55,7 +55,7 @@ import { pushNotification, prefersReducedMotionAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getOpenBlockIdsForDefinition } from "@/app/store/agent-pane-state-store";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { ConfirmModal } from "@/element/modal";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { ObjectService } from "@/app/store/services";

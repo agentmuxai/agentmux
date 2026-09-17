@@ -20,8 +20,8 @@ import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { cpuColor, loadColor } from "./cpu-color";
 
 interface Core {

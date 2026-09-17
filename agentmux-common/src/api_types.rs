@@ -13,7 +13,7 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
-// ── WPS publish ───────────────────────────────────────────────────────────────
+// ── MPS publish ───────────────────────────────────────────────────────────────
 
 /// `POST /agentmux/wps/publish` — shared client/server envelope.
 ///

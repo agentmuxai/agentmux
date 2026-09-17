@@ -66,7 +66,7 @@ vi.mock("@/app/store/contextmenu", () => ({
     },
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn(() => () => {}),
 }));
 

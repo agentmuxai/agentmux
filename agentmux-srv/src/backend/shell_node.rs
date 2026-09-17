@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! ShellNodeRunner — spawns a shell command and streams output to the
-//! frontend as `shell_chunk` WPS events scoped to the agent's block.
+//! frontend as `shell_chunk` MPS events scoped to the agent's block.
 //!
 //! Launched by `handle_shell_create` (server/mod.rs) via `tokio::spawn`.
 //! The runner is fire-and-forget; the HTTP handler returns the `shell_id`
@@ -20,7 +20,7 @@ use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::backend::wps::{Broker, MuxEvent, EVENT_SHELL_CHUNK};
+use crate::backend::mps::{Broker, MuxEvent, EVENT_SHELL_CHUNK};
 use agentmux_common::api_types::ShellInputFailure;
 
 fn now_ms() -> u64 {
@@ -524,7 +524,7 @@ impl ShellNodeRunner {
 //
 // Now chunks/exit go ONLY to `shell:<shell_id>`. The frontend subscribes to that
 // scope when it sees the (block-scoped, persist:64) `shell_node_create`. Because
-// the broker persists the ring regardless of subscribers (wps.rs persist_event
+// the broker persists the ring regardless of subscribers (mps.rs persist_event
 // runs inside publish whenever persist>0), any output produced before the
 // subscription establishes is retained in the persist:1024 ring and replayed
 // exactly once on subscribe (guarded by the broker's per-route+event+scope

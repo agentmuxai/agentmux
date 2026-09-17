@@ -211,7 +211,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             }
 
             // Priority event lane → WebSocket. Two sources feed it:
-            //   1. WPS Broker (via EventBusBridge) — already wrapped as
+            //   1. MPS Broker (via EventBusBridge) — already wrapped as
             //      { eventtype: "rpc", data: { command: "eventrecv", data: MuxEvent } }
             //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
             //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
@@ -314,14 +314,14 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 /// Forward a queued event-bus value to the WebSocket. Returns `true` if the
 /// send failed (the caller should break the loop).
 ///
-/// Two shapes arrive: already-RPC-wrapped values (from the WPS broker via
+/// Two shapes arrive: already-RPC-wrapped values (from the MPS broker via
 /// EventBusBridge) are forwarded as-is; raw event-bus values (e.g. SetMeta's
 /// `waveobj:update`) are wrapped as an RPC `eventrecv` so the frontend
 /// WshRouter routes them to handleMuxEvent → updateMuxObject. Shared by both
 /// the priority and background egress lanes.
 async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool {
     let msg = if event["eventtype"] == "rpc" {
-        // Already an RPC message (from WPS broker via EventBusBridge)
+        // Already an RPC message (from MPS broker via EventBusBridge)
         serde_json::to_string(&event).unwrap_or_default()
     } else {
         // Raw event bus event — wrap as RPC eventrecv
@@ -343,7 +343,7 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
 }
 
 /// Extract a coalescing key from a background-lane event.
-/// Background events are RPC-wrapped WPS events:
+/// Background events are RPC-wrapped MPS events:
 ///   { "eventtype": "rpc", "data": { "command": "eventrecv", "data": { "event": "sysinfo", "scopes": ["local"] } } }
 /// Key = "<event-name>:<first-scope>", e.g. "sysinfo:local" or "blockstats:block:abc123".
 /// Falls back to "_:_" for events that don't match the expected shape (safe: they coalesce
@@ -420,7 +420,7 @@ fn priority_pane_key(event: &serde_json::Value) -> Option<String> {
     }
     let inner = event.get("data").and_then(|d| d.get("data"));
     let is_blockfile = inner.and_then(|d| d.get("event")).and_then(|e| e.as_str())
-        == Some(crate::backend::wps::EVENT_BLOCK_FILE);
+        == Some(crate::backend::mps::EVENT_BLOCK_FILE);
     if !is_blockfile {
         return Some(NON_PANE_EVENT_KEY.to_string());
     }
@@ -762,8 +762,8 @@ async fn handle_incoming_text(
 /// query is the single source of truth for the actual rows, so there's
 /// nothing to keep in sync between two payload shapes. See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
-fn publish_background_task_updated(broker: &crate::backend::wps::Broker, block_id: &str) {
-    broker.publish(crate::backend::wps::MuxEvent {
+fn publish_background_task_updated(broker: &crate::backend::mps::Broker, block_id: &str) {
+    broker.publish(crate::backend::mps::MuxEvent {
         event: "background-task-updated".to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
@@ -809,7 +809,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         Box::new(|_data, _ctx| Box::pin(async move { Ok(None) })),
     );
 
-    // eventsub → register subscription with the WPS broker
+    // eventsub → register subscription with the MPS broker
     let broker_sub = state.broker.clone();
     let conn_id_sub = conn_id.clone();
     engine.register_handler(
@@ -818,7 +818,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let broker = broker_sub.clone();
             let conn_id = conn_id_sub.clone();
             Box::pin(async move {
-                let sub: crate::backend::wps::SubscriptionRequest =
+                let sub: crate::backend::mps::SubscriptionRequest =
                     serde_json::from_value(data).map_err(|e| format!("eventsub: {e}"))?;
                 tracing::debug!("eventsub: event={} scopes={:?} allscopes={}", sub.event, sub.scopes, sub.allscopes);
                 broker.subscribe(&conn_id, sub);
@@ -827,7 +827,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    // eventunsub → unsubscribe from the WPS broker
+    // eventunsub → unsubscribe from the MPS broker
     let broker_unsub = state.broker.clone();
     let conn_id_unsub = conn_id.clone();
     engine.register_handler(
@@ -845,7 +845,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    // eventunsuball → unsubscribe all from the WPS broker
+    // eventunsuball → unsubscribe all from the MPS broker
     let broker_unsub_all = state.broker.clone();
     let conn_id_unsub_all = conn_id.clone();
     engine.register_handler(
@@ -861,12 +861,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // setmeta → update object metadata in the DB, broadcast update event
-    let wstore_sm = state.wstore.clone();
+    let mstore_sm = state.mstore.clone();
     let event_bus_sm = state.event_bus.clone();
     engine.register_handler(
         COMMAND_SET_META,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_sm.clone();
+            let mstore = mstore_sm.clone();
             let event_bus = event_bus_sm.clone();
             Box::pin(async move {
                 let cmd: CommandSetMetaData =
@@ -879,7 +879,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // CRASH_2026_06_29 P1). Default production filter is info, so
                 // this is now suppressed unless RUST_LOG=debug is set.
                 tracing::debug!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
-                update_object_meta(&wstore, &oref_str, &cmd.meta)?;
+                update_object_meta(&mstore, &oref_str, &cmd.meta)?;
                 // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): the
                 // frontend writes term:zoom via this WebSocket path, not the HTTP
                 // UpdateObjectMeta handler where the mirror was originally placed.
@@ -887,12 +887,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 let oref_parsed = crate::backend::ORef::parse(&oref_str)
                     .map_err(|e| e.to_string())?;
                 if oref_parsed.otype == "block" && cmd.meta.contains_key("term:zoom") {
-                    if let Ok(block) = wstore.must_get::<Block>(&oref_parsed.oid) {
+                    if let Ok(block) = mstore.must_get::<Block>(&oref_parsed.oid) {
                         let agent_id = block.meta.get("agentId")
                             .and_then(|v| v.as_str()).unwrap_or("").to_string();
                         if !agent_id.is_empty() {
                             let zoom = cmd.meta.get("term:zoom").and_then(|v| v.as_f64());
-                            schedule_agent_zoom_mirror(wstore.clone(), agent_id, zoom);
+                            schedule_agent_zoom_mirror(mstore.clone(), agent_id, zoom);
                         }
                     }
                 }
@@ -901,7 +901,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 let oref = crate::backend::ORef::parse(&oref_str)
                     .map_err(|e| e.to_string())?;
                 let update_data = if oref.otype == "block" {
-                    if let Ok(block) = wstore.must_get::<Block>(&oref.oid) {
+                    if let Ok(block) = mstore.must_get::<Block>(&oref.oid) {
                         Some(serde_json::to_value(&MuxObjUpdate {
                             updatetype: "update".into(),
                             otype: oref.otype.clone(),
@@ -921,15 +921,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // getmeta → return metadata for a wave object
-    let wstore_gm = state.wstore.clone();
+    let mstore_gm = state.mstore.clone();
     engine.register_handler(
         COMMAND_GET_META,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_gm.clone();
+            let mstore = mstore_gm.clone();
             Box::pin(async move {
                 let cmd: CommandGetMetaData =
                     serde_json::from_value(data).map_err(|e| format!("getmeta: {e}"))?;
-                let obj: Option<serde_json::Value> = wstore
+                let obj: Option<serde_json::Value> = mstore
                     .get_raw(&cmd.oref.otype, &cmd.oref.oid)
                     .map_err(|e| format!("getmeta: {e}"))?;
                 match obj {
@@ -976,7 +976,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // controllerresync → load block from DB, create/restart controller with PTY
-    let wstore_resync = state.wstore.clone();
+    let mstore_resync = state.mstore.clone();
     let broker_resync = state.broker.clone();
     let event_bus_resync = state.event_bus.clone();
     let filestore_resync = state.filestore.clone();
@@ -984,7 +984,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     engine.register_handler(
         COMMAND_CONTROLLER_RESYNC,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_resync.clone();
+            let mstore = mstore_resync.clone();
             let broker = broker_resync.clone();
             let event_bus = event_bus_resync.clone();
             let filestore = filestore_resync.clone();
@@ -999,11 +999,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     norespawn = cmd.norespawn,
                     "ControllerResync"
                 );
-                let block: Block = wstore
+                let block: Block = mstore
                     .get(&cmd.blockid)
                     .map_err(|e| format!("controllerresync: load block: {e}"))?
                     .ok_or_else(|| format!("controllerresync: block {} not found", cmd.blockid))?;
-                let registry = wstore.shared_agent_registry();
+                let registry = mstore.shared_agent_registry();
                 blockcontroller::resync_controller(
                     &block,
                     &cmd.tabid,
@@ -1015,7 +1015,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     !cmd.norespawn,
                     Some(broker),
                     Some(event_bus),
-                    Some(wstore),
+                    Some(mstore),
                     Some(filestore),
                     registry,
                     boot_id,
@@ -1044,7 +1044,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     //
     // Keep this check I/O-free. It reads `blockcontroller::agent_lock`, an
     // in-memory map, NOT the block's persisted meta: the original revision
-    // called `wstore.get::<Block>()` here, putting a synchronous SQLite
+    // called `mstore.get::<Block>()` here, putting a synchronous SQLite
     // query behind `Store`'s single process-wide `Mutex<Connection>` inside
     // an async handler, inline on a Tokio worker thread with no
     // `block_in_place` — the same failure class as the sysinfo incident
@@ -1075,11 +1075,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // createsubblock → create a headless sub-block (no tab/layout entry)
     // parented to an existing block, e.g. a `term`-view PTY embedded in an
     // agent pane's details drawer.
-    let wstore_csb = state.wstore.clone();
+    let mstore_csb = state.mstore.clone();
     engine.register_handler(
         COMMAND_CREATE_SUB_BLOCK,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_csb.clone();
+            let mstore = mstore_csb.clone();
             Box::pin(async move {
                 let cmd: CommandCreateSubBlockData = serde_json::from_value(data)
                     .map_err(|e| format!("createsubblock: {e}"))?;
@@ -1124,19 +1124,19 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     meta,
                     ..Default::default()
                 };
-                wstore
+                mstore
                     .insert(&mut block)
                     .map_err(|e| format!("createsubblock: insert: {e}"))?;
 
                 // Best-effort link into the parent's subblockids. Not a CAS
                 // (Store::update is a blind version-bump) — an acceptable
                 // race for a single lazily-created shell per agent pane.
-                if let Ok(mut parent) = wstore.must_get::<Block>(&cmd.parentblockid) {
+                if let Ok(mut parent) = mstore.must_get::<Block>(&cmd.parentblockid) {
                     parent
                         .subblockids
                         .get_or_insert_with(Vec::new)
                         .push(child_id.clone());
-                    let _ = wstore.update(&mut parent);
+                    let _ = mstore.update(&mut parent);
                 }
 
                 tracing::info!(
@@ -1145,7 +1145,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     "CreateSubBlock"
                 );
                 // TS `CreateSubBlockCommand` resolves `Promise<ORef>`, and
-                // `ORef` (gotypes.d.ts:1258) is a plain string — return the
+                // `ORef` (srv-types.d.ts:1258) is a plain string — return the
                 // bare "block:<id>" string, not a wrapper object.
                 Ok(Some(serde_json::Value::String(format!("block:{child_id}"))))
             })
@@ -1156,11 +1156,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Kill-first ordering matches sagas/delete_block.rs; unlike that saga,
     // this does NOT touch tab bookkeeping — sub-blocks are never
     // tab-referenced, so delete_block.rs's precondition would reject them.
-    let wstore_dsb = state.wstore.clone();
+    let mstore_dsb = state.mstore.clone();
     engine.register_handler(
         COMMAND_DELETE_SUB_BLOCK,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_dsb.clone();
+            let mstore = mstore_dsb.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteSubBlockData = serde_json::from_value(data)
                     .map_err(|e| format!("deletesubblock: {e}"))?;
@@ -1169,13 +1169,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // delayed row delete.
                 blockcontroller::delete_controller(&cmd.blockid);
 
-                let parent_id = wstore
+                let parent_id = mstore
                     .get::<Block>(&cmd.blockid)
                     .ok()
                     .flatten()
                     .and_then(|b| b.parentoref.strip_prefix("block:").map(str::to_string));
 
-                wstore
+                mstore
                     .delete::<Block>(&cmd.blockid)
                     .map_err(|e| format!("deletesubblock: delete: {e}"))?;
 
@@ -1183,10 +1183,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // controller is already dead and the row is already gone
                 // either way, so don't fail the call over this step.
                 if let Some(parent_id) = parent_id {
-                    if let Ok(mut parent) = wstore.must_get::<Block>(&parent_id) {
+                    if let Ok(mut parent) = mstore.must_get::<Block>(&parent_id) {
                         if let Some(ids) = parent.subblockids.as_mut() {
                             ids.retain(|id| id != &cmd.blockid);
-                            let _ = wstore.update(&mut parent);
+                            let _ = mstore.update(&mut parent);
                         }
                     }
                 }
@@ -1289,13 +1289,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // holds the RPC open. Every failure path is silence — the narrated action
     // has already happened and the UI already reflects it, so a missing line is
     // a missing nicety, not a missing state change.
-    let wstore_narrate = state.wstore.clone();
+    let mstore_narrate = state.mstore.clone();
     let broker_narrate = state.broker.clone();
     let narrated = state.narrated_events.clone();
     engine.register_handler(
         COMMAND_AMBIENT_NARRATE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_narrate.clone();
+            let mstore = mstore_narrate.clone();
             let broker = broker_narrate.clone();
             let narrated = narrated.clone();
             Box::pin(async move {
@@ -1315,7 +1315,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         .unwrap_or_default()
                         .as_millis() as u64;
                     let Some(text) = crate::server::app_api::session::generate_ambient_narration(
-                        &wstore,
+                        &mstore,
                         &cmd.blockid,
                         &cmd.dedupe_key,
                         generation,
@@ -1340,13 +1340,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     // narration kind that has none) falls through and publishes,
                     // since absence of a row is not evidence of completion.
                     if !cmd.dedupe_key.is_empty() {
-                        if let Ok(Some(task)) = wstore.background_task_get(&cmd.dedupe_key) {
+                        if let Ok(Some(task)) = mstore.background_task_get(&cmd.dedupe_key) {
                             if task.status != crate::backend::storage::background_tasks::BackgroundTaskStatus::Running {
                                 return;
                             }
                         }
                     }
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "ambient-narration".to_string(),
                         scopes: vec![format!("block:{}", cmd.blockid)],
                         sender: String::new(),
@@ -1366,14 +1366,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    let wstore_dns = state.wstore.clone();
+    let mstore_dns = state.mstore.clone();
     let pending_pids_dns = state.pending_background_pids.clone();
     let broker_dns = state.broker.clone();
     engine.register_handler(
         COMMAND_DOCK_NODE_STATUS,
         Box::new(move |data, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
-            let wstore = wstore_dns.clone();
+            let mstore = mstore_dns.clone();
             let pending_pids = pending_pids_dns.clone();
             let broker = broker_dns.clone();
             Box::pin(async move {
@@ -1385,7 +1385,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .as_millis() as i64;
 
                 if cmd.run_in_background == Some(true) {
-                    match wstore.background_task_observe(
+                    match mstore.background_task_observe(
                         &cmd.node_id,
                         &cmd.blockid,
                         &cmd.tool_name,
@@ -1412,10 +1412,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     // pending_background_pids.rs's module doc for why that
                     // matters (Codex/reagentx findings on PR #2681).
                     let node_id = cmd.node_id.clone();
-                    let wstore_apply = wstore.clone();
+                    let mstore_apply = mstore.clone();
                     let result: Result<(), crate::backend::storage::StoreError> = pending_pids
                         .observe_and_apply(&cmd.node_id, observed_at, |pid| {
-                            wstore_apply.background_task_set_pid(&node_id, pid)
+                            mstore_apply.background_task_set_pid(&node_id, pid)
                         });
                     if let Err(e) = result {
                         tracing::warn!(
@@ -1457,12 +1457,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // `push_delta` fully overwrites a node's snapshot, and this event has no
     // `tool_name`/original `run_in_background` value to carry forward — the
     // exact bug class #2520 already fixed once for a different call site.
-    let wstore_btc = state.wstore.clone();
+    let mstore_btc = state.mstore.clone();
     let broker_btc = state.broker.clone();
     engine.register_handler(
         COMMAND_BACKGROUND_TASK_COMPLETION,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_btc.clone();
+            let mstore = mstore_btc.clone();
             let broker = broker_btc.clone();
             Box::pin(async move {
                 let cmd: CommandBackgroundTaskCompletionData = serde_json::from_value(data)
@@ -1474,7 +1474,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         .as_millis() as i64
                 });
                 let status = crate::backend::storage::background_tasks::BackgroundTaskStatus::from_str(&cmd.status);
-                match wstore.background_task_complete(&cmd.node_id, status, ended_at) {
+                match mstore.background_task_complete(&cmd.node_id, status, ended_at) {
                     Ok(_) => publish_background_task_updated(&broker, &cmd.blockid),
                     Err(e) => tracing::warn!(
                         target: "background_tasks",
@@ -1489,7 +1489,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // backgroundtaskpid → fire-and-forget push of a declared-background
-    // task's real OS pid, relayed from `agentmux-bashwrap`'s own WPS "pid"
+    // task's real OS pid, relayed from `agentmux-bashwrap`'s own MPS "pid"
     // chunk. Closes the gap where `db_background_tasks.pid` existed but
     // nothing in production ever wrote it (Phase A of
     // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Best-effort,
@@ -1506,13 +1506,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // retry a write that will never succeed — stash it instead, and
     // `COMMAND_DOCK_NODE_STATUS`'s handler applies it the moment the row
     // exists. See Codex/reagentx findings on PR #2681.
-    let wstore_btp = state.wstore.clone();
+    let mstore_btp = state.mstore.clone();
     let pending_pids_btp = state.pending_background_pids.clone();
     let broker_btp = state.broker.clone();
     engine.register_handler(
         COMMAND_BACKGROUND_TASK_PID,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_btp.clone();
+            let mstore = mstore_btp.clone();
             let pending_pids = pending_pids_btp.clone();
             let broker = broker_btp.clone();
             Box::pin(async move {
@@ -1523,9 +1523,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .unwrap_or_default()
                     .as_millis() as i64;
                 let node_id = cmd.node_id.clone();
-                let wstore_set = wstore.clone();
+                let mstore_set = mstore.clone();
                 let result = pending_pids.set_or_stash(&cmd.node_id, cmd.pid as i64, now_ms, |pid| {
-                    wstore_set.background_task_set_pid(&node_id, pid)
+                    mstore_set.background_task_set_pid(&node_id, pid)
                 });
                 match result {
                     Ok(()) => publish_background_task_updated(&broker, &cmd.blockid),
@@ -1550,15 +1550,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // ever launching it — Phase B of
     // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md).
     // See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
-    let wstore_lbt = state.wstore.clone();
+    let mstore_lbt = state.mstore.clone();
     engine.register_handler(
         COMMAND_LIST_BACKGROUND_TASKS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_lbt.clone();
+            let mstore = mstore_lbt.clone();
             Box::pin(async move {
                 let cmd: CommandListBackgroundTasksData = serde_json::from_value(data)
                     .map_err(|e| format!("listbackgroundtasks: {e}"))?;
-                let tasks = wstore
+                let tasks = mstore
                     .background_task_list_for_block(&cmd.blockid)
                     .map_err(|e| format!("listbackgroundtasks: {e}"))?;
                 let views: Vec<super::muxspect_handlers::BackgroundTaskView> =
@@ -1675,7 +1675,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // reactive.registrations → Stash "Registration" tab live status (#2696)
     super::reactive::register_reactive_ws_handlers(engine, &state);
 
-    // eventreadhistory → read persisted event history from the WPS broker
+    // eventreadhistory → read persisted event history from the MPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(
         COMMAND_EVENT_READ_HISTORY,
@@ -1930,7 +1930,7 @@ mod tests {
             },
             ..Default::default()
         };
-        state.wstore.insert(&mut stale_meta_block).unwrap();
+        state.mstore.insert(&mut stale_meta_block).unwrap();
         let resp = send_input(&engine, &mut output_rx, "ci-stale-meta-shell").await;
         assert!(
             resp.error.contains("no controller"),

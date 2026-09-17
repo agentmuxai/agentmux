@@ -24,7 +24,7 @@
 import { createSignal, onCleanup, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 
 interface ResizableDetailsDrawerProps {
     blockId: string;
@@ -58,7 +58,7 @@ export const ResizableDetailsDrawer = (props: ResizableDetailsDrawerProps): JSX.
         window.removeEventListener("pointerup", onPointerUp);
         setDragging(false);
         void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", props.blockId),
+            oref: MOS.makeORef("block", props.blockId),
             meta: { "term:shellheight": height() } as any,
         });
     };

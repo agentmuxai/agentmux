@@ -8,7 +8,7 @@ const hub = vi.hoisted(() => ({
     handler: null as ((e: unknown) => void) | null,
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         if (sub.eventType === "controllerstatus") hub.handler = sub.handler;
         return () => {
@@ -16,7 +16,7 @@ vi.mock("@/app/store/wps", () => ({
         };
     }),
 }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 
 import { deriveTurnActive, didTurnJustEnd, useControllerStatusEvents } from "./useControllerStatusEvents";
 

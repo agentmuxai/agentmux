@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, refocusNode, setActiveTab, WOS } from "@/app/store/global";
+import { atoms, refocusNode, setActiveTab, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
 import { triggerTabCloseRequest } from "@/app/tab/tab-close-request";
@@ -15,8 +15,8 @@ export function getFocusedBlockInStaticTab() {
 
 function getStaticTabBlockCount(): number {
     const tabId = atoms.activeTabId();
-    const tabORef = WOS.makeORef("tab", tabId);
-    const tabAtom = WOS.getMuxObjectAtom<Tab>(tabORef);
+    const tabORef = MOS.makeORef("tab", tabId);
+    const tabAtom = MOS.getMuxObjectAtom<Tab>(tabORef);
     const tabData = tabAtom();
     return tabData?.blockids?.length ?? 0;
 }

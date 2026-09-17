@@ -3,7 +3,7 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
-import { WpsEvent } from "@/app/store/wps-events";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setPlatform } from "@/util/platformutil";
@@ -18,8 +18,8 @@ import {
 import { openModal } from "./modalmodel";
 import { AboutModal } from "@/app/modals/about";
 import { UserInputModal } from "@/app/modals/userinputmodal";
-import * as WOS from "./wos";
-import { getFileSubject, muxEventSubscribe } from "./wps";
+import * as MOS from "./mos";
+import { getFileSubject, muxEventSubscribe } from "./mps";
 import { getApi } from "./app-api";
 import {
     fullConfigAtom,
@@ -124,7 +124,7 @@ export const [openFloatingPaneEntriesAtom, setOpenFloatingPaneEntriesAtom] =
     createSignal<FloatingPaneEntry[]>([]);
 
 // ---------------------------------------------------------------------------
-// GlobalAtomsType-compatible export (used in wos.ts callBackendService)
+// GlobalAtomsType-compatible export (used in mos.ts callBackendService)
 // ---------------------------------------------------------------------------
 
 export const atoms = {
@@ -216,7 +216,7 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
         initBackendStatusListeners(getApi(), reconnectWS);
     } catch (_) {}
 
-    // Expose atoms on window for wos.ts callBackendService
+    // Expose atoms on window for mos.ts callBackendService
     window.globalAtoms = atoms;
 }
 
@@ -226,7 +226,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             eventType: WpsEvent.MuxObjUpdate,
             handler: (event) => {
                 const update: MuxObjUpdate = event.data;
-                WOS.updateMuxObject(update);
+                MOS.updateMuxObject(update);
             },
         },
         {
@@ -238,7 +238,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 // the still-mounted tab before the workspace update unmounts
                 // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
                 const updates: MuxObjUpdate[] = event.data ?? [];
-                WOS.updateMuxObjects(updates);
+                MOS.updateMuxObjects(updates);
             },
         },
         {
@@ -415,5 +415,5 @@ export { countersClear, counterInc, countersPrint } from "./dev-counters";
 // backward-compat (97 files import from this module).
 export { isDev, getUserName, getHostName, openLink } from "./misc-utils";
 
-// Re-export WOS and getApi for call-sites that import them from here
-export { WOS, getApi };
+// Re-export MOS and getApi for call-sites that import them from here
+export { MOS, getApi };

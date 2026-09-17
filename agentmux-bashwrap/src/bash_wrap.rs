@@ -35,7 +35,7 @@
 //!   lands on this process's stdout for Claude's native Bash tool to
 //!   harvest as the `tool_result` content. Truncated head/tail at 50KB
 //!   each per `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §4.5.
-//! - If WPS publish fails (missing env, sidecar down, etc.), the
+//! - If MPS publish fails (missing env, sidecar down, etc.), the
 //!   command still runs to completion — output just doesn't stream.
 //!   The model-visible blob is unaffected. A `kind: "system"` chunk
 //!   announces the degradation at startup.
@@ -52,14 +52,14 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::{Mutex, mpsc, oneshot};
 
-use crate::wps_client::WpsClient;
+use crate::mps_client::WpsClient;
 
 /// CLI args for `exec`. `command` carried as base64 to sidestep every
 /// quoting concern in the shell that invokes us.
 #[derive(Parser, Debug)]
 pub struct Args {
     /// Tool-use id from Claude's `tool_use` event; threaded back as
-    /// the WPS subject suffix so the frontend correlates chunks with
+    /// the MPS subject suffix so the frontend correlates chunks with
     /// the matching ToolNode.
     #[arg(long)]
     pub tool_id: String,
@@ -68,7 +68,7 @@ pub struct Args {
     #[arg(long)]
     pub b64_cmd: String,
 
-    /// Optional block id — used as the `block:<id>` WPS scope so
+    /// Optional block id — used as the `block:<id>` MPS scope so
     /// chunks only reach subscribers watching this block. When
     /// omitted, chunks publish unscoped.
     #[arg(long)]
@@ -508,7 +508,7 @@ pub async fn run(mut args: Args) -> Result<i32> {
     log_relevant_env();
     let command = decode_command(&args.b64_cmd)?;
 
-    // `block_id` controls the WPS publish scope. Prefer the explicit
+    // `block_id` controls the MPS publish scope. Prefer the explicit
     // CLI arg, but fall back to AGENTMUX_BLOCKID env (set by
     // agentmux-srv when spawning Claude) so the hook doesn't have to
     // pass it explicitly. Without a scope, the frontend's per-block
@@ -521,8 +521,8 @@ pub async fn run(mut args: Args) -> Result<i32> {
         }
     }
 
-    let wps = WpsClient::from_env();
-    let degraded = wps.is_none();
+    let mps = WpsClient::from_env();
+    let degraded = mps.is_none();
 
     let buffered = Arc::new(Mutex::new(Vec::<u8>::with_capacity(64 * 1024)));
 
@@ -554,11 +554,11 @@ pub async fn run(mut args: Args) -> Result<i32> {
     if degraded {
         // Surface degradation as a real chunk on stdout (we'll prefix
         // it on the model side too) so the user sees a clear "no
-        // streaming this turn" message in the overlay. WPS publish
+        // streaming this turn" message in the overlay. MPS publish
         // would no-op, so we skip it.
         let warn = b"[bashwrap] warning: streaming disabled (auth/url env missing); command output will only appear on completion\n";
         buffered.lock().await.extend_from_slice(warn);
-    } else if let Some(client) = wps.as_ref() {
+    } else if let Some(client) = mps.as_ref() {
         match publish_system(
             client,
             &args.tool_id,
@@ -578,7 +578,7 @@ pub async fn run(mut args: Args) -> Result<i32> {
             // to the 5s WpsClient::from_env default, plus the retry's own
             // 250ms sleep) directly on this declared-background command's
             // startup path — measurably delaying the actual work (e.g.
-            // `task dev`) behind a degraded WPS endpoint, exactly what
+            // `task dev`) behind a degraded MPS endpoint, exactly what
             // "best-effort" is supposed to avoid (reagentx P1, PR #2681).
             // Still joined (bounded) below before `run()` returns, so a
             // fast-exiting wrapped command can't silently abandon it.
@@ -598,7 +598,7 @@ pub async fn run(mut args: Args) -> Result<i32> {
     // reproducing the exact abandonment bug the join exists to prevent, just
     // via the Err path instead of a fast Ok exit (reagentx P1, round 3 on
     // this PR — the round-2 fix only covered the Ok(status) fast-exit case).
-    let run_result = run_proc(&args, &command, wps.as_ref(), buffered.clone()).await;
+    let run_result = run_proc(&args, &command, mps.as_ref(), buffered.clone()).await;
     let elapsed = start.elapsed();
 
     if let Some(handle) = pid_publish {
@@ -619,7 +619,7 @@ pub async fn run(mut args: Args) -> Result<i32> {
 
     let status = run_result?;
 
-    if let Some(client) = wps.as_ref() {
+    if let Some(client) = mps.as_ref() {
         let _ = client
             .publish_chunk(
                 args.block_id.as_deref(),
@@ -696,7 +696,7 @@ async fn publish_system(
 /// call site's comment for why blocking startup on this was a real
 /// latency bug (reagentx P1, PR #2681).
 ///
-/// The single retry here is insurance against a transient WPS/HTTP
+/// The single retry here is insurance against a transient MPS/HTTP
 /// publish failure ONLY — it does not, and cannot, wait for
 /// `db_background_tasks`'s row to exist first (this function has no
 /// visibility into srv's database state). This publish routinely arrives
@@ -981,7 +981,7 @@ where
 async fn run_proc(
     args: &Args,
     command: &str,
-    wps: Option<&WpsClient>,
+    mps: Option<&WpsClient>,
     buffered: Arc<Mutex<Vec<u8>>>,
 ) -> Result<i32> {
     let bash = locate_bash()?;
@@ -998,7 +998,7 @@ async fn run_proc(
                 bash = %bash.display(),
                 "spawning bash -c via PTY (live-buffered, headless DSR responder active)",
             );
-            run_via_pty(args, command, wps, buffered, &bash, pair).await
+            run_via_pty(args, command, mps, buffered, &bash, pair).await
         }
         Err(e) => {
             tracing::warn!(
@@ -1007,7 +1007,7 @@ async fn run_proc(
                 error = %e,
                 "PTY allocation failed — falling back to pipes (output may buffer at child level)",
             );
-            run_via_pipes(args, command, wps, buffered, &bash).await
+            run_via_pipes(args, command, mps, buffered, &bash).await
         }
     }
 }
@@ -1017,7 +1017,7 @@ async fn run_proc(
 async fn run_via_pty(
     args: &Args,
     command: &str,
-    wps: Option<&WpsClient>,
+    mps: Option<&WpsClient>,
     buffered: Arc<Mutex<Vec<u8>>>,
     bash: &std::path::Path,
     pair: portable_pty::PtyPair,
@@ -1159,7 +1159,7 @@ async fn run_via_pty(
     });
     drop(tx);
 
-    let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
+    let publisher_handle = spawn_publisher_loop(args, mps.cloned(), buffered.clone(), rx);
 
     // Move pair AND writer into the wait task — both must outlive
     // child.wait() to satisfy the ConPTY lifetime contract on Windows.
@@ -1283,7 +1283,7 @@ paging output that doesn't fit one screen). Try `git --no-pager <cmd>` or \
 async fn run_via_pipes(
     args: &Args,
     command: &str,
-    wps: Option<&WpsClient>,
+    mps: Option<&WpsClient>,
     buffered: Arc<Mutex<Vec<u8>>>,
     bash: &std::path::Path,
 ) -> Result<i32> {
@@ -1353,7 +1353,7 @@ async fn run_via_pipes(
     let stderr_reader = tokio::spawn(stream_reader(stderr, "stderr", tx.clone(), last_activity.clone()));
     drop(tx);
 
-    let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
+    let publisher_handle = spawn_publisher_loop(args, mps.cloned(), buffered.clone(), rx);
 
     let (idle_tx, idle_rx) = oneshot::channel::<()>();
     let idle_timeout = effective_idle_timeout(args);
@@ -2079,7 +2079,7 @@ fn collapse_cr(pending: &mut Vec<u8>) {
 }
 
 /// Shared publisher loop — drains the LineEvent channel, aggregates
-/// into the model-visible buffer, and publishes each line via WPS.
+/// into the model-visible buffer, and publishes each line via MPS.
 ///
 /// **Leading-`\r` spinner handling:** throttled spinner frames (npm, cargo,
 /// ora, tqdm at >50 ms/frame) are collapsed upstream — in the
@@ -2097,7 +2097,7 @@ fn collapse_cr(pending: &mut Vec<u8>) {
 /// surviving final frame for each overwrite sequence.
 fn spawn_publisher_loop(
     args: &Args,
-    wps: Option<WpsClient>,
+    mps: Option<WpsClient>,
     buffered: Arc<Mutex<Vec<u8>>>,
     mut rx: mpsc::Receiver<LineEvent>,
 ) -> tokio::task::JoinHandle<()> {
@@ -2118,7 +2118,7 @@ fn spawn_publisher_loop(
                     buf.extend_from_slice(b"[stderr] ");
                 }
                 // Strip a single leading `\r` carried by a collapsed leading-\r
-                // spinner frame (e.g. a final "\r✔ done\n"), matching the WPS
+                // spinner frame (e.g. a final "\r✔ done\n"), matching the MPS
                 // live path's `strip_prefix('\r')` below, so the model-visible
                 // blob and the live log agree byte-for-byte. The trailing `\n`
                 // is preserved here — it separates lines in the blob.
@@ -2128,7 +2128,7 @@ fn spawn_publisher_loop(
                 };
                 buf.extend_from_slice(body);
             }
-            if let Some(client) = wps.as_ref() {
+            if let Some(client) = mps.as_ref() {
                 let mut line_bytes: &[u8] = &event.bytes;
                 if line_bytes.last() == Some(&b'\n') {
                     line_bytes = &line_bytes[..line_bytes.len() - 1];
@@ -2138,8 +2138,8 @@ fn spawn_publisher_loop(
                 if let Some(stripped) = line_str.strip_prefix('\r') {
                     // Leading-\r spinner frame: publish any prior pending frame
                     // before storing the new one, so consecutive \r-prefixed
-                    // lines are not silently dropped from the live WPS log.
-                    // (This pending slot only affects the live WPS log; the
+                    // lines are not silently dropped from the live MPS log.
+                    // (This pending slot only affects the live MPS log; the
                     // model-visible blob already received this frame's bytes
                     // above, with the leading \r stripped to match.)
                     if let Some((prior_text, prior_kind)) = pending_cr_line.take() {
@@ -2159,7 +2159,7 @@ fn spawn_publisher_loop(
                                     target: "bashwrap",
                                     tool_id = %tool_id,
                                     error = %e,
-                                    "WPS publish failed (prior pending_cr_line)"
+                                    "MPS publish failed (prior pending_cr_line)"
                                 );
                             }
                         }
@@ -2184,7 +2184,7 @@ fn spawn_publisher_loop(
                                     target: "bashwrap",
                                     tool_id = %tool_id,
                                     error = %e,
-                                    "WPS publish failed"
+                                    "MPS publish failed"
                                 );
                             }
                         }
@@ -2205,7 +2205,7 @@ fn spawn_publisher_loop(
                                 target: "bashwrap",
                                 tool_id = %tool_id,
                                 error = %e,
-                                "WPS publish failed"
+                                "MPS publish failed"
                             );
                         }
                     }
@@ -2215,7 +2215,7 @@ fn spawn_publisher_loop(
 
         // EOF: flush any remaining pending spinner frame.
         if let Some((cr_text, cr_kind)) = pending_cr_line.take() {
-            if let Some(client) = wps.as_ref() {
+            if let Some(client) = mps.as_ref() {
                 match publish_line(client, &tool_id, block_id.as_deref(), cr_kind, &cr_text).await
                 {
                     Ok(()) => chunks_published += 1,
@@ -2225,7 +2225,7 @@ fn spawn_publisher_loop(
                             target: "bashwrap",
                             tool_id = %tool_id,
                             error = %e,
-                            "WPS publish failed (EOF flush)"
+                            "MPS publish failed (EOF flush)"
                         );
                     }
                 }
@@ -2306,7 +2306,7 @@ mod tests {
     // `std::env::set_var` / `remove_var` mutate process-global state;
     // cargo test runs tests in parallel by default, so without a
     // serial lock tests that touch the env race each other. Mirrors
-    // the same pattern in `wps_client::tests`.
+    // the same pattern in `mps_client::tests`.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]

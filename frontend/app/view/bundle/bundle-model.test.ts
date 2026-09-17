@@ -138,11 +138,11 @@ vi.mock("@/app/store/rpc-api", () => ({
 
 // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md — same hub pattern
 // bundle-mcp-model.test.ts / global-bundle-model.test.ts use.
-const wpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
-vi.mock("@/app/store/wps", () => ({
+const mpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
-        wpsHub.handlers.set(sub.eventType, sub.handler);
-        return () => wpsHub.handlers.delete(sub.eventType);
+        mpsHub.handlers.set(sub.eventType, sub.handler);
+        return () => mpsHub.handlers.delete(sub.eventType);
     }),
 }));
 
@@ -150,7 +150,7 @@ describe("validateDraft", () => {
     beforeEach(() => {
         listMemoriesMock.mockClear();
         validateBundleMock.mockClear();
-        wpsHub.handlers.clear();
+        mpsHub.handlers.clear();
     });
 
     // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md
@@ -160,12 +160,12 @@ describe("validateDraft", () => {
         await Promise.resolve();
         listMemoriesMock.mockClear();
 
-        wpsHub.handlers.get("memories:changed")?.({});
+        mpsHub.handlers.get("memories:changed")?.({});
         await Promise.resolve();
         expect(listMemoriesMock).toHaveBeenCalledTimes(1);
 
         model.dispose();
-        expect(wpsHub.handlers.has("memories:changed")).toBe(false);
+        expect(mpsHub.handlers.has("memories:changed")).toBe(false);
     });
 
     test("populates validationAtom from the RPC response", async () => {

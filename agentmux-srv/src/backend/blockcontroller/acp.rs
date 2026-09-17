@@ -38,9 +38,9 @@ use super::health::TurnActivityTracker;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps;
+use crate::backend::mps;
 
-/// WPS file subject name for ACP output.
+/// MPS file subject name for ACP output.
 pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
@@ -90,9 +90,9 @@ pub struct AcpController {
     tab_id: String,
     block_id: String,
     inner: Arc<Mutex<AcpInner>>,
-    broker: Option<Arc<wps::Broker>>,
+    broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<TurnActivityTracker>,
     /// Monotonically increasing JSON-RPC request ID.
@@ -114,9 +114,9 @@ impl AcpController {
     pub fn new(
         tab_id: String,
         block_id: String,
-        broker: Option<Arc<wps::Broker>>,
+        broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
@@ -135,7 +135,7 @@ impl AcpController {
             })),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
@@ -305,7 +305,7 @@ impl AcpController {
             }
         });
 
-        // Spawn stdout reader task — reads NDJSON lines and broadcasts via WPS
+        // Spawn stdout reader task — reads NDJSON lines and broadcasts via MPS
         let block_id_stdout = self.block_id.clone();
         let broker_clone = self.broker.clone();
         let filestore_clone = self.filestore.clone();
@@ -313,11 +313,11 @@ impl AcpController {
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
         let outstanding_prompt_ids_clone = self.outstanding_prompt_ids.clone();
-        let wstore_clone = self.wstore.clone();
+        let mstore_clone = self.mstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
-            super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             tracing::info!(block_id = %block_id_stdout, "ACP stdout_reader started");
@@ -429,7 +429,7 @@ impl AcpController {
                             // "My Agents" reattach path can read agent:sessionid from
                             // block.meta. ACP previously captured the ID in memory only —
                             // this mirrors the careful path from persistent.rs / subprocess.rs.
-                            core::persist_session_id(&block_id_stdout, &sid_owned, &wstore_clone, &event_bus_clone);
+                            core::persist_session_id(&block_id_stdout, &sid_owned, &mstore_clone, &event_bus_clone);
                         }
                     }
 
@@ -947,7 +947,7 @@ mod tests {
     /// the same `mark_turn_active_returning_was_active()` call.
     #[tokio::test]
     async fn send_input_publishes_the_turn_active_flip() {
-        let broker = Arc::new(wps::Broker::new());
+        let broker = Arc::new(mps::Broker::new());
         let c = AcpController::new(
             "tab".to_string(),
             "block-acp-publish".to_string(),
@@ -962,7 +962,7 @@ mod tests {
         assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
 
         let history = broker.read_event_history(
-            wps::EVENT_CONTROLLER_STATUS,
+            mps::EVENT_CONTROLLER_STATUS,
             "block:block-acp-publish",
             1,
         );
@@ -987,7 +987,7 @@ mod tests {
     /// work that never happened.
     #[tokio::test]
     async fn send_input_rolls_back_turn_active_when_enqueue_fails() {
-        let broker = Arc::new(wps::Broker::new());
+        let broker = Arc::new(mps::Broker::new());
         let c = AcpController::new(
             "tab".to_string(),
             "block-acp-enqueue-fail".to_string(),
@@ -1010,7 +1010,7 @@ mod tests {
         // LATEST published status must reflect the rollback, not the
         // transient true a live subscriber may have also observed.
         let history = broker.read_event_history(
-            wps::EVENT_CONTROLLER_STATUS,
+            mps::EVENT_CONTROLLER_STATUS,
             "block:block-acp-enqueue-fail",
             1,
         );

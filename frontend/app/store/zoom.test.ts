@@ -25,7 +25,7 @@ vi.mock("@/app/store/global", () => ({
         return vt === undefined ? undefined : { viewModel: { viewType: vt } };
     },
     getFocusedBlockId: () => undefined,
-    WOS: {
+    MOS: {
         makeORef: (type: string, id: string) => `${type}:${id}`,
         getObjectValue: (oref: string) => {
             const id = oref.slice(oref.indexOf(":") + 1);
@@ -169,7 +169,7 @@ describe("zoomAllPanesIn/Out", () => {
     });
 
     // ReAgent P1, PR #3090: the real RpcApi.SetMetaCommand is fire-and-forget
-    // — WOS's local object cache is NOT updated synchronously by it, only
+    // — MOS's local object cache is NOT updated synchronously by it, only
     // later when the backend pushes a MuxObjUpdate event back
     // (global.ts's initGlobalEventSubs). Every OTHER test in this file uses
     // a setMetaMock that updates blockMetas synchronously, which masked a
@@ -180,10 +180,10 @@ describe("zoomAllPanesIn/Out", () => {
     // update blockMetas at all, reproducing that stale-cache condition
     // exactly, to prove the fix (using stepZoom's own return value instead
     // of re-reading) doesn't depend on the cache having updated.
-    it("computes the summary range from the freshly stepped value, not a re-read of WOS's (unsynced) cache", () => {
+    it("computes the summary range from the freshly stepped value, not a re-read of MOS's (unsynced) cache", () => {
         // Deliberately never touches blockMetas — reproduces the real
         // system's actual timing (RpcApi.SetMetaCommand is fire-and-forget;
-        // WOS's cache only updates later, off a MuxObjUpdate event).
+        // MOS's cache only updates later, off a MuxObjUpdate event).
         // beforeEach resets this back to defaultSetMetaImpl for every other
         // test, so this override cannot leak.
         setMetaMock.mockImplementation(() => Promise.resolve(undefined));

@@ -3,7 +3,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS } from "@/app/store/global";
+import { MOS } from "@/app/store/global";
 
 export interface PaneHueOption {
     label: string;
@@ -46,7 +46,7 @@ export function hueToBorder(hue: number): string {
 
 export function setHue(blockId: string, hue: number | null): void {
     void RpcApi.SetMetaCommand(TabRpcClient, {
-        oref: WOS.makeORef("block", blockId),
+        oref: MOS.makeORef("block", blockId),
         meta: { "frame:hue": hue } as any,
     });
 }

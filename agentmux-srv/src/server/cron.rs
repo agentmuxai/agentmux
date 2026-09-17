@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::backend::storage::cron::CronJob;
-use crate::backend::wps::{MuxEvent, EVENT_CRON_CHANGED};
+use crate::backend::mps::{MuxEvent, EVENT_CRON_CHANGED};
 use super::AppState;
 
 #[derive(Debug, Deserialize)]

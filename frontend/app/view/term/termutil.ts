@@ -60,7 +60,7 @@ function applyTransparencyToColor(hexColor: string, transparency: number): strin
 // value that would almost always equal foreground anyway.
 //
 // cursorAccent isn't part of TermThemeType's wire shape (frontend/types/
-// gotypes.d.ts) but IS a real xterm.js ITheme option — same tolerant `as
+// srv-types.d.ts) but IS a real xterm.js ITheme option — same tolerant `as
 // unknown as TermThemeType` cast FALLBACK_TERM_THEME below already uses for
 // the same reason, not a typo.
 function tryDeriveTermThemeFromCss(): TermThemeType | null {

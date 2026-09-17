@@ -24,7 +24,7 @@
 //!
 //! Sources scanned, read-only (never mutates a source):
 //! 1. The current channel's `objects.db` (links can live there if `id_store`
-//!    ever fell back to `wstore`, e.g. before `0011_shared_store_backfill`
+//!    ever fell back to `mstore`, e.g. before `0011_shared_store_backfill`
 //!    applied).
 //! 2. The true global `shared/store.db`, resolved via
 //!    `registry::resolve_global_shared_root()` — NOT `MigrationContext`'s own

@@ -64,7 +64,7 @@ use crate::backend::storage::store::Store;
 use crate::backend::history::HistoryService;
 use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 use agentmux_common::api_types::{
     PaneTitleRequest, PtyShellCreateRequest, PtyShellCreateResponse, PtyShellInputRequest,
     PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse, PtyShellResizeRequest,
@@ -108,7 +108,7 @@ pub struct AppState {
     /// machine it is talking to.
     pub hostname: String,
     pub app_path: String,
-    pub wstore: Arc<Store>,
+    pub mstore: Arc<Store>,
     /// GLOBAL shared store (`~/.agentmux/shared/store.db`). Holds durable
     /// user content that must survive version upgrades: identity accounts,
     /// memory bundles, drone definitions, and MuxBus credentials.
@@ -116,8 +116,8 @@ pub struct AppState {
     /// See `docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md`.
     pub shared_store: Option<Arc<Store>>,
     /// Effective identity/memory/drone/muxbus store — `shared_store` when
-    /// available, otherwise `wstore`. Handlers capture this instead of
-    /// `wstore` for any operation that must survive across version upgrades.
+    /// available, otherwise `mstore`. Handlers capture this instead of
+    /// `mstore` for any operation that must survive across version upgrades.
     ///
     /// Deprecated for everything except `db_accounts` reads/writes as of
     /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` — new call sites
@@ -131,7 +131,7 @@ pub struct AppState {
     pub id_store: Arc<Store>,
     /// Permanently-global identity store — see `identity_store`'s own doc
     /// comment on `bootstrap::Stores` for the full explanation. Never
-    /// `None`: falls back to `wstore` on the same best-effort terms as
+    /// `None`: falls back to `mstore` on the same best-effort terms as
     /// `id_store` if the shared root can't be resolved.
     pub identity_store: Arc<Store>,
     pub filestore: Arc<FileStore>,
@@ -167,7 +167,7 @@ pub struct AppState {
     /// `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
     pub dock_snapshots: Arc<crate::backend::dock_snapshot::DockSnapshotCache>,
     /// Holding pen for a declared-background task's OS pid when it arrives
-    /// (from bashwrap, over WPS) before its `db_background_tasks` row
+    /// (from bashwrap, over MPS) before its `db_background_tasks` row
     /// exists yet — closes the race `background_task_set_pid`'s silent
     /// no-op on a missing row would otherwise lose permanently. See
     /// `docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and the
@@ -248,7 +248,7 @@ pub struct AppState {
     pub auth_session_manager: std::sync::Arc<crate::identity::auth_session::AuthSessionManager>,
 
     /// In-flight `install.start` sessions. Frontend subscribes to
-    /// `install_chunk` WPS events scoped by session id; the registry
+    /// `install_chunk` MPS events scoped by session id; the registry
     /// holds per-session cancel handles so `install.cancel` can abort
     /// an install mid-flight.
     /// See `SPEC_AGENT_INSTALL_STAGE_2026_05_17.md` §9.
@@ -438,7 +438,7 @@ pub fn build_router(state: AppState) -> Router {
         // Streaming-bash wrapper publish endpoint
         // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
         // POSTs `{event, scopes, data}` here while a PreToolUse-rewritten
-        // Bash command is running; we forward to the in-process WPS broker.
+        // Bash command is running; we forward to the in-process MPS broker.
         // Auth-gated like the other reactive routes (PR #801 pattern).
         .route("/agentmux/wps/publish", post(handle_wps_publish))
         // Persistent shell launch endpoint
@@ -802,7 +802,7 @@ async fn handle_discovery(State(state): State<AppState>) -> Json<serde_json::Val
     // path leaves block_id/status empty (agents.rs) — so addressability AND the
     // live block_id come from the reachable set above. `block_id` is null for a
     // known-but-unreachable agent; the always-empty `status` is omitted.
-    let instances = state.wstore.instance_list(None, None).unwrap_or_default();
+    let instances = state.mstore.instance_list(None, None).unwrap_or_default();
     let agents: Vec<serde_json::Value> = instances
         .into_iter()
         .map(|i| {
@@ -873,10 +873,10 @@ async fn stub_501() -> impl IntoResponse {
     )
 }
 
-/// Auth-gated WPS publish endpoint
+/// Auth-gated MPS publish endpoint
 /// (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §3.2). `agentmux-bashwrap`
 /// POSTs here while running a Bash command; we forward to the
-/// in-process WPS broker so subscribed frontends receive the event.
+/// in-process MPS broker so subscribed frontends receive the event.
 async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
@@ -887,10 +887,10 @@ async fn handle_wps_publish(
     // detector itself, see
     // docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md.
     // `agentmux-bashwrap`'s `precompact` POST still lands here and is now
-    // a harmless no-op broadcast like any other WPS event — left as-is
+    // a harmless no-op broadcast like any other MPS event — left as-is
     // rather than removing the route, since deleting it isn't warranted
     // just to avoid one no-op publish.
-    let event = crate::backend::wps::MuxEvent {
+    let event = crate::backend::mps::MuxEvent {
         event: req.event,
         scopes: req.scopes,
         sender: String::new(),
@@ -905,7 +905,7 @@ async fn handle_wps_publish(
 ///
 /// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
 /// `shell_id`; the `ShellNodeRunner` streams stdout/stderr to the frontend
-/// as `shell_chunk` WPS events without blocking the agent.
+/// as `shell_chunk` MPS events without blocking the agent.
 async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,
@@ -918,7 +918,7 @@ async fn handle_shell_create(
         .as_millis() as u64;
 
     // Read the agent block once for both the cwd and env fallbacks below.
-    let agent_block = state.wstore
+    let agent_block = state.mstore
         .get::<crate::backend::obj::Block>(&req.agent_block_id)
         .ok()
         .flatten();
@@ -985,8 +985,8 @@ async fn handle_shell_create(
     // shells lost their create event while their shell_chunk events at
     // persist: 1024 still replayed, causing the reducer to silently drop
     // orphaned chunks.)
-    state.broker.publish(crate::backend::wps::MuxEvent {
-        event: crate::backend::wps::EVENT_SHELL_NODE_CREATE.to_string(),
+    state.broker.publish(crate::backend::mps::MuxEvent {
+        event: crate::backend::mps::EVENT_SHELL_NODE_CREATE.to_string(),
         scopes: vec![format!("block:{}", req.agent_block_id)],
         sender: String::new(),
         persist: 64,
@@ -1123,11 +1123,11 @@ pub(crate) const META_KEY_AGENT_LOCK_UNTIL: &str = "term:agentlockuntil";
 /// shell the HUMAN created via the drawer is just as legitimate a target as
 /// one `PtyShell` created itself, as long as it's this agent's own pane.
 fn is_owned_by_agent(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     shell_id: &str,
     agent_block_id: &str,
 ) -> bool {
-    wstore
+    mstore
         .get::<crate::backend::obj::Block>(shell_id)
         .ok()
         .flatten()
@@ -1150,9 +1150,9 @@ fn broadcast_meta_update(
     meta_update: &crate::backend::obj::MetaMapType,
 ) -> Result<(), String> {
     let oref_str = format!("block:{block_id}");
-    crate::server::service::object_helpers::update_object_meta(&state.wstore, &oref_str, meta_update)?;
+    crate::server::service::object_helpers::update_object_meta(&state.mstore, &oref_str, meta_update)?;
     let block = state
-        .wstore
+        .mstore
         .must_get::<crate::backend::obj::Block>(block_id)
         .map_err(|e| e.to_string())?;
     state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
@@ -1198,7 +1198,7 @@ async fn try_attach_to_existing_shell(
     agent_block_id: &str,
     id: &str,
 ) -> Option<axum::response::Response> {
-    let block = state.wstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
+    let block = state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
 
     // Baseline BEFORE resync — see `answer_conpty_handshake_if_seen`'s doc
     // comment (Codex P1 on PR #3194) for why this matters: the `term` file
@@ -1213,7 +1213,7 @@ async fn try_attach_to_existing_shell(
         .map(|info| info.size as usize)
         .unwrap_or(0);
 
-    let registry = state.wstore.shared_agent_registry();
+    let registry = state.mstore.shared_agent_registry();
     if let Err(e) = blockcontroller::resync_controller(
         &block,
         "ptyshell",
@@ -1236,7 +1236,7 @@ async fn try_attach_to_existing_shell(
         false,
         Some(Arc::clone(&state.broker)),
         Some(Arc::clone(&state.event_bus)),
-        Some(Arc::clone(&state.wstore)),
+        Some(Arc::clone(&state.mstore)),
         Some(Arc::clone(&state.filestore)),
         registry,
         state.boot_id.clone(),
@@ -1281,10 +1281,10 @@ async fn try_attach_to_existing_shell(
             // path). Not fully transactional (same as that existing
             // pattern) — a failed/skipped clear just costs one more round
             // trip through the fallback chain, not correctness.
-            if let Ok(mut parent) = state.wstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
+            if let Ok(mut parent) = state.mstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
                 if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
                     parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
-                    if state.wstore.update(&mut parent).is_ok() {
+                    if state.mstore.update(&mut parent).is_ok() {
                         state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                             eventtype: "waveobj:update".to_string(),
                             oref: format!("block:{agent_block_id}"),
@@ -1338,7 +1338,7 @@ async fn handle_pty_shell_create(
     Json(req): Json<PtyShellCreateRequest>,
 ) -> impl IntoResponse {
     let existing_id = state
-        .wstore
+        .mstore
         .get::<crate::backend::obj::Block>(&req.agent_block_id)
         .ok()
         .flatten()
@@ -1401,7 +1401,7 @@ async fn handle_pty_shell_create(
     // (typically the portable runtime/ dir), not the agent's worktree.
     let effective_cwd = req.cwd.clone().or_else(|| {
         state
-            .wstore
+            .mstore
             .get::<crate::backend::obj::Block>(&req.agent_block_id)
             .ok()
             .flatten()
@@ -1481,7 +1481,7 @@ async fn handle_pty_shell_create(
     // documented, accepted gap (see the spec's §10 for the full
     // reasoning), not silently ignored, just out of scope for what a
     // single backend transaction can enforce unilaterally.
-    let claim = state.wstore.with_tx(|tx| {
+    let claim = state.mstore.with_tx(|tx| {
         let mut parent = tx.must_get::<crate::backend::obj::Block>(&req.agent_block_id)?;
         if let Some(winner_id) = parent
             .meta
@@ -1536,9 +1536,9 @@ async fn handle_pty_shell_create(
             // `Ok(None)` arm does inside its transaction — just as a plain
             // sequence, since we're no longer inside that transaction.
             let insert_result = (|| -> Result<(), crate::backend::storage::error::StoreError> {
-                state.wstore.insert(&mut block)?;
+                state.mstore.insert(&mut block)?;
                 let mut parent = state
-                    .wstore
+                    .mstore
                     .must_get::<crate::backend::obj::Block>(&req.agent_block_id)?;
                 parent
                     .subblockids
@@ -1547,7 +1547,7 @@ async fn handle_pty_shell_create(
                 parent
                     .meta
                     .insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), json!(child_id));
-                state.wstore.update(&mut parent)?;
+                state.mstore.update(&mut parent)?;
                 Ok(())
             })();
             if let Err(e) = insert_result {
@@ -1558,7 +1558,7 @@ async fn handle_pty_shell_create(
                     .into_response();
             }
             if let Ok(Some(parent)) = state
-                .wstore
+                .mstore
                 .get::<crate::backend::obj::Block>(&req.agent_block_id)
             {
                 state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
@@ -1581,7 +1581,7 @@ async fn handle_pty_shell_create(
             // subscribed frontend). Broadcast now so a drawer already open
             // (or opened moments later) actually sees the pointer reactively
             // instead of only on its next unrelated refetch.
-            if let Ok(Some(parent)) = state.wstore.get::<crate::backend::obj::Block>(&req.agent_block_id) {
+            if let Ok(Some(parent)) = state.mstore.get::<crate::backend::obj::Block>(&req.agent_block_id) {
                 state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: format!("block:{}", req.agent_block_id),
@@ -1605,7 +1605,7 @@ async fn handle_pty_shell_create(
     };
     let child_id = shell_id;
 
-    let registry = state.wstore.shared_agent_registry();
+    let registry = state.mstore.shared_agent_registry();
     if let Err(e) = blockcontroller::resync_controller(
         &block,
         "ptyshell", // headless — no real tab; only used for tracing/scoping.
@@ -1614,7 +1614,7 @@ async fn handle_pty_shell_create(
         true, // respawn_if_done — irrelevant here, this block is always freshly inserted (STATUS_INIT), never STATUS_DONE
         Some(Arc::clone(&state.broker)),
         Some(Arc::clone(&state.event_bus)),
-        Some(Arc::clone(&state.wstore)),
+        Some(Arc::clone(&state.mstore)),
         Some(Arc::clone(&state.filestore)),
         registry,
         state.boot_id.clone(),
@@ -1625,9 +1625,9 @@ async fn handle_pty_shell_create(
         // registered controller behind that the caller has no way to clean
         // up, since it never received a `shell_id` to call PtyShellStop with.
         blockcontroller::delete_controller(&child_id);
-        let _ = state.wstore.delete::<crate::backend::obj::Block>(&child_id);
+        let _ = state.mstore.delete::<crate::backend::obj::Block>(&child_id);
         if let Ok(mut parent) = state
-            .wstore
+            .mstore
             .must_get::<crate::backend::obj::Block>(&req.agent_block_id)
         {
             let mut changed = false;
@@ -1652,7 +1652,7 @@ async fn handle_pty_shell_create(
                 changed = true;
             }
             if changed {
-                let _ = state.wstore.update(&mut parent);
+                let _ = state.mstore.update(&mut parent);
                 state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
                     eventtype: "waveobj:update".to_string(),
                     oref: format!("block:{}", req.agent_block_id),
@@ -1772,7 +1772,7 @@ async fn handle_pty_shell_input(
     State(state): State<AppState>,
     Json(req): Json<PtyShellInputRequest>,
 ) -> impl IntoResponse {
-    if !is_owned_by_agent(&state.wstore, &req.shell_id, &req.agent_block_id) {
+    if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (
             StatusCode::OK,
             Json(PtyShellInputResponse {
@@ -1840,7 +1840,7 @@ async fn handle_pty_shell_resize(
     State(state): State<AppState>,
     Json(req): Json<PtyShellResizeRequest>,
 ) -> impl IntoResponse {
-    if !is_owned_by_agent(&state.wstore, &req.shell_id, &req.agent_block_id) {
+    if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (
             StatusCode::OK,
             Json(PtyShellResizeResponse {
@@ -1884,7 +1884,7 @@ async fn handle_pty_shell_read(
     State(state): State<AppState>,
     Json(req): Json<PtyShellReadRequest>,
 ) -> impl IntoResponse {
-    if !is_owned_by_agent(&state.wstore, &req.shell_id, &req.agent_block_id) {
+    if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (
             StatusCode::OK,
             Json(PtyShellReadResponse { content: String::new(), truncated: false }),
@@ -1915,7 +1915,7 @@ async fn handle_pty_shell_status(
     State(state): State<AppState>,
     Json(req): Json<PtyShellStatusRequest>,
 ) -> impl IntoResponse {
-    if !is_owned_by_agent(&state.wstore, &req.shell_id, &req.agent_block_id) {
+    if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (StatusCode::OK, Json(PtyShellStatusResponse { running: false, exit_code: None }));
     }
     match blockcontroller::get_block_controller_status(&req.shell_id) {
@@ -1943,7 +1943,7 @@ async fn handle_pty_shell_stop(
     State(state): State<AppState>,
     Json(req): Json<PtyShellStopRequest>,
 ) -> impl IntoResponse {
-    if !is_owned_by_agent(&state.wstore, &req.shell_id, &req.agent_block_id) {
+    if !is_owned_by_agent(&state.mstore, &req.shell_id, &req.agent_block_id) {
         return (StatusCode::OK, Json(PtyShellStopResponse { released: false }));
     }
     // Released in memory first — that's the copy `controllerinput` enforces
@@ -2388,7 +2388,7 @@ async fn handle_self(
     if block_id.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing block_id" }))).into_response();
     }
-    match service::resolve_agent_context(&state.wstore, &block_id) {
+    match service::resolve_agent_context(&state.mstore, &block_id) {
         Ok(ctx) => Json(serde_json::to_value(&ctx).unwrap_or_default()).into_response(),
         Err(e) => (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response(),
     }
@@ -2417,7 +2417,7 @@ async fn handle_window_name(
             if block_id.is_empty() {
                 return (StatusCode::BAD_REQUEST, Json(json!({ "error": "provide window_id or block_id" }))).into_response();
             }
-            match service::resolve_agent_context(&state.wstore, &block_id) {
+            match service::resolve_agent_context(&state.mstore, &block_id) {
                 Ok(ctx) => match ctx.window_id {
                     Some(w) => w,
                     None => {
@@ -2552,7 +2552,7 @@ fn resolve_own(
     if block_id.is_empty() {
         return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "provide an explicit target id or block_id" }))).into_response());
     }
-    let ctx = service::resolve_agent_context(&state.wstore, &block_id)
+    let ctx = service::resolve_agent_context(&state.mstore, &block_id)
         .map_err(|e| (StatusCode::NOT_FOUND, Json(json!({ "error": e }))).into_response())?;
     pick(&ctx).filter(|s| !s.is_empty()).ok_or_else(|| {
         (
@@ -2596,17 +2596,17 @@ fn name_call_error_status(e: &str) -> StatusCode {
 
 /// `GET /api/v1/layout` — read-only window → workspace → tab → pane tree.
 async fn handle_layout(State(state): State<AppState>) -> impl IntoResponse {
-    Json(service::agent_layout(&state.wstore))
+    Json(service::agent_layout(&state.mstore))
 }
 
 /// `GET /api/v1/windows` — flat list of windows.
 async fn handle_list_windows(State(state): State<AppState>) -> impl IntoResponse {
-    Json(service::agent_windows(&state.wstore))
+    Json(service::agent_windows(&state.mstore))
 }
 
 /// `GET /api/v1/workspaces` — flat list of workspaces.
 async fn handle_list_workspaces(State(state): State<AppState>) -> impl IntoResponse {
-    Json(service::agent_workspaces(&state.wstore))
+    Json(service::agent_workspaces(&state.mstore))
 }
 
 #[derive(serde::Deserialize)]
@@ -2629,10 +2629,10 @@ async fn handle_list_tabs(
     let ws_id = q.workspace_id.filter(|w| !w.is_empty()).or_else(|| {
         q.block_id
             .filter(|b| !b.is_empty())
-            .and_then(|b| service::resolve_agent_context(&state.wstore, &b).ok())
+            .and_then(|b| service::resolve_agent_context(&state.mstore, &b).ok())
             .and_then(|ctx| ctx.workspace_id)
     });
-    Json(service::agent_tabs(&state.wstore, ws_id.as_deref()))
+    Json(service::agent_tabs(&state.mstore, ws_id.as_deref()))
 }
 
 /// `POST /api/v1/tab/activate` — make `tab_id` the active tab in its
@@ -2645,7 +2645,7 @@ async fn handle_tab_activate(
     if tab_id.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing tab_id" }))).into_response();
     }
-    let ws_id = match service::workspace_id_for_tab(&state.wstore, &tab_id) {
+    let ws_id = match service::workspace_id_for_tab(&state.mstore, &tab_id) {
         Some(w) => w,
         None => return (StatusCode::NOT_FOUND, Json(json!({ "error": format!("no workspace owns tab {tab_id}") }))).into_response(),
     };

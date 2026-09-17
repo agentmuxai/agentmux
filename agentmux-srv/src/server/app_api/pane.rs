@@ -29,7 +29,7 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// windows itself). See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
 pub(super) async fn open_pane_floating(
     state: &AppState,
-    wstore: &Store,
+    mstore: &Store,
     event_bus: &crate::backend::eventbus::EventBus,
     view: String,
     source_tab_id: String,
@@ -50,7 +50,7 @@ pub(super) async fn open_pane_floating(
     // `state.blocks` — the `tear_off_block` saga's pre-condition checks the
     // reducer-canonical block map. The `BlockCreated` event also carries the
     // meta, which `persist_subscriber::apply_block_created` writes into the
-    // wstore Block so the editor renders with its file + tree state. We skip
+    // mstore Block so the editor renders with its file + tree state. We skip
     // layout placement, so the block never renders docked before the saga
     // moves it into the floating workspace (no flash).
     let meta_val = serde_json::to_value(&meta)
@@ -77,8 +77,8 @@ pub(super) async fn open_pane_floating(
         })
         .ok_or_else(|| "pane.open: floating: CreateBlock emitted no BlockCreated".to_string())?;
     for ev in &create_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, wstore) {
-            tracing::warn!("pane.open: floating: CreateBlock wstore apply failed: {e}");
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.open: floating: CreateBlock mstore apply failed: {e}");
         }
     }
     crate::server::service::publish_events(state, &create_events);
@@ -120,7 +120,7 @@ pub(super) async fn open_pane_floating(
     // its MuxObj cache (mirrors the docked path + the tear-off DnD handler).
     {
         let mut updates: Vec<obj::MuxObjUpdate> = Vec::new();
-        if let Ok(ws) = wstore.must_get::<Workspace>(&new_ws_id) {
+        if let Ok(ws) = mstore.must_get::<Workspace>(&new_ws_id) {
             updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "workspace".into(),
@@ -128,8 +128,8 @@ pub(super) async fn open_pane_floating(
                 obj: Some(obj::mux_obj_to_value(&ws)),
             });
         }
-        if let Ok(t) = wstore.must_get::<Tab>(&new_tab_id) {
-            if let Ok(layout) = wstore.must_get::<obj::LayoutState>(&t.layoutstate) {
+        if let Ok(t) = mstore.must_get::<Tab>(&new_tab_id) {
+            if let Ok(layout) = mstore.must_get::<obj::LayoutState>(&t.layoutstate) {
                 updates.push(obj::MuxObjUpdate {
                     updatetype: "update".into(),
                     otype: "layout".into(),
@@ -144,7 +144,7 @@ pub(super) async fn open_pane_floating(
                 obj: Some(obj::mux_obj_to_value(&t)),
             });
         }
-        if let Ok(b) = wstore.must_get::<Block>(&block_id) {
+        if let Ok(b) = mstore.must_get::<Block>(&block_id) {
             updates.push(obj::MuxObjUpdate {
                 updatetype: "update".into(),
                 otype: "block".into(),
@@ -170,7 +170,7 @@ pub(super) async fn open_pane_floating(
     };
     match window_id {
         Some(win) => {
-            state.broker.publish(crate::backend::wps::MuxEvent {
+            state.broker.publish(crate::backend::mps::MuxEvent {
                 event: "openfloatingpane".to_string(),
                 scopes: vec![win],
                 sender: String::new(),
@@ -259,7 +259,7 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 
 /// Block-meta key carrying an ARRAY of files the reused pane should open —
 /// the sole delivery path (see below for why an earlier version's second,
-/// "live WPS event" path was removed). Drained (all entries, in order)
+/// "live MPS event" path was removed). Drained (all entries, in order)
 /// reactively by `EditorViewModel`'s `createEffect` over its own block meta,
 /// then cleared immediately after — covers both "not yet mounted when this
 /// was written" and "already mounted, reacts as soon as the write lands"
@@ -272,13 +272,13 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// but the final one. Appending to an array and draining all of them at
 /// once fixes that.
 ///
-/// **Sole delivery path — no separate live WPS event** (codex P1 on PR
-/// #2404, found twice): an earlier version ALSO fired a direct WPS event
+/// **Sole delivery path — no separate live MPS event** (codex P1 on PR
+/// #2404, found twice): an earlier version ALSO fired a direct MPS event
 /// (`persist: 0`) alongside this meta write, for immediate delivery when the
 /// pane was already mounted. First finding: the frontend's live handler
 /// didn't clear its own entry from this array, so it could be reprocessed
 /// on a later, unrelated remount. Second, deeper finding after fixing that:
-/// the WPS event is a direct WS push and arrives essentially synchronously,
+/// the MPS event is a direct WS push and arrives essentially synchronously,
 /// while THIS meta write only reaches the frontend's `blockAtom` after an
 /// async MuxObj DB-refetch — so the live handler's own dequeue attempt
 /// could run and read stale data (this exact write not yet reflected)
@@ -289,12 +289,12 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// already-mounted case (a real MuxObj round-trip instead of a direct
 /// push) for not being racy.
 ///
-/// **Superseded relying on WPS `persist > 0` for durability** (codex P1 on
+/// **Superseded relying on MPS `persist > 0` for durability** (codex P1 on
 /// PR #2404, earliest finding on this function): a just-created Editor
 /// block may not have finished mounting its `EditorViewModel` by the time a
 /// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
 /// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
-/// replay marker on disconnect (`agentmux-srv/src/backend/wps.rs:312-323`),
+/// replay marker on disconnect (`agentmux-srv/src/backend/mps.rs:312-323`),
 /// so any later, unrelated reconnect would replay the *entire* persisted
 /// history again — reopening files the user has since closed. The broker
 /// has no ack/consume concept, so nothing marks a persisted event "already
@@ -335,13 +335,13 @@ pub(super) async fn maybe_reuse_editor_pane(
     caller_block_id: &str,
     file: &str,
 ) -> Result<Option<PaneOpenResult>, String> {
-    let wstore = &state.wstore;
-    let tab_id = match super::resolve_tab_id_for_block(wstore, caller_block_id) {
+    let mstore = &state.mstore;
+    let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
         Ok(id) => id,
         Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
     };
 
-    let existing = match super::find_editor_block(wstore, &tab_id)? {
+    let existing = match super::find_editor_block(mstore, &tab_id)? {
         Some(block) => block,
         None => return Ok(None),
     };
@@ -352,7 +352,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     // posture elsewhere) so a not-yet-mounted (or remounting)
     // EditorViewModel drains every pending file once at construction, then
     // clears the queue — see META_PENDING_OPEN_FILES's doc comment for why
-    // this replaces relying on WPS persist/replay for correctness.
+    // this replaces relying on MPS persist/replay for correctness.
     let mut pending: Vec<String> = existing
         .meta
         .get(META_PENDING_OPEN_FILES)
@@ -370,8 +370,8 @@ pub(super) async fn maybe_reuse_editor_pane(
     )
     .await;
     for ev in &meta_events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, wstore) {
-            tracing::warn!("pane.open: reuse: UpdateBlockMeta wstore apply failed: {e}");
+        if let Err(e) = crate::persist_subscriber::apply_event_to_mstore(ev, mstore) {
+            tracing::warn!("pane.open: reuse: UpdateBlockMeta mstore apply failed: {e}");
         }
     }
     crate::server::service::publish_events(state, &meta_events);
@@ -504,7 +504,7 @@ mod close_pane_tests {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let evs = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &evs {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         evs
     }
@@ -553,7 +553,7 @@ mod close_pane_tests {
     /// the exact mechanism `agentmux-mcp`'s `sign_ui_automation_auth` uses,
     /// reproduced here since this is a different crate.
     fn sign_auth(state: &AppState, agent_id: &str) -> UiAutomationAuth {
-        let key = state.wstore.agent_jekt_key_ensure(agent_id).unwrap();
+        let key = state.mstore.agent_jekt_key_ensure(agent_id).unwrap();
         let ts_secs = agentmux_common::time::now_secs();
         let sig = agentmux_common::jekt_sign::sign_jekt(
             &key, "ui-automation-identity", agent_id, "__srv__", ts_secs, "",

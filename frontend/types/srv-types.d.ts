@@ -243,7 +243,7 @@ declare global {
 
     // wshrpc.CommandBackgroundTaskPidData — fire-and-forget push of a
     // declared-background task's real OS pid, relayed from
-    // `agentmux-bashwrap`'s own WPS `"pid"` chunk (op: "pid" on the
+    // `agentmux-bashwrap`'s own MPS `"pid"` chunk (op: "pid" on the
     // `tool_chunk` event this block already subscribes to). `node_id` is
     // the same join key as `CommandBackgroundTaskCompletionData` above.
     // See docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
@@ -1820,7 +1820,7 @@ declare global {
         display: StickerDisplayOptsType;
     };
 
-    // wps.SubscriptionRequest
+    // mps.SubscriptionRequest
     type SubscriptionRequest = {
         event: string;
         scopes?: string[];
@@ -2074,7 +2074,7 @@ declare global {
         data: any;
     };
 
-    // wps.WSFileEventData
+    // mps.WSFileEventData
     type WSFileEventData = {
         zoneid: string;
         filename: string;
@@ -2102,7 +2102,7 @@ declare global {
         fullconfig: FullConfigType;
     };
 
-    // wps.MuxEvent
+    // mps.MuxEvent
     type MuxEvent = {
         event: string;
         scopes?: string[];

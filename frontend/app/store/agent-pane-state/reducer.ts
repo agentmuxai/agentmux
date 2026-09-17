@@ -787,7 +787,7 @@ export function update(
             // SubmitTimeoutElapsed/InterruptTimeoutElapsed/
             // ReconcileTurnActive above, missed here in round 4 on the
             // (wrong) assumption that a synchronously-failed turn-start
-            // could never race a live WPS ping.
+            // could never race a live MPS ping.
             return {
                 state: { ...state, turnPhase: { kind: "Idle" }, compacting: null, pendingCompactionPing: null },
                 events: [{ type: "turn-start-failed" }],
@@ -1277,7 +1277,7 @@ export function update(
             // reagent P1 on PR #2378 (round 5): also no-op unless the turn
             // is actually in the working set (Submitting/Streaming/
             // Interrupting). `compaction_started` arrives over a SEPARATE
-            // transport (WPS: HTTP publish -> broker -> websocket) from the
+            // transport (MPS: HTTP publish -> broker -> websocket) from the
             // primary NDJSON stream carrying TurnEnd/compact_boundary, so
             // it can race and land AFTER that same turn's TurnEnd already
             // fired. Every "clear compacting" fix added across rounds 1-4
@@ -1298,7 +1298,7 @@ export function update(
             // the compaction that already completed), since `workingFromPhase`
             // stays true the whole time and doesn't distinguish "before" from
             // "after" the boundary. `compaction_started` and `compact_boundary`
-            // travel over two independent transports (WPS vs. the primary
+            // travel over two independent transports (MPS vs. the primary
             // NDJSON stream) with no ordering guarantee between them. Reject
             // any start whose own timestamp is at or before the most recent
             // known boundary — a genuinely NEW compaction must be later than
@@ -1410,7 +1410,7 @@ export function update(
                 pendingCompactionPing: preservesNewerPendingPing ? state.pendingCompactionPing : null,
                 // Codex P2 on PR #2378 (round 10): use this boundary's own
                 // parsed completion time, not `command.at` (the frontend's
-                // receipt wall-clock). `CompactionStarted.at` is the WPS
+                // receipt wall-clock). `CompactionStarted.at` is the MPS
                 // payload's embedded true start time, not a receipt
                 // timestamp — comparing it against a delayed boundary's
                 // RECEIPT time in the isStaleVsLastBoundary check above

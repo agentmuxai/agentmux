@@ -59,7 +59,7 @@ export const McpApi = {
         return client.rpcCall("mcp.unbind", data, opts);
     },
 
-    /** Health/prerequisite probe — see McpProbeResult (gotypes.d.ts). */
+    /** Health/prerequisite probe — see McpProbeResult (srv-types.d.ts). */
     McpProbeCommand(
         client: RpcClient,
         data: { agent_id: string; id: string },

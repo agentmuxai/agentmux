@@ -42,12 +42,12 @@ export interface FixtureStreamEvent {
     line: string;
 }
 
-/** A WPS broker event. The replay driver matches `event` + `data.op`
+/** A MPS broker event. The replay driver matches `event` + `data.op`
  *  to translate into the right reducer command. */
 export interface FixtureWpsEvent {
     seq: number;
     t_ms: number;
-    src: "wps";
+    src: "mps";
     /** Broker event name, e.g. `"tool_chunk"`, `"controllerstatus"`. */
     event: string;
     /** Scope filters (`["block:<id>"]`). */

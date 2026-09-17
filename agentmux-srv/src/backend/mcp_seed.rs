@@ -120,12 +120,12 @@ fn reject_duplicate_names(manifest: &[StarterMcpServer]) -> Result<(), StoreErro
 /// fail the migration on every subsequent boot — same self-heal
 /// `skill_seed.rs::any_starter_skill_name_exists` provides (reagent P1, PR
 /// #2144).
-pub(crate) fn any_starter_mcp_server_name_exists(wstore: &Arc<Store>) -> Result<bool, StoreError> {
+pub(crate) fn any_starter_mcp_server_name_exists(mstore: &Arc<Store>) -> Result<bool, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
     // Pre-dates Phase 2 of SPEC_DURABLE_BINDINGS_2026_09_10.md's catalog
     // redirect — see skill_seed.rs's identical note.
-    let existing = wstore.mcp_server_list_global(wstore)?;
+    let existing = mstore.mcp_server_list_global(mstore)?;
     Ok(manifest
         .iter()
         .any(|entry| existing.iter().any(|item| item.server.name == entry.name)))
@@ -147,7 +147,7 @@ pub(crate) fn any_starter_mcp_server_name_exists(wstore: &Arc<Store>) -> Result<
 /// would hit the name-uniqueness rejection on the servers already stranded
 /// from the failed attempt. Mirrors `skill_seed::seed_starter_skills`
 /// exactly (reagent P2, PR #2141 round 1).
-pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerSeedReport, StoreError> {
+pub(crate) fn seed_starter_mcp_servers(mstore: &Arc<Store>) -> Result<McpServerSeedReport, StoreError> {
     let manifest: Vec<StarterMcpServer> = serde_json::from_str(STARTER_MCP_SERVERS_JSON)
         .map_err(|e| StoreError::Other(format!("mcp server seed: parse manifest: {e}")))?;
     reject_duplicate_names(&manifest)?;
@@ -170,9 +170,9 @@ pub(crate) fn seed_starter_mcp_servers(wstore: &Arc<Store>) -> Result<McpServerS
             created_at: now,
             updated_at: now,
         };
-        if let Err(e) = wstore.mcp_server_upsert_unique_global(&server) {
+        if let Err(e) = mstore.mcp_server_upsert_unique_global(&server) {
             for id in &inserted_ids {
-                if let Err(cleanup_err) = wstore.mcp_server_delete(wstore, id) {
+                if let Err(cleanup_err) = mstore.mcp_server_delete(mstore, id) {
                     tracing::error!(
                         "mcp server seed: cleanup after partial failure could not remove {id}: {cleanup_err}"
                     );
@@ -256,13 +256,13 @@ mod tests {
 
     #[test]
     fn seeds_six_mcp_servers_into_an_empty_catalog() {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        assert!(wstore.mcp_server_list_global(&wstore).unwrap().is_empty());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        assert!(mstore.mcp_server_list_global(&mstore).unwrap().is_empty());
 
-        let report = seed_starter_mcp_servers(&wstore).unwrap();
+        let report = seed_starter_mcp_servers(&mstore).unwrap();
 
         assert_eq!(report.created, 6);
-        let after = wstore.mcp_server_list_global(&wstore).unwrap();
+        let after = mstore.mcp_server_list_global(&mstore).unwrap();
         assert_eq!(after.len(), 6, "all six starter MCP servers should be seeded");
         assert!(after.iter().all(|item| item.server.is_global));
         assert!(
@@ -273,10 +273,10 @@ mod tests {
 
     #[test]
     fn seeded_config_round_trips_as_valid_json() {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        seed_starter_mcp_servers(&wstore).unwrap();
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        seed_starter_mcp_servers(&mstore).unwrap();
 
-        let after = wstore.mcp_server_list_global(&wstore).unwrap();
+        let after = mstore.mcp_server_list_global(&mstore).unwrap();
         let git = after
             .iter()
             .find(|item| item.server.name == "git")
@@ -296,7 +296,7 @@ mod tests {
         // forces seed_starter_mcp_servers to fail partway through the
         // manifest, and the catalog must end up back at exactly the one
         // pre-existing server, not a stranded partial starter set.
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -314,12 +314,12 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        wstore.mcp_server_upsert_unique_global(&colliding).unwrap();
+        mstore.mcp_server_upsert_unique_global(&colliding).unwrap();
 
-        let result = seed_starter_mcp_servers(&wstore);
+        let result = seed_starter_mcp_servers(&mstore);
         assert!(result.is_err(), "seeding must fail when a name collides");
 
-        let after = wstore.mcp_server_list_global(&wstore).unwrap();
+        let after = mstore.mcp_server_list_global(&mstore).unwrap();
         assert_eq!(
             after.len(),
             1,
@@ -330,8 +330,8 @@ mod tests {
 
     #[test]
     fn any_starter_mcp_server_name_exists_detects_a_collision_without_inserting() {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        assert!(!any_starter_mcp_server_name_exists(&wstore).unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        assert!(!any_starter_mcp_server_name_exists(&mstore).unwrap());
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -346,11 +346,11 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        wstore.mcp_server_upsert_unique_global(&user_created).unwrap();
+        mstore.mcp_server_upsert_unique_global(&user_created).unwrap();
 
-        assert!(any_starter_mcp_server_name_exists(&wstore).unwrap());
+        assert!(any_starter_mcp_server_name_exists(&mstore).unwrap());
         assert_eq!(
-            wstore.mcp_server_list_global(&wstore).unwrap().len(),
+            mstore.mcp_server_list_global(&mstore).unwrap().len(),
             1,
             "the check itself must not insert anything"
         );

@@ -76,7 +76,7 @@ impl SnapshotError {
 /// Inspect `objects.db` to decide whether a pre-migration snapshot is
 /// warranted. Returns `Some(found_version)` if an existing DB is behind
 /// `current`; `None` for fresh installs (no file) or same-version opens.
-/// A newer-than-current DB is left alone — the safety lock in `wstore.rs`
+/// A newer-than-current DB is left alone — the safety lock in `mstore.rs`
 /// will refuse to open it before any migration runs.
 pub fn needs_snapshot(
     objects_db: &Path,

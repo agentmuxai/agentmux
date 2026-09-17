@@ -11,7 +11,7 @@
 
 import { createSignal, onCleanup, onMount } from "solid-js";
 import { detectHost } from "@/app/platform/ipc";
-import { getSettingsKeyAtom, pushNotification, WOS } from "@/app/store/global";
+import { getSettingsKeyAtom, pushNotification, MOS } from "@/app/store/global";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 
 interface Opts {
@@ -72,7 +72,7 @@ export function useAgentDropAttach(opts: Opts): UseAgentDropAttachResult {
     };
 
     const cwd = (): string | undefined => {
-        const block = WOS.getObjectValue<Block>(WOS.makeORef("block", opts.blockId));
+        const block = MOS.getObjectValue<Block>(MOS.makeORef("block", opts.blockId));
         return block?.meta?.["cmd:cwd"];
     };
 

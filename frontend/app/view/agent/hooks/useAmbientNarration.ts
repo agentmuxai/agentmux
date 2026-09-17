@@ -31,8 +31,8 @@
 
 import { createSignal, onCleanup, type Accessor } from "solid-js";
 
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 
 export interface AmbientNarration {
     /** Which narrated action this was — the backend's prompt selector. */

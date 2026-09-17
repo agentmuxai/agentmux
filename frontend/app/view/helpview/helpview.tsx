@@ -5,7 +5,7 @@ import { QuickTips } from "@/app/element/quicktips";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showZoomIndicator } from "@/app/store/zoom";
-import { WOS } from "@/store/global";
+import { MOS } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal, onMount, type JSX } from "solid-js";
 
@@ -36,7 +36,7 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     const [zoom, setZoom] = createSignal(1.0);
 
     onMount(() => {
-        const blockData = WOS.getMuxObjectAtom<Block>(`block:${model.blockId}`)();
+        const blockData = MOS.getMuxObjectAtom<Block>(`block:${model.blockId}`)();
         const saved = blockData?.meta?.["help:zoom"];
         if (typeof saved === "number" && saved >= MIN_ZOOM && saved <= MAX_ZOOM) {
             setZoom(saved);
@@ -48,7 +48,7 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
         setZoom(next);
         fireAndForget(() =>
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", model.blockId),
+                oref: MOS.makeORef("block", model.blockId),
                 meta: { "help:zoom": Math.abs(next - 1.0) < 0.01 ? null : next },
             })
         );

@@ -32,11 +32,11 @@ vi.mock("@/app/store/rpc-util", () => ({
     TabRpcClient: {},
 }));
 
-vi.mock("@/app/store/wos", () => ({
+vi.mock("@/app/store/mos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
     getMuxObjectAtom: () => () => ({ meta: {} }),
     // global.ts evaluates a `tabAtom` createMemo at module-init that calls
-    // WOS.getObjectValue; without this stub the import chain crashes during
+    // MOS.getObjectValue; without this stub the import chain crashes during
     // test setup before any BrowserViewModel test can run.
     getObjectValue: () => ({}),
 }));

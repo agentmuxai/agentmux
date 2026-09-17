@@ -6,13 +6,13 @@ import { computeBgStyleFromMeta } from "@/util/muxutil";
 import type { JSX } from "solid-js";
 import { createMemo, onCleanup, onMount } from "solid-js";
 import { debounce } from "throttle-debounce";
-import { atoms, getApi, WOS } from "./store/global";
+import { atoms, getApi, MOS } from "./store/global";
 
 export function AppBackground(): JSX.Element {
     let bgRef: HTMLDivElement;
     const tabData = createMemo(() => {
         const tabId = atoms.activeTabId();
-        return WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabId));
+        return MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId));
     });
     const style = createMemo(() => computeBgStyleFromMeta(tabData()?.meta, 0.5) ?? {});
 

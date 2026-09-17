@@ -11,7 +11,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { Logger } from "@/util/logger";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 

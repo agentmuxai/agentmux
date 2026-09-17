@@ -27,9 +27,9 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::fs_watch::{FsWatchEventKind, FsWatchPool, Subscription};
-use super::wps::{Broker, MuxEvent};
+use super::mps::{Broker, MuxEvent};
 
-/// WPS event fired when a file matching a Media pane's extension filter is
+/// MPS event fired when a file matching a Media pane's extension filter is
 /// created/modified inside a directory that pane is watching. Scoped
 /// per-block (`block:<id>`) via `MuxEvent::scopes`, matching
 /// `EVENT_EDITOR_FILE_CHANGED`'s pattern. Payload is just the changed file's
@@ -235,7 +235,7 @@ mod tests {
         events: StdMutex<Vec<(String, MuxEvent)>>,
     }
 
-    impl super::super::wps::WpsClient for Arc<TestClient> {
+    impl super::super::mps::WpsClient for Arc<TestClient> {
         fn send_event(&self, route_id: &str, event: MuxEvent) {
             self.events.lock().unwrap().push((route_id.to_string(), event));
         }
@@ -284,7 +284,7 @@ mod tests {
 
         broker.subscribe(
             "route-1",
-            super::super::wps::SubscriptionRequest {
+            super::super::mps::SubscriptionRequest {
                 event: EVENT_MEDIA_FILE_CHANGED.to_string(),
                 scopes: vec!["block:abc".to_string()],
                 allscopes: false,
@@ -309,7 +309,7 @@ mod tests {
 
         broker.subscribe(
             "route-png-only",
-            super::super::wps::SubscriptionRequest {
+            super::super::mps::SubscriptionRequest {
                 event: EVENT_MEDIA_FILE_CHANGED.to_string(),
                 scopes: vec!["block:png-block".to_string()],
                 allscopes: false,
@@ -334,7 +334,7 @@ mod tests {
         broker.set_client(Box::new(client.clone()));
         broker.subscribe(
             "route-e2e",
-            super::super::wps::SubscriptionRequest {
+            super::super::mps::SubscriptionRequest {
                 event: EVENT_MEDIA_FILE_CHANGED.to_string(),
                 scopes: vec!["block:e2e".to_string()],
                 allscopes: false,
@@ -380,7 +380,7 @@ mod tests {
         broker.set_client(Box::new(client.clone()));
         broker.subscribe(
             "route-removed",
-            super::super::wps::SubscriptionRequest {
+            super::super::mps::SubscriptionRequest {
                 event: EVENT_MEDIA_FILE_CHANGED.to_string(),
                 scopes: vec!["block:removed".to_string()],
                 allscopes: false,

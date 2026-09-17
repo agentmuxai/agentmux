@@ -139,11 +139,11 @@ const SEED_MANIFEST: &str = include_str!("../../agent-seed.json");
 
 /// Seed agent definitions from the embedded manifest.
 /// Skips agents whose ID already exists in the database.
-pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
+pub fn seed_agents(mstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST)
         .map_err(|e| StoreError::Other(format!("agent seed: parse manifest: {e}")))?;
 
-    let existing = wstore.agent_def_list()?;
+    let existing = mstore.agent_def_list()?;
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|a| a.id.clone()).collect();
 
@@ -201,7 +201,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             memory_id: String::new(),
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
-        wstore.agent_def_insert(&mut agent)?;
+        mstore.agent_def_insert(&mut agent)?;
 
         // Insert content blobs
         let content_pairs = [
@@ -214,7 +214,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
         for (content_type, maybe_content) in &content_pairs {
             if let Some(content) = maybe_content {
                 if !content.is_empty() {
-                    wstore.agent_content_set(&AgentContent {
+                    mstore.agent_content_set(&AgentContent {
                         agent_id: agent_def.id.clone(),
                         content_type: content_type.to_string(),
                         content: content.clone(),
@@ -236,7 +236,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
                 content: skill_def.content.clone(),
                 created_at: now,
             };
-            wstore.agent_skill_insert(&skill)?;
+            mstore.agent_skill_insert(&skill)?;
         }
 
         created += 1;
@@ -247,8 +247,8 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
 
 /// Seed memory bundles from the manifest. Skips any bundle whose ID already
 /// exists — this is a one-time seed, not an upsert on every startup.
-fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
-    let existing = wstore.bundle_list()?;
+fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
+    let existing = mstore.bundle_list()?;
     let existing_ids: std::collections::HashSet<String> =
         existing.iter().map(|m| m.id.clone()).collect();
 
@@ -285,7 +285,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
         // Use warn-and-skip rather than ? so a user bundle whose name
         // collides with the seeded name (UNIQUE constraint on name) does
         // not abort the remainder of the seed loop.
-        match wstore.bundle_upsert(&memory) {
+        match mstore.bundle_upsert(&memory) {
             Ok(()) => { created += 1; }
             Err(e) => {
                 tracing::warn!(
@@ -303,7 +303,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
 
 /// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
 /// Re-seeding updates existing seeded agents and removes seeded agents not in the manifest.
-pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
+pub fn auto_seed_on_startup(mstore: &Arc<Store>) {
     let manifest: SeedManifest = match serde_json::from_str(SEED_MANIFEST) {
         Ok(m) => m,
         Err(e) => {
@@ -312,10 +312,10 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
         }
     };
 
-    match wstore.agent_def_count() {
+    match mstore.agent_def_count() {
         Ok(0) => {
             tracing::info!("agent seed: no agents found, seeding from manifest v{}...", manifest.version);
-            match seed_agents(wstore) {
+            match seed_agents(mstore) {
                 Ok(report) => {
                     tracing::info!(
                         "agent seed: seeded {} agents ({} skipped)",
@@ -328,7 +328,7 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
         }
         Ok(count) => {
             // Check if we need to re-seed (manifest version changed)
-            match reseed_if_needed(wstore, &manifest) {
+            match reseed_if_needed(mstore, &manifest) {
                 Ok(Some(report)) => {
                     tracing::info!(
                         "agent seed: re-seeded from manifest v{}: {} created, {} updated, {} removed",
@@ -346,7 +346,7 @@ pub fn auto_seed_on_startup(wstore: &Arc<Store>) {
 
     // Seed memory bundles once — skips any bundle whose ID already exists.
     if !manifest.memories.is_empty() {
-        match seed_memories(wstore, &manifest) {
+        match seed_memories(mstore, &manifest) {
             Ok(0) => {}
             Ok(n) => tracing::info!("agent seed: seeded {n} memory bundles"),
             Err(e) => tracing::error!("agent seed: failed to seed memories: {e}"),
@@ -364,10 +364,10 @@ pub struct ReseedReport {
 /// Re-seed if the manifest version is newer than what's in the DB.
 /// Updates seeded agents, adds new ones, removes seeded agents not in the manifest.
 fn reseed_if_needed(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     manifest: &SeedManifest,
 ) -> Result<Option<ReseedReport>, StoreError> {
-    let existing = wstore.agent_def_list()?;
+    let existing = mstore.agent_def_list()?;
 
     // Check if any seeded agent needs updating by comparing providers/descriptions
     let manifest_ids: std::collections::HashSet<&str> =
@@ -477,10 +477,10 @@ fn reseed_if_needed(
             // newly-added branch below keeps user_hidden = 0 so a never-
             // before-seen template id always surfaces at least once.
             agent.user_hidden = existing_agent.user_hidden;
-            wstore.agent_def_update(&mut agent)?;
+            mstore.agent_def_update(&mut agent)?;
             updated += 1;
         } else {
-            wstore.agent_def_insert(&mut agent)?;
+            mstore.agent_def_insert(&mut agent)?;
             created += 1;
         }
     }
@@ -488,7 +488,7 @@ fn reseed_if_needed(
     // Remove seeded agents not in manifest (e.g., agent4, agent5)
     for agent in &existing {
         if agent.is_seeded == 1 && !manifest_ids.contains(agent.id.as_str()) {
-            wstore.agent_def_delete(&agent.id)?;
+            mstore.agent_def_delete(&agent.id)?;
             removed += 1;
             tracing::info!("agent seed: removed seeded agent '{}'", agent.id);
         }
@@ -532,7 +532,7 @@ mod tests {
         }
     }
 
-    fn insert_tpl(wstore: &Arc<Store>, id: &str, name: &str, hidden: i64) {
+    fn insert_tpl(mstore: &Arc<Store>, id: &str, name: &str, hidden: i64) {
         let mut def = AgentDefinition {
             id: id.to_string(),
             slug: id.to_string(),
@@ -565,7 +565,7 @@ mod tests {
             memory_id: String::new(),
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
     }
 
     #[test]
@@ -573,19 +573,19 @@ mod tests {
         // The user previously hid `tpl-claude`. A description-only
         // manifest change triggers a re-seed; the user's hide preference
         // MUST survive (it's a per-user UI flag, not manifest-managed).
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        insert_tpl(&wstore, "tpl-claude", "Claude", 1);
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        insert_tpl(&mstore, "tpl-claude", "Claude", 1);
         // Manifest carries a *different* description so reseed_if_needed
         // sees a change and runs the upsert path.
         let manifest = manifest_with(&[("tpl-claude", "v2 desc")]);
 
-        let report = reseed_if_needed(&wstore, &manifest)
+        let report = reseed_if_needed(&mstore, &manifest)
             .expect("reseed succeeds")
             .expect("reseed runs because description changed");
         assert_eq!(report.created, 0);
         assert_eq!(report.updated, 1);
 
-        let after = wstore.agent_def_list().unwrap();
+        let after = mstore.agent_def_list().unwrap();
         let tpl = after.iter().find(|a| a.id == "tpl-claude").unwrap();
         assert_eq!(tpl.user_hidden, 1, "hide preference must survive reseed");
         assert_eq!(tpl.description, "v2 desc", "description must update");
@@ -597,19 +597,19 @@ mod tests {
         // introduces a brand-new id `tpl-codex`. The new id MUST land
         // with user_hidden = 0 — Phase 2 spec invariant so users always
         // see new templates at least once.
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
-        insert_tpl(&wstore, "tpl-claude", "Claude", 1);
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        insert_tpl(&mstore, "tpl-claude", "Claude", 1);
         let manifest = manifest_with(&[
             ("tpl-claude", "v1 desc"), // unchanged — won't fire upsert on its own
             ("tpl-codex", "Codex CLI"),  // NEW id — forces reseed
         ]);
 
-        let report = reseed_if_needed(&wstore, &manifest)
+        let report = reseed_if_needed(&mstore, &manifest)
             .expect("reseed succeeds")
             .expect("reseed runs because tpl-codex is new");
         assert!(report.created >= 1, "tpl-codex should be inserted");
 
-        let after = wstore.agent_def_list().unwrap();
+        let after = mstore.agent_def_list().unwrap();
         let codex = after
             .iter()
             .find(|a| a.id == "tpl-codex")

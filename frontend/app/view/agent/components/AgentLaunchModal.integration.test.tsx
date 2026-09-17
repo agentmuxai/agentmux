@@ -55,7 +55,7 @@ vi.mock("@/app/view/identity/identity-model", () => ({
     subscribeAccountChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn(() => () => {}),
 }));
 

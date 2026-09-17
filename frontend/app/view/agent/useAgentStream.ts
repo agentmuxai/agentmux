@@ -14,7 +14,7 @@
  * and watchdogs (`hooks/useTurnLifecycle.ts`), and pending-message
  * acceptance (`hooks/usePendingMessageAcceptance.ts`).
  *
- * IMPORTANT — crash history: `tool_chunk` WPS events used to call
+ * IMPORTANT — crash history: `tool_chunk` MPS events used to call
  * dispatchDoc(ToolChunkAppend) directly, one immediate signal write per
  * chunk. During active tool streaming that meant many independent signal
  * writes, each triggering its own Solid reactive flush. When a chunk write
@@ -35,7 +35,7 @@
  * — do NOT give it its own RAF or `batch()` call.
  */
 
-import { getFileSubject } from "@/app/store/wps";
+import { getFileSubject } from "@/app/store/mps";
 import { base64ToArray } from "@/util/util";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
@@ -262,7 +262,7 @@ export function useAgentStream({
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
     // mutation of one existing node, not a streaming producer. Uses
     // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
-    // WPS handler can fire after the pane unregisters.
+    // MPS handler can fire after the pane unregisters.
     useDockClearStream({ blockId, model });
     useResumeRetryStream({ blockId, model });
     // Seeds/refreshes attachedTask from the durable db_background_tasks

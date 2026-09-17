@@ -23,8 +23,8 @@ import {
     type AgentBlockResult,
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
 
@@ -296,7 +296,7 @@ export class DroneViewModel implements ViewModel {
             // The dispose-during-await race: if `dispose()` ran while
             // we were awaiting the RPC, `this.disposed === true` now
             // and `dispatchIfAlive` no-ops below. `subscribeRun`
-            // creates a WPS listener — gate it too so we don't leak
+            // creates a MPS listener — gate it too so we don't leak
             // the subscription past dispose (reagent P1 on #848).
             if (this.disposed) return;
             this.dispatchIfAlive(
@@ -322,7 +322,7 @@ export class DroneViewModel implements ViewModel {
         }
     }
 
-    /** Subscribe to `dronerun:<runId>` WPS events for the active run.
+    /** Subscribe to `dronerun:<runId>` MPS events for the active run.
      *  Replaces any prior subscription. The backend publishes one event
      *  per `RunEvent` variant — we route every event into the slot
      *  reducer and refresh the run row on terminal events. */

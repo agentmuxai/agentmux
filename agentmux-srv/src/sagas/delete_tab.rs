@@ -202,7 +202,7 @@ mod tests {
     ) -> Vec<agentmux_common::ipc::Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_mstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -261,7 +261,7 @@ mod tests {
             assert_eq!(s.workspaces[&ws_id].tab_ids, vec![tab_a.clone(), tab_b.clone()]);
             assert!(s.tabs.contains_key(&tab_a));
         }
-        assert!(state.wstore.get::<Tab>(&tab_a).unwrap().is_some());
+        assert!(state.mstore.get::<Tab>(&tab_a).unwrap().is_some());
 
         let result = run(&state, ws_id.clone(), tab_a.clone()).await.unwrap();
         assert_eq!(result["tab_id"], tab_a);
@@ -274,8 +274,8 @@ mod tests {
         drop(s);
 
         // SQLite: tab gone; workspace.tabids reflects.
-        assert!(state.wstore.get::<Tab>(&tab_a).unwrap().is_none());
-        let ws_persist = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        assert!(state.mstore.get::<Tab>(&tab_a).unwrap().is_none());
+        let ws_persist = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
         assert_eq!(ws_persist.tabids, vec![tab_b]);
     }
 

@@ -22,7 +22,7 @@ const hub = vi.hoisted(() => ({
     handler: null as ((e: unknown) => void) | null,
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handler = sub.handler;
         return () => {

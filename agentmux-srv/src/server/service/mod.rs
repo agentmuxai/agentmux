@@ -99,7 +99,7 @@ pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> We
     // One batched frame, not one frame per update: these WS frames also
     // reach the CALLING renderer, and they land BEFORE the HTTP response
     // body — so N individual frames repaint the UI in N unbatched steps
-    // and the response body's batched application (wos.ts
+    // and the response body's batched application (mos.ts
     // `updateMuxObjects`) arrives too late to matter (version-guarded to
     // a no-op). CloseTab's `[delete tab, update workspace]` pair sent as
     // two frames is exactly the blank-tab flash of

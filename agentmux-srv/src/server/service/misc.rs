@@ -9,7 +9,7 @@ use crate::backend::service::{self, WebCallType, WebReturnType};
 use super::super::AppState;
 
 pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let _store = &state.wstore;
+    let _store = &state.mstore;
     let args = &call.args;
     match (call.service.as_str(), call.method.as_str()) {
         // ---- UserInputService ----
@@ -157,7 +157,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 Err(e) => return WebReturnType::error(e),
             };
             let result = super::super::app_api::session::generate_subagent_name(
-                &state.wstore,
+                &state.mstore,
                 &state.subagent_watcher,
                 &agent_id,
                 super::super::app_api::session::pull_call_semaphore(),
@@ -276,7 +276,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                     Ok(v) => v,
                     Err(e) => return WebReturnType::error(e),
                 };
-            match super::super::app_api::agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), data).await {
+            match super::super::app_api::agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), data).await {
                 Ok(result) => WebReturnType::success(serde_json::to_value(&result).unwrap_or_default()),
                 Err(e) => WebReturnType::error(e),
             }

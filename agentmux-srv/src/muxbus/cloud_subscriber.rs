@@ -157,7 +157,7 @@ pub fn get_global_subscriber() -> Option<&'static CloudSubscriber> {
 impl CloudSubscriber {
     /// Initialize the global subscriber and start the background WS loop.
     /// Should be called once at startup. No-op if already initialized.
-    pub fn init_global(wstore: Arc<Store>) {
+    pub fn init_global(mstore: Arc<Store>) {
         let (ctrl_tx, ctrl_rx) = mpsc::unbounded_channel::<CtrlMsg>();
         let agents = Arc::new(Mutex::new(HashSet::<String>::new()));
         let subscriber = CloudSubscriber {
@@ -167,7 +167,7 @@ impl CloudSubscriber {
         if GLOBAL_SUBSCRIBER.set(subscriber).is_err() {
             return; // already initialized
         }
-        tokio::spawn(run_loop(wstore, agents, ctrl_rx));
+        tokio::spawn(run_loop(mstore, agents, ctrl_rx));
     }
 
     /// Notify the WS loop that a new agent is registered locally.
@@ -210,7 +210,7 @@ impl CloudSubscriber {
 // ── Background loop ───────────────────────────────────────────────────────────
 
 async fn run_loop(
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     agents: Arc<Mutex<HashSet<String>>>,
     mut ctrl_rx: mpsc::UnboundedReceiver<CtrlMsg>,
 ) {
@@ -224,8 +224,8 @@ async fn run_loop(
     // disconnected/backing off, which the old ping-tick-only check could not.
     let scheduler = crate::broker::init_global(Duration::from_secs(BROKER_SWEEP_INTERVAL_SECS));
     {
-        let wstore_fresh = wstore.clone();
-        let wstore_refresh = wstore.clone();
+        let mstore_fresh = mstore.clone();
+        let mstore_refresh = mstore.clone();
         let http_refresh = http.clone();
         scheduler
             .register(
@@ -249,18 +249,18 @@ async fn run_loop(
                 // to keychain reads elsewhere (see
                 // app_api/mod.rs's account_validate_impl).
                 move || {
-                    let wstore = wstore_fresh.clone();
+                    let mstore = mstore_fresh.clone();
                     Box::pin(async move {
-                        tokio::task::spawn_blocking(move || wstore.muxbus_is_fresh())
+                        tokio::task::spawn_blocking(move || mstore.muxbus_is_fresh())
                             .await
                             .unwrap_or(false)
                     })
                 },
                 move || {
-                    let wstore = wstore_refresh.clone();
+                    let mstore = mstore_refresh.clone();
                     let http = http_refresh.clone();
                     Box::pin(async move {
-                        let load_store = wstore.clone();
+                        let load_store = mstore.clone();
                         let current = tokio::task::spawn_blocking(move || load_store.muxbus_load())
                             .await
                             .map_err(|e| RefreshErrorKind::Transient(format!("muxbus_load task: {e}")))?
@@ -288,7 +288,7 @@ async fn run_loop(
                         let refreshed = crate::muxbus::pkce::refresh_token(&current, &http)
                             .await
                             .map_err(classify_refresh_token_error)?;
-                        let save_store = wstore.clone();
+                        let save_store = mstore.clone();
                         tokio::task::spawn_blocking(move || save_store.muxbus_save(&refreshed))
                             .await
                             .map_err(|e| RefreshErrorKind::Transient(format!("muxbus_save task: {e}")))?
@@ -320,8 +320,8 @@ async fn run_loop(
         // Secret Service D-Bus daemon) must not stall this loop's tokio
         // worker thread.
         let has_stored_creds_load = {
-            let wstore = wstore.clone();
-            tokio::task::spawn_blocking(move || wstore.muxbus_load()).await
+            let mstore = mstore.clone();
+            tokio::task::spawn_blocking(move || mstore.muxbus_load()).await
         };
         let has_stored_creds = match has_stored_creds_load {
             Ok(Ok(Some(c))) => !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
@@ -335,7 +335,7 @@ async fn run_loop(
                 true
             }
         };
-        let token = match load_valid_token(&wstore, &scheduler).await {
+        let token = match load_valid_token(&mstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
                 // No credentials at all — wait for muxbus.login to signal us
@@ -378,7 +378,7 @@ async fn run_loop(
         tracing::info!("cloud_subscriber: connecting to {}", MUXBUS_WS_URL);
         let session_start = std::time::Instant::now();
 
-        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &wstore, &http).await {
+        match connect_and_run(&token, agents.clone(), &mut ctrl_rx, &mstore, &http).await {
             Ok(()) => {
                 // Apply the same >30s healthy-session guard as the error branch: a server
                 // that immediately closes after handshake must not suppress back-off.
@@ -423,7 +423,7 @@ async fn connect_and_run(
     token: &str,
     agents: Arc<Mutex<HashSet<String>>>,
     ctrl_rx: &mut mpsc::UnboundedReceiver<CtrlMsg>,
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     http: &reqwest::Client,
 ) -> Result<(), String> {
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
@@ -496,7 +496,7 @@ async fn connect_and_run(
                     Some(Err(e)) => return Err(format!("ws recv: {e}")),
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(server_msg) = serde_json::from_str::<ServerMsg>(&text) {
-                            match handle_server_msg(server_msg, token, http, &agents, wstore).await {
+                            match handle_server_msg(server_msg, token, http, &agents, mstore).await {
                                 Ok(()) => {}
                                 // Eviction or expired token — close stream to trigger reconnect.
                                 Err(ref e) if e.starts_with("reconnect:") => {
@@ -550,7 +550,7 @@ async fn handle_server_msg(
     token: &str,
     http: &reqwest::Client,
     agents: &Arc<Mutex<HashSet<String>>>,
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
 ) -> Result<(), String> {
     match msg {
         ServerMsg::InjectAvailable => {
@@ -570,7 +570,7 @@ async fn handle_server_msg(
             let outcomes = futures_util::future::join_all(
                 registered
                     .iter()
-                    .map(|agent_id| sync_agent_reactive(agent_id, token, http, wstore, handler)),
+                    .map(|agent_id| sync_agent_reactive(agent_id, token, http, mstore, handler)),
             )
             .await;
 
@@ -681,7 +681,7 @@ async fn sync_agent_reactive(
     agent_id: &str,
     token: &str,
     http: &reqwest::Client,
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     handler: &'static crate::backend::reactive::handler::ReactiveHandler,
 ) -> AgentSyncOutcome {
     #[derive(Deserialize)]
@@ -719,7 +719,7 @@ async fn sync_agent_reactive(
     // delivery. `using_per_agent` tracks which one is currently in play so
     // a 401 can be attributed correctly and, for a per-agent credential,
     // retried once with the shared token instead of just giving up.
-    let per_agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, wstore, http).await;
+    let per_agent_token = crate::muxbus::agent_credentials::ensure_agent_credential(agent_id, mstore, http).await;
     let mut agent_token = per_agent_token.clone().unwrap_or_else(|| token.to_string());
     let mut using_per_agent = per_agent_token.is_some();
 
@@ -753,9 +753,9 @@ async fn sync_agent_reactive(
                 // invalidate_binding_mismatched_credential's doc comment for
                 // why a plain token-clear isn't enough for that status.
                 if resp.status() == reqwest::StatusCode::FORBIDDEN {
-                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, wstore);
+                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, mstore);
                 } else {
-                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, mstore);
                 }
                 tracing::warn!(
                     agent_id = %agent_id,
@@ -827,9 +827,9 @@ async fn sync_agent_reactive(
                 // or leaving this agent's already-fetched pending
                 // injections unclaimed until an unrelated broadcast fires.
                 if claim_resp.status() == reqwest::StatusCode::FORBIDDEN {
-                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, wstore);
+                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, mstore);
                 } else {
-                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, mstore);
                 }
                 tracing::warn!(
                     agent_id = %agent_id,
@@ -963,7 +963,7 @@ async fn sync_agent_reactive(
         // WAN-delivered `transcript_request` would silently skip both the
         // forced-TIER=sensitive rule and the escalate-forcing rule
         // entirely, not just get a weaker version of them.
-        crate::server::reactive::resolve_transcript_request_tier_fields(wstore, &mut req);
+        crate::server::reactive::resolve_transcript_request_tier_fields(mstore, &mut req);
         let delivery = handler.inject_message(req);
         tracing::debug!(
             injection_id = %inj.id,
@@ -1027,7 +1027,7 @@ async fn sync_agent_reactive(
 /// POST /agents/provision call, which requires the human's own user-level
 /// (PKCE) token, not an agent-bound M2M one.
 pub(crate) async fn load_valid_token(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     scheduler: &crate::broker::RefreshScheduler,
 ) -> Option<String> {
     if let Err(e) = scheduler.ensure_fresh(crate::muxbus::CREDENTIAL_ID).await {
@@ -1041,7 +1041,7 @@ pub(crate) async fn load_valid_token(
     //
     // spawn_blocking — reagent P1 on #2260: same synchronous-keychain-read
     // concern as every other muxbus_load call site in this file.
-    let load_store = wstore.clone();
+    let load_store = mstore.clone();
     let creds = tokio::task::spawn_blocking(move || load_store.muxbus_load())
         .await
         .ok()
