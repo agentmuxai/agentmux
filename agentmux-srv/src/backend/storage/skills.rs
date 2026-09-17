@@ -19,15 +19,20 @@ use super::managed::{ManagedResource, Owner};
 use super::store::Store;
 
 /// A reusable skill/capability attached to a agent definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentSkill {
     pub id: String,
     pub agent_id: String,
     pub name: String,
     pub trigger: String,
+    /// Free-form rather than an enum: rows written by the Armory catalog and
+    /// by older builds both land here, so a closed set would fail to read
+    /// them back. `createagentskill` defaults it to "prompt".
     pub skill_type: String,
     pub description: String,
     pub content: String,
+    #[ts(type = "number")]
     pub created_at: i64,
 }
 
