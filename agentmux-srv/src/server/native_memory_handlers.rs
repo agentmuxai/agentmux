@@ -771,14 +771,12 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore_list = state.mstore.clone();
     let id_store_list = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_NATIVE_MEMORY_LIST,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNativeMemoryListData, _ctx| {
             let mstore = mstore_list.clone();
             let id_store = id_store_list.clone();
-            Box::pin(async move {
-                let cmd: CommandNativeMemoryListData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:memory:list: {e}"))?;
+            async move {
 
                 let agent = mstore
                     .agent_def_get(&cmd.agent_id)
@@ -968,21 +966,19 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     b.is_index.cmp(&a.is_index).then(a.filename.cmp(&b.filename))
                 });
 
-                Ok(Some(serde_json::to_value(NativeMemoryListResult { files }).map_err(|e| e.to_string())?))
-            })
-        }),
+                Ok(NativeMemoryListResult { files })
+            }
+        },
     );
 
     let mstore_read = state.mstore.clone();
     let id_store_read = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_NATIVE_MEMORY_READ_FILE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNativeMemoryReadFileData, _ctx| {
             let mstore = mstore_read.clone();
             let id_store = id_store_read.clone();
-            Box::pin(async move {
-                let cmd: CommandNativeMemoryReadFileData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:memory:read_file: {e}"))?;
+            async move {
 
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:read_file: {e}"))?;
@@ -1066,23 +1062,21 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     }
                 };
 
-                Ok(Some(serde_json::to_value(NativeMemoryReadFileResult { content }).map_err(|e| e.to_string())?))
-            })
-        }),
+                Ok(NativeMemoryReadFileResult { content })
+            }
+        },
     );
 
     let mstore_write = state.mstore.clone();
     let id_store_write = state.id_store.clone();
     let broker_write = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_NATIVE_MEMORY_WRITE_FILE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNativeMemoryWriteFileData, _ctx| {
             let mstore = mstore_write.clone();
             let id_store = id_store_write.clone();
             let broker = broker_write.clone();
-            Box::pin(async move {
-                let cmd: CommandNativeMemoryWriteFileData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:memory:write_file: {e}"))?;
+            async move {
 
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:write_file: {e}"))?;
@@ -1202,21 +1196,25 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     bytes = cmd.content.len(),
                     "agent:memory:write_file"
                 );
-                Ok(None)
-            })
-        }),
+                // `register_typed` always sends a `data` field, so this `()`
+                // puts `"data": null` on the wire where the old untyped
+                // `Ok(None)` omitted the key entirely. Both frontend callers
+                // (agent-native-memory-model.ts:200,:240) await and discard the
+                // result, and no other crate invokes this command, so the
+                // difference is unobservable.
+                Ok(())
+            }
+        },
     );
 
     let mstore_history = state.mstore.clone();
     let id_store_history = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_NATIVE_MEMORY_HISTORY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNativeMemoryHistoryData, _ctx| {
             let mstore = mstore_history.clone();
             let id_store = id_store_history.clone();
-            Box::pin(async move {
-                let cmd: CommandNativeMemoryHistoryData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:memory:history: {e}"))?;
+            async move {
 
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:history: {e}"))?;
@@ -1241,21 +1239,19 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map(version_summary_to_meta)
                     .collect();
 
-                Ok(Some(serde_json::to_value(NativeMemoryHistoryResult { versions }).map_err(|e| e.to_string())?))
-            })
-        }),
+                Ok(NativeMemoryHistoryResult { versions })
+            }
+        },
     );
 
     let mstore_diff = state.mstore.clone();
     let id_store_diff = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_NATIVE_MEMORY_DIFF,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNativeMemoryDiffData, _ctx| {
             let mstore = mstore_diff.clone();
             let id_store = id_store_diff.clone();
-            Box::pin(async move {
-                let cmd: CommandNativeMemoryDiffData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:memory:diff: {e}"))?;
+            async move {
 
                 // Resolve to the same canonical agent.id write_file keys by
                 // — see the identical comment on the history handler above.
@@ -1295,23 +1291,21 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 let diff = line_diff(&from.content, &to.content);
-                Ok(Some(serde_json::to_value(NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())?))
-            })
-        }),
+                Ok(NativeMemoryDiffResult { diff })
+            }
+        },
     );
 
     let mstore_revert = state.mstore.clone();
     let id_store_revert = state.id_store.clone();
     let broker_revert = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_NATIVE_MEMORY_REVERT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandNativeMemoryRevertData, _ctx| {
             let mstore = mstore_revert.clone();
             let id_store = id_store_revert.clone();
             let broker = broker_revert.clone();
-            Box::pin(async move {
-                let cmd: CommandNativeMemoryRevertData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent:memory:revert: {e}"))?;
+            async move {
 
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:revert: {e}"))?;
@@ -1408,10 +1402,110 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     target_version_id = %cmd.target_version_id,
                     "agent:memory:revert"
                 );
-                Ok(Some(serde_json::to_value(NativeMemoryRevertResult { version: version_to_meta(&new_version) }).map_err(|e| e.to_string())?))
-            })
-        }),
+                Ok(NativeMemoryRevertResult { version: version_to_meta(&new_version) })
+            }
+        },
     );
+}
+
+// Request-shape tests for the six `agent:memory:*` commands.
+//
+// These exist because NOTHING else catches a Req/payload mismatch: `tsc` only
+// checks the frontend against the GENERATED types, and
+// `scripts/check-rpc-bindings.sh` only checks that a generated type exists for
+// each command — neither one ever deserializes a real payload into the Rust
+// struct. A `Req` that cannot parse what the stub sends compiles, typechecks,
+// passes the binding gate, and then fails on every call at runtime. That is
+// exactly the bug found on `bookmarks.list` (`Req = ()` rejects `{}`), so each
+// command below is pinned to the literal JSON its call site actually sends.
+#[cfg(test)]
+mod req_shape_tests {
+    use super::*;
+    use serde_json::json;
+
+    // agent-native-memory-model.ts:128
+    #[test]
+    fn list_req_accepts_the_payload_the_stub_sends() {
+        serde_json::from_value::<CommandNativeMemoryListData>(json!({"agent_id": "a1"}))
+            .expect("agent:memory:list must accept {agent_id}");
+    }
+
+    // agent-native-memory-model.ts:167, native-memory-history-model.ts:176
+    #[test]
+    fn read_file_req_accepts_the_payload_the_stub_sends() {
+        serde_json::from_value::<CommandNativeMemoryReadFileData>(
+            json!({"agent_id": "a1", "filename": "MEMORY.md"}),
+        )
+        .expect("agent:memory:read_file must accept {agent_id, filename}");
+    }
+
+    // agent-native-memory-model.ts:201 and :237 — BOTH call sites send
+    // `provenance: { source: "human" }` and neither sends `detail`, so the
+    // nested `default_detail` path is the only one the UI ever exercises.
+    #[test]
+    fn write_file_req_accepts_provenance_without_detail() {
+        let req: CommandNativeMemoryWriteFileData = serde_json::from_value(json!({
+            "agent_id": "a1",
+            "filename": "MEMORY.md",
+            "content": "hello",
+            "provenance": {"source": "human"},
+        }))
+        .expect("agent:memory:write_file must accept a detail-less provenance");
+        let prov = req.provenance.expect("provenance should round-trip");
+        assert_eq!(prov.source, "human");
+        // `default_detail` must yield `{}`, not `null` — a null here would be
+        // written into the version row's source_detail as the string "null".
+        assert_eq!(prov.detail, json!({}));
+    }
+
+    // `provenance` is `Option<_>` and generated as `provenance?`, so an omitted
+    // key must parse even though no current caller omits it.
+    #[test]
+    fn write_file_req_accepts_an_omitted_provenance() {
+        let req: CommandNativeMemoryWriteFileData = serde_json::from_value(json!({
+            "agent_id": "a1",
+            "filename": "MEMORY.md",
+            "content": "hello",
+        }))
+        .expect("agent:memory:write_file must accept an omitted provenance");
+        assert!(req.provenance.is_none());
+    }
+
+    // native-memory-history-model.ts:196
+    #[test]
+    fn history_req_accepts_the_payload_the_stub_sends() {
+        serde_json::from_value::<CommandNativeMemoryHistoryData>(
+            json!({"agent_id": "a1", "filename": "MEMORY.md"}),
+        )
+        .expect("agent:memory:history must accept {agent_id, filename}");
+    }
+
+    // native-memory-history-model.ts:242. `agent_id` is required here on
+    // purpose (reagent P1: without it any caller could read another agent's
+    // memory by version id), so a payload missing it must be REJECTED.
+    #[test]
+    fn diff_req_accepts_the_payload_the_stub_sends_and_requires_agent_id() {
+        serde_json::from_value::<CommandNativeMemoryDiffData>(
+            json!({"agent_id": "a1", "from_version_id": "v1", "to_version_id": "v2"}),
+        )
+        .expect("agent:memory:diff must accept {agent_id, from_version_id, to_version_id}");
+        assert!(
+            serde_json::from_value::<CommandNativeMemoryDiffData>(
+                json!({"from_version_id": "v1", "to_version_id": "v2"}),
+            )
+            .is_err(),
+            "agent:memory:diff must reject a payload with no agent_id — that is the              ownership check the P1 fix added"
+        );
+    }
+
+    // native-memory-history-model.ts:270
+    #[test]
+    fn revert_req_accepts_the_payload_the_stub_sends() {
+        serde_json::from_value::<CommandNativeMemoryRevertData>(
+            json!({"agent_id": "a1", "filename": "MEMORY.md", "target_version_id": "v1"}),
+        )
+        .expect("agent:memory:revert must accept {agent_id, filename, target_version_id}");
+    }
 }
 
 #[cfg(test)]

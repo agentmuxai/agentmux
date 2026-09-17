@@ -15,6 +15,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 
 function cardTitlesInOrder(container: HTMLElement): string[] {
     return Array.from(container.querySelectorAll(".memory-agent-card-title")).map((el) => el.textContent ?? "");

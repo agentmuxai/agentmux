@@ -19,6 +19,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 
 /** Validate a filename the same way the backend does, so the user gets
  *  feedback before the RPC round-trips. Mirrors validate_filename() in

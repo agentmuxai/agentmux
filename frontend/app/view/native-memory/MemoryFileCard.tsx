@@ -24,6 +24,7 @@
  */
 
 import { Show, type JSX } from "solid-js";
+import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 
 interface MemoryFileCardProps {
     file: NativeMemoryFileMeta;

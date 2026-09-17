@@ -8,18 +8,50 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The result shapes below are GENERATED from their Rust definitions by ts-rs
+// and re-exported here, so the previously hand-written copies in
+// frontend/types/srv-types.d.ts (which sat in the global namespace and could
+// drift from the backend silently) are gone. See
+// docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.4 step 2.
+//
+// `NativeMemoryWriteProvenance` is the one exception and stays hand-written in
+// srv-types.d.ts: its `detail` field is a `serde_json::Value` that the frontend
+// has always treated as an OPTIONAL property, and ts-rs refuses
+// `#[ts(optional)]` on anything that is not `Option<T>`, so the shape is not
+// expressible by the generator. See the long note on the Rust struct in
+// agentmux-srv/src/backend/rpc_types/native_memory.rs.
+export type { NativeMemoryFileMeta } from "@/types/rpc/NativeMemoryFileMeta";
+export type { NativeMemoryVersionMeta } from "@/types/rpc/NativeMemoryVersionMeta";
+export type { NativeMemoryListResult } from "@/types/rpc/NativeMemoryListResult";
+export type { NativeMemoryReadFileResult } from "@/types/rpc/NativeMemoryReadFileResult";
+export type { NativeMemoryHistoryResult } from "@/types/rpc/NativeMemoryHistoryResult";
+export type { NativeMemoryDiffResult } from "@/types/rpc/NativeMemoryDiffResult";
+export type { NativeMemoryRevertResult } from "@/types/rpc/NativeMemoryRevertResult";
+
+import type { CommandNativeMemoryListData } from "@/types/rpc/CommandNativeMemoryListData";
+import type { CommandNativeMemoryReadFileData } from "@/types/rpc/CommandNativeMemoryReadFileData";
+import type { CommandNativeMemoryWriteFileData } from "@/types/rpc/CommandNativeMemoryWriteFileData";
+import type { CommandNativeMemoryHistoryData } from "@/types/rpc/CommandNativeMemoryHistoryData";
+import type { CommandNativeMemoryDiffData } from "@/types/rpc/CommandNativeMemoryDiffData";
+import type { CommandNativeMemoryRevertData } from "@/types/rpc/CommandNativeMemoryRevertData";
+import type { NativeMemoryListResult as NativeMemoryListResultT } from "@/types/rpc/NativeMemoryListResult";
+import type { NativeMemoryReadFileResult as NativeMemoryReadFileResultT } from "@/types/rpc/NativeMemoryReadFileResult";
+import type { NativeMemoryHistoryResult as NativeMemoryHistoryResultT } from "@/types/rpc/NativeMemoryHistoryResult";
+import type { NativeMemoryDiffResult as NativeMemoryDiffResultT } from "@/types/rpc/NativeMemoryDiffResult";
+import type { NativeMemoryRevertResult as NativeMemoryRevertResultT } from "@/types/rpc/NativeMemoryRevertResult";
+
 export const NativeMemoryApi = {
-    NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {
+    NativeMemoryListCommand(client: RpcClient, data: CommandNativeMemoryListData, opts?: RpcOpts): Promise<NativeMemoryListResultT> {
         return client.rpcCall("agent:memory:list", data, opts);
     },
 
-    NativeMemoryReadFileCommand(client: RpcClient, data: { agent_id: string; filename: string }, opts?: RpcOpts): Promise<NativeMemoryReadFileResult> {
+    NativeMemoryReadFileCommand(client: RpcClient, data: CommandNativeMemoryReadFileData, opts?: RpcOpts): Promise<NativeMemoryReadFileResultT> {
         return client.rpcCall("agent:memory:read_file", data, opts);
     },
 
     NativeMemoryWriteFileCommand(
         client: RpcClient,
-        data: { agent_id: string; filename: string; content: string; provenance?: NativeMemoryWriteProvenance },
+        data: CommandNativeMemoryWriteFileData,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("agent:memory:write_file", data, opts);
@@ -27,9 +59,9 @@ export const NativeMemoryApi = {
 
     NativeMemoryHistoryCommand(
         client: RpcClient,
-        data: { agent_id: string; filename: string },
+        data: CommandNativeMemoryHistoryData,
         opts?: RpcOpts,
-    ): Promise<NativeMemoryHistoryResult> {
+    ): Promise<NativeMemoryHistoryResultT> {
         return client.rpcCall("agent:memory:history", data, opts);
     },
 
@@ -40,17 +72,17 @@ export const NativeMemoryApi = {
         // returning their content — every caller shares one instance-wide
         // X-AuthKey, so without it any caller could read any other
         // agent's memory content by version id.
-        data: { agent_id: string; from_version_id: string; to_version_id: string },
+        data: CommandNativeMemoryDiffData,
         opts?: RpcOpts,
-    ): Promise<NativeMemoryDiffResult> {
+    ): Promise<NativeMemoryDiffResultT> {
         return client.rpcCall("agent:memory:diff", data, opts);
     },
 
     NativeMemoryRevertCommand(
         client: RpcClient,
-        data: { agent_id: string; filename: string; target_version_id: string },
+        data: CommandNativeMemoryRevertData,
         opts?: RpcOpts,
-    ): Promise<NativeMemoryRevertResult> {
+    ): Promise<NativeMemoryRevertResultT> {
         return client.rpcCall("agent:memory:revert", data, opts);
     },
 };

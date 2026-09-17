@@ -36,6 +36,15 @@ export type {
     ReactiveRegistrationsResult,
     ReactiveRemoteRegistration,
 } from "./reactive";
+export type {
+    NativeMemoryDiffResult,
+    NativeMemoryFileMeta,
+    NativeMemoryHistoryResult,
+    NativeMemoryListResult,
+    NativeMemoryReadFileResult,
+    NativeMemoryRevertResult,
+    NativeMemoryVersionMeta,
+} from "./native-memory";
 
 // WshServerCommandToDeclMap
 export const RpcApi = {
