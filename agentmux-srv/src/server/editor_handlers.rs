@@ -10,6 +10,11 @@ use crate::backend::rpc_types::{
 };
 use crate::backend::agent_config::BUNDLE_SECTION_HEADING;
 use crate::backend::base::expand_home_dir_safe;
+use crate::backend::rpc_types::{
+    CreateEditorDirReq, CreateEditorDirResult, CreateEditorFileReq, CreateEditorFileResult,
+    CreateScratchFileReq, CreateScratchFileResult, DeleteEditorFileReq, MoveScratchFileReq,
+    MoveScratchFileResult, OpenInShellReq, RenameEditorFileReq, RenameEditorFileResult,
+};
 use crate::backend::storage::store::Store;
 
 use super::AppState;
@@ -633,14 +638,10 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // before performing any mutation — same policy as writeeditorfile.
 
     // openinshell → reveal a path in the OS file manager
-    engine.register_handler(
+    engine.register_typed(
         "openinshell",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { path: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("openinshell: {e}"))?;
+        |cmd: OpenInShellReq, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
                 let home = dirs::home_dir()
@@ -661,20 +662,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let target = if canonical.is_dir() { canonical.clone() } else { canonical.parent().unwrap_or(&canonical).to_path_buf() };
                     let _ = std::process::Command::new("xdg-open").arg(&target).spawn();
                 }
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // renameeditorfile → rename a file or folder (name only, same parent directory)
-    engine.register_handler(
+    engine.register_typed(
         "renameeditorfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { old_path: String, new_name: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("renameeditorfile: {e}"))?;
+        |cmd: RenameEditorFileReq, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.old_path);
                 let old_path = expanded.as_path();
                 let home = dirs::home_dir().ok_or("renameeditorfile: cannot determine home")?;
@@ -694,20 +691,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 std::fs::rename(&canonical_old, &new_path)
                     .map_err(|e| format!("renameeditorfile: {e}"))?;
-                Ok(Some(serde_json::json!({ "new_path": new_path.to_string_lossy() })))
-            })
-        }),
+                Ok(RenameEditorFileResult { new_path: new_path.to_string_lossy().into_owned() })
+            }
+        },
     );
 
     // createeditorfile → create an empty file inside an existing directory
-    engine.register_handler(
+    engine.register_typed(
         "createeditorfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { parent_path: String, name: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("createeditorfile: {e}"))?;
+        |cmd: CreateEditorFileReq, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.parent_path);
                 let parent = expanded.as_path();
                 let home = dirs::home_dir().ok_or("createeditorfile: cannot determine home")?;
@@ -724,20 +717,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("createeditorfile: file already exists".to_string());
                 }
                 std::fs::write(&file_path, "").map_err(|e| format!("createeditorfile: {e}"))?;
-                Ok(Some(serde_json::json!({ "file_path": file_path.to_string_lossy() })))
-            })
-        }),
+                Ok(CreateEditorFileResult { file_path: file_path.to_string_lossy().into_owned() })
+            }
+        },
     );
 
     // createeditordir → create a directory inside an existing directory
-    engine.register_handler(
+    engine.register_typed(
         "createeditordir",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { parent_path: String, name: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("createeditordir: {e}"))?;
+        |cmd: CreateEditorDirReq, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.parent_path);
                 let parent = expanded.as_path();
                 let home = dirs::home_dir().ok_or("createeditordir: cannot determine home")?;
@@ -754,20 +743,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("createeditordir: already exists".to_string());
                 }
                 std::fs::create_dir(&dir_path).map_err(|e| format!("createeditordir: {e}"))?;
-                Ok(Some(serde_json::json!({ "dir_path": dir_path.to_string_lossy() })))
-            })
-        }),
+                Ok(CreateEditorDirResult { dir_path: dir_path.to_string_lossy().into_owned() })
+            }
+        },
     );
 
     // deleteeditorfile → delete a file or directory
-    engine.register_handler(
+    engine.register_typed(
         "deleteeditorfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { path: String, recursive: bool }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("deleteeditorfile: {e}"))?;
+        |cmd: DeleteEditorFileReq, _ctx| {
+            async move {
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
                 let home = dirs::home_dir().ok_or("deleteeditorfile: cannot determine home")?;
@@ -801,23 +786,19 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     std::fs::remove_file(&canonical).map_err(|e| format!("deleteeditorfile: {e}"))?;
                 }
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // ── Scratch file service ────────────────────────────────────────────
     // Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
 
     // createscratchfile → create a scratch buffer file in ~/.agentmux/cache/scratch/
-    engine.register_handler(
+    engine.register_typed(
         "createscratchfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { display_name: Option<String>, exclude_scratch_ids: Option<Vec<String>> }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("createscratchfile: {e}"))?;
+        |cmd: CreateScratchFileReq, _ctx| {
+            async move {
                 let home = dirs::home_dir()
                     .ok_or("createscratchfile: cannot determine home directory")?;
                 let scratch_dir = home.join(".agentmux").join("cache").join("scratch");
@@ -916,11 +897,11 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 if let Some((scratch_id, display_name)) = chosen {
                     let file_path = scratch_dir.join(format!("{}.md", scratch_id));
-                    return Ok(Some(serde_json::json!({
-                        "scratch_id": scratch_id,
-                        "file_path": file_path.to_string_lossy(),
-                        "display_name": display_name,
-                    })));
+                    return Ok(CreateScratchFileResult {
+                        scratch_id,
+                        file_path: file_path.to_string_lossy().into_owned(),
+                        display_name,
+                    });
                 }
 
                 // No reusable candidate — mint a fresh UUID pair.
@@ -940,24 +921,20 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Claim the fresh scratch so subsequent calls don't immediately reuse it.
                 let claim_path = scratch_dir.join(format!("{}.md.claim", scratch_id));
                 let _ = std::fs::write(&claim_path, session_token);
-                Ok(Some(serde_json::json!({
-                    "scratch_id": scratch_id,
-                    "file_path": file_path.to_string_lossy(),
-                    "display_name": display_name,
-                })))
-            })
-        }),
+                Ok(CreateScratchFileResult {
+                    scratch_id,
+                    file_path: file_path.to_string_lossy().into_owned(),
+                    display_name,
+                })
+            }
+        },
     );
 
     // movescratchfile → promote a scratch buffer to a real user-chosen path (Save As)
-    engine.register_handler(
+    engine.register_typed(
         "movescratchfile",
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                struct Cmd { scratch_id: String, destination_path: String }
-                let cmd: Cmd = serde_json::from_value(data)
-                    .map_err(|e| format!("movescratchfile: {e}"))?;
+        |cmd: MoveScratchFileReq, _ctx| {
+            async move {
                 let home = dirs::home_dir()
                     .ok_or("movescratchfile: cannot determine home")?;
                 let canonical_home = home.canonicalize()
@@ -1016,15 +993,103 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let _ = std::fs::remove_file(&meta_path);
                 let claim_path = scratch_dir.join(format!("{}.md.claim", cmd.scratch_id));
                 let _ = std::fs::remove_file(&claim_path);
-                Ok(Some(serde_json::json!({ "file_path": canonical_dest.to_string_lossy() })))
-            })
-        }),
+                Ok(MoveScratchFileResult { file_path: canonical_dest.to_string_lossy().into_owned() })
+            }
+        },
     );
 }
 
 #[cfg(test)]
 mod tests {
     use crate::backend::rpc_types::AgentConfigFile;
+    use crate::backend::rpc_types::{CreateScratchFileReq, DeleteEditorFileReq};
+
+    /// The seven file-tree mutation commands record their request and response
+    /// types.
+    ///
+    /// Each of them used to deserialize into a `struct Cmd` declared inside its
+    /// own closure, with the response built by an inline `json!({..})`. Neither
+    /// can be named, so neither could be generated from — which is exactly why
+    /// the frontend restated all fourteen shapes by hand. A command that falls
+    /// back to `register_handler` disappears from the registry rather than
+    /// being recorded wrong, and that absence is what this catches.
+    #[tokio::test]
+    async fn register_typed_records_the_editor_mutation_commands() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        super::register_editor_handlers(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema — did it fall back to register_handler?"))
+        };
+
+        for (cmd, req, resp) in [
+            ("openinshell", "OpenInShellReq", "()"),
+            ("renameeditorfile", "RenameEditorFileReq", "RenameEditorFileResult"),
+            ("createeditorfile", "CreateEditorFileReq", "CreateEditorFileResult"),
+            ("createeditordir", "CreateEditorDirReq", "CreateEditorDirResult"),
+            ("deleteeditorfile", "DeleteEditorFileReq", "()"),
+            ("createscratchfile", "CreateScratchFileReq", "CreateScratchFileResult"),
+            ("movescratchfile", "MoveScratchFileReq", "MoveScratchFileResult"),
+        ] {
+            let row = find(cmd);
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert_eq!(row["responseName"], resp, "{cmd} response");
+        }
+    }
+
+    /// `recursive` is required on purpose, and this is the assertion that keeps
+    /// it that way.
+    ///
+    /// Adding `#[serde(default)]` would compile, pass every gate, and quietly
+    /// turn "a caller that forgot the field" into "delete a directory tree it
+    /// never asked to delete" — the generated TS would go from `recursive:
+    /// boolean` to still-required (ts-rs cannot express the default anyway), so
+    /// nothing downstream would flag it either. The destructive choice has to
+    /// stay explicit on the wire.
+    #[test]
+    fn deleteeditorfile_will_not_deserialize_without_recursive() {
+        let err = serde_json::from_value::<DeleteEditorFileReq>(
+            serde_json::json!({ "path": "/home/u/x" }),
+        )
+        .expect_err("recursive must not be defaultable");
+        assert!(
+            err.to_string().contains("recursive"),
+            "expected the error to name the field, got {err}",
+        );
+
+        // Both explicit values still work, so this is about absence only.
+        for recursive in [true, false] {
+            let req: DeleteEditorFileReq = serde_json::from_value(
+                serde_json::json!({ "path": "/home/u/x", "recursive": recursive }),
+            )
+            .unwrap();
+            assert_eq!(req.recursive, recursive);
+        }
+    }
+
+    /// `createscratchfile`'s two fields are genuinely optional — the stub
+    /// defaults its argument to `{}` — and they are `Option<T>` in Rust, so
+    /// ts-rs can say `display_name?: string` without the derive-a-narrower-type
+    /// dance the `serde(default)`-on-`String` fields elsewhere need.
+    #[test]
+    fn createscratchfile_accepts_an_empty_request() {
+        let req: CreateScratchFileReq = serde_json::from_value(serde_json::json!({}))
+            .expect("both fields are optional");
+        assert!(req.display_name.is_none());
+        assert!(req.exclude_scratch_ids.is_none());
+
+        let full: CreateScratchFileReq = serde_json::from_value(serde_json::json!({
+            "display_name": "Notes",
+            "exclude_scratch_ids": ["a", "b"],
+        }))
+        .unwrap();
+        assert_eq!(full.display_name.as_deref(), Some("Notes"));
+        assert_eq!(full.exclude_scratch_ids.unwrap().len(), 2);
+    }
 
     /// reagent P1, PR #2322: `writeagentconfig` (this file) is the actual
     /// "click Launch" path, distinct from `agent.open`'s

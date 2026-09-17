@@ -30,6 +30,20 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    CreateEditorDirReq,
+    CreateEditorDirResult,
+    CreateEditorFileReq,
+    CreateEditorFileResult,
+    CreateScratchFileReq,
+    CreateScratchFileResult,
+    DeleteEditorFileReq,
+    MoveScratchFileReq,
+    MoveScratchFileResult,
+    OpenInShellReq,
+    RenameEditorFileReq,
+    RenameEditorFileResult,
+} from "./file";
+export type {
     BlockKind,
     DeleteDroneReq,
     DeleteDroneResp,

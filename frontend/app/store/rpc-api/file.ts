@@ -6,6 +6,37 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The editor file-tree mutation shapes are GENERATED from their Rust
+// definitions by ts-rs. Each of them used to be a `struct Cmd` declared
+// inside its handler's own closure, with the response built by an inline
+// `json!({..})` -- neither form can be named, so neither could be generated
+// from, which is why every one of these was restated by hand here.
+export type { CreateEditorDirReq } from "@/types/rpc/CreateEditorDirReq";
+export type { CreateEditorDirResult } from "@/types/rpc/CreateEditorDirResult";
+export type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
+export type { CreateEditorFileResult } from "@/types/rpc/CreateEditorFileResult";
+export type { CreateScratchFileReq } from "@/types/rpc/CreateScratchFileReq";
+export type { CreateScratchFileResult } from "@/types/rpc/CreateScratchFileResult";
+export type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
+export type { MoveScratchFileReq } from "@/types/rpc/MoveScratchFileReq";
+export type { MoveScratchFileResult } from "@/types/rpc/MoveScratchFileResult";
+export type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+export type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
+export type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
+
+import type { CreateEditorDirReq } from "@/types/rpc/CreateEditorDirReq";
+import type { CreateEditorDirResult } from "@/types/rpc/CreateEditorDirResult";
+import type { CreateEditorFileReq } from "@/types/rpc/CreateEditorFileReq";
+import type { CreateEditorFileResult } from "@/types/rpc/CreateEditorFileResult";
+import type { CreateScratchFileReq } from "@/types/rpc/CreateScratchFileReq";
+import type { CreateScratchFileResult } from "@/types/rpc/CreateScratchFileResult";
+import type { DeleteEditorFileReq } from "@/types/rpc/DeleteEditorFileReq";
+import type { MoveScratchFileReq } from "@/types/rpc/MoveScratchFileReq";
+import type { MoveScratchFileResult } from "@/types/rpc/MoveScratchFileResult";
+import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
+import type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
+import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
+
 export const FileApi = {
     FileAppendCommand(client: RpcClient, data: FileData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("fileappend", data, opts);
@@ -92,7 +123,7 @@ export const FileApi = {
     // Spec: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
     OpenInShellCommand(
         client: RpcClient,
-        data: { path: string },
+        data: OpenInShellReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("openinshell", data, opts);
@@ -100,31 +131,31 @@ export const FileApi = {
 
     RenameEditorFileCommand(
         client: RpcClient,
-        data: { old_path: string; new_name: string },
+        data: RenameEditorFileReq,
         opts?: RpcOpts,
-    ): Promise<{ new_path: string }> {
+    ): Promise<RenameEditorFileResult> {
         return client.rpcCall("renameeditorfile", data, opts);
     },
 
     CreateEditorFileCommand(
         client: RpcClient,
-        data: { parent_path: string; name: string },
+        data: CreateEditorFileReq,
         opts?: RpcOpts,
-    ): Promise<{ file_path: string }> {
+    ): Promise<CreateEditorFileResult> {
         return client.rpcCall("createeditorfile", data, opts);
     },
 
     CreateEditorDirCommand(
         client: RpcClient,
-        data: { parent_path: string; name: string },
+        data: CreateEditorDirReq,
         opts?: RpcOpts,
-    ): Promise<{ dir_path: string }> {
+    ): Promise<CreateEditorDirResult> {
         return client.rpcCall("createeditordir", data, opts);
     },
 
     DeleteEditorFileCommand(
         client: RpcClient,
-        data: { path: string; recursive: boolean },
+        data: DeleteEditorFileReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("deleteeditorfile", data, opts);
@@ -134,17 +165,17 @@ export const FileApi = {
     // Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
     CreateScratchFileCommand(
         client: RpcClient,
-        data: { display_name?: string; exclude_scratch_ids?: string[] } = {},
+        data: CreateScratchFileReq = {},
         opts?: RpcOpts,
-    ): Promise<{ scratch_id: string; file_path: string; display_name: string }> {
+    ): Promise<CreateScratchFileResult> {
         return client.rpcCall("createscratchfile", data, opts);
     },
 
     MoveScratchFileCommand(
         client: RpcClient,
-        data: { scratch_id: string; destination_path: string },
+        data: MoveScratchFileReq,
         opts?: RpcOpts,
-    ): Promise<{ file_path: string }> {
+    ): Promise<MoveScratchFileResult> {
         return client.rpcCall("movescratchfile", data, opts);
     },
 
