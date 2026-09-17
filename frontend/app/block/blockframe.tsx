@@ -516,18 +516,24 @@ function BlockFrame_Header(
             style={headerStyle()}
         >
             {preIconButtonElem()}
-            <div class="block-frame-default-header-iconview">
-                {viewIconElem()}
-                <Show
-                    when={props.viewModel?.setViewName}
-                    fallback={<div class="block-frame-view-type">{viewName()}</div>}
-                >
-                    <ViewNameEditor name={viewName()} onSave={(v) => void props.viewModel.setViewName(v)} />
-                </Show>
-                <Show when={showBlockIds}>
-                    <div class="block-frame-blockid">[{props.blockId().substring(0, 8)}]</div>
-                </Show>
-            </div>
+            <Show
+                when={!props.leadingTabStrip}
+                fallback={<div class="block-frame-default-header-tabstrip">{props.leadingTabStrip}</div>}
+            >
+                <div class="block-frame-default-header-iconview">
+                    {viewIconElem()}
+                    <Show
+                        when={props.viewModel?.setViewName}
+                        fallback={<div class="block-frame-view-type">{viewName()}</div>}
+                    >
+                        <ViewNameEditor name={viewName()} onSave={(v) => void props.viewModel.setViewName(v)} />
+                    </Show>
+                    <Show when={showBlockIds}>
+                        <div class="block-frame-blockid">[{props.blockId().substring(0, 8)}]</div>
+                    </Show>
+                </div>
+            </Show>
+            <Show when={!props.leadingTabStrip}>{props.trailingAddButton}</Show>
             <Show when={manageConnection()}>
                 <ConnectionButton
                     ref={props.connBtnRef}

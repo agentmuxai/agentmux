@@ -1,0 +1,134 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Tests for PaneHeaderTabStrip — the unified Pane header. A thin wrapper
+ * around `BlockFrame_Header`'s `leadingTabStrip`/`trailingAddButton` props
+ * (see that component's own doc comment for why cherry-picking pieces like
+ * `EndIcons`, or unconditionally overriding the iconview even for a lone
+ * tab, were both rejected — real features/identity live in parts of
+ * BlockFrame_Header this file never touches).
+ * Spec: docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md §4.1.
+ */
+
+import { cleanup, render, screen } from "@solidjs/testing-library";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
+
+const blockFrameHeaderCalls: any[] = [];
+vi.mock("@/app/block/blockframe", () => ({
+    BlockFrame_Header: (props: any) => {
+        blockFrameHeaderCalls.push(props);
+        return (
+            <div data-testid="block-frame-header">
+                {props.leadingTabStrip}
+                {!props.leadingTabStrip && props.trailingAddButton}
+            </div>
+        );
+    },
+}));
+vi.mock("@/app/store/global", () => ({
+    getSettingsKeyAtom: () => () => undefined,
+}));
+
+afterEach(() => {
+    cleanup();
+    blockFrameHeaderCalls.length = 0;
+});
+
+interface T {
+    id: string;
+    label: string;
+}
+
+function fakeNodeModel(): any {
+    return { isFocused: () => false, isMagnified: () => false, toggleMagnify: vi.fn(), onClose: vi.fn() };
+}
+
+describe("PaneHeaderTabStrip", () => {
+    it("with 2+ tabs: overrides the iconview with a pill strip (leadingTabStrip set)", () => {
+        render(() => (
+            <PaneHeaderTabStrip
+                tabs={[{ id: "a", label: "alpha" }, { id: "b", label: "beta" }] as T[]}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                nodeModel={fakeNodeModel()}
+                viewModel={null}
+                activeBlockId={() => "b1"}
+            />
+        ));
+        expect(screen.getByText("alpha")).toBeInTheDocument();
+        expect(screen.getByText("beta")).toBeInTheDocument();
+        expect(blockFrameHeaderCalls[0].leadingTabStrip).toBeTruthy();
+    });
+
+    it("with 0 tabs and no onAdd (fresh/unlaunched pane): does NOT override the iconview, and shows no add button", () => {
+        render(() => (
+            <PaneHeaderTabStrip
+                tabs={[] as T[]}
+                activeId={null}
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                nodeModel={fakeNodeModel()}
+                viewModel={null}
+                activeBlockId={() => "b1"}
+            />
+        ));
+        // The real BlockFrame_Header iconview would render here in
+        // production — this mock just proves leadingTabStrip was NOT set,
+        // i.e. PaneHeaderTabStrip didn't try to substitute anything for it.
+        expect(blockFrameHeaderCalls[0].leadingTabStrip).toBeUndefined();
+    });
+
+    // Regression for ReAgent P1 on PR #3309 (round 2): agent/term's own
+    // visibleTabs()/visibleTermTabs() collapse a real single-conversation/
+    // single-shell state down to `tabs=[]` with `onAdd` STILL set. An
+    // earlier version of this component unconditionally overrode the real
+    // iconview with a hardcoded literal in this exact case — silently
+    // losing the real per-agent name, branded icon, and click-to-rename
+    // affordance for the single most common pane state. The fix: never
+    // override the iconview for 0 or 1 tabs; append the "+" separately.
+    it("with 0 tabs and onAdd set (the common lone-conversation/shell case): does NOT override the iconview, but DOES show the add button", () => {
+        const onAdd = vi.fn();
+        render(() => (
+            <PaneHeaderTabStrip
+                tabs={[] as T[]}
+                activeId={null}
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                nodeModel={fakeNodeModel()}
+                viewModel={null}
+                activeBlockId={() => "b1"}
+                onAdd={onAdd}
+                addTitle="New agent"
+            />
+        ));
+        expect(blockFrameHeaderCalls[0].leadingTabStrip).toBeUndefined();
+        expect(screen.getByLabelText("New agent")).toBeInTheDocument();
+    });
+
+    it("passes connBtnRef/changeConnModalAtom through to BlockFrame_Header unchanged", () => {
+        const connBtnRef = { current: null };
+        const changeConnModalAtom = (() => false) as any;
+        render(() => (
+            <PaneHeaderTabStrip
+                tabs={[] as T[]}
+                activeId={null}
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                nodeModel={fakeNodeModel()}
+                viewModel={null}
+                activeBlockId={() => "b1"}
+                connBtnRef={connBtnRef}
+                changeConnModalAtom={changeConnModalAtom}
+            />
+        ));
+        expect(blockFrameHeaderCalls[0].connBtnRef).toBe(connBtnRef);
+        expect(blockFrameHeaderCalls[0].changeConnModalAtom).toBe(changeConnModalAtom);
+    });
+});

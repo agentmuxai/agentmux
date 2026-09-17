@@ -1439,6 +1439,12 @@ declare global {
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
+        // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+        // §4.1/§7). "always" (default): every Pane's header is the unified
+        // PaneHeaderTabStrip even with exactly one tab (one pill instead of a
+        // plain title). "multi-only": a single-tab Pane shows a plain title
+        // instead of a one-pill strip — same row either way, never a second row.
+        "pane:tabstrip"?: "always" | "multi-only";
         "window:*"?: boolean;
         "window:transparent"?: boolean;
         "window:blur"?: boolean;

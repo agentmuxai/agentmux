@@ -42,7 +42,7 @@ describe("HelpView zoom", () => {
     });
 
     function renderHelp() {
-        const model = new HelpViewModel("test-block");
+        const model = new HelpViewModel("test-block", {} as any);
         return render(() => <HelpView model={model} />);
     }
 

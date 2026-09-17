@@ -348,6 +348,7 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) | Architecture rethink: making ABF mandatory ("every agent must have an ABF") |
+| [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
 | [`SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10`](SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md) | Spec: ABF v0.2 — Provider-Aware Components + Native Memory |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
@@ -375,6 +376,7 @@ partial list.
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
+| [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
 | [`SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16`](SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16.md) | SPEC: Split local-machine credentials out of `services/infra` into `services/local` |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
