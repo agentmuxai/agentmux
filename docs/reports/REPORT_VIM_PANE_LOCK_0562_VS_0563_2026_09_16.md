@@ -1,9 +1,10 @@
 # Report: vim locks the pane in 0.56.3 but not 0.56.2 — the code delta is not the cause
 
 **Date:** 2026-09-16
-**Status:** investigation complete; root cause NOT confirmed. The leading
-hypothesis is environmental (concurrent-instance GPU contention), not a code
-regression. Three cheap decisive tests are proposed in §7.
+**Status:** active — investigation complete, root cause NOT confirmed. Reopened
+in §9-§11 after live testing cleared both the code delta and the artifact. The
+vim symptom itself remains open; the isolation defects found along the way are
+tracked separately.
 **Author:** Opaz
 **Repo state:** `main` @ `cc8897c` (pulled fresh for this investigation)
 **Method:** static analysis + read-only inspection of both running instances'
