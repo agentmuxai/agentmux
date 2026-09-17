@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildConfigFiles, buildSettingsWithHooks, deriveSlug, renderSkillMd, sanitizeTrigger, uniqueSkillSlug } from "./agent-config-builder";
+import type { AgentSkill } from "@/app/store/rpc-api";
 
 function makeSkill(over: Partial<AgentSkill> = {}): AgentSkill {
     return {

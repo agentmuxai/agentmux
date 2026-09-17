@@ -14,7 +14,7 @@
 
 import { Logger } from "@/util/logger";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
-import type { AgentDefinition } from "@/app/store/rpc-api";
+import type { AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
 
 /**
  * `skill_type` value that materializes a skill as an Agent Skills-format

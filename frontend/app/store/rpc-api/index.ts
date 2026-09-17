@@ -47,6 +47,14 @@ export type {
     ListEditorDirResult,
 } from "./file";
 export type {
+    AgentSkill,
+    CommandCreateAgentSkillData,
+    CommandDeleteAgentSkillData,
+    CommandListAgentSkillsData,
+    CommandUpdateAgentSkillData,
+    CreateAgentSkillInput,
+} from "./agent";
+export type {
     CreateEditorDirReq,
     CreateEditorDirResult,
     CreateEditorFileReq,

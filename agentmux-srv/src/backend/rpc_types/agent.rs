@@ -532,13 +532,15 @@ pub struct CommandGetAllAgentContentData {
 // ---- Agent Skills command data types ----
 
 /// Input for listagentskills
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListAgentSkillsData {
     pub agent_id: String,
 }
 
 /// Input for createagentskill
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandCreateAgentSkillData {
     pub agent_id: String,
     pub name: String,
@@ -556,8 +558,23 @@ fn default_skill_type() -> String {
     "prompt".to_string()
 }
 
-/// Input for updateagentskill
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Input for updateagentskill.
+///
+/// Full replace, not a patch: the handler builds a whole `AgentSkill` out of
+/// these fields and writes it, keeping only `agent_id` and `created_at` from
+/// the existing row. So an omitted `description` does not mean "leave it
+/// alone", it means "set it to empty" -- and `skill_type` is worse, because
+/// `createagentskill` defaults it to "prompt" while this defaults it to "",
+/// so a create-then-update round trip that omits the field silently blanks a
+/// value the create had filled in.
+///
+/// The `serde(default)`s are kept (dropping them would reject payloads the
+/// server accepts today), but the generated TS deliberately does NOT restate
+/// them as optional the way `CommandCreateAgentSkillData` does. Full-replace
+/// semantics make every field semantically required, and there is no caller to
+/// break: nothing in the frontend calls `updateagentskill` today.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandUpdateAgentSkillData {
     pub id: String,
     pub name: String,
@@ -572,7 +589,8 @@ pub struct CommandUpdateAgentSkillData {
 }
 
 /// Input for deleteagentskill
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandDeleteAgentSkillData {
     pub id: String,
 }
