@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { createStore } from "solid-js/store";
 
 import { RpcApi } from "@/app/store/rpc-api";
@@ -10,6 +10,7 @@ import { getApi, createBlock } from "@/store/global";
 import { CORE_TOOLS, cliCommandForPlatform, currentPlatform, rowIconClass } from "@/app/view/agent/providers/toolchain-catalog";
 import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/providers/widget-catalog";
 import { getProviderList } from "@/app/view/agent/providers";
+import { resolveDrift } from "@/app/view/agent/providers/version-drift";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
@@ -59,6 +60,9 @@ interface ToolRow {
     installCommand?: string;
     npmPackage?: string;
     latestVersion?: string;
+    /** `pinnedVersion` from the provider catalog — the version AgentMux
+     *  validated. Provider rows only; core tools have no pin. */
+    pinnedVersion?: string;
 }
 
 interface WidgetRow {
@@ -98,6 +102,16 @@ function pathSourceLabel(src: string): string {
     }
 }
 
+/**
+ * Module-level so the registry lookup survives a pane close/reopen. Six hours
+ * is well below the rate at which these CLIs ship and well above how often a
+ * user opens this pane, so the automatic check costs approximately one request
+ * per session rather than one per open.
+ */
+const LATEST_TTL_MS = 6 * 60 * 60 * 1000;
+const latestCache: Record<string, string> = {};
+let latestFetchedAt = 0;
+
 // ── View component ────────────────────────────────────────────────────────────
 
 export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): JSX.Element {
@@ -116,6 +130,10 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
         id: p.id, label: p.displayName, icon: p.icon, kind: "provider",
         loading: true, found: false, docsUrl: p.docsUrl, installUrl: p.docsUrl,
         npmPackage: p.npmPackage,
+        // The version AgentMux validated. Core tools have no pin and stay
+        // undefined — resolveDrift reports `unknown` for them rather than
+        // claiming they're current.
+        pinnedVersion: p.pinnedVersion || undefined,
     }));
     const [rows, setRows] = createStore<ToolRow[]>([...coreRows, ...providerRows]);
 
@@ -203,6 +221,14 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     onMount(() => {
         RpcApi.ToolchainEnvCommand(TabRpcClient, { timeout: 8000 }).then(setEnv).catch(() => setEnv(null));
         rows.forEach((_, i) => void probe(i));
+        // Answer "am I behind?" without the user having to ask. This used to
+        // require clicking "Check latest versions", so drift was invisible
+        // unless you already suspected it — which is backwards for the one
+        // question this pane exists to answer. Cached (see LATEST_TTL_MS) and
+        // deliberately unawaited: rows render from the local installed-vs-pin
+        // comparison immediately, and the upstream column fills in later or
+        // not at all.
+        void checkLatestVersions({ auto: true });
         wrows.forEach((_, i) => void probeWidget(i));
         // Background-poll liveness tools (docker) so this view self-heals —
         // e.g. reflects "user just started Docker Desktop" — within a few
@@ -227,7 +253,39 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
 
     const [latestLoading, setLatestLoading] = createSignal(false);
 
-    const checkLatestVersions = async () => {
+    /** Per-row drift, from the one shared predicate. Cheap and pure — no memo
+     *  per row, since `rows` is a store and this is called during render. */
+    const rowDrift = (row: ToolRow) =>
+        resolveDrift({
+            installed: row.version,
+            pinned: row.pinnedVersion,
+            latest: row.latestVersion,
+            found: row.found,
+        });
+
+    /** How many rows the user can actually act on. Drives the summary line, so
+     *  the answer to "am I behind?" is available without scanning every row —
+     *  deliberately counts `behind-pin` only, NOT `pin-behind-upstream`, which
+     *  is ours to fix and must never be dressed up as the user's problem. */
+    const behindCount = createMemo(
+        () => rows.filter((r) => !r.loading && rowDrift(r).drift === "behind-pin").length
+    );
+
+    const checkLatestVersions = async (opts?: { auto?: boolean }) => {
+        // An automatic check must not re-hit the registry every time the pane
+        // is opened. A manual click always refetches — that is what the button
+        // is for. Offline/failure leaves the cache empty and simply reports
+        // `unknown` currency; it is never surfaced as an error, because having
+        // no network is a normal state, not a fault (see
+        // SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06 §3 on `lookup-failed`).
+        if (opts?.auto && Date.now() - latestFetchedAt < LATEST_TTL_MS) {
+            if (Object.keys(latestCache).length) {
+                rows.forEach((r, i) => {
+                    if (r.npmPackage && latestCache[r.id]) setRows(i, "latestVersion", latestCache[r.id]);
+                });
+                return;
+            }
+        }
         const packages = rows
             .filter((r) => r.npmPackage)
             .map((r) => ({ id: r.id, package: r.npmPackage! }));
@@ -238,8 +296,10 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
             rows.forEach((r, i) => {
                 if (r.npmPackage && result[r.id] !== undefined) {
                     setRows(i, "latestVersion", result[r.id] ?? undefined);
+                    if (result[r.id]) latestCache[r.id] = result[r.id]!;
                 }
             });
+            latestFetchedAt = Date.now();
         } catch {
             // network failure — leave latestVersion undefined
         } finally {
@@ -308,15 +368,52 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                         <Show when={row.source === "local_install"}>
                             <span class="toolchain-pill toolchain-pill--muted">managed</span>
                         </Show>
-                        <Show when={row.latestVersion !== undefined && row.version !== undefined}>
-                            <span
-                                class={`toolchain-pill ${row.version === row.latestVersion ? "toolchain-pill--muted" : "toolchain-pill--update"}`}
-                                title={`Latest: ${row.latestVersion}`}
-                            >
-                                <i class={`fa-solid ${row.version === row.latestVersion ? "fa-circle-check" : "fa-circle-up"}`} />
-                                {" "}{row.version === row.latestVersion ? "up to date" : `${row.latestVersion} available`}
-                            </span>
-                        </Show>
+                        {/* Drift, split by who can act on it. `behind-pin` is
+                            the user's — loud, and paired with the install
+                            action below, which reinstalls at the pin. The pin
+                            trailing upstream is OURS; it is shown quietly and
+                            never as a call to action, because the user cannot
+                            fix it. Previously this compared installed against
+                            upstream by string equality, which both missed
+                            behind-pin entirely and pushed users AHEAD of the
+                            version we validated. */}
+                        {(() => {
+                            const d = rowDrift(row);
+                            return (
+                                <>
+                                    <Show when={d.drift === "behind-pin"}>
+                                        <span
+                                            class="toolchain-pill toolchain-pill--update"
+                                            title={`AgentMux is validated against ${d.pinned}; you have ${d.installed}`}
+                                        >
+                                            <i class="fa-solid fa-circle-up" />{" "}
+                                            {d.pinned} available
+                                        </span>
+                                    </Show>
+                                    <Show when={d.drift === "current"}>
+                                        <span class="toolchain-pill toolchain-pill--muted">
+                                            <i class="fa-solid fa-circle-check" /> up to date
+                                        </span>
+                                    </Show>
+                                    <Show when={d.drift === "ahead-of-pin"}>
+                                        <span
+                                            class="toolchain-pill toolchain-pill--muted"
+                                            title={`Newer than the ${d.pinned} AgentMux validates against — not a problem, just untested here`}
+                                        >
+                                            ahead of pin
+                                        </span>
+                                    </Show>
+                                    <Show when={d.currency === "pin-behind-upstream"}>
+                                        <span
+                                            class="toolchain-pill toolchain-pill--muted"
+                                            title={`AgentMux pins ${d.pinned}; upstream has ${d.latest}. Nothing for you to do — this is ours to bump.`}
+                                        >
+                                            pin {d.pinned} · upstream {d.latest}
+                                        </span>
+                                    </Show>
+                                </>
+                            );
+                        })()}
                     </Show>
                     <Show when={!row.loading && !row.found}>
                         <span class="toolchain-pill" classList={{ "toolchain-pill--warn": !row.optional, "toolchain-pill--muted": row.optional }}>
@@ -391,6 +488,16 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                     <i class={`fa-solid ${latestLoading() ? "fa-spinner fa-spin" : "fa-arrow-up"}`} />
                     {latestLoading() ? " Checking…" : " Check latest versions"}
                 </button>
+                {/* The one-glance answer to "am I behind?" — counts only what
+                    the user can act on. A pin trailing upstream is ours and is
+                    deliberately excluded, so this never nags about something
+                    they cannot fix. */}
+                <Show when={behindCount() > 0}>
+                    <span class="toolchain-pill toolchain-pill--update" title="Reinstall from each row to move to the version AgentMux validates against">
+                        <i class="fa-solid fa-circle-up" />{" "}
+                        {behindCount()} {behindCount() === 1 ? "tool is" : "tools are"} behind
+                    </span>
+                </Show>
             </div>
             <div class="toolchain-body">
                 <section class="toolchain-section">
