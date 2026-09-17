@@ -29,6 +29,33 @@ import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
 import type { PrereqToolResolution } from "@/types/rpc/PrereqToolResolution";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+export type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
+export type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
+export type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
+export type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+export type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
+export type { AckResp } from "@/types/rpc/AckResp";
+export type { EnsureAccountDirReq } from "@/types/rpc/EnsureAccountDirReq";
+export type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
+import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
+import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
+import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
+import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+import type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
+import type { AckResp } from "@/types/rpc/AckResp";
+import type { EnsureAccountDirReq } from "@/types/rpc/EnsureAccountDirReq";
+import type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
+
+// `directAccount`, `existingAccountId`, `authEnv` and `requiresTty` are all
+// `#[serde(default)]` on non-`Option` Rust fields, so they are omittable on the
+// wire but ts-rs generates them as required. Derive the accurate shape from the
+// generated type rather than hand-listing them, so a field added in Rust flows
+// through automatically -- same approach as BundleUpsertInput/SkillUpsertInput.
+export type AuthStartInput = Pick<
+    StartProviderAuthReq,
+    "providerId" | "cliPath" | "authLoginArgs" | "authCheckArgs"
+> &
+    Partial<Omit<StartProviderAuthReq, "providerId" | "cliPath" | "authLoginArgs" | "authCheckArgs">>;
 import type { OAuthFlowStatus } from "./types";
 
 export const IdentityApi = {
@@ -178,29 +205,7 @@ export const IdentityApi = {
 
     AuthStartCommand(
         client: RpcClient,
-        data: {
-            providerId: string;
-            /** Vestigial — bundle mode was retired in Phase 4c of
-             *  SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the
-             *  wire shape only; never set by `AuthFlowController`. */
-            intoBundleId?: string;
-            /** Always sent as `true` by `AuthFlowController` (the sole
-             *  caller) — a successful auth persists a standalone
-             *  IdentityAccount. */
-            directAccount?: boolean;
-            /** Direct-account reconnect: non-empty to refresh an
-             *  already-linked account's tokens in place. Ignored unless
-             *  `directAccount` is set. */
-            existingAccountId?: string;
-            cliPath: string;
-            authLoginArgs: string[];
-            authCheckArgs: string[];
-            authEnv?: Record<string, string>;
-            /** Spawn the login subprocess under a PTY (run_cli_login's
-             *  PTY branch). Required for providers whose auth subcommand
-             *  refuses to run without an interactive TTY (OpenClaw). */
-            requiresTty?: boolean;
-        },
+        data: AuthStartInput,
         opts?: RpcOpts,
     ): Promise<{ sessionId: string; authUrl?: string }> {
         return client.rpcCall("auth.start", data, opts);
@@ -209,7 +214,7 @@ export const IdentityApi = {
     // command "auth.poll" — flattened `{ providerId, ...AuthSessionStatus }`
     AuthPollCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: PollProviderAuthReq,
         opts?: RpcOpts,
     ): Promise<AuthSessionStatus & { providerId: string }> {
         return client.rpcCall("auth.poll", data, opts);
@@ -217,17 +222,17 @@ export const IdentityApi = {
 
     AuthSubmitCallbackCommand(
         client: RpcClient,
-        data: { sessionId: string; callbackUrl: string },
+        data: SubmitAuthCallbackReq,
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<AckResp> {
         return client.rpcCall("auth.submitcallback", data, opts);
     },
 
     AuthCancelCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: CancelProviderAuthReq,
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<AckResp> {
         return client.rpcCall("auth.cancel", data, opts);
     },
 
