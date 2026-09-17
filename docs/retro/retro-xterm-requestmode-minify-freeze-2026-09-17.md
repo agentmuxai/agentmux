@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-17
 **Author:** Opaz
-**Status:** implemented — fix is removing `safari13` from the Vite build target
+**Status:** implemented — `safari13` dropped from the Vite target, esbuild floored
+at >=0.28.2, and the terminal parser hardened against the failure class
 **Severity:** High — any terminal pane running a program that queries DECRQM
 becomes unresponsive; packaged builds only
 
@@ -59,6 +60,36 @@ ReferenceError: t is not defined
 
 `es2021`, `chrome97` and `es2022` all emit correct output (`let t; … (t ||= {})`).
 Only the Safari 13 target triggers it.
+
+## 2a. This is a known upstream bug — we were one patch behind
+
+It is [evanw/esbuild#4508](https://github.com/evanw/esbuild/issues/4508), fixed
+in **esbuild 0.28.2**:
+
+> Fix a minification bug with lowered logical assignment operators. This release
+> fixes a bug that could cause esbuild to generate incorrect code for logical
+> assignment operators when lowering them to an older target environment.
+
+Upstream's explanation matches the diagnosis exactly: lowering duplicates the
+left-hand side, esbuild failed to count the duplicate as a *new usage* when the
+LHS is an identifier, so the minifier believed the variable was used once and
+inlined its initializer into that use — dropping the declaration.
+
+Vite 6.4.3 resolves `esbuild ^0.25.0`; we had **0.28.1**. Verified against both:
+
+```
+esbuild 0.28.1 --target=safari13  ->  void 0||(t={})      declaration dropped
+esbuild 0.28.2 --target=safari13  ->  let E; ... E||(E={})  correct
+```
+
+So the two fixes are independent and either alone is sufficient for *this* bug:
+removing the obsolete `safari13` target avoids the lowering path entirely, and
+the `>=0.28.2` floor fixes the miscompile itself — which also covers any other
+lowering path that hits the same flaw. Both are applied.
+
+No upstream report is needed. The lesson is narrower and more uncomfortable: a
+patch-level dependency gap produced a user-visible terminal freeze, and nothing
+in our process would have surfaced it.
 
 ## 3. Why it froze the pane
 
@@ -138,6 +169,30 @@ AFTER : requestMode(t,n){let r;(p=>(…)  ← restored
 and the orphaned `void 0||(x={})` pattern no longer appears anywhere in the
 output.
 
+## 6a. Hardening the failure class
+
+The specific miscompile is fixed twice over. The *class* is not: any uncaught
+throw inside xterm's `parse()` — or a handler that hangs — wedges a pane the same
+silent way, and that silence is why this took as long as it did.
+
+`frontend/app/view/term/parser-wedge.ts` detects it by **liveness**, deliberately
+not by inspecting `error.stack` for xterm frames: stack sniffing is unreliable
+against minified vendor code, which is precisely the condition being survived.
+`Terminal.write(data, cb)` invokes `cb` once that chunk is parsed, so writes
+handed over and never acknowledged mean the parser stopped consuming — whatever
+the cause.
+
+On trip, `termwrap` resets the terminal (clearing half-finished parser state) and
+calls `resyncController()`, the same path a crashed controller already takes. It
+is a new trigger, not a new mechanism, and scrollback is re-read from the backend
+rather than lost. Rate-limited so a repeatedly-failing pane is not thrashed, and
+logged at error level — a pane that silently recovers still hides a bug.
+
+Detection requires **both** unacknowledged writes and silence past the timeout.
+Either alone is normal: an idle pane has no pending writes, a busy one settles.
+7 tests pin the behaviour, including the partially-drained case that matches the
+real failure shape (some chunks parse, then one throws and the rest stall).
+
 ## 7. Follow-ups
 
 1. **Packaging strips the source maps the runtime resolver needs.**
@@ -145,11 +200,12 @@ output.
    `vite.config.ts` emits them on purpose for `source-map-resolver.ts`. Either
    ship them or drop the resolver; today we pay the build cost and lose the
    benefit, and that directly cost this investigation.
-2. **Report upstream to esbuild.** The repro in §2 is self-contained. Worth
-   confirming against the latest esbuild first.
+2. **Dependency currency has no signal today.** The fix existed upstream in
+   0.28.2 before we ever hit the bug; we shipped a terminal freeze because a
+   transitive dev-dependency was one patch behind and nothing flagged it. Worth
+   deciding whether build-toolchain versions deserve a currency check, given a
+   minifier defect is invisible to every source-level review we run.
 3. **Consider pinning the minifier target in one place with a comment**, so a
    future "add Safari support back" change cannot silently reintroduce this.
-4. **An uncaught exception inside `parse` kills the terminal silently.** Even
-   with this fixed, one bad escape sequence can wedge a pane with nothing
-   surfaced to the user. A guard around the parser dispatch — logging and
-   continuing rather than unwinding — would turn a freeze into a glitch.
+4. ~~An uncaught exception inside `parse` kills the terminal silently.~~ Done —
+   see §6a.
