@@ -667,6 +667,53 @@ describe("addWidgetAsPaneTab", () => {
         expect(data.activeBlockId).toBe("b2");
     });
 
+    // ReAgent P0 on #3351: the first version of this sent the contributed
+    // key as a TOP-LEVEL pane.open arg (`cwd`), which srv silently drops —
+    // `open_pane` only consults the top-level args inside `build_pane_meta`,
+    // and skips that entirely whenever `meta` is supplied, which this path
+    // always does. So the assertion that matters is that the key lands
+    // INSIDE meta, not merely that it was somewhere in the payload.
+    it("merges a destination pane's contributed keys INTO meta, where srv will actually read them", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        await addWidgetAsPaneTab(
+            model,
+            nodeId,
+            { meta: { view: "term", controller: "shell" } } as BlockDef,
+            { "cmd:cwd": "/tmp/here" }
+        );
+
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            {
+                view: "term",
+                skip_placement: true,
+                meta: { view: "term", controller: "shell", "cmd:cwd": "/tmp/here" },
+            },
+            {}
+        );
+        // Belt and braces: nothing may ride along at the top level, since
+        // that is precisely the shape srv ignores.
+        const sent = rpcCall.mock.calls[0][1] as Record<string, unknown>;
+        expect(sent).not.toHaveProperty("cwd");
+    });
+
+    it("leaves meta exactly as the blockdef had it when the pane contributes nothing", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        await addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef, undefined);
+
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            { view: "browser", skip_placement: true, meta: { view: "browser" } },
+            {}
+        );
+    });
+
     it("deletes the orphaned block and does not throw if the target node vanished while the RPC was in flight", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");

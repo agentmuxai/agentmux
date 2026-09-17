@@ -102,7 +102,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
-        openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e);
+        openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e, model?.newTabMeta);
     };
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;

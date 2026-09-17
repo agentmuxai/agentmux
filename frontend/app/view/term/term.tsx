@@ -18,7 +18,6 @@ import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
-import { openPaneTabWidgetPicker } from "@/app/element/pane-tab-picker";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -687,6 +686,20 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
         // unchanged.
         connBtnRef: connBtnRef(),
         changeConnModalAtom: changeConnModalAtom(),
+        // A new terminal tab inherits the CURRENT tab's cwd, matching how a
+        // real terminal's "new tab" starts in the same directory. This used
+        // to live in term's own `handleTermTabAdd`; it moved here when "+"
+        // became the shared widget picker, so it applies to a terminal
+        // added from this pane's picker and to nothing else (any other view
+        // type gets undefined and is unaffected).
+        newTabMeta: (view: string | undefined) => {
+            if (view !== "term") return undefined;
+            const cwd = activeBlockData()?.meta?.["cmd:cwd"] as string | undefined;
+            // The same key `build_pane_meta`'s own "term" branch writes from
+            // a top-level `cwd` arg (pane.rs) — set directly here because
+            // this path always supplies `meta`, so that branch never runs.
+            return cwd ? { "cmd:cwd": cwd } : undefined;
+        },
         rootClass: "term-pane-stack",
         contentClass: "term-pane-stack-content",
         // The background image and runtime badge span the strip AND the

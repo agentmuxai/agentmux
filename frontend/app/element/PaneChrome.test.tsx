@@ -244,7 +244,9 @@ describe("renderPaneChromeShell — activate/close/add wiring", () => {
 
         // Simulate the user picking the item the mocked picker returned.
         capturedOnSelect!({ meta: { view: "browser" } });
-        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "browser" } });
+        // 4th arg is the destination pane's own newTabMeta contribution —
+        // undefined here, since this pane supplies no PaneChromeModel.
+        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "browser" } }, undefined);
     });
 });
 
@@ -384,6 +386,30 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
         const root = container.querySelector(".pane-stack")!;
         expect(root.classList.contains("term-pane-stack")).toBe(true);
         expect(root.classList.contains("pane-stack-focused")).toBe(true);
+    });
+
+    it("newTabMeta reaches the add path, so a pane can carry context into the new tab", () => {
+        // Terminal's cwd inheritance rides on this: the picker stays
+        // view-agnostic and the destination pane contributes the params.
+        renderWithModel({
+            newTabMeta: (view: string) => (view === "term" ? { "cmd:cwd": "/tmp/here" } : undefined),
+        });
+
+        headerCalls[0].onAdd({ clientX: 1, clientY: 1 } as unknown as MouseEvent);
+        capturedOnSelect!({ meta: { view: "term" } });
+
+        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "term" } }, { "cmd:cwd": "/tmp/here" });
+    });
+
+    it("contributes nothing for a view type the pane doesn't recognise", () => {
+        renderWithModel({
+            newTabMeta: (view: string) => (view === "term" ? { "cmd:cwd": "/tmp/here" } : undefined),
+        });
+
+        headerCalls[0].onAdd({ clientX: 1, clientY: 1 } as unknown as MouseEvent);
+        capturedOnSelect!({ meta: { view: "browser" } });
+
+        expect(addWidgetAsPaneTab).toHaveBeenCalledWith(mockLayoutModel, "node-1", { meta: { view: "browser" } }, undefined);
     });
 
     it("a view type that opts out entirely (no paneChromeModel) keeps every default", () => {
