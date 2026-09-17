@@ -1057,6 +1057,17 @@ pub fn spawn_background_subsystems(
         event_bus.clone(),
     );
 
+    // Browser pane start page — same load-then-watch shape as settings.json
+    // above, on the SAME fs_watch_pool instance, so it rides the existing
+    // GetFullConfig/live-broadcast pipeline instead of a parallel one. See
+    // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.2.
+    backend::browser_start_page::load_start_page_from_disk(&config_watcher);
+    backend::browser_start_page::spawn_start_page_watcher(
+        fs_watch_pool.clone(),
+        config_watcher.clone(),
+        event_bus.clone(),
+    );
+
     // Start sysinfo collection loop (interval configurable via telemetry:interval)
     let sysinfo_broker = broker.clone();
     let sysinfo_config = config_watcher.clone();

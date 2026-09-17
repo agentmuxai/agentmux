@@ -7,6 +7,7 @@ pub mod agent_config;
 pub mod agent_session;
 pub mod blockcontroller;
 pub mod bookmarks_store;
+pub mod browser_start_page;
 pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_validate;

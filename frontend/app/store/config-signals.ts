@@ -11,6 +11,13 @@ export const [fullConfigAtom, setFullConfigAtom] = createSignal<FullConfigType>(
 
 export const settingsAtom = createMemo<SettingsType>(() => fullConfigAtom()?.settings ?? ({} as SettingsType));
 
+// Browser pane start page — rides GetFullConfig's `browserstartpage` field
+// (populated at boot, live-updated on WpsEvent.Config, same as every other
+// config-derived signal here) rather than a dedicated fetch, so a new
+// browser pane can read it synchronously with zero added round trips. See
+// docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.1/§3.3.
+export const browserStartPageAtom = createMemo<string | null>(() => fullConfigAtom()?.browserstartpage ?? null);
+
 export const hasCustomAIPresetsAtom = createMemo<boolean>(() => {
     const fullConfig = fullConfigAtom();
     if (!fullConfig?.presets) return false;

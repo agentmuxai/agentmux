@@ -1424,6 +1424,7 @@ declare global {
         connections: {[key: string]: ConnKeywords};
         bookmarks: {[key: string]: WebBookmark};
         configerrors: ConfigError[];
+        browserstartpage?: string;
     };
 
     // waveobj.LayoutActionData
