@@ -562,6 +562,22 @@ impl Controller for ShellController {
 
             let mut c = CommandBuilder::new(&shell_path);
 
+            // Strip this instance's identity before anything else touches the
+            // environment. `CommandBuilder::new` seeds from `std::env::vars_os()`,
+            // so without this the pane inherits srv's whole `AGENTMUX_*` set and
+            // anything launched from the pane — including another AgentMux build —
+            // adopts THIS instance's channel, data dir and cache dir. See
+            // `backend::pane_env` and
+            // docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md.
+            //
+            // Deliberately before the explicit `.env()` calls below: this path
+            // re-sets everything a pane actually needs (BLOCKID, TABID, VERSION,
+            // LOG_DIR, LOCAL_URL, AGENTMUX) a few lines down, so stripping first
+            // costs nothing and keeps the allowlist honest.
+            for key in crate::backend::pane_env::keys_to_strip() {
+                c.env_remove(&key);
+            }
+
             // Apply shell-specific startup args (--rcfile, -File, etc.)
             if let Some(startup) = crate::backend::shellintegration::get_shell_startup(shell_type, &shell_home) {
                 for arg in &startup.extra_args {
