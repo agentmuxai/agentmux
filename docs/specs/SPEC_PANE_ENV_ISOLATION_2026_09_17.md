@@ -142,6 +142,49 @@ Applying it *after* the if/else rather than inside a branch is deliberate: a
 per-branch call is exactly the shape that silently half-applies, which is how
 the first revision shipped a fix that left the most important path open.
 
+### 3.2c The complete spawn inventory
+
+Three review rounds each found sites the previous fix missed, every time because
+the fix was applied where the author happened to be looking rather than to an
+enumerated list. So: every `Command::new` / `CommandBuilder::new` in
+`agentmux-srv`, classified. Grep for the constructor, not for one alias — round 3
+was missed because `agents/runner.rs` imports `Command` rather than writing
+`tokio::process::Command`.
+
+**Pane policy** (`sanitize_pty_command` / `sanitize_process_command`) — ours, may
+use the in-pane helpers, so [`PANE_ENV_KEEP`] applies:
+
+| Site | Spawns |
+|---|---|
+| `blockcontroller/shell/lifecycle.rs` | all three PTY branches |
+| `blockcontroller/core.rs` | agent subprocesses |
+| `agents/runner.rs` | the drone one-shot agent CLI |
+| `backend/shell_node.rs` | `/api/v1/shell/create` — MCP `Shell` |
+| `server/shell_handlers.rs` | `shellexec` |
+
+**Strict policy** (`sanitize_external_command` / `..._pty_command`) — third-party,
+so not even the keep-set:
+
+| Site | Spawns |
+|---|---|
+| `server/identity_auth_spawn.rs` ×2 | provider CLIs for OAuth login |
+| `backend/lsp/supervisor.rs` | language servers |
+| `backend/mcp_probe.rs` | an arbitrary configured MCP command |
+| `server/voice.rs` | whisper.cpp |
+| `server/install_handlers.rs` | `npm install` — arbitrary postinstall scripts |
+| `server/system_install_handlers.rs` | an arbitrary install-recipe program |
+
+**Deliberately not sanitized**, with reasons:
+
+- `crash_monitor.rs` re-spawns **our own executable** to recover. Stripping would
+  make the replacement lose the identity it is supposed to resume.
+- Short-lived probes — `which`/`where`, `rustc --version`, `apt-cache`,
+  `npm --version`, `brew`, `winget` queries. They read and exit; there is nothing
+  to leak into and patching them is churn that dilutes review.
+- `util.rs`'s `open`/`xdg-open`/`explorer.exe` hand a URL or path to the desktop
+  handler. Arguably external, but stripping risks breaking the handoff on some
+  desktops for no concrete gain; noted rather than changed.
+
 ### 3.3 Strip before the overlay
 
 Both call sites strip *before* applying their own explicit `.env()` values. The

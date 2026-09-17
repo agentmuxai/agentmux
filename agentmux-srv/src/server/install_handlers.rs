@@ -516,6 +516,9 @@ fn spawn_install_task(
         );
 
         let mut cmd = Command::new(if cfg!(windows) { "npm.cmd" } else { "npm" });
+        // `npm install` runs arbitrary postinstall scripts — the textbook case for
+        // not handing a process this instance's identity or API endpoint.
+        crate::backend::pane_env::sanitize_external_command(&mut cmd);
         cmd.args(&npm_args);
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
