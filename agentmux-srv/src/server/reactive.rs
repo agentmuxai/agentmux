@@ -2197,24 +2197,31 @@ pub(super) fn is_self_registration(entry_local_url: &str, this_instances_local_u
 /// frontend actually needs to render a "registered elsewhere too" badge —
 /// deliberately excludes `local_url`/`auth_key`, which are internal
 /// forwarding plumbing, not UI-relevant.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub(super) struct RemoteRegistrationEntry {
     channel: String,
+    // u32 is < 2^53 so ts-rs maps it to `number` already; only 64-bit
+    // integers become `bigint`. See updated_at below.
     pid: u32,
+    #[ts(type = "number")]
     updated_at: u64,
 }
 
 /// Summary of the most recent `identity-mismatch` audit entry for this
 /// agent_id, if any (see #2695's `Handler::inject_message_inner` check) —
 /// narrowed from `AuditLogEntry` to what the Stash badge needs.
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub(super) struct MismatchAuditSummary {
+    #[ts(type = "number")]
     timestamp: u64,
     block_id: String,
     error_message: Option<String>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationsResult {
     /// This instance's own registration for the agent, if any — same data
     /// `GET /agentmux/reactive/agent` exposes, reused here so the frontend
@@ -2228,9 +2235,10 @@ pub(super) struct ReactiveRegistrationsResult {
     recent_mismatch: Option<MismatchAuditSummary>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub(super) struct ReactiveRegistrationsParams {
-    agent_id: String,
+    pub agent_id: String,
 }
 
 /// Registers `reactive.registrations`, called by the Stash "Registration"
@@ -2242,13 +2250,15 @@ pub(super) struct ReactiveRegistrationsParams {
 /// recent delivery hit the #2695 identity-mismatch guard.
 pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>, state: &AppState) {
     let state = state.clone();
-    engine.register_handler(
+    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1): the
+    // params/result structs carry `#[derive(ts_rs::TS)]`, so the frontend
+    // consumes generated bindings instead of four hand-written interfaces
+    // that each said "mirrors agentmux-srv's ...".
+    engine.register_typed(
         "reactive.registrations",
-        Box::new(move |data, _ctx| {
+        move |params: ReactiveRegistrationsParams, _ctx| {
             let state = state.clone();
-            Box::pin(async move {
-                let params: ReactiveRegistrationsParams = serde_json::from_value(data)
-                    .map_err(|e| format!("reactive.registrations: {e}"))?;
+            async move {
 
                 let local = state.reactive_handler.get_agent(&params.agent_id);
 
@@ -2306,9 +2316,9 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
                     remote,
                     recent_mismatch,
                 };
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
+                Ok(result)
+            }
+        },
     );
 }
 
@@ -3263,5 +3273,35 @@ mod cloud_relay_gate_tests {
         assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("host"))).await.is_none());
         assert!(try_cloud_relay(&state, &req(Some("agent2"), Some("lan"))).await.is_none());
         assert!(try_cloud_relay(&state, &req(Some("agent2"), None)).await.is_none());
+    }
+}
+
+/// Request-shape guard for `reactive.registrations`, added as part of the
+/// typed-registration migration.
+///
+/// `register_typed` deserializes the payload BEFORE the handler runs, so the
+/// Req type has to accept exactly what the frontend stub sends. On
+/// `bookmarks.list` that distinction shipped a P0 — a unit Req compiled fine
+/// and then rejected the stub's `{}` at runtime, because serde accepts `()`
+/// only from `null` (PR #3293). Neither `tsc` nor `check-rpc-bindings.sh`
+/// catches that class: they verify generated-type drift, not runtime payload
+/// shape. So every migrated command gets a test fed the real payload.
+#[cfg(test)]
+mod reactive_registrations_req_tests {
+    use super::*;
+
+    #[test]
+    fn params_accept_the_payload_the_stub_sends() {
+        // frontend/app/store/rpc-api/reactive.ts sends exactly this shape.
+        let sent_by_stub = serde_json::json!({ "agent_id": "manoz" });
+        let params: ReactiveRegistrationsParams = serde_json::from_value(sent_by_stub)
+            .expect("reactive.registrations must accept { agent_id }");
+        assert_eq!(params.agent_id, "manoz");
+    }
+
+    #[test]
+    fn params_reject_a_missing_agent_id() {
+        let empty = serde_json::json!({});
+        assert!(serde_json::from_value::<ReactiveRegistrationsParams>(empty).is_err());
     }
 }
