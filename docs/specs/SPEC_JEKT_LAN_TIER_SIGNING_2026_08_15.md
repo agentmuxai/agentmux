@@ -1,7 +1,16 @@
 # SPEC: LAN-tier Ed25519 jekt signing
 
 **Date:** 2026-08-15
-**Status:** Proposed
+**Status:** implemented — shipped in PR #2588 (`feat(jekt): per-agent Ed25519
+signing for LAN-tier jekts`); `db_agent_lan_keys`, `db_lan_peer_pubkey_pins`,
+`verify_lan_signature`, `find_agent_lan_pubkey`, and the `TRUST=lan-verified`
+marker are all live. Verified 2026-09-17. **Two exceptions to "as specified"
+that a reader must not miss:** §2.2's rate-limit exhaustion behaviour was
+specified wrong and the code deliberately does the opposite (see the
+correction inline there), and §5's "key rotation out of scope" is now
+partially closed for host-tier only by
+`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md`, which explains why LAN keys
+still cannot rotate.
 **Tracks:** GitHub issue #2586 ("jekt: extend cryptographic signing to LAN tier
 and general agent-to-agent WAN traffic"), scoped to the LAN half only per the
 issue's own suggested split — general agent-to-agent WAN signing is a separate
@@ -141,9 +150,26 @@ just by varying `source_agent`, ahead of `Handler::inject_message`'s own
 rate limiter (which only runs after `verify_lan_signature` returns). A
 simple global token bucket (`LAN_PUBKEY_LOOKUP_RATE_LIMIT`, 10/sec) gates
 the fan-out itself — not per-`agent_id`, since the abuse pattern is
-specifically about varying the id to dodge a per-id cache — failing closed
-(same "nothing to check against" outcome as a genuine not-found, never a
-verification failure) when exceeded.
+specifically about varying the id to dodge a per-id cache.
+
+**Correction, 2026-09-17 — this paragraph originally specified the wrong
+exhaustion behaviour, and the implementation is right, not this text.** It
+said an exhausted bucket should produce the "nothing to check against"
+outcome (`lan_verified = None`, a genuine not-found), "never a verification
+failure." That is **fail-open**: an attacker who exhausts the bucket gets a
+presented-but-invalid `lan_sig` downgraded from forced-sensitive to ordinary
+`TRUST=network-claimed` treatment — the exact bypass the bucket exists to
+prevent. Shipped code correctly maps
+`LanPubkeyLookup::RateLimited` to `lan_verified = Some(false)`
+(`agentmux-srv/src/server/reactive.rs`, with a comment naming this attack),
+i.e. a throttled lookup for a request that **presented a signature** is
+treated as a failure. A request with no signature at all is unaffected —
+nothing was claimed, so there is nothing to fail.
+
+Corrected after this stale text was inherited verbatim into the first draft
+of `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.4 and caught in review there
+(PR #3298). Trust `reactive.rs` over this paragraph if they ever disagree
+again.
 
 ### 2.3 Signing (client side — `agentmux-mcp`)
 
