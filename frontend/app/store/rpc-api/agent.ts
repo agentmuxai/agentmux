@@ -32,6 +32,35 @@ import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAg
 export type CreateAgentInstanceInput = Pick<CommandCreateAgentInstanceData, "definition_id"> &
     Partial<Omit<CommandCreateAgentInstanceData, "definition_id">>;
 
+// The agent-skill shapes are GENERATED from their Rust definitions by ts-rs.
+// This covers agent_handlers/skills.rs.
+export type { AgentSkill } from "@/types/rpc/AgentSkill";
+export type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
+export type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
+export type { CommandListAgentSkillsData } from "@/types/rpc/CommandListAgentSkillsData";
+export type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
+
+import type { AgentSkill } from "@/types/rpc/AgentSkill";
+import type { CommandCreateAgentSkillData } from "@/types/rpc/CommandCreateAgentSkillData";
+import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgentSkillData";
+import type { CommandListAgentSkillsData } from "@/types/rpc/CommandListAgentSkillsData";
+import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
+
+/**
+ * What a `createagentskill` caller may send.
+ *
+ * The four content fields are `#[serde(default)]` on non-`Option` Rust
+ * fields, so the server accepts them missing -- which ts-rs cannot express, so
+ * the generated type calls them required. Deriving restores that.
+ *
+ * Note there is deliberately no matching `UpdateAgentSkillInput`:
+ * `updateagentskill` is a full replace, so an omitted field means "set this to
+ * empty" rather than "leave it alone". Making its fields optional in TS would
+ * advertise a patch API the server does not implement.
+ */
+export type CreateAgentSkillInput = Pick<CommandCreateAgentSkillData, "agent_id" | "name"> &
+    Partial<Omit<CommandCreateAgentSkillData, "agent_id" | "name">>;
+
 // The Drone pane's wire types are GENERATED from their Rust definitions by
 // ts-rs (agentmux-srv/src/drone/types.rs + server/drone_handlers.rs).
 export type { DroneBlockState } from "@/types/rpc/DroneBlockState";
@@ -278,7 +307,7 @@ export const AgentApi = {
         return client.rpcCall("listagentskills", data, opts);
     },
 
-    CreateAgentSkillCommand(client: RpcClient, data: CommandCreateAgentSkillData, opts?: RpcOpts): Promise<AgentSkill> {
+    CreateAgentSkillCommand(client: RpcClient, data: CreateAgentSkillInput, opts?: RpcOpts): Promise<AgentSkill> {
         return client.rpcCall("createagentskill", data, opts);
     },
 

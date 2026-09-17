@@ -453,48 +453,6 @@ declare global {
         agent_type?: string;
     };
 
-    // AgentSkill
-    type AgentSkill = {
-        id: string;
-        agent_id: string;
-        name: string;
-        trigger: string;
-        skill_type: string;
-        description: string;
-        content: string;
-        created_at: number;
-    };
-
-    // CommandListAgentSkillsData
-    type CommandListAgentSkillsData = {
-        agent_id: string;
-    };
-
-    // CommandCreateAgentSkillData
-    type CommandCreateAgentSkillData = {
-        agent_id: string;
-        name: string;
-        trigger?: string;
-        skill_type?: string;
-        description?: string;
-        content?: string;
-    };
-
-    // CommandUpdateAgentSkillData
-    type CommandUpdateAgentSkillData = {
-        id: string;
-        name: string;
-        trigger?: string;
-        skill_type?: string;
-        description?: string;
-        content?: string;
-    };
-
-    // CommandDeleteAgentSkillData
-    type CommandDeleteAgentSkillData = {
-        id: string;
-    };
-
     // AgentHistory
     type AgentHistory = {
         id: number;
