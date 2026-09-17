@@ -13,16 +13,14 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let filestore = state.filestore.clone();
     let global_store = state.global_transcript_store.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BLOCKFILE_LINE_COUNT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandBlockfileLineCountData, _ctx| {
             let broker = broker.clone();
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             let global_store = global_store.clone();
-            Box::pin(async move {
-                let cmd: CommandBlockfileLineCountData = serde_json::from_value(data)
-                    .map_err(|e| format!("blockfile:line_count: {e}"))?;
+            async move {
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, "blockfile:line_count");
 
@@ -54,9 +52,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         }
                     };
                     if let Some(count) = count {
-                        return Ok(Some(
-                            serde_json::to_value(&BlockfileLineCountResult { count }).unwrap(),
-                        ));
+                        return Ok(BlockfileLineCountResult { count });
                     }
                 }
 
@@ -71,9 +67,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if cmd.filename == "output" {
                     if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
                         if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
-                            return Ok(Some(serde_json::to_value(
-                                &BlockfileLineCountResult { count },
-                            ).unwrap()));
+                            return Ok(BlockfileLineCountResult { count });
                         }
                     }
                 }
@@ -107,9 +101,9 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                Ok(Some(serde_json::to_value(&BlockfileLineCountResult { count }).unwrap()))
-            })
-        }),
+                Ok(BlockfileLineCountResult { count })
+            }
+        },
     );
 }
 
@@ -119,16 +113,14 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let global_store = state.global_transcript_store.clone();
     let mstore = state.mstore.clone();
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BLOCKFILE_READ_RANGE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandBlockfileReadRangeData, _ctx| {
             let broker = broker.clone();
             let filestore = filestore.clone();
             let global_store = global_store.clone();
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
-                    .map_err(|e| format!("blockfile:read_range: {e}"))?;
+            async move {
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, offset = cmd.offset, limit = cmd.limit, "blockfile:read_range");
 
@@ -317,7 +309,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             lines = result.lines.len(),
                             "blockfile:read_range via output.idx fast path"
                         );
-                        return Ok(Some(serde_json::to_value(&result).unwrap()));
+                        return Ok(result);
                     }
                 }
 
@@ -402,25 +394,19 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     all_lines[clamped_offset..clamped_end].to_vec()
                 };
 
-                Ok(Some(serde_json::to_value(&BlockfileReadRangeResult {
-                    lines,
-                    total,
-                    stamps: None,
-                }).unwrap()))
-            })
-        }),
+                Ok(BlockfileReadRangeResult { lines, total, stamps: None })
+            }
+        },
     );
 }
 
 fn register_blockfile_read_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BLOCKFILE_READ_STATE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandBlockfileReadStateData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandBlockfileReadStateData = serde_json::from_value(data)
-                    .map_err(|e| format!("blockfile:read_state: {e}"))?;
+            async move {
                 if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
                     return Err("blockfile:read_state: filename must not contain path separators".to_string());
                 }
@@ -440,21 +426,19 @@ fn register_blockfile_read_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 };
 
-                Ok(Some(serde_json::to_value(&BlockfileReadStateResult { content }).unwrap()))
-            })
-        }),
+                Ok(BlockfileReadStateResult { content })
+            }
+        },
     );
 }
 
 fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let filestore = state.filestore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BLOCKFILE_WRITE_STATE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandBlockfileWriteStateData, _ctx| {
             let filestore = filestore.clone();
-            Box::pin(async move {
-                let cmd: CommandBlockfileWriteStateData = serde_json::from_value(data)
-                    .map_err(|e| format!("blockfile:write_state: {e}"))?;
+            async move {
                 if cmd.filename.contains('/') || cmd.filename.contains('\\') || cmd.filename.contains("..") {
                     return Err("blockfile:write_state: filename must not contain path separators".to_string());
                 }
@@ -480,8 +464,8 @@ fn register_blockfile_write_state(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     Err(e) => return Err(format!("blockfile:write_state: {e}")),
                 }
 
-                Ok(Some(serde_json::to_value(&BlockfileWriteStateResult { bytes_written }).unwrap()))
-            })
-        }),
+                Ok(BlockfileWriteStateResult { bytes_written })
+            }
+        },
     );
 }
