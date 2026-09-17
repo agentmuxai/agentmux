@@ -46,7 +46,6 @@ import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { openPaneTabWidgetPicker } from "@/element/pane-tab-picker";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import {
