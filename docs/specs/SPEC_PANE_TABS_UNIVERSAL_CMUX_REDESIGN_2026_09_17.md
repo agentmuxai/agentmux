@@ -142,13 +142,13 @@ agent/term/editor — see §2.4).
     swaps one mounted block at a time.
 - **Today's chrome for a hoisted pane is TWO stacked rows, confirmed by direct
   reading of both implementations** — `AgentPaneChrome`
-  (`frontend/app/view/agent/agent-view.tsx:350-897`) and `TermPaneChrome`
+  (`frontend/app/view/agent/agent-view.tsx:350-895`) and `TermPaneChrome`
   (`frontend/app/view/term/term.tsx:442-751`) have the identical structure: a
   `headerElem` built from the real `BlockFrame_Header` component (full icon/
-  title/minimize/magnify/close chrome, `agent-view.tsx:411-436`) is rendered FIRST
-  (`agent-view.tsx:491`, `term.tsx:699`), and only THEN, in a separate wrapping div
-  below it (`.agent-pane-stack-content`, `agent-view.tsx:499`), does
-  `PaneTabStrip` render the tab pills (`agent-view.tsx:518`, `term.tsx:717`). A
+  title/minimize/magnify/close chrome, `agent-view.tsx:427-435`) is rendered FIRST
+  (`agent-view.tsx:840`, `term.tsx:699`), and only THEN, in a separate wrapping div
+  below it (`.agent-pane-stack-content`, `agent-view.tsx:848`), does
+  `PaneTabStrip` render the tab pills (`agent-view.tsx:867`, `term.tsx:717`). A
   progress-bar slot sits between them for agent panes. This is the exact "tabs
   below the header, not replacing it" state this spec's §1 commits to collapsing
   into one row — not a detail to preserve, a structure to remove.
