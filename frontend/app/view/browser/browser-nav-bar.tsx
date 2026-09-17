@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import clsx from "clsx";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";

@@ -324,3 +324,30 @@ pub struct CommandVoiceCheckPathData {
 pub struct VoiceCheckPathResult {
     pub exists: bool,
 }
+
+/// `bookmarks.list` / `bookmarks.set` response — both answer with the full
+/// list, so they share one type. Was an anonymous `json!({"bookmarks": ..})`
+/// before this existed to name it for the RPC bindings generator.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct BookmarksResult {
+    pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
+}
+
+/// `bookmarks.set` request — wholesale replace of the saved list.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandBookmarksSetData {
+    pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
+}
+
+/// `bookmarks.list` request — no arguments, but deliberately a struct rather
+/// than `()`. Serde deserializes `()` ONLY from JSON `null`, and the frontend
+/// stub sends `{}`, so a unit Req makes every list call fail at runtime with
+/// "invalid type: map, expected unit" — invisible to the compiler and to any
+/// test that does not exercise the real payload (codex P1 on PR #3293). An
+/// empty struct accepts `{}` and ignores unknown keys, matching the previous
+/// untyped handler's behaviour of ignoring `data` entirely.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandBookmarksListData {}

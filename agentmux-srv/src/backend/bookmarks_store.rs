@@ -19,14 +19,23 @@ use serde::{Deserialize, Serialize};
 /// One saved bookmark. `favicon_url` and `created_at` are best-effort —
 /// absent on any record written before a field was added, so both default
 /// on deserialize rather than failing the whole list over one old entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct BrowserBookmark {
     pub id: String,
     pub title: String,
     pub url: String,
     #[serde(default)]
     pub favicon_url: String,
+    // #[ts(type = "number")]: ts-rs maps i64 -> `bigint` by default, which is
+    // not assignable to `number` in TypeScript. Every consumer of this field
+    // treats it as a JS millisecond timestamp (`ToggleBookmarkInput.now: () =>
+    // number`), and ms-since-epoch stays exactly representable in an f64 until
+    // the year 275760 — so `number` is both correct and required for the
+    // frontend to compile. Any future rpc_types field with an i64 timestamp
+    // needs this same annotation; see SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md.
     #[serde(default)]
+    #[ts(type = "number")]
     pub created_at: i64,
 }
 
