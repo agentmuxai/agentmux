@@ -1733,23 +1733,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 //    bound, which is the exact state being designed out.
                 lan_listeners.apply(lan_enabled);
 
-                // 4. Broadcast updated config now — no waiting for fs watcher
-                let config = cw.get_full_config();
-                if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
-                    crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
-                    let event = crate::backend::eventbus::WSEventType {
-                        eventtype: crate::backend::eventbus::WS_EVENT_RPC.to_string(),
-                        oref: String::new(),
-                        data: Some(serde_json::json!({
-                            "command": "eventrecv",
-                            "data": {
-                                "event": "config",
-                                "data": { "fullconfig": config_val }
-                            }
-                        })),
-                    };
-                    eb.broadcast_event(&event);
-                }
+                // 4. Broadcast updated config now — no waiting for fs watcher.
+                //    Shared with the settings-watcher reload path and the
+                //    browser-start-page watcher — see its own doc comment
+                //    for why this used to be duplicated inline here.
+                crate::backend::config_watcher_fs::broadcast_full_config(&cw, &eb);
                 Ok(None)
             })
         }),

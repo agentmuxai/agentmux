@@ -455,6 +455,13 @@ pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
 pub const COMMAND_BOOKMARKS_LIST: &str = "bookmarks.list";
 pub const COMMAND_BOOKMARKS_SET: &str = "bookmarks.set";
 
+// Browser-pane start page — a single URL, also global (shared_dir-backed).
+// Write-only RPC: the value is read via GetFullConfig's `browserstartpage`
+// field, not a dedicated `.get`, so a new browser pane can read it
+// synchronously with zero added round trips. See
+// docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md.
+pub const COMMAND_BROWSER_START_PAGE_SET: &str = "browser_start_page.set";
+
 // Settings -> Recording section: live path-existence check for the local
 // whisper.cpp CLI/model file config. See
 // docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §3.

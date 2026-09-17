@@ -759,4 +759,16 @@ pub struct FullConfigType {
 
     #[serde(rename = "configerrors", default, skip_serializing_if = "Vec::is_empty")]
     pub config_errors: Vec<ConfigError>,
+
+    /// The browser pane's configured start page — `None` until the user
+    /// sets one via the bookmarks menu's "Set as Start Page" row. Global
+    /// across channels (`~/.agentmux/shared/browser-start-page.json`, NOT
+    /// `settings.json` — see that file's own module doc comment), and
+    /// deliberately living here rather than behind its own RPC so the
+    /// frontend gets it for free from the same `GetFullConfig` call it
+    /// already awaits before rendering, with live cross-window updates via
+    /// the same file-watch/broadcast pipeline `settings` itself uses. See
+    /// `docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md`.
+    #[serde(rename = "browserstartpage", default)]
+    pub browser_start_page: Option<String>,
 }

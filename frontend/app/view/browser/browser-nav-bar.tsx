@@ -5,6 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type 
 import clsx from "clsx";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { browserStartPageAtom } from "@/store/config-signals";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -249,6 +250,25 @@ export function BrowserNavBar(props: {
         }
     };
 
+    // Start page — unlike bookmarks, no local signal/rollback needed: the
+    // RPC handler updates the live config and broadcasts it BEFORE
+    // responding (agentmux-srv/src/server/app_api/browser_start_page.rs
+    // step 2/3), so by the time this await resolves, fullConfigAtom() — and
+    // therefore browserStartPageAtom() — is already current in THIS window
+    // and every other open one. See
+    // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3.
+    const [startPageError, setStartPageError] = createSignal<string | null>(null);
+
+    const setCurrentAsStartPage = async () => {
+        const url = model.urlAtom();
+        if (!url) return;
+        try {
+            await RpcApi.SetBrowserStartPageCommand(TabRpcClient, { url });
+        } catch (e) {
+            setStartPageError(`Failed to save start page: ${(e as Error).message ?? e}`);
+        }
+    };
+
     // Exact-URL match, not append-only — repeatedly toggling the same page
     // must flip between saved/unsaved, never pile up duplicate entries.
     // The actual add/remove decision is in the pure, directly-unit-tested
@@ -303,6 +323,17 @@ export function BrowserNavBar(props: {
         }
         const items: MenuItem[] = [];
         if (model.urlAtom()) {
+            // First entry, above the bookmark toggle — see
+            // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3.
+            // `checked` reuses the same MenuItem field the bookmarks spec's
+            // own UI section named for this row and never used; FlyoutMenu's
+            // default renderer already draws a check glyph for it.
+            items.push({
+                label: "Set as Start Page",
+                icon: "house",
+                checked: model.urlAtom() === browserStartPageAtom(),
+                onClick: setCurrentAsStartPage,
+            });
             items.push({
                 label: currentBookmark() ? "Remove Bookmark" : "Bookmark This Page",
                 icon: "star",
@@ -356,21 +387,38 @@ export function BrowserNavBar(props: {
                     }}
                     // Only the icon slot is customized here — label/onClick/
                     // divider behavior is identical to FlyoutMenu's default
-                    // rendering. `checked`/`shortcut`/`subItems` are
-                    // deliberately not replicated since this menu never uses
-                    // them (v1 has no folders/radio state) — not a general-
-                    // purpose replacement for the default renderer.
+                    // rendering. `shortcut`/`subItems` are deliberately not
+                    // replicated since this menu never uses them (v1 has no
+                    // folders — not a general-purpose replacement for the
+                    // default renderer). `checked` IS replicated, mirroring
+                    // FlyoutMenu's own default markup exactly
+                    // (flyoutmenu.tsx's un-overridden branch): a check glyph
+                    // replaces the icon slot entirely when `checked` is set,
+                    // rather than showing both — used by the "Set as Start
+                    // Page" row (docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3).
                     renderMenuItem={(item, menuItemProps) => (
                         <div {...menuItemProps}>
                             <Show
-                                when={typeof item.icon !== "string"}
+                                when={item.checked === undefined}
                                 fallback={
-                                    <Show when={item.icon}>
-                                        <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
-                                    </Show>
+                                    <i
+                                        class={clsx(
+                                            "fa-solid fa-fw menu-item-icon menu-item-check",
+                                            { "fa-check": item.checked === true },
+                                        )}
+                                    />
                                 }
                             >
-                                {item.icon as JSX.Element}
+                                <Show
+                                    when={typeof item.icon !== "string"}
+                                    fallback={
+                                        <Show when={item.icon}>
+                                            <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                        </Show>
+                                    }
+                                >
+                                    {item.icon as JSX.Element}
+                                </Show>
                             </Show>
                             <span class="label">{item.label}</span>
                         </div>
@@ -378,11 +426,17 @@ export function BrowserNavBar(props: {
                 >
                     <button
                         class="browser-nav-btn"
-                        title={bookmarksError() ? `Bookmarks: ${bookmarksError()}` : "Bookmarks"}
+                        title={
+                            bookmarksError()
+                                ? `Bookmarks: ${bookmarksError()}`
+                                : startPageError()
+                                  ? `Start page: ${startPageError()}`
+                                  : "Bookmarks"
+                        }
                     >
                         <i
                             class="fa fa-solid fa-bookmark"
-                            classList={{ "browser-bookmark-btn-error": !!bookmarksError() }}
+                            classList={{ "browser-bookmark-btn-error": !!bookmarksError() || !!startPageError() }}
                             aria-hidden="true"
                         />
                     </button>
