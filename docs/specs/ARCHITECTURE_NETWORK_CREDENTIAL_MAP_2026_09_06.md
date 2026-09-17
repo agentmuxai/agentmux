@@ -32,7 +32,7 @@ the message it carries. That is what `lan_sig` is for.
 
 | Credential | Transport | Gates | Held by |
 |---|---|---|---|
-| `auth_key` | `X-AuthKey` header | Everything under `authed_routes`, via `auth_middleware` — the full API surface | srv, launcher, frontend, and **every agent process** (`AGENTMUX_AUTH_KEY`) |
+| `auth_key` | `X-AuthKey` header | Everything under `authed_routes`, via `auth_middleware` — the full API surface, including `GET /agentmux/reactive/history/search` (see the note below it) | srv, launcher, frontend, and **every agent process** (`AGENTMUX_AUTH_KEY`) |
 | `lan_key` | `X-AuthKey` header | Exactly two routes, via `lan_or_full_auth_middleware`: `POST /agentmux/reactive/inject` and `GET /agentmux/reactive/agent` | srv only, plus whoever receives the mDNS TXT record it is broadcast in |
 | `host_reg_secret` | `host_ipc.Register` argument | That one call — nothing else | srv and the paired CEF host only; **never** an agent |
 | `ipc_token` (+ `ipc_port`) | Pushed to srv by the host; replayed by srv when proxying | `/agentmux/browser/*` **on the host's own IPC server**, backing the `/api/v1/ui/{screenshot,click,query}` proxy routes | The CEF host generates it for itself and is the sole source of truth |
@@ -52,6 +52,27 @@ The two-route set is deliberately kept **out** of `authed_routes` and merged at
 the top level with its own middleware, rather than nested — nesting would put
 `route_layer(auth_middleware)` on the outside and reject the LAN key before the
 inner layer ever saw it.
+
+### `history/search` reads conversation content, and `auth_key` cannot say who is asking
+
+`GET /agentmux/reactive/history/search`
+(`SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md`) searches an agent's own past
+sessions from disk — strictly more than `/reactive/transcript`, which returns
+only the live session's tail. It is deliberately a **full-auth** route, never
+in the `lan_key` set: conversation content is exactly what a captured LAN
+credential must not reach.
+
+**Its `agent` parameter is self-declared, and this table is the reason why.**
+`auth_key` is shared by every locally-spawned agent, so the server cannot
+distinguish which agent is calling — the same property that already makes
+`/reactive/transcript` readable for any agent by any local caller holding the
+key. The `SearchHistory` MCP tool exposes no `agent` parameter and always
+sends the caller's own `AGENTMUX_AGENT_ID` from its trusted spawn-time env,
+but that is a **client-side convention, not server-side enforcement**, and
+must not be documented as one. Enforcing "own history only" needs a verifiable
+per-agent identity on local routes, which does not exist; `host_reg_secret`
+below is the existing precedent for "`X-AuthKey` alone cannot distinguish
+callers that share it."
 
 ### Why `host_reg_secret` exists on top of `auth_key`
 

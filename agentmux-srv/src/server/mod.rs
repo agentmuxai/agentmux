@@ -410,6 +410,15 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/agentmux/reactive/supervisor-decision",
             post(reactive::handle_reactive_supervisor_decision),
+        )
+        // SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md — search an agent's own past
+        // conversations on disk. Distinct from `/transcript`, which is the LIVE
+        // session's tail only. Full-auth route (not in the LAN-scoped set):
+        // this reads conversation content, which is exactly what the LAN key
+        // must not reach.
+        .route(
+            "/agentmux/reactive/history/search",
+            get(reactive::handle_reactive_history_search),
         );
 
     // MessageBus routes (authed, localhost-only)

@@ -24,6 +24,7 @@
 
 import { Show, createMemo, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 /** Per-agent memory-count fetch state. `error` is distinct from `count: 0`. */
 export type MemoryCountState =

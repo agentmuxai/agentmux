@@ -12,9 +12,14 @@ import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import { activeKeyFor, getNodeByBlockId } from "@/layout/lib/layoutNodeModels";
-import { closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
+import { addWidgetAsPaneTab, closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
 import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
+
+const rpcCall = vi.fn();
+const deleteBlock = vi.fn();
+vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) } }));
+vi.mock("@/app/store/services", () => ({ ObjectService: { DeleteBlock: (...args: unknown[]) => deleteBlock(...args) } }));
 
 // Same mock harness as layoutModel.test.ts.
 const layoutStateSignals = new Map<string, SignalAtom<LayoutState>>();
@@ -635,5 +640,43 @@ describe("LayoutModel.dispose()", () => {
         model.treeState.focusedNodeId = undefined;
         model.setter(model.localTreeStateAtom, { ...model.treeState });
         expect(nodeModel.isFocused()).toBe(true); // frozen — proves disposal, not just eviction
+    });
+});
+
+describe("addWidgetAsPaneTab", () => {
+    beforeEach(() => {
+        rpcCall.mockReset();
+        deleteBlock.mockReset();
+        deleteBlock.mockResolvedValue(undefined);
+    });
+
+    it("creates the block via pane.open{skip_placement:true} and pushes it onto the target node's stack", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        await addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef);
+
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            { view: "browser", skip_placement: true, meta: { view: "browser" } },
+            {}
+        );
+        const data = model.treeState.rootNode!.data!;
+        expect(data.blockStack).toEqual(["b1", "b2"]);
+        expect(data.activeBlockId).toBe("b2");
+    });
+
+    it("deletes the orphaned block and does not throw if the target node vanished while the RPC was in flight", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        // Simulate the pane closing mid-flight by clearing the tree before
+        // addWidgetAsPaneTab re-resolves the node.
+        model.treeState.rootNode = undefined;
+
+        await expect(addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef)).resolves.toBeUndefined();
+        expect(deleteBlock).toHaveBeenCalledWith("b2");
     });
 });

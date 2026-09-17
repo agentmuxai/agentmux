@@ -207,156 +207,7 @@ declare global {
         blockdef: BlockDef;
     };
 
-    // AgentDefinition
-    type AgentDefinition = {
-        id: string;
-        // Stable, filesystem-safe identifier. Drives working dir, env vars,
-        // and cross-references. NEVER changes — distinct from `name` which
-        // is the renameable display. See
-        // docs/specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
-        slug: string;
-        name: string;
-        icon: string;
-        provider: string;
-        description: string;
-        working_directory: string;
-        shell: string;
-        provider_flags: string;
-        auto_start: number;
-        restart_on_crash: number;
-        idle_timeout_minutes: number;
-        created_at: number;
-        agent_type: string;
-        environment: string;
-        agent_bus_id: string;
-        is_seeded: number;
-        /**
-         * JSON-encoded per-provider account refs.
-         * **Deprecated in v6** — use `db_agent_identity_links` (junction
-         * table) via `listAgentIdentities` RPC instead. Kept on the type
-         * for compatibility with rows that still carry the legacy blob.
-         */
-        accounts?: string;
-        /**
-         * Forked-from definition id, or empty string for root definitions.
-         * Added in v6. See docs/specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
-         */
-        parent_id?: string;
-        /**
-         * Free-form label describing the branch (e.g. "pr-422-review").
-         * Empty for root definitions. Added in v6.
-         */
-        branch_label?: string;
-        /**
-         * Last-modified timestamp (epoch ms). Set to created_at on insert,
-         * refreshed on every update. Schema v2. `0` for rows last written
-         * before v2.
-         */
-        updated_at?: number;
-        /**
-         * Per-user hide flag for seeded templates (0 = visible, 1 = hidden).
-         * Schema v3. Set via AgentDefHideCommand / AgentDefUnhideCommand
-         * — Phase 2 of SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md.
-         * `listagents` excludes hidden templates by default; only the
-         * settings unhide UI passes `include_hidden: true` to see them.
-         */
-        user_hidden?: number;
-        /**
-         * Container image to pull when agent_type === "container".
-         * Populated from the seed manifest (cli-catalog.ts `containerImage`).
-         * Empty string for host-only agents.
-         */
-        container_image?: string;
-        /**
-         * Explicit per-agent opt-in (0/1) to the CLI's global (ambient)
-         * login when no oauth-class account resolves at spawn. 0 (default)
-         * = spawn fails with a visible error instead of silently falling
-         * back to ~/.claude. Toggled from the Agent setup modal's Accounts
-         * tab. Schema v12 — layer 3 of
-         * SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
-         */
-        use_ambient_login?: number;
-        /**
-         * Redirects this agent's harness (CLI) at a non-default model vendor
-         * backend — e.g. a custom `ANTHROPIC_BASE_URL` for a claude-provider
-         * agent. Empty/absent = use the harness's default vendor endpoint.
-         * Schema v15. Only settable via `agent.define` today; the human
-         * "New Agent"/edit UI (createagent/updateagent) doesn't surface it
-         * yet — see `agent_define_core`'s `validate_vendor_base_url`.
-         */
-        model_vendor_base_url?: string;
-        /**
-         * Per-agent opt-in: when non-zero, a running Warden Supervisor
-         * watcher agent is permitted to auto-continue this agent's session
-         * on turn-end (subject to a server-side consecutive-nudge ceiling).
-         * 0 (default) = opt-in required, same fail-by-default posture as
-         * use_ambient_login. Schema v17. Toggled from the Warden Supervisor
-         * panel.
-         */
-        auto_continue_enabled?: number;
-        /**
-         * The agent's own dedicated ABF bundle (`Bundle.id`). Set once —
-         * readonly after creation, same posture as `slug`/`parent_id`
-         * (`updateagent` preserves it from the existing row rather than
-         * accepting a client-supplied value). Empty string = not yet
-         * provisioned (legacy row predating this field). Distinct from an
-         * `AgentInstance`'s own `memory_id`, which can still point at a
-         * different bundle on purpose for one specific launch. Schema v19 —
-         * see ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
-         */
-        memory_id?: string;
-        /**
-         * This agent's own disclosure policy for an incoming cross-tier
-         * `transcript_request` jekt (`muxspect` Phase B/C — LAN/WAN
-         * conversation visibility). One of "private" (default,
-         * auto-deny) / "trusted_peers" (auto-approve an allow-listed
-         * requester) / "ask" (force human escalation). Channel-local
-         * only, like model_vendor_base_url/memory_id above — a
-         * cross-channel-reopened agent starts back at the safe
-         * "private" default. Schema v26.
-         */
-        conversation_visibility?: string;
-    };
-
     // ── v6: identity, instance, junction ────────────────────────────────────
-
-    /**
-     * Discriminated-union secret reference. Stored as JSON in
-     * `IdentityAccount.secret_ref`. The actual secret value is NEVER stored;
-     * only how to look it up at launch time. `plaintext_dev` is dev-only.
-     */
-    type SecretRef =
-        | { backend: "env"; env_var: string }
-        | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
-        | { backend: "plaintext_dev"; plaintext_dev: string }
-        // Armory API keys: pointer into the OS keychain. Plaintext is
-        // never carried here. See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
-        | { backend: "keychain"; service: string; account: string }
-        // OAuth credentials as a filesystem pointer: the provider CLI reads
-        // its tokens from this dir at spawn time; agentmux holds only the
-        // path. See SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md and the Rust
-        // SecretRef::OAuthConfigDir variant (storage/identities.rs).
-        | { backend: "oauth_config_dir"; dir: string };
-
-    type IdentityAccount = {
-        id: string;
-        name: string;
-        provider: string; // "github" | "aws" | "anthropic" | "custom"
-        kind: string;     // "pat" | "role" | "api_key" | "env_ref"
-        display_name?: string;
-        secret_ref: SecretRef;
-        /** Free-form per-provider context. Frontend types it by `provider`. */
-        context: Record<string, unknown>;
-        status?: string; // "unknown" | "ok" | "expired" | "invalid"
-        created_at: number;
-        updated_at: number;
-    };
-
-    type AgentDefinitionIdentity = {
-        agent_id: string;
-        account_id: string;
-        provider: string;
-    };
 
     // ── v7 — Bundles ────────────────────────────────────────────
 
@@ -442,52 +293,6 @@ declare global {
      *  McpServerBundleListItem. */
     type SkillBundleListItem = Skill & { bound_to_bundle: boolean };
 
-    /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
-     *  agentmux-srv/src/drone/types.rs. */
-    type DroneDefinition = {
-        id: string;
-        name: string;
-        description: string;
-        graph: { nodes: DroneFlowNode[]; edges: DroneFlowEdge[] };
-        viewport: { x: number; y: number; zoom: number };
-        created_at: number;
-        updated_at: number;
-    };
-
-    type DroneFlowNode = {
-        id: string;
-        position: { x: number; y: number };
-        data: Record<string, unknown> & { kind: string };
-        type?: string;
-    };
-
-    type DroneFlowEdge = {
-        id: string;
-        source: string;
-        target: string;
-        sourceHandle?: string;
-        targetHandle?: string;
-    };
-
-    type DroneRun = {
-        id: string;
-        drone_id: string;
-        status: string;
-        started_at: number;
-        ended_at: number;
-        block_states: Record<string, DroneBlockState>;
-        output: string;
-        error: string;
-    };
-
-    type DroneBlockState = {
-        status: "pending" | "running" | "done" | "error" | "skipped";
-        output?: unknown;
-        error?: string;
-        started_at?: number;
-        completed_at?: number;
-    };
-
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
 
     type GitHubContext = {
@@ -496,34 +301,6 @@ declare global {
         branch?: string;
         issue_number?: number;
         workflow_run_id?: number;
-    };
-
-    type AgentInstance = {
-        id: string;
-        definition_id: string;
-        parent_instance_id?: string;
-        block_id?: string;
-        session_id?: string;
-        status: string; // AgentInstanceStatus
-        /** JSON-encoded GitHubContext, or empty string. */
-        github_context?: string;
-        started_at: number;
-        ended_at?: number;
-        created_at: number;
-        /** v7/v11 — legacy Identity-bundle id; db_identity_bundles was
-         *  dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
-         *  Vestigial opaque pass-through now — credential resolution and
-         *  display names both go through db_agent_identity_links/db_accounts.
-         *  Empty string = ambient creds. */
-        identity_id?: string;
-        /** v7/v11 — FK to db_bundles. Empty string = blank singleton. */
-        memory_id?: string;
-        /** v8 — user-chosen instance name (AGENTMUX_AGENT_ID). */
-        instance_name?: string;
-        /** v8 — absolute working directory from allocate_agent_workdir. */
-        working_directory?: string;
-        /** v8 — soft-delete flag for the "Forget agent" affordance. */
-        display_hidden?: boolean;
     };
 
     // ────────────────────────────────────────────────────────────────
@@ -676,92 +453,6 @@ declare global {
         agent_type?: string;
     };
 
-    // AgentContent
-    type AgentContent = {
-        agent_id: string;
-        content_type: string;
-        content: string;
-        updated_at: number;
-    };
-
-    // CommandCreateAgentDefinitionData
-    type CommandCreateAgentDefinitionData = {
-        name: string;
-        icon: string;
-        provider: string;
-        description: string;
-        working_directory?: string;
-        shell?: string;
-        provider_flags?: string;
-        auto_start?: number;
-        restart_on_crash?: number;
-        idle_timeout_minutes?: number;
-        agent_type?: string;
-        environment?: string;
-        agent_bus_id?: string;
-    };
-
-    // CommandUpdateAgentDefinitionData
-    type CommandUpdateAgentDefinitionData = {
-        id: string;
-        name: string;
-        icon: string;
-        provider: string;
-        description: string;
-        working_directory?: string;
-        shell?: string;
-        provider_flags?: string;
-        auto_start?: number;
-        restart_on_crash?: number;
-        idle_timeout_minutes?: number;
-        agent_type?: string;
-        environment?: string;
-        agent_bus_id?: string;
-        /** JSON-encoded per-provider account refs. See AgentDefinition.accounts. */
-        accounts?: string;
-        /**
-         * Explicit ambient-login opt-in (0/1). Omit to preserve the stored
-         * value — the backend treats absence as "no change". See
-         * AgentDefinition.use_ambient_login.
-         */
-        use_ambient_login?: number;
-        /**
-         * Per-agent opt-in letting a Warden Supervisor watcher agent
-         * auto-continue this agent's session on turn-end (0/1). Omit to
-         * preserve the stored value. See AgentDefinition.auto_continue_enabled.
-         */
-        auto_continue_enabled?: number;
-        /**
-         * Custom model vendor base URL override. Omit to preserve the
-         * stored value; "" explicitly clears it back to the harness's
-         * default vendor endpoint. See AgentDefinition.model_vendor_base_url.
-         */
-        model_vendor_base_url?: string;
-    };
-
-    // CommandDeleteAgentDefinitionData
-    type CommandDeleteAgentDefinitionData = {
-        id: string;
-    };
-
-    // CommandGetAgentContentData
-    type CommandGetAgentContentData = {
-        agent_id: string;
-        content_type: string;
-    };
-
-    // CommandSetAgentContentData
-    type CommandSetAgentContentData = {
-        agent_id: string;
-        content_type: string;
-        content: string;
-    };
-
-    // CommandGetAllAgentContentData
-    type CommandGetAllAgentContentData = {
-        agent_id: string;
-    };
-
     // AgentSkill
     type AgentSkill = {
         id: string;
@@ -832,12 +523,6 @@ declare global {
         agent_id: string;
         query: string;
         limit?: number;
-    };
-
-    // CommandImportAgentFromClawData
-    type CommandImportAgentFromClawData = {
-        workspace_path: string;
-        agent_name: string;
     };
 
     // wshrpc.CommandDeleteFileData
@@ -1477,6 +1162,12 @@ declare global {
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
+        // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+        // §4.1/§7). "always" (default): every Pane's header is the unified
+        // PaneHeaderTabStrip even with exactly one tab (one pill instead of a
+        // plain title). "multi-only": a single-tab Pane shows a plain title
+        // instead of a one-pill strip — same row either way, never a second row.
+        "pane:tabstrip"?: "always" | "multi-only";
         "window:*"?: boolean;
         "window:transparent"?: boolean;
         "window:blur"?: boolean;
@@ -2028,33 +1719,6 @@ declare global {
         auto_allocate?: boolean;
     };
 
-    // wshrpc.CommandReadEditorFileData
-    type CommandReadEditorFileData = {
-        path: string;
-    };
-
-    // wshrpc.CommandReadEditorFileResult
-    type CommandReadEditorFileResult = {
-        content: string;
-        read_only: boolean;
-        // Detected text encoding (SPEC_EDITOR_FILE_ENCODINGS). Optional for
-        // back-compat; absent ⇒ treat as UTF-8.
-        encoding?: string;
-        bom?: string;
-        line_ending?: string;
-        had_decode_errors?: boolean;
-    };
-
-    // wshrpc.CommandWriteEditorFileData
-    type CommandWriteEditorFileData = {
-        path: string;
-        content: string;
-        // Encoding to write back in; omit ⇒ UTF-8 (back-compat).
-        encoding?: string;
-        bom?: string;
-        line_ending?: string;
-    };
-
     // wshrpc.CommandResolveCliData
     type CommandResolveCliData = {
         provider_id: string;
@@ -2101,42 +1765,6 @@ declare global {
         raw_output: string;
     };
 
-    // tool_store.ToolStatus
-    type ToolStatus = "installed_system" | "installed_bundled" | "installed_managed" | "missing" | "unavailable";
-
-    // tool_store.ToolStatusEntry
-    type ToolStatusEntry = {
-        id: string;
-        display: string;
-        description: string;
-        tier: number;
-        status: ToolStatus;
-        version?: string;
-        path?: string;
-    };
-
-    // wshrpc.GetToolStatusResult
-    type GetToolStatusResult = {
-        tools: ToolStatusEntry[];
-    };
-
-    // wshrpc.CommandInstallToolData
-    type CommandInstallToolData = {
-        tool_ids: string[];
-    };
-
-    // wshrpc.InstallFailure
-    type InstallFailure = {
-        id: string;
-        error: string;
-    };
-
-    // wshrpc.InstallToolResult
-    type InstallToolResult = {
-        installed: string[];
-        failed: InstallFailure[];
-    };
-
     // The ONLY native-memory type still hand-written here; its siblings are now
     // ts-rs-generated under frontend/types/rpc/ and re-exported from
     // app/store/rpc-api/native-memory.ts. This one cannot be generated: `detail`
@@ -2148,41 +1776,6 @@ declare global {
     type NativeMemoryWriteProvenance = {
         source: string; // "human" | "agent_inferred" | "jekt" | ...
         detail?: unknown;
-    };
-
-    // CommandImportAgentDefinitionsData
-    type AgentSkillImport = {
-        name: string;
-        trigger: string;
-        skill_type: string;
-        description: string;
-        content: string;
-    };
-
-    type AgentDefinitionImport = {
-        id: string;
-        name: string;
-        icon: string;
-        description: string;
-        provider: string;
-        shell: string;
-        working_directory: string;
-        agent_bus_id: string;
-        agent_type: string;
-        environment: string;
-        restart_on_crash: boolean;
-        content: Record<string, string>;
-        skills: AgentSkillImport[];
-    };
-
-    type CommandImportAgentDefinitionsData = {
-        agents: AgentDefinitionImport[];
-    };
-
-    type ImportAgentDefinitionsResult = {
-        imported: string[];
-        skipped: string[];
-        failed: string[];
     };
 
     // ExportAgentDefinitionsResult

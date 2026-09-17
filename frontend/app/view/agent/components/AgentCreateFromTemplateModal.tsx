@@ -34,7 +34,7 @@ import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { providerSupportsModelFlag } from "../buildRuntimeArgs";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
-import type { Bundle } from "@/app/store/rpc-api";
+import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 
 interface CreateFromTemplateFormData {
     name: string;

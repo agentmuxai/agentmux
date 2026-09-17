@@ -30,6 +30,109 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    UnwatchMediaDirReq,
+    WatchEditorFileReq,
+    WatchMediaDirReq,
+} from "./file";
+export type {
+    CommandReadEditorFileData,
+    CommandReadEditorFileResult,
+    CommandWriteEditorFileData,
+    DirEntry,
+    EditorDrive,
+    EditorRootsReq,
+    GetEditorHomeResult,
+    GetEditorRootsResult,
+    ListEditorDirReq,
+    ListEditorDirResult,
+} from "./file";
+export type {
+    CreateEditorDirReq,
+    CreateEditorDirResult,
+    CreateEditorFileReq,
+    CreateEditorFileResult,
+    CreateScratchFileReq,
+    CreateScratchFileResult,
+    DeleteEditorFileReq,
+    MoveScratchFileReq,
+    MoveScratchFileResult,
+    OpenInShellReq,
+    RenameEditorFileReq,
+    RenameEditorFileResult,
+} from "./file";
+export type {
+    AgentInstance,
+    CommandCreateAgentInstanceData,
+    CommandGetAgentInstanceData,
+    CommandListAgentInstancesData,
+    CommandUpdateAgentInstanceData,
+    CreateAgentInstanceInput,
+} from "./agent";
+export type {
+    BlockKind,
+    DeleteDroneReq,
+    DeleteDroneResp,
+    DroneBlockState,
+    DroneDefinition,
+    DroneFlowEdge,
+    DroneFlowNode,
+    DroneGraph,
+    DroneRun,
+    DroneViewport,
+    GetDroneReq,
+    ListDroneRunsInput,
+    ListDronesReq,
+    RunDroneReq,
+    RunDroneResp,
+} from "./agent";
+export type {
+    LspSendReq,
+    LspStartReq,
+    LspStartResult,
+    LspStopReq,
+} from "./file";
+export type {
+    AgentContent,
+    AgentDefinition,
+    AgentDefinitionCreateInput,
+    AgentDefinitionUpdateInput,
+    AgentDefinitionImport,
+    AgentSkillImport,
+    CommandContainerRuntimeAvailableData,
+    CommandCreateAgentDefinitionData,
+    CommandDeleteAgentDefinitionData,
+    CommandExportAgentsData,
+    CommandGetAgentContentData,
+    CommandGetAllAgentContentData,
+    CommandImportAgentDefinitionsData,
+    CommandImportAgentFromClawData,
+    CommandListAgentDefinitionsData,
+    CommandReseedAgentsData,
+    CommandSetAgentContentData,
+    CommandUpdateAgentDefinitionData,
+    ContainerRuntimeAvailableResult,
+    ImportAgentDefinitionsResult,
+    ReseedAgentsResult,
+    CommandForkAgentDefinitionData,
+    CommandListHiddenTemplatesData,
+    CommandRenameAgentDefinitionTitleData,
+    ForkAgentDefinitionInput,
+} from "./agent";
+export type {
+    AgentDefinitionIdentity,
+    AgentIdentityLink,
+    IdentityAccount,
+    SecretRef,
+} from "./identity";
+export type {
+    CommandInstallToolData,
+    GetToolStatusResult,
+    InstallFailure,
+    InstallToolResult,
+    ToolStatus,
+    ToolStatusEntry,
+} from "./workspace";
+export type {
     BlockfileLineCountResult,
     BlockfileReadRangeResult,
     BlockfileReadStateResult,

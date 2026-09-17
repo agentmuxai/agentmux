@@ -18,7 +18,7 @@ use crate::backend::rpc_types::{
     COMMAND_FORK_AGENT_DEFINITION,
     COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
     CommandForkAgentDefinitionSuggestData, ForkAgentDefinitionSuggestResult,
-    CommandForkAgentDefinitionData,
+    CommandForkAgentDefinitionData, CommandListHiddenTemplatesData,
     COMMAND_RENAME_AGENT_DEFINITION_TITLE,
     CommandRenameAgentDefinitionTitleData,
 };
@@ -350,11 +350,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // to render the unhide list. The picker proper never calls this —
     // it uses `listagents` with the default-filter-out behaviour.
     let mstore_lh = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
-        Box::new(move |_data, _ctx| {
+        // `Option<_>`, not the bare struct — see the type's own comment:
+        // it is what makes both no-argument encodings (`{}` and `null`)
+        // deserialize, which a typed registration otherwise cannot do.
+        move |_req: Option<CommandListHiddenTemplatesData>, _ctx| {
             let mstore = mstore_lh.clone();
-            Box::pin(async move {
+            async move {
                 let agents = mstore
                     .agent_def_list()
                     .map_err(|e| format!("agentdeflisthiddentemplates: {e}"))?;
@@ -362,9 +365,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .into_iter()
                     .filter(|a| a.is_seeded == 1 && a.user_hidden == 1)
                     .collect();
-                Ok(Some(serde_json::to_value(&hidden).unwrap_or_default()))
-            })
-        }),
+                Ok(hidden)
+            }
+        },
     );
 
     // ---- Definition fork ----
@@ -372,15 +375,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_FORK_AGENT_DEFINITION,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandForkAgentDefinitionData, _ctx| {
             let mstore = mstore.clone();
             let id_store = id_store.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandForkAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("forkagentdefinition: {e}"))?;
+            async move {
 
                 // Find the source definition by id.
                 let all_defs = mstore
@@ -510,9 +511,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     data: None,
                 });
 
-                Ok(Some(serde_json::to_value(&fork).unwrap_or_default()))
-            })
-        }),
+                Ok(fork)
+            }
+        },
     );
 
     // ---- Definition fork suggest (read-only — no mutation) ----
@@ -550,14 +551,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
     let mstore_rn = state.mstore.clone();
     let broker_rn = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandRenameAgentDefinitionTitleData, _ctx| {
             let mstore = mstore_rn.clone();
             let broker = broker_rn.clone();
-            Box::pin(async move {
-                let cmd: CommandRenameAgentDefinitionTitleData = serde_json::from_value(data)
-                    .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
+            async move {
                 let title = cmd.title.trim();
                 if title.is_empty() {
                     return Err("renameagentdefinitiontitle: title must not be empty".to_string());
@@ -614,9 +613,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     data: None,
                 });
 
-                Ok(Some(serde_json::to_value(&updated).unwrap_or_default()))
-            })
-        }),
+                Ok(updated)
+            }
+        },
     );
 
 }
@@ -714,13 +713,120 @@ mod tests {
         let f = find(COMMAND_FORK_AGENT_DEFINITION_SUGGEST);
         assert_eq!(f["requestName"], "CommandForkAgentDefinitionSuggestData");
         assert_eq!(f["responseName"], "ForkAgentDefinitionSuggestResult");
-        // Renameagentdefinitiontitle is deliberately NOT migrated (its
-        // response is the storage-level AgentDefinition, out of scope here)
-        // and must stay absent from the schema.
+        // The remaining three, migrated in the agent-template slice. Their
+        // responses are the storage-level `AgentDefinition`, which is why they
+        // waited for that type to be generated.
+        let r = find(COMMAND_RENAME_AGENT_DEFINITION_TITLE);
+        assert_eq!(r["requestName"], "CommandRenameAgentDefinitionTitleData");
+        assert_eq!(r["responseName"], "AgentDefinition");
+        let fk = find(COMMAND_FORK_AGENT_DEFINITION);
+        assert_eq!(fk["requestName"], "CommandForkAgentDefinitionData");
+        assert_eq!(fk["responseName"], "AgentDefinition");
+
+        // `Vec<T>` keeps its full path — truncating at the last `::` would
+        // yield `AgentDefinition>`, which names nothing — so match on the
+        // element type rather than on an exact string.
+        let lh = find(COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES);
+        let lh_req = lh["requestName"].as_str().unwrap_or_default();
         assert!(
-            rows.iter().all(|r| r["command"] != COMMAND_RENAME_AGENT_DEFINITION_TITLE),
-            "renameagentdefinitiontitle is not migrated and must not appear",
+            lh_req.starts_with("core::option::Option<")
+                && lh_req.contains("CommandListHiddenTemplatesData"),
+            "agentdeflisthiddentemplates takes Option<CommandListHiddenTemplatesData>              so both no-argument encodings deserialize, got {lh_req:?}",
         );
+        let lh_resp = lh["responseName"].as_str().unwrap_or_default();
+        assert!(
+            lh_resp.starts_with("alloc::vec::Vec<") && lh_resp.contains("AgentDefinition"),
+            "agentdeflisthiddentemplates should answer Vec<AgentDefinition>, got {lh_resp:?}",
+        );
+        assert!(
+            !lh_resp.contains("serde_json::Value"),
+            "hand-serializing would record Value and leave this endpoint outside              the drift net; got {lh_resp:?}",
+        );
+    }
+
+    /// `agentdeflisthiddentemplates` takes no argument, and the RPC client
+    /// sends `{}` for that. A unit `Req` would reject every one of those
+    /// calls, because serde deserializes `()` only from JSON `null` — hence
+    /// the empty struct. This is the `bookmarks.list` failure re-tested at
+    /// the one place in this slice that could reproduce it.
+    #[tokio::test]
+    async fn listhiddentemplates_accepts_the_empty_object_the_stub_sends() {
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        for payload in [serde_json::json!({}), serde_json::Value::Null] {
+            engine.handle_message(RpcMessage {
+                command: COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES.to_string(),
+                reqid: format!("req-{payload}"),
+                data: Some(payload.clone()),
+                ..Default::default()
+            });
+            let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                resp.error.is_empty(),
+                "{payload} should be accepted, got error: {}",
+                resp.error,
+            );
+            let rows: Vec<AgentDefinition> =
+                serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+            assert!(rows.is_empty(), "nothing is hidden in a fresh store");
+        }
+    }
+
+    /// The four payload-ignoring agent commands all take `Option<Req>`, so a
+    /// client that omits `data` entirely -- which the server turns into
+    /// `Value::Null` -- is accepted rather than answered with a deserialize
+    /// error. One test rather than four: the failure is a property of the
+    /// registration shape, not of any one command.
+    #[tokio::test]
+    async fn no_argument_commands_accept_a_null_body() {
+        use crate::backend::rpc_types::{
+            COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES, COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+        };
+
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        crate::server::agent_handlers::core::register(&engine, &state);
+
+        for cmd in [
+            COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+            COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+        ] {
+            engine.handle_message(RpcMessage {
+                command: cmd.to_string(),
+                reqid: format!("req-{cmd}"),
+                data: Some(serde_json::Value::Null),
+                ..Default::default()
+            });
+            let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                resp.error.is_empty(),
+                "{cmd} should accept a null body, got error: {}",
+                resp.error,
+            );
+        }
+    }
+
+    /// `branch_label` is `#[serde(default)]`, so a caller may omit it — the
+    /// generated TS cannot say so (ts-rs marks a non-`Option` field required),
+    /// which is why the stub derives `ForkAgentDefinitionInput` rather than
+    /// using the generated type directly. Pin the server half of that claim:
+    /// if the `default` is ever dropped, the derived TS type becomes a lie.
+    #[test]
+    fn fork_request_accepts_a_missing_branch_label() {
+        let cmd: CommandForkAgentDefinitionData =
+            serde_json::from_value(serde_json::json!({ "source_id": "abc" }))
+                .expect("branch_label is serde(default) and may be omitted");
+        assert_eq!(cmd.source_id, "abc");
+        assert_eq!(cmd.branch_label, "", "an omitted branch_label defaults to empty");
     }
 
     #[tokio::test]

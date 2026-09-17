@@ -46,7 +46,28 @@ import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX 
  * `nodeModel.paneChromeHoisted` (see AgentViewModel/TermViewModel), or its
  * inline BlockFrame header and its hoisted one will both render.
  */
-const HOISTS_OWN_CHROME = new Set(["agent", "term"]);
+// Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+// §5, Task Group C): "agent"/"term" keep their own richer, domain-specific
+// Chrome components (AgentPaneChrome/TermPaneChrome); every other widget
+// type here registers the SAME shared GenericPaneChrome
+// (`genericRenderPaneChrome`) via a one-line `this.renderPaneChrome =`
+// field in its own ViewModel — see any of those files for the pattern.
+// "cpuplot" is sysinfo's own secondary registered view key
+// (block-registry.ts), same ViewModel class as "sysinfo".
+const HOISTS_OWN_CHROME = new Set([
+    "agent",
+    "term",
+    "browser",
+    "editor",
+    "sysinfo",
+    "cpuplot",
+    "swarm",
+    "armory",
+    "media",
+    "drone",
+    "help",
+    "warden",
+]);
 
 /**
  * Subset of `HOISTS_OWN_CHROME` whose stack members stay mounted
@@ -89,8 +110,8 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // that way, a single-member pane rendered no strip and therefore no
     // "+", so `hasEverBeenMultiMember` could never become true and the
     // whole feature was unreachable. The strip's own visibility rules
-    // (`shouldShowTabStrip` — hidden on a fresh picker pane, "+"-only for
-    // one live conversation, pills once there are 2+) still live inside
+    // ("+"-only for one live conversation, pills once there are 2+; "+" is
+    // always shown, matching every other widget type) still live inside
     // chrome and are unchanged; this only decides whether chrome EXISTS.
     //
     // Latched for the same reason the ViewModel below is: `effectiveViewType()`

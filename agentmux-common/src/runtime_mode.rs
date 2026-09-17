@@ -332,7 +332,7 @@ fn sanitize_clone_id(s: &str) -> String {
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-fn fnv1a_64(bytes: &[u8]) -> u64 {
+pub fn fnv1a_64(bytes: &[u8]) -> u64 {
     let mut hash = FNV_OFFSET_BASIS;
     for b in bytes {
         hash ^= *b as u64;

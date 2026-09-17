@@ -29,6 +29,7 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
+import type { AgentContent, AgentDefinition } from "@/app/store/rpc-api";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -166,7 +167,12 @@ export class AgentViewModel implements ViewModel {
             const meta = this.blockAtom()?.meta;
             const name = meta?.["agentName"];
             if (typeof name === "string" && name.length > 0) return name;
-            return "Agent";
+            // No agent launched into this pane yet (the picker state) — same
+            // label a newly-"+"-created tab already falls back to
+            // (agent-view.tsx's own `?? "New Agent"`), so a fresh pane and a
+            // fresh tab read identically instead of one saying "Agent" and
+            // the other "New Agent".
+            return "New Agent";
         };
         this.viewText = (): HeaderElem[] => {
             const elems: HeaderElem[] = [];

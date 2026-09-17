@@ -89,6 +89,7 @@ class FakeResizeObserver {
 
 import { AgentInstallModalPanel } from "./AgentInstallModal";
 import { RpcApi } from "@/app/store/rpc-api";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 afterEach(() => {
     cleanup();

@@ -1222,11 +1222,32 @@ mod recent_sessions_tests {
             );
         }
 
+        // `getagentcontent` answers `Option<AgentContent>` rather than
+        // hand-serializing to a `Value`. That distinction is invisible on the
+        // wire — both send the same JSON — and only shows up here, in what the
+        // registry recorded. Serializing by hand would record `Value` and quietly
+        // drop this one endpoint out of the drift net the migration exists to
+        // build, so assert the recorded type, not the response body.
+        let content_row = find(crate::backend::rpc_types::COMMAND_GET_AGENT_CONTENT);
+        let recorded = content_row["response"].as_str().unwrap_or_default();
+        assert!(
+            recorded.contains("AgentContent"),
+            "getagentcontent should record AgentContent, got {recorded:?}",
+        );
+        assert!(
+            !recorded.contains("serde_json::Value"),
+            "getagentcontent must not hand-serialize its response — that records              Value and leaves it outside the drift net; got {recorded:?}",
+        );
+
         // Commands still on register_handler are absent rather than recorded
         // wrong — that absence is what makes migrating one at a time safe.
+        //
+        // `listagents` stays here deliberately: it tolerates a null/malformed
+        // body for older clients, which `register_typed` cannot express (see
+        // the comment on its registration in core.rs).
         assert!(
             rows.iter().all(|r| r["command"] != crate::backend::rpc_types::COMMAND_LIST_AGENTS),
-            "listagents is not migrated yet and must not appear in the schema",
+            "listagents keeps its loose-input handler and must not appear in the schema",
         );
     }
 

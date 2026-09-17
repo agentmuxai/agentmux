@@ -34,26 +34,43 @@ use crate::drone::executor::{run_drone, RunEvent};
 use crate::drone::storage::DroneStore;
 use crate::drone::types::{RunStatus, DroneDefinition, DroneRun};
 
-#[derive(Debug, Deserialize)]
-struct GetDroneReq {
-    id: String,
+/// Request for `listdrones`, which ignores its payload.
+///
+/// Registered as `Option<Self>`: the stub sends `{}` and a client that omits
+/// `data` sends `null`, and serde accepts each of those from only one of
+/// `()` and a struct. `Option<Self>` takes both.
+#[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ListDronesReq {}
+
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct GetDroneReq {
+    pub id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct DeleteDroneReq {
-    id: String,
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct DeleteDroneReq {
+    pub id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct RunDroneReq {
-    drone_id: String,
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct RunDroneReq {
+    pub drone_id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct ListRunsReq {
-    drone_id: String,
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ListRunsReq {
+    pub drone_id: String,
+    /// `serde(default)`, so a caller may omit it -- which ts-rs cannot express
+    /// on a non-`Option` field. The stub derives `ListDroneRunsInput` from the
+    /// generated type to restore that; see the comment there.
     #[serde(default = "default_limit")]
-    limit: i64,
+    #[ts(type = "number")]
+    pub limit: i64,
 }
 
 fn default_limit() -> i64 {
@@ -67,58 +84,60 @@ fn default_limit() -> i64 {
 /// to client-driven slicing. (kimi P1 on PR #755.)
 const MAX_LIST_LIMIT: i64 = 200;
 
-#[derive(Debug, Serialize)]
-struct DeleteResp {
-    deleted: bool,
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(rename = "DeleteDroneResp")]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct DeleteResp {
+    pub deleted: bool,
 }
 
-#[derive(Debug, Serialize)]
-struct RunResp {
-    run_id: String,
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(rename = "RunDroneResp")]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct RunResp {
+    pub run_id: String,
 }
 
 pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Drone definition CRUD — routed to id_store (global shared store).
     let id_store = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_DRONES,
-        Box::new(move |_data, _ctx| {
+        // `Option<_>` -- see `ListDronesReq`: it is what makes both encodings
+        // of "no argument" deserialize.
+        move |_req: Option<ListDronesReq>, _ctx| {
             let id_store = id_store.clone();
-            Box::pin(async move {
+            async move {
                 let list = id_store
                     .drone_list()
                     .map_err(|e| format!("listdrones: {e}"))?;
-                Ok(Some(serde_json::to_value(&list).unwrap_or_default()))
-            })
-        }),
+                Ok(list)
+            }
+        },
     );
 
     let id_store = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_DRONE,
-        Box::new(move |data, _ctx| {
+        move |cmd: GetDroneReq, _ctx| {
             let id_store = id_store.clone();
-            Box::pin(async move {
-                let cmd: GetDroneReq = serde_json::from_value(data)
-                    .map_err(|e| format!("getdrone: {e}"))?;
+            async move {
                 let row = id_store
                     .drone_get(&cmd.id)
                     .map_err(|e| format!("getdrone: {e}"))?;
-                Ok(Some(serde_json::to_value(&row).unwrap_or_default()))
-            })
-        }),
+                Ok(row)
+            }
+        },
     );
 
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPSERT_DRONE,
-        Box::new(move |data, _ctx| {
+        move |mut cmd: DroneDefinition, _ctx| {
             let id_store = id_store.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let mut cmd: DroneDefinition = serde_json::from_value(data)
-                    .map_err(|e| format!("upsertdrone: {e}"))?;
+            async move {
                 let now = now_ms();
                 if cmd.created_at == 0 {
                     cmd.created_at = now;
@@ -137,21 +156,19 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&cmd).unwrap_or_default()))
-            })
-        }),
+                Ok(cmd)
+            }
+        },
     );
 
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DELETE_DRONE,
-        Box::new(move |data, _ctx| {
+        move |cmd: DeleteDroneReq, _ctx| {
             let id_store = id_store.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: DeleteDroneReq = serde_json::from_value(data)
-                    .map_err(|e| format!("deletedrone: {e}"))?;
+            async move {
                 let deleted = id_store
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
@@ -164,9 +181,9 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         data: None,
                     });
                 }
-                Ok(Some(serde_json::to_value(&DeleteResp { deleted }).unwrap_or_default()))
-            })
-        }),
+                Ok(DeleteResp { deleted })
+            }
+        },
     );
 
     // COMMAND_RUN_DRONE: reads drone definition from id_store (global),
@@ -174,15 +191,13 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_RUN_DRONE,
-        Box::new(move |data, _ctx| {
+        move |cmd: RunDroneReq, _ctx| {
             let id_store = id_store.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: RunDroneReq = serde_json::from_value(data)
-                    .map_err(|e| format!("rundrone: {e}"))?;
+            async move {
                 let wf = id_store
                     .drone_get(&cmd.drone_id)
                     .map_err(|e| format!("rundrone: {e}"))?
@@ -299,29 +314,108 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 });
 
-                Ok(Some(serde_json::to_value(&RunResp { run_id }).unwrap_or_default()))
-            })
-        }),
+                Ok(RunResp { run_id })
+            }
+        },
     );
 
     let mstore = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_DRONE_RUNS,
-        Box::new(move |data, _ctx| {
+        move |cmd: ListRunsReq, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: ListRunsReq = serde_json::from_value(data)
-                    .map_err(|e| format!("listdroneruns: {e}"))?;
+            async move {
                 let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
                 let list = mstore
                     .drone_runs_for(&cmd.drone_id, limit)
                     .map_err(|e| format!("listdroneruns: {e}"))?;
-                Ok(Some(serde_json::to_value(&list).unwrap_or_default()))
-            })
-        }),
+                Ok(list)
+            }
+        },
     );
 }
 
 fn now_ms() -> i64 {
     agentmux_common::time::now_ms()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every drone command records its request and response type, which is the
+    /// property the generated bindings are derived from — a command that
+    /// silently falls back to `register_handler` disappears from here rather
+    /// than being recorded wrong, and that absence is what this catches.
+    // `tokio::test`, not `test`: `test_state()` builds the fs-watch pool,
+    // which spawns, so it needs a runtime.
+    #[tokio::test]
+    async fn register_typed_records_every_drone_command() {
+        let (engine, _rx) = WshRpcEngine::new();
+        let state = crate::server::tests::test_state();
+        register_drone_handlers(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema — did it fall back to register_handler?"))
+        };
+
+        for (cmd, req, resp) in [
+            (COMMAND_GET_DRONE, "GetDroneReq", "DroneDefinition"),
+            (COMMAND_UPSERT_DRONE, "DroneDefinition", "DroneDefinition"),
+            (COMMAND_DELETE_DRONE, "DeleteDroneReq", "DeleteResp"),
+            (COMMAND_RUN_DRONE, "RunDroneReq", "RunResp"),
+        ] {
+            let row = find(cmd);
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert!(
+                row["responseName"].as_str().unwrap().contains(resp),
+                "{cmd} response should mention {resp}, got {:?}",
+                row["responseName"],
+            );
+        }
+
+        // The two list commands answer `Vec<_>`, whose recorded name keeps its
+        // full path (truncating at the last `::` would yield `DroneRun>`).
+        for (cmd, elem) in [
+            (COMMAND_LIST_DRONES, "DroneDefinition"),
+            (COMMAND_LIST_DRONE_RUNS, "DroneRun"),
+        ] {
+            let got = find(cmd)["responseName"].as_str().unwrap().to_string();
+            assert!(
+                got.starts_with("alloc::vec::Vec<") && got.contains(elem),
+                "{cmd} should answer Vec<{elem}>, got {got:?}",
+            );
+        }
+    }
+
+    /// `listdrones` takes no argument, and the two encodings of that both
+    /// reach the server: the stub sends `{}`, a client that omits `data`
+    /// sends `null`. A bare struct rejects the second, a `()` rejects the
+    /// first — `Option<ListDronesReq>` is what takes both.
+    #[test]
+    fn listdrones_request_accepts_both_encodings_of_no_argument() {
+        for payload in [serde_json::json!({}), serde_json::Value::Null] {
+            serde_json::from_value::<Option<ListDronesReq>>(payload.clone())
+                .unwrap_or_else(|e| panic!("{payload} should deserialize, got {e}"));
+        }
+        // ...and the bare struct really does reject null, so the Option is
+        // load-bearing rather than decoration.
+        assert!(serde_json::from_value::<ListDronesReq>(serde_json::Value::Null).is_err());
+    }
+
+    /// `limit` is `serde(default)`, which ts-rs cannot express on a non-Option
+    /// field — the stub's `ListDroneRunsInput` restores the optionality by
+    /// deriving from the generated type. Pin the server half: drop the default
+    /// and that derived TS type becomes a lie.
+    #[test]
+    fn listruns_request_accepts_a_missing_limit() {
+        let req: ListRunsReq =
+            serde_json::from_value(serde_json::json!({ "drone_id": "d1" }))
+                .expect("limit is serde(default) and may be omitted");
+        assert_eq!(req.drone_id, "d1");
+        assert_eq!(req.limit, default_limit(), "an omitted limit falls back to the default");
+    }
 }

@@ -53,15 +53,6 @@ declare global {
         other_ttl_secs: number;
     };
 
-    // Editor file-tree row. Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
-    type DirEntry = {
-        name: string;
-        is_dir: boolean;
-        is_symlink: boolean;
-        size?: number;
-        mtime?: number; // unix millis
-    };
-
     type WritableMuxObjectAtom<T extends MuxObj> = SignalAtom<T>;
 
     type ThrottledValueAtom<T> = SignalAtom<T>;

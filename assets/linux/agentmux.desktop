@@ -5,6 +5,6 @@ Comment=AgentMux — AI-native terminal multiplexer
 Exec=__EXEC__ %F
 Icon=agentmux
 Categories=Development;TerminalEmulator;
-StartupWMClass=agentmux
+StartupWMClass=__WMCLASS__
 StartupNotify=true
 Terminal=false

@@ -29,6 +29,62 @@ import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
 import type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
 import type { PrereqToolResolution } from "@/types/rpc/PrereqToolResolution";
 import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+export type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
+export type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
+export type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
+export type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+export type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
+export type { AckResp } from "@/types/rpc/AckResp";
+export type { EnsureAccountDirReq } from "@/types/rpc/EnsureAccountDirReq";
+export type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
+import type { StartProviderAuthReq } from "@/types/rpc/StartProviderAuthReq";
+import type { PollProviderAuthReq } from "@/types/rpc/PollProviderAuthReq";
+import type { SubmitAuthCallbackReq } from "@/types/rpc/SubmitAuthCallbackReq";
+import type { CancelProviderAuthReq } from "@/types/rpc/CancelProviderAuthReq";
+import type { SubmitProviderApiKeyReq } from "@/types/rpc/SubmitProviderApiKeyReq";
+import type { AckResp } from "@/types/rpc/AckResp";
+import type { EnsureAccountDirReq } from "@/types/rpc/EnsureAccountDirReq";
+import type { EnsureAccountDirResp } from "@/types/rpc/EnsureAccountDirResp";
+
+// `directAccount`, `existingAccountId`, `authEnv` and `requiresTty` are all
+// `#[serde(default)]` on non-`Option` Rust fields, so they are omittable on the
+// wire but ts-rs generates them as required. Derive the accurate shape from the
+// generated type rather than hand-listing them, so a field added in Rust flows
+// through automatically -- same approach as BundleUpsertInput/SkillUpsertInput.
+export type AuthStartInput = Pick<
+    StartProviderAuthReq,
+    "providerId" | "cliPath" | "authLoginArgs" | "authCheckArgs"
+> &
+    Partial<Omit<StartProviderAuthReq, "providerId" | "cliPath" | "authLoginArgs" | "authCheckArgs">>;
+export type { IdentityAccount } from "@/types/rpc/IdentityAccount";
+export type { SecretRef } from "@/types/rpc/SecretRef";
+export type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
+export type { CommandListIdentityAccountsData } from "@/types/rpc/CommandListIdentityAccountsData";
+export type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
+export type { CommandLinkAgentIdentityData } from "@/types/rpc/CommandLinkAgentIdentityData";
+export type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
+export type { CommandListAgentIdentitiesData } from "@/types/rpc/CommandListAgentIdentitiesData";
+export type { CommandListAllAgentIdentitiesData } from "@/types/rpc/CommandListAllAgentIdentitiesData";
+export type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
+export type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
+export type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
+import type { IdentityAccount } from "@/types/rpc/IdentityAccount";
+import type { SecretRef } from "@/types/rpc/SecretRef";
+import type { AgentIdentityLink } from "@/types/rpc/AgentIdentityLink";
+import type { CommandListIdentityAccountsData } from "@/types/rpc/CommandListIdentityAccountsData";
+import type { CommandGetIdentityAccountData } from "@/types/rpc/CommandGetIdentityAccountData";
+import type { CommandLinkAgentIdentityData } from "@/types/rpc/CommandLinkAgentIdentityData";
+import type { CommandUnlinkAgentIdentityData } from "@/types/rpc/CommandUnlinkAgentIdentityData";
+import type { CommandListAgentIdentitiesData } from "@/types/rpc/CommandListAgentIdentitiesData";
+import type { CommandListAllAgentIdentitiesData } from "@/types/rpc/CommandListAllAgentIdentitiesData";
+import type { UnlinkAgentIdentityResult } from "@/types/rpc/UnlinkAgentIdentityResult";
+import type { AccountOAuthCancelResult } from "@/types/rpc/AccountOAuthCancelResult";
+import type { OAuthSessionReq } from "@/types/rpc/OAuthSessionReq";
+
+// The frontend has always called the agent<->account link row
+// `AgentDefinitionIdentity`; the Rust type is `AgentIdentityLink`. Same three
+// fields, so this is a naming alias rather than a second declaration.
+export type { AgentIdentityLink as AgentDefinitionIdentity } from "@/types/rpc/AgentIdentityLink";
 import type { OAuthFlowStatus } from "./types";
 
 export const IdentityApi = {
@@ -44,7 +100,7 @@ export const IdentityApi = {
 
     GetIdentityAccountCommand(
         client: RpcClient,
-        data: { id: string },
+        data: CommandGetIdentityAccountData,
         opts?: RpcOpts,
     ): Promise<IdentityAccount> {
         return client.rpcCall("getidentityaccount", data, opts);
@@ -126,15 +182,15 @@ export const IdentityApi = {
 
     AccountOAuthCancelCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: OAuthSessionReq,
         opts?: RpcOpts,
-    ): Promise<{ cancelled: boolean }> {
+    ): Promise<AccountOAuthCancelResult> {
         return client.rpcCall("account.oauth.cancel", data, opts);
     },
 
     LinkAgentIdentityCommand(
         client: RpcClient,
-        data: { agent_id: string; account_id: string; provider: string },
+        data: CommandLinkAgentIdentityData,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("linkagentidentity", data, opts);
@@ -151,15 +207,15 @@ export const IdentityApi = {
             silent?: boolean;
         },
         opts?: RpcOpts,
-    ): Promise<{ unlinked: boolean }> {
+    ): Promise<UnlinkAgentIdentityResult> {
         return client.rpcCall("unlinkagentidentity", data, opts);
     },
 
     ListAgentIdentitiesCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: CommandListAgentIdentitiesData,
         opts?: RpcOpts,
-    ): Promise<AgentDefinitionIdentity[]> {
+    ): Promise<AgentIdentityLink[]> {
         return client.rpcCall("listagentidentities", data, opts);
     },
 
@@ -168,9 +224,9 @@ export const IdentityApi = {
     // up front rather than one ListAgentIdentitiesCommand call per rail row.
     ListAllAgentIdentitiesCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: CommandListAllAgentIdentitiesData = {},
         opts?: RpcOpts,
-    ): Promise<AgentDefinitionIdentity[]> {
+    ): Promise<AgentIdentityLink[]> {
         return client.rpcCall("listallagentidentities", data, opts);
     },
 
@@ -178,29 +234,7 @@ export const IdentityApi = {
 
     AuthStartCommand(
         client: RpcClient,
-        data: {
-            providerId: string;
-            /** Vestigial — bundle mode was retired in Phase 4c of
-             *  SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the
-             *  wire shape only; never set by `AuthFlowController`. */
-            intoBundleId?: string;
-            /** Always sent as `true` by `AuthFlowController` (the sole
-             *  caller) — a successful auth persists a standalone
-             *  IdentityAccount. */
-            directAccount?: boolean;
-            /** Direct-account reconnect: non-empty to refresh an
-             *  already-linked account's tokens in place. Ignored unless
-             *  `directAccount` is set. */
-            existingAccountId?: string;
-            cliPath: string;
-            authLoginArgs: string[];
-            authCheckArgs: string[];
-            authEnv?: Record<string, string>;
-            /** Spawn the login subprocess under a PTY (run_cli_login's
-             *  PTY branch). Required for providers whose auth subcommand
-             *  refuses to run without an interactive TTY (OpenClaw). */
-            requiresTty?: boolean;
-        },
+        data: AuthStartInput,
         opts?: RpcOpts,
     ): Promise<{ sessionId: string; authUrl?: string }> {
         return client.rpcCall("auth.start", data, opts);
@@ -209,7 +243,7 @@ export const IdentityApi = {
     // command "auth.poll" — flattened `{ providerId, ...AuthSessionStatus }`
     AuthPollCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: PollProviderAuthReq,
         opts?: RpcOpts,
     ): Promise<AuthSessionStatus & { providerId: string }> {
         return client.rpcCall("auth.poll", data, opts);
@@ -217,17 +251,17 @@ export const IdentityApi = {
 
     AuthSubmitCallbackCommand(
         client: RpcClient,
-        data: { sessionId: string; callbackUrl: string },
+        data: SubmitAuthCallbackReq,
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<AckResp> {
         return client.rpcCall("auth.submitcallback", data, opts);
     },
 
     AuthCancelCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: CancelProviderAuthReq,
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<AckResp> {
         return client.rpcCall("auth.cancel", data, opts);
     },
 
@@ -332,20 +366,20 @@ export const IdentityApi = {
     // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7.
     EnsureAccountDirCommand(
         client: RpcClient,
-        data: { providerId: string; existingAccountId?: string },
+        data: EnsureAccountDirReq,
         opts?: RpcOpts,
-    ): Promise<{ accountId: string; dir?: string }> {
+    ): Promise<EnsureAccountDirResp> {
         return client.rpcCall("identity.ensureaccountdir", data, opts);
     },
 
+    // NOTE: the backend handler for this command currently returns `Err`
+    // unconditionally -- API-key persistence is deferred ("bundle persistence
+    // lands in PR C"). So the success shape below describes a response that
+    // cannot occur yet, which is why it is NOT generated: there is no Rust
+    // success type to generate it from. The REQUEST is generated and accurate.
     AuthSubmitApiKeyCommand(
         client: RpcClient,
-        data: {
-            providerId: string;
-            intoBundleId?: string;
-            apiKey: string;
-            accountName: string;
-        },
+        data: SubmitProviderApiKeyReq,
         opts?: RpcOpts,
     ): Promise<{ success: boolean; bundleId?: string; error?: string }> {
         return client.rpcCall("auth.submitapikey", data, opts);

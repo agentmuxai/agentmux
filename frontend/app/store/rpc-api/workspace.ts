@@ -6,6 +6,24 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The tool-status shapes are GENERATED from their Rust definitions by ts-rs.
+// The rest of this file is still hand-written: workspace spans four handler
+// files and is being migrated one at a time.
+export type { ToolStatus } from "@/types/rpc/ToolStatus";
+export type { ToolStatusEntry } from "@/types/rpc/ToolStatusEntry";
+export type { GetToolStatusResult } from "@/types/rpc/GetToolStatusResult";
+export type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
+export type { InstallFailure } from "@/types/rpc/InstallFailure";
+export type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+
+import type { ToolStatus } from "@/types/rpc/ToolStatus";
+import type { ToolStatusEntry } from "@/types/rpc/ToolStatusEntry";
+import type { GetToolStatusResult } from "@/types/rpc/GetToolStatusResult";
+import type { CommandInstallToolData } from "@/types/rpc/CommandInstallToolData";
+import type { InstallFailure } from "@/types/rpc/InstallFailure";
+import type { InstallToolResult } from "@/types/rpc/InstallToolResult";
+import type { CommandGetToolStatusData } from "@/types/rpc/CommandGetToolStatusData";
+
 export const WorkspaceApi = {
     ConnConnectCommand(client: RpcClient, data: ConnRequest, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("connconnect", data, opts);
@@ -116,7 +134,8 @@ export const WorkspaceApi = {
     },
 
     GetToolStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<GetToolStatusResult> {
-        return client.rpcCall("gettoolstatus", {}, opts);
+        const data: CommandGetToolStatusData = {};
+        return client.rpcCall("gettoolstatus", data, opts);
     },
 
     InstallToolCommand(client: RpcClient, data: CommandInstallToolData, opts?: RpcOpts): Promise<InstallToolResult> {

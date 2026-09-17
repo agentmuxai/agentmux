@@ -22,6 +22,7 @@
 import { createMemo, onMount, Show, type JSX } from "solid-js";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 interface AgentCardProps {
     agent: AgentDefinition;

@@ -6,20 +6,25 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListAgentInstancesData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub definition_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub status: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandGetAgentInstanceData {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandCreateAgentInstanceData {
     pub definition_id: String,
     #[serde(default)]
@@ -227,20 +232,26 @@ pub struct ListRecentSessionsResult {
 
 /// Mutable subset of AgentInstance for PATCH-style updates. Every field is
 /// optional — absent fields preserve their current value.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandUpdateAgentInstanceData {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub block_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub status: Option<String>,
     /// JSON-encoded `GitHubContext` or empty string. `None` = leave as-is;
     /// `Some("")` = explicitly clear.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub github_context: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub ended_at: Option<i64>,
 }
 

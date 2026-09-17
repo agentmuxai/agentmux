@@ -1,5 +1,38 @@
 # AgentMux Version History
 
+## 0.56.4 — 2026-09-17
+
+- test(tools): pane-load.mjs — hand repro for cross-pane input lag
+- docs: re-verify the large-migrations audit and correct five stale status claims
+- refactor: rename Wave* identifiers to Mux* (issue #851 phase 1)
+- refactor: rename wos/wps/wstore abbreviations to mos/mps/mstore (#851 phase 3)
+- feat(browser): Set as Start Page in the bookmarks menu
+- refactor: use the shared CREATE_NO_WINDOW constant instead of raw 0x08000000
+- refactor(rpc): migrate voice.checkPath to typed registration; frontend consumes generated bindings
+- refactor(rpc): migrate bookmarks to typed registration; delete the hand-maintained BrowserBookmark
+- refactor(rpc): migrate reactive.registrations; delete four hand-written mirror interfaces
+- Generate the native-memory RPC wire types from Rust with ts-rs instead of hand-maintaining them in srv-types.d.ts
+- Generate the session RPC wire types from Rust with ts-rs, removing 23 hand-written global declarations
+- Generate the fleet RPC wire types from Rust with ts-rs, and give fleet.group.list/delete real Rust types
+- fix(agent-pane): stop new/closed window tabs from flashing on reveal
+- fix(lan-discovery): key peer staleness off each peer's own advertised mDNS TTL, not a fixed 300s cutoff
+- Generate the Bundle wire type from Rust and fix the upsert request type, which wrongly allowed omitting name
+- feat(jekt): mint and sign per-agent WAN keys (verification not yet wired)
+- Generate the bundle validation report types from Rust; keep the validate handler untyped because it normalizes before deserializing
+- feat(jekt): bind WAN signatures to the sending instance (host + channel)
+- Type the bundle import preview/commit wire shapes, surfacing a field and two input modes the typed client could not reach
+- Generate the blockfile RPC wire types from Rust
+- Generate wire types for eight more block RPC commands
+- Delete ten dead block RPC stubs that no backend handler serves, and five global types they orphaned
+- Delete 55 dead RPC stubs across misc, workspace and file that no backend handler serves
+- Generate the muxbus and providers.models wire types from Rust
+- Generate the skill RPC wire types from Rust, replacing sixteen function-local request structs
+- Generate the mcp RPC wire types from Rust, replacing seventeen function-local request structs
+- Generate the install and resolve.prereqs wire types; fix install.cancel error typed optional when it is always present
+- Generate the auth/identity wire types from Rust
+- Generate the identity account wire types; fix a generated SecretRef tag that the server never writes
+- feat(history): SearchHistory — agents can search their own past conversations
+
 ## 0.56.3 — 2026-09-16
 
 - feat(widgets): right-click a widget now offers Open in New Window / Floating Pane / New Tab everywhere, including the pinned bar

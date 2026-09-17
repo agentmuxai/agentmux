@@ -117,6 +117,59 @@ impl HistoryService {
         Ok((page, total, has_more))
     }
 
+    /// Search this agent's OWN conversation history.
+    ///
+    /// `SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md`. Closes the gap where an
+    /// agent's memory of what it did is bounded by its current context window
+    /// while its actual actions are not — so a compaction or session reset
+    /// leaves it confidently misreporting its own past, with nothing marking
+    /// the boundary. Questions like "did I already send that message" are
+    /// answerable from disk; before this they were not answerable by the agent
+    /// being asked.
+    ///
+    /// **Own history only.** Searching another agent's transcript is already a
+    /// governed act — `conversation_visibility` plus the `transcript_request`
+    /// tier rules decide whether one agent may read another's content. A
+    /// search verb that read other agents' sessions directly would be a
+    /// second, ungoverned disclosure path around that machinery, and a more
+    /// dangerous one for looking like an ordinary read tool. Cross-agent
+    /// search must route *through* `transcript_request`, as its own phase.
+    ///
+    /// `since_secs`/`until_secs` filter on indexed `modified_at` **before** any
+    /// file is opened, so a narrow time window costs nothing on irrelevant
+    /// sessions. `max_sessions` bounds how many of the remaining candidates
+    /// may be parsed, newest first.
+    pub fn search_for_agent(
+        &self,
+        store: &crate::backend::storage::store::Store,
+        agent_id: &str,
+        opts: &index::HistorySearchOptions,
+        since_secs: Option<i64>,
+        until_secs: Option<i64>,
+        max_sessions: usize,
+    ) -> Result<index::HistorySearchOutcome, String> {
+        let (all, _total, _has_more) = self.sessions_for_agent(
+            store,
+            agent_id,
+            0,
+            usize::MAX,
+            "modified_at",
+            "desc",
+            false,
+        )?;
+
+        // Cheap metadata filtering first — this is the whole reason a time
+        // window is worth offering: it removes candidates without a read.
+        let in_window: Vec<SessionMeta> = all
+            .into_iter()
+            .filter(|s| since_secs.is_none_or(|since| s.modified_at >= since))
+            .filter(|s| until_secs.is_none_or(|until| s.modified_at <= until))
+            .take(max_sessions)
+            .collect();
+
+        Ok(self.index.search_sessions(&in_window, opts))
+    }
+
     /// This agent's own sessions — the actual "fast Conversation History
     /// lookup" protocol §4.4 asks for, resolving `agent_id` to its bound
     /// identity bundle(s) (`Store::agent_identity_list_for_agent`, the

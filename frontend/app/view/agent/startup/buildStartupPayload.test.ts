@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { buildStartupPayload, resolveAccounts, type ResolvedAccount, type StartupPayloadOpts } from "./buildStartupPayload";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     return {
@@ -24,6 +25,18 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
         agent_bus_id: "",
         is_seeded: 0,
         accounts: "",
+        parent_id: "",
+        branch_label: "",
+        updated_at: 1700000000000,
+        user_hidden: 0,
+        container_image: "",
+        container_volumes: "[]",
+        container_name: "",
+        use_ambient_login: 0,
+        model_vendor_base_url: "",
+        auto_continue_enabled: 0,
+        memory_id: "",
+        conversation_visibility: "",
         ...overrides,
     };
 }

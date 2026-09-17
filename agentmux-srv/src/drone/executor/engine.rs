@@ -392,7 +392,7 @@ mod tests {
             id: id.to_string(),
             position: NodePosition::default(),
             data: json!({ "kind": kind }),
-            node_type: String::new(),
+            node_type: None,
         }
     }
 

@@ -74,10 +74,21 @@
     // edge case in a given renderer) reads as transparent instead of a
     // stray colored block.
     background: transparent;
-    overflow-x: hidden;
+    // `auto`, not `hidden` — once enough tabs (`.pane-tab-tip`, each
+    // `flex: 0 0 auto`, so they never shrink below their own natural width)
+    // no longer fit within this box's own `max-width: 100%`, the extra tabs
+    // used to just be clipped and permanently unreachable — no shrink phase,
+    // no way back to them. `overflow-x: auto` makes the content genuinely
+    // scrollable (wheel, via PaneTabStrip.tsx's own listener; drag), while
+    // the scrollbar ITSELF stays hidden below (repo-owner call — matches
+    // `.tab-bar-scroll`'s own hidden-but-scrollable pattern, tabbar.scss),
+    // matching the design spec's §4.10 "shrink-with-a-floor... then
+    // horizontal scroll once the floor is hit" without the visible-track
+    // part of that section.
+    overflow-x: auto;
     // Explicit, not left to default — per the CSS Overflow spec, when one
-    // axis is `hidden` and the other is left at its initial `visible`, the
-    // `visible` one computes to `auto` instead (not `visible`), silently.
+    // axis is `auto`/`hidden`/`scroll` and the other is left at its initial
+    // `visible`, the `visible` one computes to `auto` instead, silently.
     // With no overflow-y set here, that made this container's real
     // computed overflow-y `auto` the whole time: any content even a
     // fraction of a pixel taller than the declared height (a native
@@ -89,8 +100,16 @@
     // inspector — the exact signature of a native scrollbar, not a styled
     // element. Two earlier fixes on this same bug (explicit `width:
     // fit-content` on the strip; `appearance: none` on the buttons) missed
-    // this because neither touches the vertical axis.
+    // this because neither touches the vertical axis. Still required now
+    // that overflow-x is itself `auto`, not just when it was `hidden`.
     overflow-y: hidden;
+    // Hide the horizontal scrollbar itself — same reasoning and same
+    // technique as `.tab-bar-scroll` (tabbar.scss): still fully scrollable
+    // (wheel/drag), just without the visible track/thumb.
+    scrollbar-width: none; // Firefox
+    &::-webkit-scrollbar {
+        display: none; // Chrome/Safari/CEF
+    }
 }
 
 // The zoomed layer — carries the flex layout the outer box used to own
@@ -168,6 +187,19 @@
         .pane-tab-close {
             opacity: 1;
         }
+    }
+}
+
+// Optional, per-tab (getIcon prop) — omitted entirely when a caller doesn't
+// pass getIcon (agent/term today), so this never affects their layout.
+.pane-tab-icon {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+
+    i {
+        font-size: 11px;
+        opacity: 0.5;
     }
 }
 

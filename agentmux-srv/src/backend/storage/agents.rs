@@ -31,7 +31,8 @@ use super::store::Store;
 use crate::registry::RecordScope;
 
 /// A user-defined AI agent in the user's agent-definition catalog.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentDefinition {
     pub id: String,
     /// Stable, filesystem-safe identifier. Drives working directory,
@@ -52,11 +53,15 @@ pub struct AgentDefinition {
     #[serde(default)]
     pub provider_flags: String,
     #[serde(default)]
+    #[ts(type = "number")]
     pub auto_start: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub restart_on_crash: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub idle_timeout_minutes: i64,
+    #[ts(type = "number")]
     pub created_at: i64,
     #[serde(default = "default_agent_type")]
     pub agent_type: String,
@@ -65,6 +70,7 @@ pub struct AgentDefinition {
     #[serde(default)]
     pub agent_bus_id: String,
     #[serde(default)]
+    #[ts(type = "number")]
     pub is_seeded: i64,
     /// JSON-encoded per-provider account assignments
     /// (`{"github":"acct-id", …}`). Written by the Agent pane's Identity
@@ -90,6 +96,7 @@ pub struct AgentDefinition {
     /// and refreshed on every `agent_def_update`. Schema v2. `0` for
     /// rows written before v2 (until next update).
     #[serde(default)]
+    #[ts(type = "number")]
     pub updated_at: i64,
     /// Per-user hide flag for seeded templates. `1` = the user clicked
     /// "Hide template" on the picker's `+ New from template` tier; the
@@ -102,6 +109,7 @@ pub struct AgentDefinition {
     /// User-owned rows (`is_seeded = 0`) MUST stay at `0` here; their
     /// removal path is `deleteagent`, not hide.
     #[serde(default)]
+    #[ts(type = "number")]
     pub user_hidden: i64,
     /// Docker image to use when `agent_type == "container"`.
     /// e.g. `"ghcr.io/agentmuxai/agent-claude:latest"`.
@@ -130,6 +138,7 @@ pub struct AgentDefinition {
     /// grandfathers pre-existing linkless agents to `1`. Layer 3 of
     /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md (§2.2-§2.4).
     #[serde(default)]
+    #[ts(type = "number")]
     pub use_ambient_login: i64,
     /// Redirects this agent's harness (CLI) at a non-default model vendor
     /// backend — e.g. `"https://my-proxy.example.com"` for a `claude`-provider
@@ -150,6 +159,7 @@ pub struct AgentDefinition {
     /// panel. See
     /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
     #[serde(default)]
+    #[ts(type = "number")]
     pub auto_continue_enabled: i64,
     /// The agent's own dedicated ABF bundle (`db_bundles.id`). Distinct from
     /// `AgentInstance.memory_id` (a specific *launch*'s bundle, which can
@@ -304,7 +314,8 @@ pub struct InstanceUpdate {
 /// strings on the wire rather than `Option<String>` to match the
 /// existing schema conventions (`NOT NULL DEFAULT ''`). Callers
 /// that need structured absence can use `.is_empty()`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentInstance {
     pub id: String,
     pub definition_id: String,
@@ -318,9 +329,12 @@ pub struct AgentInstance {
     /// JSON-encoded `GitHubContext`, or empty string.
     #[serde(default)]
     pub github_context: String,
+    #[ts(type = "number")]
     pub started_at: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub ended_at: i64,
+    #[ts(type = "number")]
     pub created_at: i64,
     /// Legacy Identity-bundle id column — `db_identity_bundles` was
     /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.

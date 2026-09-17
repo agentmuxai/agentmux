@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { atoms, MOS } from "@/store/global";
+import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { BlockNodeModel } from "@/app/block/blocktypes";
 import * as util from "@/util/util";
 import { createMemo } from "solid-js";
 import type { SignalAtom } from "@/util/util";
@@ -238,8 +240,26 @@ class SysinfoViewModel implements ViewModel {
         }
     }
 
-    constructor(blockId: string, viewType: string) {
-        this.viewType = viewType;
+    // Universal Pane Tabs — real, pre-existing mismatch found while wiring
+    // this up, fixed as a necessary byproduct: `block.tsx`'s `makeViewModel`
+    // always calls `new ctor(blockId, nodeModel)` for EVERY registered
+    // ViewModel class (no per-view special-casing) — this constructor's 2nd
+    // param was actually receiving the real NodeModel object at runtime
+    // despite being named/typed `viewType: string`, so `this.viewType`
+    // (used nowhere critical — icon/name are this class's OWN viewIcon/
+    // viewName fields below, not the generic blockViewToName(meta.view)
+    // fallback — likely why this went unnoticed) was silently set to a
+    // NodeModel object instead of "sysinfo"/"cpuplot". Fixed by reading the
+    // real value from the block's own meta instead, and correctly typing
+    // the 2nd param as what it actually is.
+    nodeModel: BlockNodeModel;
+    renderPaneChrome = genericRenderPaneChrome;
+    noHeader = () => this.nodeModel.paneChromeHoisted === true;
+
+    constructor(blockId: string, nodeModel: BlockNodeModel) {
+        this.nodeModel = nodeModel;
+        const bd = MOS.getObjectValue(MOS.makeORef("block", blockId)) as Block | undefined;
+        this.viewType = (bd?.meta?.view as string) ?? "sysinfo";
         this.blockId = blockId;
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 

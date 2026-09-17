@@ -17,6 +17,8 @@ use crate::backend::rpc_types::{
     COMMAND_RESEED_AGENTS,
     COMMAND_CONTAINER_RUNTIME_AVAILABLE,
     CommandListAgentDefinitionsData,
+    CommandContainerRuntimeAvailableData, CommandReseedAgentsData, CommandExportAgentsData,
+    ContainerRuntimeAvailableResult, ReseedAgentsResult,
     CommandCreateAgentDefinitionData, CommandUpdateAgentDefinitionData, CommandDeleteAgentDefinitionData,
     CommandGetAgentContentData, CommandSetAgentContentData, CommandGetAllAgentContentData,
     CommandImportAgentFromClawData,
@@ -43,6 +45,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // always 0 by backend invariant; `agent_def_set_hidden` rejects
     // non-template ids).
     let mstore_lfa = state.mstore.clone();
+    // NOT migrated to `register_typed`, deliberately. `register_typed`
+    // deserializes the payload strictly and answers Err on failure, but this
+    // command tolerates a null/malformed body on purpose: older clients never
+    // sent one, and the server defaults a missing `data` field to
+    // `Value::Null`, which cannot deserialize into a struct. Typing it would
+    // turn "older client asks for the unfiltered list" into an RPC error.
+    //
+    // Same rule as `bundle.validate` and `widget.health`: a handler that
+    // deliberately accepts loose input keeps its `Value` request. Its RESPONSE
+    // is still `Vec<AgentDefinition>`, which IS generated -- that is where the
+    // drift risk lived.
     engine.register_handler(
         COMMAND_LIST_AGENTS,
         Box::new(move |data, _ctx| {
@@ -82,15 +95,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore_cfa = state.mstore.clone();
     let id_store_cfa = state.id_store.clone();
     let broker_cfa = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_CREATE_AGENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandCreateAgentDefinitionData, _ctx| {
             let mstore = mstore_cfa.clone();
             let id_store = id_store_cfa.clone();
             let broker = broker_cfa.clone();
-            Box::pin(async move {
-                let cmd: CommandCreateAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("createagent: {e}"))?;
+            async move {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -164,22 +175,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
-            })
-        }),
+                Ok(agent)
+            }
+        },
     );
 
     // updateagent → update existing agent, broadcast agents:changed
     let mstore_ufa = state.mstore.clone();
     let broker_ufa = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPDATE_AGENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandUpdateAgentDefinitionData, _ctx| {
             let mstore = mstore_ufa.clone();
             let broker = broker_ufa.clone();
-            Box::pin(async move {
-                let cmd: CommandUpdateAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("updateagent: {e}"))?;
+            async move {
                 // Fetch existing to preserve created_at
                 let existing = mstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
                 let old = existing.iter().find(|a| a.id == cmd.id)
@@ -284,24 +293,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
-            })
-        }),
+                Ok(agent)
+            }
+        },
     );
 
     // deleteagent → delete agent by id, broadcast agents:changed
     let mstore_dfa = state.mstore.clone();
     let broker_dfa = state.broker.clone();
     let identity_store_dfa = state.identity_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DELETE_AGENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandDeleteAgentDefinitionData, _ctx| {
             let mstore = mstore_dfa.clone();
             let broker = broker_dfa.clone();
             let identity_store = identity_store_dfa.clone();
-            Box::pin(async move {
-                let cmd: CommandDeleteAgentDefinitionData = serde_json::from_value(data)
-                    .map_err(|e| format!("deleteagent: {e}"))?;
+            async move {
                 mstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
                 super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagent");
                 broker.publish(crate::backend::mps::MuxEvent {
@@ -311,9 +318,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // containerruntimeavailable → does the Docker DAEMON answer a ping
@@ -327,44 +334,45 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // the connection on demand, so a daemon that came up or went down
     // since launch is reflected without an app restart.
     let container_manager_cra = state.container_manager.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_CONTAINER_RUNTIME_AVAILABLE,
-        Box::new(move |_data, _ctx| {
+        move |_cmd: Option<CommandContainerRuntimeAvailableData>, _ctx| {
             let cm = container_manager_cra.clone();
-            Box::pin(async move {
+            async move {
                 let available = cm.is_available().await;
-                Ok(Some(serde_json::json!({ "available": available })))
-            })
-        }),
+                Ok(ContainerRuntimeAvailableResult { available })
+            }
+        },
     );
 
     // getagentcontent → return a single content blob for an agent
     let mstore_gfc = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_AGENT_CONTENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandGetAgentContentData, _ctx| {
             let mstore = mstore_gfc.clone();
-            Box::pin(async move {
-                let cmd: CommandGetAgentContentData = serde_json::from_value(data)
-                    .map_err(|e| format!("getagentcontent: {e}"))?;
+            async move {
                 let content = mstore.agent_content_get(&cmd.agent_id, &cmd.content_type)
                     .map_err(|e| format!("getagentcontent: {e}"))?;
-                Ok(content.map(|c| serde_json::to_value(&c).unwrap_or_default()))
-            })
-        }),
+                // `Option<AgentContent>`, not a hand-serialized Value: the schema
+                // registry records the Resp type, so serializing here would have it
+                // record `Value` and leave this one endpoint outside the drift net.
+                // Serializes identically -- `None` is JSON null, matching the stub's
+                // `Promise<AgentContent | null>`.
+                Ok(content)
+            }
+        },
     );
 
     // setagentcontent → upsert a content blob, broadcast agentcontent:changed
     let mstore_sfc = state.mstore.clone();
     let broker_sfc = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_SET_AGENT_CONTENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandSetAgentContentData, _ctx| {
             let mstore = mstore_sfc.clone();
             let broker = broker_sfc.clone();
-            Box::pin(async move {
-                let cmd: CommandSetAgentContentData = serde_json::from_value(data)
-                    .map_err(|e| format!("setagentcontent: {e}"))?;
+            async move {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -383,25 +391,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&content).unwrap_or_default()))
-            })
-        }),
+                Ok(content)
+            }
+        },
     );
 
     // getallagentcontent → return all content blobs for an agent
     let mstore_gafc = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_ALL_AGENT_CONTENT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandGetAllAgentContentData, _ctx| {
             let mstore = mstore_gafc.clone();
-            Box::pin(async move {
-                let cmd: CommandGetAllAgentContentData = serde_json::from_value(data)
-                    .map_err(|e| format!("getallagentcontent: {e}"))?;
+            async move {
                 let contents = mstore.agent_content_get_all(&cmd.agent_id)
                     .map_err(|e| format!("getallagentcontent: {e}"))?;
-                Ok(Some(serde_json::to_value(&contents).unwrap_or_default()))
-            })
-        }),
+                Ok(contents)
+            }
+        },
     );
 
     // ── Agent Import handler ───────────────────────────────────────────────
@@ -410,15 +416,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore_ifc = state.mstore.clone();
     let id_store_ifc = state.id_store.clone();
     let broker_ifc = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_IMPORT_AGENT_FROM_CLAW,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandImportAgentFromClawData, _ctx| {
             let mstore = mstore_ifc.clone();
             let id_store = id_store_ifc.clone();
             let broker = broker_ifc.clone();
-            Box::pin(async move {
-                let cmd: CommandImportAgentFromClawData = serde_json::from_value(data)
-                    .map_err(|e| format!("importagentfromclaw: {e}"))?;
+            async move {
 
                 let workspace_path = std::path::Path::new(&cmd.workspace_path);
                 if !workspace_path.exists() {
@@ -516,20 +520,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&agent).unwrap_or_default()))
-            })
-        }),
+                Ok(agent)
+            }
+        },
     );
 
     // reseedagents → delete all seeded agents and re-run seed from manifest
     let mstore_rsfa = state.mstore.clone();
     let broker_rsfa = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_RESEED_AGENTS,
-        Box::new(move |_data, _ctx| {
+        move |_cmd: Option<CommandReseedAgentsData>, _ctx| {
             let mstore = mstore_rsfa.clone();
             let broker = broker_rsfa.clone();
-            Box::pin(async move {
+            async move {
                 // Delete all previously seeded agents (cascade deletes content, skills, history)
                 let deleted = mstore.agent_def_delete_seeded()
                     .map_err(|e| format!("reseedagents: delete seeded: {e}"))?;
@@ -545,28 +549,26 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(json!({
-                    "deleted": deleted,
-                    "created": report.created,
-                    "skipped": report.skipped,
-                })))
-            })
-        }),
+                Ok(ReseedAgentsResult {
+                    deleted,
+                    created: report.created,
+                    skipped: report.skipped,
+                })
+            }
+        },
     );
 
     // importagents — bulk import from JSON export format
     let mstore_ifa = state.mstore.clone();
     let id_store_ifa = state.id_store.clone();
     let broker_ifa = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_IMPORT_AGENTS,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandImportAgentDefinitionsData, _ctx| {
             let mstore = mstore_ifa.clone();
             let id_store = id_store_ifa.clone();
             let broker = broker_ifa.clone();
-            Box::pin(async move {
-                let cmd: CommandImportAgentDefinitionsData = serde_json::from_value(data)
-                    .map_err(|e| format!("importagents: {e}"))?;
+            async move {
 
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -678,20 +680,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 });
 
                 let result = ImportAgentDefinitionsResult { imported, skipped, failed };
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
+                Ok(result)
+            }
+        },
     );
 
     // exportagents — export all agent definitions with content and skills
     let mstore_efa = state.mstore.clone();
     let id_store_efa = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_EXPORT_AGENTS,
-        Box::new(move |_data, _ctx| {
+        move |_cmd: Option<CommandExportAgentsData>, _ctx| {
             let mstore = mstore_efa.clone();
             let id_store = id_store_efa.clone();
-            Box::pin(async move {
+            async move {
                 let agents = mstore.agent_def_list()
                     .map_err(|e| format!("exportagents: list: {e}"))?;
 
@@ -751,9 +753,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     source: "agentmux-export".to_string(),
                     agents: agent_exports,
                 };
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
+                Ok(result)
+            }
+        },
     );
 
 }

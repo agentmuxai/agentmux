@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Account } from "./identity-model";
+import type { AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 export interface AgentIdentityRow {
     provider: string;
