@@ -21,18 +21,22 @@ export function createTab() {
     const ws = workspace();
     if (ws == null) return;
     fireAndForget(async () => {
-        // Pin the gate while CreateTab + preset import + applyTabPreset
-        // run. Calling scheduleRevealLift here would let the 80ms SETTLE
-        // window elapse during the (longtask-free) RPCs and layout-model
-        // polling inside applyTabPreset, so the gate would lift before the
-        // agent/sysinfo/swarm blocks have mounted and the user would still
-        // see the piecemeal cascade. The detector is started in `finally`
-        // once the preset apply has returned (or failed) — at that point
-        // SETTLE / MAX_GATE measure the actual mount window. See issue
-        // #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
-        holdRevealGate();
         try {
-            const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
+            // Created INACTIVE (`activate: false`) — the current tab
+            // stays fully visible/interactive the whole time this runs.
+            // No reveal gate needed for this phase: nothing the user is
+            // looking at changes yet. See
+            // SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md — the
+            // old design activated eagerly (as part of this same RPC)
+            // and raced the reveal gate's frame-heuristic settle-
+            // detector against applyTabPreset's own in-flight RPCs
+            // below, which are pure `await`s with no long tasks and
+            // reliably outlast the gate's 80ms settle window: the tab
+            // revealed near-empty, panes popped in one at a time, and
+            // activating explicitly (once real content exists) could
+            // re-trigger the gate on an already-revealed tab — the
+            // flash a user reported.
+            const tabId = await WorkspaceService.CreateTab(ws.oid, "", false, false);
             // New tabs intentionally start with no `tab:color` — see
             // docs/reports/REPORT_REMOVE_AUTO_TAB_COLOR_2026_08_18.md. Users
             // still pick one manually via the right-click swatch picker
@@ -44,12 +48,17 @@ export function createTab() {
             // frontend/app/tab/tab-presets.ts.
             const { applyTabPreset, DEFAULT_TAB_PRESET } = await import("@/app/tab/tab-presets");
             await applyTabPreset(tabId, DEFAULT_TAB_PRESET);
+            // Activate now that the tab's content actually exists — via
+            // the ordinary, unmodified setActiveTab() path below, whose
+            // own gate/settle-detector now measures a genuine cached-
+            // content switch instead of racing pane creation. A no-op
+            // if the backend already auto-activated this tab (the
+            // "first tab in an empty workspace" case activates
+            // unconditionally, regardless of the `activate: false`
+            // passed above).
+            await setActiveTab(tabId);
         } catch (e) {
             console.error("[createTab] failed:", e);
-        } finally {
-            // Pair with holdRevealGate above — without this the gate
-            // would stay pinned forever on the error path.
-            scheduleRevealLift();
         }
     });
 }

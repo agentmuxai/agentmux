@@ -1,11 +1,14 @@
 # Tab close (X) button — spurious select flash
 
-**Status:** **RESOLVED.** §§2-3 (click-bubble race), §5 (double round trip),
-§6 (unbatched RPC-response application) and §7 (unbatched WS-push application)
-merged in PR #2811 (`c0eb56d87`) — all four were real defects, but the flash
-survived them. It was actually fixed by §8 (**optimistic tab removal** — the
-strip stops depending on backend update ordering at all) and §9 (**targeted
-reveal gate**), merged in PR #2818 (`a2fbe5b4d`).
+**Status:** implemented — amended 2026-09-17 by §10. §§2-3 (click-bubble
+race), §5 (double round trip), §6 (unbatched RPC-response application) and
+§7 (unbatched WS-push application) merged in PR #2811 (`c0eb56d87`) — all
+four were real defects, but the flash survived them. It was actually fixed
+by §8 (**optimistic tab removal** — the strip stops depending on backend
+update ordering at all) and §9 (**targeted reveal gate**), merged in PR
+#2818 (`a2fbe5b4d`). §10 (2026-09-17) keeps §8/§9's fix intact — the flash
+class they closed does not reopen — but revises WHEN §8's optimistic hide
+fires, after it produced its own, different visible transition in practice.
 **Owner:** unassigned
 **Date:** 2026-08-25
 **Why it took five rounds:** analysed in
@@ -614,3 +617,94 @@ confirm-click and no longer covers the round trip.
 - Manual regression: ordinary tab switch — source no longer blanks during
   the RPC; destination still reveals atomically (no piecemeal paint).
   Startup reveal (app-init's untargeted `scheduleRevealLift`) unchanged.
+
+## 10. Follow-up #6 — the tab shouldn't leave before the user decides
+
+§8.1 quoted the original directive verbatim: *"the closed tab should leave
+right when the modal is open, if the user cancels, put the tab back."* In
+practice that read as its own, different kind of flash — the tab visibly
+vanishing from the strip the instant you clicked "✕", before you'd
+actually confirmed anything, then visibly reappearing if you clicked
+Cancel. Repo-owner directive, 2026-09-17, verbatim: *"we want the tab to
+stay present when the modal is open. if the user agrees to delete, then
+the modal and the tab should go away at the same time, no flashing."*
+
+### 10.1 What changes, precisely
+
+Only WHEN the optimistic hide (§8) fires — not whether it exists, and not
+anything about §9's targeted reveal gate, which is untouched:
+
+- `requestClose()` (`tabbar.tsx`) no longer calls `hideTab(tabId)` before
+  opening the modal. The tab stays in `tabIds()`, rendered completely
+  normally, for as long as the modal is open.
+- `handleClose()`'s own `hideTab(tabId)` call — previously a no-op on the
+  modal path (§8's early hide had already run) — is now the FIRST and
+  ONLY hide for both paths. `onConfirm` calls `setPendingCloseTabId(null)`
+  (closes the modal) and `handleClose(tabId)` (hides the tab, starts the
+  RPC) synchronously, in the same click handler — no `await` between them,
+  so both DOM updates land in the same script execution and the same
+  paint. The tab and the modal disappear together, by construction, the
+  same "ordering-immune because nothing async separates them" property
+  §8 originally established — just applied at confirm-time instead of
+  open-time.
+- `onCancel` no longer calls `unhideTab()` — there's nothing to restore.
+  The tab was never hidden while the modal was open, so Cancel is just
+  closing the modal; the strip has not visibly changed since before the
+  click that opened it.
+- `requestClose()`'s re-entry guard changes shape: it used to check
+  `pendingHiddenTabIds().has(tabId)` alone (true from the moment the modal
+  opened). That signal is now only true once a close is actually
+  confirmed and mid-RPC, so a SEPARATE guard,
+  `pendingCloseTabId() === tabId`, covers "a modal is already open for
+  this tab" (e.g. a rapid double-click on the same "✕" before the modal
+  has rendered). Both guards are kept — the first covers the modal-open
+  window, the second the confirmed/mid-RPC window.
+
+### 10.2 Why this doesn't reopen §§2-9's races
+
+§9's targeted reveal gate still hides only the promoted neighbor's
+*content*, from the activetabid flip until settle — unaffected, since it
+was already keyed off `handleClose`'s own `hideTab`/RPC timing, not
+`requestClose`'s. §8's core property — the strip's rendering of a closing
+tab must not depend on backend response/WS-push ordering — is preserved
+exactly: hiding is still a pure client-side, synchronous, optimistic
+signal set, made the instant the user's own click (Confirm) fires, not
+the instant a network response arrives. Only the TRIGGER moved, from "the
+✕ click that opens the modal" to "the Confirm click inside it" — both are
+still 100%-client-side, 100%-synchronous, ordering-immune triggers.
+
+### 10.3 Test plan
+
+- Modal path: ✕ on a tab → tab stays visible, fully normal, in the strip
+  the entire time the modal is open.
+- Modal path: ✕ → Cancel → modal closes, tab unchanged throughout (no
+  restore needed, nothing was hidden).
+- Modal path: ✕ → Confirm → tab and modal both disappear in the same
+  frame; content area switches atomically under §9's gate exactly as
+  before.
+- Skip-confirm path: unchanged — hides immediately on click, same as
+  today (`handleClose` called directly, no modal in the loop).
+- Rapid double-click the same tab's "✕": second click is a no-op
+  (`pendingCloseTabId() === tabId` guard) while the modal is already open
+  for it.
+- Failure injection: CloseTab RPC rejects → tab returns to the strip
+  (`unhideTab` in `handleClose`'s `finally`, unchanged).
+- `tsc --noEmit` + full `vitest` — no regressions.
+
+### 10.4 Known residual — a flash still reported after confirming a close
+
+§10 fixes the STRIP timing (the tab no longer leaves before the user
+decides) — confirmed a real improvement. The repo owner still reports a
+flash after confirming a close, distinct from what §10 addresses. Not yet
+root-caused: static review of the PANE-content path (§9's targeted gate,
+`handleClose`'s single-RPC hold/lift shape) doesn't show an obvious defect
+the way `SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md` did for tab
+creation — candidate mechanisms considered but not yet confirmed: a
+promoted neighbor tab that has never been painted before (first
+`content-visibility` reveal, full layout+paint cost, same class as a
+brand-new tab) and whether the reveal gate's settle-detector actually
+masks that correctly; a mis-targeted gate when a select and a close race
+concurrently (already a named, accepted risk in §9's own comment).
+Needs live verification (screenshot/perf-log before-and-after a close, per
+this subsystem's own established Phase-0 discipline) before committing to
+a fix — tracked as follow-up, not closed by this PR.
