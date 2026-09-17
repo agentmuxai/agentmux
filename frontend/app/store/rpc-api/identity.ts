@@ -337,20 +337,20 @@ export const IdentityApi = {
     // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7.
     EnsureAccountDirCommand(
         client: RpcClient,
-        data: { providerId: string; existingAccountId?: string },
+        data: EnsureAccountDirReq,
         opts?: RpcOpts,
-    ): Promise<{ accountId: string; dir?: string }> {
+    ): Promise<EnsureAccountDirResp> {
         return client.rpcCall("identity.ensureaccountdir", data, opts);
     },
 
+    // NOTE: the backend handler for this command currently returns `Err`
+    // unconditionally -- API-key persistence is deferred ("bundle persistence
+    // lands in PR C"). So the success shape below describes a response that
+    // cannot occur yet, which is why it is NOT generated: there is no Rust
+    // success type to generate it from. The REQUEST is generated and accurate.
     AuthSubmitApiKeyCommand(
         client: RpcClient,
-        data: {
-            providerId: string;
-            intoBundleId?: string;
-            apiKey: string;
-            accountName: string;
-        },
+        data: SubmitProviderApiKeyReq,
         opts?: RpcOpts,
     ): Promise<{ success: boolean; bundleId?: string; error?: string }> {
         return client.rpcCall("auth.submitapikey", data, opts);

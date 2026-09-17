@@ -329,9 +329,13 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 // mstore writes wait. For PR A we return an explicit
                 // error so frontend (PR B) sees a clear "not yet"
                 // signal while OAuth providers work end-to-end.
-                Err::<Option<serde_json::Value>, String>(
-                    "auth.submitapikey: bundle persistence lands in PR C"
-                        .to_string(),
+                // `()` rather than `Option<serde_json::Value>`: this handler
+                // never succeeds, so the honest Resp is "there is no success
+                // payload". The old turbofish made the schema registry record
+                // `Option<Value>` as this command's response type, which
+                // describes nothing.
+                Err::<(), String>(
+                    "auth.submitapikey: bundle persistence lands in PR C".to_string(),
                 )
             }
         },
