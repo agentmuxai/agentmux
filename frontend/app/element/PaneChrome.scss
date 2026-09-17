@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// ReAgent P1 on PR #3309: GenericPaneChrome.tsx's `.generic-pane-stack`
+// ReAgent P1 on PR #3309: PaneChrome.tsx's `.pane-stack`
 // wrapper had no corresponding SCSS at all — `BlockFrame_Header` (via
 // `PaneHeaderTabStrip`) renders as a direct child here, OUTSIDE the
 // `.block.block-frame-default .block-frame-default-inner` ancestor chain
@@ -17,7 +17,7 @@
 
 @use "../mixins.scss" as mixins;
 
-.generic-pane-stack {
+.pane-stack {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -26,7 +26,7 @@
 
     // See this file's header comment — required or the header renders
     // unstyled. `>` (direct child) because ErrorBoundary (block.tsx's
-    // wrapping pattern, mirrored in GenericPaneChrome) renders no DOM
+    // wrapping pattern, mirrored in PaneChrome) renders no DOM
     // element of its own.
     > .block-frame-default-header {
         @include mixins.block-frame-default-header-layout();
@@ -50,24 +50,24 @@
         will-change: transform;
     }
 
-    &.generic-pane-stack-focused::after {
+    &.pane-stack-focused::after {
         border-color: var(--pane-ring-color, var(--accent-color));
         z-index: 50;
     }
 
-    &.generic-pane-stack-focused-alone::after {
+    &.pane-stack-focused-alone::after {
         border-color: transparent;
     }
 }
 
-.generic-pane-stack-content {
+.pane-stack-content {
     flex: 1 1 auto;
     min-height: 0;
     position: relative;
 
     // Neutralizes the nested <Block>'s own `.block-mask` ring so it
     // doesn't draw a redundant second ring right where the header ends,
-    // now that `.generic-pane-stack`'s own `::after` (above) covers the
+    // now that `.pane-stack`'s own `::after` (above) covers the
     // whole pane. Mirrors `.agent-pane-stack-content`'s identical rule
     // (agent-view.scss) exactly — same reasoning, `!important` for the
     // same specificity-order reason documented there.

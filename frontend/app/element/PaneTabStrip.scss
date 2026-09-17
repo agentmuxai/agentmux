@@ -68,6 +68,29 @@
     // from this smaller, always-present 1px mismatch.
     height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1) + 1px);
     border-bottom: 1px solid var(--border-color);
+
+    // …but NOT when this strip is the pane header itself (PaneHeaderTabStrip
+    // renders it inside `.block-frame-default-header`, which already draws
+    // the row's own full-width bottom border — mixins.scss's
+    // `block-frame-default-header-layout`). Two borders in that context
+    // renders as a second, SHORT line hanging under just the tabs and the
+    // "+", since the strip is shrink-to-fit while the header row is
+    // full-width — reported live as "a horizontal line just under the +"
+    // (most visible on a single-tab pane, where the strip IS only the "+").
+    //
+    // Scoped rather than removed outright: the editor's file-tab strip
+    // (editor-tab-strip.tsx) and the history strip (AgentHistoryTabView.tsx)
+    // still render PaneTabStrip as their OWN standalone row, where this
+    // border is the only thing separating them from the content below.
+    //
+    // The `+ 1px` above goes with it: it exists only to stop border-box
+    // carving that border out of the declared height (see the long comment
+    // above it). With no border there is nothing to carve, and keeping it
+    // would leave a 1px gap under `.pane-tab-strip-inner` instead.
+    .block-frame-default-header & {
+        height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1));
+        border-bottom: none;
+    }
     // No fill on the container itself — only .pane-tab (active/hover) and
     // .pane-tab-strip-add (hover) paint a background. Any stray width the
     // container ends up with beyond its actual tabs/+ (rounding, a flex

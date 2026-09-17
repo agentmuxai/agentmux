@@ -500,6 +500,60 @@ declare global {
 
     type ViewModelClass = new (blockId: string, nodeModel: BlockNodeModel) => ViewModel;
 
+    /**
+     * What a view type can override or add on the ONE shared pane chrome
+     * (`renderPaneChrome`, PaneChrome.tsx). Every field is optional:
+     * omit the whole thing and a pane gets the default behavior every
+     * widget type already had.
+     *
+     * The tab fields mirror `PaneHeaderTabStripProps` deliberately — the
+     * chrome merges whatever is supplied here over its own blockStack-derived
+     * defaults and hands the result straight to the strip, so there is one
+     * tab-rendering contract rather than a parallel one per pane type.
+     */
+    interface PaneChromeModel {
+        /** Replaces the default `blockStack`-derived tab list — e.g. to merge
+         *  in tabs that live in OTHER panes (agent's cross-pane fork lineage)
+         *  or to label/order members by view-specific rules. */
+        tabs?: () => any[];
+        getId?: (tab: any) => string;
+        getLabel?: (tab: any) => string;
+        getIcon?: (tab: any) => JSX.Element;
+        getTooltip?: (tab: any) => string;
+        getAttention?: (tab: any) => boolean;
+        getTabClass?: (tab: any) => Record<string, boolean>;
+        /** Return true to signal "handled"; the chrome's default
+         *  `setActiveBlockInStack` is skipped. Needed when a tab may live in a
+         *  different pane (activating it means focusing that pane instead). */
+        onActivate?: (id: string) => boolean | void;
+        onClose?: (id: string) => boolean | void;
+        onTabDoubleClick?: (tab: any) => void;
+        /** Custom label content — inline rename inputs today. */
+        renderLabel?: (tab: any) => JSX.Element;
+        addTitle?: string;
+        /** Per-pane content zoom the strip scales with. */
+        zoomFactor?: () => number;
+        connBtnRef?: { current: HTMLDivElement | null };
+        changeConnModalAtom?: import("@/util/util").SignalAtom<boolean>;
+        /** Rendered between the header row and the content region — a
+         *  progress/status bar slot. Overlay-positioned by the view type's own
+         *  CSS; the chrome only guarantees the DOM position. */
+        renderBelowHeader?: () => JSX.Element;
+        /** Wraps the content region, for a view type whose background/overlay
+         *  surface must span more than the content box alone (terminal's
+         *  background image + drag overlay). Identity by default. */
+        wrapContent?: (content: JSX.Element) => JSX.Element;
+        /** Extra class on the chrome's own root, so a view type can keep
+         *  CSS hooks it already has without the chrome knowing about it. */
+        rootClass?: string;
+        /** Class for the content region, same purpose as `rootClass` —
+         *  lets a view type whose stylesheet already targets its own
+         *  content box (`.term-pane-stack-content`, positioning the xterm
+         *  surface) adopt the shared chrome without restyling. Defaults to
+         *  the chrome's own. */
+        contentClass?: string;
+    }
+
     interface ViewModel {
         viewType: string;
         viewIcon?: Accessor<string | IconButtonDecl>;
@@ -557,6 +611,20 @@ declare global {
          *  every stack member), not a per-block one. See
          *  `docs/specs/SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`. */
         renderPaneChrome?: (nodeModel: NodeModel, content: JSX.Element) => JSX.Element;
+        /** Trait-like opt-in: the capabilities THIS view type wants from the
+         *  one shared pane chrome, on top of the defaults every pane gets
+         *  (tabs derived from the pane's own `blockStack`, "+" opening the
+         *  widget picker, switch/close via `layoutStack`). Nothing here is
+         *  specific to any one view type — a browser pane can take
+         *  `renderBelowHeader` for a page-load bar exactly as an agent pane
+         *  takes it for its turn-progress bar.
+         *
+         *  Called ONCE, at chrome mount, in the chrome's own reactive scope
+         *  (so any signals/memos it creates are owned and disposed with the
+         *  chrome, not with whatever scope happened to be ambient). The
+         *  active ViewModel is latched for the pane's life by
+         *  `pane-leaf-chrome.tsx`, so re-deriving per switch would be wrong. */
+        paneChromeModel?: (nodeModel: NodeModel) => PaneChromeModel;
         /** Registers the DOM node hoisted chrome should portal a
          *  per-block busy/progress indicator into, so the indicator's own
          *  remount (tied to the active block) doesn't require the chrome

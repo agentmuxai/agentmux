@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * GenericPaneChrome — a single, shared `ViewModel.renderPaneChrome`
+ * PaneChrome — a single, shared `ViewModel.renderPaneChrome`
  * implementation for every widget type that does NOT need agent's or
  * term's own richer, domain-specific chrome (fork-lineage tab merging,
  * rename-via-definition-API, per-tab zoom, etc.). Every OTHER widget type
  * (browser, editor, sysinfo, swarm, armory, media, drone, help, warden)
  * registers this SAME function rather than each growing its own
  * near-identical Chrome component — see each ViewModel's own one-line
- * `this.renderPaneChrome = genericRenderPaneChrome` registration.
+ * `this.renderPaneChrome = renderPaneChromeShell` registration.
  *
  * Uses only the already view-agnostic primitives `layoutStack.ts` and
  * `action-widgets-config.ts` already provide: `blockStack` membership for
@@ -30,7 +30,7 @@ import { atoms, MOS } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, getLayoutModelForStaticTab, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import "./GenericPaneChrome.scss";
+import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 
@@ -40,7 +40,7 @@ interface GenericPaneTab {
     icon: JSX.Element;
 }
 
-export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
+export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
     const layoutModel = getLayoutModelForStaticTab();
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
@@ -80,11 +80,26 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
         });
     });
 
+    // The active ViewModel's opted-in capabilities, resolved ONCE here (not
+    // in a memo): `pane-leaf-chrome.tsx` latches the chrome ViewModel for the
+    // pane's whole life, so re-deriving per switch would both contradict that
+    // and re-create any signals the model builds. A view type that opts out
+    // entirely (the nine that never implement it) leaves this null and gets
+    // every default below unchanged.
+    const model: PaneChromeModel | null = nodeModel.activeViewModel?.()?.paneChromeModel?.(nodeModel) ?? null;
+
     const handleActivate = (blockId: string) => {
+        // A view type whose tabs can live in OTHER panes (agent's cross-pane
+        // forks) handles activation itself and returns true; anything else
+        // falls through to the ordinary same-pane stack switch.
+        if (model?.onActivate?.(blockId) === true) return;
         if (blockId === activeBlockId()) return;
         setActiveBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     };
-    const handleClose = (blockId: string) => void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
+    const handleClose = (blockId: string) => {
+        if (model?.onClose?.(blockId) === true) return;
+        void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
+    };
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
         openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e);
@@ -94,27 +109,38 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
 
     const renderHeader = (viewModel: ViewModel | null): JSX.Element => (
         <PaneHeaderTabStrip
-            tabs={tabs()}
+            tabs={model?.tabs?.() ?? tabs()}
             activeId={activeBlockId()}
-            getId={(t) => t.blockId}
-            getLabel={(t) => t.label}
-            getIcon={(t) => t.icon}
+            getId={model?.getId ?? ((t: any) => t.blockId)}
+            getLabel={model?.getLabel ?? ((t: any) => t.label)}
+            getIcon={model?.getIcon ?? ((t: any) => t.icon)}
+            getTooltip={model?.getTooltip}
+            getAttention={model?.getAttention}
+            getTabClass={model?.getTabClass}
             onActivate={handleActivate}
             onClose={handleClose}
+            onTabDoubleClick={model?.onTabDoubleClick}
+            renderLabel={model?.renderLabel}
+            zoomFactor={model?.zoomFactor}
+            connBtnRef={model?.connBtnRef}
+            changeConnModalAtom={model?.changeConnModalAtom}
             onAdd={handleAdd}
-            addTitle="Add tab"
+            addTitle={model?.addTitle ?? "Add tab"}
             nodeModel={nodeModel}
             viewModel={viewModel}
             activeBlockId={activeBlockId}
         />
     );
 
+    const contentRegion = <div class={model?.contentClass ?? "pane-stack-content"}>{content}</div>;
+
     return (
         <div
-            class="generic-pane-stack"
+            class="pane-stack"
             classList={{
-                "generic-pane-stack-focused": isFocused() && !isAlone(),
-                "generic-pane-stack-focused-alone": isFocused() && isAlone(),
+                "pane-stack-focused": isFocused() && !isAlone(),
+                "pane-stack-focused-alone": isFocused() && isAlone(),
+                ...(model?.rootClass ? { [model.rootClass]: true } : {}),
             }}
             style={{ "--pane-ring-color": ringBorderColor() }}
             data-blockid={activeBlockId()}
@@ -124,7 +150,8 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
             <ErrorBoundary fallback={renderHeader(null)}>
                 {renderHeader(activeViewModelOrUndefined() ?? null)}
             </ErrorBoundary>
-            <div class="generic-pane-stack-content">{content}</div>
+            {model?.renderBelowHeader?.()}
+            {model?.wrapContent ? model.wrapContent(contentRegion) : contentRegion}
         </div>
     );
 }
