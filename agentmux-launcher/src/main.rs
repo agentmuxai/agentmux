@@ -41,9 +41,9 @@ mod saga;
 mod second_instance;
 mod supervisor;
 mod teardown_backstop;
-mod upgrade;
 mod tray;
 mod ui_liveness;
+mod upgrade;
 #[cfg(target_os = "windows")]
 mod splash;
 #[cfg(target_os = "macos")]

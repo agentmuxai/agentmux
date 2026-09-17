@@ -90,6 +90,10 @@ pub enum QuiesceOutcome {
 /// a graceful path for Windows is out of scope for this change; this
 /// function stays consistent with that existing convention rather than
 /// introducing a new, untested shutdown mechanism for one caller.
+// `graceful_timeout` is unused on the Windows branch (there's no graceful
+// wait to bound) — allowed there specifically rather than renaming the
+// param, since it IS used on every other platform.
+#[cfg_attr(target_os = "windows", allow(unused_variables))]
 pub async fn quiesce_srv(
     child: &mut Child,
     graceful_timeout: Duration,
@@ -176,6 +180,8 @@ pub async fn run_migration_upgrade(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_os = "windows"))]
+    use tokio::io::{AsyncBufReadExt, BufReader};
 
     /// Portable "runs for a while, does nothing" child: `sleep` on Unix,
     /// `ping` on Windows (`timeout.exe` refuses to run with no console —
@@ -205,13 +211,36 @@ mod tests {
     /// path. Unix only — Windows has no graceful signal to ignore in the
     /// first place (see `quiesce_srv`'s own doc comment), so its escalation
     /// path is unconditional and already covered by every Windows test here.
+    ///
+    /// Blocks until the child confirms its trap is actually installed
+    /// before returning — sending SIGTERM immediately after `spawn()` races
+    /// the shell's own startup (parse `-c`, run `trap`, THEN start `sleep`),
+    /// and on a loaded CI runner that race is real: a signal arriving
+    /// before `trap ''` executes finds SIGTERM at its default disposition
+    /// and the shell dies immediately, which is exactly the CI-only flake
+    /// this fixes (`ExitedGracefully` instead of `ExitedAfterForceKill`,
+    /// ubuntu-latest, PR #3352). Piping stdout and reading one line back is
+    /// a real synchronization point, not a fixed delay that would just
+    /// narrow the window instead of closing it.
     #[cfg(not(target_os = "windows"))]
-    fn spawn_sigterm_immune() -> Child {
-        tokio::process::Command::new("sh")
-            .args(["-c", "trap '' TERM; sleep 30"])
+    async fn spawn_sigterm_immune() -> Child {
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; echo ready; sleep 30"])
+            .stdout(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .expect("spawn sigterm-immune shell")
+            .expect("spawn sigterm-immune shell");
+
+        let stdout = child.stdout.take().expect("piped stdout");
+        let mut lines = BufReader::new(stdout).lines();
+        let line = lines
+            .next_line()
+            .await
+            .expect("read readiness line")
+            .expect("readiness line present");
+        assert_eq!(line.trim(), "ready", "trap must be installed before the test signals this child");
+
+        child
     }
 
     #[tokio::test]
@@ -266,7 +295,7 @@ mod tests {
     async fn a_sigterm_ignoring_child_is_force_killed_after_the_timeout() {
         use std::os::unix::process::ExitStatusExt;
 
-        let mut child = spawn_sigterm_immune();
+        let mut child = spawn_sigterm_immune().await;
 
         let (status, outcome) = tokio::time::timeout(
             Duration::from_secs(10),
