@@ -777,6 +777,44 @@ mod tests {
         }
     }
 
+    /// The four payload-ignoring agent commands all take `Option<Req>`, so a
+    /// client that omits `data` entirely -- which the server turns into
+    /// `Value::Null` -- is accepted rather than answered with a deserialize
+    /// error. One test rather than four: the failure is a property of the
+    /// registration shape, not of any one command.
+    #[tokio::test]
+    async fn no_argument_commands_accept_a_null_body() {
+        use crate::backend::rpc_types::{
+            COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES, COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+        };
+
+        let state = test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        crate::server::agent_handlers::core::register(&engine, &state);
+
+        for cmd in [
+            COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
+            COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+        ] {
+            engine.handle_message(RpcMessage {
+                command: cmd.to_string(),
+                reqid: format!("req-{cmd}"),
+                data: Some(serde_json::Value::Null),
+                ..Default::default()
+            });
+            let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                resp.error.is_empty(),
+                "{cmd} should accept a null body, got error: {}",
+                resp.error,
+            );
+        }
+    }
+
     /// `branch_label` is `#[serde(default)]`, so a caller may omit it — the
     /// generated TS cannot say so (ts-rs marks a non-`Option` field required),
     /// which is why the stub derives `ForkAgentDefinitionInput` rather than

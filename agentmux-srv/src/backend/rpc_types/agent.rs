@@ -735,10 +735,14 @@ pub struct CommandRenameAgentDefinitionTitleData {
 /// Requests for the three payload-ignoring agent commands
 /// (`containerruntimeavailable`, `reseedagents`, `exportagents`).
 ///
-/// Structs rather than `()`: the stub calls each with no argument, which the
-/// RPC client sends as `{}`, and serde deserializes `()` only from JSON
-/// `null` -- a unit Req would reject every real call while compiling and
-/// passing every CI gate (the `bookmarks.list` bug).
+/// Structs rather than `()`, and registered as `Option<Self>` rather than
+/// `Self`, because the two encodings of "no argument" both reach the server
+/// and serde accepts each from only one of them: the stub calls each with no
+/// argument, which the RPC client sends as `{}` (`()` deserializes only from
+/// `null`), while a client that omits `data` entirely arrives as `null` (a
+/// struct deserializes only from an object). A unit Req would reject every
+/// real call while compiling and passing every CI gate (the `bookmarks.list`
+/// bug); a bare struct rejects the older shape. `Option<Self>` takes both.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandContainerRuntimeAvailableData {}
