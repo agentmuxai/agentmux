@@ -354,7 +354,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let content = mstore.agent_content_get(&cmd.agent_id, &cmd.content_type)
                     .map_err(|e| format!("getagentcontent: {e}"))?;
-                Ok(content.map(|c| serde_json::to_value(&c).unwrap_or_default()))
+                // `Option<AgentContent>`, not a hand-serialized Value: the schema
+                // registry records the Resp type, so serializing here would have it
+                // record `Value` and leave this one endpoint outside the drift net.
+                // Serializes identically -- `None` is JSON null, matching the stub's
+                // `Promise<AgentContent | null>`.
+                Ok(content)
             }
         },
     );
