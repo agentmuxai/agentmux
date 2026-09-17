@@ -62,7 +62,11 @@ import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, u
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
-import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
+import {
+    hasBlockingForegroundToolCall,
+    hasRunningPromotedTool,
+    nextToolPromotionAt,
+} from "./activity/tool-adapter";
 import { paneBusyForInput } from "./working-indicator";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
@@ -1910,13 +1914,21 @@ const AgentPresentationView = ({
     // queues — the row was hiding a gate that was still closed, while the bar
     // (which never had the term) kept running. See
     // docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md
-    // §2.3 and §3.1.
+    // §3.1 (still valid: mere dock PROMOTION never relaxes busy-ness).
+    //
+    // §2.3a (2026-09-17, supersedes §2.3) DOES relax busy-ness, but only for
+    // genuinely accepted background work (isAcceptedBackgroundLaunch), not
+    // mere promotion — see hasBlockingForegroundToolCall's doc comment in
+    // ./activity/tool-adapter for exactly how those two are told apart.
     const paneBusy = createMemo(() =>
         paneBusyForInput({
             showingLaunchActivity: showingLaunchActivity(),
             turnPhase: paneModel.state.turnPhase,
             compacting: paneModel.state.compacting,
             reconnecting: paneModel.state.reconnecting,
+            hasAttachedBackgroundWork:
+                paneModel.state.attachedTask != null || paneModel.state.registryAttachedTaskSince != null,
+            hasBlockingForegroundToolCall: hasBlockingForegroundToolCall(paneModel.document()),
         })
     );
 

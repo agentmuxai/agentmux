@@ -33,6 +33,8 @@ import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "../launch-args";
+import { hasBlockingForegroundToolCall } from "../activity/tool-adapter";
+import { turnHeldOnlyByBackgroundWork } from "../working-indicator";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
@@ -1036,6 +1038,34 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 return;
             }
             heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime, authFailureToPreserve: null, initiatedTurnOptimistically: false });
+            // §2.3a (2026-09-17): if the turn is only still open because work
+            // has been accepted as backgrounded, drain the queue NOW instead
+            // of waiting for the normal trigger. The ordinary drain fires at
+            // the next tool-call boundary — but a turn whose sole remaining
+            // work is a detached dev server may not produce another tool call
+            // for minutes, or at all, so the message would sit in the "send
+            // now" panel indefinitely. The indicator has already gone dark and
+            // told the user they'd be answered immediately (see
+            // working-indicator.ts); this is what makes that true rather than
+            // a lie. Deliberately still pushed-then-flushed rather than
+            // delivered inline: the code below this branch is the "pane is
+            // idle, initiating a new turn" path and assumes exactly that, but
+            // flushHeldMessages already delivers mid-turn with
+            // initiatesTurn=false and is explicitly safe to call while a turn
+            // is genuinely active (see its own doc comment). Awaited, not
+            // fire-and-forget, so sendMessage still resolves after the message
+            // has actually gone out.
+            if (
+                turnHeldOnlyByBackgroundWork({
+                    turnPhase: paneSnapshot(opts.blockId)?.turnPhase ?? { kind: "Idle" },
+                    hasAttachedBackgroundWork:
+                        paneSnapshot(opts.blockId)?.attachedTask != null ||
+                        paneSnapshot(opts.blockId)?.registryAttachedTaskSince != null,
+                    hasBlockingForegroundToolCall: hasBlockingForegroundToolCall(opts.documentNodes()),
+                })
+            ) {
+                await flushHeldMessages();
+            }
             return;
         }
 

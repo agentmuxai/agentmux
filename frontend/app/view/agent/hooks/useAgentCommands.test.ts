@@ -45,8 +45,10 @@ import { useAgentCommands } from "./useAgentCommands";
 import {
     registerPane,
     unregisterPane,
+    type AgentPaneModel,
     type PaneRegistration,
 } from "@/app/store/agent-pane-registration";
+import type { DocumentNode } from "../types";
 import { snapshot as paneSnapshot, __resetAllSlots as resetPaneStateSlots } from "@/app/store/agent-pane-state-store";
 import { __resetAllSlots as resetDocSlots } from "@/app/store/agent-document-store";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
@@ -2935,6 +2937,111 @@ describe("useAgentCommands — turnAttempted survives the guard's re-dispatch (c
             await commands.sendMessage("u there", false, asPane(preLaunchAuth, /* turnAttempted */ true));
 
             expect(paneSnapshot(BLOCK_ID)?.failure?.turnAttempted).toBe(true);
+            dispose();
+        });
+    });
+});
+
+/**
+ * §2.3a (2026-09-17): a turn that is still `Streaming` ONLY because work has
+ * been accepted as backgrounded must not hold a newly-typed message.
+ *
+ * The indicator already goes dark in that state (working-indicator.ts), which
+ * promises the user an immediate answer. Before this, the send path still took
+ * the HOLD branch — `wasAlreadyWorking` reads the raw turn phase — so the
+ * message sat in the "send now" queue waiting for a tool-call boundary that, for
+ * a turn whose only remaining work is a detached dev server, may never arrive.
+ * The indicator and the gate disagreed, which is the exact bug class
+ * working-indicator.ts exists to prevent (see that module's §3.1 history).
+ */
+describe("useAgentCommands — §2.3a: background-only turns don't hold messages", () => {
+    const streamingWithBackgroundTask = (model: AgentPaneModel) => {
+        model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+        // Submitting -> Streaming; the carve-out is Streaming-only by design.
+        model.dispatchPane({ type: "StreamFlushObserved", addedCount: 1, at: Date.now() }, "system");
+        model.dispatchPane({ type: "AttachedTaskObserved", at: Date.now() }, "system");
+    };
+
+    it("flushes immediately when nothing else is blocking", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            hub.agentInput.mockResolvedValue(undefined);
+            streamingWithBackgroundTask(model);
+            hub.agentInput.mockClear();
+
+            await commands.sendMessage("typed while only a dev server runs", true);
+
+            expect(commands.hasHeldMessages()).toBe(false);
+            expect(hub.agentInput).toHaveBeenCalledTimes(1);
+            dispose();
+        });
+    });
+
+    it("still holds when a genuine second tool call is running", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                // A second, genuinely-foreground tool call is mid-flight. The
+                // turn is NOT held open only by the background task, so the
+                // ordinary hold-until-the-next-boundary behaviour must stand.
+                documentNodes: () =>
+                    [{ type: "tool", status: "running" }] as unknown as DocumentNode[],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            hub.agentInput.mockResolvedValue(undefined);
+            streamingWithBackgroundTask(model);
+            hub.agentInput.mockClear();
+
+            await commands.sendMessage("typed while a real tool call runs", true);
+
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(hub.agentInput).not.toHaveBeenCalled();
             dispose();
         });
     });
