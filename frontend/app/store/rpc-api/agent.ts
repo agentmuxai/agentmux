@@ -6,6 +6,45 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The Drone pane's wire types are GENERATED from their Rust definitions by
+// ts-rs (agentmux-srv/src/drone/types.rs + server/drone_handlers.rs).
+export type { DroneBlockState } from "@/types/rpc/DroneBlockState";
+export type { DroneDefinition } from "@/types/rpc/DroneDefinition";
+export type { DroneFlowEdge } from "@/types/rpc/DroneFlowEdge";
+export type { DroneFlowNode } from "@/types/rpc/DroneFlowNode";
+export type { DroneGraph } from "@/types/rpc/DroneGraph";
+export type { DroneRun } from "@/types/rpc/DroneRun";
+export type { DroneViewport } from "@/types/rpc/DroneViewport";
+export type { BlockKind } from "@/types/rpc/BlockKind";
+export type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
+export type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
+export type { GetDroneReq } from "@/types/rpc/GetDroneReq";
+export type { ListDronesReq } from "@/types/rpc/ListDronesReq";
+export type { RunDroneReq } from "@/types/rpc/RunDroneReq";
+export type { RunDroneResp } from "@/types/rpc/RunDroneResp";
+
+import type { DroneDefinition } from "@/types/rpc/DroneDefinition";
+import type { DroneRun } from "@/types/rpc/DroneRun";
+import type { DeleteDroneReq } from "@/types/rpc/DeleteDroneReq";
+import type { DeleteDroneResp } from "@/types/rpc/DeleteDroneResp";
+import type { GetDroneReq } from "@/types/rpc/GetDroneReq";
+import type { ListDronesReq } from "@/types/rpc/ListDronesReq";
+import type { ListRunsReq } from "@/types/rpc/ListRunsReq";
+import type { RunDroneReq } from "@/types/rpc/RunDroneReq";
+import type { RunDroneResp } from "@/types/rpc/RunDroneResp";
+
+/**
+ * What a `listdroneruns` caller may send.
+ *
+ * Not `ListRunsReq` directly: `limit` is `#[serde(default = "default_limit")]`
+ * on an `i64`, so the server fills in 50 when it is missing — but ts-rs only
+ * marks a field optional when the Rust type is `Option<T>`, so the generated
+ * type calls it required. Deriving keeps the field names and types
+ * authoritative while restoring the one thing ts-rs cannot say.
+ */
+export type ListDroneRunsInput = Omit<ListRunsReq, "limit"> &
+    Partial<Pick<ListRunsReq, "limit">>;
+
 // The agent-definition and agent-content shapes are GENERATED from their Rust
 // definitions by ts-rs. agent.ts spans twelve handler files and is being
 // migrated one file at a time; this covers agent_handlers/core.rs.
@@ -228,7 +267,7 @@ export const AgentApi = {
 
     ListDronesCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: ListDronesReq = {},
         opts?: RpcOpts,
     ): Promise<DroneDefinition[]> {
         return client.rpcCall("listdrones", data, opts);
@@ -236,7 +275,7 @@ export const AgentApi = {
 
     GetDroneCommand(
         client: RpcClient,
-        data: { id: string },
+        data: GetDroneReq,
         opts?: RpcOpts,
     ): Promise<DroneDefinition | null> {
         return client.rpcCall("getdrone", data, opts);
@@ -252,23 +291,23 @@ export const AgentApi = {
 
     DeleteDroneCommand(
         client: RpcClient,
-        data: { id: string },
+        data: DeleteDroneReq,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<DeleteDroneResp> {
         return client.rpcCall("deletedrone", data, opts);
     },
 
     RunDroneCommand(
         client: RpcClient,
-        data: { drone_id: string },
+        data: RunDroneReq,
         opts?: RpcOpts,
-    ): Promise<{ run_id: string }> {
+    ): Promise<RunDroneResp> {
         return client.rpcCall("rundrone", data, opts);
     },
 
     ListDroneRunsCommand(
         client: RpcClient,
-        data: { drone_id: string; limit?: number },
+        data: ListDroneRunsInput,
         opts?: RpcOpts,
     ): Promise<DroneRun[]> {
         return client.rpcCall("listdroneruns", data, opts);

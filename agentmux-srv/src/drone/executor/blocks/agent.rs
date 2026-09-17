@@ -140,7 +140,7 @@ mod tests {
             id: "a1".to_string(),
             position: NodePosition::default(),
             data,
-            node_type: String::new(),
+            node_type: None,
         }
     }
 
