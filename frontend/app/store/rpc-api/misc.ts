@@ -13,34 +13,6 @@ export const MiscApi = {
         return client.rpcCall("activity", data, opts);
     },
 
-    AiSendMessageCommand(client: RpcClient, data: AiMessageData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("aisendmessage", data, opts);
-    },
-
-    AuthenticateCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<CommandAuthenticateRtnData> {
-        return client.rpcCall("authenticate", data, opts);
-    },
-
-    AuthenticateTokenCommand(client: RpcClient, data: CommandAuthenticateTokenData, opts?: RpcOpts): Promise<CommandAuthenticateRtnData> {
-        return client.rpcCall("authenticatetoken", data, opts);
-    },
-
-    FetchSuggestionsCommand(client: RpcClient, data: FetchSuggestionsData, opts?: RpcOpts): Promise<FetchSuggestionsResponse> {
-        return client.rpcCall("fetchsuggestions", data, opts);
-    },
-
-    FocusWindowCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("focuswindow", data, opts);
-    },
-
-    MessageCommand(client: RpcClient, data: CommandMessageData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("message", data, opts);
-    },
-
-    NotifyCommand(client: RpcClient, data: MuxNotificationOptions, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("notify", data, opts);
-    },
-
     // command "providers.models" [call] — authoritative model catalog for a
     // provider, fetched server-side from the Anthropic Models API with the
     // account OAuth token. Returns [] (never throws for the model list) when
@@ -57,36 +29,8 @@ export const MiscApi = {
         return client.rpcCall("recordtevent", data, opts);
     },
 
-    SendTelemetryCommand(client: RpcClient, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("sendtelemetry", null, opts);
-    },
-
-    StreamCpuDataCommand(client: RpcClient, data: CpuDataRequest, opts?: RpcOpts): AsyncGenerator<TimeSeriesData, void, boolean> {
-        return client.rpcStream("streamcpudata", data, opts);
-    },
-
-    StreamTestCommand(client: RpcClient, opts?: RpcOpts): AsyncGenerator<number, void, boolean> {
-        return client.rpcStream("streamtest", null, opts);
-    },
-
-    TermGetScrollbackLinesCommand(client: RpcClient, data: CommandTermGetScrollbackLinesData, opts?: RpcOpts): Promise<CommandTermGetScrollbackLinesRtnData> {
-        return client.rpcCall("termgetscrollbacklines", data, opts);
-    },
-
-    TestCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("test", data, opts);
-    },
-
     MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxInfoData> {
         return client.rpcCall("waveinfo", null, opts);
-    },
-
-    WebSelectorCommand(client: RpcClient, data: CommandWebSelectorData, opts?: RpcOpts): Promise<string[]> {
-        return client.rpcCall("webselector", data, opts);
-    },
-
-    WshActivityCommand(client: RpcClient, data: {[key: string]: number}, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("wshactivity", data, opts);
     },
 
     // command "widget.health" [call] — HTTP liveness probe for an external widget
