@@ -280,7 +280,7 @@ causes and raw occurrences rather than actionable duplication.
 
 | Cause | Outcome |
 |---|---|
-| 1. No Rust↔TS codegen | **Loop closed for one command — #3291, merged.** See below. |
+| 1. No Rust↔TS codegen | **Template shipped, ~5% migrated** — #3291 merged. See below. |
 | 2. `agentmux-common` underuse | **Done** — #3289. See §2.6's correction. |
 | 3. Platform-forked `zoom.*.ts` | Already done before this report (#3034). |
 | 4. `mcp` ↔ `skill` twin primitives | **Verified real, recommended against.** |
@@ -293,7 +293,16 @@ were all live with 12 generated types. What had not happened is step 2, and spec
 **nothing in the frontend imported a single generated type.** All 12 were generated, gated
 against drift, and unused, while the hand-written stubs kept inline duplicates of the same
 shapes — a pipeline built and never connected at the far end. #3291 connects it end to end
-for `voice.checkPath` and gives the remaining 16 stub files a template. (That spec's own
+for `voice.checkPath` and gives the remaining 16 stub files a template.
+
+**This is a template, not a completed cause, and the scoreboard says so deliberately.**
+Measured after #3291 merged: **286 hand-written stub functions across 16 files, exactly one of
+which imports a generated type; 14 generated bindings against 195 `rpc_types` structs; 12
+`register_typed` call sites against 232 `register_handler`; `srv-types.d.ts` still 2,755
+hand-maintained lines.** Roughly 5%. The spec's step 2 (migrate domain by domain, deleting
+each stub) and step 3 (delete `rpc-api/` once empty) are essentially untouched, and `agent.ts`
+alone is 466 lines. Counting this cause as "closed" because one command works would be the
+same named-cause-instead-of-work error this report keeps finding elsewhere. (That spec's own
 Status still reads "no generator exists yet" — the same stale-status pattern §0 is about.)
 
 **Cause 4 — real duplication, but abstracting it would be premature.** `McpCatalogModel` and
@@ -406,7 +415,7 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟢 **4/5 closed or dismissed** | causes 1-3 merged (#3291, #3289, #3034); 4 recommended against, 5 was never duplication — §5.4a. Remaining: migrate the other 16 RPC stub domains |
+| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~5% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Cause 1 is the one with ongoing cost and it is **286 hand-written stubs across 16 files, 1 of which imports a generated type; 12 `register_typed` vs 232 `register_handler`; `srv-types.d.ts` still 2,755 hand-maintained lines.** §5.4a |
 | 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 
