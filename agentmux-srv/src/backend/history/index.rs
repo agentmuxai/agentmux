@@ -68,6 +68,43 @@ pub struct HistorySearchOutcome {
     pub truncated: bool,
 }
 
+/// Case-insensitive substring search returning a byte offset into the
+/// **original** haystack, not into a lowercased copy of it.
+///
+/// The naive version of this (`haystack.to_lowercase().find(needle)`, then
+/// slice `haystack` at the result) is wrong, and wrong in a way that can
+/// panic: lowercasing is not length-preserving. Turkish `İ` (U+0130, 2 bytes)
+/// lowercases to `i̇` (3 bytes), so every such character before the match
+/// shifts the two strings out of alignment — slicing the original at an offset
+/// derived from the lowercased copy can land mid-character and panic, or
+/// silently return a misaligned snippet. Caught by reagentx P1 on PR #3321.
+///
+/// So the lowercase mapping is built explicitly, recording which original byte
+/// each lowercased byte came from.
+fn find_case_insensitive(haystack: &str, needle_lower: &str) -> Option<usize> {
+    if needle_lower.is_empty() {
+        return None;
+    }
+    let mut lowered = String::with_capacity(haystack.len());
+    // lowered-byte-offset -> original-byte-offset
+    let mut origin: Vec<usize> = Vec::with_capacity(haystack.len() + 1);
+    for (orig_idx, ch) in haystack.char_indices() {
+        for lc in ch.to_lowercase() {
+            let mut buf = [0u8; 4];
+            let encoded = lc.encode_utf8(&mut buf);
+            for _ in 0..encoded.len() {
+                origin.push(orig_idx);
+            }
+            lowered.push_str(encoded);
+        }
+    }
+    origin.push(haystack.len());
+    let at = lowered.find(needle_lower)?;
+    // Always a char boundary in the original: every entry is the start index
+    // of the char that produced it.
+    origin.get(at).copied()
+}
+
 /// Bound a matched region to something a caller can actually read, keeping a
 /// little context before the match so the hit is interpretable.
 fn snippet_around(haystack: &str, match_at: usize) -> String {
@@ -102,18 +139,33 @@ fn match_message(
     // Tool-call matches. When `tool` is set the search is structural: the
     // filter is the tool NAME, and an empty query then means "every call to
     // it" rather than "no matches".
+    //
+    // Every snippet offset below is resolved against the exact string the
+    // snippet is cut from. Deriving an offset from one string and slicing
+    // another — e.g. finding in `"{name} {args}"` and slicing `args` — puts
+    // the window in the wrong place, and for a long argument summary silently
+    // returns evidence that does not contain the match. A hit whose snippet
+    // omits the match is worse than no hit: it looks like verification.
+    // Both were reagentx P1s on PR #3321.
     for tu in &msg.tool_uses {
         if let Some(want) = opts.tool.as_deref() {
             if !tu.name.eq_ignore_ascii_case(want) {
                 continue;
             }
-            if needle.is_empty() || tu.argument_summary.to_lowercase().contains(needle) {
+            // Empty query + tool filter = "every call to this tool", so the
+            // start of the arguments is the right window.
+            let at = if needle.is_empty() {
+                Some(0)
+            } else {
+                find_case_insensitive(&tu.argument_summary, needle)
+            };
+            if let Some(at) = at {
                 hits.push(HistorySearchHit {
                     session_id: meta.session_id.clone(),
                     file_path: meta.file_path.clone(),
                     timestamp: msg.timestamp,
                     role: msg.role.clone(),
-                    snippet: snippet_around(&tu.argument_summary, 0),
+                    snippet: snippet_around(&tu.argument_summary, at),
                     tool_name: Some(tu.name.clone()),
                 });
             }
@@ -122,14 +174,21 @@ fn match_message(
         if needle.is_empty() {
             continue;
         }
-        let hay = format!("{} {}", tu.name, tu.argument_summary).to_lowercase();
-        if let Some(at) = hay.find(needle) {
+        // No tool filter: the query may match the tool's NAME or its
+        // arguments. Searched separately so the snippet offset always belongs
+        // to `argument_summary`, the string actually being cut.
+        let at = if find_case_insensitive(&tu.name, needle).is_some() {
+            Some(0)
+        } else {
+            find_case_insensitive(&tu.argument_summary, needle)
+        };
+        if let Some(at) = at {
             hits.push(HistorySearchHit {
                 session_id: meta.session_id.clone(),
                 file_path: meta.file_path.clone(),
                 timestamp: msg.timestamp,
                 role: msg.role.clone(),
-                snippet: snippet_around(&tu.argument_summary, at.min(tu.argument_summary.len())),
+                snippet: snippet_around(&tu.argument_summary, at),
                 tool_name: Some(tu.name.clone()),
             });
         }
@@ -138,7 +197,7 @@ fn match_message(
     // Prose match — skipped entirely when the caller asked a structural
     // tool-only question.
     if opts.tool.is_none() && !needle.is_empty() {
-        if let Some(at) = msg.content.to_lowercase().find(needle) {
+        if let Some(at) = find_case_insensitive(&msg.content, needle) {
             hits.push(HistorySearchHit {
                 session_id: meta.session_id.clone(),
                 file_path: meta.file_path.clone(),
@@ -1016,5 +1075,88 @@ mod tests {
         assert_eq!(out.hits.len(), 1);
         assert!(out.hits[0].snippet.chars().count() <= SNIPPET_MAX_CHARS + 2, "snippet stays bounded");
         assert!(out.hits[0].snippet.contains("NEEDLE"), "and still shows the match");
+    }
+
+    // ── Snippet/offset correctness (reagentx P1s on PR #3321) ──
+    //
+    // All three of these fail against the original implementation. They are
+    // about the same underlying mistake in three places: an offset computed
+    // against one string and then used to slice a different one.
+
+    #[test]
+    fn a_tool_hit_snippet_contains_the_match_even_far_into_a_long_argument() {
+        // The snippet used to be cut from offset 0 whenever a `tool` filter
+        // was set, so a match past SNIPPET_MAX_CHARS was reported as a hit
+        // whose evidence did not contain it. A hit whose snippet omits the
+        // match is worse than no hit — it looks like verification.
+        let args = format!("{}NEEDLE_TARGET{}", "p".repeat(3_000), "q".repeat(100));
+        let idx = search_index(vec![("s1", vec![msg("assistant", "sent", vec![("SendMessage", &args)])])]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+
+        let mut o = opts("needle_target");
+        o.tool = Some("SendMessage".into());
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!(out.hits.len(), 1);
+        assert!(
+            out.hits[0].snippet.contains("NEEDLE_TARGET"),
+            "snippet must show the match, not the start of the arguments: {}",
+            out.hits[0].snippet
+        );
+    }
+
+    #[test]
+    fn an_untooled_tool_hit_offsets_against_the_arguments_not_name_plus_arguments() {
+        // Previously the offset came from `format!("{name} {args}")` but was
+        // used to slice `args` alone, so the window was shifted by
+        // name.len()+1 — and for a long name effectively clamped to the end.
+        let args = format!("{}FIND_ME{}", "z".repeat(1_000), "w".repeat(1_000));
+        let idx = search_index(vec![(
+            "s1",
+            vec![msg("assistant", "no prose match here", vec![("SomeVeryLongToolNameIndeed", &args)])],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+
+        let out = idx.search_sessions(&cands, &opts("find_me"));
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.hits[0].tool_name.as_deref(), Some("SomeVeryLongToolNameIndeed"));
+        assert!(
+            out.hits[0].snippet.contains("FIND_ME"),
+            "snippet window must be centred on the real match: {}",
+            out.hits[0].snippet
+        );
+    }
+
+    #[test]
+    fn matching_is_safe_when_lowercasing_changes_byte_length() {
+        // Lowercasing is not length-preserving: 'İ' (U+0130, 2 bytes) becomes
+        // 'i̇' (3 bytes). Finding in a lowercased copy and slicing the
+        // original therefore drifts by one byte per such character, which can
+        // slice mid-character and panic. This must neither panic nor
+        // mis-window.
+        let content = format!("{}NEEDLE tail", "İ".repeat(200));
+        let idx = search_index(vec![("s1", vec![msg("assistant", &content, vec![])])]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+
+        let out = idx.search_sessions(&cands, &opts("needle"));
+        assert_eq!(out.hits.len(), 1);
+        assert!(
+            out.hits[0].snippet.contains("NEEDLE"),
+            "snippet must still contain the match: {}",
+            out.hits[0].snippet
+        );
+    }
+
+    #[test]
+    fn case_insensitive_find_reports_offsets_into_the_original_string() {
+        // Direct unit coverage of the helper the three fixes above rely on.
+        assert_eq!(find_case_insensitive("Hello World", "world"), Some(6));
+        assert_eq!(find_case_insensitive("abc", "zzz"), None);
+        assert_eq!(find_case_insensitive("abc", ""), None);
+
+        // 'İ' is 2 bytes and lowercases to 3, so a naive lowercased-offset
+        // would report 3 here instead of the correct 2.
+        let s = "İX";
+        assert_eq!(find_case_insensitive(s, "x"), Some(2));
+        assert!(s.is_char_boundary(find_case_insensitive(s, "x").unwrap()));
     }
 }
