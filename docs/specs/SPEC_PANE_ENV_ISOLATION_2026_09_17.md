@@ -144,12 +144,31 @@ the first revision shipped a fix that left the most important path open.
 
 ### 3.2c The complete spawn inventory
 
-Three review rounds each found sites the previous fix missed, every time because
+Four review rounds each found sites the previous fix missed, every time because
 the fix was applied where the author happened to be looking rather than to an
-enumerated list. So: every `Command::new` / `CommandBuilder::new` in
-`agentmux-srv`, classified. Grep for the constructor, not for one alias — round 3
-was missed because `agents/runner.rs` imports `Command` rather than writing
-`tokio::process::Command`.
+enumerated list. Two distinct ways the "sweep" failed, both worth naming:
+
+- **Round 3**: the grep matched `tokio::process::Command::new`, but
+  `agents/runner.rs` imports `Command`. The pattern was narrower than the
+  problem.
+- **Round 4**: the grep was right but its output was piped through `head -40`,
+  so `identity_auth_spawn.rs:728` was never displayed. An inventory was declared
+  complete from a truncated list.
+
+Verify with this, which prints any spawn with no `sanitize_` within the
+following lines — and do not truncate it:
+
+```
+grep -rnE "(CommandBuilder|Command)::new\(" --include=*.rs agentmux-srv/src \
+  | grep -viE "/tests?\.rs|#\[cfg\(test\)\]" \
+  | while IFS=: read -r f ln _; do
+      sed -n "$ln,$((ln+8))p" "$f" | grep -q sanitize_ || echo "$f:$ln"
+    done
+```
+
+Remaining hits are expected: `lifecycle.rs`'s three branches (covered by the
+single call after the if/else at :732), `shell_node.rs:327/331` (covered at
+:343), `core.rs` (covered at :82), and the deliberate exclusions below.
 
 **Pane policy** (`sanitize_pty_command` / `sanitize_process_command`) — ours, may
 use the in-pane helpers, so [`PANE_ENV_KEEP`] applies:
@@ -173,6 +192,11 @@ so not even the keep-set:
 | `server/voice.rs` | whisper.cpp |
 | `server/install_handlers.rs` | `npm install` — arbitrary postinstall scripts |
 | `server/system_install_handlers.rs` | an arbitrary install-recipe program |
+| `server/cli_handlers.rs` ×2 | `npm install` (win + unix) — arbitrary postinstall scripts |
+
+`identity_auth_spawn.rs` spawns the same provider CLI **three** times: the
+non-PTY login, the PTY login, and the auth-check poll driven from the OAuth
+drain loop. All three are sanitized; rounds 2 and 4 each found one of them.
 
 **Deliberately not sanitized**, with reasons:
 

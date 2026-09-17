@@ -189,8 +189,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{}\" {}",
                                     prefix_dir, package_arg
                                 );
-                                std::process::Command::new("cmd")
-                                    .arg("/C")
+                                let mut c = std::process::Command::new("cmd");
+                                // `npm install` runs arbitrary postinstall
+                                // scripts — no instance identity for those.
+                                crate::backend::pane_env::sanitize_external_std_command(&mut c);
+                                c.arg("/C")
                                     .raw_arg(&npm_cmd_str)
                                     .creation_flags(CREATE_NO_WINDOW)
                                     .env("CI", "true")
@@ -199,8 +202,11 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             }
                             #[cfg(not(windows))]
                             {
-                                std::process::Command::new("npm")
-                                    .args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--no-progress", "--prefix", &prefix_dir, &package_arg])
+                                let mut c = std::process::Command::new("npm");
+                                // `npm install` runs arbitrary postinstall
+                                // scripts — no instance identity for those.
+                                crate::backend::pane_env::sanitize_external_std_command(&mut c);
+                                c.args(["install", "--loglevel=http", "--no-audit", "--no-fund", "--no-progress", "--prefix", &prefix_dir, &package_arg])
                                     .env("CI", "true")
                                     .env("FORCE_COLOR", "0")
                                     .output()

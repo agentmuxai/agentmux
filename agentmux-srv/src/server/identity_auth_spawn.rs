@@ -726,6 +726,10 @@ async fn confirm_authenticated(
     use std::process::Stdio;
     use tokio::process::Command;
     let mut c = Command::new(cli_path);
+    // The third spawn of this same provider CLI in this file — the auth-check
+    // poll driven from the OAuth drain loop. Same strict policy as the other
+    // two. (ReAgent P0, round 4, on #3326.)
+    crate::backend::pane_env::sanitize_external_command(&mut c);
     c.args(args)
         .envs(env)
         .stdin(Stdio::null())

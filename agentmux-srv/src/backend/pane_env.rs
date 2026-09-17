@@ -167,6 +167,19 @@ fn all_agentmux_keys() -> Vec<String> {
         .collect()
 }
 
+
+/// `sanitize_external_command` for a synchronous `std::process::Command`.
+///
+/// Needed because not every external spawn is async — `npm install` in
+/// `server/cli_handlers.rs` is a blocking `.output()` call, and it runs
+/// arbitrary postinstall scripts.
+pub fn sanitize_external_std_command(cmd: &mut std::process::Command) {
+    for key in all_agentmux_keys() {
+        cmd.env_remove(&key);
+    }
+    cmd.env(NESTING_SENTINEL_KEY, "1");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
