@@ -54,6 +54,7 @@ import {
     type AgentAccounts,
 } from "@/app/view/identity/identity-model";
 import { AgentIdentityPanel } from "./AgentIdentityPanel";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 interface AgentIdentityModalPanelProps {
     agent: AgentDefinition;

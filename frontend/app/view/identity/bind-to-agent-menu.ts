@@ -17,7 +17,7 @@ import { getProvider, resolveProviderAlias } from "@/app/view/agent/providers";
 import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { Logger } from "@/util/logger";
 import type { Account } from "./identity-model";
-import type { AgentDefinitionIdentity } from "@/app/store/rpc-api";
+import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 /** One agent's row-worth of binding context for the submenu. */
 export interface BindCandidate {

@@ -14,6 +14,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
 import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition, ProviderModel } from "./providers/types";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 /**
  * Check if Node.js is available for a provider actually installed via

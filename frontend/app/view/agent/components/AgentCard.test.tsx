@@ -40,6 +40,7 @@ vi.mock("@/element/DualProviderLogo", () => ({
 }));
 
 import { AgentCard } from "./AgentCard";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 afterEach(() => {
     cleanup();

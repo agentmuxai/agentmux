@@ -40,6 +40,7 @@ vi.mock("@/app/view/identity/identity-model", () => ({
 import { AgentCreateFromTemplateModalPanel } from "./AgentCreateFromTemplateModal";
 import { resetCapabilities } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
