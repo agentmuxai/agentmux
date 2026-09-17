@@ -688,8 +688,25 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Re-export from shared crate for internal use.
+/// Build a provider-CLI command with this instance's identity already stripped.
+///
+/// Sanitizing HERE rather than at each call site is deliberate. This factory has
+/// eight callers across srv (agent spawn, ACP, app-server, persistent
+/// controller, session probe, auth check, version probe), and none of them
+/// contains a literal `Command::new` — so a grep for spawn constructors, which
+/// is how the other sites in this codebase were audited, cannot see them. Five
+/// review rounds on PR #3326 each found a spawn the previous fix had missed;
+/// this one was invisible to the verification command the spec recommends.
+/// A factory is the one place a fix cannot be half-applied.
+///
+/// Pane policy, not strict: most callers launch an agent CLI that legitimately
+/// uses the in-pane helpers. Call sites that spawn the CLI as a plain
+/// third-party binary (auth checks, version probes) tighten this to
+/// `sanitize_external_command` on top, which only removes more.
 pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
-    agentmux_common::make_cli_cmd(cli_path)
+    let mut cmd = agentmux_common::make_cli_cmd(cli_path);
+    crate::backend::pane_env::sanitize_process_command(&mut cmd);
+    cmd
 }
 
 /// Run the provider auth-check CLI against `auth_env` and parse the verdict.
@@ -702,6 +719,10 @@ async fn run_auth_check(
 ) -> Result<(bool, Option<String>, Option<String>, String), String> {
     let output = tokio::time::timeout(std::time::Duration::from_secs(10), {
         let mut check_cmd = make_cli_cmd(cli_path);
+        // An auth check is the provider CLI acting as a plain third-party
+        // binary, not as one of our agents — no endpoint, no credential.
+        // (ReAgent P0, round 5, on #3326.)
+        crate::backend::pane_env::sanitize_external_command(&mut check_cmd);
         check_cmd.args(auth_check_args);
         for (k, v) in auth_env {
             check_cmd.env(k, v);
@@ -811,6 +832,8 @@ async fn get_cli_version(cli_path: &str) -> String {
         std::time::Duration::from_secs(5),
         {
             let mut c = make_cli_cmd(cli_path);
+            // Version probe — same reasoning as the auth check above.
+            crate::backend::pane_env::sanitize_external_command(&mut c);
             c.arg("--version").stdin(std::process::Stdio::null());
             c.output()
         },

@@ -155,8 +155,16 @@ enumerated list. Two distinct ways the "sweep" failed, both worth naming:
   so `identity_auth_spawn.rs:728` was never displayed. An inventory was declared
   complete from a truncated list.
 
+- **Round 5**: the grep cannot see spawns built by a **factory**.
+  `cli_handlers::make_cli_cmd` has eight callers across srv and none of them
+  contains a literal `Command::new`, so no amount of care with the constructor
+  grep would have found them. That factory now sanitizes internally, which is
+  the only shape a fix cannot be half-applied in.
+
 Verify with this, which prints any spawn with no `sanitize_` within the
-following lines — and do not truncate it:
+following lines — and do not truncate it. **It does not cover factories**: any
+helper returning a `Command` must sanitize inside itself, and
+`make_cli_cmd` is the one that exists today.
 
 ```
 grep -rnE "(CommandBuilder|Command)::new\(" --include=*.rs agentmux-srv/src \
