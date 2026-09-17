@@ -1166,5 +1166,14 @@ mod tests {
         // injection for months while `agent.open` did it correctly.
         assert!(env["AGENTMUX_WAN_KEY"].is_string() && !env["AGENTMUX_WAN_KEY"].as_str().unwrap().is_empty());
         assert_ne!(env["AGENTMUX_WAN_KEY"], env["AGENTMUX_LAN_KEY"], "WAN and LAN keys must be independent");
+        // §2.1.2: the WAN signature binds the sending instance, so the host
+        // label must travel with the key. A missing one would make the sender
+        // sign under a different instance identity than srv publishes.
+        assert_eq!(
+            env["AGENTMUX_HOST_LABEL"],
+            serde_json::json!(crate::backend::reactive::registry::local_host_label()),
+            "the MCP env must carry the same host label this instance publishes its WAN key under"
+        );
+
     }
 }

@@ -257,6 +257,16 @@ pub struct InjectionRequest {
     /// population of agents later rather than almost none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wan_sig: Option<String>,
+    /// The sending machine's host label. With `source_channel`, identifies
+    /// which AgentMux instance under the sending account owns the keypair
+    /// `wan_sig` was produced with (`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`
+    /// §2.1.2) — the same account can legitimately run one agent name on
+    /// several machines and several channels, each with its own database and
+    /// so its own key. Client-supplied like `source_channel` and bound into
+    /// the signed material, so a wrong value fails verification rather than
+    /// selecting a key it shouldn't.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wan_source_host: Option<String>,
     /// Server-computed verification outcome for `channel_sig` —
     /// `#[serde(skip_deserializing)]`, the same guarantee as `sig_verified`/
     /// `lan_verified`: no attacker-supplied JSON body can set this. Set by

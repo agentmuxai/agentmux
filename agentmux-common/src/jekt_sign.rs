@@ -417,23 +417,40 @@ const WAN_DOMAIN: &str = "amx-jekt-wan-v1";
 
 /// Signed material for a general agent-to-agent WAN jekt.
 ///
+/// Binds the sending **instance** (`source_host` + `source_channel`) as well
+/// as the agent, for the same reason [`channel_signed_material`] binds
+/// `source_channel`: after
+/// `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §2.1.2, one agent name can
+/// legitimately be live on several instances under one account — a different
+/// machine, or a different build channel on the same machine — and **each
+/// mints its own keypair**, because each srv instance has its own database.
+/// The instance therefore selects which key a signature is checked against,
+/// so it has to be part of what the signature covers; otherwise a mislabelled
+/// instance would silently select a different key rather than fail.
+///
 /// Deliberately does NOT bind the sender's muxbus account, even though
-/// verification resolves the key by `(sender_account, source_agent)`: the
+/// verification resolves the key by `(account, host, channel, agent)`: the
 /// account is a cloud-side fact the signing process has no trustworthy view
 /// of at sign time, and binding a client-asserted account into the signature
 /// would let a sender pick which account's key it is checked against. The
 /// account is resolved server-side from the authenticated caller instead
-/// (`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.4.1) and selects the key;
-/// the signature then proves the agent.
+/// (§3.4.1) and selects the key; the signature then proves the agent and its
+/// instance. Host and channel are different: both are injected into the
+/// agent's env at spawn, so the sending process knows them reliably, and a
+/// wrong value selects a key the signature cannot verify under — it grants
+/// nothing.
 fn wan_signed_material(
     msgid: &str,
     source_agent: &str,
+    source_host: &str,
+    source_channel: &str,
     target_agent: &str,
     ts_secs: i64,
     message: &str,
 ) -> String {
     format!(
         "{WAN_DOMAIN}{FIELD_SEP}{msgid}{FIELD_SEP}{source_agent}{FIELD_SEP}\
+         {source_host}{FIELD_SEP}{source_channel}{FIELD_SEP}\
          {target_agent}{FIELD_SEP}{ts_secs}{FIELD_SEP}{message}"
     )
 }
@@ -466,13 +483,23 @@ pub fn sign_wan_jekt(
     private_key: &[u8],
     msgid: &str,
     source_agent: &str,
+    source_host: &str,
+    source_channel: &str,
     target_agent: &str,
     ts_secs: i64,
     message: &str,
 ) -> Option<String> {
     let seed: [u8; 32] = private_key.try_into().ok()?;
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
-    let material = wan_signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    let material = wan_signed_material(
+        msgid,
+        source_agent,
+        source_host,
+        source_channel,
+        target_agent,
+        ts_secs,
+        message,
+    );
     let signature = ed25519_dalek::Signer::sign(&signing_key, material.as_bytes());
     Some(BASE64.encode(signature.to_bytes()))
 }
@@ -491,6 +518,8 @@ pub fn verify_wan_jekt(
     public_key: &[u8],
     msgid: &str,
     source_agent: &str,
+    source_host: &str,
+    source_channel: &str,
     target_agent: &str,
     ts_secs: i64,
     message: &str,
@@ -501,7 +530,15 @@ pub fn verify_wan_jekt(
     let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
     let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
     let signature = Signature::from_bytes(&sig_arr);
-    let material = wan_signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    let material = wan_signed_material(
+        msgid,
+        source_agent,
+        source_host,
+        source_channel,
+        target_agent,
+        ts_secs,
+        message,
+    );
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
@@ -1025,37 +1062,65 @@ mod tests {
     #[test]
     fn a_correctly_signed_wan_message_verifies() {
         let (public_key, private_key) = generate_wan_keypair(lan_seed(11));
-        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
-        assert!(verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello").unwrap();
+        assert!(verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &sig));
     }
 
     #[test]
     fn a_wan_signature_does_not_verify_under_another_agents_key() {
         let (_, private_key) = generate_wan_keypair(lan_seed(11));
         let (other_public, _) = generate_wan_keypair(lan_seed(12));
-        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
-        assert!(!verify_wan_jekt(&other_public, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_wan_jekt(&other_public, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &sig));
     }
 
     #[test]
     fn tampering_with_any_wan_field_breaks_verification() {
         let (public_key, private_key) = generate_wan_keypair(lan_seed(11));
-        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
-        assert!(!verify_wan_jekt(&public_key, "msg-2", "agentx", "agenty", 1_000, "hello", &sig));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "someoneelse", "agenty", 1_000, "hello", &sig));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agentz", 1_000, "hello", &sig));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_001, "hello", &sig));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "goodbye", &sig));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_wan_jekt(&public_key, "msg-2", "agentx", "narko", "stable", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "someoneelse", "narko", "stable", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agentz", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_001, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "goodbye", &sig));
     }
 
     #[test]
     fn wan_malformed_inputs_fail_rather_than_panic() {
         let (public_key, private_key) = generate_wan_keypair(lan_seed(11));
-        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
-        assert!(sign_wan_jekt(&[1u8; 16], "m", "a", "b", 1, "x").is_none());
-        assert!(!verify_wan_jekt(&[0u8; 16], "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", "!!not base64!!"));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", ""));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello").unwrap();
+        assert!(sign_wan_jekt(&[1u8; 16], "m", "a", "h", "c", "b", 1, "x").is_none());
+        assert!(!verify_wan_jekt(&[0u8; 16], "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", "!!not base64!!"));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", ""));
+    }
+
+    #[test]
+    fn a_wan_signature_is_bound_to_the_sending_instance() {
+        // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §2.1.2. One account can run
+        // the same agent name on several instances — another machine, or
+        // another build channel on the same machine — and each mints its own
+        // keypair. The instance selects which key a signature is checked
+        // against, so it must be part of what the signature covers: otherwise
+        // a mislabelled instance would silently select a different key instead
+        // of failing.
+        let (public_key, private_key) = generate_wan_keypair(lan_seed(14));
+        let sig =
+            sign_wan_jekt(&private_key, "msg-1", "lark", "narko", "stable", "agenty", 1_000, "hello")
+                .unwrap();
+
+        assert!(verify_wan_jekt(
+            &public_key, "msg-1", "lark", "narko", "stable", "agenty", 1_000, "hello", &sig
+        ));
+        // Same agent, same account, different machine → not the same claim.
+        assert!(!verify_wan_jekt(
+            &public_key, "msg-1", "lark", "area54", "stable", "agenty", 1_000, "hello", &sig
+        ));
+        // Same agent, same machine, different build channel → also distinct,
+        // because that is a different data dir, database, and keypair.
+        assert!(!verify_wan_jekt(
+            &public_key, "msg-1", "lark", "narko", "local-dev", "agenty", 1_000, "hello", &sig
+        ));
     }
 
     #[test]
@@ -1069,18 +1134,17 @@ mod tests {
         let seed = lan_seed(13);
         let (public_key, private_key) = generate_wan_keypair(seed);
 
-        let wan_sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        let wan_sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello").unwrap();
         let lan_sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
         let channel_sig =
             sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
                 .unwrap();
 
         // Each verifies only under its own tier's verifier.
-        assert!(verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &wan_sig));
+        assert!(verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &wan_sig));
         assert!(!verify_lan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &wan_sig));
-        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &lan_sig));
-        assert!(!verify_wan_jekt(
-            &public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &channel_sig
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &lan_sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &channel_sig
         ));
         assert_ne!(wan_sig, lan_sig);
     }
