@@ -7,30 +7,36 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListIdentityAccountsData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub provider: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandGetIdentityAccountData {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandDeleteIdentityAccountData {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandLinkAgentIdentityData {
     pub agent_id: String,
     pub account_id: String,
     pub provider: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandUnlinkAgentIdentityData {
     pub agent_id: String,
     pub provider: String,
@@ -47,8 +53,34 @@ pub struct CommandUnlinkAgentIdentityData {
     pub silent: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListAgentIdentitiesData {
     pub agent_id: String,
 }
 
+
+/// Result of `unlinkagentidentity`. Was an inline `json!({ "unlinked": .. })`.
+/// False means there was no link to remove — the unlink is idempotent, so this
+/// is "was something actually removed", not an error flag.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct UnlinkAgentIdentityResult {
+    pub unlinked: bool,
+}
+
+/// Result of `account.oauth.cancel`. Was an inline
+/// `json!({ "cancelled": .. })`. False means there was no in-flight flow.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct AccountOAuthCancelResult {
+    pub cancelled: bool,
+}
+
+/// Request for `listallagentidentities`. The handler ignores its payload, but
+/// this must be a struct rather than `()`: the stub calls it with `{}`, and
+/// serde deserializes `()` only from JSON `null`, so a unit Req would reject
+/// every real call at runtime while passing every CI gate.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandListAllAgentIdentitiesData {}
