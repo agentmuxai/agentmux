@@ -6,6 +6,29 @@
 // original rpc-api.ts.
 
 import { RpcClient } from "../rpc-client";
+
+// The install.* and resolve.prereqs shapes are GENERATED from their Rust
+// definitions by ts-rs. The rest of this file is still hand-written -- identity
+// spans four handler files and is being migrated a file at a time.
+export type { InstallStartReq } from "@/types/rpc/InstallStartReq";
+export type { InstallCancelReq } from "@/types/rpc/InstallCancelReq";
+export type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
+export type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
+export type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+export type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
+export type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
+export type { PrereqToolResolution } from "@/types/rpc/PrereqToolResolution";
+export type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
+
+import type { InstallStartReq } from "@/types/rpc/InstallStartReq";
+import type { InstallCancelReq } from "@/types/rpc/InstallCancelReq";
+import type { InstallCheckReq } from "@/types/rpc/InstallCheckReq";
+import type { ResolvePrereqsReq } from "@/types/rpc/ResolvePrereqsReq";
+import type { InstallStartResult } from "@/types/rpc/InstallStartResult";
+import type { InstallCheckResult } from "@/types/rpc/InstallCheckResult";
+import type { InstallCancelResult } from "@/types/rpc/InstallCancelResult";
+import type { PrereqToolResolution } from "@/types/rpc/PrereqToolResolution";
+import type { ResolvePrereqsResult } from "@/types/rpc/ResolvePrereqsResult";
 import type { OAuthFlowStatus } from "./types";
 
 export const IdentityApi = {
@@ -215,14 +238,9 @@ export const IdentityApi = {
     // via `install_chunk` MPS events scoped to `install:<sessionId>`.
     InstallStartCommand(
         client: RpcClient,
-        data: {
-            providerId: string;
-            cliCommand: string;
-            npmPackage: string;
-            pinnedVersion: string;
-        },
+        data: InstallStartReq,
         opts?: RpcOpts,
-    ): Promise<{ sessionId: string }> {
+    ): Promise<InstallStartResult> {
         return client.rpcCall("install.start", data, opts);
     },
 
@@ -230,9 +248,9 @@ export const IdentityApi = {
     // the partial dir.
     InstallCancelCommand(
         client: RpcClient,
-        data: { sessionId: string },
+        data: InstallCancelReq,
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; error?: string }> {
+    ): Promise<InstallCancelResult> {
         return client.rpcCall("install.cancel", data, opts);
     },
 
@@ -242,9 +260,9 @@ export const IdentityApi = {
     // "show install modal?" decision matches the install location.
     InstallCheckCommand(
         client: RpcClient,
-        data: { providerId: string; cliCommand: string },
+        data: InstallCheckReq,
         opts?: RpcOpts,
-    ): Promise<{ installed: boolean }> {
+    ): Promise<InstallCheckResult> {
         return client.rpcCall("install.check", data, opts);
     },
 
@@ -254,9 +272,9 @@ export const IdentityApi = {
     // tools. See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
     ResolvePrereqsCommand(
         client: RpcClient,
-        data: { tools: string[] },
+        data: ResolvePrereqsReq,
         opts?: RpcOpts,
-    ): Promise<{ results: Array<{ tool: string; found: boolean; path: string | null }> }> {
+    ): Promise<ResolvePrereqsResult> {
         return client.rpcCall("resolve.prereqs", data, opts);
     },
 

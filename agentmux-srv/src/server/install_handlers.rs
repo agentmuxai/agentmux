@@ -25,7 +25,7 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -37,27 +37,89 @@ pub const COMMAND_INSTALL_CANCEL: &str = "install.cancel";
 pub const COMMAND_INSTALL_CHECK: &str = "install.check";
 pub const COMMAND_RESOLVE_PREREQS: &str = "resolve.prereqs";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct InstallStartReq {
-    provider_id: String,
-    cli_command: String,
-    npm_package: String,
+pub struct InstallStartReq {
+    pub provider_id: String,
+    pub cli_command: String,
+    pub npm_package: String,
+    /// `#[serde(default)]`, so it is omittable on the wire — but the
+    /// hand-written stub declared it REQUIRED, and the generated type keeps it
+    /// required (ts-rs cannot express an optional non-`Option` property
+    /// anyway). Callers are stricter than the server here, which is the safe
+    /// direction; noting it so the asymmetry is deliberate rather than lost.
     #[serde(default)]
-    pinned_version: String,
+    pub pinned_version: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct InstallCancelReq {
-    session_id: String,
+pub struct InstallCancelReq {
+    pub session_id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct InstallCheckReq {
-    provider_id: String,
-    cli_command: String,
+pub struct InstallCheckReq {
+    pub provider_id: String,
+    pub cli_command: String,
+}
+
+/// Request for `resolve.prereqs`. Was a function-local anonymous struct.
+#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ResolvePrereqsReq {
+    pub tools: Vec<String>,
+}
+
+/// Result of `install.start`. Was an inline `json!({ "sessionId": .. })`.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct InstallStartResult {
+    pub session_id: String,
+}
+
+/// Result of `install.check`.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct InstallCheckResult {
+    pub installed: bool,
+}
+
+/// Result of `install.cancel`.
+///
+/// `error` is genuinely `string | null`, NOT an optional property: the handler
+/// writes an explicit `Value::Null` on success, so the key is always present.
+/// The hand-written stub declared it `error?: string`, which said the key could
+/// be absent — it never is. Generating the type corrects that.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+#[serde(rename_all = "camelCase")]
+pub struct InstallCancelResult {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// One tool's resolution in `resolve.prereqs`.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct PrereqToolResolution {
+    pub tool: String,
+    pub found: bool,
+    /// Always present, null when the tool was not found.
+    pub path: Option<String>,
+}
+
+/// Result of `resolve.prereqs`.
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ResolvePrereqsResult {
+    pub results: Vec<PrereqToolResolution>,
 }
 
 /// Per-session abort handle so `install.cancel` can kill an in-flight
@@ -210,14 +272,12 @@ fn resolve_installed_bin(provider_id: &str, cli_command: &str) -> Option<std::pa
 pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let registry = state.install_sessions.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_INSTALL_START,
-        Box::new(move |data, _ctx| {
+        move |req: InstallStartReq, _ctx| {
             let registry = registry.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let req: InstallStartReq = serde_json::from_value(data)
-                    .map_err(|e| format!("install.start: {e}"))?;
+            async move {
                 if !is_safe_provider_id(&req.provider_id) {
                     return Err(format!(
                         "install.start: invalid provider id {:?} — must match [a-zA-Z0-9_-]+",
@@ -265,17 +325,15 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     cancel_rx,
                 );
 
-                Ok(Some(json!({ "sessionId": session_id })))
-            })
-        }),
+                Ok(InstallStartResult { session_id })
+            }
+        },
     );
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_INSTALL_CHECK,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let req: InstallCheckReq = serde_json::from_value(data)
-                    .map_err(|e| format!("install.check: {e}"))?;
+        move |req: InstallCheckReq, _ctx| {
+            async move {
                 if !is_safe_provider_id(&req.provider_id) {
                     return Err(format!(
                         "install.check: invalid provider id {:?}",
@@ -289,20 +347,14 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ));
                 }
                 let installed = resolve_installed_bin(&req.provider_id, &req.cli_command).is_some();
-                Ok(Some(json!({ "installed": installed })))
-            })
-        }),
+                Ok(InstallCheckResult { installed })
+            }
+        },
     );
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_RESOLVE_PREREQS,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                #[derive(serde::Deserialize)]
-                #[serde(rename_all = "camelCase")]
-                struct Req { tools: Vec<String> }
-                let req: Req = serde_json::from_value(data)
-                    .map_err(|e| format!("resolve.prereqs: {e}"))?;
+        move |req: ResolvePrereqsReq, _ctx| async move {
                 let mut results = Vec::with_capacity(req.tools.len());
                 for tool in &req.tools {
                     if !is_safe_cli_command(tool) {
@@ -312,34 +364,33 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         ));
                     }
                     let path = resolve_tool_path(tool).await;
-                    results.push(json!({
-                        "tool": tool,
-                        "found": path.is_some(),
-                        "path": path,
-                    }));
+                    results.push(PrereqToolResolution {
+                        tool: tool.clone(),
+                        found: path.is_some(),
+                        path,
+                    });
                 }
-                Ok(Some(json!({ "results": results })))
-            })
-        }),
+                Ok(ResolvePrereqsResult { results })
+        },
     );
 
     let registry = state.install_sessions.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_INSTALL_CANCEL,
-        Box::new(move |data, _ctx| {
+        move |req: InstallCancelReq, _ctx| {
             let registry = registry.clone();
-            Box::pin(async move {
-                let req: InstallCancelReq = serde_json::from_value(data)
-                    .map_err(|e| format!("install.cancel: {e}"))?;
+            async move {
                 let ok = registry.cancel(&req.session_id);
-                Ok(Some(json!({
-                    "success": ok,
-                    "error": if ok { serde_json::Value::Null } else {
-                        json!(format!("unknown or already-terminal session: {}", req.session_id))
-                    }
-                })))
-            })
-        }),
+                Ok(InstallCancelResult {
+                    success: ok,
+                    error: if ok {
+                        None
+                    } else {
+                        Some(format!("unknown or already-terminal session: {}", req.session_id))
+                    },
+                })
+            }
+        },
     );
 }
 
@@ -648,5 +699,79 @@ mod tests {
         ] {
             assert!(!is_safe_cli_command(cmd), "{cmd:?} should be rejected");
         }
+    }
+}
+
+// Request/result shape tests for the four install-related commands.
+#[cfg(test)]
+mod req_shape_tests {
+    use super::*;
+    use serde_json::json;
+
+    // These structs rely on rename_all = "camelCase" to match the wire. Drop
+    // that attribute and everything still compiles and the binding still
+    // generates -- it just silently stops parsing real payloads.
+    #[test]
+    fn the_requests_accept_the_camel_case_payloads_the_stub_sends() {
+        let start: InstallStartReq = serde_json::from_value(json!({
+            "providerId": "claude",
+            "cliCommand": "claude",
+            "npmPackage": "@anthropic-ai/claude-code",
+            "pinnedVersion": "1.2.3",
+        }))
+        .expect("install.start");
+        assert_eq!(start.pinned_version, "1.2.3");
+
+        // pinnedVersion is #[serde(default)], so the server accepts it missing
+        // even though the generated binding marks it required -- callers are
+        // stricter than the wire, which is the safe direction.
+        let no_version: InstallStartReq = serde_json::from_value(json!({
+            "providerId": "claude",
+            "cliCommand": "claude",
+            "npmPackage": "p",
+        }))
+        .expect("pinnedVersion is optional on the wire");
+        assert_eq!(no_version.pinned_version, "");
+
+        serde_json::from_value::<InstallCancelReq>(json!({"sessionId": "s1"}))
+            .expect("install.cancel");
+        serde_json::from_value::<InstallCheckReq>(
+            json!({"providerId": "claude", "cliCommand": "claude"}),
+        )
+        .expect("install.check");
+        serde_json::from_value::<ResolvePrereqsReq>(json!({"tools": ["node", "git"]}))
+            .expect("resolve.prereqs");
+
+        assert!(
+            serde_json::from_value::<InstallCancelReq>(json!({"session_id": "s1"})).is_err(),
+            "snake_case is not the wire format for these"
+        );
+    }
+
+    // THE DRIFT THIS SLICE FIXES. The handler writes an explicit null for
+    // `error` on success, so the key is ALWAYS present. The hand-written stub
+    // said `error?: string`, i.e. the key may be absent -- it never is.
+    #[test]
+    fn cancel_result_always_carries_the_error_key() {
+        let ok = serde_json::to_value(InstallCancelResult { success: true, error: None })
+            .expect("serializable");
+        assert_eq!(ok, json!({"success": true, "error": null}));
+        assert!(
+            ok.as_object().unwrap().contains_key("error"),
+            "error is `string | null`, not an optional property"
+        );
+    }
+
+    #[test]
+    fn prereq_results_carry_a_nullable_path() {
+        let v = serde_json::to_value(ResolvePrereqsResult {
+            results: vec![PrereqToolResolution {
+                tool: "node".to_string(),
+                found: false,
+                path: None,
+            }],
+        })
+        .expect("serializable");
+        assert_eq!(v, json!({"results": [{"tool": "node", "found": false, "path": null}]}));
     }
 }
