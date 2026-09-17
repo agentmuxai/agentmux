@@ -9,7 +9,15 @@ untargeted-hold case). Visual verification confirmed a clear improvement;
 a residual flash reported specifically on tab CLOSE is tracked separately
 (see `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §10 for the
 close-specific timing fix shipped alongside this, and the still-open
-pane-content flash noted there as unresolved).
+pane-content flash noted there as unresolved). PR #3300 review (codex P2)
+caught a real gap §3 didn't name: the new async-populate window (up to ~2s
+for `applyTabPreset`'s own layout-model poll) is long enough for the user
+to switch to a different tab before activation, and the old unconditional
+`await setActiveTab(tabId)` would then yank them back to the new tab —
+fixed by capturing the active tab id BEFORE `CreateTab` fires and skipping
+activation if it's changed by the time `applyTabPreset` resolves (new tab
+stays created-but-inactive, reachable via the tab bar normally). Covered
+by a new `tab-actions.test.ts` (4 cases, all passing).
 **Scope:** window-level tabs only (`frontend/app/workspace/workspace.tsx`,
 `frontend/app/store/tab-actions.ts`, `frontend/app/store/tab-reveal.ts`,
 `frontend/app/tab/tab-presets.ts`) — specifically the "+" new-tab creation

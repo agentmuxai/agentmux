@@ -20,6 +20,12 @@ import { activeTabId, workspace } from "./window-identity";
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
+    // Captured BEFORE the RPC even fires — the baseline to compare against
+    // once applyTabPreset finishes, so a user who switched tabs while it
+    // was running (its layout-model poll alone can take up to 2s) doesn't
+    // get yanked back to the new tab out from under whatever they
+    // navigated to meanwhile (codex P2, PR #3300).
+    const startingActiveTabId = activeTabId();
     fireAndForget(async () => {
         try {
             // Created INACTIVE (`activate: false`) — the current tab
@@ -56,7 +62,18 @@ export function createTab() {
             // "first tab in an empty workspace" case activates
             // unconditionally, regardless of the `activate: false`
             // passed above).
-            await setActiveTab(tabId);
+            //
+            // Only if the user hasn't navigated elsewhere in the meantime
+            // (codex P2, PR #3300): applyTabPreset's own polling/RPCs can
+            // take long enough for a rapid New Tab, or a manual switch to
+            // some other tab, to land first. Forcing activation here would
+            // then override that newer, more deliberate choice — instead
+            // the new tab is left created but inactive; the user reaches
+            // it via the tab bar whenever they actually want it, same as
+            // any other background tab.
+            if (activeTabId() === startingActiveTabId) {
+                await setActiveTab(tabId);
+            }
         } catch (e) {
             console.error("[createTab] failed:", e);
         }

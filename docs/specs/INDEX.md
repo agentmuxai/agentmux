@@ -315,6 +315,7 @@ partial list.
 | [`SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25`](SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md) | Tab close (X) button — spurious select flash |
 | [`SPEC_TAB_COLOR_DESATURATION_2026_08_13`](SPEC_TAB_COLOR_DESATURATION_2026_08_13.md) | Spec: Desaturate tab colors, keep agent pane border colors as-is |
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
+| [`SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16`](SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md) | SPEC: Window-Tab Creation Flashing — Root Cause and an Architecture Cleanup |
 | [`SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04`](SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) | Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs) |
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
