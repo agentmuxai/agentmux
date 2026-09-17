@@ -1157,13 +1157,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // this does NOT touch tab bookkeeping — sub-blocks are never
     // tab-referenced, so delete_block.rs's precondition would reject them.
     let mstore_dsb = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DELETE_SUB_BLOCK,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandDeleteSubBlockData, _ctx| {
             let mstore = mstore_dsb.clone();
-            Box::pin(async move {
-                let cmd: CommandDeleteSubBlockData = serde_json::from_value(data)
-                    .map_err(|e| format!("deletesubblock: {e}"))?;
+            async move {
 
                 // Kill process FIRST — a lingering PTY tree is worse than a
                 // delayed row delete.
@@ -1192,9 +1190,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 }
 
                 tracing::info!(block_id = %cmd.blockid, "DeleteSubBlock");
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // tooldecision → reply to a per-tool-call permission gate.
@@ -1216,12 +1214,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // for next-turn application, or interactive-mode subprocess
     // launch with stdin write) is decided in PR-3b / PR-4 once we
     // pick a CLI integration strategy.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_TOOL_DECISION,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                let cmd: CommandToolDecisionData = serde_json::from_value(data)
-                    .map_err(|e| format!("tooldecision: {e}"))?;
+        move |cmd: CommandToolDecisionData, _ctx| async move {
                 match cmd.outcome.as_str() {
                     "allow" | "deny" => {}
                     other => {
@@ -1251,9 +1246,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     has_feedback = cmd.feedback.is_some(),
                     "[tooldecision] received (delivery mechanism deferred to PR-3b/PR-4)"
                 );
-                Ok(None)
-            })
-        }),
+                Ok(())
+        },
     );
 
     // docknodestatus → fire-and-forget push of a ToolNode's latest status,
@@ -1292,21 +1286,19 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     let mstore_narrate = state.mstore.clone();
     let broker_narrate = state.broker.clone();
     let narrated = state.narrated_events.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AMBIENT_NARRATE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandAmbientNarrateData, _ctx| {
             let mstore = mstore_narrate.clone();
             let broker = broker_narrate.clone();
             let narrated = narrated.clone();
-            Box::pin(async move {
-                let cmd: CommandAmbientNarrateData = serde_json::from_value(data)
-                    .map_err(|e| format!("ambientnarrate: {e}"))?;
+            async move {
 
                 // Dedupe per narrated event. A ToolNode can be re-observed, and
                 // narrating one event twice is both noise and a wasted model
                 // call. Checked before spawning so a repeat costs nothing.
                 if !cmd.dedupe_key.is_empty() && !narrated.mark_new(&cmd.dedupe_key) {
-                    return Ok(None);
+                    return Ok(());
                 }
 
                 tokio::spawn(async move {
@@ -1361,24 +1353,22 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         })),
                     });
                 });
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     let mstore_dns = state.mstore.clone();
     let pending_pids_dns = state.pending_background_pids.clone();
     let broker_dns = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_DOCK_NODE_STATUS,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandDockNodeStatusData, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
             let mstore = mstore_dns.clone();
             let pending_pids = pending_pids_dns.clone();
             let broker = broker_dns.clone();
-            Box::pin(async move {
-                let cmd: CommandDockNodeStatusData = serde_json::from_value(data)
-                    .map_err(|e| format!("docknodestatus: {e}"))?;
+            async move {
                 let observed_at = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -1438,9 +1428,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         run_in_background: cmd.run_in_background,
                     },
                 );
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // backgroundtaskcompletion → fire-and-forget push of a declared-
@@ -1459,14 +1449,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // exact bug class #2520 already fixed once for a different call site.
     let mstore_btc = state.mstore.clone();
     let broker_btc = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BACKGROUND_TASK_COMPLETION,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandBackgroundTaskCompletionData, _ctx| {
             let mstore = mstore_btc.clone();
             let broker = broker_btc.clone();
-            Box::pin(async move {
-                let cmd: CommandBackgroundTaskCompletionData = serde_json::from_value(data)
-                    .map_err(|e| format!("backgroundtaskcompletion: {e}"))?;
+            async move {
                 let ended_at = cmd.timestamp.unwrap_or_else(|| {
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -1483,9 +1471,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         "failed to mark background task terminal in the durable registry",
                     ),
                 }
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // backgroundtaskpid → fire-and-forget push of a declared-background
@@ -1509,15 +1497,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     let mstore_btp = state.mstore.clone();
     let pending_pids_btp = state.pending_background_pids.clone();
     let broker_btp = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BACKGROUND_TASK_PID,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandBackgroundTaskPidData, _ctx| {
             let mstore = mstore_btp.clone();
             let pending_pids = pending_pids_btp.clone();
             let broker = broker_btp.clone();
-            Box::pin(async move {
-                let cmd: CommandBackgroundTaskPidData = serde_json::from_value(data)
-                    .map_err(|e| format!("backgroundtaskpid: {e}"))?;
+            async move {
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -1536,9 +1522,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         "failed to record background task pid in the durable registry",
                     ),
                 }
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     // listbackgroundtasks → request/response: this block's current
@@ -1551,21 +1537,19 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md).
     // See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
     let mstore_lbt = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_BACKGROUND_TASKS,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandListBackgroundTasksData, _ctx| {
             let mstore = mstore_lbt.clone();
-            Box::pin(async move {
-                let cmd: CommandListBackgroundTasksData = serde_json::from_value(data)
-                    .map_err(|e| format!("listbackgroundtasks: {e}"))?;
+            async move {
                 let tasks = mstore
                     .background_task_list_for_block(&cmd.blockid)
                     .map_err(|e| format!("listbackgroundtasks: {e}"))?;
                 let views: Vec<super::muxspect_handlers::BackgroundTaskView> =
                     tasks.into_iter().map(Into::into).collect();
-                Ok(Some(serde_json::to_value(views).map_err(|e| format!("listbackgroundtasks: {e}"))?))
-            })
-        }),
+                Ok(views)
+            }
+        },
     );
 
     // agent.answer → deliver an AskUserQuestion answer to the running agent CLI
@@ -1617,12 +1601,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // `UNSUPPORTED_CONTROLLER`): the frontend's SAFE_TO_RETRY_VIA_FOLLOWUP
     // allowlist (useAgentQuestions.ts) matches on these substrings for both
     // commands. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_AGENT_CANCEL,
-        Box::new(|data, _ctx| {
-            Box::pin(async move {
-                let cmd: CommandAgentCancelData = serde_json::from_value(data)
-                    .map_err(|e| format!("agent.cancel: {e}"))?;
+        move |cmd: CommandAgentCancelData, _ctx| async move {
                 if cmd.tool_use_id.is_empty() {
                     return Err("agent.cancel: MISSING_ARG: tool_use_id".to_string());
                 }
@@ -1641,14 +1622,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         tool_use_id = %cmd.tool_use_id,
                         "[agent.cancel] deny control_response delivered to persistent stdin"
                     );
-                    Ok(None)
+                    Ok(())
                 } else {
                     Err("agent.cancel: UNSUPPORTED_CONTROLLER: canceling AskUserQuestion \
                          requires a persistent (host) agent; container/one-shot agents are \
                          not yet supported (Phase 2)".to_string())
                 }
-            })
-        }),
+        },
     );
 
     // Agent input/stop + subprocess spawn handlers

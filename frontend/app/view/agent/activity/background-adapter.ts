@@ -25,6 +25,7 @@
  */
 
 import type { PinnedActivity } from "./types";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 /** Pure: one registry row as a dock row. No `tool`/`shell`/`subagent` source
  *  field is populated — a registry-only row has no live transcript log to

@@ -18,6 +18,15 @@ export type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfile
 export type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
 export type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
 export type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
+export type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData";
+export type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
+export type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+export type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
+export type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
+export type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
+export type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
+export type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
+export type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 
 import type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
 import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
@@ -27,6 +36,15 @@ import type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfile
 import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
 import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
 import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
+import type { CommandDeleteBlockData } from "@/types/rpc/CommandDeleteBlockData";
+import type { CommandToolDecisionData } from "@/types/rpc/CommandToolDecisionData";
+import type { CommandAmbientNarrateData } from "@/types/rpc/CommandAmbientNarrateData";
+import type { CommandDockNodeStatusData } from "@/types/rpc/CommandDockNodeStatusData";
+import type { CommandBackgroundTaskCompletionData } from "@/types/rpc/CommandBackgroundTaskCompletionData";
+import type { CommandBackgroundTaskPidData } from "@/types/rpc/CommandBackgroundTaskPidData";
+import type { CommandListBackgroundTasksData } from "@/types/rpc/CommandListBackgroundTasksData";
+import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData";
+import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 
 export const BlockApi = {
     BlockInfoCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<BlockInfoData> {
