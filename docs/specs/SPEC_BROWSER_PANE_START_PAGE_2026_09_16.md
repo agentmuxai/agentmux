@@ -1,7 +1,10 @@
 # SPEC — Browser pane: "Set as Start Page" in the bookmarks menu
 
 **Date:** 2026-09-16
-**Status:** proposed — not implemented
+**Status:** implemented (2026-09-16) — `cargo test -p agentmux-srv`: 3550
+passed; `tsc --noEmit`: clean; `vitest`: 2962 passed (29 pre-existing
+Windows-only @solid-refresh/jsdom failures, none touching this feature's
+files). Not yet manually verified in a running `task dev` instance.
 **Scope:** `frontend/app/view/browser/` (nav bar, model),
 `agentmux-srv/src/backend/wconfig/` (`FullConfigType`, `ConfigState`),
 `agentmux-srv/src/backend/config_watcher_fs.rs`, `agentmux-srv/src/bootstrap.rs`.
