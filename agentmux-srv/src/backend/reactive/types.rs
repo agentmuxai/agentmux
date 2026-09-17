@@ -335,13 +335,31 @@ pub struct InjectionResponse {
 }
 
 /// Agent registration record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `#[ts(type = "number")]` on the u64 timestamps: ts-rs maps 64-bit integers
+/// to `bigint`, which is not assignable to `number` in TypeScript and would
+/// break every consumer that treats these as JS millisecond timestamps. See
+/// the same annotation on `BrowserBookmark::created_at` (PR #3293).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentRegistration {
     pub agent_id: String,
     pub block_id: String,
+    // `#[ts(optional)]`: this field carries `skip_serializing_if`, so the key
+    // is OMITTED from the JSON entirely when None — not serialized as null.
+    // Without this ts-rs renders `tab_id: string | null`, which promises the
+    // key is always present, and a consumer narrowing on `!== null` would
+    // still get `undefined` at runtime. Note the contrast with
+    // `MismatchAuditSummary::error_message` in server/reactive.rs: that one is
+    // a plain `Option<String>` with NO skip_serializing_if, so it genuinely is
+    // present-and-null and `string | null` is correct there. Same Option<T>,
+    // two different correct bindings, decided by the serde attribute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub tab_id: Option<String>,
+    #[ts(type = "number")]
     pub registered_at: u64,
+    #[ts(type = "number")]
     pub last_seen: u64,
     /// Process-wide unique nonce of the persistent-controller spawn this
     /// registration belongs to; 0 = not recorded (HTTP register handler,
@@ -354,6 +372,7 @@ pub struct AgentRegistration {
     /// instead of blindly wiping a fallback respawn's (or replacement
     /// controller's) fresh registration (issue #2363).
     #[serde(default)]
+    #[ts(type = "number")]
     pub registration_nonce: u64,
 }
 
