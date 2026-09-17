@@ -9,6 +9,7 @@ pub mod agent_credentials;
 pub mod agent_groups;
 pub mod agent_jekt_keys;
 pub mod agent_lan_keys;
+pub mod agent_wan_keys;
 pub mod agent_native_memory;
 pub mod agent_native_memory_versions;
 pub mod lan_peer_pubkey_pins;
