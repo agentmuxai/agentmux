@@ -701,7 +701,8 @@ pub struct AgentSkillExport {
 
 // ---- Agent definition branching (fork) ----
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandForkAgentDefinitionData {
     pub source_id: String,
     /// When non-empty this becomes the fork's display name directly.
@@ -724,7 +725,8 @@ pub struct ForkAgentDefinitionSuggestResult {
 
 /// SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4 — renames
 /// whichever field a fork tab's title actually resolves from.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandRenameAgentDefinitionTitleData {
     pub id: String,
     pub title: String,
@@ -733,10 +735,14 @@ pub struct CommandRenameAgentDefinitionTitleData {
 /// Requests for the three payload-ignoring agent commands
 /// (`containerruntimeavailable`, `reseedagents`, `exportagents`).
 ///
-/// Structs rather than `()`: the stub calls each with no argument, which the
-/// RPC client sends as `{}`, and serde deserializes `()` only from JSON
-/// `null` -- a unit Req would reject every real call while compiling and
-/// passing every CI gate (the `bookmarks.list` bug).
+/// Structs rather than `()`, and registered as `Option<Self>` rather than
+/// `Self`, because the two encodings of "no argument" both reach the server
+/// and serde accepts each from only one of them: the stub calls each with no
+/// argument, which the RPC client sends as `{}` (`()` deserializes only from
+/// `null`), while a client that omits `data` entirely arrives as `null` (a
+/// struct deserializes only from an object). A unit Req would reject every
+/// real call while compiling and passing every CI gate (the `bookmarks.list`
+/// bug); a bare struct rejects the older shape. `Option<Self>` takes both.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandContainerRuntimeAvailableData {}
@@ -774,3 +780,14 @@ pub struct ReseedAgentsResult {
     #[ts(type = "number")]
     pub skipped: usize,
 }
+/// Request for `listhiddentemplates`, which ignores its payload.
+///
+/// A struct rather than `()`, and registered as `Option<Self>` rather than
+/// `Self`, because the two no-argument encodings both reach the server and
+/// serde accepts each from only one of them: the stub calls this with no
+/// argument, which the RPC client sends as `{}` (`()` deserializes only from
+/// `null`), while a client that omits `data` entirely arrives as `null` (a
+/// struct deserializes only from an object). `Option<Self>` takes both.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandListHiddenTemplatesData {}

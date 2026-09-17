@@ -336,7 +336,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let container_manager_cra = state.container_manager.clone();
     engine.register_typed(
         COMMAND_CONTAINER_RUNTIME_AVAILABLE,
-        move |_cmd: CommandContainerRuntimeAvailableData, _ctx| {
+        move |_cmd: Option<CommandContainerRuntimeAvailableData>, _ctx| {
             let cm = container_manager_cra.clone();
             async move {
                 let available = cm.is_available().await;
@@ -530,7 +530,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker_rsfa = state.broker.clone();
     engine.register_typed(
         COMMAND_RESEED_AGENTS,
-        move |_cmd: CommandReseedAgentsData, _ctx| {
+        move |_cmd: Option<CommandReseedAgentsData>, _ctx| {
             let mstore = mstore_rsfa.clone();
             let broker = broker_rsfa.clone();
             async move {
@@ -690,7 +690,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store_efa = state.id_store.clone();
     engine.register_typed(
         COMMAND_EXPORT_AGENTS,
-        move |_cmd: CommandExportAgentsData, _ctx| {
+        move |_cmd: Option<CommandExportAgentsData>, _ctx| {
             let mstore = mstore_efa.clone();
             let id_store = id_store_efa.clone();
             async move {

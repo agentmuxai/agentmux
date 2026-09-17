@@ -68,6 +68,10 @@ export type {
     ContainerRuntimeAvailableResult,
     ImportAgentDefinitionsResult,
     ReseedAgentsResult,
+    CommandForkAgentDefinitionData,
+    CommandListHiddenTemplatesData,
+    CommandRenameAgentDefinitionTitleData,
+    ForkAgentDefinitionInput,
 } from "./agent";
 export type {
     AgentDefinitionIdentity,
