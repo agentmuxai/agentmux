@@ -2,8 +2,12 @@
 
 **Status:** active — living status doc, updated as its own §5 items land. Every doc
 correction it recommends for itself was made in the PR that created it (§4). Since then:
-§5.4 (Wave → Mux, #851) is **done and the issue closed**, and §5.4a records DRY/modularity
-closing four of five causes. Remaining open items are §5.1-5.3 and §5.5-5.9.
+§5.4 (Wave → Mux, #851) is **done and the issue closed**. §5.4a tracks DRY/modularity: four
+of its five named causes are closed or dismissed, but the one that carries real ongoing cost
+(cause 1, RPC codegen) is a long grind now **four domains in** — #3291, #3293, #3294, #3295 —
+with eleven stub domains still to go. Every one of those four surfaced a defect no existing
+CI gate could catch, including a P0 that would have broken `bookmarks.list` on every call.
+Remaining open items are §5.1-5.3 and §5.5-5.9.
 **Date:** 2026-09-16
 **Author:** Manoz (manoz-0803a)
 **Baseline:** `main` @ `65958f84e` (post-v0.56.2)
@@ -299,11 +303,63 @@ for `voice.checkPath` and gives the remaining 16 stub files a template.
 Measured after #3291 merged: **286 hand-written stub functions across 16 files, exactly one of
 which imports a generated type; 14 generated bindings against 195 `rpc_types` structs; 12
 `register_typed` call sites against 232 `register_handler`; `srv-types.d.ts` still 2,755
-hand-maintained lines.** Roughly 5%. The spec's step 2 (migrate domain by domain, deleting
-each stub) and step 3 (delete `rpc-api/` once empty) are essentially untouched, and `agent.ts`
-alone is 466 lines. Counting this cause as "closed" because one command works would be the
-same named-cause-instead-of-work error this report keeps finding elsewhere. (That spec's own
-Status still reads "no generator exists yet" — the same stale-status pattern §0 is about.)
+hand-maintained lines.** Roughly 5%.
+
+#### Progress since, four domains in (updated 2026-09-16)
+
+| Domain | PR | What it did |
+|---|---|---|
+| `voice.checkPath` | #3291 | First end-to-end connection; template for the rest. |
+| `bookmarks.*` | #3293 | Found the **P0**: `Req = ()` rejects the `{}` the stub sends, so every `bookmarks.list` call would have failed at runtime. serde deserializes `()` only from `null`. |
+| `reactive.registrations` | #3294 | Deleted 4 mirror interfaces, one of which literally said "Mirrors agentmux-srv's AgentRegistration". Fixed a **P2** where `skip_serializing_if` made `tab_id` `string | null` when the key is actually *omitted*. |
+| `agent:memory:*` (6 cmds) | #3295 | 13 of 14 types generated; 7 hand-written **globals** deleted from `srv-types.d.ts`. |
+
+Current numbers, same greps as above: **286 stub functions across 16 files, now 4 of which
+import generated types; 36 generated bindings; 21 `register_typed` against 223
+`register_handler`; `srv-types.d.ts` down to 2,707 lines.**
+
+Two honest caveats on those numbers:
+
+- **The stub-function count has not moved (286), by design.** Step 2 re-types stubs against
+  generated types; it does not delete them. The count only falls at step 3, when `rpc-api/`
+  goes away entirely. Anyone reading "286 → 286" as no progress is reading the wrong number —
+  the one that moved is *hand-maintained lines*, and `srv-types.d.ts` is down 48.
+- **48 lines over four domains means this is a long grind, not a nearly-finished job.**
+  `agent.ts` alone is 466 lines. At this rate cause 1 is perhaps 15% done, not 5% and not
+  closed. Eleven stub domains remain: `session` (59), `fleet` (87), `bundle` (134),
+  `block` (140), `misc` (167), `workspace` (177), `mcp` (184), `skill` (188), `file` (292),
+  `identity` (335), `agent` (466).
+
+#### What the migration keeps finding: the gate does not check what you think
+
+Every domain so far has surfaced a defect that **no existing check could catch**, which is the
+strongest argument for continuing:
+
+- `tsc` checks the frontend against the *generated* types, not against the backend.
+- `check-rpc-bindings.sh` checks that a generated type *exists* per command, and that it is
+  current — never that a real payload deserializes into the Rust `Req`.
+
+So a `Req` that cannot parse what the stub sends **compiles, typechecks, and passes the
+binding gate**, then fails on every call. That is precisely the `bookmarks.list` P0. Each
+migrated domain therefore now carries `req_shape_tests` pinning each command to the literal
+JSON its call site sends, including negative assertions (e.g. `agent:memory:diff` must
+*reject* a payload with no `agent_id` — the ownership check behind an earlier P1).
+
+#### A real expressiveness limit in ts-rs, found in #3295
+
+`NativeMemoryWriteProvenance` **cannot be generated** and is the one type left hand-written.
+Its `detail` field is a `serde_json::Value` the frontend has always treated as an optional
+property, and ts-rs refuses `#[ts(optional)]` on anything that is not `Option<T>`:
+
+```
+error: `optional` can only be used on an Option<T> type
+```
+
+The tempting fix — change the field to `Option<serde_json::Value>` — would let the generator
+dictate wire behaviour, since `default_detail()` exists so an omitted detail becomes `{}`
+rather than `null`. **Expect this to recur:** any struct with a defaulted non-`Option` field
+that the frontend treats as optional is inexpressible, and the right answer is to leave it
+hand-written with a note on both sides, not to reshape the Rust to suit the tool.
 
 **Cause 4 — real duplication, but abstracting it would be premature.** `McpCatalogModel` and
 `SkillCatalogModel` share 10 method names, and the bodies are near-identical (`saveDraft`
@@ -415,7 +471,7 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~5% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Cause 1 is the one with ongoing cost and it is **286 hand-written stubs across 16 files, 1 of which imports a generated type; 12 `register_typed` vs 232 `register_handler`; `srv-types.d.ts` still 2,755 hand-maintained lines.** §5.4a |
+| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~15% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Cause 1 is the one with ongoing cost. Four domains migrated (#3291, #3293, #3294, #3295), each of which surfaced a defect no existing gate could catch. **286 stub functions across 16 files (unchanged by design — step 2 re-types stubs, step 3 deletes them), 4 now importing generated types; 36 bindings; 21 `register_typed` vs 223 `register_handler`; `srv-types.d.ts` 2,755 → 2,707.** Eleven domains left, `agent.ts` alone is 466 lines. §5.4a |
 | 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 

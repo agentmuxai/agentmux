@@ -21,6 +21,7 @@ import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { AgentNativeMemoryModel, normalizeMemoryFilename, validateMemoryFilename } from "../agent-native-memory-model";
 import { NativeMemoryHistoryPanel } from "./NativeMemoryHistoryPanel";
 import "./AgentNativeMemoryModal.scss";
+import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 
 interface AgentNativeMemoryModalProps {
     agentId: string;
