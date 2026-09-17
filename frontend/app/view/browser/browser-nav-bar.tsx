@@ -262,6 +262,10 @@ export function BrowserNavBar(props: {
     const setCurrentAsStartPage = async () => {
         const url = model.urlAtom();
         if (!url) return;
+        // Clear before the attempt, not just on success — a stale error
+        // from an earlier failed click must not keep tinting the button red
+        // once a later retry actually succeeds (codex P2, PR #3288).
+        setStartPageError(null);
         try {
             await RpcApi.SetBrowserStartPageCommand(TabRpcClient, { url });
         } catch (e) {
@@ -325,13 +329,16 @@ export function BrowserNavBar(props: {
         if (model.urlAtom()) {
             // First entry, above the bookmark toggle — see
             // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3.
-            // `checked` reuses the same MenuItem field the bookmarks spec's
-            // own UI section named for this row and never used; FlyoutMenu's
-            // default renderer already draws a check glyph for it.
+            // Label flips to reflect current state, same convention as the
+            // bookmark-toggle row right below (label changes, icon doesn't)
+            // — NOT `MenuItem.checked`: that field replaces the icon slot
+            // entirely with a check-or-blank glyph (this nav bar's own
+            // `renderMenuItem` override mirrors FlyoutMenu's default markup
+            // for it), which would make the house icon never render at all
+            // for this always-boolean row (ReAgent P2, PR #3288).
             items.push({
-                label: "Set as Start Page",
+                label: model.urlAtom() === browserStartPageAtom() ? "This Is Your Start Page" : "Set as Start Page",
                 icon: "house",
-                checked: model.urlAtom() === browserStartPageAtom(),
                 onClick: setCurrentAsStartPage,
             });
             items.push({
@@ -387,38 +394,23 @@ export function BrowserNavBar(props: {
                     }}
                     // Only the icon slot is customized here — label/onClick/
                     // divider behavior is identical to FlyoutMenu's default
-                    // rendering. `shortcut`/`subItems` are deliberately not
-                    // replicated since this menu never uses them (v1 has no
-                    // folders — not a general-purpose replacement for the
-                    // default renderer). `checked` IS replicated, mirroring
-                    // FlyoutMenu's own default markup exactly
-                    // (flyoutmenu.tsx's un-overridden branch): a check glyph
-                    // replaces the icon slot entirely when `checked` is set,
-                    // rather than showing both — used by the "Set as Start
-                    // Page" row (docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3).
+                    // rendering. `checked`/`shortcut`/`subItems` are
+                    // deliberately not replicated since this menu never uses
+                    // them (both pinned rows reflect state via their LABEL,
+                    // not `checked` — see the "Set as Start Page" row's own
+                    // comment for why) — not a general-purpose replacement
+                    // for the default renderer.
                     renderMenuItem={(item, menuItemProps) => (
                         <div {...menuItemProps}>
                             <Show
-                                when={item.checked === undefined}
+                                when={typeof item.icon !== "string"}
                                 fallback={
-                                    <i
-                                        class={clsx(
-                                            "fa-solid fa-fw menu-item-icon menu-item-check",
-                                            { "fa-check": item.checked === true },
-                                        )}
-                                    />
+                                    <Show when={item.icon}>
+                                        <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                    </Show>
                                 }
                             >
-                                <Show
-                                    when={typeof item.icon !== "string"}
-                                    fallback={
-                                        <Show when={item.icon}>
-                                            <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
-                                        </Show>
-                                    }
-                                >
-                                    {item.icon as JSX.Element}
-                                </Show>
+                                {item.icon as JSX.Element}
                             </Show>
                             <span class="label">{item.label}</span>
                         </div>

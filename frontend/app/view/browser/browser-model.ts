@@ -524,9 +524,18 @@ export class BrowserViewModel implements ViewModel {
         // back to the user's configured start page
         // (`browserStartPageAtom`, "Set as Start Page" in the bookmarks
         // menu), and only then to DEFAULT_BROWSER_URL so fresh panes are
-        // never blank before anyone has ever set one (the widget definition
-        // in widgets.json also ships this URL, but the fallback covers
-        // panes created through the API with no meta.url).
+        // never blank before anyone has ever set one.
+        //
+        // The generic `defwidget@browser` widget (widgets.json) deliberately
+        // ships NO `meta.url` — it used to bundle this same
+        // "https://agentmux.ai" value directly, which meant `meta.url` was
+        // never empty for the single most common way of opening a browser
+        // pane (the widget bar), so `browserStartPageAtom()` below was dead
+        // code for that path (codex P1, PR #3288). Purpose-specific browser
+        // widgets (Discord/Slack/Telegram/WhatsApp/Teams) keep their own
+        // real `meta.url` — those must always win over a personal start
+        // page, and still do, since `meta.url` is checked first.
+        //
         // browserStartPageAtom is safe to read synchronously here: it's
         // derived from fullConfigAtom, which app-init.ts already awaits and
         // populates before the app renders at all — see

@@ -769,6 +769,6 @@ pub struct FullConfigType {
     /// already awaits before rendering, with live cross-window updates via
     /// the same file-watch/broadcast pipeline `settings` itself uses. See
     /// `docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md`.
-    #[serde(rename = "browserstartpage", default)]
+    #[serde(rename = "browserstartpage", default, skip_serializing_if = "Option::is_none")]
     pub browser_start_page: Option<String>,
 }
