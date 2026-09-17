@@ -14,6 +14,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
+import type { ToolStatusEntry } from "@/app/store/rpc-api";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

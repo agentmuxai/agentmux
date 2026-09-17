@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    CommandInstallToolData, GetToolStatusResult, InstallFailure, InstallToolResult,
+    CommandGetToolStatusData, CommandInstallToolData, GetToolStatusResult, InstallFailure,
+    InstallToolResult,
     COMMAND_GET_TOOL_STATUS, COMMAND_INSTALL_TOOL,
 };
 use crate::backend::tool_store;
@@ -19,27 +20,19 @@ pub fn register_tool_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let http_client = state.http_client.clone();
 
     // gettoolstatus → return current install status of all catalog tools
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_TOOL_STATUS,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
-                let tools = tool_store::get_tool_statuses();
-                Ok(Some(
-                    serde_json::to_value(GetToolStatusResult { tools })
-                        .map_err(|e| format!("serialize: {e}"))?,
-                ))
-            })
-        }),
+        move |_req: CommandGetToolStatusData, _ctx| async move {
+            Ok(GetToolStatusResult { tools: tool_store::get_tool_statuses() })
+        },
     );
 
     // installtool → download + verify + install requested tools
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_INSTALL_TOOL,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandInstallToolData, _ctx| {
             let client = http_client.clone();
-            Box::pin(async move {
-                let cmd: CommandInstallToolData = serde_json::from_value(data)
-                    .map_err(|e| format!("installtool: {e}"))?;
+            async move {
 
                 let mut installed = Vec::new();
                 let mut failed = Vec::new();
@@ -60,11 +53,8 @@ pub fn register_tool_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                Ok(Some(
-                    serde_json::to_value(InstallToolResult { installed, failed })
-                        .map_err(|e| format!("serialize: {e}"))?,
-                ))
-            })
-        }),
+                Ok(InstallToolResult { installed, failed })
+            }
+        },
     );
 }
