@@ -1,7 +1,7 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createComponent, createSignal, createEffect, onCleanup } from "solid-js";
+import { createSignal, createEffect, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import type { NodeModel } from "@/layout/index";

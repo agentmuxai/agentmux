@@ -31,7 +31,7 @@ import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
 import { boundNumber, createSignalAtom, sleep, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
-import { createComponent, createMemo, createSignal } from "solid-js";
+import { createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import type { NodeModel } from "@/layout/index";
 
