@@ -22,52 +22,84 @@ pub const COMMAND_MUXBUS_LOGIN_CANCEL: &str = "muxbus.login.cancel";
 pub const COMMAND_MUXBUS_STATUS: &str = "muxbus.status";
 pub const COMMAND_MUXBUS_DISCONNECT: &str = "muxbus.disconnect";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct MuxBusLoginReq {
-    cognito_domain: String,
-    client_id: String,
+pub struct MuxBusLoginReq {
+    pub cognito_domain: String,
+    pub client_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct MuxBusLoginResp {
-    success: bool,
-    email: String,
+pub struct MuxBusLoginResp {
+    pub success: bool,
+    pub email: String,
+    /// skip_serializing_if, so the key is OMITTED on success rather than
+    /// carrying null -- `error?: string`, which is what the hand-written
+    /// inline type already said.
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    #[ts(optional)]
+    pub error: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct MuxBusLoginCancelResp {
+pub struct MuxBusLoginCancelResp {
     /// False when there was no in-flight login to cancel (already resolved,
     /// or never started) — not an error, just nothing to do.
-    cancelled: bool,
+    pub cancelled: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct MuxBusStatusResp {
-    connected: bool,
-    email: String,
-    cognito_domain: String,
-    expires_at: i64,
-    valid: bool,
+pub struct MuxBusStatusResp {
+    pub connected: bool,
+    pub email: String,
+    pub cognito_domain: String,
+    #[ts(type = "number")]
+    pub expires_at: i64,
+    pub valid: bool,
 }
+
+/// Empty request shapes for `muxbus.login.cancel`, `muxbus.status` and
+/// `muxbus.disconnect`. The handlers ignore their payload, but these must be
+/// structs rather than `()`: the stub calls all three with `{}`, and serde
+/// deserializes `()` only from JSON `null`, so a unit Req would reject every
+/// real call at runtime while compiling and passing every CI gate -- the
+/// `bookmarks.list` bug.
+#[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct MuxBusLoginCancelReq {}
+
+#[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct MuxBusStatusReq {}
+
+#[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct MuxBusDisconnectReq {}
+
+/// Result of `muxbus.disconnect`. Was an inline `json!({})`; the stub already
+/// typed it `Record<string, never>`, which is exactly what an empty struct
+/// generates.
+#[derive(Debug, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct MuxBusDisconnectResp {}
 
 pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // muxbus.login — PKCE browser flow, returns when browser login completes
     let mstore_login = state.id_store.clone();
     let http_client_login = state.http_client.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_MUXBUS_LOGIN,
-        Box::new(move |data, _ctx| {
+        move |req: MuxBusLoginReq, _ctx| {
             let mstore = mstore_login.clone();
             let http = http_client_login.clone();
-            Box::pin(async move {
-                let req: MuxBusLoginReq = serde_json::from_value(data)
-                    .map_err(|e| format!("muxbus.login: {e}"))?;
+            async move {
 
                 match crate::muxbus::pkce::run_pkce_login(
                     &req.cognito_domain,
@@ -103,7 +135,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 email: String::new(),
                                 error: Some(format!("login succeeded but credentials couldn't be saved: {e}")),
                             };
-                            return Ok(Some(serde_json::to_value(resp).unwrap()));
+                            return Ok(resp);
                         }
                         // Kick the cloud subscriber to open a WS with the new
                         // token. On an isolated local-package channel
@@ -131,7 +163,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             email,
                             error: None,
                         };
-                        Ok(Some(serde_json::to_value(resp).unwrap()))
+                        Ok(resp)
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "muxbus.login: PKCE flow failed");
@@ -140,11 +172,11 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             email: String::new(),
                             error: Some(e),
                         };
-                        Ok(Some(serde_json::to_value(resp).unwrap()))
+                        Ok(resp)
                     }
                 }
-            })
-        }),
+            }
+        },
     );
 
     // muxbus.login.cancel — abort an in-flight muxbus.login. The aborted
@@ -152,24 +184,24 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // the original muxbus.login RPC call with a "sign-in cancelled" error —
     // this handler just fires the abort and returns immediately, it does
     // not wait for that resolution.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_MUXBUS_LOGIN_CANCEL,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
+        move |_req: MuxBusLoginCancelReq, _ctx| {
+            async move {
                 let cancelled = crate::muxbus::pkce::cancel_active_login();
                 let resp = MuxBusLoginCancelResp { cancelled };
-                Ok(Some(serde_json::to_value(resp).unwrap()))
-            })
-        }),
+                Ok(resp)
+            }
+        },
     );
 
     // muxbus.status — return current credential state
     let mstore_status = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_MUXBUS_STATUS,
-        Box::new(move |_data, _ctx| {
+        move |_req: MuxBusStatusReq, _ctx| {
             let mstore = mstore_status.clone();
-            Box::pin(async move {
+            async move {
                 // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
                 // HostPopover.tsx` mounts globally and polls this handler on
                 // mount + every 60s, unconditionally — so an unguarded
@@ -191,7 +223,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         expires_at: 0,
                         valid: false,
                     };
-                    return Ok(Some(serde_json::to_value(resp).unwrap()));
+                    return Ok(resp);
                 }
                 // spawn_blocking — reagent P1 on #2260: same
                 // synchronous-keychain-read concern as muxbus.login's save.
@@ -209,7 +241,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             expires_at: creds.expires_at,
                             valid,
                         };
-                        Ok(Some(serde_json::to_value(resp).unwrap()))
+                        Ok(resp)
                     }
                     Ok(None) => {
                         let resp = MuxBusStatusResp {
@@ -219,21 +251,21 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             expires_at: 0,
                             valid: false,
                         };
-                        Ok(Some(serde_json::to_value(resp).unwrap()))
+                        Ok(resp)
                     }
                     Err(e) => Err(format!("muxbus.status: {e}")),
                 }
-            })
-        }),
+            }
+        },
     );
 
     // muxbus.disconnect — clear credentials
     let mstore_disconnect = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_MUXBUS_DISCONNECT,
-        Box::new(move |_data, _ctx| {
+        move |_req: MuxBusDisconnectReq, _ctx| {
             let mstore = mstore_disconnect.clone();
-            Box::pin(async move {
+            async move {
                 // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
                 // synchronous OS-keychain delete, same concern as every
                 // other muxbus call site in this module.
@@ -241,9 +273,9 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .await
                     .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
-                Ok(Some(serde_json::json!({})))
-            })
-        }),
+                Ok(MuxBusDisconnectResp {})
+            }
+        },
     );
 }
 
@@ -313,5 +345,63 @@ pub async fn inject_muxbus_env(
             expires_at = creds.expires_at,
             "muxbus: token expired, skipping injection — user should reconnect via muxbus.login"
         );
+    }
+}
+
+// Request-shape tests for the four `muxbus.*` commands.
+//
+// These types were private to this file until now, so the frontend's inline
+// copies were hand-maintained against nothing.
+#[cfg(test)]
+mod req_shape_tests {
+    use super::*;
+    use serde_json::json;
+
+    // The stub sends camelCase keys; the Rust fields are snake_case and rely
+    // on `rename_all = "camelCase"`. If that attribute were ever dropped the
+    // struct would still compile and the binding would still generate -- it
+    // would just silently stop parsing real payloads. Pin it.
+    #[test]
+    fn login_accepts_the_camel_case_payload_the_stub_sends() {
+        let r: MuxBusLoginReq =
+            serde_json::from_value(json!({"cognitoDomain": "d", "clientId": "c"}))
+                .expect("muxbus.login must accept camelCase keys");
+        assert_eq!((r.cognito_domain.as_str(), r.client_id.as_str()), ("d", "c"));
+
+        assert!(
+            serde_json::from_value::<MuxBusLoginReq>(json!({"cognito_domain": "d", "client_id": "c"}))
+                .is_err(),
+            "snake_case keys are NOT the wire format here"
+        );
+    }
+
+    // All three payload-ignoring commands are called with `{}`. A unit Req
+    // would reject that (serde deserializes `()` only from null).
+    #[test]
+    fn the_payload_ignoring_commands_accept_the_empty_object() {
+        serde_json::from_value::<MuxBusLoginCancelReq>(json!({})).expect("login.cancel");
+        serde_json::from_value::<MuxBusStatusReq>(json!({})).expect("status");
+        serde_json::from_value::<MuxBusDisconnectReq>(json!({})).expect("disconnect");
+        assert!(serde_json::from_value::<()>(json!({})).is_err());
+    }
+
+    // `error` is skip_serializing_if, so a successful login OMITS the key
+    // rather than sending null -- which is why the binding says `error?`.
+    #[test]
+    fn login_response_omits_error_on_success() {
+        let ok = serde_json::to_value(MuxBusLoginResp {
+            success: true,
+            email: "a@b.c".to_string(),
+            error: None,
+        })
+        .expect("serializable");
+        assert_eq!(ok, json!({"success": true, "email": "a@b.c"}));
+    }
+
+    // disconnect answered with an inline `json!({})`; the stub already typed it
+    // `Record<string, never>`, which is what an empty struct generates.
+    #[test]
+    fn disconnect_response_is_an_empty_object() {
+        assert_eq!(serde_json::to_value(MuxBusDisconnectResp {}).unwrap(), json!({}));
     }
 }
