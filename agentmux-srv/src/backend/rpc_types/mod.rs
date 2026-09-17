@@ -22,6 +22,7 @@ mod bundle_import;
 mod native_memory;
 mod misc;
 mod session;
+mod skill;
 
 pub use agent::*;
 pub use block::*;
@@ -34,6 +35,7 @@ pub use bundle_import::*;
 pub use native_memory::*;
 pub use misc::*;
 pub use session::*;
+pub use skill::*;
 
 // ---- RpcMessage wire format ----
 

@@ -13,10 +13,62 @@
 
 import { RpcClient } from "../rpc-client";
 
+// Every request and result shape below is GENERATED from its Rust definition by
+// ts-rs. They were function-local anonymous `struct Req` declarations inside
+// each handler closure -- sixteen of them -- so the inline types here were
+// hand-maintained against types the frontend could not see.
+//
+// Several commands share a type because they genuinely share a shape:
+// `skill.bind` and `skill.catalog.unbind` both take `{agent_id, skill_id}` for
+// the same reason. The shared names describe the shape rather than one command.
+export type { SkillAgentScopeData } from "@/types/rpc/SkillAgentScopeData";
+export type { SkillAgentItemData } from "@/types/rpc/SkillAgentItemData";
+export type { SkillAgentBindingData } from "@/types/rpc/SkillAgentBindingData";
+export type { SkillBundleBindingData } from "@/types/rpc/SkillBundleBindingData";
+export type { SkillBundleScopeData } from "@/types/rpc/SkillBundleScopeData";
+export type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
+export type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
+export type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData";
+export type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
+export type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
+export type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+export type { SkillBindResult } from "@/types/rpc/SkillBindResult";
+export type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
+
+import type { SkillAgentScopeData } from "@/types/rpc/SkillAgentScopeData";
+import type { SkillAgentItemData } from "@/types/rpc/SkillAgentItemData";
+import type { SkillAgentBindingData } from "@/types/rpc/SkillAgentBindingData";
+import type { SkillBundleBindingData } from "@/types/rpc/SkillBundleBindingData";
+import type { SkillBundleScopeData } from "@/types/rpc/SkillBundleScopeData";
+import type { SkillCatalogItemData } from "@/types/rpc/SkillCatalogItemData";
+import type { SkillCatalogListData } from "@/types/rpc/SkillCatalogListData";
+import type { CommandSkillUpsertData } from "@/types/rpc/CommandSkillUpsertData";
+import type { CommandSkillCatalogUpsertData } from "@/types/rpc/CommandSkillCatalogUpsertData";
+import type { CommandSkillCatalogUpsertForBundleData } from "@/types/rpc/CommandSkillCatalogUpsertForBundleData";
+import type { SkillDeleteResult } from "@/types/rpc/SkillDeleteResult";
+import type { SkillBindResult } from "@/types/rpc/SkillBindResult";
+import type { SkillUnbindResult } from "@/types/rpc/SkillUnbindResult";
+
+// The three upsert commands have every field except their scope key and `name`
+// marked `#[serde(default)]`, so all of them are omittable on the wire. ts-rs
+// generates them as REQUIRED because it cannot express an optional property for
+// a non-`Option` field, so the accurate shape is DERIVED from the generated
+// type rather than hand-listed -- a new field added in Rust flows through
+// automatically and these cannot drift. Same approach as `BundleUpsertInput`.
+export type SkillUpsertInput = Pick<CommandSkillUpsertData, "agent_id" | "name"> &
+    Partial<Omit<CommandSkillUpsertData, "agent_id" | "name">>;
+export type SkillCatalogUpsertInput = Pick<CommandSkillCatalogUpsertData, "name"> &
+    Partial<Omit<CommandSkillCatalogUpsertData, "name">>;
+export type SkillCatalogUpsertForBundleInput = Pick<
+    CommandSkillCatalogUpsertForBundleData,
+    "bundle_id" | "name"
+> &
+    Partial<Omit<CommandSkillCatalogUpsertForBundleData, "bundle_id" | "name">>;
+
 export const SkillApi = {
     SkillListCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: SkillAgentScopeData,
         opts?: RpcOpts,
     ): Promise<SkillListItem[]> {
         return client.rpcCall("skill.list", data, opts);
@@ -24,7 +76,7 @@ export const SkillApi = {
 
     SkillGetCommand(
         client: RpcClient,
-        data: { agent_id: string; id: string },
+        data: SkillAgentItemData,
         opts?: RpcOpts,
     ): Promise<Skill | null> {
         return client.rpcCall("skill.get", data, opts);
@@ -32,15 +84,7 @@ export const SkillApi = {
 
     SkillUpsertCommand(
         client: RpcClient,
-        data: {
-            agent_id: string;
-            id?: string;
-            name: string;
-            trigger?: string;
-            skill_type?: string;
-            description?: string;
-            content?: string;
-        },
+        data: SkillUpsertInput,
         opts?: RpcOpts,
     ): Promise<Skill> {
         return client.rpcCall("skill.upsert", data, opts);
@@ -48,25 +92,25 @@ export const SkillApi = {
 
     SkillDeleteCommand(
         client: RpcClient,
-        data: { agent_id: string; id: string },
+        data: SkillAgentItemData,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<SkillDeleteResult> {
         return client.rpcCall("skill.delete", data, opts);
     },
 
     SkillBindCommand(
         client: RpcClient,
-        data: { agent_id: string; skill_id: string },
+        data: SkillAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ bound: boolean }> {
+    ): Promise<SkillBindResult> {
         return client.rpcCall("skill.bind", data, opts);
     },
 
     SkillUnbindCommand(
         client: RpcClient,
-        data: { agent_id: string; skill_id: string },
+        data: SkillAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
+    ): Promise<SkillUnbindResult> {
         return client.rpcCall("skill.unbind", data, opts);
     },
 
@@ -74,7 +118,7 @@ export const SkillApi = {
 
     SkillCatalogListCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: SkillCatalogListData = {},
         opts?: RpcOpts,
     ): Promise<SkillCatalogItem[]> {
         return client.rpcCall("skill.catalog.list", data, opts);
@@ -82,14 +126,7 @@ export const SkillApi = {
 
     SkillCatalogUpsertCommand(
         client: RpcClient,
-        data: {
-            id?: string;
-            name: string;
-            trigger?: string;
-            skill_type?: string;
-            description?: string;
-            content?: string;
-        },
+        data: SkillCatalogUpsertInput,
         opts?: RpcOpts,
     ): Promise<Skill> {
         return client.rpcCall("skill.catalog.upsert", data, opts);
@@ -97,9 +134,9 @@ export const SkillApi = {
 
     SkillCatalogDeleteCommand(
         client: RpcClient,
-        data: { id: string },
+        data: SkillCatalogItemData,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<SkillDeleteResult> {
         return client.rpcCall("skill.catalog.delete", data, opts);
     },
 
@@ -109,9 +146,9 @@ export const SkillApi = {
     // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
     SkillCatalogBindCommand(
         client: RpcClient,
-        data: { agent_id: string; skill_id: string },
+        data: SkillAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ bound: boolean }> {
+    ): Promise<SkillBindResult> {
         return client.rpcCall("skill.catalog.bind", data, opts);
     },
 
@@ -123,7 +160,7 @@ export const SkillApi = {
     // check_s1.
     SkillCatalogListForAgentCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: SkillAgentScopeData,
         opts?: RpcOpts,
     ): Promise<SkillListItem[]> {
         return client.rpcCall("skill.catalog.list_for_agent", data, opts);
@@ -131,9 +168,9 @@ export const SkillApi = {
 
     SkillCatalogUnbindCommand(
         client: RpcClient,
-        data: { agent_id: string; skill_id: string },
+        data: SkillAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
+    ): Promise<SkillUnbindResult> {
         return client.rpcCall("skill.catalog.unbind", data, opts);
     },
 
@@ -146,23 +183,23 @@ export const SkillApi = {
 
     SkillCatalogBindToBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string; skill_id: string },
+        data: SkillBundleBindingData,
         opts?: RpcOpts,
-    ): Promise<{ bound: boolean }> {
+    ): Promise<SkillBindResult> {
         return client.rpcCall("skill.catalog.bind_to_bundle", data, opts);
     },
 
     SkillCatalogUnbindFromBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string; skill_id: string },
+        data: SkillBundleBindingData,
         opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
+    ): Promise<SkillUnbindResult> {
         return client.rpcCall("skill.catalog.unbind_from_bundle", data, opts);
     },
 
     SkillCatalogListForBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string },
+        data: SkillBundleScopeData,
         opts?: RpcOpts,
     ): Promise<SkillBundleListItem[]> {
         return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
@@ -172,15 +209,7 @@ export const SkillApi = {
     // McpApi.McpCatalogUpsertForBundleCommand's identical comment.
     SkillCatalogUpsertForBundleCommand(
         client: RpcClient,
-        data: {
-            bundle_id: string;
-            id?: string;
-            name: string;
-            trigger?: string;
-            skill_type?: string;
-            description?: string;
-            content?: string;
-        },
+        data: SkillCatalogUpsertForBundleInput,
         opts?: RpcOpts,
     ): Promise<Skill> {
         return client.rpcCall("skill.catalog.upsert_for_bundle", data, opts);
