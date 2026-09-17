@@ -3,6 +3,7 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { formatGlobalBundleBlock, groupProvidersByStartupFilename } from "./global-bundle-model";
+import type { Bundle } from "@/app/store/rpc-api";
 
 // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §5 — must mirror
 // bundles.rs's format_global_bundle_block fixture-for-fixture.

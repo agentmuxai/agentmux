@@ -22,7 +22,8 @@ use super::store::Store;
 /// Provider, model, instructions, and JSON-encoded arrays of context
 /// files / MCP servers / skills. Agent definitions shadow-migrate into this
 /// table during the v7 migration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct Bundle {
     pub id: String,
     pub name: String,
@@ -63,6 +64,7 @@ pub struct Bundle {
     /// `reorderglobalbrain` RPC — `bundle_upsert` never overwrites it
     /// on conflict, so editing a bundle via the regular form keeps its place.
     #[serde(default)]
+    #[ts(type = "number")]
     pub sort_order: i64,
     /// AgentMux-controlled, highest-priority Global Bundle tier — always
     /// also `is_global`, injected first in `format_global_bundle_block`'s
@@ -78,8 +80,10 @@ pub struct Bundle {
     // default on input so partial upserts (e.g. a "new section" that only
     // sends id/name/instructions) deserialize cleanly. (reagent P0 on #1608)
     #[serde(default)]
+    #[ts(type = "number")]
     pub created_at: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub updated_at: i64,
 }
 

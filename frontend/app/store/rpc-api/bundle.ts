@@ -7,6 +7,39 @@
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
 import { RpcClient } from "../rpc-client";
+
+// The bundle CRUD shapes below are GENERATED from their Rust definitions by
+// ts-rs. See docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.4 step 2.
+// `BundleImportApi` at the bottom is NOT migrated yet — those three commands
+// need their private `Req` structs promoted out of the handler file first.
+export type { Bundle } from "@/types/rpc/Bundle";
+
+import type { Bundle as BundleT } from "@/types/rpc/Bundle";
+import type { CommandListBundlesData } from "@/types/rpc/CommandListBundlesData";
+import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
+import type { CommandDeleteBundleData } from "@/types/rpc/CommandDeleteBundleData";
+import type { DeleteBundleResult } from "@/types/rpc/DeleteBundleResult";
+import type { CommandReorderGlobalBundlesData } from "@/types/rpc/CommandReorderGlobalBundlesData";
+import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
+import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
+import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
+
+// The accurate request shape for the three upsert/validate commands, DERIVED
+// from the generated `Bundle` rather than hand-listed, so a new Rust field
+// flows through automatically and this cannot drift.
+//
+// This replaces `Partial<Bundle>`, which was wrong in a way that mattered:
+// `Bundle.id` and `Bundle.name` are the only two fields WITHOUT
+// `#[serde(default)]` on the Rust side, so a payload omitting `name` is
+// rejected by serde at runtime — but `Partial<Bundle>` told callers omitting
+// it was fine. Every other field defaults server-side, which is exactly what
+// `Partial<Omit<...>>` says.
+//
+// (`Bundle` itself is all-required because the server always writes every
+// field: they are `#[serde(default)]` but have no `skip_serializing_if`, so
+// none is ever omitted from a response.)
+export type BundleUpsertInput = Pick<BundleT, "id" | "name"> & Partial<Omit<BundleT, "id" | "name">>;
+
 // Bundle CRUD (db_bundles rows; Rust: Store::bundle_*). The wire command
 // names below (`listmemories`, `getmemory`, ...) are the legacy aliases the
 // backend still registers alongside `bundle.*` — the strings must not change
@@ -14,42 +47,42 @@ import { RpcClient } from "../rpc-client";
 export const BundleApi = {
     ListBundlesCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: CommandListBundlesData = {},
         opts?: RpcOpts,
-    ): Promise<Bundle[]> {
+    ): Promise<BundleT[]> {
         return client.rpcCall("listmemories", data, opts);
     },
 
     GetBundleCommand(
         client: RpcClient,
-        data: { id: string },
+        data: CommandGetBundleData,
         opts?: RpcOpts,
-    ): Promise<Bundle> {
+    ): Promise<BundleT> {
         return client.rpcCall("getmemory", data, opts);
     },
 
     UpsertBundleCommand(
         client: RpcClient,
-        data: Partial<Bundle>,
+        data: BundleUpsertInput,
         opts?: RpcOpts,
-    ): Promise<Bundle> {
+    ): Promise<BundleT> {
         return client.rpcCall("upsertmemory", data, opts);
     },
 
     DeleteBundleCommand(
         client: RpcClient,
-        data: { id: string },
+        data: CommandDeleteBundleData,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<DeleteBundleResult> {
         return client.rpcCall("deletememory", data, opts);
     },
 
     // `ids` is the full ordered list of global bundle ids.
     ReorderGlobalBundlesCommand(
         client: RpcClient,
-        data: { ids: string[] },
+        data: CommandReorderGlobalBundlesData,
         opts?: RpcOpts,
-    ): Promise<{ updated: number }> {
+    ): Promise<ReorderGlobalBundlesResult> {
         return client.rpcCall("reorderglobalbrain", data, opts);
     },
 
@@ -59,17 +92,17 @@ export const BundleApi = {
     // UpsertBundleCommand/DeleteBundleCommand.
     UpsertSystemBundleCommand(
         client: RpcClient,
-        data: Partial<Bundle>,
+        data: BundleUpsertInput,
         opts?: RpcOpts,
-    ): Promise<Bundle> {
+    ): Promise<BundleT> {
         return client.rpcCall("upsertsystemmemory", data, opts);
     },
 
     DeleteSystemBundleCommand(
         client: RpcClient,
-        data: { id: string },
+        data: CommandDeleteBundleData,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<DeleteBundleResult> {
         return client.rpcCall("deletesystemmemory", data, opts);
     },
 
@@ -85,9 +118,9 @@ export const BundleApi = {
     // §5, §7. No parameters, no write counterpart.
     GetClaudeGlobalConfigCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: CommandGetClaudeGlobalConfigData = {},
         opts?: RpcOpts,
-    ): Promise<{ path: string; content: string | null; exists: boolean }> {
+    ): Promise<ClaudeGlobalConfig> {
         return client.rpcCall("getclaudeglobalconfig", data, opts);
     },
 
@@ -126,7 +159,7 @@ export const BundleImportApi = {
     // already persisted.
     ValidateBundleCommand(
         client: RpcClient,
-        data: Partial<Bundle>,
+        data: BundleUpsertInput,
         opts?: RpcOpts,
     ): Promise<BundleValidationReport> {
         return client.rpcCall("bundle.validate", data, opts);

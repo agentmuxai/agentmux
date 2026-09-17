@@ -12,6 +12,7 @@ import {
     sanitizeProviderKey,
     serializeInstructionsByProvider,
 } from "./bundle-model";
+import type { Bundle } from "@/app/store/rpc-api";
 
 // reagent P1, PR #2523: instructions_by_provider (ABF v0.2 §2.2) was
 // previously dropped by the edit round-trip. Since this form has no field

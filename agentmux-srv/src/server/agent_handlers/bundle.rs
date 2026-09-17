@@ -14,6 +14,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
+    CommandListBundlesData, CommandGetClaudeGlobalConfigData, ReorderGlobalBundlesResult,
 };
 use crate::backend::storage::store::Bundle;
 
@@ -23,48 +24,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Bundle CRUD ----
 
     let mstore = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_MEMORIES,
-        Box::new(move |_data, _ctx| {
+        move |_req: CommandListBundlesData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
+            async move {
                 let memories = mstore
                     .bundle_list()
                     .map_err(|e| format!("listmemories: {e}"))?;
-                Ok(Some(serde_json::to_value(&memories).unwrap_or_default()))
-            })
-        }),
+                Ok(memories)
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandGetBundleData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandGetBundleData = serde_json::from_value(data)
-                    .map_err(|e| format!("getmemory: {e}"))?;
+            async move {
                 match mstore
                     .bundle_get(&cmd.id)
                     .map_err(|e| format!("getmemory: {e}"))?
                 {
-                    Some(m) => Ok(Some(serde_json::to_value(&m).unwrap_or_default())),
+                    Some(m) => Ok(m),
                     None => Err(format!("getmemory: not found id={}", cmd.id)),
                 }
-            })
-        }),
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPSERT_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |mut memory: Bundle, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let mut memory: Bundle = serde_json::from_value(data)
-                    .map_err(|e| format!("upsertmemory: {e}"))?;
+            async move {
                 // Guard on BOTH client-supplied is_blank AND id == "blank".
                 // Without the id check a caller could send
                 // {id:"blank", is_blank:false, name:"evil"} and the
@@ -110,9 +107,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&memory).unwrap_or_default()))
-            })
-        }),
+                Ok(memory)
+            }
+        },
     );
 
     let id_store = state.id_store.clone();
@@ -153,14 +150,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_REORDER_GLOBAL_BRAIN,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandReorderGlobalBundlesData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandReorderGlobalBundlesData = serde_json::from_value(data)
-                    .map_err(|e| format!("reorderglobalbrain: {e}"))?;
+            async move {
                 let updated = mstore
                     .bundle_reorder(&cmd.ids)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
@@ -171,9 +166,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(json!({ "updated": updated })))
-            })
-        }),
+                Ok(ReorderGlobalBundlesResult { updated })
+            }
+        },
     );
 
     // ---- System-tier Global Bundle — see
@@ -184,14 +179,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPSERT_SYSTEM_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |mut memory: Bundle, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let mut memory: Bundle = serde_json::from_value(data)
-                    .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+            async move {
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
                 }
@@ -241,9 +234,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_get(&memory.id)
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?
                     .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
-                Ok(Some(serde_json::to_value(&saved).unwrap_or_default()))
-            })
-        }),
+                Ok(saved)
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
@@ -275,16 +268,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // config dir — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
     // §5 (post-review revision). No parameters (fixed path, not
     // caller-supplied), no write counterpart.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
-                let claude_dir = resolve_shared_claude_provider_dir();
-                let result = read_claude_global_config(&claude_dir)
-                    .map_err(|e| format!("getclaudeglobalconfig: {e}"))?;
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
+        move |_req: CommandGetClaudeGlobalConfigData, _ctx| async move {
+            let claude_dir = resolve_shared_claude_provider_dir();
+            read_claude_global_config(&claude_dir)
+                .map_err(|e| format!("getclaudeglobalconfig: {e}"))
+        },
     );
 
 }
@@ -321,11 +311,17 @@ fn resolve_shared_claude_provider_dir() -> std::path::PathBuf {
 /// agent on this host has one today, confirmed 2026-08-24) — real I/O
 /// errors (permission denied, etc.) still propagate as `Err`, not
 /// silently folded into "missing."
-#[derive(serde::Serialize)]
-struct ClaudeGlobalConfig {
-    path: String,
-    content: Option<String>,
-    exists: bool,
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ClaudeGlobalConfig {
+    pub path: String,
+    /// Genuinely `string | null`, not an optional property: a plain
+    /// `Option<String>` with no `skip_serializing_if`, so the key is always
+    /// present and carries `null` when the file does not exist. That
+    /// distinction is load-bearing here — `exists: false` with
+    /// `content: null` is the meaningful "no file" answer, not an absent key.
+    pub content: Option<String>,
+    pub exists: bool,
 }
 
 fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<ClaudeGlobalConfig> {

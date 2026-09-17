@@ -28,6 +28,7 @@ vi.mock("@/app/store/global", () => ({
 }));
 
 import { AgentStartupModal } from "./AgentStartupModal";
+import type { Bundle } from "@/app/store/rpc-api";
 
 function mkBundle(overrides: Partial<Bundle>): Bundle {
     return {
