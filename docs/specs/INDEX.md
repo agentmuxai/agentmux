@@ -59,6 +59,7 @@ See also:
 | [SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | Stop / teardown for persistent shells |
 | [SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29](SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) | Input-latency spec |
 | [SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15](SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md) | `exit` doesn't close the pane — dead close-on-exit code + `resync_controller` respawns a `STATUS_DONE` shell |
+| [SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17](SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17.md) | Shell-integration scripts deploy per instance — two running versions no longer overwrite each other's rcfiles (I6) |
 
 ## Browser Pane
 

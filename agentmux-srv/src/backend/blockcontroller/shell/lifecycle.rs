@@ -546,12 +546,16 @@ impl Controller for ShellController {
 
             let shell_type = crate::backend::shellintegration::detect_shell_type(&shell_path);
 
-            // Deploy shell integration scripts to ~/.agentmux/ (the user's home-based
-            // data dir) instead of AGENTMUX_DATA_HOME.  MSIX packages virtualise writes
-            // to %LocalAppData%, so files written by the packaged backend aren't visible
-            // to child processes (pwsh, bash, etc.) spawned via ConPTY.  The home dir is
-            // never virtualised, so the scripts are always reachable at their literal path.
-            let shell_home = crate::backend::base::get_home_dir().join(".agentmux");
+            // Deploy shell integration scripts under the user's home rather than
+            // AGENTMUX_DATA_HOME.  MSIX packages virtualise writes to %LocalAppData%,
+            // so files written by the packaged backend aren't visible to child
+            // processes (pwsh, bash, etc.) spawned via ConPTY.  The home dir is never
+            // virtualised, so the scripts are always reachable at their literal path.
+            //
+            // The path is keyed per instance: this runs on EVERY shell spawn, so an
+            // unkeyed home-global dir let two concurrently-running versions rewrite
+            // each other's scripts indefinitely (I6).  See `integration_base`.
+            let shell_home = crate::backend::shellintegration::integration_base();
             crate::backend::shellintegration::deploy_scripts(&shell_home);
 
             tracing::info!(block_id = %self.block_id, shell = %shell_path, shell_type = ?shell_type, "interactive shell path");
