@@ -527,84 +527,6 @@ declare global {
         agent_type?: string;
     };
 
-    // CommandCreateAgentDefinitionData
-    type CommandCreateAgentDefinitionData = {
-        name: string;
-        icon: string;
-        provider: string;
-        description: string;
-        working_directory?: string;
-        shell?: string;
-        provider_flags?: string;
-        auto_start?: number;
-        restart_on_crash?: number;
-        idle_timeout_minutes?: number;
-        agent_type?: string;
-        environment?: string;
-        agent_bus_id?: string;
-    };
-
-    // CommandUpdateAgentDefinitionData
-    type CommandUpdateAgentDefinitionData = {
-        id: string;
-        name: string;
-        icon: string;
-        provider: string;
-        description: string;
-        working_directory?: string;
-        shell?: string;
-        provider_flags?: string;
-        auto_start?: number;
-        restart_on_crash?: number;
-        idle_timeout_minutes?: number;
-        agent_type?: string;
-        environment?: string;
-        agent_bus_id?: string;
-        /** JSON-encoded per-provider account refs. See AgentDefinition.accounts. */
-        accounts?: string;
-        /**
-         * Explicit ambient-login opt-in (0/1). Omit to preserve the stored
-         * value — the backend treats absence as "no change". See
-         * AgentDefinition.use_ambient_login.
-         */
-        use_ambient_login?: number;
-        /**
-         * Per-agent opt-in letting a Warden Supervisor watcher agent
-         * auto-continue this agent's session on turn-end (0/1). Omit to
-         * preserve the stored value. See AgentDefinition.auto_continue_enabled.
-         */
-        auto_continue_enabled?: number;
-        /**
-         * Custom model vendor base URL override. Omit to preserve the
-         * stored value; "" explicitly clears it back to the harness's
-         * default vendor endpoint. See AgentDefinition.model_vendor_base_url.
-         */
-        model_vendor_base_url?: string;
-    };
-
-    // CommandDeleteAgentDefinitionData
-    type CommandDeleteAgentDefinitionData = {
-        id: string;
-    };
-
-    // CommandGetAgentContentData
-    type CommandGetAgentContentData = {
-        agent_id: string;
-        content_type: string;
-    };
-
-    // CommandSetAgentContentData
-    type CommandSetAgentContentData = {
-        agent_id: string;
-        content_type: string;
-        content: string;
-    };
-
-    // CommandGetAllAgentContentData
-    type CommandGetAllAgentContentData = {
-        agent_id: string;
-    };
-
     // AgentSkill
     type AgentSkill = {
         id: string;
@@ -675,12 +597,6 @@ declare global {
         agent_id: string;
         query: string;
         limit?: number;
-    };
-
-    // CommandImportAgentFromClawData
-    type CommandImportAgentFromClawData = {
-        workspace_path: string;
-        agent_name: string;
     };
 
     // wshrpc.CommandDeleteFileData
@@ -1991,41 +1907,6 @@ declare global {
     type NativeMemoryWriteProvenance = {
         source: string; // "human" | "agent_inferred" | "jekt" | ...
         detail?: unknown;
-    };
-
-    // CommandImportAgentDefinitionsData
-    type AgentSkillImport = {
-        name: string;
-        trigger: string;
-        skill_type: string;
-        description: string;
-        content: string;
-    };
-
-    type AgentDefinitionImport = {
-        id: string;
-        name: string;
-        icon: string;
-        description: string;
-        provider: string;
-        shell: string;
-        working_directory: string;
-        agent_bus_id: string;
-        agent_type: string;
-        environment: string;
-        restart_on_crash: boolean;
-        content: Record<string, string>;
-        skills: AgentSkillImport[];
-    };
-
-    type CommandImportAgentDefinitionsData = {
-        agents: AgentDefinitionImport[];
-    };
-
-    type ImportAgentDefinitionsResult = {
-        imported: string[];
-        skipped: string[];
-        failed: string[];
     };
 
     // ExportAgentDefinitionsResult

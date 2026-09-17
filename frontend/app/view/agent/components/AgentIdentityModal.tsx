@@ -54,7 +54,7 @@ import {
     type AgentAccounts,
 } from "@/app/view/identity/identity-model";
 import { AgentIdentityPanel } from "./AgentIdentityPanel";
-import type { AgentDefinition } from "@/app/store/rpc-api";
+import type { AgentDefinition, AgentDefinitionUpdateInput } from "@/app/store/rpc-api";
 
 interface AgentIdentityModalPanelProps {
     agent: AgentDefinition;
@@ -75,7 +75,7 @@ export const AgentIdentityModalPanel = (props: AgentIdentityModalPanelProps): JS
 
     /** Common UpdateAgentDefinitionCommand payload from the live snapshot.
      *  `accounts` is layered on by the caller. */
-    const basePayload = (a: AgentDefinition): CommandUpdateAgentDefinitionData => ({
+    const basePayload = (a: AgentDefinition): AgentDefinitionUpdateInput => ({
         id: a.id,
         name: a.name,
         icon: a.icon,

@@ -45,11 +45,29 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // always 0 by backend invariant; `agent_def_set_hidden` rejects
     // non-template ids).
     let mstore_lfa = state.mstore.clone();
-    engine.register_typed(
+    // NOT migrated to `register_typed`, deliberately. `register_typed`
+    // deserializes the payload strictly and answers Err on failure, but this
+    // command tolerates a null/malformed body on purpose: older clients never
+    // sent one, and the server defaults a missing `data` field to
+    // `Value::Null`, which cannot deserialize into a struct. Typing it would
+    // turn "older client asks for the unfiltered list" into an RPC error.
+    //
+    // Same rule as `bundle.validate` and `widget.health`: a handler that
+    // deliberately accepts loose input keeps its `Value` request. Its RESPONSE
+    // is still `Vec<AgentDefinition>`, which IS generated -- that is where the
+    // drift risk lived.
+    engine.register_handler(
         COMMAND_LIST_AGENTS,
-        move |cmd: CommandListAgentDefinitionsData, _ctx| {
+        Box::new(move |data, _ctx| {
             let mstore = mstore_lfa.clone();
-            async move {
+            Box::pin(async move {
+                // unwrap_or_default — both `null` and `{}` deserialize
+                // to the default (no filter). Anything malformed falls
+                // back to no-filter rather than erroring; older clients
+                // never sent a body for this RPC and we can't know
+                // which JSON shape they're on.
+                let cmd: CommandListAgentDefinitionsData =
+                    serde_json::from_value(data).unwrap_or_default();
                 let agents = mstore.agent_def_list().map_err(|e| format!("listagents: {e}"))?;
                 let is_seeded_filter = cmd.is_seeded;
                 let include_hidden = cmd.include_hidden;
@@ -68,9 +86,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         include_hidden || a.is_seeded != 1 || a.user_hidden == 0
                     })
                     .collect();
-                Ok(filtered)
-            }
-        },
+                Ok(Some(serde_json::to_value(&filtered).unwrap_or_default()))
+            })
+        }),
     );
 
     // createagent → insert new agent, broadcast agents:changed

@@ -1222,21 +1222,15 @@ mod recent_sessions_tests {
             );
         }
 
-        // `listagents` used to be asserted ABSENT here, on the grounds that it
-        // was "not migrated yet" — a statement about a temporary state rather
-        // than an invariant, so migrating it correctly is what made that fail.
-        // It now asserts what the command actually records.
+        // Commands still on register_handler are absent rather than recorded
+        // wrong — that absence is what makes migrating one at a time safe.
         //
-        // The response is `Vec<AgentDefinition>`, and `short_name` deliberately
-        // leaves a generic whole (truncating `Vec<a::B>` at the last `::` would
-        // yield `B>`, which names nothing), so match on shape rather than
-        // pinning the full crate path.
-        let list = find(crate::backend::rpc_types::COMMAND_LIST_AGENTS);
-        assert_eq!(list["requestName"], "CommandListAgentDefinitionsData");
-        let list_resp = list["responseName"].as_str().unwrap_or_default();
+        // `listagents` stays here deliberately: it tolerates a null/malformed
+        // body for older clients, which `register_typed` cannot express (see
+        // the comment on its registration in core.rs).
         assert!(
-            list_resp.starts_with("alloc::vec::Vec<") && list_resp.ends_with("::AgentDefinition>"),
-            "listagents should answer with a Vec of AgentDefinition, got {list_resp}"
+            rows.iter().all(|r| r["command"] != crate::backend::rpc_types::COMMAND_LIST_AGENTS),
+            "listagents keeps its loose-input handler and must not appear in the schema",
         );
     }
 
