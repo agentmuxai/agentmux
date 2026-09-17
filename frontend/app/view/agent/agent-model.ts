@@ -56,12 +56,6 @@ export class AgentViewModel implements ViewModel {
      *  reactively) — `null` until chrome has mounted and called it at
      *  least once. */
     progressBarMount: () => HTMLDivElement | null;
-    /** NOT part of the shared `ViewModel` contract — same bridging pattern
-     *  as `progressBarMount`/`setProgressBarMount` above, for
-     *  `AgentBlockContent`'s picker-host strip-clearance padding
-     *  (agent-view.tsx's own comment on that style binding explains why). */
-    tabStripVisible: () => boolean;
-    setTabStripVisible: (visible: boolean) => void;
     /** NOT part of the shared `ViewModel` contract. ReAgent P2 on
      *  SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's PR: owned here
      *  (one `useAgentDefinitions()` subscription per ViewModel instance,
@@ -114,9 +108,6 @@ export class AgentViewModel implements ViewModel {
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);
-        const [tabStripVisibleSig, setTabStripVisibleSig] = createSignal(false);
-        this.tabStripVisible = tabStripVisibleSig;
-        this.setTabStripVisible = (visible: boolean) => setTabStripVisibleSig(visible);
         this.agentDefinitions = useAgentDefinitions()[0];
 
         // Flash signal: set true briefly when the activity summary changes to a

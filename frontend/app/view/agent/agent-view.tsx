@@ -278,24 +278,6 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
                         <Show when={pickerVisible()}>
                             <div
                                 class="agent-picker-host"
-                                // Strip clearance — mirrors chrome's own
-                                // tab-strip-visibility state
-                                // (AgentPaneChrome writes it via
-                                // model.setTabStripVisible, the same
-                                // bridging pattern as progressBarMount,
-                                // since chrome and content are now separate
-                                // trees). The floating strip still
-                                // physically overlaps this box (it's
-                                // position:absolute within the same
-                                // .agent-pane-stack-content containing
-                                // block content's own .block wrapper is a
-                                // normal-flow child of), even though
-                                // they're no longer DOM siblings.
-                                style={{
-                                    "--pane-tab-strip-reserve": model.tabStripVisible()
-                                        ? "var(--pane-tab-strip-height, 28px)"
-                                        : "0px",
-                                }}
                                 classList={{
                                     // Applied the instant agentId() is set
                                     // (same render as AgentPresentationView
@@ -716,19 +698,6 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
             vm?.setProgressBarMount?.(null);
         });
     });
-    // Same bridging pattern for the tab-strip-visible flag AgentBlockContent's
-    // picker-host reads for its own strip-clearance padding (see that
-    // component's own comment) — chrome and content are separate trees now,
-    // so this can no longer be a plain shared local read. Always true — see
-    // the strip-visibility comment above.
-    createEffect(() => {
-        const vm = nodeModel.activeViewModel?.() as AgentViewModel | null;
-        vm?.setTabStripVisible?.(true);
-        onCleanup(() => {
-            vm?.setTabStripVisible?.(false);
-        });
-    });
-
     // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
     // §4.1) — factored out so the ErrorBoundary fallback below can render
     // the exact same header with `viewModel={null}` (mirrors the old
