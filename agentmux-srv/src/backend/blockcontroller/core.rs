@@ -113,15 +113,15 @@ pub(crate) fn expand_home_dir(dir: &str) -> String {
 /// logs and continues on failure, since the block-meta write above (the
 /// live-turn source of truth) already succeeded.
 ///
-/// No-ops silently when `wstore` is `None` (e.g. in unit tests that don't wire
+/// No-ops silently when `mstore` is `None` (e.g. in unit tests that don't wire
 /// up a store).
 pub(crate) fn persist_session_id(
     block_id: &str,
     sid: &str,
-    wstore: &Option<Arc<Store>>,
+    mstore: &Option<Arc<Store>>,
     event_bus: &Option<Arc<EventBus>>,
 ) {
-    let Some(ref store) = wstore else {
+    let Some(ref store) = mstore else {
         return;
     };
     let oref_str = format!("block:{}", block_id);
@@ -208,10 +208,10 @@ fn sync_instance_session_id(store: &Arc<Store>, block_id: &str, sid: &str) {
 pub(crate) fn persist_last_failure(
     block_id: &str,
     failure: Option<&crate::agents::failure::AgentFailure>,
-    wstore: &Option<Arc<Store>>,
+    mstore: &Option<Arc<Store>>,
     event_bus: &Option<Arc<EventBus>>,
 ) {
-    let Some(ref store) = wstore else {
+    let Some(ref store) = mstore else {
         return;
     };
     // On a clean exit (failure=None), only write null (which merge_meta uses to

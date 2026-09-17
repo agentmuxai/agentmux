@@ -83,7 +83,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // Auto-close the floating window when its only pane is closed.
     // The Workspace MuxObj has `tabids` but NO `blockids` field — the
     // block-membership signal lives on the Tab (`tab.blockids`, see
-    // `frontend/types/gotypes.d.ts:1491`). We subscribe to the active
+    // `frontend/types/srv-types.d.ts:1491`). We subscribe to the active
     // tab and trigger close as soon as its blockids array transitions
     // from non-empty → empty. The `hadBlocks` latch avoids closing on
     // the brief empty state during initial workspace load.

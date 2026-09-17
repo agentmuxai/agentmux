@@ -63,9 +63,9 @@ impl Migration for M0017AmbientLoginGrandfather {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("ambient_login_grandfather: open wstore: {}", e)))?,
+                .map_err(|e| MigrationError(format!("ambient_login_grandfather: open mstore: {}", e)))?,
         );
         // The live links live in the shared store. A missing shared store
         // (fresh install racing the bootstrap) means no links exist —
@@ -78,7 +78,7 @@ impl Migration for M0017AmbientLoginGrandfather {
         } else {
             HashSet::new()
         };
-        let (ambient, managed) = wstore
+        let (ambient, managed) = mstore
             .agents_grandfather_ambient_login(&linked)
             .map_err(|e| MigrationError(format!("ambient_login_grandfather: {}", e)))?;
         tracing::info!(
@@ -151,11 +151,11 @@ mod tests {
         let shared = tempfile::NamedTempFile::new().unwrap();
 
         // Channel store: two user agents.
-        let wstore = Store::open(channel.path()).unwrap();
+        let mstore = Store::open(channel.path()).unwrap();
         let mut linkless = make_def("agent-linkless");
-        wstore.agent_def_insert(&mut linkless).unwrap();
+        mstore.agent_def_insert(&mut linkless).unwrap();
         let mut linked = make_def("agent-linked");
-        wstore.agent_def_insert(&mut linked).unwrap();
+        mstore.agent_def_insert(&mut linked).unwrap();
 
         // Shared store: one link for agent-linked. The account row is not
         // required for the grandfather decision (only the link's presence),
@@ -180,26 +180,26 @@ mod tests {
             .agent_identity_link("agent-linked", "acct-1", "claude")
             .unwrap();
         drop(shared_store);
-        drop(wstore);
+        drop(mstore);
 
         M0017AmbientLoginGrandfather
             .up(&ctx_for(channel.path(), shared.path()))
             .unwrap();
 
-        let wstore = Store::open(channel.path()).unwrap();
-        let after_linkless = wstore.agent_def_get("agent-linkless").unwrap().unwrap();
+        let mstore = Store::open(channel.path()).unwrap();
+        let after_linkless = mstore.agent_def_get("agent-linkless").unwrap().unwrap();
         assert_eq!(
             after_linkless.use_ambient_login, 1,
             "linkless agent must be grandfathered to ambient"
         );
-        let after_linked = wstore.agent_def_get("agent-linked").unwrap().unwrap();
+        let after_linked = mstore.agent_def_get("agent-linked").unwrap().unwrap();
         assert_eq!(
             after_linked.use_ambient_login, 0,
             "linked agent must keep fail-by-default"
         );
         // The consolidated db_agents projection agrees (it's what the
         // roster/modal read).
-        let listed = wstore.agent_def_list().unwrap();
+        let listed = mstore.agent_def_list().unwrap();
         assert_eq!(
             listed.iter().find(|a| a.id == "agent-linkless").unwrap().use_ambient_login,
             1,
@@ -220,10 +220,10 @@ mod tests {
         let channel = tempfile::NamedTempFile::new().unwrap();
         let shared = tempfile::NamedTempFile::new().unwrap();
 
-        let wstore = Store::open(channel.path()).unwrap();
+        let mstore = Store::open(channel.path()).unwrap();
         let mut pat_only = make_def("agent-pat-only");
-        wstore.agent_def_insert(&mut pat_only).unwrap();
-        drop(wstore);
+        mstore.agent_def_insert(&mut pat_only).unwrap();
+        drop(mstore);
 
         // Shared store: a github (api-key-class) link and nothing else.
         let shared_store = Store::open_shared(shared.path()).unwrap();
@@ -252,9 +252,9 @@ mod tests {
             .up(&ctx_for(channel.path(), shared.path()))
             .unwrap();
 
-        let wstore = Store::open(channel.path()).unwrap();
+        let mstore = Store::open(channel.path()).unwrap();
         assert_eq!(
-            wstore.agent_def_get("agent-pat-only").unwrap().unwrap().use_ambient_login,
+            mstore.agent_def_get("agent-pat-only").unwrap().unwrap().use_ambient_login,
             1,
             "a PAT-only agent is a de-facto ambient CLI user and must be grandfathered"
         );
@@ -263,10 +263,10 @@ mod tests {
     #[test]
     fn missing_shared_store_treats_every_agent_as_linkless() {
         let channel = tempfile::NamedTempFile::new().unwrap();
-        let wstore = Store::open(channel.path()).unwrap();
+        let mstore = Store::open(channel.path()).unwrap();
         let mut def = make_def("agent-solo");
-        wstore.agent_def_insert(&mut def).unwrap();
-        drop(wstore);
+        mstore.agent_def_insert(&mut def).unwrap();
+        drop(mstore);
 
         let missing_shared = std::env::temp_dir()
             .join("agentmux-test-shared-store-definitely-missing-x9q.db");
@@ -275,9 +275,9 @@ mod tests {
             .up(&ctx_for(channel.path(), &missing_shared))
             .unwrap();
 
-        let wstore = Store::open(channel.path()).unwrap();
+        let mstore = Store::open(channel.path()).unwrap();
         assert_eq!(
-            wstore.agent_def_get("agent-solo").unwrap().unwrap().use_ambient_login,
+            mstore.agent_def_get("agent-solo").unwrap().unwrap().use_ambient_login,
             1,
         );
     }

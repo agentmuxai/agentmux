@@ -111,7 +111,7 @@ pub struct CommandBlockInputData {
     pub seq: Option<u64>,
 }
 
-/// Matches TS `CommandCreateSubBlockData` (frontend/types/gotypes.d.ts:238-241).
+/// Matches TS `CommandCreateSubBlockData` (frontend/types/srv-types.d.ts:238-241).
 /// Creates a headless sub-block (no tab/layout entry) parented to
 /// `parentblockid` — e.g. a `term`-view PTY embedded in an agent
 /// pane's details drawer.

@@ -4,7 +4,7 @@
 //! Layout-tree + pending-action writers used by the tear-off / promote /
 //! redock handlers. SPEC_864 Phase 3/4 — all of them route through the
 //! reducer (`seed_layout_via_reducer` / `queue_layout_actions_via_reducer`);
-//! nothing here writes wstore directly anymore.
+//! nothing here writes mstore directly anymore.
 //! `setup_torn_off_block_layout` is re-exported crate-wide (the pane
 //! app-API uses it).
 
@@ -212,7 +212,7 @@ mod tests {
         async fn dispatch_apply(state: &crate::server::AppState, cmd: Command) -> Vec<Event> {
             let events = super::super::reducer_helpers::dispatch_to_reducer(state, cmd).await;
             for ev in &events {
-                crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+                crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
             }
             events
         }
@@ -242,8 +242,8 @@ mod tests {
     }
 
     fn pending_actions(state: &crate::server::AppState, tab_id: &str) -> Vec<LayoutActionData> {
-        let tab = state.wstore.must_get::<Tab>(tab_id).unwrap();
-        let layout = state.wstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
+        let tab = state.mstore.must_get::<Tab>(tab_id).unwrap();
+        let layout = state.mstore.must_get::<LayoutState>(&tab.layoutstate).unwrap();
         layout.pendingbackendactions.unwrap_or_default()
     }
 
@@ -305,7 +305,7 @@ mod tests {
     }
 
     /// SPEC_864 Phase 4 — queue writers hit the reducer's unknown-tab
-    /// validation instead of silently writing wstore.
+    /// validation instead of silently writing mstore.
     #[tokio::test]
     async fn queue_helpers_error_on_reducer_unknown_tab() {
         let state = test_state();

@@ -28,7 +28,7 @@
 //! ## Cross-channel ref cleanup is intentionally partial
 //!
 //! `db_agent_skills_ref`/`db_bundle_skills_ref` live in EACH CHANNEL's own
-//! `wstore`, not in the identity store this migration (Global-scoped) opens.
+//! `mstore`, not in the identity store this migration (Global-scoped) opens.
 //! A single global migration run cannot reach every channel's ref rows the
 //! way `m0022_identity_store_links_backfill` reads multiple sources —
 //! reaching in and WRITING to a sibling channel's live `objects.db` from a
@@ -108,8 +108,8 @@ fn collapse_and_reindex(identity_conn: &Connection, channel_wstore: Option<&Stor
         members.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
         let survivor_id = members[0].id.clone();
         for loser in &members[1..] {
-            if let Some(wstore) = channel_wstore {
-                wstore
+            if let Some(mstore) = channel_wstore {
+                mstore
                     .skill_rewrite_ref_id(&loser.id, &survivor_id)
                     .map_err(|e| format!("rewrite refs for collapsed skill {}: {e}", loser.id))?;
             }
@@ -180,7 +180,7 @@ impl Migration for M0033NarrowSkillGlobalUniquenessIndex {
         let channel_wstore = if ctx.channel_store_path.exists() {
             Some(
                 Store::open(&ctx.channel_store_path)
-                    .map_err(|e| MigrationError(format!("narrow_skill_global_uniqueness_index: open wstore: {e}")))?,
+                    .map_err(|e| MigrationError(format!("narrow_skill_global_uniqueness_index: open mstore: {e}")))?,
             )
         } else {
             None
@@ -310,7 +310,7 @@ mod tests {
         insert_skill(&conn, "loser", "Deploy", "prompt", 200);
         insert_skill(&conn, "winner", "Deploy", "agent-skill", 100);
 
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         // Insert the ref row directly rather than through `skill_bind` — the
         // catalog row lives only in the raw identity `conn` above (not
         // wrapped as a `Store`), and `skill_bind` now checks catalog
@@ -318,17 +318,17 @@ mod tests {
         // test is only exercising `skill_rewrite_ref_id`'s effect on the ref
         // table, same as m0031's own tests seed ref rows directly.
         {
-            let raw = wstore.conn().lock().unwrap();
+            let raw = mstore.conn().lock().unwrap();
             raw.execute("INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')", [])
                 .unwrap();
             raw.execute("INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES ('agent-1', 'loser')", [])
                 .unwrap();
         }
 
-        collapse_and_reindex(&conn, Some(&wstore)).unwrap();
+        collapse_and_reindex(&conn, Some(&mstore)).unwrap();
 
-        assert!(wstore.skill_is_bound_to("agent-1", "winner").unwrap(), "the ref must now point at the survivor");
-        assert!(!wstore.skill_is_bound_to("agent-1", "loser").unwrap());
+        assert!(mstore.skill_is_bound_to("agent-1", "winner").unwrap(), "the ref must now point at the survivor");
+        assert!(!mstore.skill_is_bound_to("agent-1", "loser").unwrap());
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
     /// End-to-end through `up()` itself: a real identity store (pre-v8
     /// shape, built the same way `legacy_identity_conn` does but at the
     /// resolved production path) with a real colliding pair, plus a real
-    /// current-channel `wstore` holding a ref row pointing at the loser —
+    /// current-channel `mstore` holding a ref row pointing at the loser —
     /// after `up()`, the identity store has one row, the ref points at the
     /// survivor, and the new index is in place.
     #[test]
@@ -442,11 +442,11 @@ mod tests {
         let channel_store_path = tmp.path().join("data").join("db").join("objects.db");
         std::fs::create_dir_all(channel_store_path.parent().unwrap()).unwrap();
         {
-            let wstore = Store::open(&channel_store_path).unwrap();
+            let mstore = Store::open(&channel_store_path).unwrap();
             // Direct ref-row insert, not `skill_bind` — see the identical
             // note on `the_current_channels_ref_rows_are_rewritten_to_the_survivor`
             // above.
-            let raw = wstore.conn().lock().unwrap();
+            let raw = mstore.conn().lock().unwrap();
             raw.execute("INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')", [])
                 .unwrap();
             raw.execute("INSERT INTO db_agent_skills_ref (agent_id, skill_id) VALUES ('agent-1', 'loser')", [])
@@ -467,9 +467,9 @@ mod tests {
         let survivor: String = identity_conn.query_row("SELECT id FROM db_skills", [], |r| r.get(0)).unwrap();
         assert_eq!(survivor, "winner");
 
-        let wstore = Store::open(&ctx.channel_store_path).unwrap();
-        assert!(wstore.skill_is_bound_to("agent-1", "winner").unwrap(), "the ref must now point at the survivor");
-        assert!(!wstore.skill_is_bound_to("agent-1", "loser").unwrap());
+        let mstore = Store::open(&ctx.channel_store_path).unwrap();
+        assert!(mstore.skill_is_bound_to("agent-1", "winner").unwrap(), "the ref must now point at the survivor");
+        assert!(!mstore.skill_is_bound_to("agent-1", "loser").unwrap());
 
         assert!(
             matches!(M0033NarrowSkillGlobalUniquenessIndex.verify(&ctx), VerifyOutcome::Ok(_)),

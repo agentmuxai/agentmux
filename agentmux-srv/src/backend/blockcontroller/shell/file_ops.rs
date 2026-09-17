@@ -324,15 +324,15 @@ pub(super) fn mirror_append_to_global(gfs: &Arc<FileStore>, zone: &str, data: &[
 }
 
 /// Resolve a block's GLOBAL transcript zone (`agent:<defId>:current`) from its
-/// `agentId` meta, looking the block up in `wstore`. Returns `None` for
+/// `agentId` meta, looking the block up in `mstore`. Returns `None` for
 /// non-agent blocks, when there's no store, or when the block can't be loaded —
 /// the caller then passes `None` and no global mirror happens. Shared by the
 /// subprocess / persistent / acp agent controllers.
 pub(crate) fn resolve_global_output_zone(
-    wstore: &Option<Arc<crate::backend::storage::store::Store>>,
+    mstore: &Option<Arc<crate::backend::storage::store::Store>>,
     block_id: &str,
 ) -> Option<String> {
-    let store = wstore.as_ref()?;
+    let store = mstore.as_ref()?;
     let block = store
         .must_get::<crate::backend::obj::Block>(block_id)
         .ok()?;

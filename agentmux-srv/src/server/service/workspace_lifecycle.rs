@@ -14,7 +14,7 @@ use super::reducer_helpers::{
 };
 
 pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let name: String = service::get_arg(args, 0).unwrap_or_default();
     let events = dispatch_to_reducer(
@@ -28,7 +28,7 @@ pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType
         }
         _ => None,
     });
-    // Apply synchronously to wstore BEFORE publishing or
+    // Apply synchronously to mstore BEFORE publishing or
     // returning. On SQLite failure, dispatch a compensating
     // `DeleteWorkspace` so the reducer's session-only state
     // doesn't carry a ghost workspace that was never
@@ -78,13 +78,13 @@ pub(crate) async fn handle_create_workspace(state: &AppState, call: &WebCallType
 }
 
 pub(crate) async fn handle_get_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
         Err(e) => return WebReturnType::error(e),
     };
-    // wstore-direct during the migration window (see
+    // mstore-direct during the migration window (see
     // ("workspace", ...) header comment above for the
     // rationale). Reducer-state reads return on E.2c.3+ once
     // tabs (and pinned tabs) live in the reducer.
@@ -95,7 +95,7 @@ pub(crate) async fn handle_get_workspace(state: &AppState, call: &WebCallType) -
 }
 
 pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -158,7 +158,7 @@ pub(crate) async fn handle_delete_workspace(state: &AppState, call: &WebCallType
 // mutated). Meta-only updates are dispatched as
 // UpdateWorkspaceMeta separately by frontends.
 pub(crate) async fn handle_update_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,

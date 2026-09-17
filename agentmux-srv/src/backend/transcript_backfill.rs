@@ -196,7 +196,7 @@ fn read_agent_blocks(
 ) -> Result<Vec<(String, String)>, rusqlite::Error> {
     let conn = Connection::open_with_flags(objdb, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut stmt = conn.prepare("SELECT data FROM db_block")?;
-    // `db_block.data` is declared TEXT but the wstore stores the JSON as a BLOB
+    // `db_block.data` is declared TEXT but the mstore stores the JSON as a BLOB
     // (`typeof = 'blob'`), so read raw bytes — `get::<String>` would error on
     // every row and silently skip the whole DB. `from_slice` parses either.
     let rows = stmt.query_map([], |row| row.get::<_, Vec<u8>>(0))?;
@@ -343,7 +343,7 @@ mod tests {
         let oc = Connection::open(db.join("objects.db")).unwrap();
         oc.execute("CREATE TABLE db_block (data TEXT)", []).unwrap();
         let block_json = serde_json::json!({"oid": block_oid, "meta": {"view":"agent", meta_key: def_id}});
-        // Store as a BLOB to mirror the wstore (db_block.data is declared TEXT
+        // Store as a BLOB to mirror the mstore (db_block.data is declared TEXT
         // but holds blob-typed JSON) — the reader reads raw bytes.
         oc.execute(
             "INSERT INTO db_block (data) VALUES (?1)",

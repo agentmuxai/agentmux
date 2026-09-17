@@ -55,22 +55,22 @@ use crate::state::State;
 /// full-resync after a `RecvError::Lagged`.
 pub fn spawn_persist_subscriber(
     events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     state: Arc<Mutex<State>>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run_persist_subscriber(events_rx, wstore, state))
+    tokio::spawn(run_persist_subscriber(events_rx, mstore, state))
 }
 
 async fn run_persist_subscriber(
     mut events_rx: broadcast::Receiver<Event>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     state: Arc<Mutex<State>>,
 ) {
     tracing::info!(target: "srv-persist-subscriber", "[srv-persist-subscriber] started");
     loop {
         match events_rx.recv().await {
             Ok(event) => {
-                if let Err(e) = apply_event_to_wstore(&event, &wstore) {
+                if let Err(e) = apply_event_to_wstore(&event, &mstore) {
                     tracing::warn!(
                         target: "srv-persist-subscriber",
                         "[srv-persist-subscriber] apply failed for event {:?}: {}",
@@ -92,7 +92,7 @@ async fn run_persist_subscriber(
                     "[srv-persist-subscriber] dropped {} event(s) — running workspace resync",
                     n
                 );
-                if let Err(e) = resync_workspaces(&state, &wstore).await {
+                if let Err(e) = resync_workspaces(&state, &mstore).await {
                     tracing::error!(
                         target: "srv-persist-subscriber",
                         "[srv-persist-subscriber] resync failed: {} — SQLite may diverge from reducer until next event",
@@ -137,7 +137,7 @@ async fn run_persist_subscriber(
 ///      no-op if name matches, update if name differs.
 async fn resync_workspaces(
     state: &Arc<Mutex<State>>,
-    wstore: &Store,
+    mstore: &Store,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Snapshot under lock; release before any I/O.
     let snapshot: Vec<(String, String)> = {
@@ -149,13 +149,13 @@ async fn resync_workspaces(
     };
 
     for (workspace_id, name) in &snapshot {
-        match wstore.get::<Workspace>(workspace_id)? {
+        match mstore.get::<Workspace>(workspace_id)? {
             Some(existing) if existing.name == *name => {
                 // Already in sync.
             }
             Some(mut existing) => {
                 existing.name = name.clone();
-                wstore.update(&mut existing)?;
+                mstore.update(&mut existing)?;
             }
             None => {
                 let mut ws = Workspace {
@@ -163,7 +163,7 @@ async fn resync_workspaces(
                     name: name.clone(),
                     ..Default::default()
                 };
-                wstore.insert(&mut ws)?;
+                mstore.insert(&mut ws)?;
             }
         }
     }
@@ -185,86 +185,86 @@ async fn resync_workspaces(
 /// arms are idempotent — the subscriber's later apply is a no-op.
 pub(crate) fn apply_event_to_wstore(
     event: &Event,
-    wstore: &Store,
+    mstore: &Store,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match event {
         Event::WorkspaceCreated {
             workspace_id, name, ..
-        } => apply_workspace_created(wstore, workspace_id, name),
+        } => apply_workspace_created(mstore, workspace_id, name),
         Event::WorkspaceDeleted { workspace_id, .. } => {
-            apply_workspace_deleted(wstore, workspace_id)
+            apply_workspace_deleted(mstore, workspace_id)
         }
         Event::TabCreated {
             workspace_id,
             tab_id,
             name,
             ..
-        } => apply_tab_created(wstore, workspace_id, tab_id, name),
+        } => apply_tab_created(mstore, workspace_id, tab_id, name),
         Event::TabDeleted {
             workspace_id,
             tab_id,
             ..
-        } => apply_tab_deleted(wstore, workspace_id, tab_id),
+        } => apply_tab_deleted(mstore, workspace_id, tab_id),
         Event::ActiveTabChanged {
             workspace_id,
             tab_id,
             ..
-        } => apply_active_tab_changed(wstore, workspace_id, tab_id.as_deref()),
+        } => apply_active_tab_changed(mstore, workspace_id, tab_id.as_deref()),
         Event::TabReordered {
             workspace_id,
             tab_id,
             new_index,
             ..
-        } => apply_tab_reordered(wstore, workspace_id, tab_id, *new_index),
+        } => apply_tab_reordered(mstore, workspace_id, tab_id, *new_index),
         Event::BlockCreated {
             tab_id,
             block_id,
             meta,
             ..
-        } => apply_block_created(wstore, tab_id, block_id, meta),
+        } => apply_block_created(mstore, tab_id, block_id, meta),
         Event::BlockDeleted {
             tab_id, block_id, ..
-        } => apply_block_deleted(wstore, tab_id, block_id),
+        } => apply_block_deleted(mstore, tab_id, block_id),
         Event::SrvWindowOpened {
             window_id,
             workspace_id,
             ..
-        } => apply_srv_window_opened(wstore, window_id, workspace_id),
-        Event::SrvWindowClosed { window_id, .. } => apply_srv_window_closed(wstore, window_id),
+        } => apply_srv_window_opened(mstore, window_id, workspace_id),
+        Event::SrvWindowClosed { window_id, .. } => apply_srv_window_closed(mstore, window_id),
         Event::SrvWindowWorkspaceChanged {
             window_id,
             workspace_id,
             ..
-        } => apply_srv_window_workspace_changed(wstore, window_id, workspace_id),
+        } => apply_srv_window_workspace_changed(mstore, window_id, workspace_id),
         Event::TabsReorderedBulk {
             workspace_id,
             tab_ids,
             ..
-        } => apply_tabs_reordered_bulk(wstore, workspace_id, tab_ids),
+        } => apply_tabs_reordered_bulk(mstore, workspace_id, tab_ids),
         Event::WorkspaceRenamed {
             workspace_id, name, ..
-        } => apply_workspace_renamed(wstore, workspace_id, name),
-        Event::TabRenamed { tab_id, name, .. } => apply_tab_renamed(wstore, tab_id, name),
+        } => apply_workspace_renamed(mstore, workspace_id, name),
+        Event::TabRenamed { tab_id, name, .. } => apply_tab_renamed(mstore, tab_id, name),
         Event::WorkspaceMetaUpdated {
             workspace_id,
             meta_patch,
             ..
-        } => apply_workspace_meta_updated(wstore, workspace_id, meta_patch),
+        } => apply_workspace_meta_updated(mstore, workspace_id, meta_patch),
         Event::WindowMetaUpdated {
             window_id,
             meta_patch,
             ..
-        } => apply_window_meta_updated(wstore, window_id, meta_patch),
+        } => apply_window_meta_updated(mstore, window_id, meta_patch),
         Event::TabMetaUpdated {
             tab_id,
             meta_patch,
             ..
-        } => apply_tab_meta_updated(wstore, tab_id, meta_patch),
+        } => apply_tab_meta_updated(mstore, tab_id, meta_patch),
         Event::BlockMetaUpdated {
             block_id,
             meta_patch,
             ..
-        } => apply_block_meta_updated(wstore, block_id, meta_patch),
+        } => apply_block_meta_updated(mstore, block_id, meta_patch),
         Event::TabMoved {
             tab_id,
             src_workspace_id,
@@ -274,7 +274,7 @@ pub(crate) fn apply_event_to_wstore(
             new_dst_active_tab_id,
             ..
         } => apply_tab_moved(
-            wstore,
+            mstore,
             tab_id,
             src_workspace_id,
             dst_workspace_id,
@@ -288,12 +288,12 @@ pub(crate) fn apply_event_to_wstore(
             dst_tab_id,
             dst_index,
             ..
-        } => apply_block_moved(wstore, block_id, src_tab_id, dst_tab_id, *dst_index),
+        } => apply_block_moved(mstore, block_id, src_tab_id, dst_tab_id, *dst_index),
         Event::FocusedNodeChanged { tab_id, node_id, .. } => {
-            apply_focused_node_changed(wstore, tab_id, node_id)
+            apply_focused_node_changed(mstore, tab_id, node_id)
         }
         Event::MagnifiedNodeChanged { tab_id, node_id, .. } => {
-            apply_magnified_node_changed(wstore, tab_id, node_id)
+            apply_magnified_node_changed(mstore, tab_id, node_id)
         }
         // Phase E.4.B — layout-tree persistence. These two are the
         // first tree-mutating layout events to persist through the
@@ -308,13 +308,13 @@ pub(crate) fn apply_event_to_wstore(
         // surface). Delete WAS in the same boat until SPEC_864 site #6
         // gave `LayoutNodeDeleted` a `new_tree` (+ `tree_cleared`) and its
         // own arm below; Insert follows when a production caller needs it.
-        Event::LayoutCleared { tab_id, .. } => apply_layout_cleared(wstore, tab_id),
+        Event::LayoutCleared { tab_id, .. } => apply_layout_cleared(mstore, tab_id),
         Event::LayoutTreeReplaced {
             tab_id,
             new_tree,
             slices,
             ..
-        } => apply_layout_tree_replaced(wstore, tab_id, new_tree, slices.as_ref()),
+        } => apply_layout_tree_replaced(mstore, tab_id, new_tree, slices.as_ref()),
         // SPEC_864 site #6 — LayoutNodeDeleted gets its own arm (not the
         // group below) because a delete is the one structural op that can
         // legitimately EMPTY the tree (root-orphan case). `tree_cleared`
@@ -331,8 +331,8 @@ pub(crate) fn apply_event_to_wstore(
             tree_cleared,
             ..
         } => match (new_tree.is_some(), tree_cleared) {
-            (true, _) => apply_layout_tree_replaced(wstore, tab_id, new_tree, None),
-            (false, true) => apply_layout_tree_replaced(wstore, tab_id, &None, None),
+            (true, _) => apply_layout_tree_replaced(mstore, tab_id, new_tree, None),
+            (false, true) => apply_layout_tree_replaced(mstore, tab_id, &None, None),
             (false, false) => Ok(()),
         },
         // The 7 granular structural arms each carry the reducer's resulting
@@ -356,7 +356,7 @@ pub(crate) fn apply_event_to_wstore(
             // persisted layout (codex P2 on #1883). Persist only a real tree.
             match new_tree {
                 // Granular events carry no client slices — tree-only write.
-                Some(_) => apply_layout_tree_replaced(wstore, tab_id, new_tree, None),
+                Some(_) => apply_layout_tree_replaced(mstore, tab_id, new_tree, None),
                 None => Ok(()),
             }
         }
@@ -368,7 +368,7 @@ pub(crate) fn apply_event_to_wstore(
         // from broadcast) by deduping on `actionid` — every writer
         // stamps a fresh UUID per action.
         Event::LayoutBackendActionsQueued { tab_id, actions, .. } => {
-            apply_layout_backend_actions_queued(wstore, tab_id, actions)
+            apply_layout_backend_actions_queued(mstore, tab_id, actions)
         }
         // All other event variants are not domain-state mutations
         // (lifecycle, errors, snapshots). The subscriber ignores them.
@@ -377,11 +377,11 @@ pub(crate) fn apply_event_to_wstore(
 }
 
 fn apply_workspace_created(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Workspace>(workspace_id)?.is_some() {
+    if mstore.get::<Workspace>(workspace_id)?.is_some() {
         return Ok(()); // already present
     }
     let mut ws = Workspace {
@@ -389,23 +389,23 @@ fn apply_workspace_created(
         name: name.to_string(),
         ..Default::default()
     };
-    wstore.insert(&mut ws)?;
+    mstore.insert(&mut ws)?;
     Ok(())
 }
 
 fn apply_workspace_deleted(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Workspace>(workspace_id)?.is_none() {
+    if mstore.get::<Workspace>(workspace_id)?.is_none() {
         return Ok(()); // already gone
     }
-    wcore::delete_workspace(wstore, workspace_id)?;
+    wcore::delete_workspace(mstore, workspace_id)?;
     Ok(())
 }
 
 fn apply_tab_created(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     tab_id: &str,
     name: &str,
@@ -414,7 +414,7 @@ fn apply_tab_created(
     // sequence in a single SQLite transaction so a partial failure
     // can't leave a tab without a layout or a workspace whose
     // tab_ids points at a tab that doesn't exist on disk.
-    wstore.with_tx(|tx| {
+    mstore.with_tx(|tx| {
         if tx.get::<Tab>(tab_id)?.is_none() {
             // Phase E.2c.2 — create a LayoutState row alongside the
             // Tab so reducer-originated tabs have a `Tab.layoutstate`
@@ -455,18 +455,18 @@ fn apply_tab_created(
 }
 
 fn apply_tab_deleted(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     tab_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Tab>(tab_id)?.is_none() {
+    if mstore.get::<Tab>(tab_id)?.is_none() {
         return Ok(()); // already gone (or never existed)
     }
     // wcore::delete_tab handles unlinking from the workspace's
     // tabids, deleting the tab's blocks + layout, and the tab row
     // itself. Returns NotFound errors if any of those don't exist —
     // we surface those as the operation having already happened.
-    match wcore::delete_tab(wstore, workspace_id, tab_id) {
+    match wcore::delete_tab(mstore, workspace_id, tab_id) {
         Ok(()) => Ok(()),
         Err(crate::backend::storage::StoreError::NotFound) => Ok(()),
         Err(e) => Err(Box::new(e)),
@@ -474,11 +474,11 @@ fn apply_tab_deleted(
 }
 
 fn apply_active_tab_changed(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     tab_id: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+    let Some(mut ws) = mstore.get::<Workspace>(workspace_id)? else {
         return Ok(()); // workspace already gone — nothing to update
     };
     let new = tab_id.unwrap_or("").to_string();
@@ -486,17 +486,17 @@ fn apply_active_tab_changed(
         return Ok(());
     }
     ws.activetabid = new;
-    wstore.update(&mut ws)?;
+    mstore.update(&mut ws)?;
     Ok(())
 }
 
 fn apply_tab_reordered(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     tab_id: &str,
     new_index: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+    let Some(mut ws) = mstore.get::<Workspace>(workspace_id)? else {
         return Ok(());
     };
     // Pinning was removed from AgentMux but legacy SQLite databases
@@ -514,7 +514,7 @@ fn apply_tab_reordered(
         }
         let id = ws.tabids.remove(current_pos);
         ws.tabids.insert(target, id);
-        wstore.update(&mut ws)?;
+        mstore.update(&mut ws)?;
     } else if let Some(current_pos) = ws.pinnedtabids.iter().position(|t| t == tab_id) {
         let len = ws.pinnedtabids.len();
         let target = target_index.min(len.saturating_sub(1));
@@ -523,14 +523,14 @@ fn apply_tab_reordered(
         }
         let id = ws.pinnedtabids.remove(current_pos);
         ws.pinnedtabids.insert(target, id);
-        wstore.update(&mut ws)?;
+        mstore.update(&mut ws)?;
     }
     // Tab not in either list — silent no-op (idempotent).
     Ok(())
 }
 
 fn apply_block_created(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     block_id: &str,
     meta: &serde_json::Value,
@@ -542,7 +542,7 @@ fn apply_block_created(
         }
         _ => Default::default(),
     };
-    wstore.with_tx(|tx| {
+    mstore.with_tx(|tx| {
         if tx.get::<Block>(block_id)?.is_none() {
             // Phase E.2c.4 — write the meta map carried in the event
             // (`view`, layout hints, etc.) so reducer-routed
@@ -569,14 +569,14 @@ fn apply_block_created(
 }
 
 fn apply_block_deleted(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     block_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if wstore.get::<Block>(block_id)?.is_none() {
+    if mstore.get::<Block>(block_id)?.is_none() {
         return Ok(()); // already gone
     }
-    match wcore::delete_block(wstore, tab_id, block_id) {
+    match wcore::delete_block(mstore, tab_id, block_id) {
         Ok(()) => Ok(()),
         Err(crate::backend::storage::StoreError::NotFound) => Ok(()),
         Err(e) => Err(Box::new(e)),
@@ -593,7 +593,7 @@ fn apply_block_deleted(
 /// Window row exists but `GetClientData` / focus-order logic can't
 /// see it. (codex P1 #619.)
 fn apply_srv_window_opened(
-    wstore: &Store,
+    mstore: &Store,
     window_id: &str,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -601,7 +601,7 @@ fn apply_srv_window_opened(
     // tx so a partial failure can't leave a Window row that
     // `GetClientData` doesn't see (or a `windowids` entry pointing
     // at a Window row that wasn't written).
-    wstore.with_tx(|tx| {
+    mstore.with_tx(|tx| {
         let was_new = match tx.get::<Window>(window_id)? {
             Some(existing) if existing.workspaceid == workspace_id => false,
             Some(mut existing) => {
@@ -647,14 +647,14 @@ fn apply_srv_window_opened(
 /// the store still holds it (#2051). Deliberately defensive/idempotent:
 /// both callers rely on the already-gone cases being safe.
 pub(crate) fn apply_srv_window_closed(
-    wstore: &Store,
+    mstore: &Store,
     window_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // F1.A — Client.windowids prune + Window-row delete in one tx.
     // Order matters (mirrors `wcore::close_window`): prune client
     // FIRST so any read between the two ops doesn't see a dangling
     // id pointing at a Window row that's already been removed.
-    wstore.with_tx(|tx| {
+    mstore.with_tx(|tx| {
         let window_exists = tx.get::<Window>(window_id)?.is_some();
         // Always defensively prune the client list — handles the
         // already-gone case where divergence left a stale entry.
@@ -677,11 +677,11 @@ pub(crate) fn apply_srv_window_closed(
 /// upsert behavior; separate function for log-clarity since the
 /// emitted event is distinct.
 fn apply_srv_window_workspace_changed(
-    wstore: &Store,
+    mstore: &Store,
     window_id: &str,
     workspace_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    apply_srv_window_opened(wstore, window_id, workspace_id)
+    apply_srv_window_opened(mstore, window_id, workspace_id)
 }
 
 /// Phase E.5.3 — replace the workspace's `tabids` with the new
@@ -692,11 +692,11 @@ fn apply_srv_window_workspace_changed(
 /// in SQLite would cause UI double-insertion (`workspace.tsx`
 /// builds the displayed tab list as `[...pinnedtabids, ...tabids]`).
 fn apply_tabs_reordered_bulk(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     tab_ids: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+    let Some(mut ws) = mstore.get::<Workspace>(workspace_id)? else {
         return Ok(());
     };
     let tabids_match = ws.tabids == tab_ids;
@@ -706,41 +706,41 @@ fn apply_tabs_reordered_bulk(
     }
     ws.tabids = tab_ids.to_vec();
     ws.pinnedtabids.clear();
-    wstore.update(&mut ws)?;
+    mstore.update(&mut ws)?;
     Ok(())
 }
 
 /// Phase E.5.3 — rename a persisted workspace.
 fn apply_workspace_renamed(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+    let Some(mut ws) = mstore.get::<Workspace>(workspace_id)? else {
         return Ok(());
     };
     if ws.name == name {
         return Ok(());
     }
     ws.name = name.to_string();
-    wstore.update(&mut ws)?;
+    mstore.update(&mut ws)?;
     Ok(())
 }
 
 /// Phase E.5.3 — rename a persisted tab.
 fn apply_tab_renamed(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     name: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(mut tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if tab.name == name {
         return Ok(());
     }
     tab.name = name.to_string();
-    wstore.update(&mut tab)?;
+    mstore.update(&mut tab)?;
     Ok(())
 }
 
@@ -752,24 +752,24 @@ fn apply_tab_renamed(
 /// `LayoutState` fields stay on their existing wcore-direct path until
 /// Option B lands.
 fn apply_focused_node_changed(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if tab.layoutstate.is_empty() {
         return Ok(());
     }
-    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
         return Ok(());
     };
     if layout.focusednodeid == node_id {
         return Ok(());
     }
     layout.focusednodeid = node_id.to_string();
-    wstore.update(&mut layout)?;
+    mstore.update(&mut layout)?;
     Ok(())
 }
 
@@ -777,24 +777,24 @@ fn apply_focused_node_changed(
 /// onto the tab's `LayoutState.magnifiednodeid` column. Same shape as
 /// `apply_focused_node_changed`.
 fn apply_magnified_node_changed(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if tab.layoutstate.is_empty() {
         return Ok(());
     }
-    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
         return Ok(());
     };
     if layout.magnifiednodeid == node_id {
         return Ok(());
     }
     layout.magnifiednodeid = node_id.to_string();
-    wstore.update(&mut layout)?;
+    mstore.update(&mut layout)?;
     Ok(())
 }
 
@@ -806,16 +806,16 @@ fn apply_magnified_node_changed(
 /// (so a double-apply — once synchronously from the RPC handler, once
 /// from the broadcast — does not churn the version).
 fn apply_layout_cleared(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if tab.layoutstate.is_empty() {
         return Ok(());
     }
-    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
         return Ok(());
     };
     if layout.rootnode.is_none()
@@ -829,7 +829,7 @@ fn apply_layout_cleared(
     layout.focusednodeid = String::new();
     layout.magnifiednodeid = String::new();
     layout.leaforder = None;
-    wstore.update(&mut layout)?;
+    mstore.update(&mut layout)?;
     Ok(())
 }
 
@@ -852,18 +852,18 @@ fn apply_layout_cleared(
 /// rootnode/focus/magnify only). Idempotent: no-op (no version bump)
 /// when nothing changes.
 fn apply_layout_tree_replaced(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     new_tree: &Option<agentmux_common::LayoutNode>,
     slices: Option<&agentmux_common::LayoutClientSlices>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if tab.layoutstate.is_empty() {
         return Ok(());
     }
-    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
         return Ok(());
     };
     let clears = new_tree.is_none();
@@ -914,7 +914,7 @@ fn apply_layout_tree_replaced(
     layout.magnifiednodeid = new_magnified;
     layout.leaforder = new_leaforder;
     layout.pendingbackendactions = new_pending;
-    wstore.update(&mut layout)?;
+    mstore.update(&mut layout)?;
     Ok(())
 }
 
@@ -932,17 +932,17 @@ fn apply_layout_tree_replaced(
 /// an (out-of-contract) empty `actionid` dedupes against other empties,
 /// which is the safe direction — skip rather than duplicate.
 fn apply_layout_backend_actions_queued(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     actions: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if tab.layoutstate.is_empty() {
         return Ok(());
     }
-    let Some(mut layout) = wstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
+    let Some(mut layout) = mstore.get::<PersistedLayoutState>(&tab.layoutstate)? else {
         return Ok(());
     };
     let incoming: Vec<LayoutActionData> = serde_json::from_value(actions.clone())?;
@@ -959,7 +959,7 @@ fn apply_layout_backend_actions_queued(
         return Ok(());
     }
     layout.pendingbackendactions = Some(pending);
-    wstore.update(&mut layout)?;
+    mstore.update(&mut layout)?;
     Ok(())
 }
 
@@ -969,63 +969,63 @@ fn apply_layout_backend_actions_queued(
 /// JSON object that merges shallow-key-by-shallow-key on top of the
 /// existing meta. `null` values in the patch delete the key.
 fn apply_workspace_meta_updated(
-    wstore: &Store,
+    mstore: &Store,
     workspace_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut ws) = wstore.get::<Workspace>(workspace_id)? else {
+    let Some(mut ws) = mstore.get::<Workspace>(workspace_id)? else {
         return Ok(());
     };
     if merge_meta_patch(&mut ws.meta, meta_patch) {
-        wstore.update(&mut ws)?;
+        mstore.update(&mut ws)?;
     }
     Ok(())
 }
 
 /// Phase E.5.x (issue #855) — apply a meta-patch to a window's `meta`
 /// map. Same shape as `apply_workspace_meta_updated`. Silent no-op if
-/// the window doesn't exist in wstore (preserves the idempotency
+/// the window doesn't exist in mstore (preserves the idempotency
 /// contract — duplicate or stale events fold to no-op).
 fn apply_window_meta_updated(
-    wstore: &Store,
+    mstore: &Store,
     window_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut window) = wstore.get::<Window>(window_id)? else {
+    let Some(mut window) = mstore.get::<Window>(window_id)? else {
         return Ok(());
     };
     if merge_meta_patch(&mut window.meta, meta_patch) {
-        wstore.update(&mut window)?;
+        mstore.update(&mut window)?;
     }
     Ok(())
 }
 
 /// Phase E.5.3 — apply a meta-patch to a tab's `meta` map.
 fn apply_tab_meta_updated(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut tab) = wstore.get::<Tab>(tab_id)? else {
+    let Some(mut tab) = mstore.get::<Tab>(tab_id)? else {
         return Ok(());
     };
     if merge_meta_patch(&mut tab.meta, meta_patch) {
-        wstore.update(&mut tab)?;
+        mstore.update(&mut tab)?;
     }
     Ok(())
 }
 
 /// Phase E.5.3 — apply a meta-patch to a block's `meta` map.
 fn apply_block_meta_updated(
-    wstore: &Store,
+    mstore: &Store,
     block_id: &str,
     meta_patch: &serde_json::Value,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(mut block) = wstore.get::<Block>(block_id)? else {
+    let Some(mut block) = mstore.get::<Block>(block_id)? else {
         return Ok(());
     };
     if merge_meta_patch(&mut block.meta, meta_patch) {
-        wstore.update(&mut block)?;
+        mstore.update(&mut block)?;
     }
     Ok(())
 }
@@ -1045,7 +1045,7 @@ fn apply_block_meta_updated(
 /// * Updates the `Tab` row's parent ref so loaders find it under
 ///   the new workspace.
 fn apply_tab_moved(
-    wstore: &Store,
+    mstore: &Store,
     tab_id: &str,
     src_workspace_id: &str,
     dst_workspace_id: &str,
@@ -1056,7 +1056,7 @@ fn apply_tab_moved(
     // F1.A — both workspaces' updates wrapped in one tx so a partial
     // failure can't leave the tab in both src.tabids and dst.tabids
     // simultaneously, or in neither.
-    wstore.with_tx(|tx| {
+    mstore.with_tx(|tx| {
         // Source workspace: remove the tab and update activetabid.
         if let Some(mut src_ws) = tx.get::<Workspace>(src_workspace_id)? {
             let len_before_tabids = src_ws.tabids.len();
@@ -1107,7 +1107,7 @@ fn apply_tab_moved(
 /// Handles both cross-tab moves and intra-tab repositioning.
 /// Idempotent on re-delivery (checks current parent before mutating).
 fn apply_block_moved(
-    wstore: &Store,
+    mstore: &Store,
     block_id: &str,
     src_tab_id: &str,
     dst_tab_id: &str,
@@ -1117,7 +1117,7 @@ fn apply_block_moved(
     // wrapped in one tx so a partial failure can't leave the block in
     // both tabs' blockids or with parentoref pointing at the wrong
     // tab.
-    wstore.with_tx(|tx| {
+    mstore.with_tx(|tx| {
         if src_tab_id == dst_tab_id {
             // Intra-tab reposition: remove + re-insert in the same tab.
             if let Some(mut tab) = tx.get::<Tab>(src_tab_id)? {
@@ -1255,8 +1255,8 @@ mod tests {
     use crate::backend::storage::store::Store;
 
     fn store() -> Arc<Store> {
-        // In-memory SQLite for tests (matches existing wstore test pattern).
-        let store = Store::open_in_memory().expect("in-memory wstore");
+        // In-memory SQLite for tests (matches existing mstore test pattern).
+        let store = Store::open_in_memory().expect("in-memory mstore");
         Arc::new(store)
     }
 

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Stable failure taxonomy. Wire format is snake_case to match the rest
-/// of the agent event surface (`frontend/types/gotypes.d.ts`).
+/// of the agent event surface (`frontend/types/srv-types.d.ts`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureClass {

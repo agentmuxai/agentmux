@@ -277,7 +277,7 @@ async fn apply_and_publish(
     events: &[Event],
 ) -> Result<(), String> {
     for ev in events {
-        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore) {
+        if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore) {
             return Err(format!("SQLite write failed: {}", e));
         }
     }
@@ -335,7 +335,7 @@ pub(crate) async fn handle_save_session_snapshot(
     state: &AppState,
     _call: &WebCallType,
 ) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
 
     let Some(ws_id) = current_workspace_id(store) else {
         // No client, no window, or no workspace — nothing to capture. Not an
@@ -422,7 +422,7 @@ fn current_workspace_id(store: &Store) -> Option<String> {
 pub(crate) async fn restore_last_session(
     state: &AppState,
 ) -> Result<Option<(String, Vec<Event>)>, String> {
-    let Some(snapshot) = load_last_session_snapshot(&state.wstore) else {
+    let Some(snapshot) = load_last_session_snapshot(&state.mstore) else {
         return Ok(None);
     };
     let tabs_json = snapshot
@@ -608,7 +608,7 @@ mod tests {
     async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
         let events = dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -616,23 +616,23 @@ mod tests {
     #[tokio::test]
     async fn no_snapshot_means_nothing_to_load() {
         let state = test_state();
-        assert!(load_last_session_snapshot(&state.wstore).is_none());
+        assert!(load_last_session_snapshot(&state.mstore).is_none());
     }
 
     #[tokio::test]
     async fn save_then_load_round_trips() {
         let state = test_state();
         let snap = json!({ "tabs": [{"name": "t", "blocks": [{"meta": {"view": "agent"}}]}] });
-        save_last_session_snapshot(&state.wstore, snap.clone());
-        assert_eq!(load_last_session_snapshot(&state.wstore), Some(snap));
+        save_last_session_snapshot(&state.mstore, snap.clone());
+        assert_eq!(load_last_session_snapshot(&state.mstore), Some(snap));
     }
 
     #[tokio::test]
     async fn save_overwrites_prior_snapshot() {
         let state = test_state();
-        save_last_session_snapshot(&state.wstore, json!({"tabs": [{"name": "old"}]}));
-        save_last_session_snapshot(&state.wstore, json!({"tabs": [{"name": "new"}]}));
-        let loaded = load_last_session_snapshot(&state.wstore).unwrap();
+        save_last_session_snapshot(&state.mstore, json!({"tabs": [{"name": "old"}]}));
+        save_last_session_snapshot(&state.mstore, json!({"tabs": [{"name": "new"}]}));
+        let loaded = load_last_session_snapshot(&state.mstore).unwrap();
         assert_eq!(loaded["tabs"][0]["name"], "new");
     }
 
@@ -668,7 +668,7 @@ mod tests {
         )
         .await;
 
-        let snap = snapshot_workspace(&state.wstore, &ws_id).expect("snapshot should be produced");
+        let snap = snapshot_workspace(&state.mstore, &ws_id).expect("snapshot should be produced");
         let tabs = snap["tabs"].as_array().unwrap();
         assert_eq!(tabs.len(), 1);
         assert_eq!(tabs[0]["name"], "mytab");
@@ -680,7 +680,7 @@ mod tests {
     #[tokio::test]
     async fn snapshot_of_unknown_workspace_is_none() {
         let state = test_state();
-        assert!(snapshot_workspace(&state.wstore, "no-such-workspace").is_none());
+        assert!(snapshot_workspace(&state.mstore, "no-such-workspace").is_none());
     }
 
     #[tokio::test]
@@ -762,8 +762,8 @@ mod tests {
             .unwrap();
 
         // Snapshot + save exactly like the close hook does.
-        let snap = snapshot_workspace(&state.wstore, &ws_id).expect("snapshot should be produced");
-        save_last_session_snapshot(&state.wstore, snap);
+        let snap = snapshot_workspace(&state.mstore, &ws_id).expect("snapshot should be produced");
+        save_last_session_snapshot(&state.mstore, snap);
 
         // Restore into a brand-new workspace.
         let (new_ws_id, _events) = restore_last_session(&state)
@@ -772,21 +772,21 @@ mod tests {
             .expect("restore should recreate the tab");
         assert_ne!(new_ws_id, ws_id, "restore creates a NEW workspace, not the deleted one");
 
-        let new_workspace = state.wstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
+        let new_workspace = state.mstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
         assert_eq!(new_workspace.tabids.len(), 1);
-        let new_tab = state.wstore.get::<Tab>(&new_workspace.tabids[0]).unwrap().unwrap();
+        let new_tab = state.mstore.get::<Tab>(&new_workspace.tabids[0]).unwrap().unwrap();
         assert_eq!(new_tab.name, "mytab");
         assert_eq!(new_tab.blockids.len(), 2);
 
-        let new_blk1 = state.wstore.get::<Block>(&new_tab.blockids[0]).unwrap().unwrap();
+        let new_blk1 = state.mstore.get::<Block>(&new_tab.blockids[0]).unwrap().unwrap();
         assert_eq!(new_blk1.meta.get("view").and_then(|v| v.as_str()), Some("agent"));
-        let new_blk2 = state.wstore.get::<Block>(&new_tab.blockids[1]).unwrap().unwrap();
+        let new_blk2 = state.mstore.get::<Block>(&new_tab.blockids[1]).unwrap().unwrap();
         assert_eq!(new_blk2.meta.get("view").and_then(|v| v.as_str()), Some("sysinfo"));
 
         // Layout tree was restored with the NEW block ids, not the old ones
         // or leftover placeholders.
         let new_layout = state
-            .wstore
+            .mstore
             .get::<LayoutState>(&new_tab.layoutstate)
             .unwrap()
             .unwrap();
@@ -874,14 +874,14 @@ mod tests {
             .await
             .unwrap();
 
-        let snap = snapshot_workspace(&state.wstore, &ws_id).expect("snapshot should be produced");
+        let snap = snapshot_workspace(&state.mstore, &ws_id).expect("snapshot should be produced");
         assert_eq!(snap["tabs"][0]["magnifiednodeid"], "left", "magnifiednodeid captured in snapshot");
-        save_last_session_snapshot(&state.wstore, snap);
+        save_last_session_snapshot(&state.mstore, snap);
 
         let (new_ws_id, _events) = restore_last_session(&state).await.unwrap().unwrap();
-        let new_workspace = state.wstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
-        let new_tab = state.wstore.get::<Tab>(&new_workspace.tabids[0]).unwrap().unwrap();
-        let new_layout = state.wstore.get::<LayoutState>(&new_tab.layoutstate).unwrap().unwrap();
+        let new_workspace = state.mstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
+        let new_tab = state.mstore.get::<Tab>(&new_workspace.tabids[0]).unwrap().unwrap();
+        let new_layout = state.mstore.get::<LayoutState>(&new_tab.layoutstate).unwrap().unwrap();
         assert_eq!(
             new_layout.magnifiednodeid, "left",
             "magnifiednodeid restored — LayoutNode.id values aren't placeholder-remapped, \
@@ -948,17 +948,17 @@ mod tests {
             Command::SetActiveTab { workspace_id: ws_id.clone(), tab_id: tab2_id.clone() },
         )
         .await;
-        let workspace_before = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        let workspace_before = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
         assert_eq!(workspace_before.activetabid, tab2_id, "precondition: tab-two is active");
 
-        let snap = snapshot_workspace(&state.wstore, &ws_id).expect("snapshot should be produced");
+        let snap = snapshot_workspace(&state.mstore, &ws_id).expect("snapshot should be produced");
         assert_eq!(snap["active_tab_index"], 1, "active tab is the SECOND captured tab");
-        save_last_session_snapshot(&state.wstore, snap);
+        save_last_session_snapshot(&state.mstore, snap);
 
         let (new_ws_id, _events) = restore_last_session(&state).await.unwrap().unwrap();
-        let new_workspace = state.wstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
+        let new_workspace = state.mstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
         assert_eq!(new_workspace.tabids.len(), 2);
-        let new_tab2 = state.wstore.get::<Tab>(&new_workspace.tabids[1]).unwrap().unwrap();
+        let new_tab2 = state.mstore.get::<Tab>(&new_workspace.tabids[1]).unwrap().unwrap();
         assert_eq!(new_tab2.name, "tab-two");
         assert_eq!(
             new_workspace.activetabid, new_tab2.oid,
@@ -998,14 +998,14 @@ mod tests {
             Command::CreateBlock { tab_id: tab_id.clone(), meta: json!({"view": "agent"}) },
         )
         .await;
-        let snap = snapshot_workspace(&state.wstore, &ws_id).unwrap();
-        save_last_session_snapshot(&state.wstore, snap);
+        let snap = snapshot_workspace(&state.mstore, &ws_id).unwrap();
+        save_last_session_snapshot(&state.mstore, snap);
 
         let (first_ws, _) = restore_last_session(&state).await.unwrap().unwrap();
         let (second_ws, _) = restore_last_session(&state).await.unwrap().unwrap();
         assert_ne!(first_ws, second_ws, "each restore call creates its own fresh workspace");
-        assert!(state.wstore.get::<Workspace>(&first_ws).unwrap().is_some());
-        assert!(state.wstore.get::<Workspace>(&second_ws).unwrap().is_some());
+        assert!(state.mstore.get::<Workspace>(&first_ws).unwrap().is_some());
+        assert!(state.mstore.get::<Workspace>(&second_ws).unwrap().is_some());
     }
 
 
@@ -1027,7 +1027,7 @@ mod tests {
     /// bootstrapped session rather than anything the test invents — which is
     /// the point, since it mirrors what a real running instance looks like.
     fn bootstrapped_workspace(state: &AppState) -> String {
-        current_workspace_id(&state.wstore).expect("test_state seeds a live session")
+        current_workspace_id(&state.mstore).expect("test_state seeds a live session")
     }
 
     /// The whole point of Phase 0: an OS shutdown captures the session even
@@ -1047,7 +1047,7 @@ mod tests {
     async fn shutdown_flush_writes_a_snapshot_without_a_close() {
         let state = test_state();
         let ws_id = bootstrapped_workspace(&state);
-        let ws = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        let ws = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
         // Count BOTH lists: a workspace the reducer has not touched yet
         // (straight out of `ensure_initial_data`) still has its tab in the
         // legacy `pinnedtabids` until a `TabsReordered` drains it — which is
@@ -1055,13 +1055,13 @@ mod tests {
         let open_tabs = ws.pinnedtabids.len() + ws.tabids.len();
         assert!(open_tabs > 0, "precondition: the session has a tab open");
         assert!(
-            load_last_session_snapshot(&state.wstore).is_none(),
+            load_last_session_snapshot(&state.mstore).is_none(),
             "precondition: nothing saved before the flush"
         );
 
         handle_save_session_snapshot(&state, &shutdown_call()).await;
 
-        let snap = load_last_session_snapshot(&state.wstore)
+        let snap = load_last_session_snapshot(&state.mstore)
             .expect("shutdown flush must persist a snapshot with no CloseWindow");
         let tabs = snap["tabs"].as_array().expect("snapshot carries a tabs array");
         assert_eq!(
@@ -1078,12 +1078,12 @@ mod tests {
     async fn shutdown_flush_leaves_the_workspace_intact() {
         let state = test_state();
         let ws_id = bootstrapped_workspace(&state);
-        let before = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        let before = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
 
         handle_save_session_snapshot(&state, &shutdown_call()).await;
 
         let after = state
-            .wstore
+            .mstore
             .get::<Workspace>(&ws_id)
             .unwrap()
             .expect("shutdown flush must not delete the workspace");
@@ -1104,9 +1104,9 @@ mod tests {
         let _ = bootstrapped_workspace(&state);
 
         handle_save_session_snapshot(&state, &shutdown_call()).await;
-        let first = load_last_session_snapshot(&state.wstore).unwrap();
+        let first = load_last_session_snapshot(&state.mstore).unwrap();
         handle_save_session_snapshot(&state, &shutdown_call()).await;
-        let second = load_last_session_snapshot(&state.wstore).unwrap();
+        let second = load_last_session_snapshot(&state.mstore).unwrap();
 
         assert_eq!(first, second, "a second flush must not corrupt the snapshot");
     }
@@ -1131,7 +1131,7 @@ mod tests {
     async fn shutdown_flush_survives_a_missing_workspace() {
         let state = test_state();
         let ws_id = bootstrapped_workspace(&state);
-        state.wstore.delete::<Workspace>(&ws_id).unwrap();
+        state.mstore.delete::<Workspace>(&ws_id).unwrap();
 
         let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
 
@@ -1140,7 +1140,7 @@ mod tests {
             "no live workspace among any window is ordinary, not a failure"
         );
         assert!(
-            load_last_session_snapshot(&state.wstore).is_none(),
+            load_last_session_snapshot(&state.mstore).is_none(),
             "nothing capturable means nothing written — not a partial snapshot"
         );
     }
@@ -1159,13 +1159,13 @@ mod tests {
     async fn shutdown_flush_reports_failure_when_the_workspace_has_no_capturable_tabs() {
         let state = test_state();
         let ws_id = bootstrapped_workspace(&state);
-        let workspace = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        let workspace = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
         for tab_id in workspace.pinnedtabids.iter().chain(workspace.tabids.iter()) {
-            let mut tab = state.wstore.get::<Tab>(tab_id).unwrap().unwrap();
+            let mut tab = state.mstore.get::<Tab>(tab_id).unwrap().unwrap();
             for block_id in tab.blockids.drain(..) {
-                let _ = state.wstore.delete::<Block>(&block_id);
+                let _ = state.mstore.delete::<Block>(&block_id);
             }
-            state.wstore.update(&mut tab).unwrap();
+            state.mstore.update(&mut tab).unwrap();
         }
 
         let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
@@ -1175,7 +1175,7 @@ mod tests {
             "a live workspace with nothing capturable in it must report failure, not silent success"
         );
         assert!(
-            load_last_session_snapshot(&state.wstore).is_none(),
+            load_last_session_snapshot(&state.mstore).is_none(),
             "nothing capturable means nothing written — not a partial snapshot"
         );
     }
@@ -1193,7 +1193,7 @@ mod tests {
         let state = test_state();
         let _ = bootstrapped_workspace(&state);
         let window_id = state
-            .wstore
+            .mstore
             .get_all::<Client>()
             .unwrap()
             .into_iter()
@@ -1204,7 +1204,7 @@ mod tests {
             .cloned()
             .expect("test_state seeds exactly one window");
         state
-            .wstore
+            .mstore
             .delete::<crate::backend::obj::Window>(&window_id)
             .unwrap();
 
@@ -1215,7 +1215,7 @@ mod tests {
             "no window to resolve a workspace from is ordinary, not a failure"
         );
         assert!(
-            load_last_session_snapshot(&state.wstore).is_none(),
+            load_last_session_snapshot(&state.mstore).is_none(),
             "nothing was captured, so nothing should be written"
         );
     }
@@ -1233,7 +1233,7 @@ mod tests {
         // Prepend a window id with no backing Window row — the exact
         // "stale leading entry" shape the finding describes.
         let mut client = state
-            .wstore
+            .mstore
             .get_all::<Client>()
             .unwrap()
             .into_iter()
@@ -1242,7 +1242,7 @@ mod tests {
         client
             .windowids
             .insert(0, "stale-window-id-no-row".to_string());
-        state.wstore.update(&mut client).unwrap();
+        state.mstore.update(&mut client).unwrap();
 
         let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
 
@@ -1250,9 +1250,9 @@ mod tests {
             ret.error.is_none(),
             "a stale leading window id must not fail the whole flush"
         );
-        let snapshot = load_last_session_snapshot(&state.wstore)
+        let snapshot = load_last_session_snapshot(&state.mstore)
             .expect("the live workspace behind the second window id must still be captured");
-        let expected = snapshot_workspace(&state.wstore, &ws_id)
+        let expected = snapshot_workspace(&state.mstore, &ws_id)
             .expect("the real workspace is independently snapshot-able");
         assert_eq!(
             snapshot, expected,
@@ -1274,7 +1274,7 @@ mod tests {
         let live_ws_id = bootstrapped_workspace(&state);
 
         let mut client = state
-            .wstore
+            .mstore
             .get_all::<Client>()
             .unwrap()
             .into_iter()
@@ -1295,11 +1295,11 @@ mod tests {
             workspaceid: "workspace-that-was-deleted".to_string(),
             ..Default::default()
         };
-        state.wstore.insert(&mut dead_window).unwrap();
+        state.mstore.insert(&mut dead_window).unwrap();
 
         // Leading: the resolver must not stop here.
         client.windowids.insert(0, dead_window.oid.clone());
-        state.wstore.update(&mut client).unwrap();
+        state.mstore.update(&mut client).unwrap();
 
         let ret = handle_save_session_snapshot(&state, &shutdown_call()).await;
 
@@ -1307,9 +1307,9 @@ mod tests {
             ret.error.is_none(),
             "a dead-workspace window must not fail the whole flush when a live one follows"
         );
-        let snapshot = load_last_session_snapshot(&state.wstore)
+        let snapshot = load_last_session_snapshot(&state.mstore)
             .expect("the live workspace behind the second window must still be captured");
-        let expected = snapshot_workspace(&state.wstore, &live_ws_id)
+        let expected = snapshot_workspace(&state.mstore, &live_ws_id)
             .expect("the real workspace is independently snapshot-able");
         assert_eq!(
             snapshot, expected,

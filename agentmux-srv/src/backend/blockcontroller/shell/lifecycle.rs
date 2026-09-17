@@ -463,7 +463,7 @@ impl Controller for ShellController {
         // on the `block:` prefix specifically, the same discriminator
         // `websocket.rs`'s `strip_prefix("block:")` already uses.
         let is_sub_block = self
-            .wstore
+            .mstore
             .as_ref()
             .and_then(|store| store.get::<obj::Block>(&self.block_id).ok().flatten())
             .map(|b| b.parentoref.starts_with("block:"))
@@ -803,14 +803,14 @@ impl Controller for ShellController {
         }
         tracing::info!(
             block_id = %self.block_id,
-            wstore_present = self.wstore.is_some(),
+            wstore_present = self.mstore.is_some(),
             event_bus_present = self.event_bus.is_some(),
             "[dnd-debug] pre-seed state after spawn"
         );
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
-        if let Some(ref store) = self.wstore {
+        if let Some(ref store) = self.mstore {
             let effective_cwd = if !cwd.is_empty() {
                 cwd.clone()
             } else {
@@ -1068,7 +1068,7 @@ impl Controller for ShellController {
         // For the agent-lease release below: clearing the `term:agentlockuntil`
         // meta copy (not just the in-memory registry) needs both, since that
         // is what the frontend's own gate reads.
-        let wstore_wait = self.wstore.clone();
+        let wstore_wait = self.mstore.clone();
         let event_bus_wait = self.event_bus.clone();
         let run_lock = Arc::clone(&self.run_lock);
         // Async outer task, not a bare spawn_blocking (reagentx P1 on PR
@@ -1468,7 +1468,7 @@ impl Controller for ShellController {
         // isn't process-group-based, so `delete_controller`'s existing
         // whole-job close already reaches it there, unchanged.
         #[cfg(unix)]
-        if let Some(store) = &self.wstore {
+        if let Some(store) = &self.mstore {
             match store.background_task_list_for_block(&self.block_id) {
                 Ok(tasks) => {
                     for task in tasks {
@@ -1861,7 +1861,7 @@ async fn flush_barrier(
 pub(super) fn release_lease_if_current(
     block_id: &str,
     inner: &Arc<std::sync::Mutex<super::controller::ShellControllerInner>>,
-    wstore: &Option<Arc<crate::backend::storage::store::Store>>,
+    mstore: &Option<Arc<crate::backend::storage::store::Store>>,
     event_bus: &Option<Arc<crate::backend::eventbus::EventBus>>,
 ) -> bool {
     let is_current = super::super::get_controller(block_id)
@@ -1879,7 +1879,7 @@ pub(super) fn release_lease_if_current(
         );
         return false;
     }
-    super::super::agent_lock::release_and_clear_meta(block_id, wstore, event_bus);
+    super::super::agent_lock::release_and_clear_meta(block_id, mstore, event_bus);
     true
 }
 

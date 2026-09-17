@@ -49,9 +49,9 @@ impl Migration for M0020AgentColorBackfill {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("agent_color_backfill: open wstore: {}", e)))?,
+                .map_err(|e| MigrationError(format!("agent_color_backfill: open mstore: {}", e)))?,
         );
         // Attach the global registry (see module doc) so agent_def_list()
         // sees cross-channel agents, not just this channel's local rows.
@@ -62,13 +62,13 @@ impl Migration for M0020AgentColorBackfill {
         // agent this run couldn't see.
         if let Some(def_dir) = resolve_shared_definitions_dir() {
             match DefinitionStore::open(def_dir) {
-                Ok(def_store) => wstore.set_def_registry(Arc::new(def_store)),
+                Ok(def_store) => mstore.set_def_registry(Arc::new(def_store)),
                 Err(e) => tracing::warn!(error = %e, "agent_color_backfill: failed to open global def registry, backfilling local-only"),
             }
         } else {
             tracing::warn!("agent_color_backfill: could not resolve global def registry dir, backfilling local-only");
         }
-        let defs = wstore
+        let defs = mstore
             .agent_def_list()
             .map_err(|e| MigrationError(format!("agent_color_backfill: list defs: {}", e)))?;
         let now = std::time::SystemTime::now()
@@ -76,13 +76,13 @@ impl Migration for M0020AgentColorBackfill {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         for def in defs {
-            let existing = wstore
+            let existing = mstore
                 .agent_content_get(&def.id, "ui:color")
                 .map_err(|e| MigrationError(format!("agent_color_backfill: get {}: {}", def.id, e)))?;
             if existing.map_or(false, |c| !c.content.trim().is_empty()) {
                 continue;
             }
-            wstore
+            mstore
                 .agent_content_set(&AgentContent {
                     agent_id: def.id.clone(),
                     content_type: "ui:color".to_string(),
@@ -155,7 +155,7 @@ mod tests {
         }
     }
 
-    fn insert_def(wstore: &Store, name: &str) -> String {
+    fn insert_def(mstore: &Store, name: &str) -> String {
         let mut def = AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: format!("test-{name}"),
@@ -188,7 +188,7 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
         def.id
     }
 
@@ -196,10 +196,10 @@ mod tests {
     fn backfills_only_defs_without_a_color() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
-            let wstore = Store::open(tmp.path()).unwrap();
-            let plain = insert_def(&wstore, "plain");
-            let colored = insert_def(&wstore, "colored");
-            wstore
+            let mstore = Store::open(tmp.path()).unwrap();
+            let plain = insert_def(&mstore, "plain");
+            let colored = insert_def(&mstore, "colored");
+            mstore
                 .agent_content_set(&AgentContent {
                     agent_id: colored.clone(),
                     content_type: "ui:color".to_string(),
@@ -210,10 +210,10 @@ mod tests {
 
             M0020AgentColorBackfill.up(&ctx_for(tmp.path())).unwrap();
 
-            let filled = wstore.agent_content_get(&plain, "ui:color").unwrap().unwrap();
+            let filled = mstore.agent_content_get(&plain, "ui:color").unwrap().unwrap();
             assert!(is_valid_agent_color(&filled.content), "{}", filled.content);
             // Pre-existing color untouched.
-            let kept = wstore.agent_content_get(&colored, "ui:color").unwrap().unwrap();
+            let kept = mstore.agent_content_get(&colored, "ui:color").unwrap().unwrap();
             assert_eq!(kept.content, "#123abc");
             assert_eq!(kept.updated_at, 42);
         });
@@ -223,13 +223,13 @@ mod tests {
     fn rerun_is_idempotent() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
-            let wstore = Store::open(tmp.path()).unwrap();
-            let id = insert_def(&wstore, "one");
+            let mstore = Store::open(tmp.path()).unwrap();
+            let id = insert_def(&mstore, "one");
 
             M0020AgentColorBackfill.up(&ctx_for(tmp.path())).unwrap();
-            let first = wstore.agent_content_get(&id, "ui:color").unwrap().unwrap();
+            let first = mstore.agent_content_get(&id, "ui:color").unwrap().unwrap();
             M0020AgentColorBackfill.up(&ctx_for(tmp.path())).unwrap();
-            let second = wstore.agent_content_get(&id, "ui:color").unwrap().unwrap();
+            let second = mstore.agent_content_get(&id, "ui:color").unwrap().unwrap();
             assert_eq!(first.content, second.content);
             assert_eq!(first.updated_at, second.updated_at);
         });

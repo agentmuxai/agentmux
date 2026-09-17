@@ -22,7 +22,7 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 // pattern so future multi-window-on-same-workspace flows
 // don't accidentally drop user state.
 pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let window_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -272,7 +272,7 @@ mod close_window_divergence_tests {
 
     fn client_has_window(state: &crate::server::AppState, window_id: &str) -> bool {
         state
-            .wstore
+            .mstore
             .get_all::<Client>()
             .unwrap()
             .into_iter()
@@ -289,7 +289,7 @@ mod close_window_divergence_tests {
     #[tokio::test]
     async fn store_only_window_is_pruned_and_workspace_cascades() {
         let state = test_state();
-        let win = wcore::create_window_full(&state.wstore, "").unwrap();
+        let win = wcore::create_window_full(&state.mstore, "").unwrap();
         assert!(client_has_window(&state, &win.oid), "precondition: windowids entry");
         assert!(
             !state.srv_state.lock().await.windows.contains_key(&win.oid),
@@ -300,7 +300,7 @@ mod close_window_divergence_tests {
         assert!(ret.success, "divergent CloseWindow failed: {:?}", ret.error);
 
         assert!(
-            state.wstore.get::<Window>(&win.oid).unwrap().is_none(),
+            state.mstore.get::<Window>(&win.oid).unwrap().is_none(),
             "Window row must be deleted"
         );
         assert!(
@@ -308,7 +308,7 @@ mod close_window_divergence_tests {
             "Client.windowids entry must be pruned"
         );
         assert!(
-            state.wstore.get::<Workspace>(&win.workspaceid).unwrap().is_none(),
+            state.mstore.get::<Workspace>(&win.workspaceid).unwrap().is_none(),
             "orphaned workspace must cascade-delete"
         );
     }
@@ -318,19 +318,19 @@ mod close_window_divergence_tests {
     #[tokio::test]
     async fn shared_workspace_survives_divergent_close() {
         let state = test_state();
-        let first = wcore::create_window_full(&state.wstore, "").unwrap();
+        let first = wcore::create_window_full(&state.mstore, "").unwrap();
         let second =
-            wcore::create_window_full(&state.wstore, &first.workspaceid).unwrap();
+            wcore::create_window_full(&state.mstore, &first.workspaceid).unwrap();
 
         let ret = handle_window_service(&state, &close_call(&first.oid)).await;
         assert!(ret.success, "divergent CloseWindow failed: {:?}", ret.error);
 
         assert!(
-            state.wstore.get::<Workspace>(&first.workspaceid).unwrap().is_some(),
+            state.mstore.get::<Workspace>(&first.workspaceid).unwrap().is_some(),
             "workspace referenced by another window must survive"
         );
         assert!(
-            state.wstore.get::<Window>(&second.oid).unwrap().is_some(),
+            state.mstore.get::<Window>(&second.oid).unwrap().is_some(),
             "the other window must be untouched"
         );
     }
@@ -386,14 +386,14 @@ mod snapshot_timing_tests {
     }
 
     fn rename_first_tab(state: &crate::server::AppState, workspace_id: &str, name: &str) {
-        let ws = state.wstore.get::<Workspace>(workspace_id).unwrap().unwrap();
-        let mut tab = state.wstore.get::<Tab>(&ws.tabids[0]).unwrap().unwrap();
+        let ws = state.mstore.get::<Workspace>(workspace_id).unwrap().unwrap();
+        let mut tab = state.mstore.get::<Tab>(&ws.tabids[0]).unwrap().unwrap();
         tab.name = name.to_string();
-        state.wstore.update(&mut tab).unwrap();
+        state.mstore.update(&mut tab).unwrap();
     }
 
     fn last_session_snapshot_tab_name(state: &crate::server::AppState) -> Option<String> {
-        let client = state.wstore.get_all::<Client>().unwrap().into_iter().next()?;
+        let client = state.mstore.get_all::<Client>().unwrap().into_iter().next()?;
         let snapshot = client.meta.get("session:last_topology")?;
         snapshot["tabs"][0]["name"].as_str().map(|s| s.to_string())
     }
@@ -406,7 +406,7 @@ mod snapshot_timing_tests {
     /// setting up a test's own "N independent windows" scenario.
     async fn close_bootstrap_window(state: &crate::server::AppState) {
         let bootstrap_id = state
-            .wstore
+            .mstore
             .get_all::<Client>()
             .unwrap()
             .into_iter()

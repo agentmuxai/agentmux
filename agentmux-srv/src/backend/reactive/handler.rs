@@ -975,7 +975,7 @@ impl Handler {
     /// `Handler` has no `Store` access by design (this module doesn't
     /// depend on `backend::storage`). That gate lives at the HTTP boundary,
     /// in `handle_reactive_supervisor_decision`
-    /// (`server/reactive.rs`), which has `AppState::wstore`. Any other
+    /// (`server/reactive.rs`), which has `AppState::mstore`. Any other
     /// caller of this method directly is responsible for its own
     /// entitlement check first.
     pub fn record_supervisor_decision(

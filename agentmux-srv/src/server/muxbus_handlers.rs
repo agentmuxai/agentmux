@@ -63,7 +63,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(
         COMMAND_MUXBUS_LOGIN,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_login.clone();
+            let mstore = wstore_login.clone();
             let http = http_client_login.clone();
             Box::pin(async move {
                 let req: MuxBusLoginReq = serde_json::from_value(data)
@@ -90,7 +90,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // daemon (headless Linux) and must not stall this
                         // tokio worker thread.
                         let email = result.credentials.user_email.clone();
-                        let save_store = wstore.clone();
+                        let save_store = mstore.clone();
                         let save_result = tokio::task::spawn_blocking(move || {
                             save_store.muxbus_save(&result.credentials)
                         })
@@ -122,7 +122,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             Some(sub) => sub.reload_token(),
                             None => {
                                 crate::muxbus::cloud_subscriber::CloudSubscriber::init_global(
-                                    wstore.clone(),
+                                    mstore.clone(),
                                 );
                             }
                         }
@@ -168,7 +168,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(
         COMMAND_MUXBUS_STATUS,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore_status.clone();
+            let mstore = wstore_status.clone();
             Box::pin(async move {
                 // reagentx P0 on PR #3248, round 2: `frontend/app/statusbar/
                 // HostPopover.tsx` mounts globally and polls this handler on
@@ -195,7 +195,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
                 // spawn_blocking — reagent P1 on #2260: same
                 // synchronous-keychain-read concern as muxbus.login's save.
-                let load_store = wstore.clone();
+                let load_store = mstore.clone();
                 let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load())
                     .await
                     .map_err(|e| format!("muxbus.status: load task: {e}"))?;
@@ -232,12 +232,12 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(
         COMMAND_MUXBUS_DISCONNECT,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore_disconnect.clone();
+            let mstore = wstore_disconnect.clone();
             Box::pin(async move {
                 // spawn_blocking — reagent P1 on #2260: muxbus_clear does a
                 // synchronous OS-keychain delete, same concern as every
                 // other muxbus call site in this module.
-                tokio::task::spawn_blocking(move || wstore.muxbus_clear())
+                tokio::task::spawn_blocking(move || mstore.muxbus_clear())
                     .await
                     .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
@@ -278,13 +278,13 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// means injection starts working on the very next agent spawn after
 /// login, same session, no restart.
 pub async fn inject_muxbus_env(
-    wstore: &Arc<crate::backend::storage::store::Store>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
     env_vars: &mut std::collections::HashMap<String, String>,
 ) {
     if crate::muxbus::cloud_subscriber::get_global_subscriber().is_none() {
         return;
     }
-    let load_store = wstore.clone();
+    let load_store = mstore.clone();
     let load_result = tokio::task::spawn_blocking(move || load_store.muxbus_load()).await;
     let creds = match load_result {
         Ok(Ok(Some(c))) => c,

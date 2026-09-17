@@ -137,13 +137,13 @@ pub(crate) fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
 /// moment it reappears on disk (recreated with new content), so a later
 /// re-deletion is detected fresh rather than staying permanently suppressed.
 pub(crate) fn reconciliation_sweep_once(
-    wstore: &Store,
+    mstore: &Store,
     id_store: &Store,
     broker: &crate::backend::mps::Broker,
     deleted_notified: &mut HashSet<(String, String)>,
 ) -> usize {
     let mut drifted = 0;
-    let targets = list_all_memory_targets(wstore);
+    let targets = list_all_memory_targets(mstore);
     for (agent_id, memory_dir) in &targets {
         drifted += sweep_one_agent_dir(id_store, agent_id, memory_dir, "reconciliation_sweep", broker);
     }
@@ -244,20 +244,20 @@ fn sweep_one_agent_dir(
 }
 
 /// Start both layers. Call once at server startup with a fully-built
-/// `AppState`'s `fs_watch_pool`/`wstore`/`id_store`. Returns immediately —
+/// `AppState`'s `fs_watch_pool`/`mstore`/`id_store`. Returns immediately —
 /// both loops run as spawned background tasks for the lifetime of the
 /// process (no shutdown handle; srv itself owns the process lifetime).
 pub fn spawn(
     fs_watch_pool: Arc<FsWatchPool>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     id_store: Arc<Store>,
     broker: Arc<crate::backend::mps::Broker>,
 ) {
-    spawn_fast_path(fs_watch_pool, wstore.clone(), id_store.clone(), broker.clone());
-    spawn_slow_path(wstore, id_store, broker);
+    spawn_fast_path(fs_watch_pool, mstore.clone(), id_store.clone(), broker.clone());
+    spawn_slow_path(mstore, id_store, broker);
 }
 
-fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::mps::Broker>) {
+fn spawn_slow_path(mstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::mps::Broker>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_INTERVAL);
         // Persistent across ticks, same pattern as the fast path's own
@@ -266,7 +266,7 @@ fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::
         let mut deleted_notified: HashSet<(String, String)> = HashSet::new();
         loop {
             tick.tick().await;
-            reconciliation_sweep_once(&wstore, &id_store, &broker, &mut deleted_notified);
+            reconciliation_sweep_once(&mstore, &id_store, &broker, &mut deleted_notified);
         }
     });
 }
@@ -284,7 +284,7 @@ fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::
 /// to avoid redundant re-subscription every tick.
 fn spawn_fast_path(
     fs_watch_pool: Arc<FsWatchPool>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     id_store: Arc<Store>,
     broker: Arc<crate::backend::mps::Broker>,
 ) {
@@ -297,7 +297,7 @@ fn spawn_fast_path(
         loop {
             tokio::select! {
                 _ = tick.tick() => {
-                    refresh_subscriptions(&fs_watch_pool, &wstore, &mut watched_dirs, &mut dir_to_agent);
+                    refresh_subscriptions(&fs_watch_pool, &mstore, &mut watched_dirs, &mut dir_to_agent);
                 }
                 event = events.recv() => {
                     let event = match event {
@@ -361,11 +361,11 @@ fn spawn_fast_path(
 
 fn refresh_subscriptions(
     fs_watch_pool: &Arc<FsWatchPool>,
-    wstore: &Store,
+    mstore: &Store,
     watched_dirs: &mut HashSet<PathBuf>,
     dir_to_agent: &mut std::collections::HashMap<PathBuf, String>,
 ) {
-    for (agent_id, memory_dir) in list_all_memory_targets(wstore) {
+    for (agent_id, memory_dir) in list_all_memory_targets(mstore) {
         // subscribe_dir canonicalizes internally; canonicalize here too so
         // watched_dirs/dir_to_agent key on the same form an incoming
         // event's path will actually have (events report canonical paths —
@@ -609,9 +609,9 @@ mod tests {
                 model_vendor_base_url: String::new(),
                 memory_id: String::new(),
             };
-            state.wstore.agent_def_insert(&mut def).unwrap();
+            state.mstore.agent_def_insert(&mut def).unwrap();
             state
-                .wstore
+                .mstore
                 .agent_content_set(&crate::backend::storage::AgentContent {
                     agent_id: id.to_string(),
                     content_type: "env".to_string(),
@@ -620,14 +620,14 @@ mod tests {
                 })
                 .unwrap();
 
-            let memory_dir = memory_dir_for_agent_by_id(&state.wstore, &def).unwrap();
+            let memory_dir = memory_dir_for_agent_by_id(&state.mstore, &def).unwrap();
             std::fs::create_dir_all(&memory_dir).unwrap();
             std::fs::write(memory_dir.join("MEMORY.md"), format!("content for {id}")).unwrap();
         }
 
         let broker = crate::backend::mps::Broker::new();
         let mut deleted_notified = HashSet::new();
-        let drifted = reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        let drifted = reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(drifted, 2, "sweep must cover every agent with a working directory");
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-a", "MEMORY.md").unwrap().len(), 1);
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-b", "MEMORY.md").unwrap().len(), 1);
@@ -688,9 +688,9 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .agent_content_set(&crate::backend::storage::AgentContent {
                 agent_id: def.id.clone(),
                 content_type: "env".to_string(),
@@ -698,7 +698,7 @@ mod tests {
                 updated_at: 0,
             })
             .unwrap();
-        let memory_dir = memory_dir_for_agent_by_id(&state.wstore, &def).unwrap();
+        let memory_dir = memory_dir_for_agent_by_id(&state.mstore, &def).unwrap();
         std::fs::create_dir_all(&memory_dir).unwrap();
         let file_path = memory_dir.join("MEMORY.md");
         std::fs::write(&file_path, "content").unwrap();
@@ -708,33 +708,33 @@ mod tests {
 
         // Sweep 1: file present — establishes the recorded version (and
         // publishes once, from ordinary content-drift, not deletion logic).
-        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(client.received_events().len(), 1);
 
         // Delete the file out of band (not through write_file/revert).
         std::fs::remove_file(&file_path).unwrap();
 
         // Sweep 2: first sweep to observe the deletion — must publish.
-        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(client.received_events().len(), 2, "the sweep that first observes a deletion must publish");
 
         // Sweep 3: file still gone — must NOT publish again (suppressed;
         // otherwise a permanently-deleted file would fire an event every
         // 30s tick forever).
-        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(client.received_events().len(), 2, "a repeat sweep over an already-reported deletion must not re-publish");
 
         // Recreate the file — content-drift detects it as a new version
         // (publish #3) and clears the deletion-suppression for this file.
         std::fs::write(&file_path, "recreated content").unwrap();
-        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(client.received_events().len(), 3);
 
         // Delete it again — must be detected as a FRESH deletion (publish
         // #4), proving the suppression state was actually cleared on
         // recreation, not permanently stuck once a file is ever deleted once.
         std::fs::remove_file(&file_path).unwrap();
-        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        reconciliation_sweep_once(&state.mstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(client.received_events().len(), 4, "a re-deletion after recreation must be detected as a fresh event");
 
         match prev_shared_dir {

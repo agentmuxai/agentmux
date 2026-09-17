@@ -569,7 +569,7 @@ pub fn resync_controller(
     respawn_if_done: bool,
     broker: Option<Arc<Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
     registry: Option<Arc<crate::registry::Registry>>,
     boot_id: Arc<str>,
@@ -603,7 +603,7 @@ pub fn resync_controller(
     tracing::info!(
         block_id = %block_id,
         controller_type = %controller_type,
-        wstore_present = wstore.is_some(),
+        wstore_present = mstore.is_some(),
         event_bus_present = event_bus.is_some(),
         force,
         "[dnd-debug] resync_controller entry"
@@ -698,7 +698,7 @@ pub fn resync_controller(
                 block_id.to_string(),
                 broker,
                 event_bus,
-                wstore,
+                mstore,
                 filestore,
             );
             let ctrl = Arc::new(ctrl);
@@ -721,7 +721,7 @@ pub fn resync_controller(
                 block_id.to_string(),
                 broker,
                 event_bus,
-                wstore,
+                mstore,
                 filestore,
                 registry,
                 boot_id,
@@ -739,7 +739,7 @@ pub fn resync_controller(
                 block_id.to_string(),
                 broker,
                 event_bus,
-                wstore,
+                mstore,
                 filestore,
             );
             let ctrl = Arc::new(ctrl);
@@ -755,7 +755,7 @@ pub fn resync_controller(
                 block_id.to_string(),
                 broker,
                 event_bus,
-                wstore,
+                mstore,
                 filestore,
             );
             let ctrl = Arc::new(ctrl);
@@ -770,7 +770,7 @@ pub fn resync_controller(
                 block_id.to_string(),
                 broker,
                 event_bus,
-                wstore,
+                mstore,
                 filestore,
             );
             let ctrl = Arc::new(ctrl);

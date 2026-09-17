@@ -25,15 +25,15 @@ use super::super::AppState;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Agent instance CRUD ----
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_INSTANCES,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandListAgentInstancesData =
                     serde_json::from_value(data).unwrap_or_default();
-                let rows = wstore
+                let rows = mstore
                     .instance_list(cmd.definition_id.as_deref(), cmd.status.as_deref())
                     .map_err(|e| format!("listagentinstances: {e}"))?;
                 Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
@@ -41,15 +41,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_GET_AGENT_INSTANCE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandGetAgentInstanceData = serde_json::from_value(data)
                     .map_err(|e| format!("getagentinstance: {e}"))?;
-                match wstore
+                match mstore
                     .instance_get(&cmd.id)
                     .map_err(|e| format!("getagentinstance: {e}"))?
                 {
@@ -60,12 +60,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_CREATE_AGENT_INSTANCE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandCreateAgentInstanceData = serde_json::from_value(data)
@@ -110,7 +110,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // zone on the definition the launch modal opened
                 // (`agent:<defId>:current`), and the frontend subscribes to
                 // `agentinstances:changed:<defId>` by that same id.
-                let created = wstore
+                let created = mstore
                     .instance_create(&inst)
                     .map_err(|e| format!("createagentinstance: {e}"))?;
 
@@ -133,7 +133,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     );
                     let oref_str = format!("block:{}", inst.block_id);
                     if let Err(e) = crate::server::service::update_object_meta(
-                        &wstore, &oref_str, &meta_update,
+                        &mstore, &oref_str, &meta_update,
                     ) {
                         // Non-fatal — the instance row is the source
                         // of truth, the meta stamp is a frontend
@@ -160,12 +160,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPDATE_AGENT_INSTANCE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandUpdateAgentInstanceData = serde_json::from_value(data)
@@ -185,7 +185,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     github_context: cmd.github_context,
                     ended_at: cmd.ended_at,
                 };
-                let fresh = wstore
+                let fresh = mstore
                     .instance_update_partial(&cmd.id, &upd)
                     .map_err(|e| format!("updateagentinstance: {e}"))?
                     .ok_or_else(|| format!("updateagentinstance: not found id={}", cmd.id))?;
@@ -201,22 +201,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let identity_store_del = state.identity_store.clone();
     engine.register_typed(
         COMMAND_DELETE_AGENT_INSTANCE,
         move |cmd: CommandDeleteAgentInstanceData, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             let identity_store = identity_store_del.clone();
             async move {
                 // Read the row first so we can emit a scoped event after.
-                let definition_id = wstore
+                let definition_id = mstore
                     .instance_get(&cmd.id)
                     .map_err(|e| format!("deleteagentinstance: {e}"))?
                     .map(|i| i.definition_id);
-                let deleted = wstore
+                let deleted = mstore
                     .instance_delete(&cmd.id)
                     .map_err(|e| format!("deleteagentinstance: {e}"))?;
                 // Unconditional, matching the sibling `deleteagent` handler

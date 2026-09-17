@@ -7,7 +7,7 @@
 //!
 //! The frontend talks to srv through 284 hand-written command stubs
 //! (`frontend/app/store/rpc-api/*.ts`) and a 2,819-line hand-maintained
-//! `frontend/types/gotypes.d.ts`, every one of them headed "keep in sync
+//! `frontend/types/srv-types.d.ts`, every one of them headed "keep in sync
 //! with the agentmux-srv RPC". `docs/reports/REPORT_DRY_AND_MODULARITY_AUDIT_2026_09_06.md`
 //! §2.1 counted 334 such comments and one live drift found by hand.
 //!

@@ -180,7 +180,7 @@ impl Migration for M0027AgentsWorkspaceBackfill {
         // touches the table.
         drop(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("agents_workspace_backfill: open wstore: {e}")))?,
+                .map_err(|e| MigrationError(format!("agents_workspace_backfill: open mstore: {e}")))?,
         );
         let conn = Connection::open(&ctx.channel_store_path)
             .map_err(|e| MigrationError(format!("agents_workspace_backfill: open: {e}")))?;

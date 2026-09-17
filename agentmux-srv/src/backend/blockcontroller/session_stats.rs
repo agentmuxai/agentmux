@@ -70,7 +70,7 @@ impl SessionStatsAccumulator {
     /// Updates in-memory counters.  Flushes to the Store if the debounce
     /// interval has elapsed *or* if this is the very first line (so the
     /// frontend sees `session:start_ts_ms` promptly).
-    pub fn record_line(&mut self, line_len: usize, wstore: &Option<Arc<Store>>) {
+    pub fn record_line(&mut self, line_len: usize, mstore: &Option<Arc<Store>>) {
         let ts = now_ms();
         let is_first = self.start_ts_ms == 0;
 
@@ -88,7 +88,7 @@ impl SessionStatsAccumulator {
         };
 
         if should_flush {
-            if let Some(ref store) = wstore {
+            if let Some(ref store) = mstore {
                 self.flush(store);
             }
         }
@@ -97,7 +97,7 @@ impl SessionStatsAccumulator {
     /// Force-flush all accumulated stats to the Store right now.
     ///
     /// Called by `record_line` when the debounce window has elapsed.
-    fn flush(&mut self, wstore: &Arc<Store>) {
+    fn flush(&mut self, mstore: &Arc<Store>) {
         let oref_str = format!("block:{}", self.block_id);
         let mut meta_update = MetaMapType::new();
 
@@ -120,7 +120,7 @@ impl SessionStatsAccumulator {
             serde_json::json!(self.token_estimate),
         );
 
-        match crate::server::service::update_object_meta(wstore, &oref_str, &meta_update) {
+        match crate::server::service::update_object_meta(mstore, &oref_str, &meta_update) {
             Ok(()) => {
                 tracing::trace!(
                     block_id = %self.block_id,
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_accumulator_first_line_sets_start_ts() {
         let mut acc = SessionStatsAccumulator::new("blk-1".to_string());
-        // No wstore — flush is skipped but counters still update.
+        // No mstore — flush is skipped but counters still update.
         acc.record_line(100, &None);
         assert_ne!(acc.start_ts_ms, 0);
         assert_eq!(acc.line_count, 1);

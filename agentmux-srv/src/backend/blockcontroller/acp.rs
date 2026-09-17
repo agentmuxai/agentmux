@@ -92,7 +92,7 @@ pub struct AcpController {
     inner: Arc<Mutex<AcpInner>>,
     broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<TurnActivityTracker>,
     /// Monotonically increasing JSON-RPC request ID.
@@ -116,7 +116,7 @@ impl AcpController {
         block_id: String,
         broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
@@ -135,7 +135,7 @@ impl AcpController {
             })),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
@@ -313,11 +313,11 @@ impl AcpController {
         let health_clone = self.health_monitor.clone();
         let rpc_id_clone = self.next_rpc_id.clone();
         let outstanding_prompt_ids_clone = self.outstanding_prompt_ids.clone();
-        let wstore_clone = self.wstore.clone();
+        let wstore_clone = self.mstore.clone();
         let event_bus_clone = self.event_bus.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
-            super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
             tracing::info!(block_id = %block_id_stdout, "ACP stdout_reader started");

@@ -58,7 +58,7 @@ const WORD_TARGET: u32 = 12;
 pub const EVENT_AGENT_SUMMARY: &str = "agent:summary";
 
 /// Run the pushed-summary sweep loop. Never returns.
-pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore>, broker: Arc<Broker>) {
+pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore>, broker: Arc<Broker>) {
     let mut ticker = interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_SUMMARIES));
     // block_id -> last output size we *successfully* summarized at, so idle
@@ -118,7 +118,7 @@ pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore
                 continue; // a summarization for this block is already running
             }
 
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             let broker = broker.clone();
             let semaphore = semaphore.clone();
@@ -133,7 +133,7 @@ pub async fn run_agent_summary_loop(wstore: Arc<Store>, filestore: Arc<FileStore
                 };
 
                 let result = crate::server::app_api::session::generate_pushed_activity_summary(
-                    &wstore, &filestore, &block_id, tick, WORD_TARGET,
+                    &mstore, &filestore, &block_id, tick, WORD_TARGET,
                 ).await;
 
                 in_flight.lock().unwrap().remove(&block_id);

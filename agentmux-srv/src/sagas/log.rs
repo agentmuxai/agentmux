@@ -15,7 +15,7 @@
 // reducer's persistence path. (The two-store atomicity concern from
 // spec §2.1 is not load-bearing for PR 1; saga steps are written
 // after the reducer-emitted event has already been applied to
-// wstore by `apply_event_to_wstore`. Compensate-on-restart in PR 2
+// mstore by `apply_event_to_wstore`. Compensate-on-restart in PR 2
 // will reconcile any divergence by walking succeeded steps in
 // reverse.)
 //
@@ -150,7 +150,7 @@ impl SagaLog {
              PRAGMA temp_store=MEMORY;
              PRAGMA foreign_keys=ON;",
         )?;
-        // Safety lock BEFORE migrations — same discipline as wstore /
+        // Safety lock BEFORE migrations — same discipline as mstore /
         // filestore: refuse to touch a newer-schema DB on disk before
         // any mutating step runs. See `check_schema_compat` doc.
         check_schema_compat(&conn, SAGA_LOG_SCHEMA_VERSION, "sagas.db")?;

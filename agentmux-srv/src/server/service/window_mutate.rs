@@ -16,7 +16,7 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 // both exist + emits SrvWindowWorkspaceChanged; subscriber
 // writes Window.workspaceid in SQLite.
 pub(crate) async fn handle_switch_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let window_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -53,7 +53,7 @@ pub(crate) async fn handle_switch_workspace(state: &AppState, call: &WebCallType
 }
 
 pub(crate) async fn handle_set_window_pos_and_size(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let window_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -92,7 +92,7 @@ pub(crate) async fn handle_set_window_pos_and_size(state: &AppState, call: &WebC
 // non-f32) argument must surface as an error, not get silently
 // treated as an explicit clear. (reagent P1.)
 pub(crate) async fn handle_set_window_opacity(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let window_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -129,7 +129,7 @@ pub(crate) async fn handle_set_window_opacity(state: &AppState, call: &WebCallTy
 // `state::WindowRecord`), so there's no split-brain risk to route
 // around.
 pub(crate) async fn handle_set_window_topology(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let window_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -248,7 +248,7 @@ mod set_window_opacity_tests {
         let ret = handle_window_service(&state, &call(&window_id, Some(0.85))).await;
         assert!(ret.success, "SetWindowOpacity failed: {:?}", ret.error);
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.opacity, Some(0.85));
     }
 
@@ -262,7 +262,7 @@ mod set_window_opacity_tests {
         let ret = handle_window_service(&state, &call(&window_id, None)).await;
         assert!(ret.success, "SetWindowOpacity (clear) failed: {:?}", ret.error);
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.opacity, None, "None must clear back to unset/opaque");
     }
 
@@ -276,7 +276,7 @@ mod set_window_opacity_tests {
             assert!(!ret.success, "opacity {bad} must be rejected");
         }
         // Rejected — window's opacity must stay unset.
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.opacity, None);
     }
 
@@ -311,7 +311,7 @@ mod set_window_opacity_tests {
         let ret = handle_window_service(&state, &bad_call).await;
         assert!(!ret.success, "malformed opacity must error, not be treated as clear");
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(
             win.opacity,
             Some(0.6),
@@ -327,7 +327,7 @@ mod set_window_opacity_tests {
         for boundary in [0.0_f32, 1.0_f32] {
             let ret = handle_window_service(&state, &call(&window_id, Some(boundary))).await;
             assert!(ret.success, "boundary opacity {boundary} must be accepted");
-            let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+            let win = state.mstore.must_get::<Window>(&window_id).unwrap();
             assert_eq!(win.opacity, Some(boundary));
         }
     }
@@ -387,7 +387,7 @@ mod set_window_topology_tests {
         let ret = handle_window_service(&state, &call(&window_id, Some("full_instance"), None)).await;
         assert!(ret.success, "SetWindowTopology failed: {:?}", ret.error);
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.kind, Some("full_instance".to_string()));
         assert_eq!(win.parent_window_id, None);
     }
@@ -402,7 +402,7 @@ mod set_window_topology_tests {
             handle_window_service(&state, &call(&window_id, Some("subwindow"), Some(&parent_id))).await;
         assert!(ret.success, "SetWindowTopology failed: {:?}", ret.error);
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.kind, Some("subwindow".to_string()));
         assert_eq!(win.parent_window_id, Some(parent_id));
     }
@@ -415,7 +415,7 @@ mod set_window_topology_tests {
         let ret = handle_window_service(&state, &call(&window_id, Some("subwindow"), None)).await;
         assert!(!ret.success, "subwindow with no parent_window_id must be rejected");
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.kind, None, "rejected write must not persist");
     }
 
@@ -442,7 +442,7 @@ mod set_window_topology_tests {
                 .await;
         assert!(!ret.success, "full_instance with a parent_window_id must be rejected");
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.kind, None, "rejected write must not persist");
     }
 
@@ -470,7 +470,7 @@ mod set_window_topology_tests {
                 .await;
         assert!(!ret.success, "a parent_window_id that doesn't exist must be rejected");
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.kind, None, "rejected write must not persist");
     }
 
@@ -494,7 +494,7 @@ mod set_window_topology_tests {
         let ret = handle_window_service(&state, &call(&window_id, None, None)).await;
         assert!(ret.success, "SetWindowTopology (clear) failed: {:?}", ret.error);
 
-        let win = state.wstore.must_get::<Window>(&window_id).unwrap();
+        let win = state.mstore.must_get::<Window>(&window_id).unwrap();
         assert_eq!(win.kind, None);
         assert_eq!(win.parent_window_id, None);
     }

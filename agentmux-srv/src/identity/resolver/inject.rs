@@ -72,13 +72,13 @@ use super::secret::resolve_secret;
 /// bindings, but oauth-class resolution failures now fail the spawn by
 /// default so account deletion is honest at the next spawn.
 pub fn inject_identity_env(
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     id_store: Arc<Store>,
     identity_store: Arc<Store>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) -> Result<(), SpawnGateError> {
-    inject_identity_env_with_broker(wstore, id_store, identity_store, None, block_id, env_vars)
+    inject_identity_env_with_broker(mstore, id_store, identity_store, None, block_id, env_vars)
 }
 
 /// `inject_identity_env` + optional broker handle so the OAuth-class
@@ -103,7 +103,7 @@ pub fn inject_identity_env(
 /// the spawn) — see that variant's doc for why an open fallback would
 /// systemically bypass the gate after any store panic.
 pub async fn inject_identity_env_async(
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     id_store: Arc<Store>,
     identity_store: Arc<Store>,
     broker: Option<Arc<Broker>>,
@@ -112,7 +112,7 @@ pub async fn inject_identity_env_async(
 ) -> Result<HashMap<String, String>, SpawnGateError> {
     match tokio::task::spawn_blocking(move || {
         let mut env = env_vars;
-        inject_identity_env_with_broker(wstore, id_store, identity_store, broker, &block_id, &mut env)
+        inject_identity_env_with_broker(mstore, id_store, identity_store, broker, &block_id, &mut env)
             .map(|()| env)
     })
     .await
@@ -196,15 +196,15 @@ struct IdentityBinding {
 /// `parent_id` back only when it names a row with `is_seeded = 1` — a
 /// genuine template — never for a plain agent-to-agent fork, which reuses
 /// the same `parent_id`/`parent_template_id` column for unrelated lineage.
-/// `wstore` is the store `parent_id` was read from (the same one
+/// `mstore` is the store `parent_id` was read from (the same one
 /// `agent_def_get` resolved the launch's own row through); an empty
 /// `parent_id`, a lookup failure, or a parent that resolves but isn't
 /// seeded all return `""` — "no eligible template parent," not an error.
-fn template_parent_id_if_seeded(wstore: &Store, parent_id: &str) -> String {
+fn template_parent_id_if_seeded(mstore: &Store, parent_id: &str) -> String {
     if parent_id.is_empty() {
         return String::new();
     }
-    match wstore.agent_def_get(parent_id) {
+    match mstore.agent_def_get(parent_id) {
         Ok(Some(parent)) if parent.is_seeded == 1 => parent_id.to_string(),
         Ok(Some(_)) => String::new(), // a fork's source, not a template — reagent P0 on #3092
         Ok(None) => String::new(),
@@ -389,20 +389,20 @@ pub fn resolve_account_for_spawn(
 /// "nothing bound, fall back to the old behavior" for a caller that isn't
 /// gating a spawn.
 pub fn resolve_bound_oauth_config_dir(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
     block_id: &str,
 ) -> Option<PathBuf> {
-    let instance = wstore.instance_get_active_for_block(block_id).ok().flatten()?;
-    let def = wstore.agent_def_get(&instance.definition_id).ok().flatten()?;
+    let instance = mstore.instance_get_active_for_block(block_id).ok().flatten()?;
+    let def = mstore.agent_def_get(&instance.definition_id).ok().flatten()?;
     let effective_provider = id_store.resolve_effective_provider_id(&def);
     let canonical_provider = resolve_provider_alias(&effective_provider).to_string();
     if !matches!(provider_class(&canonical_provider), Some(ProviderClass::OAuth { .. })) {
         return None;
     }
 
-    let template_parent_id = template_parent_id_if_seeded(wstore, &def.parent_id);
+    let template_parent_id = template_parent_id_if_seeded(mstore, &def.parent_id);
     let bindings = resolve_bindings_for_instance(identity_store, &instance, &template_parent_id, None);
     let binding = bindings
         .iter()
@@ -430,15 +430,15 @@ pub fn resolve_bound_oauth_config_dir(
 /// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
 /// isolated-auto-provision option that used to exist implicitly.
 pub fn inject_identity_env_with_broker(
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     id_store: Arc<Store>,
     identity_store: Arc<Store>,
     broker: Option<Arc<Broker>>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) -> Result<(), SpawnGateError> {
-    // Step 1: instance lookup — per-channel, always reads from wstore.
-    let instance = match wstore.instance_get_active_for_block(block_id) {
+    // Step 1: instance lookup — per-channel, always reads from mstore.
+    let instance = match mstore.instance_get_active_for_block(block_id) {
         Ok(Some(i)) => i,
         Ok(None) => {
             // Block has no agent instance row — nothing to inject, and no
@@ -505,10 +505,10 @@ pub fn inject_identity_env_with_broker(
     // bundle already carries the canonical id doesn't get re-aliased
     // incorrectly (resolve_provider_alias is idempotent on an
     // already-canonical id, so this is safe either way).
-    let (use_ambient, def_provider, parent_template_id) = match wstore.agent_def_get(&instance.definition_id) {
+    let (use_ambient, def_provider, parent_template_id) = match mstore.agent_def_get(&instance.definition_id) {
         Ok(Some(d)) => {
             let effective_provider = id_store.resolve_effective_provider_id(&d);
-            let template_parent_id = template_parent_id_if_seeded(&wstore, &d.parent_id);
+            let template_parent_id = template_parent_id_if_seeded(&mstore, &d.parent_id);
             (
                 d.use_ambient_login != 0,
                 Some(resolve_provider_alias(&effective_provider).to_string()),
@@ -1256,14 +1256,14 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn inject_refuses_an_account_that_only_exists_in_the_global_mirror() {
-        let wstore = make_store();
+        let mstore = make_store();
         // Deliberately EMPTY of the account and link — simulates a fresh,
         // isolated per-channel id_store on a new channel/version.
         let id_store = make_store();
         // Real identity-store schema (no account_id/agent_id FK, matching
         // production's Store::open_identity_store — NOT open_in_memory's
         // channel schema, which still has both FKs and would reject this
-        // link since "def-1" only exists in wstore's own definitions
+        // link since "def-1" only exists in mstore's own definitions
         // table, a different physical store). Simulates the post-migration
         // state: both the link AND the account mirror row live here,
         // exactly what m0022_identity_store_links_backfill produces.
@@ -1302,7 +1302,7 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
 
         let claude = make_account(
             "acct-migrated",
@@ -1316,12 +1316,12 @@ mod tests {
             .agent_identity_link("def-1", "acct-migrated", "claude")
             .unwrap();
 
-        insert_block_for_agent(&wstore, "block-continuing", "def-1");
+        insert_block_for_agent(&mstore, "block-continuing", "def-1");
         let inst = make_instance("block-continuing", "id-continuing");
-        wstore.instance_create(&inst).unwrap();
+        mstore.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(wstore, id_store, identity_store, "block-continuing", &mut env);
+        let res = inject_identity_env(mstore, id_store, identity_store, "block-continuing", &mut env);
 
         assert!(
             matches!(res, Err(SpawnGateError::MissingCredentials { .. })),
@@ -1352,7 +1352,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn inject_refuses_a_mirror_written_account_after_a_channel_switch() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         let identity_store_tmp = tempfile::NamedTempFile::new().unwrap();
         let identity_store = Arc::new(Store::open_identity_store(identity_store_tmp.path()).unwrap());
@@ -1391,7 +1391,7 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
 
         // "Before the channel switch": the account is created live, via the
         // same helper `identity.account.upsert`/OAuth persist use — writing
@@ -1409,9 +1409,9 @@ mod tests {
             .agent_identity_link("def-1", "acct-fresh", "claude")
             .unwrap();
 
-        insert_block_for_agent(&wstore, "block-fresh", "def-1");
+        insert_block_for_agent(&mstore, "block-fresh", "def-1");
         let inst = make_instance("block-fresh", "id-fresh");
-        wstore.instance_create(&inst).unwrap();
+        mstore.instance_create(&inst).unwrap();
 
         // "After the channel switch": a brand-new, empty id_store — the
         // account row created above must be unreachable here, exactly like
@@ -1419,7 +1419,7 @@ mod tests {
         let id_store_after_switch = make_store();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(wstore, id_store_after_switch, identity_store, "block-fresh", &mut env);
+        let res = inject_identity_env(mstore, id_store_after_switch, identity_store, "block-fresh", &mut env);
 
         assert!(
             matches!(res, Err(SpawnGateError::MissingCredentials { .. })),
@@ -2924,11 +2924,11 @@ mod tests {
     // the layer-3 gate must resolve the definition's provider through
     // its bound ABF bundle (`id_store.resolve_effective_provider_id`),
     // not `d.provider` directly. Uses two genuinely separate stores —
-    // wstore (definition, block, instance) and id_store (bundle,
+    // mstore (definition, block, instance) and id_store (bundle,
     // account, link) — so the test can't pass by accident the way it
     // would if both roles were backed by the same `Arc<Store>`, which
     // every OTHER test in this module does (matching production's
-    // AppState.wstore/id_store split, but meaning none of them could
+    // AppState.mstore/id_store split, but meaning none of them could
     // have caught this class of bug).
     //
     // Scenario: the definition's own `provider` column has drifted to
@@ -2944,7 +2944,7 @@ mod tests {
     // successfully, and the spawn proceeds.
     #[test]
     fn spawn_gate_resolves_provider_through_the_bound_bundle_not_the_drifted_definition_column() {
-        let wstore = make_store();
+        let mstore = make_store();
         // Real shared-store schema, not open_in_memory's channel schema —
         // db_agent_identity_links only has a `db_agent_definitions` FK in
         // the channel schema (migrations.rs:334); the shared-store schema
@@ -2995,7 +2995,7 @@ mod tests {
             // ...but its bound bundle (below, in id_store) says claude.
             memory_id: "bundle-1".to_string(),
         };
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
 
         let bundle = Bundle {
             id: "bundle-1".to_string(),
@@ -3029,12 +3029,12 @@ mod tests {
             .agent_identity_link("def-1", "acct-drift", "claude")
             .unwrap();
 
-        insert_block_for_agent(&wstore, "block-drift", "def-1");
+        insert_block_for_agent(&mstore, "block-drift", "def-1");
         let inst = make_instance("block-drift", "id-drift");
-        wstore.instance_create(&inst).unwrap();
+        mstore.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(wstore, id_store, identity_store, "block-drift", &mut env);
+        let res = inject_identity_env(mstore, id_store, identity_store, "block-drift", &mut env);
 
         assert!(res.is_ok(), "a valid claude account must not be blocked by a stale codex column: {res:?}");
         assert_eq!(

@@ -22,13 +22,13 @@ use super::super::AppState;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Bundle CRUD ----
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_LIST_MEMORIES,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
-                let memories = wstore
+                let memories = mstore
                     .bundle_list()
                     .map_err(|e| format!("listmemories: {e}"))?;
                 Ok(Some(serde_json::to_value(&memories).unwrap_or_default()))
@@ -36,15 +36,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     engine.register_handler(
         COMMAND_GET_MEMORY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandGetBundleData = serde_json::from_value(data)
                     .map_err(|e| format!("getmemory: {e}"))?;
-                match wstore
+                match mstore
                     .bundle_get(&cmd.id)
                     .map_err(|e| format!("getmemory: {e}"))?
                 {
@@ -55,12 +55,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_MEMORY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let mut memory: Bundle = serde_json::from_value(data)
@@ -100,7 +100,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // the REST/MCP path does (see BundleVersion::written_by's
                 // own doc comment) — a human via the UI is the only thing
                 // this code path can honestly claim.
-                wstore
+                mstore
                     .bundle_upsert_with_version(&memory, "armory-ui", "human", "{}")
                     .map_err(|e| format!("upsertmemory: {e}"))?;
                 broker.publish(crate::backend::mps::MuxEvent {
@@ -116,7 +116,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     let id_store = state.id_store.clone();
-    let component_store = state.wstore.clone();
+    let component_store = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_DELETE_MEMORY,
@@ -151,17 +151,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         },
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_REORDER_GLOBAL_BRAIN,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandReorderGlobalBundlesData = serde_json::from_value(data)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
-                let updated = wstore
+                let updated = mstore
                     .bundle_reorder(&cmd.ids)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
                 broker.publish(crate::backend::mps::MuxEvent {
@@ -182,12 +182,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // so the ordinary Global Bundle editor and every other generic
     // bundle-writing surface can never reach an is_system row.
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_SYSTEM_MEMORY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let mut memory: Bundle = serde_json::from_value(data)
@@ -218,7 +218,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // revision raced a concurrent writer (e.g. another AgentMux
                 // instance's own reseed) between the read and the write.
                 // Codex P1/P2, ReAgent P2, PR #3244.
-                wstore
+                mstore
                     .bundle_upsert_system_if_changed(&memory, "armory-ui", "human", "{}")
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
                 broker.publish(crate::backend::mps::MuxEvent {
@@ -237,7 +237,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Echoing `memory` back would misreport both to any caller
                 // that trusts the response instead of refetching. reagent
                 // P2, PR #2782.
-                let saved = wstore
+                let saved = mstore
                     .bundle_get(&memory.id)
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?
                     .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
@@ -246,15 +246,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_typed(
         COMMAND_DELETE_SYSTEM_MEMORY,
         move |cmd: CommandDeleteBundleData, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             async move {
-                let deleted = wstore
+                let deleted = mstore
                     .bundle_delete_system(&cmd.id)
                     .map_err(|e| format!("deletesystemmemory: {e}"))?;
                 if deleted {

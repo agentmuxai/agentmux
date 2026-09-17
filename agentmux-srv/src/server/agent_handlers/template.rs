@@ -98,13 +98,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //  - `name` non-empty, ≤200 chars, and not already taken by any
     //    `is_seeded = 0` row. Avoids collisions in the picker's
     //    "My Agents" list.
-    let wstore_act = state.wstore.clone();
+    let wstore_act = state.mstore.clone();
     let id_store_act = state.id_store.clone();
     let broker_act = state.broker.clone();
     engine.register_typed(
         COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
         move |cmd: CommandAgentDefCreateFromTemplateData, _ctx| {
-            let wstore = wstore_act.clone();
+            let mstore = wstore_act.clone();
             let id_store = id_store_act.clone();
             let broker = broker_act.clone();
             async move {
@@ -118,7 +118,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     );
                 }
 
-                let all = wstore
+                let all = mstore
                     .agent_def_list()
                     .map_err(|e| format!("agentdefcreatefromtemplate: list: {e}"))?;
                 let template = all
@@ -234,13 +234,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // a fresh clone, not carried over).
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
-                wstore
+                mstore
                     .agent_def_insert(&mut new_def)
                     .map_err(|e| format!("agentdefcreatefromtemplate: insert: {e}"))?;
                 // Own dedicated ABF bundle, not the template's — every
                 // agent has its own (ARCHITECTURE_MANDATORY_ABF_RETHINK_
                 // 2026_08_14.md §3.2, "strong reading").
-                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut new_def, now);
+                mstore.agent_def_provision_and_bind_bundle(&id_store, &mut new_def, now);
 
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "agents:changed".to_string(),
@@ -278,7 +278,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //
     // Broadcasts `agents:changed` so the picker refetches and the card
     // disappears (existing list query already excludes hidden by default).
-    let wstore_hide = state.wstore.clone();
+    let wstore_hide = state.mstore.clone();
     let broker_hide = state.broker.clone();
     // Registered through `register_typed` (rather than `register_handler`)
     // so this command's request/response pair lands in the engine's
@@ -289,10 +289,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(
         COMMAND_AGENT_DEF_HIDE,
         move |cmd: CommandAgentDefHideData, _ctx| {
-            let wstore = wstore_hide.clone();
+            let mstore = wstore_hide.clone();
             let broker = broker_hide.clone();
             async move {
-                let ok = wstore
+                let ok = mstore
                     .agent_def_set_hidden(&cmd.definition_id, true)
                     .map_err(|e| format!("agentdefhide: {e}"))?;
                 if ok {
@@ -316,15 +316,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // agentdefunhide → set user_hidden = 0 on a seeded template,
     // bringing it back into the picker. Same validation + broadcast as
     // agentdefhide. Phase 2 of the two-tier picker spec.
-    let wstore_unhide = state.wstore.clone();
+    let wstore_unhide = state.mstore.clone();
     let broker_unhide = state.broker.clone();
     engine.register_typed(
         COMMAND_AGENT_DEF_UNHIDE,
         move |cmd: CommandAgentDefHideData, _ctx| {
-            let wstore = wstore_unhide.clone();
+            let mstore = wstore_unhide.clone();
             let broker = broker_unhide.clone();
             async move {
-                let ok = wstore
+                let ok = mstore
                     .agent_def_set_hidden(&cmd.definition_id, false)
                     .map_err(|e| format!("agentdefunhide: {e}"))?;
                 if ok {
@@ -349,13 +349,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // (is_seeded = 1 AND user_hidden = 1). Used by the settings panel
     // to render the unhide list. The picker proper never calls this —
     // it uses `listagents` with the default-filter-out behaviour.
-    let wstore_lh = state.wstore.clone();
+    let wstore_lh = state.mstore.clone();
     engine.register_handler(
         COMMAND_AGENT_DEF_LIST_HIDDEN_TEMPLATES,
         Box::new(move |_data, _ctx| {
-            let wstore = wstore_lh.clone();
+            let mstore = wstore_lh.clone();
             Box::pin(async move {
-                let agents = wstore
+                let agents = mstore
                     .agent_def_list()
                     .map_err(|e| format!("agentdeflisthiddentemplates: {e}"))?;
                 let hidden: Vec<_> = agents
@@ -369,13 +369,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Definition fork ----
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_FORK_AGENT_DEFINITION,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -383,7 +383,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
 
                 // Find the source definition by id.
-                let all_defs = wstore
+                let all_defs = mstore
                     .agent_def_list()
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
                 let source = all_defs
@@ -459,17 +459,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // and model vendor IS inherited).
                     conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
-                wstore
+                mstore
                     .agent_def_insert(&mut fork)
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
                 // Own dedicated ABF bundle, not the source's — same "every
                 // agent has its own" rule as the template-clone path above.
-                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut fork, now);
+                mstore.agent_def_provision_and_bind_bundle(&id_store, &mut fork, now);
 
                 // Deep-copy content blobs + skills from source. Cascade foreign
                 // keys on the source are unaffected — we're copying out, not
                 // moving.
-                let source_contents = wstore
+                let source_contents = mstore
                     .agent_content_get_all(&source.id)
                     .map_err(|e| format!("forkagentdefinition content: {e}"))?;
                 for c in source_contents {
@@ -479,11 +479,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         content: c.content,
                         updated_at: now,
                     };
-                    wstore
+                    mstore
                         .agent_content_set(&new_content)
                         .map_err(|e| format!("forkagentdefinition content: {e}"))?;
                 }
-                let source_skills = wstore
+                let source_skills = mstore
                     .agent_skill_list(&source.id)
                     .map_err(|e| format!("forkagentdefinition skills: {e}"))?;
                 for s in source_skills {
@@ -497,7 +497,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         content: s.content,
                         created_at: now,
                     };
-                    wstore
+                    mstore
                         .agent_skill_insert(&new_skill)
                         .map_err(|e| format!("forkagentdefinition skill: {e}"))?;
                 }
@@ -517,13 +517,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Definition fork suggest (read-only — no mutation) ----
 
-    let wstore_sug = state.wstore.clone();
+    let wstore_sug = state.mstore.clone();
     engine.register_typed(
         COMMAND_FORK_AGENT_DEFINITION_SUGGEST,
         move |cmd: CommandForkAgentDefinitionSuggestData, _ctx| {
-            let wstore = wstore_sug.clone();
+            let mstore = wstore_sug.clone();
             async move {
-                let all = wstore
+                let all = mstore
                     .agent_def_list()
                     .map_err(|e| format!("forkagentdefinitionsuggest: {e}"))?;
                 let source = all
@@ -548,12 +548,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // the field `fork-set.ts`'s `titleOf()` actually displays: `branch_label`
     // when the row already has one (a fork), else `name` (a lineage root).
     // See SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §4.
-    let wstore_rn = state.wstore.clone();
+    let wstore_rn = state.mstore.clone();
     let broker_rn = state.broker.clone();
     engine.register_handler(
         COMMAND_RENAME_AGENT_DEFINITION_TITLE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_rn.clone();
+            let mstore = wstore_rn.clone();
             let broker = broker_rn.clone();
             Box::pin(async move {
                 let cmd: CommandRenameAgentDefinitionTitleData = serde_json::from_value(data)
@@ -563,7 +563,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     return Err("renameagentdefinitiontitle: title must not be empty".to_string());
                 }
 
-                let all = wstore
+                let all = mstore
                     .agent_def_list()
                     .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
                 let old = all
@@ -578,7 +578,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     updated.name = title.to_string();
                 }
 
-                let found = wstore
+                let found = mstore
                     .agent_def_update(&mut updated)
                     .map_err(|e| format!("renameagentdefinitiontitle: {e}"))?;
                 if !found {
@@ -598,7 +598,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // drift apart is the confusing outcome, not the safe one.
                 // Best-effort — the title change already landed, and a
                 // display-name mirror failing is not a failed rename.
-                if let Err(e) = wstore.instance_rename(&cmd.id, title) {
+                if let Err(e) = mstore.instance_rename(&cmd.id, title) {
                     tracing::warn!(
                         agent_id = %cmd.id, error = %e,
                         "renameagentdefinitiontitle: display name not updated; \
@@ -688,7 +688,7 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: bundle_id.to_string(),
         };
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
     }
 
     /// Both commands migrated to `register_typed` in this PR are recorded
@@ -750,7 +750,7 @@ mod tests {
             serde_json::from_value(resp.data.expect("expected result data")).unwrap();
 
         let cloned = state
-            .wstore
+            .mstore
             .agent_def_get(&result.definition_id)
             .unwrap()
             .unwrap();

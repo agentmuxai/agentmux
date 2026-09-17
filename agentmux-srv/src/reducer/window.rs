@@ -103,7 +103,7 @@ pub(super) fn handle_switch_workspace(
 
 /// Phase E.5.x (issue #855) — apply a meta-patch to a window. Pass-
 /// through to `Event::WindowMetaUpdated`; the persist subscriber
-/// performs the merge against wstore. Same shape as
+/// performs the merge against mstore. Same shape as
 /// `handle_update_workspace_meta` — reducer state does NOT track
 /// window meta, the migration property is "every mutation goes
 /// through the reducer's broadcast bus" so the MuxObjUpdate bridge
@@ -114,7 +114,7 @@ pub(super) fn handle_switch_workspace(
 /// `handle_update_block_meta`) — this arm used to be the sole outlier
 /// with no guard, which made `POST /api/v1/window/name` report success
 /// for well-formed-but-nonexistent window ids (the persist subscriber's
-/// `apply_window_meta_updated` silently no-ops on a wstore miss, so
+/// `apply_window_meta_updated` silently no-ops on a mstore miss, so
 /// nothing downstream caught it either). The guard is safe because
 /// `state.windows` reliably mirrors real windows: every runtime
 /// creation goes through `handle_create_window`, and

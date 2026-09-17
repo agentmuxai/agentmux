@@ -102,7 +102,7 @@ fn parse_claude_config_dir(env_blob: &str) -> String {
 ///
 /// Shared by `native_memory_handlers` and the `memory.*` App API handlers.
 pub(crate) fn memory_dir_for_agent(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<std::path::PathBuf, String> {
     // agent_id arriving from App API is the agent slug (AGENTMUX_AGENT_ID /
@@ -110,7 +110,7 @@ pub(crate) fn memory_dir_for_agent(
     // instance_get_by_slug (agent_def_get queries by UUID and would always
     // return None here; instance_get_by_name matches the display name, a
     // different namespace — see that function's own doc comment).
-    if let Some(instance) = wstore
+    if let Some(instance) = mstore
         .instance_get_by_slug(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
     {
@@ -128,7 +128,7 @@ pub(crate) fn memory_dir_for_agent(
         // intact — the common case, since `working_directory` is blank by
         // default. See SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md.
         if !instance.working_directory.is_empty() {
-            let config_dir = wstore
+            let config_dir = mstore
                 .agent_content_get(&instance.id, "env")
                 .ok()
                 .flatten()
@@ -142,9 +142,9 @@ pub(crate) fn memory_dir_for_agent(
         // so reading the name off `instance` here silently yielded "" and
         // fell through to a not-found. `instance.id` IS the definition id in
         // this consolidated table (see the note above).
-        if let Ok(Some(def)) = wstore.agent_def_get(&instance.id) {
+        if let Ok(Some(def)) = mstore.agent_def_get(&instance.id) {
             if let Some(dir) =
-                memory_dir_for_blank_working_dir(wstore, &def.id, &def.name, &def.slug)
+                memory_dir_for_blank_working_dir(mstore, &def.id, &def.name, &def.slug)
             {
                 return Ok(dir);
             }
@@ -187,10 +187,10 @@ pub(crate) fn memory_dir_for_agent(
 ///   `agent_def_get`'s namespace — its sibling `instance_id` is a
 ///   different, launch-scoped identity, not what `write_file` keys by.
 pub(crate) fn resolve_agent_uuid(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     agent_id: &str,
 ) -> Result<String, String> {
-    if let Some(instance) = wstore
+    if let Some(instance) = mstore
         .instance_get_by_slug(agent_id)
         .map_err(|e| format!("resolve_agent_uuid: store: {e}"))?
     {
@@ -261,7 +261,7 @@ fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
 /// the instance row's `id` already IS that id (see `memory_dir_for_agent`'s
 /// own note).
 fn memory_dir_for_blank_working_dir(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     definition_id: &str,
     agent_name: &str,
     slug: &str,
@@ -278,7 +278,7 @@ fn memory_dir_for_blank_working_dir(
     if agent_name.is_empty() {
         return None;
     }
-    let config_dir = wstore
+    let config_dir = mstore
         .agent_content_get(definition_id, "env")
         .ok()
         .flatten()
@@ -321,21 +321,21 @@ fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRecord) -> Op
 ///
 /// reagent P1 on PR #2675: the fs-watch drift detector's enumeration
 /// (`reconciliation_sweep_once`/`refresh_subscriptions` in
-/// `native_memory_drift.rs`) originally used only `wstore.agent_def_list()`
+/// `native_memory_drift.rs`) originally used only `mstore.agent_def_list()`
 /// — the same gap [`memory_dir_for_agent`] itself already had to work
 /// around for the App-API surface (see its own doc comment / issue #1836):
 /// a live agent spawned but not yet persisted to `db_agents` has no row
 /// there at all, so the detector silently skipped it, contradicting the
 /// spec's (§4.5) "every agent with an active session" contract.
 pub(crate) fn list_all_memory_targets(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
 ) -> Vec<(String, std::path::PathBuf)> {
     let mut seen = std::collections::HashSet::new();
     let mut targets = Vec::new();
 
-    if let Ok(agents) = wstore.agent_def_list() {
+    if let Ok(agents) = mstore.agent_def_list() {
         for agent in &agents {
-            if let Some(dir) = memory_dir_for_agent_by_id(wstore, agent) {
+            if let Some(dir) = memory_dir_for_agent_by_id(mstore, agent) {
                 if seen.insert(agent.id.clone()) {
                     targets.push((agent.id.clone(), dir));
                 }
@@ -626,7 +626,7 @@ pub(crate) fn refresh_memory_mirror_from_live_fs(
 /// callers). Shared by those three handlers and `bundle.export_for_agent`/
 /// `bundle.import_for_agent` (ABF v0.2 §2.3) so all five resolve identically.
 pub(crate) fn memory_dir_for_agent_by_id(
-    wstore: &crate::backend::storage::store::Store,
+    mstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Option<std::path::PathBuf> {
     // Same blank-working_directory fallthrough as `memory_dir_for_agent`
@@ -646,7 +646,7 @@ pub(crate) fn memory_dir_for_agent_by_id(
     //     bypassed a data-loss guard.
     // Both for the common case, since `working_directory` is blank by default.
     if !agent.working_directory.is_empty() {
-        let config_dir = wstore
+        let config_dir = mstore
             .agent_content_get(&agent.id, "env")
             .ok()
             .flatten()
@@ -654,7 +654,7 @@ pub(crate) fn memory_dir_for_agent_by_id(
             .unwrap_or_default();
         return Some(memory_dir_for_cwd(&config_dir, &agent.working_directory));
     }
-    memory_dir_for_blank_working_dir(wstore, &agent.id, &agent.name, &agent.slug)
+    memory_dir_for_blank_working_dir(mstore, &agent.id, &agent.name, &agent.slug)
 }
 
 fn version_summary_to_meta(v: crate::backend::storage::NativeMemoryVersionSummary) -> NativeMemoryVersionMeta {
@@ -769,18 +769,18 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
 }
 
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore_list = state.wstore.clone();
+    let wstore_list = state.mstore.clone();
     let id_store_list = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_LIST,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_list.clone();
+            let mstore = wstore_list.clone();
             let id_store = id_store_list.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryListData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:list: {e}"))?;
 
-                let agent = wstore
+                let agent = mstore
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:list: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:list: agent {} not found", cmd.agent_id))?;
@@ -798,7 +798,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // reporting "no memories" for every agent #2901 was
                 // supposed to have fixed. See
                 // SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md.
-                let memory_dir = memory_dir_for_agent_by_id(&wstore, &agent).ok_or_else(|| {
+                let memory_dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
                     format!("agent:memory:list: agent {} has no resolvable memory directory", cmd.agent_id)
                 })?;
 
@@ -973,12 +973,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_read = state.wstore.clone();
+    let wstore_read = state.mstore.clone();
     let id_store_read = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_READ_FILE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_read.clone();
+            let mstore = wstore_read.clone();
             let id_store = id_store_read.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryReadFileData = serde_json::from_value(data)
@@ -987,14 +987,14 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:read_file: {e}"))?;
 
-                let agent = wstore
+                let agent = mstore
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:read_file: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:read_file: agent {} not found", cmd.agent_id))?;
 
                 // See the identical comment on the list handler above — a
                 // blank working_directory is not "no memory dir".
-                let path = memory_dir_for_agent_by_id(&wstore, &agent)
+                let path = memory_dir_for_agent_by_id(&mstore, &agent)
                     .ok_or_else(|| {
                         format!("agent:memory:read_file: agent {} has no resolvable memory directory", cmd.agent_id)
                     })?
@@ -1071,13 +1071,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_write = state.wstore.clone();
+    let wstore_write = state.mstore.clone();
     let id_store_write = state.id_store.clone();
     let broker_write = state.broker.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_WRITE_FILE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_write.clone();
+            let mstore = wstore_write.clone();
             let id_store = id_store_write.clone();
             let broker = broker_write.clone();
             Box::pin(async move {
@@ -1096,14 +1096,14 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     ));
                 }
 
-                let agent = wstore
+                let agent = mstore
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:write_file: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:write_file: agent {} not found", cmd.agent_id))?;
 
                 // See the identical comment on the list handler above — a
                 // blank working_directory is not "no memory dir".
-                let dir = memory_dir_for_agent_by_id(&wstore, &agent).ok_or_else(|| {
+                let dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
                     format!("agent:memory:write_file: agent {} has no resolvable memory directory", cmd.agent_id)
                 })?;
                 std::fs::create_dir_all(&dir)
@@ -1207,12 +1207,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_history = state.wstore.clone();
+    let wstore_history = state.mstore.clone();
     let id_store_history = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_HISTORY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_history.clone();
+            let mstore = wstore_history.clone();
             let id_store = id_store_history.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryHistoryData = serde_json::from_value(data)
@@ -1229,7 +1229,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // rather than trusting it verbatim matches write_file's
                 // own validation and closes the gap if that assumption
                 // ever stops holding for some caller.
-                let agent = wstore
+                let agent = mstore
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:history: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:history: agent {} not found", cmd.agent_id))?;
@@ -1246,12 +1246,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_diff = state.wstore.clone();
+    let wstore_diff = state.mstore.clone();
     let id_store_diff = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_DIFF,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_diff.clone();
+            let mstore = wstore_diff.clone();
             let id_store = id_store_diff.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryDiffData = serde_json::from_value(data)
@@ -1259,7 +1259,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
                 // Resolve to the same canonical agent.id write_file keys by
                 // — see the identical comment on the history handler above.
-                let agent = wstore
+                let agent = mstore
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:diff: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:diff: agent {} not found", cmd.agent_id))?;
@@ -1300,13 +1300,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
-    let wstore_revert = state.wstore.clone();
+    let wstore_revert = state.mstore.clone();
     let id_store_revert = state.id_store.clone();
     let broker_revert = state.broker.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_REVERT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_revert.clone();
+            let mstore = wstore_revert.clone();
             let id_store = id_store_revert.clone();
             let broker = broker_revert.clone();
             Box::pin(async move {
@@ -1322,7 +1322,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // an earlier revision of this handler did) so that check
                 // compares against the same id the version was actually
                 // stored under, not the raw, possibly-different cmd.agent_id.
-                let agent = wstore
+                let agent = mstore
                     .agent_def_get(&cmd.agent_id)
                     .map_err(|e| format!("agent:memory:revert: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:revert: agent {} not found", cmd.agent_id))?;
@@ -1344,7 +1344,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // git-revert-not-git-reset guarantee from the spec's §4.3.
                 // See the identical comment on the list handler above — a
                 // blank working_directory is not "no memory dir".
-                let dir = memory_dir_for_agent_by_id(&wstore, &agent).ok_or_else(|| {
+                let dir = memory_dir_for_agent_by_id(&mstore, &agent).ok_or_else(|| {
                     format!("agent:memory:revert: agent {} has no resolvable memory directory", cmd.agent_id)
                 })?;
                 std::fs::create_dir_all(&dir)
@@ -1508,7 +1508,7 @@ mod tests {
     // ---- Durable sync integration tests ----------------------------------
     // SPEC_NATIVE_MEMORY_DURABLE_SYNC_2026_08_07.md §5: simulate two
     // "channels" against the same agent.id by pointing each AppState's
-    // wstore at a different working_directory (so memory_dir_for_cwd
+    // mstore at a different working_directory (so memory_dir_for_cwd
     // resolves two different live paths) while sharing one id_store — the
     // same topology production uses (each channel's own objects.db caches
     // the same global AgentDefinition.id; one shared store.db backs id_store).
@@ -1553,7 +1553,7 @@ mod tests {
         }
     }
 
-    /// Build a channel's AppState: its own per-channel wstore (holding the
+    /// Build a channel's AppState: its own per-channel mstore (holding the
     /// agent definition, keyed by the same `agent_id` every channel shares)
     /// plus the given shared `id_store` (the durable mirror).
     /// `claude_config_dir` must be a per-test temp directory — an empty
@@ -1588,10 +1588,10 @@ mod tests {
         id_store: Arc<Store>,
         broker: Arc<crate::backend::mps::Broker>,
     ) -> (Arc<WshRpcEngine>, tokio::sync::mpsc::UnboundedReceiver<RpcMessage>) {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let mut def = agent_def(agent_id, working_directory);
-        wstore.agent_def_insert(&mut def).unwrap();
-        wstore
+        mstore.agent_def_insert(&mut def).unwrap();
+        mstore
             .agent_content_set(&crate::backend::storage::AgentContent {
                 agent_id: agent_id.to_string(),
                 content_type: "env".to_string(),
@@ -1601,7 +1601,7 @@ mod tests {
             .unwrap();
 
         let mut state = crate::server::tests::test_state();
-        state.wstore = wstore.clone();
+        state.mstore = mstore.clone();
         state.id_store = id_store;
         state.broker = broker;
 
@@ -2451,7 +2451,7 @@ mod tests {
     }
 
     // reagent P1 on PR #2675: the fs-watch drift detector's enumeration
-    // originally used only `wstore.agent_def_list()`, which misses a live
+    // originally used only `mstore.agent_def_list()`, which misses a live
     // agent spawned but never (or not yet) persisted to `db_agents` —
     // contradicting spec §4.5's "every agent with an active session".
     #[tokio::test]
@@ -2484,7 +2484,7 @@ mod tests {
             .unwrap();
 
         let state = crate::server::tests::test_state();
-        let targets = list_all_memory_targets(&state.wstore);
+        let targets = list_all_memory_targets(&state.mstore);
         assert!(
             targets.iter().any(|(id, _)| id == "def-live-only"),
             "a registry-only agent with no db_agents row must still be enumerated: {targets:?}"
@@ -2541,9 +2541,9 @@ mod tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
         state
-            .wstore
+            .mstore
             .agent_content_set(&crate::backend::storage::AgentContent {
                 agent_id: "dup-agent".to_string(),
                 content_type: "env".to_string(),
@@ -2551,7 +2551,7 @@ mod tests {
                 updated_at: 0,
             })
             .unwrap();
-        let expected_dir = memory_dir_for_agent_by_id(&state.wstore, &def).unwrap();
+        let expected_dir = memory_dir_for_agent_by_id(&state.mstore, &def).unwrap();
 
         let registry_dir = tmp.path().join("agents").join("registry");
         let registry = crate::registry::Registry::open(registry_dir).unwrap();
@@ -2578,7 +2578,7 @@ mod tests {
             })
             .unwrap();
 
-        let targets = list_all_memory_targets(&state.wstore);
+        let targets = list_all_memory_targets(&state.mstore);
         let matches: Vec<_> = targets.iter().filter(|(id, _)| id == "dup-agent").collect();
         assert_eq!(matches.len(), 1, "must not enumerate the same agent twice: {targets:?}");
         assert_eq!(matches[0].1, expected_dir, "the db_agents-derived dir must win over the registry's");
@@ -2610,11 +2610,11 @@ mod tests {
     /// registry at all.
     #[test]
     fn non_blank_working_directory_still_resolves_from_the_instance_row() {
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut def = agent_def("realwd-agent", "/work/proj");
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
 
-        let dir = memory_dir_for_agent(&wstore, "realwd-agent").unwrap();
+        let dir = memory_dir_for_agent(&mstore, "realwd-agent").unwrap();
         let comps: Vec<String> = dir
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
@@ -2638,12 +2638,12 @@ mod tests {
     #[test]
     fn blank_working_directory_resolves_to_the_same_default_agent_open_substitutes() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut def = agent_def("blankwd-agent", "");
         def.name = "Blank WD Agent".to_string();
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
 
-        let dir = memory_dir_for_agent(&wstore, "blankwd-agent")
+        let dir = memory_dir_for_agent(&mstore, "blankwd-agent")
             .expect("a blank working_directory must resolve, not error");
 
         // default_agent_working_dir("Blank WD Agent") -> ~/.agentmux/agents/blank-wd-agent,
@@ -2715,12 +2715,12 @@ mod tests {
             })
             .unwrap();
 
-        let wstore = Store::open_in_memory().unwrap();
+        let mstore = Store::open_in_memory().unwrap();
         let mut def = agent_def("collide-agent", "");
         def.name = "Collide Agent".to_string();
-        wstore.agent_def_insert(&mut def).unwrap();
+        mstore.agent_def_insert(&mut def).unwrap();
 
-        let dir = memory_dir_for_agent(&wstore, "collide-agent").unwrap();
+        let dir = memory_dir_for_agent(&mstore, "collide-agent").unwrap();
         let as_str = dir.to_string_lossy().to_string();
         assert!(
             !as_str.contains("somebody-elses-dir"),

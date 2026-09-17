@@ -9,7 +9,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
     let global_store = state.global_transcript_store.clone();
 
@@ -17,7 +17,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
         COMMAND_BLOCKFILE_LINE_COUNT,
         Box::new(move |data, _ctx| {
             let broker = broker.clone();
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             let global_store = global_store.clone();
             Box::pin(async move {
@@ -33,7 +33,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // agent's GLOBAL transcript zone instead. See
                 // `docs/analysis/ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md`.
                 if let Some((gfs, zone)) =
-                    global_output_source(&filestore, &global_store, &wstore, &cmd.block_id, &cmd.filename)
+                    global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
                 {
                     // Blocking pool (#2841): this extends or, when it can't
                     // anchor on the existing index, fully rebuilds `output.idx`
@@ -69,7 +69,7 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // lines is O(file size) which defeats the point of a fast
                 // line_count endpoint.
                 if cmd.filename == "output" {
-                    if let Ok(Some(block)) = wstore.get::<Block>(&cmd.block_id) {
+                    if let Ok(Some(block)) = mstore.get::<Block>(&cmd.block_id) {
                         if let Some(count) = block.meta.get("session:line_count").and_then(|v| v.as_u64()) {
                             return Ok(Some(serde_json::to_value(
                                 &BlockfileLineCountResult { count },
@@ -117,7 +117,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let filestore = state.filestore.clone();
     let global_store = state.global_transcript_store.clone();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
 
     engine.register_handler(
         COMMAND_BLOCKFILE_READ_RANGE,
@@ -125,7 +125,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             let filestore = filestore.clone();
             let global_store = global_store.clone();
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: CommandBlockfileReadRangeData = serde_json::from_value(data)
                     .map_err(|e| format!("blockfile:read_range: {e}"))?;
@@ -142,7 +142,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // every FileStore call below — the local block_id normally, the
                 // agent zone when the agent ran in another build/channel.
                 let (filestore, read_block) =
-                    global_output_source(&filestore, &global_store, &wstore, &cmd.block_id, &cmd.filename)
+                    global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename)
                         .unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
 
                 // Fast path: output.idx — a lazily-built, self-validating byte-offset

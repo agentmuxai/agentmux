@@ -49,7 +49,7 @@ pub async fn run(
     // a reducer-state pre-check would falsely reject valid restores
     // (codex P1 round-2 #621).
     {
-        let src_ws = match state.wstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
+        let src_ws = match state.mstore.get::<crate::backend::obj::Workspace>(&source_workspace_id) {
             Ok(Some(ws)) => ws,
             Ok(None) => {
                 return Err(format!(
@@ -65,7 +65,7 @@ pub async fn run(
             }
         };
         if state
-            .wstore
+            .mstore
             .get::<crate::backend::obj::Workspace>(&dest_workspace_id)
             .map(|w| w.is_none())
             .unwrap_or(true)
@@ -182,7 +182,7 @@ mod tests {
     ) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
         }
         events
     }
@@ -252,7 +252,7 @@ mod tests {
         drop(s);
 
         // SQLite: source workspace row gone too.
-        assert!(state.wstore.get::<Workspace>(&torn_ws).unwrap().is_none());
+        assert!(state.mstore.get::<Workspace>(&torn_ws).unwrap().is_none());
     }
 
     #[tokio::test]

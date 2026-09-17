@@ -20,7 +20,7 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 // the apply_tab_created provisioning (E.4 layout migration is
 // separate; default rootnode = None matches wcore behaviour).
 pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let requested_ws_id: String = service::get_arg(args, 1).unwrap_or_default();
     // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
@@ -555,7 +555,7 @@ mod create_window_seed_tests {
             tab_id
         };
 
-        let store = &state.wstore;
+        let store = &state.mstore;
         let tab = store.must_get::<Tab>(&tab_id).unwrap();
         assert_eq!(tab.blockids.len(), 1);
         let block = store.must_get::<Block>(&tab.blockids[0]).unwrap();

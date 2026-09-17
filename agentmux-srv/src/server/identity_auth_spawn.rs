@@ -44,7 +44,7 @@ use super::identity_auth_persist::persist_oauth_success;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn_auth_cli(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
@@ -77,7 +77,7 @@ pub(crate) fn spawn_auth_cli(
     if requires_tty {
         spawn_auth_cli_pty(
             mgr,
-            wstore,
+            mstore,
             identity_store,
             broker,
             session_id,
@@ -101,7 +101,7 @@ pub(crate) fn spawn_auth_cli(
     let cli_path_for_check = cli_path.clone();
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
-    let wstore_for_task = wstore.clone();
+    let wstore_for_task = mstore.clone();
     let identity_store_for_task = identity_store.clone();
     let broker_for_task = broker.clone();
     let into_bundle_id_for_task = into_bundle_id.clone();
@@ -357,7 +357,7 @@ pub(crate) fn spawn_auth_cli(
 #[allow(clippy::too_many_arguments)]
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
@@ -380,7 +380,7 @@ fn spawn_auth_cli_pty(
     let cli_path_for_check = cli_path.clone();
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
-    let wstore_for_task = wstore.clone();
+    let wstore_for_task = mstore.clone();
     let identity_store_for_task = identity_store.clone();
     let broker_for_task = broker.clone();
     let into_bundle_id_for_task = into_bundle_id.clone();

@@ -155,7 +155,7 @@ pub struct SubprocessController {
     /// Event bus for obj:update broadcasts.
     event_bus: Option<Arc<EventBus>>,
     /// AgentMux object store for block metadata persistence.
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
     /// Per-block turn-activity tracker.
@@ -187,7 +187,7 @@ impl SubprocessController {
         block_id: String,
         broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
         registry: Option<Arc<crate::registry::Registry>>,
         boot_id: Arc<str>,
@@ -220,7 +220,7 @@ impl SubprocessController {
             })),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
             health_monitor,
             self_ref: Mutex::new(None),

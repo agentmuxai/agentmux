@@ -5,7 +5,7 @@
 //
 // The wire types (`DroneDefinition`, `DroneRun`, `DroneFlowNode`,
 // `DroneFlowEdge`, `DroneBlockState`) live in the AgentMux global
-// namespace at `frontend/types/gotypes.d.ts` so they're available to
+// namespace at `frontend/types/srv-types.d.ts` so they're available to
 // `rpc-api.ts` without imports. This file re-exports + narrows them
 // for ergonomic use inside the drone view.
 

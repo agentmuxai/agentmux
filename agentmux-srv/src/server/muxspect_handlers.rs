@@ -512,7 +512,7 @@ pub async fn handle_muxspect_dock(
     // rather than changing the cache's own eviction semantics (which are
     // correct for what it's actually for — see dock_snapshot.rs's doc
     // comment). See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.4.
-    let background_tasks = state.wstore.background_task_list_for_block(&q.block_id).unwrap_or_default();
+    let background_tasks = state.mstore.background_task_list_for_block(&q.block_id).unwrap_or_default();
     let nodes = merge_background_tasks(nodes, background_tasks, now_ms);
 
     Json(json!({ "block_id": q.block_id, "nodes": nodes })).into_response()
@@ -660,8 +660,8 @@ pub async fn handle_muxspect_background_tasks(
     Query(q): Query<MuxspectBackgroundTasksQuery>,
 ) -> impl IntoResponse {
     let result = match q.block_id.as_deref() {
-        Some(block_id) if !block_id.is_empty() => state.wstore.background_task_list_for_block(block_id),
-        _ => state.wstore.background_task_list_running(),
+        Some(block_id) if !block_id.is_empty() => state.mstore.background_task_list_for_block(block_id),
+        _ => state.mstore.background_task_list_running(),
     };
     match result {
         Ok(tasks) => {
@@ -994,7 +994,7 @@ fn truncate_preview(line: &str) -> String {
 /// no live file yet, or genuinely archived — at the cost of no cheap
 /// activity timestamp in that fallback case (`None`, not a guessed value).
 fn last_line_preview_and_activity(
-    wstore: &std::sync::Arc<crate::backend::storage::store::Store>,
+    mstore: &std::sync::Arc<crate::backend::storage::store::Store>,
     filestore: &std::sync::Arc<FileStore>,
     block_id: &str,
 ) -> (Option<String>, Option<u64>) {
@@ -1010,7 +1010,7 @@ fn last_line_preview_and_activity(
         }
     }
 
-    match crate::backend::session_archive::read_session_output(wstore, filestore, block_id) {
+    match crate::backend::session_archive::read_session_output(mstore, filestore, block_id) {
         Ok((raw_bytes, _)) => {
             let text = String::from_utf8_lossy(&raw_bytes);
             let preview = text
@@ -1033,7 +1033,7 @@ fn last_line_preview_and_activity(
 ///
 /// Host and cross-channel entries carry a `last_message_preview` (the tail
 /// non-blank transcript line) and `turn_active`, read directly for host
-/// (this instance's own `wstore`/`filestore`) and via a single best-effort
+/// (this instance's own `mstore`/`filestore`) and via a single best-effort
 /// forwarded HTTP call per channel for cross-channel (same auth/loopback
 /// pattern `handle_reactive_inject`'s Tier 2b and this instance's own
 /// `handle_muxspect_verify_sender` already use — see those for the security
@@ -1049,7 +1049,7 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
     // Host tier — direct local read, no network.
     for reg in state.reactive_handler.list_agents() {
         let (preview, activity_ms) =
-            last_line_preview_and_activity(&state.wstore, &state.filestore, &reg.block_id);
+            last_line_preview_and_activity(&state.mstore, &state.filestore, &reg.block_id);
         let turn_active = crate::backend::blockcontroller::get_block_controller_status(&reg.block_id)
             .map(|s| s.turn_active)
             .unwrap_or(false);
@@ -1235,7 +1235,7 @@ pub async fn handle_muxspect_layout(
     State(state): State<AppState>,
     Query(q): Query<MuxspectLayoutQuery>,
 ) -> impl IntoResponse {
-    let tabs = match state.wstore.get_all::<crate::backend::obj::Tab>() {
+    let tabs = match state.mstore.get_all::<crate::backend::obj::Tab>() {
         Ok(t) => t,
         Err(e) => {
             // 200 with an `error` field, not a 4xx/5xx — muxspect.mjs's
@@ -1254,7 +1254,7 @@ pub async fn handle_muxspect_layout(
             }
         }
         let ls = match state
-            .wstore
+            .mstore
             .must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate)
         {
             Ok(ls) => ls,
@@ -1677,10 +1677,10 @@ mod tests {
     #[tokio::test]
     async fn handle_muxspect_background_tasks_scoped_to_block_includes_terminal_tasks() {
         let state = crate::server::tests::test_state();
-        state.wstore.background_task_observe("t1", "block-1", "task dev", 0, 0).unwrap();
-        state.wstore.background_task_observe("t2", "block-1", "finished build", 0, 0).unwrap();
+        state.mstore.background_task_observe("t1", "block-1", "task dev", 0, 0).unwrap();
+        state.mstore.background_task_observe("t2", "block-1", "finished build", 0, 0).unwrap();
         state
-            .wstore
+            .mstore
             .background_task_complete(
                 "t2",
                 crate::backend::storage::background_tasks::BackgroundTaskStatus::Done,
@@ -1688,7 +1688,7 @@ mod tests {
             )
             .unwrap();
         // Different block — must not leak into a block-scoped query.
-        state.wstore.background_task_observe("t3", "block-2", "other pane", 0, 0).unwrap();
+        state.mstore.background_task_observe("t3", "block-2", "other pane", 0, 0).unwrap();
 
         let resp = handle_muxspect_background_tasks(
             State(state),
@@ -1705,11 +1705,11 @@ mod tests {
     #[tokio::test]
     async fn handle_muxspect_background_tasks_without_block_id_lists_running_globally() {
         let state = crate::server::tests::test_state();
-        state.wstore.background_task_observe("t1", "block-1", "still running", 0, 0).unwrap();
-        state.wstore.background_task_observe("t2", "block-2", "also running", 0, 0).unwrap();
-        state.wstore.background_task_observe("t3", "block-1", "finished", 0, 0).unwrap();
+        state.mstore.background_task_observe("t1", "block-1", "still running", 0, 0).unwrap();
+        state.mstore.background_task_observe("t2", "block-2", "also running", 0, 0).unwrap();
+        state.mstore.background_task_observe("t3", "block-1", "finished", 0, 0).unwrap();
         state
-            .wstore
+            .mstore
             .background_task_complete(
                 "t3",
                 crate::backend::storage::background_tasks::BackgroundTaskStatus::Done,
@@ -1930,7 +1930,7 @@ mod tests {
     /// `session_archive.rs`'s own tests use, just without the extra
     /// archival-specific meta this module's read path never inspects.
     fn insert_bare_block(
-        wstore: &std::sync::Arc<crate::backend::storage::store::Store>,
+        mstore: &std::sync::Arc<crate::backend::storage::store::Store>,
         block_id: &str,
     ) {
         use crate::backend::obj::Block;
@@ -1943,13 +1943,13 @@ mod tests {
             meta: Default::default(),
             subblockids: None,
         };
-        wstore.insert(&mut block).expect("wstore insert");
+        mstore.insert(&mut block).expect("mstore insert");
     }
 
     #[test]
     fn last_line_preview_and_activity_returns_last_non_blank_line() {
         let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
-        let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let mstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
         let block_id = uuid::Uuid::new_v4().to_string();
         filestore
             .make_file(&block_id, "output", crate::backend::storage::filestore::FileMeta::default(), crate::backend::storage::filestore::FileOpts::default())
@@ -1957,9 +1957,9 @@ mod tests {
         filestore
             .append_data(&block_id, "output", b"first line\n\nlast line\n")
             .expect("append_data");
-        insert_bare_block(&wstore, &block_id);
+        insert_bare_block(&mstore, &block_id);
 
-        let (preview, activity_ms) = last_line_preview_and_activity(&wstore, &filestore, &block_id);
+        let (preview, activity_ms) = last_line_preview_and_activity(&mstore, &filestore, &block_id);
         assert_eq!(preview, Some("last line".to_string()));
         // Fast path (live FileStore file present) — a real write timestamp
         // must come back, not None, per codex P2 on PR #2715.
@@ -1969,7 +1969,7 @@ mod tests {
     #[test]
     fn last_line_preview_and_activity_truncates_long_lines() {
         let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
-        let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let mstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
         let block_id = uuid::Uuid::new_v4().to_string();
         let long_line = "x".repeat(PREVIEW_MAX_CHARS + 50);
         filestore
@@ -1978,9 +1978,9 @@ mod tests {
         filestore
             .append_data(&block_id, "output", format!("{long_line}\n").as_bytes())
             .expect("append_data");
-        insert_bare_block(&wstore, &block_id);
+        insert_bare_block(&mstore, &block_id);
 
-        let (preview, _) = last_line_preview_and_activity(&wstore, &filestore, &block_id);
+        let (preview, _) = last_line_preview_and_activity(&mstore, &filestore, &block_id);
         let preview = preview.unwrap();
         assert_eq!(preview.chars().count(), PREVIEW_MAX_CHARS + 1); // +1 for the trailing "…"
         assert!(preview.ends_with('…'));
@@ -1989,8 +1989,8 @@ mod tests {
     #[test]
     fn last_line_preview_and_activity_returns_none_for_missing_block() {
         let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
-        let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
-        let (preview, activity_ms) = last_line_preview_and_activity(&wstore, &filestore, "no-such-block");
+        let mstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let (preview, activity_ms) = last_line_preview_and_activity(&mstore, &filestore, "no-such-block");
         assert_eq!(preview, None);
         assert_eq!(activity_ms, None);
     }

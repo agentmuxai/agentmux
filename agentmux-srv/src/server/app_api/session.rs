@@ -16,7 +16,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// typing and watching the transcript clear
 /// (`crate::backend::resume_preflight`'s module doc).
 fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     // Needed to resolve an identity-bound pane's REAL config dir — see
     // `preflight_input_from_meta`.
     let id_store = state.id_store.clone();
@@ -25,19 +25,19 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
     engine.register_handler(
         COMMAND_SESSION_RESUME_PREFLIGHT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             Box::pin(async move {
                 let cmd: CommandSessionResumePreflightData = serde_json::from_value(data)
                     .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
-                let block = wstore
+                let block = mstore
                     .must_get::<Block>(&cmd.block_id)
                     .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
                 let bound_config_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
-                    &wstore,
+                    &mstore,
                     &id_store,
                     &identity_store,
                     &cmd.block_id,
@@ -147,13 +147,13 @@ fn preflight_input_from_meta(
 }
 
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_SESSION_ARCHIVE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandSessionArchiveData = serde_json::from_value(data)
@@ -165,7 +165,7 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                     .ok_or_else(|| "cannot determine home directory".to_string())?;
 
                 let (archived_bytes, archived_at) = session_archive::archive_session_output(
-                    &wstore,
+                    &mstore,
                     &filestore,
                     &cmd.block_id,
                     &archive_dir,
@@ -182,13 +182,13 @@ fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 }
 
 fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_SESSION_RESTORE,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandSessionRestoreData = serde_json::from_value(data)
@@ -197,7 +197,7 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
                 tracing::info!(block_id = %cmd.block_id, "session:restore");
 
                 let restored_bytes = session_archive::restore_session_output(
-                    &wstore,
+                    &mstore,
                     &filestore,
                     &cmd.block_id,
                 )?;
@@ -212,13 +212,13 @@ fn register_session_restore_handler(engine: &Arc<WshRpcEngine>, state: &AppState
 }
 
 fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_SESSION_EXPORT,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandSessionExportData = serde_json::from_value(data)
@@ -227,7 +227,7 @@ fn register_session_export_handler(engine: &Arc<WshRpcEngine>, state: &AppState)
                 tracing::info!(block_id = %cmd.block_id, "session:export");
 
                 let (raw_bytes, line_count) = session_archive::read_session_output(
-                    &wstore,
+                    &mstore,
                     &filestore,
                     &cmd.block_id,
                 )?;
@@ -292,7 +292,7 @@ fn empty_summary_result() -> serde_json::Value {
 /// isn't resolvable, this call was superseded, or the CLI failed — the
 /// caller treats all of these as "no summary this tick."
 pub(crate) async fn generate_pushed_activity_summary(
-    wstore: &Store,
+    mstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
     block_id: &str,
     generation: u64,
@@ -307,7 +307,7 @@ pub(crate) async fn generate_pushed_activity_summary(
     };
     let cancel = guard.cancellation();
 
-    let block: Block = wstore.get(block_id).ok().flatten()?;
+    let block: Block = mstore.get(block_id).ok().flatten()?;
     let extracted = read_recent_activity_digest(filestore, block_id)?;
 
     let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
@@ -435,7 +435,7 @@ async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String>
 /// superseded/capped, or the CLI failed — the caller treats all of these as
 /// "still nothing to show," not an error.
 pub(crate) async fn generate_definition_activity_summary(
-    wstore: &Store,
+    mstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
     broker: &Arc<crate::backend::mps::Broker>,
     definition_id: &str,
@@ -466,7 +466,7 @@ pub(crate) async fn generate_definition_activity_summary(
         return None;
     };
 
-    let (cli_path, meta): (String, MetaMapType) = match wstore.get::<Block>(block_id) {
+    let (cli_path, meta): (String, MetaMapType) = match mstore.get::<Block>(block_id) {
         Ok(Some(block)) => {
             let p = obj::meta_get_string(&block.meta, "cmd", "");
             if p.is_empty() {
@@ -509,7 +509,7 @@ pub(crate) async fn generate_definition_activity_summary(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    match wstore.agent_activity_summary_set(definition_id, &summary, now) {
+    match mstore.agent_activity_summary_set(definition_id, &summary, now) {
         Ok(()) => {
             broker.publish(crate::backend::mps::MuxEvent {
                 event: "agents:changed".to_string(),
@@ -562,7 +562,7 @@ const AMBIENT_PURPOSE_SUBAGENT_NAME: &str = "subagent_name";
 /// already generated) returns the cached name with `tokens: None` — there's
 /// no new spend to report.
 pub(crate) async fn generate_subagent_name(
-    wstore: &Store,
+    mstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
     semaphore: &'static tokio::sync::Semaphore,
@@ -598,7 +598,7 @@ pub(crate) async fn generate_subagent_name(
         return None;
     };
 
-    let block: Block = match wstore.get(&info.parent_block_id) {
+    let block: Block = match mstore.get(&info.parent_block_id) {
         Ok(Some(b)) => b,
         _ => {
             drop(guard);
@@ -657,7 +657,7 @@ const AMBIENT_PURPOSE_DISPATCH_NAME: &str = "dispatch_name";
 /// already guarded by `naming_triggered` at the call site, so a cache check
 /// would be dead code, not a real fast path.
 pub(crate) async fn generate_dispatch_name(
-    wstore: &Store,
+    mstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     dispatch_id: &str,
     first_member_agent_id: &str,
@@ -689,7 +689,7 @@ pub(crate) async fn generate_dispatch_name(
         return None;
     };
 
-    let block: Block = match wstore.get(&info.parent_block_id) {
+    let block: Block = match mstore.get(&info.parent_block_id) {
         Ok(Some(b)) => b,
         _ => {
             drop(guard);
@@ -724,13 +724,13 @@ pub(crate) async fn generate_dispatch_name(
 }
 
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandActivitySummaryData = serde_json::from_value(data)
@@ -768,7 +768,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 let word_target = cmd.word_target.unwrap_or(7).max(3).min(20);
 
-                let block: Block = wstore
+                let block: Block = mstore
                     .get(&cmd.block_id)
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
@@ -835,13 +835,13 @@ fn empty_suggestion_result() -> serde_json::Value {
 }
 
 fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
 
     engine.register_handler(
         COMMAND_SESSION_NEXT_PROMPT_SUGGESTION,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let cmd: CommandNextPromptSuggestionData = serde_json::from_value(data)
@@ -877,7 +877,7 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     return Ok(Some(empty_suggestion_result()));
                 };
 
-                let block: Block = wstore
+                let block: Block = mstore
                     .get(&cmd.block_id)
                     .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
@@ -1730,7 +1730,7 @@ fn narration_prompt(kind: &str, context: &str) -> Option<String> {
 /// if Haiku is slow, capped out, or absent, the thing being narrated still
 /// happened and the UI must already reflect it.
 pub(crate) async fn generate_ambient_narration(
-    wstore: &Store,
+    mstore: &Store,
     block_id: &str,
     event_id: &str,
     generation: u64,
@@ -1758,7 +1758,7 @@ pub(crate) async fn generate_ambient_narration(
     };
     let cancel = guard.cancellation();
 
-    let block: Block = wstore.get(block_id).ok().flatten()?;
+    let block: Block = mstore.get(block_id).ok().flatten()?;
     let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
     if cli_path.is_empty() {
         return None;

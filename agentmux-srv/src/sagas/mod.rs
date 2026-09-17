@@ -62,10 +62,10 @@ pub mod tear_off_tab;
 
 // Step 7 — E.7 integration tests. Cross-saga end-to-end coverage
 // that exercises reducer + saga coordinator + persist subscriber +
-// saga log together against a real `AppState` (in-memory wstore +
+// saga log together against a real `AppState` (in-memory mstore +
 // sagalog). Per-saga unit tests under each saga module already cover
 // happy + reject paths in isolation; this module focuses on
-// multi-surface consistency (reducer/wstore/saga-log) that PR 2's
+// multi-surface consistency (reducer/mstore/saga-log) that PR 2's
 // `compensate_unresolved` will rely on.
 #[cfg(test)]
 mod integration_tests;
@@ -190,7 +190,7 @@ impl<'a> SagaCtx<'a> {
             return Err(message);
         }
         for ev in &events {
-            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.wstore)
+            if let Err(e) = crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.mstore)
             {
                 // (reagent P1 PR #631 round 2) Mark the step as
                 // failed in the durable log BEFORE returning. Without
@@ -206,7 +206,7 @@ impl<'a> SagaCtx<'a> {
                     tracing::warn!(
                         saga_id = self.saga_id,
                         step_index = idx,
-                        "[saga] fail_step log write failed during wstore-apply error path: {}",
+                        "[saga] fail_step log write failed during mstore-apply error path: {}",
                         log_err,
                     );
                 }
@@ -279,7 +279,7 @@ impl<'a> SagaCtx<'a> {
         }
         for ev in &events {
             if let Err(e) =
-                crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.wstore)
+                crate::persist_subscriber::apply_event_to_wstore(ev, &self.state.mstore)
             {
                 tracing::warn!(
                     saga_id = self.saga_id,

@@ -79,7 +79,7 @@ pub struct InjectionRequest {
     /// Server-computed verification outcome — `#[serde(skip_deserializing)]`
     /// means an attacker-supplied JSON body can NEVER set this field, even
     /// by including it; only `handle_reactive_inject`
-    /// (`server/reactive.rs`, which has `AppState::wstore`) may set it,
+    /// (`server/reactive.rs`, which has `AppState::mstore`) may set it,
     /// after independently looking up the claimed `source_agent`'s stored
     /// key and verifying `jekt_sig` against it, before handing the request
     /// to `Handler::inject_message` (which has no `Store` access "by

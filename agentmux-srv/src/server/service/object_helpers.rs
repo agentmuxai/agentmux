@@ -11,7 +11,7 @@ use crate::backend::storage::store::Store;
 /// Phase E.4 (Option A) — reverse lookup: given a `LayoutState.oid`,
 /// find the `Tab.oid` that owns it (i.e., the tab whose `layoutstate`
 /// field matches). Returns `None` when the layout is unowned (legacy
-/// or partially-migrated row) or the wstore read fails — caller treats
+/// or partially-migrated row) or the mstore read fails — caller treats
 /// either as "skip the reducer dispatch and fall through to the wcore
 /// write." Linear scan over all tabs; acceptable here because the
 /// layout-update path is low-frequency relative to drag-resize and

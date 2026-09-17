@@ -242,7 +242,7 @@ impl SubagentWatcher {
         tokio::spawn(async move {
             if is_workflow {
                 crate::server::app_api::session::generate_dispatch_name(
-                    &watcher.wstore,
+                    &watcher.mstore,
                     &watcher,
                     &dispatch_id,
                     &first_member_agent_id,
@@ -250,7 +250,7 @@ impl SubagentWatcher {
                 ).await;
             } else {
                 crate::server::app_api::session::generate_subagent_name(
-                    &watcher.wstore,
+                    &watcher.mstore,
                     &watcher,
                     &first_member_agent_id,
                     crate::server::app_api::session::pull_call_semaphore(),
@@ -357,7 +357,7 @@ impl SubagentWatcher {
                 match item {
                     BacklogNamingItem::Solo { agent_id } => {
                         crate::server::app_api::session::generate_subagent_name(
-                            &watcher.wstore,
+                            &watcher.mstore,
                             &watcher,
                             &agent_id,
                             crate::server::app_api::session::backlog_naming_semaphore(),
@@ -366,7 +366,7 @@ impl SubagentWatcher {
                     }
                     BacklogNamingItem::Workflow { dispatch_id, representative_agent_id } => {
                         crate::server::app_api::session::generate_dispatch_name(
-                            &watcher.wstore,
+                            &watcher.mstore,
                             &watcher,
                             &dispatch_id,
                             &representative_agent_id,

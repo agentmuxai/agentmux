@@ -1193,23 +1193,23 @@ mod bundle_ref_tests {
     /// mcp_servers.rs for the full reasoning, mirrored here for skills.
     #[test]
     fn bind_checks_bundle_existence_in_id_store_not_self() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         insert_bundle(&id_store, "bundle-1");
-        wstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
+        mstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_skill_bind(&wstore, &id_store, "bundle-1", "skill-1");
+        let result = mstore.bundle_skill_bind(&mstore, &id_store, "bundle-1", "skill-1");
         assert!(result.is_ok(), "must check bundle existence against id_store, not self: {result:?}");
     }
 
     #[test]
     fn bind_fails_when_bundle_exists_only_in_self_not_id_store() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
-        insert_bundle(&wstore, "bundle-1");
-        wstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
+        insert_bundle(&mstore, "bundle-1");
+        mstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_skill_bind(&wstore, &id_store, "bundle-1", "skill-1");
+        let result = mstore.bundle_skill_bind(&mstore, &id_store, "bundle-1", "skill-1");
         assert!(
             result.is_err(),
             "a bundle only present in self's non-authoritative copy must not satisfy the id_store check: {result:?}"

@@ -172,15 +172,15 @@ struct EnsureAccountDirResp {
 
 pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mgr = state.auth_session_manager.clone();
-    let wstore = state.id_store.clone();
+    let mstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
-    let wstore_for_ensure_dir = wstore.clone();
+    let wstore_for_ensure_dir = mstore.clone();
     engine.register_handler(
         COMMAND_AUTH_START,
         Box::new(move |data, _ctx| {
             let mgr = mgr.clone();
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
@@ -213,7 +213,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 let mut auth_env = req.auth_env;
                 let (account_id, bundle_dir) = if req.direct_account {
                     let (account_id, dir) = compute_and_ensure_account_dir(
-                        &wstore,
+                        &mstore,
                         &req.existing_account_id,
                         &req.provider_id,
                         &mut auth_env,
@@ -230,7 +230,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 let r = mgr.start_session(req.provider_id.clone(), req.into_bundle_id.clone());
                 spawn_auth_cli(
                     mgr,
-                    wstore,
+                    mstore,
                     identity_store,
                     broker,
                     r.session_id.clone(),
@@ -327,10 +327,10 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     .map_err(|e| format!("auth.submitapikey: {e}"))?;
                 // API-key path validates by running the provider's
                 // authCheckCommand with the key in the appropriate
-                // env var, then persists via wstore. That persistence
+                // env var, then persists via mstore. That persistence
                 // is part of PR C (bundle auto-creation) per spec
                 // §10 — the validate-and-stash logic is here but
-                // wstore writes wait. For PR A we return an explicit
+                // mstore writes wait. For PR A we return an explicit
                 // error so frontend (PR B) sees a clear "not yet"
                 // signal while OAuth providers work end-to-end.
                 Err::<Option<serde_json::Value>, String>(
@@ -344,13 +344,13 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
     engine.register_handler(
         COMMAND_ENSURE_ACCOUNT_DIR,
         Box::new(move |data, _ctx| {
-            let wstore = wstore_for_ensure_dir.clone();
+            let mstore = wstore_for_ensure_dir.clone();
             Box::pin(async move {
                 let req: EnsureAccountDirReq = serde_json::from_value(data)
                     .map_err(|e| format!("identity.ensureaccountdir: {e}"))?;
                 let mut auth_env = std::collections::HashMap::new();
                 let (account_id, dir) = compute_and_ensure_account_dir(
-                    &wstore,
+                    &mstore,
                     &req.existing_account_id,
                     &req.provider_id,
                     &mut auth_env,

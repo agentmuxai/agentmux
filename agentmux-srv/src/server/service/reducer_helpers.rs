@@ -36,7 +36,7 @@ pub(crate) fn publish_events(state: &AppState, events: &[agentmux_common::ipc::E
 }
 
 /// Compensation helper: dispatch a command into the reducer and
-/// apply its emitted events to wstore best-effort. Used when an
+/// apply its emitted events to mstore best-effort. Used when an
 /// earlier sync apply partially wrote SQLite and we need to undo
 /// the leaked rows. SQLite errors during compensation are logged
 /// but ignored — the caller is already returning an error to the
@@ -84,7 +84,7 @@ pub(crate) async fn seed_layout_via_reducer(
     leaforder: Vec<crate::backend::obj::LeafOrderEntry>,
     magnified_node_id: String,
 ) -> Result<(), String> {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let slices = agentmux_common::LayoutClientSlices {
         leaforder: serde_json::to_value(&leaforder).ok(),
         focused_node_id,
@@ -173,7 +173,7 @@ pub(crate) async fn queue_layout_actions_via_reducer(
     tab_id: &str,
     actions: Vec<crate::backend::obj::LayoutActionData>,
 ) -> Result<(), String> {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let actions_json = serde_json::to_value(&actions)
         .map_err(|e| format!("queue actions serialize failed: {}", e))?;
     let cmd = agentmux_common::ipc::Command::LayoutQueueBackendActions {

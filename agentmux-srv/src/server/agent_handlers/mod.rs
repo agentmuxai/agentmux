@@ -293,7 +293,7 @@ mod recent_sessions_tests {
     //
     // Spins up the same engine + state shape as the production
     // websocket path so the handler runs end-to-end against an
-    // in-memory wstore + filestore. Asserts the row shape, the
+    // in-memory mstore + filestore. Asserts the row shape, the
     // identity filter, the snapshot-first sort, the preview extraction,
     // and the cross-version "no snapshot" fallback. This is the
     // backend correctness gate for the AgentPicker's Recent Sessions
@@ -336,7 +336,7 @@ mod recent_sessions_tests {
         Arc<WshRpcEngine>,
         tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
     ) {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
         let broker = Arc::new(crate::backend::mps::Broker::new());
@@ -349,7 +349,7 @@ mod recent_sessions_tests {
             },
             reactive_handler,
         ));
-        crate::backend::wcore::ensure_initial_data(&wstore).unwrap();
+        crate::backend::wcore::ensure_initial_data(&mstore).unwrap();
         let config_watcher = Arc::new(crate::backend::wconfig::ConfigState::new());
         let process_tracker = Arc::new(
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
@@ -363,10 +363,10 @@ mod recent_sessions_tests {
             version: "test".to_string(),
             hostname: "test-host".to_string(),
             app_path: String::new(),
-            wstore: wstore.clone(),
+            mstore: mstore.clone(),
             shared_store: None,
-            id_store: wstore.clone(),
-            identity_store: wstore.clone(),
+            id_store: mstore.clone(),
+            identity_store: mstore.clone(),
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
@@ -379,7 +379,7 @@ mod recent_sessions_tests {
             host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
             host_reg_secret: None,
             local_web_url: String::new(),
-            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone(), wstore.clone(), wstore.clone())),
+            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), mstore.clone(), mstore.clone(), mstore.clone())),
             history_service: Arc::new(crate::backend::history::HistoryService::new()),
             lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
                 "test-instance".to_string(),
@@ -468,7 +468,7 @@ mod recent_sessions_tests {
             memory_id: String::new(),
         };
         let mut def_mut = def.clone();
-        wstore.agent_def_insert(&mut def_mut).unwrap();
+        mstore.agent_def_insert(&mut def_mut).unwrap();
         // Identity display name resolves via the direct agent<->account
         // link (db_agent_identity_links/db_accounts) now, not a bundle —
         // see agent_handlers::session's listrecentsessions.
@@ -484,12 +484,12 @@ mod recent_sessions_tests {
             created_at: 0,
             updated_at: 0,
         };
-        wstore.identity_upsert(&account).unwrap();
+        mstore.identity_upsert(&account).unwrap();
         // Linked to the template: `db_agent_identity_links` still has its FK
         // on `db_agent_definitions`, so a launched agent's own row cannot
         // hold a link until Phase 3c re-points it. The handler therefore
         // falls back to the template's links — see its own note.
-        wstore
+        mstore
             .agent_identity_link("def-claude", "acct-work", "github")
             .unwrap();
         let memory = Bundle {
@@ -510,7 +510,7 @@ mod recent_sessions_tests {
             updated_at: 0,
             is_system: false,
         };
-        wstore.bundle_upsert(&memory).unwrap();
+        mstore.bundle_upsert(&memory).unwrap();
 
         // 3 instances:
         //   - blk-recent: has snapshot, more recent activity
@@ -540,7 +540,7 @@ mod recent_sessions_tests {
                 working_directory: format!("/tmp/{id}"),
                 display_hidden: false,
             };
-            wstore.instance_create(&inst).unwrap();
+            mstore.instance_create(&inst).unwrap();
         }
 
         // Snapshots for the two with snapshots. Write the OLDER one
@@ -686,7 +686,7 @@ mod recent_sessions_tests {
         Arc<WshRpcEngine>,
         tokio::sync::mpsc::UnboundedReceiver<crate::backend::rpc_types::RpcMessage>,
     ) {
-        let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
         let broker = Arc::new(crate::backend::mps::Broker::new());
@@ -699,7 +699,7 @@ mod recent_sessions_tests {
             },
             reactive_handler,
         ));
-        crate::backend::wcore::ensure_initial_data(&wstore).unwrap();
+        crate::backend::wcore::ensure_initial_data(&mstore).unwrap();
         let config_watcher = Arc::new(crate::backend::wconfig::ConfigState::new());
         let process_tracker = Arc::new(
             crate::backend::process_tracker::registry::AgentProcessRegistry::new(Some(broker.clone())),
@@ -713,10 +713,10 @@ mod recent_sessions_tests {
             version: "test".to_string(),
             hostname: "test-host".to_string(),
             app_path: String::new(),
-            wstore: wstore.clone(),
+            mstore: mstore.clone(),
             shared_store: None,
-            id_store: wstore.clone(),
-            identity_store: wstore.clone(),
+            id_store: mstore.clone(),
+            identity_store: mstore.clone(),
             filestore: filestore.clone(),
             global_transcript_store: None,
             event_bus: event_bus.clone(),
@@ -729,7 +729,7 @@ mod recent_sessions_tests {
             host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
             host_reg_secret: None,
             local_web_url: String::new(),
-            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone(), wstore.clone(), wstore.clone())),
+            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), mstore.clone(), mstore.clone(), mstore.clone())),
             history_service: Arc::new(crate::backend::history::HistoryService::new()),
             lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
                 "test-instance".to_string(),
@@ -805,7 +805,7 @@ mod recent_sessions_tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        wstore.agent_def_insert(&mut tpl).unwrap();
+        mstore.agent_def_insert(&mut tpl).unwrap();
 
         let mut user_a = AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -839,7 +839,7 @@ mod recent_sessions_tests {
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
         };
-        wstore.agent_def_insert(&mut user_a).unwrap();
+        mstore.agent_def_insert(&mut user_a).unwrap();
 
         let (engine, rx) = WshRpcEngine::new();
         super::register_agent_handlers(&engine, &state);
@@ -952,13 +952,13 @@ mod recent_sessions_tests {
         )
         .await;
         let new_def = state
-            .wstore
+            .mstore
             .agent_def_get(&resp.definition_id)
             .unwrap()
             .expect("new definition should exist");
         assert!(!new_def.memory_id.is_empty(), "new definition must have a bundle bound");
         let bundle = state
-            .wstore
+            .mstore
             .bundle_get(&new_def.memory_id)
             .unwrap()
             .expect("bound bundle should exist");
@@ -969,7 +969,7 @@ mod recent_sessions_tests {
 
         // "Own" bundle — not the template's own (empty, since tpl-claude
         // was seeded directly via agent_def_insert, bypassing this path).
-        let tpl = state.wstore.agent_def_get("tpl-claude").unwrap().unwrap();
+        let tpl = state.mstore.agent_def_get("tpl-claude").unwrap().unwrap();
         assert_ne!(new_def.memory_id, tpl.memory_id);
     }
 
@@ -985,7 +985,7 @@ mod recent_sessions_tests {
         )
         .await;
         let fork = state
-            .wstore
+            .mstore
             .agent_def_get(&fork_resp.id)
             .unwrap()
             .expect("fork should exist");
@@ -994,7 +994,7 @@ mod recent_sessions_tests {
 
         // "user-a" was seeded directly via agent_def_insert (empty memory_id),
         // so this also proves the fork didn't just inherit a shared/parent id.
-        let source = state.wstore.agent_def_get("user-a").unwrap().unwrap();
+        let source = state.mstore.agent_def_get("user-a").unwrap().unwrap();
         assert_ne!(fork.memory_id, source.memory_id);
     }
 
@@ -1014,9 +1014,9 @@ mod recent_sessions_tests {
         // agent_def_provision_and_bind_bundle mutates.
         assert!(!created.memory_id.is_empty(), "response should already reflect the bound bundle");
 
-        let stored = state.wstore.agent_def_get(&created.id).unwrap().unwrap();
+        let stored = state.mstore.agent_def_get(&created.id).unwrap().unwrap();
         assert_eq!(stored.memory_id, created.memory_id);
-        let bundle = state.wstore.bundle_get(&created.memory_id).unwrap().unwrap();
+        let bundle = state.mstore.bundle_get(&created.memory_id).unwrap().unwrap();
         assert_eq!(bundle.provider, "codex");
         assert_eq!(bundle.model, "openai", "vendor defaults from codex's supported_vendors[0]");
     }

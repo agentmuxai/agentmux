@@ -44,7 +44,7 @@ pub async fn run(
     // reducer-routed), block and workspace migration status wasn't part
     // of this pass, so SQLite stays the read here.
     {
-        let block = match state.wstore.get::<crate::backend::obj::Block>(&block_id) {
+        let block = match state.mstore.get::<crate::backend::obj::Block>(&block_id) {
             Ok(Some(b)) => b,
             Ok(None) => {
                 return Err(format!("PromoteBlockToTab: block not found: {}", block_id));
@@ -59,7 +59,7 @@ pub async fn run(
             ));
         }
         if state
-            .wstore
+            .mstore
             .get::<crate::backend::obj::Workspace>(&workspace_id)
             .map(|w| w.is_none())
             .unwrap_or(true)
@@ -157,7 +157,7 @@ mod tests {
     ) -> Vec<Event> {
         let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
         for ev in &events {
-            crate::persist_subscriber::apply_event_to_wstore(ev, &state.wstore).unwrap();
+            crate::persist_subscriber::apply_event_to_wstore(ev, &state.mstore).unwrap();
         }
         events
     }

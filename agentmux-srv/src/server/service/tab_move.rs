@@ -19,7 +19,7 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 // for backward compat — used only for the post-op SQLite
 // refresh + auto-close workspace check.
 pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -145,7 +145,7 @@ pub(crate) async fn handle_move_block_to_tab(state: &AppState, call: &WebCallTyp
 // auto-close source tab stay wcore-direct here (E.4 layout
 // territory). Same shape as TearOffBlock's RPC handler.
 pub(crate) async fn handle_promote_block_to_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let ws_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -274,7 +274,7 @@ pub(crate) async fn handle_promote_block_to_tab(state: &AppState, call: &WebCall
 // by routing all tab moves through the reducer so its view
 // always matches SQLite.
 pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let tab_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -384,7 +384,7 @@ pub(crate) async fn handle_move_tab_to_workspace(state: &AppState, call: &WebCal
 // was removed from AgentMux in E.2c.3b; restored tabs always
 // land in `tab_ids`.
 pub(crate) async fn handle_restore_torn_off_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let tab_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,

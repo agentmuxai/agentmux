@@ -260,10 +260,10 @@ fn finish_carry(
 /// gets a local copy under the new id. `rewritten` counts actual ref ROWS
 /// repointed, not "how many rows had an id change" — a converging row with
 /// no local ref pointing at it yet contributes 0 either way.
-fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
+fn carry_skills(mstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
     let mut carried = 0usize;
     let mut rewritten = 0usize;
-    for skill in wstore.skill_list_all_raw().map_err(|e| format!("list local skills: {e}"))? {
+    for skill in mstore.skill_list_all_raw().map_err(|e| format!("list local skills: {e}"))? {
         let original_id = skill.id.clone();
 
         let (final_id, newly_inserted) = if skill.is_global {
@@ -430,12 +430,12 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
             |id| {
                 let mut row = to_insert.clone();
                 row.id = id.to_string();
-                wstore
+                mstore
                     .skill_insert_raw(&row)
                     .map_err(|e| format!("insert local copy under new id for skill {}: {e}", row.name))
             },
             |old, new| {
-                wstore
+                mstore
                     .skill_rewrite_ref_id(old, new)
                     .map_err(|e| format!("rewrite refs for skill {}: {e}", to_insert.name))
             },
@@ -444,14 +444,14 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
                 // SPEC_DURABLE_BINDINGS_2026_09_10.md's redirect
                 // (`skill_delete` gained a `catalog` parameter) — no change
                 // to this migration's own frozen logic. This deletes the
-                // STALE LOCAL row under the superseded id from `wstore`'s
+                // STALE LOCAL row under the superseded id from `mstore`'s
                 // own db_skills mirror — it must never touch
                 // `identity_store` (the new local copy under the final id
-                // was already inserted separately above), so `wstore` is
+                // was already inserted separately above), so `mstore` is
                 // passed as `catalog` too, reproducing the pre-split
                 // single-store behavior exactly.
-                wstore
-                    .skill_delete(wstore, old)
+                mstore
+                    .skill_delete(mstore, old)
                     .map_err(|e| format!("delete superseded local skill row {old}: {e}"))
             },
         )?;
@@ -461,10 +461,10 @@ fn carry_skills(wstore: &Store, identity_store: &Store, channel_salt: &str) -> R
 
 /// Mirrors `carry_skills` exactly, for MCP servers — see that function's
 /// comments for the reasoning behind every decision here.
-fn carry_mcp_servers(wstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
+fn carry_mcp_servers(mstore: &Store, identity_store: &Store, channel_salt: &str) -> Result<(usize, usize), String> {
     let mut carried = 0usize;
     let mut rewritten = 0usize;
-    for server in wstore.mcp_server_list_all_raw().map_err(|e| format!("list local mcp servers: {e}"))? {
+    for server in mstore.mcp_server_list_all_raw().map_err(|e| format!("list local mcp servers: {e}"))? {
         let original_id = server.id.clone();
 
         let (final_id, newly_inserted) = if server.is_global {
@@ -588,20 +588,20 @@ fn carry_mcp_servers(wstore: &Store, identity_store: &Store, channel_salt: &str)
             |id| {
                 let mut row = to_insert.clone();
                 row.id = id.to_string();
-                wstore
+                mstore
                     .mcp_server_insert_raw(&row)
                     .map_err(|e| format!("insert local copy under new id for mcp server {}: {e}", row.name))
             },
             |old, new| {
-                wstore
+                mstore
                     .mcp_server_rewrite_ref_id(old, new)
                     .map_err(|e| format!("rewrite refs for mcp server {}: {e}", to_insert.name))
             },
             |old| {
                 // See the identical compile-only note on the skill_delete
                 // call above (Part D of SPEC_DURABLE_BINDINGS_2026_09_10.md).
-                wstore
-                    .mcp_server_delete(wstore, old)
+                mstore
+                    .mcp_server_delete(mstore, old)
                     .map_err(|e| format!("delete superseded local mcp server row {old}: {e}"))
             },
         )?;
@@ -626,9 +626,9 @@ impl Migration for M0031CarrySkillsAndMcpServersToIdentityStore {
         if !ctx.channel_store_path.exists() {
             return Ok(());
         }
-        let wstore = Arc::new(
+        let mstore = Arc::new(
             Store::open(&ctx.channel_store_path)
-                .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: open wstore: {e}")))?,
+                .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: open mstore: {e}")))?,
         );
         let identity_store = open_identity_store()
             .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: {e}")))?;
@@ -638,9 +638,9 @@ impl Migration for M0031CarrySkillsAndMcpServersToIdentityStore {
         // deterministic_collision_id's doc comment.
         let channel_salt = ctx.channel_store_path.to_string_lossy().into_owned();
 
-        let (skills_carried, skills_rewritten) = carry_skills(&wstore, &identity_store, &channel_salt)
+        let (skills_carried, skills_rewritten) = carry_skills(&mstore, &identity_store, &channel_salt)
             .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: skills: {e}")))?;
-        let (servers_carried, servers_rewritten) = carry_mcp_servers(&wstore, &identity_store, &channel_salt)
+        let (servers_carried, servers_rewritten) = carry_mcp_servers(&mstore, &identity_store, &channel_salt)
             .map_err(|e| MigrationError(format!("carry_skills_and_mcp_servers: mcp servers: {e}")))?;
 
         tracing::info!(
@@ -790,15 +790,15 @@ mod tests {
     #[test]
     fn a_recognized_starter_converges_on_the_deterministic_id_regardless_of_its_legacy_local_id() {
         let dir = tempfile::tempdir().unwrap();
-        let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        let mstore = Store::open(&dir.path().join("objects.db")).unwrap();
         // A legacy pre-Phase-1 row: real starter trigger, but a random id
         // that does NOT match frozen_starter_skill_id("tdd").
-        wstore.skill_insert_raw(&skill("legacy-random-id", "Test-Driven Development", "tdd", true)).unwrap();
+        mstore.skill_insert_raw(&skill("legacy-random-id", "Test-Driven Development", "tdd", true)).unwrap();
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
-        let (carried, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (carried, rewritten) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(carried, 1);
         assert_eq!(rewritten, 0, "no ref rows existed locally, so nothing to rewrite");
 
@@ -810,18 +810,18 @@ mod tests {
         assert!(identity_store.skill_get("legacy-random-id").unwrap().is_none());
         // The stale local row must be gone too — not just superseded.
         assert!(
-            wstore.skill_get("legacy-random-id").unwrap().is_none(),
+            mstore.skill_get("legacy-random-id").unwrap().is_none(),
             "the superseded local row must be removed once the rename is complete"
         );
-        assert!(wstore.skill_get(&expected_id).unwrap().is_some());
+        assert!(mstore.skill_get(&expected_id).unwrap().is_some());
     }
 
     #[test]
     fn ref_rows_are_rewritten_when_the_id_changes() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("objects.db");
-        let wstore = Store::open(&db_path).unwrap();
-        wstore.skill_insert_raw(&skill("legacy-random-id", "Test-Driven Development", "tdd", true)).unwrap();
+        let mstore = Store::open(&db_path).unwrap();
+        mstore.skill_insert_raw(&skill("legacy-random-id", "Test-Driven Development", "tdd", true)).unwrap();
         // A real ref row naming the legacy id — the thing that must not be
         // left dangling once the migration mints a different id. `Store.conn`
         // isn't reachable from this module (`pub(super)`), so this goes
@@ -835,23 +835,23 @@ mod tests {
         // Compile-only accommodation for Part C of
         // SPEC_DURABLE_BINDINGS_2026_09_10.md's redirect (`skill_bind` gained
         // a `catalog` parameter) — no change to this migration's own frozen
-        // logic. `wstore` itself already holds this row locally (inserted
+        // logic. `mstore` itself already holds this row locally (inserted
         // above via `skill_insert_raw`), so passing it as `catalog` too
         // satisfies the new existence check exactly as it always implicitly
         // did before the split.
-        wstore.skill_bind(&wstore, "agent-1", "legacy-random-id").unwrap();
+        mstore.skill_bind(&mstore, "agent-1", "legacy-random-id").unwrap();
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
-        let (_, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (_, rewritten) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(rewritten, 1);
 
         let expected_id = frozen_starter_skill_id("tdd").to_string();
         assert!(
-            wstore.skill_is_bound_to("agent-1", &expected_id).unwrap(),
+            mstore.skill_is_bound_to("agent-1", &expected_id).unwrap(),
             "the agent's own ref row must now point at the canonical id"
         );
-        assert!(!wstore.skill_is_bound_to("agent-1", "legacy-random-id").unwrap());
+        assert!(!mstore.skill_is_bound_to("agent-1", "legacy-random-id").unwrap());
     }
 
     #[test]
@@ -1006,17 +1006,17 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("objects.db");
-        let wstore = Store::open(&db_path).unwrap();
-        wstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
+        let mstore = Store::open(&db_path).unwrap();
+        mstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
         rusqlite::Connection::open(&db_path).unwrap().execute(
             "INSERT INTO db_agents (id, name, provider) VALUES ('agent-1', 'A', 'claude')",
             [],
         ).unwrap();
         // See the identical compile-only note on the earlier skill_bind call
         // in this file (Part C of SPEC_DURABLE_BINDINGS_2026_09_10.md).
-        wstore.skill_bind(&wstore, "agent-1", "collided-id").unwrap();
+        mstore.skill_bind(&mstore, "agent-1", "collided-id").unwrap();
 
-        let (carried, rewritten) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (carried, rewritten) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(carried, 1, "the fresh-id insert must still succeed even though the first attempt lost the race");
         assert_eq!(rewritten, 1);
 
@@ -1027,8 +1027,8 @@ mod tests {
         // not at "collided-id" — and the LOCAL row that used to sit there
         // (this channel's own "My Private Skill") must be gone, not left as
         // an orphaned duplicate.
-        assert!(!wstore.skill_is_bound_to("agent-1", "collided-id").unwrap());
-        assert!(wstore.skill_get("collided-id").unwrap().is_none());
+        assert!(!mstore.skill_is_bound_to("agent-1", "collided-id").unwrap());
+        assert!(mstore.skill_get("collided-id").unwrap().is_none());
     }
 
     #[test]
@@ -1045,13 +1045,13 @@ mod tests {
         identity_store.skill_insert_raw(&skill("collided-id", "Someone Else's Skill", "", false)).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
-        let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
-        wstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
+        let mstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        mstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
 
-        let (first_carried, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (first_carried, _) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(first_carried, 1);
 
-        let (second_carried, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (second_carried, _) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(
             second_carried, 0,
             "a retry must converge on the id the first run already chose, not mint another fresh one"
@@ -1067,7 +1067,7 @@ mod tests {
         .flatten()
         .map(|s| s.name)
         .chain(
-            wstore
+            mstore
                 .skill_list_all_raw()
                 .unwrap()
                 .into_iter()
@@ -1079,7 +1079,7 @@ mod tests {
         // whatever id it converged to), and the identity store's
         // "collided-id" row is still the untouched original.
         assert_eq!(
-            wstore.skill_list_all_raw().unwrap().iter().filter(|s| s.name == "My Private Skill").count(),
+            mstore.skill_list_all_raw().unwrap().iter().filter(|s| s.name == "My Private Skill").count(),
             1,
             "must not accumulate a second local row on retry: {all_names:?}"
         );
@@ -1088,34 +1088,34 @@ mod tests {
     #[test]
     fn re_running_after_a_partial_carry_only_carries_what_is_still_missing() {
         let dir = tempfile::tempdir().unwrap();
-        let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
-        wstore.skill_insert_raw(&skill("s1", "Skill One", "", false)).unwrap();
-        wstore.skill_insert_raw(&skill("s2", "Skill Two", "", false)).unwrap();
+        let mstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        mstore.skill_insert_raw(&skill("s1", "Skill One", "", false)).unwrap();
+        mstore.skill_insert_raw(&skill("s2", "Skill Two", "", false)).unwrap();
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
 
-        let (first_pass, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (first_pass, _) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(first_pass, 2);
 
-        let (second_pass, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (second_pass, _) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(second_pass, 0, "a full re-run must find nothing left to carry");
     }
 
     #[test]
     fn a_recognized_starter_mcp_server_converges_on_the_deterministic_id() {
         let dir = tempfile::tempdir().unwrap();
-        let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
-        wstore.mcp_server_insert_raw(&mcp("legacy-random-id", "git", true)).unwrap();
+        let mstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        mstore.mcp_server_insert_raw(&mcp("legacy-random-id", "git", true)).unwrap();
 
         let identity_dir = tempfile::tempdir().unwrap();
         let identity_store = Store::open_identity_store(&identity_dir.path().join("identity-store.db")).unwrap();
-        carry_mcp_servers(&wstore, &identity_store, "channel").unwrap();
+        carry_mcp_servers(&mstore, &identity_store, "channel").unwrap();
 
         let expected_id = frozen_starter_mcp_server_id("git").to_string();
         assert!(identity_store.mcp_server_get(&expected_id).unwrap().is_some());
         assert!(identity_store.mcp_server_get("legacy-random-id").unwrap().is_none());
-        assert!(wstore.mcp_server_get("legacy-random-id").unwrap().is_none());
+        assert!(mstore.mcp_server_get("legacy-random-id").unwrap().is_none());
     }
 
     #[test]
@@ -1167,8 +1167,8 @@ mod tests {
         identity_store.skill_insert_raw(&skill("collided-id", "Someone Else's Skill", "", false)).unwrap();
 
         let dir = tempfile::tempdir().unwrap();
-        let wstore = Store::open(&dir.path().join("objects.db")).unwrap();
-        wstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
+        let mstore = Store::open(&dir.path().join("objects.db")).unwrap();
+        mstore.skill_insert_raw(&skill("collided-id", "My Private Skill", "", false)).unwrap();
 
         let expected_fallback_id =
             deterministic_collision_id(SKILL_COLLISION_NAMESPACE_SEED, "channel", "collided-id").to_string();
@@ -1176,7 +1176,7 @@ mod tests {
         pre_crashed.id = expected_fallback_id.clone();
         identity_store.skill_insert_raw(&pre_crashed).unwrap();
 
-        let (carried, _) = carry_skills(&wstore, &identity_store, "channel").unwrap();
+        let (carried, _) = carry_skills(&mstore, &identity_store, "channel").unwrap();
         assert_eq!(
             carried, 0,
             "the fallback id already exists in the identity store from the 'crashed' first attempt — nothing new to carry"
@@ -1187,10 +1187,10 @@ mod tests {
         // remove the stale local row — recovering fully instead of getting
         // stuck because the identity-store row already existed.
         assert!(
-            wstore.skill_get(&expected_fallback_id).unwrap().is_some(),
+            mstore.skill_get(&expected_fallback_id).unwrap().is_some(),
             "retry must still complete the local half of the carry even though the identity-store row already existed"
         );
-        assert!(wstore.skill_get("collided-id").unwrap().is_none());
+        assert!(mstore.skill_get("collided-id").unwrap().is_none());
     }
 
     #[test]

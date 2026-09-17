@@ -263,13 +263,13 @@ impl SubprocessController {
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
         let inner_read = Arc::clone(&self.inner);
-        let wstore_read = self.wstore.clone();
+        let wstore_read = self.mstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let session_id_field = config.session_id_field.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
-            shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Retain the terminal `result` frame so a failure reported on STDOUT
         // (auth / rate-limit / usage — the common case; claude may even exit 0)
         // can be classified, not just stderr-reported ones. Shared with the
@@ -485,7 +485,7 @@ impl SubprocessController {
         let stderr_tail_wait = Arc::clone(&stderr_tail);
         let last_result_frame_wait = Arc::clone(&last_result_frame);
         let last_inband_error_wait = Arc::clone(&last_inband_error);
-        let wstore_wait = self.wstore.clone();
+        let wstore_wait = self.mstore.clone();
         let event_bus_wait = self.event_bus.clone();
         let lease_store_wait = self.lease_store.clone();
         let claimed_lease_wait = claimed_lease;

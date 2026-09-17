@@ -955,7 +955,7 @@ use std::sync::Arc;
 
     #[test]
     fn resolve_global_output_zone_maps_agent_block() {
-        let wstore = Arc::new(Store::open_in_memory().expect("wstore"));
+        let mstore = Arc::new(Store::open_in_memory().expect("mstore"));
 
         // Agent-anchored block → zone resolved from agentId meta.
         let oid = uuid::Uuid::new_v4().to_string();
@@ -971,9 +971,9 @@ use std::sync::Arc;
             meta,
             subblockids: None,
         };
-        wstore.insert(&mut block).expect("insert block");
+        mstore.insert(&mut block).expect("insert block");
 
-        let some = Some(wstore.clone());
+        let some = Some(mstore.clone());
         assert_eq!(
             resolve_global_output_zone(&some, &oid).as_deref(),
             Some("agent:def-zone-1:current"),

@@ -170,15 +170,15 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // COMMAND_RUN_DRONE: reads drone definition from id_store (global),
-    // writes drone run rows to wstore (per-channel).
+    // writes drone run rows to mstore (per-channel).
     let id_store = state.id_store.clone();
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_RUN_DRONE,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: RunDroneReq = serde_json::from_value(data)
@@ -221,13 +221,13 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     output: String::new(),
                     error: String::new(),
                 };
-                wstore
+                mstore
                     .drone_run_insert(&placeholder)
                     .map_err(|e| format!("rundrone placeholder: {e}"))?;
 
                 // Drain on a background task; on completion, UPDATE
                 // the placeholder row in place.
-                let wstore_for_drain = wstore.clone();
+                let wstore_for_drain = mstore.clone();
                 let broker_for_drain = broker.clone();
                 let run_id_for_drain = run_id.clone();
                 let drone_id_for_drain = drone_id.clone();
@@ -304,16 +304,16 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.wstore.clone();
+    let mstore = state.mstore.clone();
     engine.register_handler(
         COMMAND_LIST_DRONE_RUNS,
         Box::new(move |data, _ctx| {
-            let wstore = wstore.clone();
+            let mstore = mstore.clone();
             Box::pin(async move {
                 let cmd: ListRunsReq = serde_json::from_value(data)
                     .map_err(|e| format!("listdroneruns: {e}"))?;
                 let limit = cmd.limit.clamp(0, MAX_LIST_LIMIT);
-                let list = wstore
+                let list = mstore
                     .drone_runs_for(&cmd.drone_id, limit)
                     .map_err(|e| format!("listdroneruns: {e}"))?;
                 Ok(Some(serde_json::to_value(&list).unwrap_or_default()))

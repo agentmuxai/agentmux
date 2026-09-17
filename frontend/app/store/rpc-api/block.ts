@@ -53,7 +53,7 @@ export const BlockApi = {
     // outcome (parsed from its <task-notification> message), into the
     // durable Background Task Registry. Deliberately separate from
     // DockNodeStatusCommand above — see CommandBackgroundTaskCompletionData's
-    // doc comment in gotypes.d.ts for why. Spec:
+    // doc comment in srv-types.d.ts for why. Spec:
     // docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
     BackgroundTaskCompletionCommand(client: RpcClient, data: CommandBackgroundTaskCompletionData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("backgroundtaskcompletion", data, opts);

@@ -292,7 +292,7 @@ fn token_blob(json: &serde_json::Value, now: i64) -> serde_json::Value {
 /// Persist the OAuth account: token blob → keychain, pointer + non-secret
 /// context → DB. Returns the account id.
 fn persist_oauth_account(
-    wstore: &Arc<Store>,
+    mstore: &Arc<Store>,
     identity_store: &Arc<Store>,
     provider: &str,
     name: &str,
@@ -317,7 +317,7 @@ fn persist_oauth_account(
         created_at: now,
         updated_at: now,
     };
-    if let Err(e) = wstore.identity_upsert_with_mirror(identity_store, &account) {
+    if let Err(e) = mstore.identity_upsert_with_mirror(identity_store, &account) {
         let _ = crate::identity::secret_store::delete(&account_id);
         return Err(format!("persist failed: {e}"));
     }
@@ -343,15 +343,15 @@ pub fn start(
     provider: &str,
     name: String,
     byo: Option<ByoCredentials>,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
 ) -> Result<(String, OAuthStatus), String> {
     let cfg = config_for(provider).ok_or_else(|| format!("unknown OAuth provider: {provider}"))?;
     let (client_id, client_secret) = resolve_client(&cfg, byo.as_ref())?;
 
     match cfg.flow {
-        OAuthFlow::AuthCodePkce => start_code_flow(cfg, client_id, client_secret, name, wstore, identity_store),
-        OAuthFlow::Device => start_device_flow(cfg, client_id, name, wstore, identity_store),
+        OAuthFlow::AuthCodePkce => start_code_flow(cfg, client_id, client_secret, name, mstore, identity_store),
+        OAuthFlow::Device => start_device_flow(cfg, client_id, name, mstore, identity_store),
     }
 }
 
@@ -360,7 +360,7 @@ fn start_code_flow(
     client_id: String,
     client_secret: Option<String>,
     name: String,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
 ) -> Result<(String, OAuthStatus), String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -444,7 +444,7 @@ fn start_code_flow(
             Ok(json) => {
                 let now = chrono::Utc::now().timestamp();
                 let tokens = token_blob(&json, now);
-                match persist_oauth_account(&wstore, &identity_store, cfg.provider, &name, &tokens) {
+                match persist_oauth_account(&mstore, &identity_store, cfg.provider, &name, &tokens) {
                     Ok(account_id) => manager().set_status(&sid, OAuthStatus::Success { account_id }),
                     Err(e) => manager().set_status(&sid, OAuthStatus::Failed { error: e }),
                 }
@@ -460,7 +460,7 @@ fn start_device_flow(
     cfg: ServiceOAuthConfig,
     client_id: String,
     name: String,
-    wstore: Arc<Store>,
+    mstore: Arc<Store>,
     identity_store: Arc<Store>,
 ) -> Result<(String, OAuthStatus), String> {
     let device_url = cfg.device_url.ok_or("provider has no device endpoint")?.to_string();
@@ -518,7 +518,7 @@ fn start_device_flow(
             if j.get("access_token").is_some() {
                 let now = chrono::Utc::now().timestamp();
                 let tokens = token_blob(&j, now);
-                match persist_oauth_account(&wstore, &identity_store, cfg.provider, &name, &tokens) {
+                match persist_oauth_account(&mstore, &identity_store, cfg.provider, &name, &tokens) {
                     Ok(account_id) => manager().set_status(&sid, OAuthStatus::Success { account_id }),
                     Err(e) => manager().set_status(&sid, OAuthStatus::Failed { error: e }),
                 }

@@ -27,7 +27,7 @@ use super::reducer_helpers::{dispatch_to_reducer, publish_events};
 // gap (see saga-coordinator-location-analysis-2026-04-30.md
 // §4.2).
 pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let block_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -154,7 +154,7 @@ pub(crate) async fn handle_tear_off_block(state: &AppState, call: &WebCallType) 
 // empty-tab watcher once its tab.blockids is empty.
 // Spec: docs/specs/SPEC_FLOATING_PANE_REDOCK_2026-05-27.md
 pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let block_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,
@@ -310,7 +310,7 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
 // CreateTab/etc. calls failing on "workspace not found"
 // checks against the reducer's stale view.
 pub(crate) async fn handle_tear_off_tab(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     let tab_id: String = match service::get_arg(args, 0) {
         Ok(v) => v,

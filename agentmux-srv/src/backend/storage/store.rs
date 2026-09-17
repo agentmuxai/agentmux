@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Store: generic OID-based CRUD for StoreObj types.
-//! Port of Go's pkg/wstore/wstore_dbops.go + wstore_dbsetup.go.
+//! Port of Go's pkg/mstore/wstore_dbops.go + wstore_dbsetup.go.
 //!
 //! Uses `Mutex<Connection>` matching Go's `MaxOpenConns(1)`.
 //! SQLite WAL mode + 5s busy timeout (same as Go).
@@ -117,7 +117,7 @@ impl Store {
     /// TEST-ONLY: additionally install the **identity-store** schema on this
     /// store, on top of whatever schema it already carries.
     ///
-    /// `server::tests::test_state` deliberately aliases `wstore`, `id_store`
+    /// `server::tests::test_state` deliberately aliases `mstore`, `id_store`
     /// and `identity_store` to ONE in-memory store so a test can seed data
     /// through any of them — a lot of existing setup code depends on that.
     /// The cost is that the single store carried only the object schema, so a
@@ -232,7 +232,7 @@ impl Store {
         &self.conn
     }
 
-    /// Run the `db_agents` consolidation backfill under the wstore's
+    /// Run the `db_agents` consolidation backfill under the mstore's
     /// exclusive connection lock. Idempotent — gated by a marker file in
     /// `data_dir` (skip with `None` for tests).
     pub fn run_agents_consolidate(

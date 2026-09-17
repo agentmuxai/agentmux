@@ -14,7 +14,7 @@ use super::object_helpers::{
 use super::reducer_helpers::{compensate_via_reducer, dispatch_to_reducer, publish_events};
 
 pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let args = &call.args;
     match call.method.as_str() {
         "GetObject" => {
@@ -287,7 +287,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
         // reducer. Decomposes by otype to the typed Update*Meta
         // command. Reducer is pass-through (validates entity exists;
         // emits event); subscriber's apply_*_meta_updated does the
-        // shallow merge against wstore.
+        // shallow merge against mstore.
         "UpdateObjectMeta" => {
             let oref_str: String = match service::get_arg(args, 0) {
                 Ok(v) => v,
@@ -475,7 +475,7 @@ async fn update_layout_via_reducer(
     tab_id: String,
     new_tree: Option<agentmux_common::LayoutNode>,
 ) -> WebReturnType {
-    let store = &state.wstore;
+    let store = &state.mstore;
     let oid = mux_obj_value
         .get("oid")
         .and_then(|v| v.as_str())

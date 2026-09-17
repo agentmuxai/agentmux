@@ -708,7 +708,7 @@ pub struct PersistentSubprocessController {
     inner: Arc<Mutex<PersistentInner>>,
     broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<TurnActivityTracker>,
@@ -824,7 +824,7 @@ impl PersistentSubprocessController {
         block_id: String,
         broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
@@ -853,7 +853,7 @@ impl PersistentSubprocessController {
             })),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
             health_monitor,
             stdout_seq: Arc::new(AtomicU64::new(0)),
@@ -1543,7 +1543,7 @@ impl PersistentSubprocessController {
     /// live-display is handled by the `agent-message-accepted` path (UUID
     /// node), avoiding a duplicate.
     fn persist_message_to_blockfile(&self, json_str: &str) {
-        let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         let line_with_newline = format!("{json_str}\n");
         super::shell::persist_to_blockfile_silent(
             &self.block_id,
@@ -1695,7 +1695,7 @@ impl PersistentSubprocessController {
     /// this PR's own bug via a different path.
     fn flush_error_line_now(&self, line: String) {
         let Some(ref broker) = self.broker else { return };
-        let global_output_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        let global_output_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         super::shell::handle_append_block_file(
             broker,
             &self.block_id,
@@ -1712,7 +1712,7 @@ impl PersistentSubprocessController {
         // it isn't silently dropped from the pane's failure-recovery UI. No
         // exit code exists for this now-superseded turn.
         if let Some(failure) = classify_exit_line(None, &line) {
-            core::persist_last_failure(&self.block_id, Some(&failure), &self.wstore, &self.event_bus);
+            core::persist_last_failure(&self.block_id, Some(&failure), &self.mstore, &self.event_bus);
             broker.publish(mps::MuxEvent {
                 event: mps::EVENT_AGENT_FAILURE.to_string(),
                 scopes: vec![format!("block:{}", self.block_id)],
@@ -1739,7 +1739,7 @@ impl PersistentSubprocessController {
     ) {
         let Some(ref broker) = self.broker else { return };
         let line = session_outcome_line(outcome, attempted_sid, actual_sid);
-        let global_output_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        let global_output_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         super::shell::handle_append_block_file(
             broker,
             &self.block_id,
@@ -1770,7 +1770,7 @@ impl PersistentSubprocessController {
                 return true;
             }
         }
-        let Some(ref store) = self.wstore else {
+        let Some(ref store) = self.mstore else {
             return false;
         };
         let Ok(block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) else {
@@ -2207,7 +2207,7 @@ impl PersistentSubprocessController {
         // blockfile append renders it in the open pane; the persisted line lets
         // `parseHistoryLines` rebuild the node on reopen.
         if let Some(ref broker) = self.broker {
-            let global_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
             let line_with_newline = format!("{json_str}\n");
             super::shell::handle_append_block_file(
                 broker,
@@ -2725,7 +2725,7 @@ impl PersistentSubprocessController {
         let stderr_reader_handle: Option<tokio::task::JoinHandle<()>> = stderr.map(|stderr_pipe| {
             let block_id_stderr = self.block_id.clone();
             let inner_stderr = Arc::clone(&self.inner);
-            let wstore_stderr = self.wstore.clone();
+            let wstore_stderr = self.mstore.clone();
             let event_bus_stderr = self.event_bus.clone();
             let attempted_resume_sid = attempted_resume_sid.clone();
             let my_generation_stderr = my_generation;
@@ -2922,8 +2922,8 @@ impl PersistentSubprocessController {
         // Record active pid for crash recovery (Phase 4.2). If the server
         // dies while this subprocess is running, scan_orphans() will find
         // the stale pid on next boot and flag the session as interrupted.
-        if let Some(ref wstore) = self.wstore {
-            super::session_recovery::mark_active_pid(wstore, &self.block_id, pid);
+        if let Some(ref mstore) = self.mstore {
+            super::session_recovery::mark_active_pid(mstore, &self.block_id, pid);
         }
 
         // Spawn stdin writer task
@@ -2951,7 +2951,7 @@ impl PersistentSubprocessController {
         let block_id_read = self.block_id.clone();
         let broker_read = self.broker.clone();
         let inner_read = Arc::clone(&self.inner);
-        let wstore_read = self.wstore.clone();
+        let wstore_read = self.mstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
@@ -2966,7 +2966,7 @@ impl PersistentSubprocessController {
         // once, from the block's `agentId` meta, so every `output` line is also
         // mirrored to the cross-channel store. `None` for non-agent blocks.
         let global_output_zone =
-            super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+            super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Cloned before `global_output_zone` moves into the stdout-reader
         // task below — the process-waiter task (spawned further down) needs
         // its own copy to flush a held-back `pending_error_result_line`.
@@ -3470,7 +3470,7 @@ impl PersistentSubprocessController {
         let block_id_wait = self.block_id.clone();
         let inner_wait = Arc::clone(&self.inner);
         let broker_wait = self.broker.clone();
-        let wstore_wait = self.wstore.clone();
+        let wstore_wait = self.mstore.clone();
         // Needed to persist a classified failure (rate-limit/overloaded/etc.)
         // into block meta alongside the MPS publish below — mirrors
         // `event_bus_read`'s equivalent clone for the stdout-reader task.
@@ -3728,8 +3728,8 @@ impl PersistentSubprocessController {
                         // respawn may have re-registered a fresh pid on a
                         // parallel task between the generation gate above
                         // and this call.
-                        if let Some(ref wstore) = wstore_wait {
-                            super::session_recovery::clear_active_pid_if_pid(wstore, &block_id_wait, pid_wait);
+                        if let Some(ref mstore) = wstore_wait {
+                            super::session_recovery::clear_active_pid_if_pid(mstore, &block_id_wait, pid_wait);
                         }
                     }
 
@@ -4158,8 +4158,8 @@ impl PersistentSubprocessController {
                         // above was read once under the lock, and a fallback
                         // respawn's re-registration can land between that
                         // read and this call.
-                        if let Some(ref wstore) = wstore_wait {
-                            super::session_recovery::clear_active_pid_if_pid(wstore, &block_id_wait, pid_wait);
+                        if let Some(ref mstore) = wstore_wait {
+                            super::session_recovery::clear_active_pid_if_pid(mstore, &block_id_wait, pid_wait);
                         }
                     }
                 }

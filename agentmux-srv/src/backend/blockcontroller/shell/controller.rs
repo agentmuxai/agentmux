@@ -101,7 +101,7 @@ pub struct ShellController {
     #[allow(dead_code)]
     pub(super) event_bus: Option<Arc<EventBus>>,
     /// AgentMux object store — used to seed cmd:cwd on shell spawn.
-    pub(super) wstore: Option<Arc<Store>>,
+    pub(super) mstore: Option<Arc<Store>>,
     /// FileStore write-through target for PTY output persistence
     /// (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1) — lets
     /// `handle_append_block_file`'s "term" writes survive a reconnect,
@@ -118,7 +118,7 @@ impl ShellController {
         block_id: String,
         broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         Self {
@@ -144,7 +144,7 @@ impl ShellController {
             conn_factory: Mutex::new(None),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
         }
     }

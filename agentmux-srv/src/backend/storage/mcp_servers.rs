@@ -581,7 +581,7 @@ impl Store {
     /// `id_store` (NOT `self`) is where bundle existence is checked —
     /// reagentx P0 review on PR #2639: bundles are authoritatively written
     /// through `id_store` (the shared store in a normal production
-    /// install), not `wstore`/`self`, where this method's own table lives.
+    /// install), not `mstore`/`self`, where this method's own table lives.
     /// `self`'s own local `db_bundles` copy is essentially always empty in
     /// that case, so checking existence there (as the original version of
     /// this method did) made "bundle not found" fire for every real
@@ -767,17 +767,17 @@ mod bundle_ref_tests {
     /// reagentx P0 review on PR #2639: bundle existence must be checked
     /// against `id_store` (the caller-supplied param), which is where
     /// bundles are authoritatively written in production — NOT against
-    /// `self` (wstore), whose own local `db_bundles` copy is essentially
+    /// `self` (mstore), whose own local `db_bundles` copy is essentially
     /// always empty for real bundles. Two-store setup mirrors production:
     /// the bundle exists ONLY in `id_store`.
     #[test]
     fn bind_checks_bundle_existence_in_id_store_not_self() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
         insert_bundle(&id_store, "bundle-1");
-        wstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
+        mstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_mcp_bind(&wstore, &id_store, "bundle-1", "srv-1");
+        let result = mstore.bundle_mcp_bind(&mstore, &id_store, "bundle-1", "srv-1");
         assert!(result.is_ok(), "must check bundle existence against id_store, not self: {result:?}");
     }
 
@@ -790,12 +790,12 @@ mod bundle_ref_tests {
     /// `id_store`, which would make THIS test's bind wrongly succeed.
     #[test]
     fn bind_fails_when_bundle_exists_only_in_self_not_id_store() {
-        let wstore = make_store();
+        let mstore = make_store();
         let id_store = make_store();
-        insert_bundle(&wstore, "bundle-1"); // wrong store — simulates the pre-fix bug's mirror image
-        wstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
+        insert_bundle(&mstore, "bundle-1"); // wrong store — simulates the pre-fix bug's mirror image
+        mstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
 
-        let result = wstore.bundle_mcp_bind(&wstore, &id_store, "bundle-1", "srv-1");
+        let result = mstore.bundle_mcp_bind(&mstore, &id_store, "bundle-1", "srv-1");
         assert!(
             result.is_err(),
             "a bundle only present in self's non-authoritative copy must not satisfy the id_store check: {result:?}"

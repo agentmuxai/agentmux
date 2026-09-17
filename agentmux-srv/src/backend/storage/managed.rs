@@ -28,7 +28,7 @@
 //! catalog table's store are no longer guaranteed to be the same physical
 //! SQLite file: `db_skills`/`db_mcp_servers` are authoritatively
 //! `identity_store` now, while `db_agent_skills_ref`/`db_bundle_skills_ref`
-//! (and the MCP equivalents) stay on `self` (`wstore`) until Phase 3/6
+//! (and the MCP equivalents) stay on `self` (`mstore`) until Phase 3/6
 //! promotes them too. Every method that used to join the catalog table
 //! against a ref table in one SQL statement now takes an explicit
 //! `catalog: &Store` parameter and does two queries composed in Rust
@@ -162,7 +162,7 @@ impl Store {
     // each one locks exactly one connection for exactly as long as it needs
     // to — important because `self` and `catalog` (or `id_store`) may be the
     // SAME `Store` (test_state() aliases them; even in production `id_store`
-    // and `identity_store` can coincide with `wstore` in a degraded-mode
+    // and `identity_store` can coincide with `mstore` in a degraded-mode
     // fallback), and `Mutex<Connection>` is not reentrant. A method that
     // locked `self` and then called into `catalog` while still holding that
     // lock would deadlock the moment they aliased.
@@ -846,7 +846,7 @@ mod tests {
     //
     // Use the REAL `Skill` primitive against two genuinely separate
     // `Store::open_in_memory()` instances — one acting as the ref-owning
-    // `wstore`, one as `catalog` (with the identity schema applied) — so a
+    // `mstore`, one as `catalog` (with the identity schema applied) — so a
     // bug that only shows up when the two stores are NOT the same connection
     // (e.g. accidentally querying `self` for a catalog row, or vice versa)
     // cannot hide the way it would if both roles resolved to one aliased
@@ -854,7 +854,7 @@ mod tests {
 
     use crate::backend::storage::skills::Skill;
 
-    fn wstore() -> Store {
+    fn mstore() -> Store {
         Store::open_in_memory().unwrap()
     }
 
@@ -901,9 +901,9 @@ mod tests {
 
     #[test]
     fn managed_list_combines_global_and_bound_private_rows_from_two_distinct_stores() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
         catalog.managed_upsert_unique_global(&skill("global-1", "Global", true, 200)).unwrap();
         catalog.managed_upsert_unique_global(&skill("global-2", "Unrelated Global", true, 100)).unwrap();
         // A private row that exists in the catalog but is NOT referenced by
@@ -921,9 +921,9 @@ mod tests {
             )
             .unwrap();
         }
-        wstore.skill_bind(&catalog, "agent-1", "private-mine").unwrap();
+        mstore.skill_bind(&catalog, "agent-1", "private-mine").unwrap();
 
-        let list = wstore.managed_list::<Skill>(&catalog, Owner::Agent, "agent-1").unwrap();
+        let list = mstore.managed_list::<Skill>(&catalog, Owner::Agent, "agent-1").unwrap();
         let ids: Vec<&str> = list.iter().map(|(s, _)| s.id.as_str()).collect();
         assert_eq!(ids, vec!["global-1", "global-2", "private-mine"], "globals first (newest first), then the bound private row");
         assert!(!list.iter().any(|(s, _)| s.id == "private-other"), "an unbound private row from another owner must not appear");
@@ -935,24 +935,24 @@ mod tests {
 
     #[test]
     fn managed_list_global_reports_bound_count_from_the_wstore_side() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
-        insert_agent(&wstore, "agent-2");
+        insert_agent(&mstore, "agent-1");
+        insert_agent(&mstore, "agent-2");
         catalog.managed_upsert_unique_global(&skill("global-1", "Global", true, 100)).unwrap();
-        wstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
-        wstore.skill_bind(&catalog, "agent-2", "global-1").unwrap();
+        mstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
+        mstore.skill_bind(&catalog, "agent-2", "global-1").unwrap();
 
-        let list = wstore.managed_list_global::<Skill>(&catalog).unwrap();
+        let list = mstore.managed_list_global::<Skill>(&catalog).unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].1, 2, "bound_count must come from wstore's ref table, not catalog");
+        assert_eq!(list[0].1, 2, "bound_count must come from mstore's ref table, not catalog");
     }
 
     #[test]
     fn managed_list_global_for_agent_never_returns_private_rows() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
         catalog.managed_upsert_unique_global(&skill("global-1", "Global", true, 100)).unwrap();
         {
             let conn = catalog.conn().lock().unwrap();
@@ -962,9 +962,9 @@ mod tests {
             )
             .unwrap();
         }
-        wstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
+        mstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
 
-        let list = wstore.managed_list_global_for_agent::<Skill>(&catalog, "agent-1").unwrap();
+        let list = mstore.managed_list_global_for_agent::<Skill>(&catalog, "agent-1").unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].0.id, "global-1");
         assert!(list[0].1);
@@ -972,9 +972,9 @@ mod tests {
 
     #[test]
     fn managed_is_accessible_to_checks_globality_in_catalog_and_binding_in_wstore() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
         catalog.managed_upsert_unique_global(&skill("global-1", "Global", true, 100)).unwrap();
         {
             let conn = catalog.conn().lock().unwrap();
@@ -985,21 +985,21 @@ mod tests {
             .unwrap();
         }
 
-        assert!(wstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "global-1").unwrap());
-        assert!(!wstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "private-1").unwrap());
-        wstore.skill_bind(&catalog, "agent-1", "private-1").unwrap();
-        assert!(wstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "private-1").unwrap());
-        assert!(!wstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "no-such-id").unwrap());
+        assert!(mstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "global-1").unwrap());
+        assert!(!mstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "private-1").unwrap());
+        mstore.skill_bind(&catalog, "agent-1", "private-1").unwrap();
+        assert!(mstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "private-1").unwrap());
+        assert!(!mstore.managed_is_accessible_to::<Skill>(&catalog, Owner::Agent, "agent-1", "no-such-id").unwrap());
     }
 
     #[test]
     fn managed_upsert_unique_detects_a_duplicate_name_in_the_catalog_store() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
         catalog.managed_upsert_unique_global(&skill("global-1", "Deploy", true, 100)).unwrap();
 
-        let result = wstore.managed_upsert_unique(&catalog, Owner::Agent, "agent-1", &skill("new-1", "Deploy", false, 200), true, None);
+        let result = mstore.managed_upsert_unique(&catalog, Owner::Agent, "agent-1", &skill("new-1", "Deploy", false, 200), true, None);
         assert!(result.is_err(), "a name already used by a visible global row must be rejected");
         // The catalog must not have gained a row from the rejected attempt.
         assert!(catalog.managed_get::<Skill>("new-1").unwrap().is_none());
@@ -1007,9 +1007,9 @@ mod tests {
 
     #[test]
     fn managed_upsert_unique_compensates_by_deleting_the_catalog_row_when_the_bind_fails() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
         // Force the ref-insert to fail deterministically: drop the ref table
         // out from under it (a stand-in for the "lock contention / disk
         // full / a channel-local constraint" failures the doc comment
@@ -1017,9 +1017,9 @@ mod tests {
         // silently rather than erroring, so a missing db_agents row can't be
         // used to exercise this path; a missing TABLE is a real, unignored
         // SQL error).
-        wstore.conn().lock().unwrap().execute_batch("DROP TABLE db_agent_skills_ref;").unwrap();
+        mstore.conn().lock().unwrap().execute_batch("DROP TABLE db_agent_skills_ref;").unwrap();
 
-        let result = wstore.managed_upsert_unique(&catalog, Owner::Agent, "agent-1", &skill("new-1", "Deploy", false, 200), true, None);
+        let result = mstore.managed_upsert_unique(&catalog, Owner::Agent, "agent-1", &skill("new-1", "Deploy", false, 200), true, None);
         assert!(result.is_err(), "the bind must fail now that its table is gone");
         assert!(
             catalog.managed_get::<Skill>("new-1").unwrap().is_none(),
@@ -1029,48 +1029,48 @@ mod tests {
 
     #[test]
     fn managed_upsert_unique_leaves_the_catalog_row_when_bind_new_is_false() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        wstore.managed_upsert_unique(&catalog, Owner::Agent, "agent-1", &skill("new-1", "Deploy", false, 200), false, None).unwrap();
+        mstore.managed_upsert_unique(&catalog, Owner::Agent, "agent-1", &skill("new-1", "Deploy", false, 200), false, None).unwrap();
         assert!(catalog.managed_get::<Skill>("new-1").unwrap().is_some());
     }
 
     #[test]
     fn managed_delete_purges_wstore_refs_and_removes_the_catalog_row() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
-        insert_bundle(&wstore, "bundle-1");
+        insert_agent(&mstore, "agent-1");
+        insert_bundle(&mstore, "bundle-1");
         catalog.managed_upsert_unique_global(&skill("global-1", "Global", true, 100)).unwrap();
-        wstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
-        wstore.bundle_skill_bind(&catalog, &wstore, "bundle-1", "global-1").unwrap();
+        mstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
+        mstore.bundle_skill_bind(&catalog, &mstore, "bundle-1", "global-1").unwrap();
 
-        let deleted = wstore.managed_delete::<Skill>(&catalog, "global-1").unwrap();
+        let deleted = mstore.managed_delete::<Skill>(&catalog, "global-1").unwrap();
         assert!(deleted);
         assert!(catalog.managed_get::<Skill>("global-1").unwrap().is_none());
-        assert!(!wstore.skill_is_bound_to("agent-1", "global-1").unwrap());
-        assert!(!wstore.bundle_skill_is_bound_to("bundle-1", "global-1").unwrap());
+        assert!(!mstore.skill_is_bound_to("agent-1", "global-1").unwrap());
+        assert!(!mstore.bundle_skill_is_bound_to("bundle-1", "global-1").unwrap());
     }
 
     #[test]
     fn managed_bind_agent_succeeds_when_the_catalog_row_exists_in_the_separate_store() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
         catalog.managed_upsert_unique_global(&skill("global-1", "Global", true, 100)).unwrap();
 
-        wstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
-        assert!(wstore.skill_is_bound_to("agent-1", "global-1").unwrap());
+        mstore.skill_bind(&catalog, "agent-1", "global-1").unwrap();
+        assert!(mstore.skill_is_bound_to("agent-1", "global-1").unwrap());
     }
 
     #[test]
     fn managed_bind_agent_rejects_a_catalog_row_that_does_not_exist_anywhere() {
-        let wstore = wstore();
+        let mstore = mstore();
         let catalog = catalog_store();
-        insert_agent(&wstore, "agent-1");
+        insert_agent(&mstore, "agent-1");
 
-        let result = wstore.skill_bind(&catalog, "agent-1", "no-such-skill");
+        let result = mstore.skill_bind(&catalog, "agent-1", "no-such-skill");
         assert!(result.is_err(), "binding an id with no row in catalog must error, not silently no-op");
-        assert!(!wstore.skill_is_bound_to("agent-1", "no-such-skill").unwrap());
+        assert!(!mstore.skill_is_bound_to("agent-1", "no-such-skill").unwrap());
     }
 }

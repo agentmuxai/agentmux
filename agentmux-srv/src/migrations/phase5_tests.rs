@@ -348,7 +348,7 @@ fn a_stale_zones_flag_beside_unmigrated_block_snapshots_is_not_stamped_and_the_n
 
     let home = TempHome::new();
     home.mark_as_existing_install();
-    let wstore = Store::open(&home.channel_store()).unwrap();
+    let mstore = Store::open(&home.channel_store()).unwrap();
     let filestore_path = home.data_dir().join("db").join("filestore.db");
     let filestore = FileStore::open(&filestore_path).unwrap();
     let mut meta = MetaMapType::new();
@@ -363,10 +363,10 @@ fn a_stale_zones_flag_beside_unmigrated_block_snapshots_is_not_stamped_and_the_n
         meta,
         subblockids: None,
     };
-    wstore.insert(&mut block).unwrap();
+    mstore.insert(&mut block).unwrap();
     filestore.make_file("block-stale", "output.state.json", FileMeta::default(), FileOpts::default()).unwrap();
     filestore.write_file("block-stale", "output.state.json", br#"{"nodes":[{"type":"user_message","message":"orphaned"}]}"#).unwrap();
-    drop((wstore, filestore));
+    drop((mstore, filestore));
     std::fs::write(home.data_dir().join(MIGRATION_MARKER_V1), b"v1\n").unwrap();
 
     M0000Bootstrap.up(&home.ctx()).unwrap();

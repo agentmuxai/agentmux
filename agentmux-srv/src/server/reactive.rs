@@ -149,7 +149,7 @@ pub(super) fn echo_jekt_to_sender(
     });
     let data = format!("{line}\n");
     let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
-        &Some(state.wstore.clone()),
+        &Some(state.mstore.clone()),
         &sender_reg.block_id,
     );
     crate::backend::blockcontroller::shell::handle_append_block_file(
@@ -352,7 +352,7 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    let Ok(Some(key)) = state.wstore.agent_jekt_key_load(&claimed) else {
+    let Ok(Some(key)) = state.mstore.agent_jekt_key_load(&claimed) else {
         return;
     };
     let msgid = req.request_id.clone().unwrap_or_default();
@@ -499,7 +499,7 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     // established — not silently trusted as an update.
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     let observed_key_b64 = BASE64.encode(&observed_key);
-    let Ok(pinned_key_b64) = state.wstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
+    let Ok(pinned_key_b64) = state.mstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
         return;
     };
     if pinned_key_b64 != observed_key_b64 {
@@ -590,7 +590,7 @@ pub(super) fn verify_cross_channel_signature_in(
         return;
     };
     // §D2 step 2: a same-instance sender is the HMAC path's to judge.
-    if matches!(state.wstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
+    if matches!(state.mstore.agent_jekt_key_load(&claimed), Ok(Some(_))) {
         return;
     }
     // Only entries that actually published a key count — a pre-Phase-A
@@ -700,7 +700,7 @@ fn same_host_forward_tier(current: Option<&str>) -> &str {
 /// `sig_verified`/`lan_verified` are resolved by this same caller before
 /// the request reaches the handler.
 ///
-/// Takes `wstore: &Arc<Store>` directly (not `&AppState`) so
+/// Takes `mstore: &Arc<Store>` directly (not `&AppState`) so
 /// `muxbus::cloud_subscriber::sync_agent_reactive` — the WAN delivery path,
 /// which calls `Handler::inject_message` directly and never goes through
 /// `handle_reactive_inject`/HTTP at all — can call this exact same
@@ -713,7 +713,7 @@ fn same_host_forward_tier(current: Option<&str>) -> &str {
 /// client might have set on these two fields (impossible anyway, since
 /// both are `#[serde(skip_deserializing)]`, but this function is the one
 /// place that actually computes their real value from scratch).
-pub(crate) fn resolve_transcript_request_tier_fields(wstore: &std::sync::Arc<crate::backend::storage::store::Store>, req: &mut InjectionRequest) {
+pub(crate) fn resolve_transcript_request_tier_fields(mstore: &std::sync::Arc<crate::backend::storage::store::Store>, req: &mut InjectionRequest) {
     let Some(transcript_req) = agentmux_common::transcript_request::parse_transcript_request(&req.message) else {
         return;
     };
@@ -725,7 +725,7 @@ pub(crate) fn resolve_transcript_request_tier_fields(wstore: &std::sync::Arc<cra
     // display `name` (same cross-namespace hazard already documented at
     // this file's Supervisor-nudge opt-in check just above, which this
     // mirrors exactly).
-    let visibility = wstore
+    let visibility = mstore
         .agent_def_list()
         .ok()
         .and_then(|defs| defs.into_iter().find(|d| d.slug.eq_ignore_ascii_case(&req.target_agent)))
@@ -737,7 +737,7 @@ pub(crate) fn resolve_transcript_request_tier_fields(wstore: &std::sync::Arc<cra
         "ask" => true,
         "trusted_peers" => {
             let requester = req.source_agent.as_deref().unwrap_or("");
-            let granted = wstore
+            let granted = mstore
                 .conversation_trust_grant_check(&req.target_agent, requester, tier)
                 .unwrap_or(false);
             !granted
@@ -795,7 +795,7 @@ mod transcript_request_tier_resolution_tests {
             memory_id: String::new(),
             conversation_visibility: conversation_visibility.to_string(),
         };
-        state.wstore.agent_def_insert(&mut def).unwrap();
+        state.mstore.agent_def_insert(&mut def).unwrap();
     }
 
     fn transcript_request_message() -> String {
@@ -820,7 +820,7 @@ mod transcript_request_tier_resolution_tests {
             message: "just chatting".to_string(),
             ..Default::default()
         };
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(!req.is_transcript_request);
         assert!(!req.transcript_request_escalate_forced);
     }
@@ -830,7 +830,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "private");
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(req.is_transcript_request);
         assert!(!req.transcript_request_escalate_forced);
     }
@@ -840,7 +840,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "ask");
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(req.is_transcript_request);
         assert!(req.transcript_request_escalate_forced);
     }
@@ -850,7 +850,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "trusted_peers");
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(
             req.transcript_request_escalate_forced,
             "an un-granted requester must still force escalation under trusted_peers mode"
@@ -861,9 +861,9 @@ mod transcript_request_tier_resolution_tests {
     async fn trusted_peers_with_a_matching_grant_does_not_force_escalate() {
         let state = test_state();
         insert_agent_def(&state, "agent1", "trusted_peers");
-        state.wstore.conversation_trust_grant_add("agent1", "requester", "lan").unwrap();
+        state.mstore.conversation_trust_grant_add("agent1", "requester", "lan").unwrap();
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(
             !req.transcript_request_escalate_forced,
             "an allow-listed requester on the SAME tier must not force escalation"
@@ -875,9 +875,9 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "trusted_peers");
         // Granted for WAN, but this request arrives on LAN (base_req's default).
-        state.wstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
+        state.mstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(
             req.transcript_request_escalate_forced,
             "a grant for one tier's identity guarantee must never be assumed to cover a different tier"
@@ -899,7 +899,7 @@ mod transcript_request_tier_resolution_tests {
             delivery_tier: Some("wan".to_string()),
             ..Default::default()
         };
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(req.is_transcript_request, "rule 1 must fire on WAN exactly like every other tier");
     }
 
@@ -907,7 +907,7 @@ mod transcript_request_tier_resolution_tests {
     async fn wan_tier_trusted_peers_grant_on_the_matching_tier_relaxes_escalation() {
         let state = test_state();
         insert_agent_def(&state, "agent1", "trusted_peers");
-        state.wstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
+        state.mstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
         let mut req = InjectionRequest {
             target_agent: "agent1".to_string(),
             message: transcript_request_message(),
@@ -915,7 +915,7 @@ mod transcript_request_tier_resolution_tests {
             delivery_tier: Some("wan".to_string()),
             ..Default::default()
         };
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(
             !req.transcript_request_escalate_forced,
             "a WAN grant checked against an actual WAN request must relax escalation, same as LAN's matching-tier case"
@@ -963,10 +963,10 @@ mod transcript_request_tier_resolution_tests {
                 memory_id: String::new(),
                 conversation_visibility: "ask".to_string(),
             };
-            state_clone.wstore.agent_def_insert(&mut def).unwrap();
+            state_clone.mstore.agent_def_insert(&mut def).unwrap();
         }
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(req.transcript_request_escalate_forced, "lookup must match by slug \"agent1\", not the unrelated display name");
     }
 
@@ -975,7 +975,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         // No AgentDefinition inserted at all for this target.
         let mut req = base_req("no-such-agent");
-        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        resolve_transcript_request_tier_fields(&state.mstore, &mut req);
         assert!(req.is_transcript_request, "rule 1 (forced sensitive) applies regardless of whether the target is known");
         assert!(!req.transcript_request_escalate_forced, "an unknown agent defaults to the safe 'private' behavior for the escalate-forcing question");
     }
@@ -999,7 +999,7 @@ pub(super) async fn handle_reactive_inject(
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
     verify_cross_channel_signature(&state, &mut req);
-    resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+    resolve_transcript_request_tier_fields(&state.mstore, &mut req);
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -1444,7 +1444,7 @@ pub(super) async fn handle_reactive_agent(
             // of this endpoint that don't know about this field see no
             // change in shape.
             let mut value = serde_json::to_value(&agent).unwrap_or_default();
-            if let Ok(Some(pubkey)) = state.wstore.agent_lan_public_key_load(id) {
+            if let Ok(Some(pubkey)) = state.mstore.agent_lan_public_key_load(id) {
                 if let Some(obj) = value.as_object_mut() {
                     obj.insert("lan_public_key".to_string(), json!(pubkey));
                 }
@@ -1527,14 +1527,14 @@ pub(super) async fn handle_reactive_register(
             // letting the frontend route ⚡ panels to that pane only. See
             // `resolve_claude_config_dir`'s doc comment for why this must read
             // the block's own `cmd:env`, not just guess a path convention.
-            let block = state.wstore.get::<crate::backend::obj::Block>(&req.block_id).ok().flatten();
+            let block = state.mstore.get::<crate::backend::obj::Block>(&req.block_id).ok().flatten();
             let empty_meta = crate::backend::obj::MetaMapType::new();
             // Identity-bound agents' real CLAUDE_CONFIG_DIR is never the
             // stale `cmd:env` snapshot below — see
             // `resolve_claude_config_dir`'s doc comment and
             // SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md.
             let bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
-                &state.wstore,
+                &state.mstore,
                 &state.id_store,
                 &state.identity_store,
                 &req.block_id,
@@ -1569,7 +1569,7 @@ pub(super) async fn handle_reactive_register(
                 // baking this into the shared primitive broke its other
                 // callers.
                 let fresh_bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
-                    &state.wstore,
+                    &state.mstore,
                     &state.id_store,
                     &state.identity_store,
                     &req.block_id,
@@ -1681,7 +1681,7 @@ pub(super) async fn handle_reactive_ensure_signing_key(
         )
             .into_response();
     }
-    match state.wstore.agent_jekt_key_ensure(&req.agent_id) {
+    match state.mstore.agent_jekt_key_ensure(&req.agent_id) {
         Ok(key) => {
             use base64::Engine as _;
             let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
@@ -1841,7 +1841,7 @@ pub(super) async fn handle_reactive_transcript(
     let block_id = reg.block_id.clone();
 
     let (raw_bytes, _total_line_count) = match crate::backend::session_archive::read_session_output(
-        &state.wstore,
+        &state.mstore,
         &state.filestore,
         &block_id,
     ) {
@@ -2025,7 +2025,7 @@ mod transcript_cross_channel_tests {
             meta: Default::default(),
             subblockids: None,
         };
-        state.wstore.insert(&mut block).expect("wstore insert");
+        state.mstore.insert(&mut block).expect("mstore insert");
 
         let resp = handle_reactive_transcript(
             State(state),
@@ -2119,7 +2119,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
     // Entitlement gate (reagentx P1 on PR #2557): a Nudge must not deliver
     // unless the target has actually opted in via `auto_continue_enabled`.
     // `Handler` (backend::reactive) has no `Store` access by design — this
-    // check belongs at the HTTP boundary where `state.wstore` is available,
+    // check belongs at the HTTP boundary where `state.mstore` is available,
     // not inside `record_supervisor_decision`. Decline never delivers
     // anything, so it isn't gated.
     //
@@ -2135,7 +2135,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
     // regression-tests for the read path.)
     if matches!(action, SupervisorAction::Nudge) {
         let opted_in = state
-            .wstore
+            .mstore
             .agent_def_list()
             .ok()
             .and_then(|defs| {
@@ -2319,7 +2319,7 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
 /// `reactive_handler` is a *global* singleton shared across every test in
 /// the binary (`backend_reactive::get_global_handler()`), so exercising it
 /// end-to-end here risks cross-test interference on shared agent
-/// registrations. `verify_jekt_signature` itself only touches `state.wstore`
+/// registrations. `verify_jekt_signature` itself only touches `state.mstore`
 /// (key lookup), not the handler, so it's safe to test in isolation with no
 /// such risk — and it's the one piece of logic actually being fixed here;
 /// the two call sites (messagebus.rs, websocket.rs) are a one-line "call
@@ -2349,7 +2349,7 @@ mod verify_jekt_signature_tests {
     #[tokio::test]
     async fn a_correctly_signed_message_verifies_true() {
         let state = test_state();
-        let key = state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        let key = state.mstore.agent_jekt_key_ensure("agentx").unwrap();
 
         let mut req = base_req("agentx", "agenty", "hello");
         req.request_id = Some("msg-1".to_string());
@@ -2375,7 +2375,7 @@ mod verify_jekt_signature_tests {
     #[tokio::test]
     async fn a_claimed_sender_with_a_key_but_no_signature_is_unverified() {
         let state = test_state();
-        state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        state.mstore.agent_jekt_key_ensure("agentx").unwrap();
 
         let mut req = base_req("agentx", "agenty", "hello");
         req.request_id = Some("msg-1".to_string());
@@ -2414,7 +2414,7 @@ mod verify_jekt_signature_tests {
     #[tokio::test]
     async fn a_locally_known_sender_is_still_checked_even_under_a_claimed_network_tier() {
         let state = test_state();
-        state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        state.mstore.agent_jekt_key_ensure("agentx").unwrap();
         let mut req = base_req("agentx", "agenty", "hello");
         req.delivery_tier = Some("wan".to_string());
         // req.jekt_sig deliberately left None — claiming "wan" must not be a
@@ -2449,7 +2449,7 @@ mod verify_jekt_signature_tests {
     #[tokio::test]
     async fn a_stale_timestamp_fails_verification_even_with_a_correct_signature() {
         let state = test_state();
-        let key = state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        let key = state.mstore.agent_jekt_key_ensure("agentx").unwrap();
 
         let stale_ts = now() - JEKT_SIG_MAX_AGE_SECS - 60; // well outside the window
         let mut req = base_req("agentx", "agenty", "hello");
@@ -2470,7 +2470,7 @@ mod verify_jekt_signature_tests {
     #[tokio::test]
     async fn a_timestamp_just_inside_the_window_still_verifies() {
         let state = test_state();
-        let key = state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        let key = state.mstore.agent_jekt_key_ensure("agentx").unwrap();
 
         let recent_ts = now() - (JEKT_SIG_MAX_AGE_SECS - 10);
         let mut req = base_req("agentx", "agenty", "hello");
@@ -2487,7 +2487,7 @@ mod verify_jekt_signature_tests {
     #[tokio::test]
     async fn a_wrong_signature_is_unverified() {
         let state = test_state();
-        state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        state.mstore.agent_jekt_key_ensure("agentx").unwrap();
 
         let mut req = base_req("agentx", "agenty", "hello");
         req.request_id = Some("msg-1".to_string());
@@ -2841,7 +2841,7 @@ mod verify_cross_channel_signature_tests {
         // so verify_jekt_signature owns the verdict — even though a shared
         // entry with a key exists and nothing was signed.
         let state = test_state();
-        state.wstore.agent_jekt_key_ensure("agent4").unwrap();
+        state.mstore.agent_jekt_key_ensure("agent4").unwrap();
         let dir = tempfile::tempdir().unwrap();
         let (_, public) = keypair(1);
         publish(dir.path(), "agent4", "chan-a", Some(&public));

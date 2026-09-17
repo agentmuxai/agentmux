@@ -5,12 +5,12 @@
 //
 // Cross-saga end-to-end coverage that exercises the full saga
 // machinery — reducer dispatch, persist subscriber, durable saga log
-// — through a realistic `AppState` (in-memory wstore + sagalog).
+// — through a realistic `AppState` (in-memory mstore + sagalog).
 //
 // Each test asserts final state across THREE surfaces so we catch
 // drift between any of them:
 //   1. Reducer state — `state.srv_state.lock().await`.
-//   2. wstore — `state.wstore.get::<T>(oid)`.
+//   2. mstore — `state.mstore.get::<T>(oid)`.
 //   3. Saga log — `state.saga_log.snapshot_recent(...)` /
 //      `unresolved_sagas()`.
 //
@@ -33,14 +33,14 @@ use crate::server::tests::test_state;
 use crate::server::AppState;
 
 /// Boilerplate: dispatch a command through the reducer + apply
-/// emitted events to wstore, returning the events. Mirrors what RPC
+/// emitted events to mstore, returning the events. Mirrors what RPC
 /// handlers do during normal operation; the seeding helpers below
 /// chain these to bootstrap a workspace + tabs + blocks before the
 /// saga-under-test runs.
 async fn dispatch_apply(state: &AppState, cmd: Command) -> Vec<Event> {
     let events = crate::server::service::dispatch_to_reducer(state, cmd).await;
     for ev in &events {
-        apply_event_to_wstore(ev, &state.wstore).unwrap();
+        apply_event_to_wstore(ev, &state.mstore).unwrap();
     }
     events
 }
@@ -123,9 +123,9 @@ async fn tear_off_tab_happy_path_writes_completed_to_saga_log() {
         assert_eq!(s.tabs[&tab_a].workspace_id, new_ws_id);
     }
 
-    // wstore matches.
-    let src_persist = state.wstore.must_get::<Workspace>(&src_ws).unwrap();
-    let new_persist = state.wstore.must_get::<Workspace>(&new_ws_id).unwrap();
+    // mstore matches.
+    let src_persist = state.mstore.must_get::<Workspace>(&src_ws).unwrap();
+    let new_persist = state.mstore.must_get::<Workspace>(&new_ws_id).unwrap();
     assert_eq!(src_persist.tabids, vec![tab_b]);
     assert_eq!(new_persist.tabids, vec![tab_a]);
 
@@ -215,8 +215,8 @@ async fn restore_torn_off_tab_happy_path_records_two_steps_when_source_emptied()
         assert!(s.workspaces[&dest_ws].tab_ids.contains(&torn_tab));
     }
 
-    // wstore: torn workspace row gone too.
-    assert!(state.wstore.get::<Workspace>(&torn_ws).unwrap().is_none());
+    // mstore: torn workspace row gone too.
+    assert!(state.mstore.get::<Workspace>(&torn_ws).unwrap().is_none());
 
     // Saga log: two steps recorded (MoveTab + DeleteWorkspace).
     let snap = state.saga_log.snapshot_recent(10).unwrap();
@@ -248,8 +248,8 @@ async fn delete_block_happy_path_removes_block_across_all_surfaces() {
         assert!(!s.blocks.contains_key(&block_id));
         assert!(s.tabs[&tab_id].block_ids.is_empty());
     }
-    // wstore view.
-    assert!(state.wstore.get::<Block>(&block_id).unwrap().is_none());
+    // mstore view.
+    assert!(state.mstore.get::<Block>(&block_id).unwrap().is_none());
     // Saga log view.
     let snap = state.saga_log.snapshot_recent(10).unwrap();
     let del = snap
@@ -317,9 +317,9 @@ async fn delete_tab_happy_path_removes_tab_across_all_surfaces() {
         assert!(!s.tabs.contains_key(&tab_a));
         assert_eq!(s.workspaces[&ws_id].tab_ids, vec![tab_b.clone()]);
     }
-    // wstore: tab gone; workspace's tabids reflects.
-    assert!(state.wstore.get::<Tab>(&tab_a).unwrap().is_none());
-    let ws_persist = state.wstore.must_get::<Workspace>(&ws_id).unwrap();
+    // mstore: tab gone; workspace's tabids reflects.
+    assert!(state.mstore.get::<Tab>(&tab_a).unwrap().is_none());
+    let ws_persist = state.mstore.must_get::<Workspace>(&ws_id).unwrap();
     assert_eq!(ws_persist.tabids, vec![tab_b]);
 
     // Saga log.
@@ -385,13 +385,13 @@ async fn delete_tab_force_true_via_direct_dispatch_simulates_compensation_path()
     let any_tab_deleted = events.iter().any(|e| matches!(e, Event::TabDeleted { .. }));
     assert!(any_tab_deleted, "expected TabDeleted event, got: {:?}", events);
 
-    // Workspace now empty in reducer + wstore.
+    // Workspace now empty in reducer + mstore.
     {
         let s = state.srv_state.lock().await;
         assert!(s.workspaces[&ws_id].tab_ids.is_empty());
         assert!(!s.tabs.contains_key(&only_tab));
     }
-    let ws_persist = state.wstore.must_get::<Workspace>(&ws_id).unwrap();
+    let ws_persist = state.mstore.must_get::<Workspace>(&ws_id).unwrap();
     assert!(ws_persist.tabids.is_empty());
 }
 
@@ -410,14 +410,14 @@ async fn delete_tab_force_true_via_direct_dispatch_simulates_compensation_path()
 // contract. Approach B is documented as a future enhancement in
 // `SPEC_SAGA_DURABILITY_2026-05-01.md` §7.2.
 
-/// Helper: wstore + saga_log are shared between two `AppState`s in a
+/// Helper: mstore + saga_log are shared between two `AppState`s in a
 /// crash-recovery test. Build a fresh `AppState` that reuses both.
 fn state_with_shared_saga_log(
-    wstore: std::sync::Arc<crate::backend::storage::store::Store>,
+    mstore: std::sync::Arc<crate::backend::storage::store::Store>,
     saga_log: std::sync::Arc<crate::sagas::log::SagaLog>,
 ) -> AppState {
     let mut s = test_state();
-    s.wstore = wstore;
+    s.mstore = mstore;
     s.saga_log = saga_log;
     s
 }
@@ -427,7 +427,7 @@ fn state_with_shared_saga_log(
 /// MoveTab but never reached terminate(). On a fresh `AppState`,
 /// `compensate_unresolved` walks the succeeded steps in reverse,
 /// dispatches inverses, and marks the saga `compensated` (or
-/// `failed_compensation` if the live wstore can't satisfy the
+/// `failed_compensation` if the live mstore can't satisfy the
 /// inverses).
 #[tokio::test]
 async fn crash_recovery_tear_off_tab_partial_apply_compensates_on_restart() {
@@ -443,7 +443,7 @@ async fn crash_recovery_tear_off_tab_partial_apply_compensates_on_restart() {
     );
 
     let original = state_with_shared_saga_log(
-        std::sync::Arc::clone(&test_state().wstore),
+        std::sync::Arc::clone(&test_state().mstore),
         std::sync::Arc::clone(&saga_log),
     );
     let (src_ws, tab_ids) = seed_workspace_with_tabs(&original, 2).await;
@@ -495,15 +495,15 @@ async fn crash_recovery_tear_off_tab_partial_apply_compensates_on_restart() {
     assert_eq!(unresolved[0].saga_id, saga_id);
     assert_eq!(unresolved[0].state, "running");
 
-    // Phase 2: fresh AppState pointing at the same wstore + saga log.
+    // Phase 2: fresh AppState pointing at the same mstore + saga log.
     // This is the post-restart srv. Call compensate_unresolved.
     let fresh = state_with_shared_saga_log(
-        std::sync::Arc::clone(&original.wstore),
+        std::sync::Arc::clone(&original.mstore),
         std::sync::Arc::clone(&saga_log),
     );
-    // Bootstrap the fresh reducer state from wstore so reducer +
-    // wstore views agree (this is what main.rs does at startup).
-    crate::persist::bootstrap_state_from_wstore(&fresh.srv_state, &fresh.wstore).await;
+    // Bootstrap the fresh reducer state from mstore so reducer +
+    // mstore views agree (this is what main.rs does at startup).
+    crate::persist::bootstrap_state_from_wstore(&fresh.srv_state, &fresh.mstore).await;
 
     let resumed = sagas::recovery::compensate_unresolved(&fresh)
         .await
@@ -513,7 +513,7 @@ async fn crash_recovery_tear_off_tab_partial_apply_compensates_on_restart() {
     // Verify: saga is no longer unresolved + final state is
     // `compensated` (the recovery layer dispatched MoveTab src↔dst
     // swap + DeleteWorkspace successfully). We don't strictly assert
-    // wstore state because the move-back inverse uses dst_index=0
+    // mstore state because the move-back inverse uses dst_index=0
     // which doesn't perfectly reverse the source order — the test
     // is about the saga log contract.
     let unresolved_after = fresh.saga_log.unresolved_sagas().unwrap();
@@ -581,10 +581,10 @@ async fn crash_recovery_mid_step_failure_compensates_succeeded_prefix() {
     );
 
     // Synthesize a saga directly in the log: CreateBlock succeeded
-    // (real id from a real wstore), then a MoveTab attempt failed.
+    // (real id from a real mstore), then a MoveTab attempt failed.
     // No terminate() — saga is `running`.
     let original = state_with_shared_saga_log(
-        std::sync::Arc::clone(&test_state().wstore),
+        std::sync::Arc::clone(&test_state().mstore),
         std::sync::Arc::clone(&saga_log),
     );
     let (_ws, tab_ids) = seed_workspace_with_tabs(&original, 1).await;
@@ -624,13 +624,13 @@ async fn crash_recovery_mid_step_failure_compensates_succeeded_prefix() {
     saga_log.start_step(7777, 1, "MoveTab", &move_cmd).unwrap();
     saga_log.fail_step(7777, 1, "reducer rejected").unwrap();
 
-    // Fresh AppState (bootstrap from same wstore so reducer state
+    // Fresh AppState (bootstrap from same mstore so reducer state
     // matches the real block we created).
     let fresh = state_with_shared_saga_log(
-        std::sync::Arc::clone(&original.wstore),
+        std::sync::Arc::clone(&original.mstore),
         std::sync::Arc::clone(&saga_log),
     );
-    crate::persist::bootstrap_state_from_wstore(&fresh.srv_state, &fresh.wstore).await;
+    crate::persist::bootstrap_state_from_wstore(&fresh.srv_state, &fresh.mstore).await;
 
     let resumed = sagas::recovery::compensate_unresolved(&fresh)
         .await
@@ -649,11 +649,11 @@ async fn crash_recovery_mid_step_failure_compensates_succeeded_prefix() {
         recovered.state
     );
 
-    // The block should be gone from wstore (recovery's DeleteBlock
+    // The block should be gone from mstore (recovery's DeleteBlock
     // inverse hit the live entity).
     use crate::backend::obj::Block;
     assert!(
-        fresh.wstore.get::<Block>(&block_id).unwrap().is_none(),
+        fresh.mstore.get::<Block>(&block_id).unwrap().is_none(),
         "DeleteBlock inverse should have removed the block"
     );
 }

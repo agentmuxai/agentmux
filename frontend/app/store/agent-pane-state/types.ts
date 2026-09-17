@@ -141,7 +141,7 @@ export interface ResumeRetryState {
 
 /**
  * A classified backend failure (the `agentfailure` wave event's payload,
- * `AgentFailure` in `frontend/types/gotypes.d.ts`) currently surfaced for
+ * `AgentFailure` in `frontend/types/srv-types.d.ts`) currently surfaced for
  * this pane. Single source of truth for "is there an active failure" —
  * previously duplicated as a hook-local signal in `useAgentFailure.ts`,
  * with no path back into `turnPhase`. See

@@ -49,7 +49,7 @@ pub struct AppServerController {
     inner: Arc<Mutex<AppServerInner>>,
     broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
-    wstore: Option<Arc<Store>>,
+    mstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
     health_monitor: Arc<TurnActivityTracker>,
     self_ref: Mutex<Option<Weak<Self>>>,
@@ -61,7 +61,7 @@ impl AppServerController {
         block_id: String,
         broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
-        wstore: Option<Arc<Store>>,
+        mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl AppServerController {
             })),
             broker,
             event_bus,
-            wstore,
+            mstore,
             filestore,
             health_monitor: Arc::new(TurnActivityTracker::new(block_id)),
             self_ref: Mutex::new(None),
@@ -456,7 +456,7 @@ impl Controller for AppServerController {
                     return;
                 }
             };
-            if let (Some(store), Some(event_bus)) = (&controller.wstore, &controller.event_bus) {
+            if let (Some(store), Some(event_bus)) = (&controller.mstore, &controller.event_bus) {
                 core::persist_session_id(
                     &controller.block_id,
                     &thread_id,
