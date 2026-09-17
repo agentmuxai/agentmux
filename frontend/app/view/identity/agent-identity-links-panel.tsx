@@ -39,6 +39,7 @@ import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-alia
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
 import "./identity-pane-view.scss";
+import type { AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 interface AgentIdentityLinksPanelProps {
     /** The agent whose linked accounts to show. `undefined` when this

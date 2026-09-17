@@ -21,7 +21,8 @@ use crate::backend::rpc_types::{
     CommandListIdentityAccountsData, CommandGetIdentityAccountData,
     CommandDeleteIdentityAccountData,
     CommandLinkAgentIdentityData, CommandUnlinkAgentIdentityData,
-    CommandListAgentIdentitiesData,
+    CommandListAgentIdentitiesData, CommandListAllAgentIdentitiesData,
+    UnlinkAgentIdentityResult, AccountOAuthCancelResult,
 };
 use crate::backend::storage::store::{
     AgentIdentityLink, AgentInstance, IdentityAccount, SecretRef,
@@ -104,10 +105,11 @@ struct OAuthStartReq {
     client_secret: Option<String>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "camelCase")]
-struct OAuthSessionReq {
-    session_id: String,
+pub struct OAuthSessionReq {
+    pub session_id: String,
 }
 
 /// Serialize an OAuthStatus to the frontend wire shape.
@@ -145,38 +147,34 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // version upgrades. Falls back to mstore transparently.
 
     let mstore = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_IDENTITY_ACCOUNTS,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandListIdentityAccountsData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandListIdentityAccountsData =
-                    serde_json::from_value(data).unwrap_or_default();
+            async move {
                 let accounts = mstore
                     .identity_list(cmd.provider.as_deref())
                     .map_err(|e| format!("listidentityaccounts: {e}"))?;
-                Ok(Some(serde_json::to_value(&accounts).unwrap_or_default()))
-            })
-        }),
+                Ok(accounts)
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_IDENTITY_ACCOUNT,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandGetIdentityAccountData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandGetIdentityAccountData =
-                    serde_json::from_value(data).map_err(|e| format!("getidentityaccount: {e}"))?;
+            async move {
                 match mstore
                     .identity_get(&cmd.id)
                     .map_err(|e| format!("getidentityaccount: {e}"))?
                 {
-                    Some(a) => Ok(Some(serde_json::to_value(&a).unwrap_or_default())),
+                    Some(a) => Ok(a),
                     None => Err(format!("getidentityaccount: not found id={}", cmd.id)),
                 }
-            })
-        }),
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
@@ -424,16 +422,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_ACCOUNT_OAUTH_CANCEL,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let req: OAuthSessionReq = serde_json::from_value(data)
-                    .map_err(|e| format!("account.oauth.cancel: {e}"))?;
+        move |req: OAuthSessionReq, _ctx| {
+            async move {
                 let cancelled = crate::identity::oauth_client::manager().cancel(&req.session_id);
-                Ok(Some(serde_json::json!({ "cancelled": cancelled })))
-            })
-        }),
+                Ok(AccountOAuthCancelResult { cancelled })
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
@@ -587,14 +583,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LINK_AGENT_IDENTITY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandLinkAgentIdentityData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandLinkAgentIdentityData = serde_json::from_value(data)
-                    .map_err(|e| format!("linkagentidentity: {e}"))?;
+            async move {
                 mstore
                     .agent_identity_link(&cmd.agent_id, &cmd.account_id, &cmd.provider)
                     .map_err(|e| format!("linkagentidentity: {e}"))?;
@@ -611,21 +605,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if let Some(watcher) = crate::backend::subagent_watcher::global() {
                     watcher.recheck_all_watched_agents();
                 }
-                Ok(None)
-            })
-        }),
+                Ok(())
+            }
+        },
     );
 
     let mstore = state.identity_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UNLINK_AGENT_IDENTITY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandUnlinkAgentIdentityData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandUnlinkAgentIdentityData = serde_json::from_value(data)
-                    .map_err(|e| format!("unlinkagentidentity: {e}"))?;
+            async move {
                 let removed = mstore
                     .agent_identity_unlink(&cmd.agent_id, &cmd.provider)
                     .map_err(|e| format!("unlinkagentidentity: {e}"))?;
@@ -665,40 +657,38 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         });
                     }
                 }
-                Ok(Some(json!({ "unlinked": removed })))
-            })
-        }),
+                Ok(UnlinkAgentIdentityResult { unlinked: removed })
+            }
+        },
     );
 
     let mstore = state.identity_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_AGENT_IDENTITIES,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandListAgentIdentitiesData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandListAgentIdentitiesData = serde_json::from_value(data)
-                    .map_err(|e| format!("listagentidentities: {e}"))?;
+            async move {
                 let rows = mstore
                     .agent_identity_list_for_agent(&cmd.agent_id)
                     .map_err(|e| format!("listagentidentities: {e}"))?;
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
-            })
-        }),
+                Ok(rows)
+            }
+        },
     );
 
     // Every direct link across every agent — see the constant's doc comment.
     let mstore = state.identity_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_ALL_AGENT_IDENTITIES,
-        Box::new(move |_data, _ctx| {
+        move |_req: CommandListAllAgentIdentitiesData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
+            async move {
                 let rows = mstore
                     .agent_identity_list_all()
                     .map_err(|e| format!("listallagentidentities: {e}"))?;
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
-            })
-        }),
+                Ok(rows)
+            }
+        },
     );
 
     // ---- v8: named agent continuation ----
