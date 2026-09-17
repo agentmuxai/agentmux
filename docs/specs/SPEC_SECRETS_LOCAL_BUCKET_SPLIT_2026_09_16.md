@@ -1,11 +1,11 @@
 # SPEC: Split local-machine credentials out of `services/infra` into `services/local`
 
-Status: **Phase 2 executed.** `services/local` created (via `aws secretsmanager
-create-secret`, matching how `services/infra`/`dev`/`qa`/`prod` were all
-originally provisioned out-of-band — none are CDK-managed) and populated with
-the 7 migrated keys plus full `$schema_version`/`$changelog`/`$environment`/
-`$last_updated`/`$updated_by` metadata. Originals remain untouched in
-`services/infra` pending Phase 3/4.
+**Status:** active — Phase 2 executed. `services/local` created (via `aws
+secretsmanager create-secret`, matching how `services/infra`/`dev`/`qa`/`prod`
+were all originally provisioned out-of-band — none are CDK-managed) and
+populated with the 7 migrated keys plus full
+`$schema_version`/`$changelog`/`$environment`/`$last_updated`/`$updated_by`
+metadata. Originals remain untouched in `services/infra` pending Phase 3/4.
 
 `secrets verify services/local` will fail until `a5af/dev-tools#370` merges
 (the CLI's `$environment` validator only recognized `dev`/`qa`/`prod`/`infra`;
@@ -73,7 +73,7 @@ schema:
 The first changelog entry documents this migration itself (source bucket,
 keys moved, this spec's filename) — not a bare "created bucket" line.
 
-### 2. Migrate the eight local-machine keys listed above
+### 2. Migrate the seven local-machine keys listed above
 
 Copied into `services/local` under the same key names (no renaming, so
 existing naming convention/searchability is preserved).
@@ -87,10 +87,10 @@ Originals stay in `services/infra` as a read-only fallback until:
 - there's explicit, separate sign-off for the deletion step specifically.
 
 This spec covers steps 1–2 only. Deletion is a distinct, later action —
-**at present, nothing in the codebase was found referencing these eight
+**at present, nothing in the codebase was found referencing these seven
 keys directly** (no hits for `shareuser-password`, `area54`, `narko-`,
-`gamerlove-`, `starpower-`, `charlie-yas`, `cornelia-asafebgi`, or
-`amramebgi` outside this new spec and `services/infra` itself), which is
+`gamerlove-`, `starpower-`, `charlie-yas`, or `cornelia-asafebgi` outside
+this new spec and `services/infra` itself), which is
 encouraging but not a substitute for the sign-off gate above — an agent's
 own local scripts or an operator's personal tooling outside this repo
 could still reference the old path.
