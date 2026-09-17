@@ -4,10 +4,14 @@
 correction it recommends for itself was made in the PR that created it (§4). Since then:
 §5.4 (Wave → Mux, #851) is **done and the issue closed**. §5.4a tracks DRY/modularity: four
 of its five named causes are closed or dismissed, but the one that carries real ongoing cost
-(cause 1, RPC codegen) is a long grind now **four domains in** — #3291, #3293, #3294, #3295 —
-with eleven stub domains still to go. Every one of those four surfaced a defect no existing
-CI gate could catch, including a P0 that would have broken `bookmarks.list` on every call.
-Remaining open items are §5.1-5.3 and §5.5-5.9.
+(cause 1, RPC codegen) is a long grind now **ten domains in** — #3291, #3293, #3294, #3295,
+#3296, #3297, #3299, #3305, #3307, #3308, #3310, #3311, #3312, #3313 — with six stub domains
+still to go. Nearly every one surfaced a defect no existing CI gate could catch, including a
+P0 that would have broken `bookmarks.list` on every call.
+
+**The shape of the remaining work changed materially on 2026-09-17** (§5.4b): a quarter of
+the stub surface turned out to be dead code, not un-migrated code. Remaining open items are
+§5.1-5.3 and §5.5-5.9.
 **Date:** 2026-09-16
 **Author:** Manoz (manoz-0803a)
 **Baseline:** `main` @ `65958f84e` (post-v0.56.2)
@@ -305,30 +309,92 @@ which imports a generated type; 14 generated bindings against 195 `rpc_types` st
 `register_typed` call sites against 232 `register_handler`; `srv-types.d.ts` still 2,755
 hand-maintained lines.** Roughly 5%.
 
-#### Progress since, four domains in (updated 2026-09-16)
+#### Progress since (updated 2026-09-17)
 
 | Domain | PR | What it did |
 |---|---|---|
 | `voice.checkPath` | #3291 | First end-to-end connection; template for the rest. |
-| `bookmarks.*` | #3293 | Found the **P0**: `Req = ()` rejects the `{}` the stub sends, so every `bookmarks.list` call would have failed at runtime. serde deserializes `()` only from `null`. |
-| `reactive.registrations` | #3294 | Deleted 4 mirror interfaces, one of which literally said "Mirrors agentmux-srv's AgentRegistration". Fixed a **P2** where `skip_serializing_if` made `tab_id` `string | null` when the key is actually *omitted*. |
-| `agent:memory:*` (6 cmds) | #3295 | 13 of 14 types generated; 7 hand-written **globals** deleted from `srv-types.d.ts`. |
+| `bookmarks.*` | #3293 | Found the **P0**: `Req = ()` rejects the `{}` the stub sends. |
+| `reactive.registrations` | #3294 | Deleted 4 mirror interfaces; fixed a P2 where `skip_serializing_if` made `tab_id` `string \| null` when the key is *omitted*. |
+| `agent:memory:*` | #3295 | 13 of 14 generated; first type ts-rs **cannot** express (`#[ts(optional)]` rejects non-`Option`). |
+| `session:*` (11 cmds) | #3296 | 23 types; first case where generating was **worse** — `verdict` would have degraded from a union to `string`. |
+| `fleet.*` | #3297 | Two commands had no Rust type at all. |
+| `bundle` CRUD | #3299 | `Bundle` was both request and response and could not correctly be either; `Partial<Bundle>` wrongly allowed omitting `name`. |
+| `bundle.validate` | #3305 | First handler **deliberately left untyped** — it normalizes before deserializing. |
+| `bundle.import.*` | #3307 | Authoring job; surfaced a field (`project_instructions`) and two input modes the typed client could not reach. |
+| `blockfile:*` | #3308 | 4 commands; two adjacent fields with opposite optionality semantics. |
+| block (websocket) | #3310 | 8 commands; corrected the survey from #3308 (see below). |
+| block dead stubs | #3311 | **Deleted** 10 commands no handler serves. |
+| dead-stub sweep | #3312 | **Deleted** 55 more across misc/workspace/file. |
+| `misc` (muxbus, providers) | #3313 | 6 private structs promoted; 2 more commands left untyped by design. |
 
-Current numbers, same greps as above: **286 stub functions across 16 files, now 4 of which
-import generated types; 36 generated bindings; 21 `register_typed` against 223
-`register_handler`; `srv-types.d.ts` down to 2,707 lines.**
+Measured 2026-09-17, same greps as the original numbers:
 
-Two honest caveats on those numbers:
+| metric | at report creation | now |
+|---|---|---|
+| `srv-types.d.ts` | 2,755 lines | **2,222** |
+| declared commands | 277 | **221** |
+| declared-but-unregistered | 69 | **14** |
+| generated bindings | 14 | **123** |
+| stub files importing generated types | 1 | **9 of 16** |
+| `register_typed` vs `register_handler` | 12 / 232 | **63 / 181** |
 
-- **The stub-function count has not moved (286), by design.** Step 2 re-types stubs against
-  generated types; it does not delete them. The count only falls at step 3, when `rpc-api/`
-  goes away entirely. Anyone reading "286 → 286" as no progress is reading the wrong number —
-  the one that moved is *hand-maintained lines*, and `srv-types.d.ts` is down 48.
-- **48 lines over four domains means this is a long grind, not a nearly-finished job.**
-  `agent.ts` alone is 466 lines. At this rate cause 1 is perhaps 15% done, not 5% and not
-  closed. Eleven stub domains remain: `session` (59), `fleet` (87), `bundle` (134),
-  `block` (140), `misc` (167), `workspace` (177), `mcp` (184), `skill` (188), `file` (292),
-  `identity` (335), `agent` (466).
+#### 5.4b The finding that changed the plan: 25% of the stub surface was dead
+
+Mapping `block`'s remaining commands turned up ten with **no backend handler**. That is not
+new information — `test/contract/rpc-contract.test.ts` already tracked them in a
+`KNOWN_DECLARED_UNREGISTERED` allowlist, and the first instinct to report it as a discovery
+was wrong. What *was* new is the scale, measured across all 16 stub files: **69 of 277
+commands (25%)**, concentrated in `file.ts` (23/42), `workspace.ts` (22/39), `misc.ts`
+(14/22) and `block.ts` (10/26).
+
+Those were the domains that looked largest by line count. More than half of `file` and
+`workspace` was deletable rather than migratable. #3311 and #3312 removed 65 of the 69.
+
+**Two qualifications learned while deleting them**, both of which would have caused a bad
+deletion if missed:
+
+- `captureblockscreenshot` looked identically dead but is a **reverse RPC** — the frontend
+  implements it and the backend calls it. "No server handler" is not sufficient evidence a
+  command is dead; the `tabrpcclient.ts` direction has to be checked too.
+- **11 unregistered commands are still actively called** (`connconnect`, `connlist`,
+  `workspacelist`, `resolveids`, `fileappend`, `filejoin`, …). Those fail at run time today.
+  They are pre-existing and tracked, and were deliberately left alone: fixing them means
+  wiring a handler or deleting a caller, which is product work. **This is the single most
+  actionable thing the contract data shows and it is nobody's assigned task.**
+
+#### 5.4c Not every handler should be typed
+
+The spec's step 2 reads as "migrate every handler to `register_typed`". Three commands are
+now deliberate exceptions, and the pattern is consistent enough to be worth stating as a rule:
+
+- **`bundle.validate`** runs its payload through `normalize_bundle_upsert_input` *before*
+  deserializing — that is what fills a missing `id` so an unsaved draft validates, and what
+  coerces array-valued fields into the JSON strings `Bundle` expects. `register_typed`
+  deserializes first, so there is no point at which normalize could run.
+- **`widget.health` / `widget.api`** read fields straight off a `Value` with lenient
+  defaults — a missing `port` becomes `0`, which the handler answers with `{healthy:false}`
+  rather than an error. A typed `Req` would turn that into a deserialization failure.
+
+**Rule:** a handler that transforms its payload before deserializing, or that deliberately
+accepts loose input, should keep its `Value` request and have only its **response** typed.
+That is where the drift risk actually lives.
+
+#### 5.4d Where generating produces a WORSE type
+
+Four `block` structs are carved out (five before `createblock` was deleted as dead), and the
+reasons generalise:
+
+- **ts-rs cannot express an optional property whose Rust type is not `Option<T>`.** Any field
+  that is `#[serde(default)]` or `skip_serializing_if` on a `bool`/`String`/`Vec` is
+  omittable on the wire but generates as **required**.
+- **A Rust `String` does not carry its domain.** `verdict`, `collision`, `outcome`, `scope`
+  and `status` all carry closed sets the frontend branches on; ts-rs emits a bare `string`.
+  Each needs an explicit `#[ts(type = ...)]` or real safety is silently lost.
+- **The hand-written TypeScript is sometimes richer than the Rust.** `CommandCreateBlockData`
+  typed `blockdef: BlockDef` where Rust had `Option<serde_json::Value>`. Generating would
+  have emitted `unknown`. Fixing it properly means tightening the *Rust*, which is a
+  behaviour change, not a refactor.
 
 #### What the migration keeps finding: the gate does not check what you think
 
@@ -471,7 +537,7 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~15% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Cause 1 is the one with ongoing cost. Four domains migrated (#3291, #3293, #3294, #3295), each of which surfaced a defect no existing gate could catch. **286 stub functions across 16 files (unchanged by design — step 2 re-types stubs, step 3 deletes them), 4 now importing generated types; 36 bindings; 21 `register_typed` vs 223 `register_handler`; `srv-types.d.ts` 2,755 → 2,707.** Eleven domains left, `agent.ts` alone is 466 lines. §5.4a |
+| 12 | DRY / modularity | 🔴 1/5 | 🟡 **cause 1 ~45% done; 2,3 done; 4,5 dismissed** | Do not read "4/5" as progress — it counts named causes, not work. Ten domains migrated and 65 dead commands deleted (#3291–#3313). **221 stub functions across 16 files, 9 now importing generated types; 123 bindings; 63 `register_typed` vs 181 `register_handler`; `srv-types.d.ts` 2,755 → 2,222; declared-but-unregistered 69 → 14.** Six domains left: agent (51), workspace (26), identity (24), file (21), mcp (18), skill (16). See §5.4b (a quarter of the surface was dead), §5.4c (not every handler should be typed) and §5.4d (where generating produces a worse type). |
 | 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 
