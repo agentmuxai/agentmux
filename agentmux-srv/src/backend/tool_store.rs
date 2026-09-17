@@ -52,7 +52,8 @@ pub struct PlatformSpec {
 
 // ---- Status types ----
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum ToolStatus {
     InstalledSystem,
@@ -62,7 +63,8 @@ pub enum ToolStatus {
     Unavailable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct ToolStatusEntry {
     pub id: String,
     pub display: String,
@@ -475,4 +477,49 @@ pub async fn install_tool(id: &str, http_client: &reqwest::Client) -> Result<Str
     let dest_str = dest_path.to_string_lossy().into_owned();
     tracing::info!(tool = %id, path = %dest_str, "tool installed successfully");
     Ok(dest_str)
+}
+
+#[cfg(test)]
+mod tool_status_wire_tests {
+    use super::*;
+    use serde_json::json;
+
+    // `version` and `path` are plain Options with NO skip_serializing_if, so
+    // the keys are ALWAYS present and carry null when unknown. The
+    // hand-written declaration marked both optional (`version?`), i.e. "the
+    // key may be absent" -- which it never is. The generated binding says
+    // `string | null`, and this pins which of the two is true.
+    #[test]
+    fn a_tool_entry_always_carries_version_and_path() {
+        let v = serde_json::to_value(ToolStatusEntry {
+            id: "rg".to_string(),
+            display: "ripgrep".to_string(),
+            description: "search".to_string(),
+            tier: 1,
+            status: ToolStatus::Missing,
+            version: None,
+            path: None,
+        })
+        .expect("serializable");
+        let obj = v.as_object().expect("object");
+        assert!(obj.contains_key("version") && obj.contains_key("path"));
+        assert_eq!(v["version"], json!(null));
+        assert_eq!(v["path"], json!(null));
+    }
+
+    // ToolStatus is a closed set the frontend branches on; it is
+    // `rename_all = "snake_case"` and generates as a string union. Pin the
+    // wire spellings so the union cannot drift from them.
+    #[test]
+    fn tool_status_serializes_to_the_expected_snake_case_tags() {
+        for (variant, tag) in [
+            (ToolStatus::InstalledSystem, "installed_system"),
+            (ToolStatus::InstalledBundled, "installed_bundled"),
+            (ToolStatus::InstalledManaged, "installed_managed"),
+            (ToolStatus::Missing, "missing"),
+            (ToolStatus::Unavailable, "unavailable"),
+        ] {
+            assert_eq!(serde_json::to_value(variant).unwrap(), json!(tag));
+        }
+    }
 }
