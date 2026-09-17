@@ -244,7 +244,7 @@ pub async fn run_migrate(
     .kill_on_drop(true);
 
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
 
     let mut child = cmd
         .spawn()

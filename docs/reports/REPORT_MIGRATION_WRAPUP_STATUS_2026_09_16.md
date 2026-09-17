@@ -114,10 +114,22 @@ authority claim is explicitly withdrawn. Nothing remains on any of these.
 
 `zoom.{win32,linux,darwin}.ts` collapsed into one `zoom.ts` (PR #3034). `agentmux-common` is now
 17 files / 9,858 lines with `time.rs`, `win32.rs`, `process.rs` and `event_log.rs`, and the
-srv/launcher copies are ~29-line re-export shims. **But the call-site sweep did not follow the
-lift:** 29 files still name `CREATE_NO_WINDOW` locally and 23 still define their own
-`fn now_ms`. That is the same "additive half landed, removing half skipped" shape the audit
-named — this time inside a fix for it.
+srv/launcher copies are ~29-line re-export shims.
+
+**Correction (2026-09-16, later the same day).** This section originally said "the call-site
+sweep did not follow the lift: 29 files still name `CREATE_NO_WINDOW` locally and 23 still
+define their own `fn now_ms`", and called it the same "additive half landed, removing half
+skipped" shape. **That was wrong, and it was my own error repeating the DRY audits metric
+without checking what it counted.** Verified directly: exactly ONE `const CREATE_NO_WINDOW`
+exists in the tree (`agentmux-common/src/win32.rs`), zero files re-declare it, and 24 import
+it correctly. The 23 `fn now_ms` "duplicates" are three-line delegators —
+`fn now_ms() -> i64 { agentmux_common::time::now_ms() }` — so the logic exists once and the
+short local call site is deliberate. Counting usages and delegators as duplication overstates
+the problem; this lift is essentially complete.
+
+The one real residue was different and smaller: **~20 call sites across 4 crates passed the
+raw magic number `0x08000000`** instead of the shared constant — worse than a duplicate
+`const`, because a magic number is unsearchable. Fixed in the PR that added this correction.
 
 ---
 
