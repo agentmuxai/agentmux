@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 
 function bookmark(id: string, url: string, title = "T"): BrowserBookmark {

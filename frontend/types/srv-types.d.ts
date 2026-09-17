@@ -541,13 +541,6 @@ declare global {
     // NOT settings.json — see the spec for why) flat list, not per-agent
     // or per-channel. See
     // docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md.
-    type BrowserBookmark = {
-        id: string;
-        title: string;
-        url: string;
-        favicon_url?: string;
-        created_at?: number;
-    };
 
     // ── Armory Bundle Format (ABF) import, Phase 3 ──────────────────────
     // agentmux-srv/src/server/app_api/bundle.rs — bundle.import.preview /
