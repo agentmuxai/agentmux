@@ -385,6 +385,126 @@ pub fn verify_channel_jekt(
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
+// ── General agent-to-agent WAN signing (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1) ──
+//
+// Issue #2586's second half. Asymmetric for the same reason LAN and
+// cross-channel are — the receiving instance must verify without being able to
+// forge — but with a different key-distribution story: the public half is
+// published to muxbus's agent-ownership registry rather than fetched from a
+// peer, because a WAN counterpart is by definition unreachable directly.
+//
+// **Only the signing primitives live here.** Publication, lookup, and
+// verification wiring are deliberately NOT part of this change: verifying a
+// WAN signature means resolving `(sender_account, source_agent)` to exactly
+// one key, which is ambiguous until muxbus's injection storage is
+// tenant-scoped (that spec's §2.1 / phase W2). Minting and signing are safe
+// and useful ahead of that — an agent only gets a key when it is spawned, so
+// starting now is what makes verification meaningful later instead of
+// silently applying to nobody.
+
+/// Domain separator for general agent-to-agent WAN signatures.
+///
+/// Exactly the same reasoning as [`CHANNEL_DOMAIN`], and load-bearing for the
+/// same reason: `db_agent_wan_keys` is a *separate* keypair from
+/// `db_agent_lan_keys`, but nothing structurally prevents a future change from
+/// reusing one key across tiers, and an undomained signature over the shared
+/// (msgid, source, target, ts, message) tuple would then be replayable from
+/// one tier to the other. The tiers make different trust claims
+/// (`TRUST=lan-verified` vs `TRUST=wan-verified`) against different key
+/// sources — a LAN peer's own answer vs. the cloud registry — so they must
+/// never be interchangeable.
+const WAN_DOMAIN: &str = "amx-jekt-wan-v1";
+
+/// Signed material for a general agent-to-agent WAN jekt.
+///
+/// Deliberately does NOT bind the sender's muxbus account, even though
+/// verification resolves the key by `(sender_account, source_agent)`: the
+/// account is a cloud-side fact the signing process has no trustworthy view
+/// of at sign time, and binding a client-asserted account into the signature
+/// would let a sender pick which account's key it is checked against. The
+/// account is resolved server-side from the authenticated caller instead
+/// (`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.4.1) and selects the key;
+/// the signature then proves the agent.
+fn wan_signed_material(
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+) -> String {
+    format!(
+        "{WAN_DOMAIN}{FIELD_SEP}{msgid}{FIELD_SEP}{source_agent}{FIELD_SEP}\
+         {target_agent}{FIELD_SEP}{ts_secs}{FIELD_SEP}{message}"
+    )
+}
+
+/// Generate an agent's WAN keypair from 32 bytes of seed entropy, returning
+/// `(public_key, private_key)`.
+///
+/// Identical construction to [`generate_lan_keypair`] — same curve, same seed
+/// handling — but kept as its own entry point because the two keys are
+/// independent by design and must be minted separately: LAN public keys are
+/// permanently trust-on-first-use pinned by peers
+/// (`db_lan_peer_pubkey_pins`), which is exactly why
+/// `SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md` §4 declined to rotate them,
+/// whereas WAN keys are served from an authoritative registry and are intended
+/// to rotate. One key cannot have both lifecycles.
+pub fn generate_wan_keypair(seed: [u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    (signing_key.verifying_key().to_bytes(), seed)
+}
+
+/// Sign a jekt with the sending agent's own WAN private key (read from its
+/// `AGENTMUX_WAN_KEY` process env var, client-side inside `agentmux-mcp`,
+/// never server-side — same placement as [`sign_lan_jekt`]).
+///
+/// `private_key` must be exactly 32 bytes (the seed [`generate_wan_keypair`]
+/// produced); any other length returns `None` rather than panicking, matching
+/// the "a missing or malformed key must never block sending" policy every
+/// other signer here follows.
+pub fn sign_wan_jekt(
+    private_key: &[u8],
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+) -> Option<String> {
+    let seed: [u8; 32] = private_key.try_into().ok()?;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let material = wan_signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    let signature = ed25519_dalek::Signer::sign(&signing_key, material.as_bytes());
+    Some(BASE64.encode(signature.to_bytes()))
+}
+
+/// Verify a claimed WAN signature against the claimed sender's published
+/// public key.
+///
+/// Returns `false` (never panics) for a malformed key, malformed base64, a
+/// wrong-length signature, or a signature that simply doesn't verify — the
+/// same "treat all of these identically as not verified" policy
+/// [`verify_lan_jekt`] and [`verify_reagent_jekt`] document. Note that the
+/// *caller* is responsible for the distinction that actually matters to tier
+/// escalation: "no key could be resolved" (nothing to check against) is not
+/// the same as "a key was resolved and this failed" (active forgery).
+pub fn verify_wan_jekt(
+    public_key: &[u8],
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+    sig_b64: &str,
+) -> bool {
+    let Ok(pubkey_arr) = <[u8; 32]>::try_from(public_key) else { return false };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_arr) else { return false };
+    let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
+    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
+    let signature = Signature::from_bytes(&sig_arr);
+    let material = wan_signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    verifying_key.verify(material.as_bytes(), &signature).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -898,5 +1018,70 @@ mod tests {
         let sig = sign_channel_jekt(&private_key, "msg-1", "agentx", "", "agenty", 1_000, "hello").unwrap();
         assert!(verify_channel_jekt(&public_key, "msg-1", "agentx", "", "agenty", 1_000, "hello", &sig));
         assert!(!verify_channel_jekt(&public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &sig));
+    }
+
+    // ── WAN tier (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1) ──
+
+    #[test]
+    fn a_correctly_signed_wan_message_verifies() {
+        let (public_key, private_key) = generate_wan_keypair(lan_seed(11));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+    }
+
+    #[test]
+    fn a_wan_signature_does_not_verify_under_another_agents_key() {
+        let (_, private_key) = generate_wan_keypair(lan_seed(11));
+        let (other_public, _) = generate_wan_keypair(lan_seed(12));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_wan_jekt(&other_public, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+    }
+
+    #[test]
+    fn tampering_with_any_wan_field_breaks_verification() {
+        let (public_key, private_key) = generate_wan_keypair(lan_seed(11));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_wan_jekt(&public_key, "msg-2", "agentx", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "someoneelse", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agentz", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_001, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "goodbye", &sig));
+    }
+
+    #[test]
+    fn wan_malformed_inputs_fail_rather_than_panic() {
+        let (public_key, private_key) = generate_wan_keypair(lan_seed(11));
+        let sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(sign_wan_jekt(&[1u8; 16], "m", "a", "b", 1, "x").is_none());
+        assert!(!verify_wan_jekt(&[0u8; 16], "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", "!!not base64!!"));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", ""));
+    }
+
+    #[test]
+    fn a_wan_signature_is_not_interchangeable_with_lan_or_channel() {
+        // The whole point of WAN_DOMAIN. Even with the SAME key bytes and the
+        // SAME (msgid, source, target, ts, message) tuple, a signature minted
+        // for one tier must not verify as another — otherwise a signature
+        // captured off the LAN could be replayed to claim `TRUST=wan-verified`,
+        // which is a materially stronger claim verified against a different
+        // key source.
+        let seed = lan_seed(13);
+        let (public_key, private_key) = generate_wan_keypair(seed);
+
+        let wan_sig = sign_wan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        let lan_sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        let channel_sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+
+        // Each verifies only under its own tier's verifier.
+        assert!(verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &wan_sig));
+        assert!(!verify_lan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &wan_sig));
+        assert!(!verify_wan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &lan_sig));
+        assert!(!verify_wan_jekt(
+            &public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &channel_sig
+        ));
+        assert_ne!(wan_sig, lan_sig);
     }
 }

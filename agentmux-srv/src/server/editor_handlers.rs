@@ -1160,5 +1160,11 @@ mod tests {
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria");
         assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
         assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
+        // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1 — the WAN key must be
+        // injected on this path too. This assertion is the whole point of the
+        // report cited above: the Launch-button path silently skipped key
+        // injection for months while `agent.open` did it correctly.
+        assert!(env["AGENTMUX_WAN_KEY"].is_string() && !env["AGENTMUX_WAN_KEY"].as_str().unwrap().is_empty());
+        assert_ne!(env["AGENTMUX_WAN_KEY"], env["AGENTMUX_LAN_KEY"], "WAN and LAN keys must be independent");
     }
 }

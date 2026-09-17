@@ -388,6 +388,16 @@ fn build_block_to_agent_map(discovery: &Value) -> std::collections::HashMap<Stri
 /// Returned as a named struct rather than a tuple: the three signatures are
 /// consecutive `Option<String>`s and a transposition at any of the call
 /// sites would compile clean and silently mislabel trust on the receiver.
+/// The WAN signature (`wan_sig`,
+/// `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.3) rides along on exactly the
+/// same terms as `lan_sig`, for the same reason: this process cannot know
+/// which tier a send will take — it posts every send to the local reactive
+/// endpoint and srv decides among local, cross-channel, LAN and cloud
+/// afterwards. Computing it unconditionally is therefore the only
+/// implementable shape, and an irrelevant signature costs nothing because srv
+/// only consults `wan_sig` once it has itself determined the delivery is WAN.
+/// It signs a domain-separated payload under this agent's own
+/// `AGENTMUX_WAN_KEY`, which is a different key from `AGENTMUX_LAN_KEY`.
 struct OutgoingJektSignatures {
     request_id: String,
     ts_secs: i64,
@@ -395,6 +405,7 @@ struct OutgoingJektSignatures {
     lan_sig: Option<String>,
     source_channel: Option<String>,
     channel_sig: Option<String>,
+    wan_sig: Option<String>,
 }
 
 impl OutgoingJektSignatures {
@@ -411,6 +422,7 @@ impl OutgoingJektSignatures {
             lan_sig: self.lan_sig,
             source_channel: self.source_channel,
             channel_sig: self.channel_sig,
+            wan_sig: self.wan_sig,
         }
     }
 }
@@ -454,7 +466,25 @@ fn sign_outgoing_jekt(
     let source_channel = channel_sig
         .as_ref()
         .map(|_| source_channel.unwrap_or_else(|| "stable".to_string()));
-    OutgoingJektSignatures { request_id: msgid, ts_secs, jekt_sig, lan_sig, source_channel, channel_sig }
+    // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.3 — its own key, not
+    // AGENTMUX_LAN_KEY. An agent whose `.mcp.json` predates this feature has
+    // no AGENTMUX_WAN_KEY and simply sends unsigned, exactly as it does today
+    // for every other tier.
+    let wan_sig = (|| {
+        let key_b64 = std::env::var("AGENTMUX_WAN_KEY").ok().filter(|s| !s.is_empty())?;
+        let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
+        let src = source_agent?;
+        agentmux_common::jekt_sign::sign_wan_jekt(&key, &msgid, src, target_agent, ts_secs, message)
+    })();
+    OutgoingJektSignatures {
+        request_id: msgid,
+        ts_secs,
+        jekt_sig,
+        lan_sig,
+        source_channel,
+        channel_sig,
+        wan_sig,
+    }
 }
 
 /// Build the identity proof every `/api/v1/ui/*` request carries — an

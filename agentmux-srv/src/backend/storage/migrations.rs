@@ -398,7 +398,18 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 10;
 ///        `source_detail` pair — an agent could otherwise claim
 ///        `source: "human"` with nothing to contradict it (codex P2, PR
 ///        #3237, caught before this table ever shipped).
-pub const OBJECT_SCHEMA_VERSION: i64 = 35;
+///   v36 — db_agent_wan_keys: per-agent Ed25519 keypair for general
+///        agent-to-agent WAN-tier jekt signing (issue #2586's second half,
+///        `docs/specs/SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.1).
+///        Mirrors v20's shape; a SEPARATE keypair from db_agent_lan_keys by
+///        design, not a reuse — LAN public keys are permanently TOFU-pinned
+///        by peers (v21), which is why they cannot rotate
+///        (SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md §4), whereas WAN
+///        keys are served from muxbus's authoritative ownership registry and
+///        are meant to. One key cannot have both lifecycles. `key_version`
+///        is reserved for the publish-sync and rotation phases (that spec's
+///        §3.2/§3.6) and is not yet read by anything.
+pub const OBJECT_SCHEMA_VERSION: i64 = 36;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -959,6 +970,28 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id    TEXT PRIMARY KEY,
             public_key  TEXT NOT NULL,
             private_key TEXT NOT NULL,
+            created_at  INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v36: per-agent Ed25519 keypair for general agent-to-agent WAN-tier
+        -- jekt signing (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1).
+        -- Same local-to-this-instance guarantee as db_agent_jekt_keys and
+        -- db_agent_lan_keys: the private half leaves only by being injected
+        -- into that ONE agent's own MCP process env (AGENTMUX_WAN_KEY) at
+        -- spawn, never over any RPC. The public half is not secret — it is
+        -- what gets published to muxbus's agent-ownership registry so a
+        -- WAN counterpart can verify this agent's signatures.
+        --
+        -- Deliberately NOT a reuse of db_agent_lan_keys: see the v36 doc
+        -- comment above for why the two tiers' keys must have independent
+        -- lifecycles. `key_version` starts at 1 and is reserved for the
+        -- version-synchronised publish (§3.2) and rotation (§3.6) phases;
+        -- nothing reads it yet.
+        CREATE TABLE IF NOT EXISTS db_agent_wan_keys (
+            agent_id    TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            key_version INTEGER NOT NULL DEFAULT 1,
             created_at  INTEGER NOT NULL DEFAULT 0
         );
 
