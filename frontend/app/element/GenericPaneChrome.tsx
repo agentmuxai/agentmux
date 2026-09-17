@@ -32,8 +32,8 @@ import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { addWidgetAsPaneTab, closeBlockInStack, getLayoutModelForStaticTab, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 import "./GenericPaneChrome.scss";
+import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 
 interface GenericPaneTab {
     blockId: string;
