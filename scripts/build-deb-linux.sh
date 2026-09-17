@@ -106,6 +106,11 @@ chmod +x "$PKGROOT/usr/bin/agentmux"
 mkdir -p "$PKGROOT/usr/share/applications"
 cp assets/linux/agentmux.desktop "$PKGROOT/usr/share/applications/agentmux.desktop"
 sed -i 's|^Exec=.*|Exec=/usr/bin/agentmux %F|' "$PKGROOT/usr/share/applications/agentmux.desktop"
+# .deb builds don't set AGENTMUX_BUILD_CHANNEL_DEFAULT, so the bundled
+# binary falls back to "stable" (agentmux-common/src/data_paths.rs) — match
+# that here so StartupWMClass equals the app_id the binary actually
+# advertises (window_settings.rs::linux_app_id()).
+sed -i "s|__WMCLASS__|agentmux-stable-${VERSION}|" "$PKGROOT/usr/share/applications/agentmux.desktop"
 
 for size in 16 32 48 64 128 256 512; do
     src="assets/linux/icons/hicolor/${size}x${size}/apps/agentmux.png"
