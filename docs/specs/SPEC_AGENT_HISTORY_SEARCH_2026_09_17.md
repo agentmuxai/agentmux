@@ -191,8 +191,9 @@ them is answerable by the agent being asked.
 
 ## 5. Scope: own history only (Phase 1)
 
-**`agent` defaults to the caller, and Phase 1 supports no other value.**
-Cross-agent search is deliberately excluded, and the reason is not effort:
+**The `SearchHistory` tool exposes no `agent` parameter — it always sends the
+caller's own id.** Cross-agent search is deliberately excluded, and the reason
+is not effort:
 
 Reading another agent's conversation is already a governed act. `muxspect`'s
 cross-tier visibility protocol and the `transcript_request` tier rules
@@ -208,6 +209,20 @@ Phase 2 (separate spec) should route cross-agent search *through*
 `transcript_request` rather than beside it. Until then §1.1's failure #3 —
 checking another agent's older sessions — stays open, and this spec says so
 rather than implying otherwise.
+
+**What is NOT true, and must not be written down as if it were: that this is
+*enforced*.** The HTTP route takes an `agent` parameter (it has to — the
+server must know whose sessions to resolve), and the route is gated only by
+the instance-wide `auth_key` that every locally-spawned agent shares. The
+server therefore cannot tell which agent is calling, so a local process
+holding that key can pass any name. That is not a regression — the same is
+already true of `/reactive/transcript` — but it means "own history only" is a
+**client-side convention** implemented by the tool exposing no `agent`
+parameter, not a boundary the server upholds. Real enforcement needs a
+verifiable per-agent identity on local routes, which does not exist today;
+`host_reg_secret` is the codebase's existing acknowledgement that `X-AuthKey`
+alone cannot distinguish callers that share it. Anyone extending this should
+fix that rather than assume it was already handled.
 
 Also out of scope:
 
