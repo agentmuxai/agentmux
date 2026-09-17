@@ -234,6 +234,29 @@ pub struct InjectionRequest {
     /// Meaningless off the `channel` tier, same scoping as `lan_sig`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel_sig: Option<String>,
+    /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
+    /// produced by the claimed `source_agent`'s own **WAN** keypair
+    /// (`db_agent_wan_keys` — a different key from the LAN one) over a
+    /// domain-separated payload
+    /// (`agentmux_common::jekt_sign::sign_wan_jekt`,
+    /// `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.1/§3.3).
+    ///
+    /// **Carried but NOT yet verified — there is deliberately no
+    /// `wan_verified` companion field yet.** Verification has two
+    /// prerequisites that do not exist: resolving `(sender_account,
+    /// source_agent)` to exactly one published key needs muxbus's injection
+    /// storage to be tenant-scoped (that spec's §2.1, phase W2), and the
+    /// signed `msgid`/`ts_secs` must survive the cloud round trip, which
+    /// today they do not — `cloud_subscriber` replaces `request_id` with the
+    /// cloud's own injection id and leaves `ts_secs` unset (§3.4.1). Adding a
+    /// verification-outcome field before either exists would read as wired
+    /// when it is not, so it lands with the verifier instead.
+    ///
+    /// Signing ships first on purpose: an agent only receives its key at
+    /// spawn, so minting now is what makes verification apply to a real
+    /// population of agents later rather than almost none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wan_sig: Option<String>,
     /// Server-computed verification outcome for `channel_sig` —
     /// `#[serde(skip_deserializing)]`, the same guarantee as `sig_verified`/
     /// `lan_verified`: no attacker-supplied JSON body can set this. Set by

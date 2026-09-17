@@ -1343,6 +1343,23 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         );
         patched = true;
     }
+    // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1/§3.3 (issue #2586's WAN
+    // half): a SEPARATE keypair from the LAN one above — see
+    // storage/agent_wan_keys.rs for why the two tiers' key lifecycles cannot
+    // be shared. Injected on the same terms and with the same guarantee:
+    // this agent's env only, never over RPC.
+    //
+    // Minted and injected ahead of any verifier existing, deliberately. An
+    // agent only receives a key at spawn, so an agent that is never respawned
+    // never gets one — starting the propagation now is what makes WAN
+    // verification meaningful when it lands, rather than applying to almost
+    // no live agent on day one. Exactly the same reasoning that made
+    // un-respawned agents render TRUST=self-declared for months after
+    // host-tier signing shipped (REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md).
+    if let Ok(keypair) = mstore.agent_wan_key_ensure(agent_slug) {
+        env.insert("AGENTMUX_WAN_KEY".to_string(), json!(keypair.private_key));
+        patched = true;
+    }
     if !patched {
         return None;
     }
@@ -1940,6 +1957,14 @@ mod tests {
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria", "existing fields must survive the patch");
         assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
         assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
+        // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1: a separate keypair
+        // from the LAN one, injected on the same terms.
+        assert!(env["AGENTMUX_WAN_KEY"].is_string() && !env["AGENTMUX_WAN_KEY"].as_str().unwrap().is_empty());
+        assert_ne!(
+            env["AGENTMUX_WAN_KEY"], env["AGENTMUX_LAN_KEY"],
+            "WAN and LAN keys must be independently minted — see storage/agent_wan_keys.rs for why \
+             sharing one keypair across the two tiers is not an option"
+        );
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B: the channel the
         // sender signs under must be the one the shared registry publishes.
         assert_eq!(
