@@ -220,11 +220,11 @@ mod tests {
         let private = BASE64.decode(&keypair.private_key).unwrap();
         let public = BASE64.decode(&keypair.public_key).unwrap();
         let sig = agentmux_common::jekt_sign::sign_wan_jekt(
-            &private, "msg-1", "agentx", "agenty", 1_000, "hello",
+            &private, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello",
         )
         .unwrap();
         assert!(agentmux_common::jekt_sign::verify_wan_jekt(
-            &public, "msg-1", "agentx", "agenty", 1_000, "hello", &sig,
+            &public, "msg-1", "agentx", "narko", "stable", "agenty", 1_000, "hello", &sig,
         ));
     }
 

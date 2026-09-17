@@ -1358,6 +1358,19 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
     // host-tier signing shipped (REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md).
     if let Ok(keypair) = mstore.agent_wan_key_ensure(agent_slug) {
         env.insert("AGENTMUX_WAN_KEY".to_string(), json!(keypair.private_key));
+        // §2.1.2: the WAN signature binds the sending INSTANCE, not just the
+        // agent, because one account can run the same agent name on several
+        // instances and each mints its own keypair. The host half is written
+        // explicitly for the same reason `AGENTMUX_CHANNEL` above is: relying
+        // on the agent's ambient environment would let a scrubbed or nested
+        // env sign under a different instance identity than the one this
+        // instance publishes its public key under — and a mismatch there does
+        // not fail loudly, it selects the wrong key and renders legitimate
+        // traffic as an active forgery.
+        env.insert(
+            "AGENTMUX_HOST_LABEL".to_string(),
+            json!(crate::backend::reactive::registry::local_host_label()),
+        );
         patched = true;
     }
     if !patched {
@@ -1964,6 +1977,14 @@ mod tests {
             env["AGENTMUX_WAN_KEY"], env["AGENTMUX_LAN_KEY"],
             "WAN and LAN keys must be independently minted — see storage/agent_wan_keys.rs for why \
              sharing one keypair across the two tiers is not an option"
+        );
+        // §2.1.2: the WAN signature binds the sending instance, so the host
+        // label must travel with the key. A missing one would make the sender
+        // sign under a different instance identity than srv publishes.
+        assert_eq!(
+            env["AGENTMUX_HOST_LABEL"],
+            json!(crate::backend::reactive::registry::local_host_label()),
+            "the MCP env must carry the same host label this instance publishes its WAN key under"
         );
         // SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md Phase B: the channel the
         // sender signs under must be the one the shared registry publishes.
