@@ -18,6 +18,12 @@ lookup mapped to fail-open (§3.4); tenant scoping needs a *recipient* address,
 not just a sender account (§2.1.1); and trusted-peer grants are not
 account-scoped, which W2's duplicate names turn into a disclosure bypass
 (§3.5.1). Anyone reading the PR's first commit should read this file instead.
+**Revised again 2026-09-17 (repo owner decision):** agent identity binds to
+account **and host/instance**, not account alone — see §2.1.2. This closes
+open question #6 and fixes a key-overwrite defect that would have flipped
+legitimate multi-host traffic to permanent active-forgery escalation; it also
+changes the signed material (§3.1), which is free to do only while no verifier
+exists.
 **Builds on:**
 - `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` — the audit that made WAN
   signing conditional on tenant isolation. **§5.1's blocking finding is now
@@ -170,9 +176,57 @@ Three options, in rough order of preference:
 not solve this.** It is Draft with no code landed, and its own scope line
 restricts it to *display naming* — explicitly "does not touch
 `AGENTMUX_AGENT_ID`, jekt signing identity, or any routing/security identity."
-Its WAN qualifier is a label for humans, not an authenticated address. Whoever
-does W2 owns this decision; it should not be assumed borrowed from that spec.
-This is open question #6 (§9).
+Its WAN qualifier is a label for humans, not an authenticated address. Its
+`HostLabel` concept is nonetheless the right shape to promote into a real
+identity component; see §2.1.2.
+
+#### 2.1.2 DECIDED (2026-09-17, repo owner): bind identity to account **and host**
+
+**An agent's WAN identity is the triple `(account, instance, agent_id)`, not
+the pair `(account, agent_id)`.** This is a repo-owner decision, and it
+corrects a genuine defect in §3.2's first draft rather than merely choosing
+among the options above.
+
+**The defect.** Key publication was keyed on the ownership row's
+`(account_user_id, agent_id)`. Every srv instance has its own SQLite database
+and therefore mints its **own** `db_agent_wan_keys` entry for a given agent
+name. So one account running an agent named `lark` on two machines publishes
+two different public keys to **one** row: last write wins, and the other
+machine's signatures then verify against the wrong key. That yields
+`wan_verified = Some(false)` — which this spec defines as *active forgery*,
+forced `TIER=sensitive` / `ESCALATE=required` — **on completely legitimate
+traffic, permanently, for whichever host lost the race.** This is the same
+class of self-inflicted false-positive that
+`SPEC_JEKT_HOST_KEY_TTL_ROTATION_2026_09_14.md` §4 refused to inflict on LAN
+by rotating pinned keys, arriving by a different route.
+
+It is not hypothetical for this deployment: agents already run under one
+account across `narko`, `Area54`, `starpower`, `gamerlove`, and `claudius`.
+
+**Granularity: instance, not merely machine.** One machine can run several
+AgentMux instances concurrently — a `stable` install alongside one or more
+per-build `local-<branch>-<hash>-<build-id>` channels (see CLAUDE.md's
+data-isolation section) — and *each has its own data dir, its own database,
+and therefore its own keypair for the same agent name.* Binding to hostname
+alone would leave exactly the same overwrite race between two channels on one
+box. The unit that actually owns a keypair is the **instance**:
+`(hostname, channel)`.
+
+**Concretely:**
+
+| Layer | Identity |
+|---|---|
+| Key registry (§3.2) | `(account_user_id, hostname, channel, agent_id)` |
+| Injection routing (§2.1.1) | account-scoped, with an optional `hostname` qualifier to disambiguate one name live on several instances |
+| Human-facing address | `agent@host` (e.g. `lark@narko`) — the `HostLabel` shape from the naming spec, promoted from display-only to a real address |
+| Trust grants (§3.5.1) | `(agent_id, peer_account, peer_host, peer_agent_id, tier)` |
+
+**Same-account remains the routing default** (option 2 above): a bare
+`target_agent` means "this account's agent," preserving every existing send
+unchanged, with the host qualifier used only where a name is live on more than
+one instance. The account/host *binding* decided here is about **identity and
+key resolution**, which is mandatory; the addressing *syntax* is the part that
+stays minimal.
 
 Follow the migration pattern this codebase already has precedent for
 (`SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md`, and §6.3 of the
@@ -261,10 +315,33 @@ WAN would be tempting and is wrong on two counts:
   rotate them. WAN keys have an authoritative registry and *should* rotate
   (§3.6). One key cannot have both lifecycles.
 
-WAN signatures therefore sign a domain-separated material string —
-`"wan|v1|" + signed_material(...)`. Host and LAN material stay byte-identical
-to what ships today; this spec introduces no change to any already-deployed
-verifier.
+WAN signatures therefore sign a domain-separated material string. Host and LAN
+material stay byte-identical to what ships today; this spec introduces no
+change to any already-deployed verifier.
+
+**The material also binds the sending instance (§2.1.2).** Exactly the
+precedent `sign_channel_jekt` set: it binds `source_channel` so a signature
+minted by an agent in channel A cannot be replayed as that same agent speaking
+from channel B. WAN needs the same property one level up, because after
+§2.1.2 one agent name can legitimately be live on several instances under one
+account, each with its own key:
+
+```
+WAN_DOMAIN | msgid | source_agent | source_host | source_channel | target_agent | ts_secs | message
+```
+
+The sending process knows its own host and channel reliably — both are
+injected into its env at spawn, the same way `AGENTMUX_CHANNEL` already is —
+so unlike the account (§3.4.1), these are safe to bind client-side. Binding
+them means a mislabelled instance fails verification rather than silently
+selecting a different key.
+
+**This is a change to material already shipped in W3a, and the window to make
+it for free is now.** W3a (PR #3304) signs `"wan|v1|"` material with no
+instance fields. Because **nothing verifies WAN signatures yet**, changing the
+material has no deployed counterpart to break and needs no version negotiation
+— exactly the property shipping the mechanism inert was meant to buy. Make
+this change before any verifier exists; afterwards it becomes a flag day.
 
 ### 3.2 Public key distribution: the ownership registry is the PKI
 
@@ -273,10 +350,24 @@ LAN had no authority to ask, so it pinned. WAN has one: the same
 `checkAgentBinding` already consults to decide whether an account may claim an
 agent name.
 
-- **Publish — on its own path, NOT on provisioning (Codex P1).** Add a
-  `wan_public_key` attribute plus `wan_key_version` and `wan_key_created_at`
-  to that row, written by a dedicated authenticated route
-  **`PUT /agents/:agent_id/pubkey`**.
+- **Publish — on its own path, NOT on provisioning (Codex P1), and keyed per
+  INSTANCE, not per agent name (§2.1.2).** A published key belongs to
+  `(account_user_id, hostname, channel, agent_id)`. Storing it as a bare
+  attribute on the `(account_user_id, agent_id)` ownership row — as this
+  section's first draft said — makes two instances running the same agent name
+  overwrite each other's key, permanently flipping the loser's legitimate
+  traffic to `Some(false)` / active-forgery escalation. Use a child collection
+  (a separate `agent_wan_keys` table keyed
+  `account_user_id` / `hostname#channel#agent_id`, or an equivalent map
+  attribute) so several instances coexist.
+
+  Written by a dedicated authenticated route
+  **`PUT /agents/:agent_id/pubkey`**, carrying the publishing instance's
+  `hostname` and `channel`. The route must reject a publish whose claimed
+  account doesn't match the authenticated caller — the instance identity is
+  self-declared and only distinguishes *this account's own* instances from
+  each other; it is not a security boundary between accounts, which is what
+  the Cognito account scope is for.
 
   The first draft of this spec proposed riding the existing
   `POST /agents/provision` call. **That cannot work**, and the reason is
@@ -377,7 +468,8 @@ So the new fields are five, not two:
 | `wan_sig` | client-supplied | base64 Ed25519 |
 | `wan_msg_id` | client-supplied | the msgid **as signed**, independent of the cloud's injection id |
 | `wan_ts_secs` | client-supplied | the timestamp **as signed** |
-| `wan_sender_account` | **server-resolved** at inject time (§2.1) | which account's key to check against |
+| `wan_sender_account` | **server-resolved** at inject time (§2.1) | which account's keys to check against |
+| `wan_source_host` | client-supplied, **and bound into the signature** (§3.1) | with `source_channel`, selects which of that account's instance keys to check against (§2.1.2). Self-declared, but a wrong value selects a key the signature won't verify under, so it grants nothing |
 | `wan_verified` | **server-computed**, `#[serde(skip_deserializing)]` | same trust boundary as `sig_verified` / `reagent_verified` / `lan_verified` — a client must never assert its own verification result |
 
 All four client-supplied fields must be persisted by muxbus as **opaque
@@ -516,11 +608,14 @@ identity.**
 Note the perverse ordering: signing makes this *worse*, not better. Today such
 a request arrives unverified and the `ask`/non-allow-listed path stops it.
 
-**Requirement:** thread `sender_account` into both the grant's persisted
-identity and the authorization lookup — `PRIMARY KEY (agent_id,
-granted_peer_account, granted_peer_agent_id, tier)`, with existing rows
-migrated to the owning account for host/LAN/channel tiers and **existing `wan`
-grants invalidated rather than guessed at**. This holds even though §9.5
+**Requirement:** thread the peer's full identity (§2.1.2) into both the
+grant's persisted identity and the authorization lookup — `PRIMARY KEY
+(agent_id, granted_peer_account, granted_peer_host, granted_peer_agent_id,
+tier)`, with existing rows migrated to the owning account for
+host/LAN/channel tiers and **existing `wan` grants invalidated rather than
+guessed at**. The host component matters for the same reason it does in the
+key registry: "I trust `lark`" should mean the `lark` on the instance you
+actually granted, not any `lark` your account happens to run later. This holds even though §9.5
 recommends keeping the account out of the rendered marker: the marker is a
 display decision, the grant is an authorization decision, and they do not have
 to agree.
@@ -769,11 +864,14 @@ silent trust:
    privacy question, not just a UX one. Recommend: no account in the marker
    for now; the receiving *instance* can log it. Note this is independent of
    §3.5.1 — grants must be account-scoped regardless of what the marker shows.
-6. **Which addressing form for W2** (§2.1.1) — account-qualified target,
-   same-account-by-default with explicit cross-account sends, or ambiguity
-   errors? This shapes the migration, the client API, and whether
-   cross-account delivery is opt-in. Recommend option 2. **It is a product
-   decision, not just a schema one**, and it gates W2.
+6. ~~**Which addressing form for W2**~~ — **DECIDED 2026-09-17 (repo owner):
+   identity binds to account **and** host; routing stays same-account by
+   default with a host qualifier for disambiguation. See §2.1.2, which also
+   records the key-overwrite defect this decision fixes. Remaining sub-question
+   for the implementer, not the owner: whether the instance component is
+   stored as two columns (`hostname`, `channel`) or one opaque instance id —
+   two columns is preferred for debuggability, since `lark@narko/stable` is
+   readable in a log and a hash is not.
 7. **Recovery when key continuity legitimately breaks** (§3.6) — an agent
    whose local DB was wiped re-mints with no continuity proof and becomes
    indistinguishable from a directory rewrite. LAN has the same unsolved shape
