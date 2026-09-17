@@ -57,4 +57,13 @@ export interface BlockFrameProps {
 
     children?: JSX.Element;
     connBtnRef?: { current: HTMLDivElement | null };
+
+    /** Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+     *  §4.1) — when provided, `BlockFrame_Header` renders this INSTEAD of its
+     *  own `.block-frame-default-header-iconview` (icon + title + blockid),
+     *  while keeping every other row element (ConnectionButton, header text
+     *  elems, EndIcons) exactly as-is. This is how `PaneHeaderTabStrip` gets
+     *  its tab pills into the SAME row as those already-correct pieces,
+     *  without reimplementing any of them. */
+    leadingTabStrip?: JSX.Element;
 }

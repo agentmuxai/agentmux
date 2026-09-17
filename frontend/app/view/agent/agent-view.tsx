@@ -3,8 +3,8 @@
 
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { DragOverlay } from "@/app/element/dragoverlay";
+import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
-import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import {
     snapshot as layoutSnapshot,
     registerPane as registerLayoutPane,
@@ -46,7 +46,7 @@ import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { BlockFrame_Header, computeFocusRingBorderColor } from "@/app/block/blockframe";
+import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import {
     closeBlockInStack,
     getLayoutModelForStaticTab,
@@ -57,7 +57,7 @@ import {
 import { findNode } from "@/layout/lib/layoutNode";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createSignalAtom, sleep } from "@/util/util";
+import { sleep } from "@/util/util";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
@@ -421,29 +421,15 @@ export const AgentPaneChrome = (props: {
     // `changeConnModalAtom` (mirroring `useBlockAtom` keyed on
     // `activeBlockId()`) at that point — don't assume this comment alone
     // will be noticed.
-    const changeConnModalAtom = createSignalAtom(false);
-    const connBtnRef: { current: HTMLDivElement | null } = { current: null };
+    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+    // §4.1): the old headerElem/headerElemNoView (BlockFrame_Header instances)
+    // and their changeConnModalAtom/connBtnRef stand-ins are gone —
+    // PaneHeaderTabStrip renders EndIcons directly instead, which never
+    // consumed connBtnRef/changeConnModalAtom in the first place (those only
+    // fed BlockFrame_Header's own leading-identity ConnectionButton, which
+    // AgentViewModel never rendered anyway — see the comment that used to
+    // sit here about manageConnection never being set for agent panes).
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
-    const headerElem = (
-        <BlockFrame_Header
-            nodeModel={nodeModel}
-            viewModel={activeViewModelOrUndefined()}
-            preview={false}
-            blockId={activeBlockId}
-            connBtnRef={connBtnRef}
-            changeConnModalAtom={changeConnModalAtom}
-        />
-    );
-    const headerElemNoView = (
-        <BlockFrame_Header
-            nodeModel={nodeModel}
-            viewModel={null}
-            preview={false}
-            blockId={activeBlockId}
-            connBtnRef={connBtnRef}
-            changeConnModalAtom={changeConnModalAtom}
-        />
-    );
 
     // In-pane tabs — rendered here (not inside AgentBlockContent) so the
     // strip stays visible whether the active member is a launched
@@ -780,6 +766,40 @@ export const AgentPaneChrome = (props: {
         });
     });
 
+    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+    // §4.1) — factored out so the ErrorBoundary fallback below can render
+    // the exact same header with `viewModel={null}` (mirrors the old
+    // headerElemNoView pattern) instead of duplicating every prop twice.
+    const renderAgentPaneHeader = (viewModel: ViewModel | null): JSX.Element => (
+        <PaneHeaderTabStrip
+            tabs={visibleTabs()}
+            activeId={activeBlockId()}
+            zoomFactor={tabStripZoomFactor}
+            getId={(t) => t.blockId}
+            getLabel={(t) => t.label}
+            onActivate={handleTabSwitch}
+            onClose={handleTabClose}
+            onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
+            renderLabel={(t) =>
+                renamingBlockId() === t.blockId && t.definitionId ? (
+                    <PaneTabRenameInput
+                        initialValue={t.label}
+                        onConfirm={(title) => void handleTabRenameConfirm(t, title)}
+                        onCancel={() => setRenamingBlockId(null)}
+                    />
+                ) : (
+                    <span class="pane-tab-label">{t.label}</span>
+                )
+            }
+            onAdd={showTabStrip() ? () => void handleNewAgentTab() : undefined}
+            addTitle="New agent"
+            emptyLabel="Agent"
+            nodeModel={nodeModel}
+            viewModel={viewModel}
+            activeBlockId={activeBlockId}
+        />
+    );
+
     return (
         // Flex-column stack: strip on top, content filling the rest.
         // `.agent-pane-stack-content`'s own containing-block role (relative
@@ -831,63 +851,31 @@ export const AgentPaneChrome = (props: {
             onClick={() => nodeModel.focusNode()}
             onFocusIn={() => nodeModel.focusNode()}
         >
-            {/* Replacement for BlockFrame's own inline header, suppressed
-                by AgentViewModel.noHeader once hoisted — see that field's
-                own doc comment and headerElem's, above. Same
-                ErrorBoundary-isolation pattern BlockFrame_Default_Component
-                itself uses (blockframe.tsx) so a broken header computation
-                blanks only the header, not the whole pane. */}
-            <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>
-            {/* Progress bar's own overlay strip — floats above the tab
-                strip, never reserving layout space (SPEC_AGENT_PANE_
+            {/* Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+                §4.1) — ONE unified row replaces the old headerElem (full
+                BlockFrame_Header) + separate .agent-pane-stack-content +
+                PaneTabStrip structure. showTabStrip()/visibleTabs() keep
+                their exact pre-existing meaning (SPEC_AGENT_PANE_TAB_STRIP_
+                OVERLAY_2026_08_10.md, tab-strip-visibility.ts) — a lone
+                conversation still shows no self-pill (empty tabs, "+" only);
+                a fresh, unlaunched picker pane still shows neither pills nor
+                "+", just the plain "Agent" identity — this row just always
+                exists as ONE row instead of a full header conditionally
+                topped by a floating strip overlay. Same ErrorBoundary
+                isolation BlockFrame_Default_Component itself uses, so a
+                broken header computation blanks only the header row, not
+                the whole pane. */}
+            <ErrorBoundary fallback={renderAgentPaneHeader(null)}>
+                {renderAgentPaneHeader(activeViewModelOrUndefined() ?? null)}
+            </ErrorBoundary>
+            {/* Progress bar's own overlay strip — floats above the content,
+                never reserving layout space (SPEC_AGENT_PANE_
                 PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md). Empty div; its
                 only content is whatever the active AgentPresentationView
                 portals into it via progressBarMount above. Positioned in
                 agent-view.scss (.agent-pane-progress-bar-slot). */}
             <div class="agent-pane-progress-bar-slot" ref={(el) => setSlotEl(el)} />
             <div class="agent-pane-stack-content">
-                {/* Tab strip floats over the content instead of reserving
-                    its own row (SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md)
-                    — with a single conversation open, the strip is exactly
-                    the "+" button's own 28×28px box (shrink-to-fit +
-                    hidden-until-2nd-tab, SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md),
-                    so the conversation renders, and can be scrolled,
-                    underneath the rest of this row — unobstructed except
-                    for wherever a real tab or the "+" actually sits. The
-                    tab pill itself stays hidden until there's something to
-                    switch BETWEEN (see visibleTabs above), and the whole
-                    strip — "+" included — is hidden on a fresh pane with no
-                    agent launched yet (shouldShowTabStrip). Chrome itself
-                    mounts for every agent pane regardless; this Show is what
-                    represents the no-strip state. The "+" comes back the
-                    moment the pane is a real conversation; see
-                    shouldShowTabStrip for why a 2nd blank tab still keeps
-                    the strip up. */}
-                <Show when={showTabStrip()}>
-                    <PaneTabStrip
-                        tabs={visibleTabs()}
-                        activeId={activeBlockId()}
-                        zoomFactor={tabStripZoomFactor}
-                        getId={(t) => t.blockId}
-                        getLabel={(t) => t.label}
-                        onActivate={handleTabSwitch}
-                        onClose={handleTabClose}
-                        onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
-                        renderLabel={(t) =>
-                            renamingBlockId() === t.blockId && t.definitionId ? (
-                                <PaneTabRenameInput
-                                    initialValue={t.label}
-                                    onConfirm={(title) => void handleTabRenameConfirm(t, title)}
-                                    onCancel={() => setRenamingBlockId(null)}
-                                />
-                            ) : (
-                                <span class="pane-tab-label">{t.label}</span>
-                            )
-                        }
-                        onAdd={() => void handleNewAgentTab()}
-                        addTitle="New agent"
-                    />
-                </Show>
                 {props.children}
             </div>
         </div>
