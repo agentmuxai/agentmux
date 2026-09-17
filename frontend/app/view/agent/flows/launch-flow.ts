@@ -57,6 +57,7 @@ import type { LaunchPhase } from "./launch-phase";
 import type { ProviderDefinition } from "../providers";
 
 import type { LogFn } from "../types";
+import type { ResolveCliResult } from "@/app/store/rpc-api";
 
 export interface LaunchFlowOptions {
     blockId: string;

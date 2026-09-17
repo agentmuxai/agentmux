@@ -1648,52 +1648,6 @@ declare global {
         auto_allocate?: boolean;
     };
 
-    // wshrpc.CommandResolveCliData
-    type CommandResolveCliData = {
-        provider_id: string;
-        cli_command: string;
-        npm_package: string;
-        pinned_version: string;
-        windows_install_command: string;
-        unix_install_command: string;
-        block_id?: string;
-    };
-
-    // wshrpc.ResolveCliResult
-    type ResolveCliResult = {
-        cli_path: string;
-        version: string;
-        source: string;
-    };
-
-    // wshrpc.CommandCheckCliAuthData
-    type CommandCheckCliAuthData = {
-        cli_path: string;
-        auth_check_args: string[];
-        auth_env?: {[key: string]: string};
-    };
-
-    // wshrpc.CheckCliAuthResult
-    type CheckCliAuthResult = {
-        authenticated: boolean;
-        email?: string;
-        auth_method?: string;
-        raw_output: string;
-    };
-
-    // wshrpc.CommandRunCliLoginData
-    type CommandRunCliLoginData = {
-        cli_path: string;
-        login_args: string[];
-        auth_env?: {[key: string]: string};
-    };
-
-    // wshrpc.RunCliLoginResult
-    type RunCliLoginResult = {
-        auth_url?: string;
-        raw_output: string;
-    };
-
     // The ONLY native-memory type still hand-written here; its siblings are now
     // ts-rs-generated under frontend/types/rpc/ and re-exported from
     // app/store/rpc-api/native-memory.ts. This one cannot be generated: `detail`

@@ -8,6 +8,17 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The widget proxy RESULT shapes are GENERATED from Rust by ts-rs. Their
+// REQUESTS deliberately stay hand-written: both handlers read their payload
+// field-by-field off a `serde_json::Value` and answer a bad port or path with
+// an `ok: false` RESULT rather than an RPC error, so there is no Rust request
+// struct to generate from -- see `WidgetHealthResult`'s doc comment.
+export type { WidgetApiResult } from "@/types/rpc/WidgetApiResult";
+export type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
+
+import type { WidgetApiResult } from "@/types/rpc/WidgetApiResult";
+import type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
+
 // The muxbus and providers shapes are GENERATED from their Rust definitions by
 // ts-rs. They were private structs in the handler files, so the inline types
 // here were hand-maintained against nothing.
@@ -77,7 +88,7 @@ export const MiscApi = {
         client: RpcClient,
         data: { port: number; health_check_path: string; health_check_body_contains?: string },
         opts?: RpcOpts,
-    ): Promise<{ healthy: boolean; status_code: number | null }> {
+    ): Promise<WidgetHealthResult> {
         return client.rpcCall("widget.health", data, opts);
     },
 
@@ -99,7 +110,7 @@ export const MiscApi = {
             body?: string;
         },
         opts?: RpcOpts,
-    ): Promise<{ ok: boolean; status_code: number | null; body: string | null; error?: string }> {
+    ): Promise<WidgetApiResult> {
         return client.rpcCall("widget.api", data, opts);
     },
 
