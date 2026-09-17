@@ -14,6 +14,7 @@ use crate::backend::rpc_types::{
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     CommandGetBundleData, CommandDeleteBundleData, DeleteBundleResult, CommandReorderGlobalBundlesData,
+    CommandListBundlesData, CommandGetClaudeGlobalConfigData, ReorderGlobalBundlesResult,
 };
 use crate::backend::storage::store::Bundle;
 
@@ -23,48 +24,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Bundle CRUD ----
 
     let mstore = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_MEMORIES,
-        Box::new(move |_data, _ctx| {
+        move |_req: CommandListBundlesData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
+            async move {
                 let memories = mstore
                     .bundle_list()
                     .map_err(|e| format!("listmemories: {e}"))?;
-                Ok(Some(serde_json::to_value(&memories).unwrap_or_default()))
-            })
-        }),
+                Ok(memories)
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandGetBundleData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandGetBundleData = serde_json::from_value(data)
-                    .map_err(|e| format!("getmemory: {e}"))?;
+            async move {
                 match mstore
                     .bundle_get(&cmd.id)
                     .map_err(|e| format!("getmemory: {e}"))?
                 {
-                    Some(m) => Ok(Some(serde_json::to_value(&m).unwrap_or_default())),
+                    Some(m) => Ok(m),
                     None => Err(format!("getmemory: not found id={}", cmd.id)),
                 }
-            })
-        }),
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPSERT_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |mut memory: Bundle, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let mut memory: Bundle = serde_json::from_value(data)
-                    .map_err(|e| format!("upsertmemory: {e}"))?;
+            async move {
                 // Guard on BOTH client-supplied is_blank AND id == "blank".
                 // Without the id check a caller could send
                 // {id:"blank", is_blank:false, name:"evil"} and the
@@ -110,9 +107,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&memory).unwrap_or_default()))
-            })
-        }),
+                Ok(memory)
+            }
+        },
     );
 
     let id_store = state.id_store.clone();
@@ -153,14 +150,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_REORDER_GLOBAL_BRAIN,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandReorderGlobalBundlesData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandReorderGlobalBundlesData = serde_json::from_value(data)
-                    .map_err(|e| format!("reorderglobalbrain: {e}"))?;
+            async move {
                 let updated = mstore
                     .bundle_reorder(&cmd.ids)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
@@ -171,9 +166,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(json!({ "updated": updated })))
-            })
-        }),
+                Ok(ReorderGlobalBundlesResult { updated })
+            }
+        },
     );
 
     // ---- System-tier Global Bundle — see
@@ -184,14 +179,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     let mstore = state.id_store.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPSERT_SYSTEM_MEMORY,
-        Box::new(move |data, _ctx| {
+        move |mut memory: Bundle, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let mut memory: Bundle = serde_json::from_value(data)
-                    .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+            async move {
                 if memory.id.is_empty() {
                     memory.id = uuid::Uuid::new_v4().to_string();
                 }
@@ -241,9 +234,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_get(&memory.id)
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?
                     .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
-                Ok(Some(serde_json::to_value(&saved).unwrap_or_default()))
-            })
-        }),
+                Ok(saved)
+            }
+        },
     );
 
     let mstore = state.id_store.clone();
@@ -275,16 +268,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // config dir — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
     // §5 (post-review revision). No parameters (fixed path, not
     // caller-supplied), no write counterpart.
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
-                let claude_dir = resolve_shared_claude_provider_dir();
-                let result = read_claude_global_config(&claude_dir)
-                    .map_err(|e| format!("getclaudeglobalconfig: {e}"))?;
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
+        move |_req: CommandGetClaudeGlobalConfigData, _ctx| async move {
+            let claude_dir = resolve_shared_claude_provider_dir();
+            read_claude_global_config(&claude_dir)
+                .map_err(|e| format!("getclaudeglobalconfig: {e}"))
+        },
     );
 
 }
@@ -321,11 +311,17 @@ fn resolve_shared_claude_provider_dir() -> std::path::PathBuf {
 /// agent on this host has one today, confirmed 2026-08-24) — real I/O
 /// errors (permission denied, etc.) still propagate as `Err`, not
 /// silently folded into "missing."
-#[derive(serde::Serialize)]
-struct ClaudeGlobalConfig {
-    path: String,
-    content: Option<String>,
-    exists: bool,
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ClaudeGlobalConfig {
+    pub path: String,
+    /// Genuinely `string | null`, not an optional property: a plain
+    /// `Option<String>` with no `skip_serializing_if`, so the key is always
+    /// present and carries `null` when the file does not exist. That
+    /// distinction is load-bearing here — `exists: false` with
+    /// `content: null` is the meaningful "no file" answer, not an absent key.
+    pub content: Option<String>,
+    pub exists: bool,
 }
 
 fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<ClaudeGlobalConfig> {
@@ -492,21 +488,53 @@ mod delete_memory_tests {
             assert_eq!(row["requestName"], "CommandDeleteBundleData");
             assert_eq!(row["responseName"], "DeleteBundleResult");
         }
-        // listmemories/getmemory/upsertmemory/reorderglobalbrain/
-        // upsertsystemmemory are deliberately NOT migrated (Bundle-shaped
-        // responses, or upsert bodies that ARE the storage entity) and must
-        // stay absent from the schema.
-        for cmd in [
-            COMMAND_LIST_MEMORIES,
-            COMMAND_GET_MEMORY,
-            COMMAND_UPSERT_MEMORY,
-            COMMAND_REORDER_GLOBAL_BRAIN,
-            COMMAND_UPSERT_SYSTEM_MEMORY,
+        // The rest of the bundle CRUD surface is now migrated too. This block
+        // previously asserted these five were ABSENT from the schema, which was
+        // a statement about a temporary state ("not migrated yet"), not an
+        // invariant -- so migrating them correctly made it fail. It now asserts
+        // what each one actually records, which is the thing worth pinning.
+        //
+        // `upsertmemory`/`upsertsystemmemory` take `Bundle` itself as the
+        // request because the upsert body IS the storage entity; only `id` and
+        // `name` are required on the wire (every other field has a serde
+        // default), which is what `BundleUpsertInput` expresses on the
+        // frontend side.
+        for (cmd, req, resp) in [
+            (COMMAND_GET_MEMORY, "CommandGetBundleData", "Bundle"),
+            (COMMAND_UPSERT_MEMORY, "Bundle", "Bundle"),
+            (COMMAND_UPSERT_SYSTEM_MEMORY, "Bundle", "Bundle"),
+            (
+                COMMAND_REORDER_GLOBAL_BRAIN,
+                "CommandReorderGlobalBundlesData",
+                "ReorderGlobalBundlesResult",
+            ),
+            (
+                COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
+                "CommandGetClaudeGlobalConfigData",
+                "ClaudeGlobalConfig",
+            ),
         ] {
-            assert!(
-                rows.iter().all(|r| r["command"] != cmd),
-                "{cmd} is not migrated and must not appear in the schema",
-            );
+            let row = rows
+                .iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"));
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert_eq!(row["responseName"], resp, "{cmd} response");
         }
+
+        // `listmemories` answers with `Vec<Bundle>`. `short_name` deliberately
+        // leaves a generic whole (truncating `Vec<a::B>` at the last `::`
+        // would yield `B>`, which names nothing), so match on the shape rather
+        // than pinning the full crate path.
+        let list = rows
+            .iter()
+            .find(|r| r["command"] == COMMAND_LIST_MEMORIES)
+            .expect("listmemories missing from the schema");
+        assert_eq!(list["requestName"], "CommandListBundlesData");
+        let list_resp = list["responseName"].as_str().unwrap_or_default();
+        assert!(
+            list_resp.starts_with("alloc::vec::Vec<") && list_resp.ends_with("::Bundle>"),
+            "listmemories should answer with a Vec of Bundle, got {list_resp}"
+        );
     }
 }
