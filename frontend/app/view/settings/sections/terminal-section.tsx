@@ -132,6 +132,16 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
+                label="Show CPU/mem badge"
+                description="Show a live CPU%/memory usage badge in the top-right corner of terminal panes"
+                control={
+                    <ToggleControl
+                        checked={s()["term:showstatsbadge"] !== false}
+                        onChange={(v) => set("term:showstatsbadge", v)}
+                    />
+                }
+            />
+            <SettingRow
                 label="Predictive echo"
                 description="Show local predictive echo of typed characters while waiting on a slow/remote shell"
                 control={

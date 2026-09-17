@@ -383,6 +383,7 @@ partial list.
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16`](SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16.md) | SPEC: Split local-machine credentials out of `services/infra` into `services/local` |
+| [`SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17`](SPEC_TERM_STATS_BADGE_TOP_OFFSET_AND_TOGGLE_2026_09_17.md) | SPEC: Terminal CPU%/Mem badge — fix top-right offset, add a Settings toggle |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 | [`SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10`](SPEC_WINGET_PACKAGE_BOOTSTRAP_2026_09_10.md) | WinGet package bootstrap: `AgentMux.AI` |

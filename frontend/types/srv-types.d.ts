@@ -1079,6 +1079,7 @@ declare global {
         "term:shiftenternewline"?: boolean;
         "term:predictiveecho"?: boolean;
         "term:predictiveecho:thresholdms"?: number;
+        "term:showstatsbadge"?: boolean;
         "term:agentmaxruntimehours"?: number;
         "term:agentidletimeoutmins"?: number;
         "cmd:env"?: {[key: string]: string};
