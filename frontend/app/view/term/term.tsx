@@ -13,7 +13,7 @@ import type { JSX } from "solid-js";
 import { TermStickers } from "./termsticker";
 import { TermThemeUpdater } from "./termtheme";
 import { computeTheme } from "./termutil";
-import { setTermPaneChromeComponent, setTerminalViewComponent, TermViewModel } from "./termViewModel";
+import { setTermPaneChromeModel, setTerminalViewComponent, TermViewModel } from "./termViewModel";
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
@@ -439,14 +439,18 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
  * `getOwnNode` uses the leaf's own stable `nodeModel.nodeId` instead, the
  * same correction ReAgent caught on the agent pane in #3136.
  */
-const TermPaneChrome = (props: {
-    anchorBlockId: string;
-    nodeModel: NodeModel;
-    children: JSX.Element;
-}): JSX.Element => {
+/**
+ * Terminal's opt-in to the ONE shared pane chrome
+ * (`genericRenderPaneChrome`) — see `PaneChromeModel` (custom.d.ts).
+ * Everything the old `TermPaneChrome` component rendered around the
+ * content (root box, focus ring, header row, ErrorBoundary) is the shared
+ * chrome's job now; what stays here is only what is genuinely terminal's:
+ * its tab model (shell tabs, rename, per-pane zoom), its connection
+ * button, and the body wrapper its background image / runtime badge need
+ * to span.
+ */
+export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeModel): PaneChromeModel {
     const layoutModel = getLayoutModelForStaticTab();
-    const nodeModel = props.nodeModel;
-    const anchorBlockId = props.anchorBlockId;
 
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? anchorBlockId;
@@ -650,75 +654,46 @@ const TermPaneChrome = (props: {
 
     // Factored out so the ErrorBoundary fallback can render the exact same
     // header with `viewModel={null}` instead of duplicating every prop twice.
-    const renderTermPaneHeader = (viewModel: ViewModel | null): JSX.Element => (
-        <PaneHeaderTabStrip
-            tabs={visibleTermTabs()}
-            activeId={activeBlockId()}
-            zoomFactor={tabStripZoomFactor}
-            getId={(t) => t.blockId}
-            getLabel={(t) => t.label}
-            getIcon={(t) => t.icon}
-            onActivate={handleTermTabSwitch}
-            onClose={handleTermTabClose}
-            onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
-            renderLabel={(t) =>
-                renamingBlockId() === t.blockId ? (
-                    <PaneTabRenameInput
-                        initialValue={t.label}
-                        onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
-                        onCancel={() => setRenamingBlockId(null)}
-                    />
-                ) : (
-                    <span class="pane-tab-label">{t.label}</span>
-                )
-            }
-            onAdd={(e) => e && openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e)}
-            addTitle="Add tab"
-            nodeModel={nodeModel}
-            viewModel={viewModel}
-            activeBlockId={activeBlockId}
-            connBtnRef={connBtnRef()}
-            changeConnModalAtom={changeConnModalAtom()}
-        />
-    );
-
-    return (
-        <div
-            class="term-pane-stack"
-            classList={{
-                "term-pane-stack-focused": isFocused() && !isAlone(),
-                // Only alone+focused suppresses the ring to transparent —
-                // matches .pane-alone .block-mask's own nesting under
-                // .block-focused (block.scss): alone-but-UNfocused still
-                // gets the ordinary dim border (reagent P2, PR #3226).
-                "term-pane-stack-focused-alone": isFocused() && isAlone(),
-            }}
-            style={{ "--pane-ring-color": ringBorderColor() }}
-            // Keeps this pane reachable by the CEF browser API's
-            // `[data-blockid]` subtree scoping (UIQuery/UIClick/screenshot
-            // clip) now that chrome sits OUTSIDE the nested `.block` that
-            // otherwise carries it — see AgentPaneChrome's identical note.
-            data-blockid={activeBlockId()}
-            // Chrome is a sibling ABOVE the nested `.block`, so clicks here
-            // never reach the BlockFrame handlers that focus the pane.
-            // Without this, clicking a terminal's own header or tab strip
-            // could leave a DIFFERENT pane focused.
-            onClick={() => nodeModel.focusNode()}
-            onFocusIn={() => nodeModel.focusNode()}
-        >
-            {/* Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
-                §4.1) — ONE unified row replaces the old headerElem (full
-                BlockFrame_Header) + a separate PaneTabStrip row below it.
-                Unlike agent's overlay strip, term's strip always reserved
-                its own normal-flow band above the xterm surface already —
-                this migration only removes the SEPARATE-ROW-FROM-THE-HEADER
-                part, not a from-overlay-to-row change. connBtnRef/
-                changeConnModalAtom are still threaded through — term's
-                ConnectionButton (manageConnection, TermViewModel) is a real,
-                live feature BlockFrame_Header itself still renders. */}
-            <ErrorBoundary fallback={renderTermPaneHeader(null)}>
-                {renderTermPaneHeader(activeViewModelOrUndefined() ?? null)}
-            </ErrorBoundary>
+    return {
+        tabs: visibleTermTabs,
+        getId: (t: any) => t.blockId,
+        getLabel: (t: any) => t.label,
+        getIcon: (t: any) => t.icon,
+        // Both return true ("handled"): a terminal tab switch has to
+        // restore focus to the newly-active xterm, and close resolves the
+        // block's own owning node first.
+        onActivate: (id: string) => {
+            handleTermTabSwitch(id);
+            return true;
+        },
+        onClose: (id: string) => {
+            handleTermTabClose(id);
+            return true;
+        },
+        onTabDoubleClick: (t: any) => setRenamingBlockId(t.blockId),
+        renderLabel: (t: any) =>
+            renamingBlockId() === t.blockId ? (
+                <PaneTabRenameInput
+                    initialValue={t.label}
+                    onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
+                    onCancel={() => setRenamingBlockId(null)}
+                />
+            ) : (
+                <span class="pane-tab-label">{t.label}</span>
+            ),
+        zoomFactor: tabStripZoomFactor,
+        // term's ConnectionButton (manageConnection, TermViewModel) is a
+        // real live feature BlockFrame_Header renders — threaded through
+        // unchanged.
+        connBtnRef: connBtnRef(),
+        changeConnModalAtom: changeConnModalAtom(),
+        rootClass: "term-pane-stack",
+        contentClass: "term-pane-stack-content",
+        // The background image and runtime badge span the strip AND the
+        // terminal, so they need a wrapper around the content region
+        // rather than a slot beside it (term.scss's own
+        // `> .term-pane-stack-body` positioning depends on this box).
+        wrapContent: (content: JSX.Element) => (
             <div class="term-pane-stack-body">
                 <Show when={termBg()}>
                     <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
@@ -728,20 +703,19 @@ const TermPaneChrome = (props: {
                         {runtimeLabel()}
                     </div>
                 </Show>
-                <div class="term-pane-stack-content">{props.children}</div>
+                {content}
             </div>
-        </div>
-    );
-};
+        ),
+    };
+}
 
-TermPaneChrome.displayName = "TermPaneChrome";
 
-export { TermPaneChrome };
+
 
 // Register TerminalView with the ViewModel to break the circular dependency
 setTerminalViewComponent(TerminalView);
 // Same late-binding registration, for the hoisted chrome half — see
-// setTermPaneChromeComponent's own comment in termViewModel.ts.
-setTermPaneChromeComponent(TermPaneChrome);
+// setTermPaneChromeModel's own comment in termViewModel.ts.
+setTermPaneChromeModel(buildTermPaneChromeModel);
 
 export { TermViewModel };

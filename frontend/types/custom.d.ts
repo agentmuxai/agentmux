@@ -546,6 +546,12 @@ declare global {
         /** Extra class on the chrome's own root, so a view type can keep
          *  CSS hooks it already has without the chrome knowing about it. */
         rootClass?: string;
+        /** Class for the content region, same purpose as `rootClass` —
+         *  lets a view type whose stylesheet already targets its own
+         *  content box (`.term-pane-stack-content`, positioning the xterm
+         *  surface) adopt the shared chrome without restyling. Defaults to
+         *  the chrome's own. */
+        contentClass?: string;
     }
 
     interface ViewModel {

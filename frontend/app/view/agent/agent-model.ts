@@ -10,7 +10,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
-import { AgentBlockContent, AgentPaneChrome } from "./agent-view";
+import { AgentBlockContent, buildAgentPaneChromeModel } from "./agent-view";
+import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -45,6 +46,7 @@ export class AgentViewModel implements ViewModel {
     noPadding: () => boolean;
     noHeader: () => boolean;
     renderPaneChrome: (nodeModel: NodeModel, content: JSX.Element) => JSX.Element;
+    paneChromeModel: (nodeModel: NodeModel) => PaneChromeModel;
     setProgressBarMount: (el: HTMLDivElement | null) => void;
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
@@ -100,19 +102,15 @@ export class AgentViewModel implements ViewModel {
         this.nodeModel = nodeModel;
         this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
-        // createComponent (not a plain `AgentPaneChrome({...})` call) —
-        // this file is a plain .ts, so it can't use JSX's `<AgentPaneChrome>`
-        // syntax, but a bare function call would run AgentPaneChrome's own
-        // createEffect/onCleanup/createSignal calls in whatever reactive
-        // scope happens to be ambient at THIS constructor call (wrong —
-        // ties chrome's disposal to whichever effect first constructed this
-        // one vm instance, not to chrome's own actual mount/unmount in the
-        // DOM). createComponent is the JSX-free equivalent of what
-        // `<AgentPaneChrome .../>` compiles to; pane-leaf-chrome.tsx (a real
-        // .tsx file) is what actually establishes the owning scope, since
-        // that's where this returned JSX.Element gets inserted into the tree.
-        this.renderPaneChrome = (leafNodeModel: NodeModel, content: JSX.Element): JSX.Element =>
-            createComponent(AgentPaneChrome, { anchorBlockId: this.blockId, nodeModel: leafNodeModel, children: content });
+        // Agent now renders through the ONE shared chrome like every other
+        // widget type; what used to be AgentPaneChrome's bespoke component
+        // is the capability model below. The old createComponent dance
+        // existed to give that component the right reactive owner — the
+        // shared chrome calls paneChromeModel in its own scope, which is
+        // the same ownership by construction.
+        this.renderPaneChrome = genericRenderPaneChrome;
+        this.paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
+            buildAgentPaneChromeModel(this.blockId, leafNodeModel);
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);
         this.progressBarMount = progressBarMountSig;
         this.setProgressBarMount = (el: HTMLDivElement | null) => setProgressBarMountSig(el);

@@ -132,7 +132,7 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
         />
     );
 
-    const contentRegion = <div class="generic-pane-stack-content">{content}</div>;
+    const contentRegion = <div class={model?.contentClass ?? "generic-pane-stack-content"}>{content}</div>;
 
     return (
         <div
