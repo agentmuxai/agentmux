@@ -307,7 +307,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
     }
 
     let mut child = cmd

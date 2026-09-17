@@ -149,7 +149,7 @@ fn detect_cli(name: &str) -> CliDetectionResult {
     let mut find = std::process::Command::new(find_cmd);
     find.arg(name);
     #[cfg(windows)]
-    find.creation_flags(0x08000000);
+    find.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
 
     let path = find
         .output()
@@ -167,7 +167,7 @@ fn detect_cli(name: &str) -> CliDetectionResult {
         let mut ver = std::process::Command::new(name);
         ver.arg("--version");
         #[cfg(windows)]
-        ver.creation_flags(0x08000000);
+        ver.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
 
         ver.output()
             .ok()
@@ -476,7 +476,7 @@ fn check_claude_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
     let mut cmd = std::process::Command::new(cli_cmd);
     cmd.args(["auth", "status", "--json"]);
     #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
+    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
 
     let output = cmd
         .output()
@@ -511,7 +511,7 @@ fn check_codex_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
     let mut cmd = std::process::Command::new(cli_cmd);
     cmd.args(["login", "status"]);
     #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
+    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
 
     let output = cmd
         .output()
@@ -530,7 +530,7 @@ fn check_gemini_auth(cli_cmd: &str) -> Result<CliAuthStatus, String> {
     let mut cmd = std::process::Command::new(cli_cmd);
     cmd.args(["auth", "status"]);
     #[cfg(windows)]
-    cmd.creation_flags(0x08000000);
+    cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
 
     let output = cmd
         .output()
@@ -596,7 +596,7 @@ pub async fn install_cli(state: &Arc<AppState>, args: &serde_json::Value) -> Res
         let mut check = std::process::Command::new(npm_cmd);
         check.arg("--version");
         #[cfg(windows)]
-        check.creation_flags(0x08000000);
+        check.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
         match check.output() {
             Ok(output) if output.status.success() => {}
             _ => {
@@ -618,7 +618,7 @@ pub async fn install_cli(state: &Arc<AppState>, args: &serde_json::Value) -> Res
             &package_spec,
         ]);
         #[cfg(windows)]
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
 
         let output = cmd
             .output()
@@ -667,7 +667,7 @@ pub async fn check_nodejs_available() -> Result<serde_json::Value, String> {
         let mut cmd = std::process::Command::new(node_cmd);
         cmd.arg("--version");
         #[cfg(windows)]
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
         if let Ok(output) = cmd.output() {
             if output.status.success() {
                 status.available = true;
@@ -679,7 +679,7 @@ pub async fn check_nodejs_available() -> Result<serde_json::Value, String> {
                 let mut wcmd = std::process::Command::new(which_cmd);
                 wcmd.arg(node_cmd);
                 #[cfg(windows)]
-                wcmd.creation_flags(0x08000000);
+                wcmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
                 if let Ok(path_out) = wcmd.output() {
                     if path_out.status.success() {
                         status.path = Some(
@@ -698,7 +698,7 @@ pub async fn check_nodejs_available() -> Result<serde_json::Value, String> {
         let mut cmd = std::process::Command::new(npm_cmd);
         cmd.arg("--version");
         #[cfg(windows)]
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
         if let Ok(output) = cmd.output() {
             if output.status.success() {
                 status.npm_available = true;

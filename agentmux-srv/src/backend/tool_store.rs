@@ -142,7 +142,7 @@ fn probe_system_path(name: &str) -> bool {
         use std::os::windows::process::CommandExt;
         std::process::Command::new("where")
             .arg(name)
-            .creation_flags(0x08000000)
+            .creation_flags(agentmux_common::win32::CREATE_NO_WINDOW)
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -164,7 +164,7 @@ fn system_path_of(name: &str) -> Option<String> {
         use std::os::windows::process::CommandExt;
         std::process::Command::new("where")
             .arg(name)
-            .creation_flags(0x08000000)
+            .creation_flags(agentmux_common::win32::CREATE_NO_WINDOW)
             .output()
             .ok()?
     };
@@ -195,7 +195,7 @@ fn probe_version(cmd: &str, version_arg: &Option<String>) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+        command.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
     }
     let output = command.output().ok()?;
     // Some tools write version to stderr (e.g. older jq), try both.

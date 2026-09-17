@@ -127,7 +127,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         #[cfg(windows)]
                         {
                             use std::os::windows::process::CommandExt;
-                            probe.creation_flags(0x08000000);
+                            probe.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
                         }
                         probe.output().await.map(|o| o.status.success()).unwrap_or(false)
                     } else {
@@ -764,7 +764,7 @@ pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            probe.creation_flags(0x08000000);
+            probe.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW);
         }
         probe.output().await
     } else {

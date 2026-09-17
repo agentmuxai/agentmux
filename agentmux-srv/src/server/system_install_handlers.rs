@@ -564,7 +564,7 @@ fn spawn_system_install_task(
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            cmd.creation_flags(agentmux_common::win32::CREATE_NO_WINDOW); // CREATE_NO_WINDOW
         }
 
         let mut child = match cmd.spawn() {
