@@ -496,46 +496,6 @@ declare global {
 
     // ── v7 — Bundles ────────────────────────────────────────────
 
-    /** A Bundle — the agent's personality and capability stack:
-     *  provider/CLI choice, model, system instructions, context files,
-     *  MCP servers, skills. The blank singleton represents "vanilla CLI". */
-    type Bundle = {
-        id: string;
-        name: string;
-        description?: string;
-        is_blank?: boolean;
-        /** When true this bundle is automatically injected into every agent's
-         *  CLAUDE.md at launch (Armory global tier). Managed in the
-         *  Identity & Memory hamburger modal. */
-        is_global?: boolean;
-        provider?: string;            // "claude" | "codex" | "gemini" | ""
-        model?: string;
-        instructions?: string;
-        /** JSON-encoded object of `{ provider_id: content }` — additive,
-         *  harness-scoped instruction variants alongside `instructions`
-         *  above (which keeps meaning "default"). ABF v0.2 §2.2. */
-        instructions_by_provider?: string;
-        /** JSON-encoded array of `{ path, content }`. */
-        context_files?: string;
-        /** JSON-encoded array of MCP server configs. */
-        mcp_servers?: string;
-        /** JSON-encoded array of skill IDs. */
-        skills?: string;
-        /** Explicit ordering within the Armory global bundles (controls
-         *  CLAUDE.md injection order). Only meaningful for is_global bundles;
-         *  0 otherwise. Owned by the reorderglobalbrain RPC. */
-        sort_order?: number;
-        created_at: number;
-        updated_at: number;
-        /** AgentMux-controlled, highest-priority Global Memory tier — always
-         *  also is_global, injected first with explicit override wording.
-         *  Writable only through upsertsystemmemory/deletesystemmemory; the
-         *  ordinary upsertmemory/deletememory/reorderglobalbrain all refuse
-         *  to touch a row with this set. See
-         *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */
-        is_system?: boolean;
-    };
-
     // ── Browser pane bookmarks ───────────────────────────────────────────
     // agentmux-srv/src/backend/bookmarks_store.rs — a global (shared_dir,
     // NOT settings.json — see the spec for why) flat list, not per-agent

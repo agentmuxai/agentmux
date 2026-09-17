@@ -11,6 +11,7 @@ import { BLOCK_KINDS, blockMeta } from "./block-registry";
 import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
+import type { Bundle } from "@/app/store/rpc-api";
 
 // Transient global: which node-kind is being dragged from the top bar.
 // Read by the Canvas's drop handler. Drag is inherently app-global, so a

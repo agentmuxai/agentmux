@@ -17,6 +17,7 @@ import {
     type LaunchFlowState,
 } from "./types";
 import type { Account } from "@/app/view/identity/identity-model";
+import type { Bundle } from "@/app/store/rpc-api";
 
 // Test fixtures. Match the wire shapes in frontend/types/srv-types.d.ts
 // and frontend/app/view/identity/identity-model.ts.
@@ -33,10 +34,25 @@ const acct = (id: string, name: string, provider = "claude"): Account => ({
     updated_at: "",
 });
 
+// Every field is spelled out because the server always sends all of them --
+// `Bundle` is the response shape. Omitting them used to typecheck only
+// because the hand-written declaration marked them optional, which the wire
+// never was.
 const mem = (id: string, name: string, is_blank = false): Bundle => ({
     id,
     name,
     is_blank,
+    description: "",
+    is_global: false,
+    is_system: false,
+    provider: "",
+    model: "",
+    instructions: "",
+    instructions_by_provider: "{}",
+    context_files: "[]",
+    mcp_servers: "[]",
+    skills: "[]",
+    sort_order: 0,
     created_at: 0,
     updated_at: 0,
 });

@@ -29,6 +29,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
+import type { Bundle, BundleUpsertInput } from "@/app/store/rpc-api";
 
 /** What the form fields look like in flight. Maps 1:1 to the Memory
  *  shape but with everything optional + JSON-array fields exposed as
@@ -133,12 +134,18 @@ export function draftFromBundle(m: Bundle): BundleDraft {
 
 /** Serialize a draft into the wire shape for `upsertmemory`.
  *
- *  The backend deserializes directly into the Rust `Memory` struct,
- *  which has no serde defaults for `created_at` / `updated_at`. Send
- *  0 for both — the upsert handler server-sets `created_at = now`
- *  when it sees 0 and always overwrites `updated_at` with now. Codex
- *  P1 (PR #749). */
-export function draftToWire(d: BundleDraft): Bundle {
+ *  Returns `BundleUpsertInput`, not `Bundle`: this builds a REQUEST, and the
+ *  two shapes genuinely differ. `Bundle` is the response shape and is
+ *  all-required because the server always writes every field; on input every
+ *  field except `id`/`name` has a serde default and may be omitted.
+ *
+ *  Sending 0 for `created_at`/`updated_at` stays correct — the upsert handler
+ *  server-sets `created_at = now` when it sees 0 and always overwrites
+ *  `updated_at` (Codex P1, PR #749). The previous version of this comment
+ *  justified it by saying the Rust struct "has no serde defaults" for those
+ *  two fields; it does have them (`#[serde(default)]` on both), so the reason
+ *  was wrong even though the behaviour was right. */
+export function draftToWire(d: BundleDraft): BundleUpsertInput {
     return {
         id: d.id ?? "",
         name: d.name.trim(),

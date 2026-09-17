@@ -29,6 +29,7 @@
 import type { AuthCommand, AuthEvent, AuthState } from "@/app/view/agent/auth/auth-state";
 import { initialState as initialAuthState } from "@/app/view/agent/auth/auth-state";
 import type { Account } from "@/app/view/identity/identity-model";
+import type { Bundle } from "@/app/store/rpc-api";
 
 /** Editable Launch-modal form fields. Empty strings mean "no
  *  selection"; the view's submit predicate blocks Launch until the

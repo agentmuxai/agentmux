@@ -32,6 +32,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { PROVIDERS } from "@/app/view/agent/providers";
+import type { Bundle } from "@/app/store/rpc-api";
 
 /** Sentinel editingId for the unsaved "new section" draft. */
 export const NEW_SECTION_ID = "__new__";

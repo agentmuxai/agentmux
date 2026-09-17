@@ -3176,6 +3176,37 @@ mod bundle_upsert_input_tests {
     use super::bundle::normalize_bundle_upsert_input;
     use serde_json::json;
 
+    // The frontend types `bundle.validate` as `BundleValidateInput` (id
+    // OPTIONAL) but `upsertmemory`/`upsertsystemmemory` as
+    // `BundleUpsertInput` (id REQUIRED). That asymmetry is not a style choice,
+    // and reagent flagged a version of this PR that got it wrong -- it falls
+    // straight out of which handlers normalize their payload first:
+    //
+    //   * bundle_validate_impl runs normalize_bundle_upsert_input, which fills
+    //     a missing id with "", then branches on memory.id.is_empty() to skip
+    //     component lookups for an unsaved draft.
+    //   * upsertmemory / upsertsystemmemory deserialize Bundle straight from
+    //     the payload, and Bundle::id has no serde default.
+    //
+    // If either half of this ever changes, the frontend types are wrong, so
+    // pin both halves here.
+    #[test]
+    fn validate_accepts_a_draft_with_no_id_but_upsert_does_not() {
+        use crate::backend::storage::store::Bundle;
+
+        let draft = json!({ "name": "unsaved draft" });
+
+        let validated: Bundle =
+            serde_json::from_value(normalize_bundle_upsert_input(draft.clone()))
+                .expect("bundle.validate must accept a draft with no id");
+        assert!(validated.id.is_empty(), "a draft id normalizes to the empty string");
+
+        assert!(
+            serde_json::from_value::<Bundle>(draft).is_err(),
+            "upsertmemory does NOT normalize, so the same payload must be rejected there"
+        );
+    }
+
     #[test]
     fn fills_missing_or_null_id_with_empty_string() {
         let no_id = normalize_bundle_upsert_input(json!({ "name": "p" }));

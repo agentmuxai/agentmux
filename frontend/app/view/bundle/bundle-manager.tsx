@@ -30,6 +30,7 @@ import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsS
 import { BundleSkillsSection } from "./BundleSkillsSection";
 
 import "./bundle-view.scss";
+import type { Bundle } from "@/app/store/rpc-api";
 
 interface BundleManagerBodyProps {
     model: BundleViewModel;

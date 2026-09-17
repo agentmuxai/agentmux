@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentLaunchModalPanel } from "./AgentLaunchModal";
 import { resetCapabilities } from "@/app/store/toolchain-capabilities";
+import type { Bundle } from "@/app/store/rpc-api";
 
 // ── Module mocks ────────────────────────────────────────────────────
 
@@ -148,7 +149,25 @@ const driftedProviderAgent = {
     memory_id: "mem-bundle-1",
 } as AgentDefinition;
 
+// The server always sends every Bundle field, so these fixtures spread a
+// complete base rather than listing a subset -- the subset only typechecked
+// while the hand-written declaration wrongly marked those fields optional.
+const bundleBase = {
+    description: "",
+    is_global: false,
+    is_system: false,
+    provider: "",
+    model: "",
+    instructions: "",
+    instructions_by_provider: "{}",
+    context_files: "[]",
+    mcp_servers: "[]",
+    skills: "[]",
+    sort_order: 0,
+} satisfies Omit<Bundle, "id" | "name" | "is_blank" | "created_at" | "updated_at">;
+
 const driftedAgentsBundle: Bundle = {
+    ...bundleBase,
     id: "mem-bundle-1",
     name: "Drift Test Bundle",
     is_blank: false,
@@ -169,6 +188,7 @@ const raceDriftAgent = {
 } as AgentDefinition;
 
 const raceDriftBundle: Bundle = {
+    ...bundleBase,
     id: "mem-bundle-race",
     name: "Race Test Bundle",
     is_blank: false,
@@ -204,6 +224,7 @@ const geminiAccount = {
 } as unknown as import("@/app/view/identity/identity-model").Account;
 
 const notesMemory: Bundle = {
+    ...bundleBase,
     id: "mem-notes",
     name: "Notes",
     is_blank: false,
@@ -212,6 +233,7 @@ const notesMemory: Bundle = {
 };
 
 const personalMemory: Bundle = {
+    ...bundleBase,
     id: "mem-personal",
     name: "Personal",
     is_blank: false,
