@@ -453,35 +453,6 @@ declare global {
         agent_type?: string;
     };
 
-    // AgentHistory
-    type AgentHistory = {
-        id: number;
-        agent_id: string;
-        session_date: string;
-        entry: string;
-        timestamp: number;
-    };
-
-    // CommandAppendAgentHistoryData
-    type CommandAppendAgentHistoryData = {
-        agent_id: string;
-        entry: string;
-    };
-
-    // CommandListAgentHistoryData
-    type CommandListAgentHistoryData = {
-        agent_id: string;
-        session_date?: string;
-        limit?: number;
-        offset?: number;
-    };
-
-    // CommandSearchAgentHistoryData
-    type CommandSearchAgentHistoryData = {
-        agent_id: string;
-        query: string;
-        limit?: number;
-    };
 
     // wshrpc.CommandDeleteFileData
     type CommandDeleteFileData = {

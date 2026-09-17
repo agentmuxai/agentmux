@@ -6,6 +6,33 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The agent-history shapes are GENERATED from their Rust definitions by ts-rs.
+// This covers agent_handlers/history.rs.
+export type { AgentHistory } from "@/types/rpc/AgentHistory";
+export type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
+export type { CommandListAgentHistoryData } from "@/types/rpc/CommandListAgentHistoryData";
+export type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
+
+import type { AgentHistory } from "@/types/rpc/AgentHistory";
+import type { CommandAppendAgentHistoryData } from "@/types/rpc/CommandAppendAgentHistoryData";
+import type { CommandListAgentHistoryData } from "@/types/rpc/CommandListAgentHistoryData";
+import type { CommandSearchAgentHistoryData } from "@/types/rpc/CommandSearchAgentHistoryData";
+
+/**
+ * What a `listagenthistory` caller may send.
+ *
+ * `limit` is `#[serde(default = "default_history_limit")]` -> 50 and
+ * `offset` is `#[serde(default)]` -> 0, both on `i64`, so the server accepts
+ * them missing. ts-rs can only mark a field optional for `Option<T>`, so the
+ * generated type calls them required; deriving restores it.
+ */
+export type ListAgentHistoryInput = Omit<CommandListAgentHistoryData, "limit" | "offset"> &
+    Partial<Pick<CommandListAgentHistoryData, "limit" | "offset">>;
+
+/** Same story for `searchagenthistory`s `limit`. */
+export type SearchAgentHistoryInput = Omit<CommandSearchAgentHistoryData, "limit"> &
+    Partial<Pick<CommandSearchAgentHistoryData, "limit">>;
+
 // The agent-instance shapes are GENERATED from their Rust definitions by
 // ts-rs. This covers agent_handlers/instance.rs.
 export type { AgentInstance } from "@/types/rpc/AgentInstance";
@@ -323,11 +350,11 @@ export const AgentApi = {
         return client.rpcCall("appendagenthistory", data, opts);
     },
 
-    ListAgentHistoryCommand(client: RpcClient, data: CommandListAgentHistoryData, opts?: RpcOpts): Promise<AgentHistory[]> {
+    ListAgentHistoryCommand(client: RpcClient, data: ListAgentHistoryInput, opts?: RpcOpts): Promise<AgentHistory[]> {
         return client.rpcCall("listagenthistory", data, opts);
     },
 
-    SearchAgentHistoryCommand(client: RpcClient, data: CommandSearchAgentHistoryData, opts?: RpcOpts): Promise<AgentHistory[]> {
+    SearchAgentHistoryCommand(client: RpcClient, data: SearchAgentHistoryInput, opts?: RpcOpts): Promise<AgentHistory[]> {
         return client.rpcCall("searchagenthistory", data, opts);
     },
 

@@ -18,12 +18,17 @@ use super::error::StoreError;
 use super::store::Store;
 
 /// An append-only session history entry for a agent definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentHistory {
+    #[ts(type = "number")]
     pub id: i64,
     pub agent_id: String,
+    /// Local date the entry was appended, `YYYY-MM-DD`. Set by the server, not
+    /// by the caller -- `appendagenthistory` takes only `agent_id` + `entry`.
     pub session_date: String,
     pub entry: String,
+    #[ts(type = "number")]
     pub timestamp: i64,
 }
 
