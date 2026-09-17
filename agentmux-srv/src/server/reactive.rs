@@ -2082,6 +2082,132 @@ pub(super) struct SupervisorDecisionRequest {
     source_agent: Option<String>,
 }
 
+/// Default/cap for how many of an agent's sessions a single search may open.
+///
+/// Full-parsing every session of a long-lived agent is not viable: the session
+/// that motivated `SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md` was 14.7 MB /
+/// 6682 records and was one of several. Candidates are taken newest-first, so
+/// the default answers the common "what did I do recently" question without
+/// reading years of history.
+const HISTORY_SEARCH_DEFAULT_MAX_SESSIONS: usize = 20;
+const HISTORY_SEARCH_MAX_SESSIONS_CAP: usize = 100;
+const HISTORY_SEARCH_DEFAULT_LIMIT: usize = 50;
+const HISTORY_SEARCH_LIMIT_CAP: usize = 200;
+
+fn default_history_max_sessions() -> usize {
+    HISTORY_SEARCH_DEFAULT_MAX_SESSIONS
+}
+fn default_history_limit() -> usize {
+    HISTORY_SEARCH_DEFAULT_LIMIT
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct HistorySearchQuery {
+    /// Whose history to search.
+    ///
+    /// **Self-declared, and deliberately documented as such.** This route sits
+    /// behind the instance-wide `auth_key`, which every locally-spawned agent
+    /// shares (see `ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md`), so
+    /// the server cannot tell *which* agent is calling — the same trust
+    /// boundary `/agentmux/reactive/transcript` already has. The `SearchHistory`
+    /// MCP tool exposes no `agent` parameter and always sends the caller's own
+    /// `AGENTMUX_AGENT_ID`; that is a client-side convention, NOT server-side
+    /// enforcement, and must not be described as one. Enforcing it needs a
+    /// verifiable per-agent identity on local routes, which does not exist
+    /// yet. See the spec's §5.
+    agent: String,
+    query: String,
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    tool: Option<String>,
+    #[serde(default)]
+    since: Option<i64>,
+    #[serde(default)]
+    until: Option<i64>,
+    #[serde(default = "default_history_max_sessions")]
+    max_sessions: usize,
+    #[serde(default = "default_history_limit")]
+    limit: usize,
+}
+
+/// `GET /agentmux/reactive/history/search` — search an agent's own past
+/// conversations (`SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md`).
+///
+/// Distinct from `/reactive/transcript`, which returns the tail of the LIVE
+/// session only. This reads sessions already persisted on disk, including
+/// sessions that ended — which is the point: an agent's memory of what it did
+/// is bounded by its context window while its actual actions are not, so after
+/// a compaction or session reset it will answer questions about its own past
+/// confidently and wrongly, with nothing marking the boundary.
+pub(super) async fn handle_reactive_history_search(
+    State(state): State<AppState>,
+    Query(params): Query<HistorySearchQuery>,
+) -> Response {
+    if params.agent.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "missing agent param"})),
+        )
+            .into_response();
+    }
+    // An empty query is only meaningful alongside a `tool` filter ("every call
+    // to X"); on its own it would match everything and return a truncated
+    // firehose, which reads as a real answer.
+    if params.query.trim().is_empty() && params.tool.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "query must be non-empty unless a tool filter is given"})),
+        )
+            .into_response();
+    }
+    if let Some(role) = params.role.as_deref() {
+        if role != "user" && role != "assistant" {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "role must be 'user' or 'assistant'"})),
+            )
+                .into_response();
+        }
+    }
+
+    let opts = crate::backend::history::index::HistorySearchOptions {
+        query: params.query.clone(),
+        role: params.role.clone(),
+        tool: params.tool.clone(),
+        limit: params.limit.clamp(1, HISTORY_SEARCH_LIMIT_CAP),
+    };
+    let max_sessions = params
+        .max_sessions
+        .clamp(1, HISTORY_SEARCH_MAX_SESSIONS_CAP);
+
+    // Parsing sessions is blocking filesystem work; keep it off the async
+    // runtime's worker threads, same posture as other disk-heavy handlers.
+    let history = state.history_service.clone();
+    let store = state.identity_store.clone();
+    let agent = params.agent.clone();
+    let since = params.since;
+    let until = params.until;
+    let result = tokio::task::spawn_blocking(move || {
+        history.search_for_agent(&store, &agent, &opts, since, until, max_sessions)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(outcome)) => (StatusCode::OK, Json(json!(outcome))).into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("history search task failed: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
 /// `POST /agentmux/reactive/supervisor-decision` — a Warden Supervisor
 /// watcher agent's decision about a target agent it just polled (see
 /// `GetAgentTranscript`). `action: "nudge"` delivers a fixed continuation
