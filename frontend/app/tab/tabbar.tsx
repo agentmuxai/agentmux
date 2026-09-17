@@ -151,7 +151,13 @@ function TabBar(props: TabBarProps): JSX.Element {
         // atomically (agentmux-srv/src/reducer/tab.rs::handle_delete_tab)
         // in the SAME state transition as the removal (§5).
         const closingActiveTab = tabId === activeTabId();
-        hideTab(tabId); // no-op when the modal path already hid it
+        // The optimistic hide (§8/§10) — for BOTH paths now: the
+        // skip-confirm path hides right here as it always did; the modal
+        // path hides here too, since as of §10 requestClose no longer
+        // hides early when it opens the modal. onConfirm calls this
+        // function synchronously in the same click that closes the modal,
+        // so the hide and the modal's disappearance land in the same frame.
+        hideTab(tabId);
         // Destination-targeted gate (§9): hideTab already ran, so
         // displayActiveTabId() resolves to the neighbor the backend is
         // about to promote. Passing it keeps the CLOSING tab's content on
@@ -198,13 +204,26 @@ function TabBar(props: TabBarProps): JSX.Element {
         // empty strip until an RPC failed (reagent P2 on PR #2818). A new
         // close may only START while more than one tab is actually visible.
         if (tabIds().length <= 1) return;
-        if (pendingHiddenTabIds().has(tabId)) return; // close already pending
+        if (pendingCloseTabId() === tabId) return; // modal already open for this tab
+        if (pendingHiddenTabIds().has(tabId)) return; // already confirmed, RPC pending
         if ((settingsAtom() as any)["tab:skipcloseconfirm"]) {
             handleClose(tabId);
         } else {
-            // Repo-owner-directed UX (§8): the tab leaves the strip the
-            // moment the modal opens; cancel puts it back.
-            hideTab(tabId);
+            // Repo-owner-directed UX, amended (SPEC_TAB_CLOSE_BUTTON_SELECT_
+            // FLASH_2026_08_25.md §8 originally hid the tab the instant the
+            // modal opened, "if the user cancels, put the tab back" — see
+            // that section for why: an optimistic hide the strip's render
+            // never has to depend on backend ordering for, so the flash it
+            // was chasing became structurally impossible. In practice that
+            // made the tab visibly vanish before the user had even decided,
+            // then visibly reappear on Cancel — its own kind of flash. §10
+            // (below) keeps the SAME optimistic-hide trick — still
+            // ordering-immune, still no dependency on backend response
+            // timing — just moves WHEN it fires: the tab now stays exactly
+            // as it was while the modal is open (nothing to restore on
+            // Cancel), and hides in the same synchronous click as the modal
+            // closing on Confirm (see onConfirm below) — both happen in one
+            // frame, together, never one before the other.
             setPendingCloseTabId(tabId);
         }
     };
@@ -348,6 +367,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                 <TabCloseConfirmModal
                     tabId={pendingCloseTabId()!}
                     onConfirm={(skipFuture) => {
+                        // §10: the tab hasn't been hidden yet (unlike the old
+                        // §8 behavior) — setPendingCloseTabId(null) (closes
+                        // the modal) and handleClose's own hideTab call
+                        // (closes the tab) both run synchronously in this one
+                        // click handler, so they land in the same frame. No
+                        // ordering dependency between them either way — both
+                        // are optimistic, backend-ordering-immune sets, same
+                        // property §8 originally established, just triggered
+                        // together here instead of at modal-open time.
                         const tabId = pendingCloseTabId()!;
                         setPendingCloseTabId(null);
                         if (skipFuture) {
@@ -358,8 +386,9 @@ function TabBar(props: TabBarProps): JSX.Element {
                         handleClose(tabId);
                     }}
                     onCancel={() => {
-                        // Cancel restores the optimistically-hidden tab (§8).
-                        unhideTab(pendingCloseTabId()!);
+                        // §10: nothing to restore — the tab was never hidden
+                        // while the modal was open, so Cancel is just closing
+                        // the modal.
                         setPendingCloseTabId(null);
                     }}
                 />

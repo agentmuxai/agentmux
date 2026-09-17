@@ -116,16 +116,17 @@ function WorkspaceElem(): JSX.Element {
     });
 
     // Reveal gate, destination-aware (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
-    // when the holder announced WHICH tab is being revealed
-    // (gateTargetTabId), only that tab hides while gated — the SOURCE tab
-    // keeps painting right up to the activetabid flip instead of blanking
-    // the whole content region for the RPC round trip. An untargeted hold
-    // (gateTargetTabId null — createTab) falls back to hiding whichever
-    // tab is active, the original behavior.
+    // the holder always announces WHICH tab is being revealed
+    // (gateTargetTabId) — only that tab hides while gated, so the SOURCE
+    // tab keeps painting right up to the activetabid flip instead of
+    // blanking the whole content region for the RPC round trip. No
+    // untargeted form anymore (SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_
+    // 2026_09_16.md) — createTab used to hold this gate untargeted
+    // because its destination tab didn't exist yet; it now doesn't hold
+    // this gate at all until the destination's content already exists.
     const gateHides = (tid: string) => {
         if (tid !== tabId() || !tabSwitching()) return false;
-        const target = gateTargetTabId();
-        return target == null || target === tid;
+        return gateTargetTabId() === tid;
     };
 
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
