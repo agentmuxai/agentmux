@@ -22,7 +22,7 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { createEffect, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, For, on, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { atoms } from "@/store/global";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
@@ -179,6 +179,37 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             }
         )
     );
+
+    // A plain vertical mouse wheel over a horizontally-scrolling region isn't
+    // reliably redirected to horizontal scroll by the engine on its own —
+    // explicit handling needed so "scroll the wheel over an overflowing tab
+    // strip" actually works, the same affordance browsers' own native tab
+    // bars give you. Only takes over when there's real horizontal overflow
+    // AND the gesture is vertical (deltaY dominant) — a trackpad's own
+    // horizontal swipe (deltaX dominant) is left to the browser's native
+    // handling untouched, and a strip that isn't overflowing at all lets the
+    // event bubble normally instead of silently swallowing every scroll.
+    //
+    // A real `addEventListener("wheel", ..., { passive: false })`, NOT the
+    // JSX `onWheel` prop — Solid (like React) delegates common events
+    // through a single top-level listener for perf, and delegated `wheel`
+    // listeners are registered passive by default, which silently no-ops
+    // `preventDefault()` (confirmed live: the JSX-prop version ran but
+    // never actually scrolled). `{ passive: false }` here is what makes
+    // `preventDefault()` real, so the browser's own default vertical-scroll
+    // response to the wheel doesn't fight the manual `scrollLeft` write.
+    onMount(() => {
+        const el = stripRef;
+        if (!el) return;
+        const handleWheel = (e: WheelEvent) => {
+            if (el.scrollWidth <= el.clientWidth) return;
+            if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+            e.preventDefault();
+            el.scrollLeft += e.deltaY;
+        };
+        el.addEventListener("wheel", handleWheel, { passive: false });
+        onCleanup(() => el.removeEventListener("wheel", handleWheel));
+    });
 
     return (
         <div
