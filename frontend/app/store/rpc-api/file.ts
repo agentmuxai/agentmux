@@ -51,6 +51,31 @@ import type { LspStartReq } from "@/types/rpc/LspStartReq";
 import type { LspStartResult } from "@/types/rpc/LspStartResult";
 import type { LspStopReq } from "@/types/rpc/LspStopReq";
 
+// The editor read shapes are GENERATED from their Rust definitions by ts-rs,
+// same story as the mutation shapes above: closure-local `Cmd` structs and
+// inline `json!({..})` responses, with hand-written TS restating both ends.
+export type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
+export type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
+export type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
+export type { DirEntry } from "@/types/rpc/DirEntry";
+export type { EditorDrive } from "@/types/rpc/EditorDrive";
+export type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
+export type { GetEditorHomeResult } from "@/types/rpc/GetEditorHomeResult";
+export type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
+export type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
+export type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
+
+import type { CommandReadEditorFileData } from "@/types/rpc/CommandReadEditorFileData";
+import type { CommandReadEditorFileResult } from "@/types/rpc/CommandReadEditorFileResult";
+import type { CommandWriteEditorFileData } from "@/types/rpc/CommandWriteEditorFileData";
+import type { DirEntry } from "@/types/rpc/DirEntry";
+import type { EditorDrive } from "@/types/rpc/EditorDrive";
+import type { EditorRootsReq } from "@/types/rpc/EditorRootsReq";
+import type { GetEditorHomeResult } from "@/types/rpc/GetEditorHomeResult";
+import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
+import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
+import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
+
 export const FileApi = {
     FileAppendCommand(client: RpcClient, data: FileData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("fileappend", data, opts);
@@ -91,9 +116,9 @@ export const FileApi = {
     // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
     ListEditorDirCommand(
         client: RpcClient,
-        data: { path: string },
+        data: ListEditorDirReq,
         opts?: RpcOpts,
-    ): Promise<{ path: string; entries: DirEntry[] }> {
+    ): Promise<ListEditorDirResult> {
         return client.rpcCall("listeditordir", data, opts);
     },
 
@@ -119,18 +144,18 @@ export const FileApi = {
 
     GetEditorHomeCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: EditorRootsReq = {},
         opts?: RpcOpts,
-    ): Promise<{ home: string }> {
+    ): Promise<GetEditorHomeResult> {
         return client.rpcCall("geteditorhome", data, opts);
     },
 
     // Returns home + drives/mounts; the editor file-tree renders these as sibling top-level roots.
     GetEditorRootsCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: EditorRootsReq = {},
         opts?: RpcOpts,
-    ): Promise<{ home: string; drives: { name: string; path: string }[] }> {
+    ): Promise<GetEditorRootsResult> {
         return client.rpcCall("geteditorroots", data, opts);
     },
 
