@@ -24,7 +24,7 @@
  */
 
 import { createMemo, type JSX } from "solid-js";
-import { blockViewToName } from "@/app/block/blockutil";
+import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { atoms, MOS } from "@/app/store/global";
@@ -38,6 +38,7 @@ import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 interface GenericPaneTab {
     blockId: string;
     label: string;
+    icon: JSX.Element;
 }
 
 export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
@@ -63,7 +64,15 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
         return stack.map((blockId) => {
             const bd = MOS.getObjectValue(MOS.makeORef("block", blockId)) as Block | undefined;
             const label = (bd?.meta?.["frame:title"] as string | undefined) ?? blockViewToName(bd?.meta?.view);
-            return { blockId, label };
+            // Same icon convention the plain (non-tabbed) header iconview
+            // uses (blockframe.tsx's viewIconElem) — derived from the
+            // block's own persisted meta, not a live ViewModel, since a
+            // background (non-active) tab's ViewModel isn't mounted here.
+            const icon = getBlockHeaderIcon(
+                (bd?.meta?.["frame:icon"] as string | undefined) ?? blockViewToIcon(bd?.meta?.view),
+                bd
+            );
+            return { blockId, label, icon };
         });
     });
 
@@ -90,6 +99,7 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
             activeId={activeBlockId()}
             getId={(t) => t.blockId}
             getLabel={(t) => t.label}
+            getIcon={(t) => t.icon}
             onActivate={handleActivate}
             onClose={handleClose}
             onAdd={handleAdd}

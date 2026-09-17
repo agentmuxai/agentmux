@@ -98,6 +98,7 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
             animateWidth={props.animateWidth}
             getId={props.getId}
             getLabel={props.getLabel}
+            getIcon={props.getIcon}
             getTooltip={props.getTooltip}
             getAttention={props.getAttention}
             getTabClass={props.getTabClass}

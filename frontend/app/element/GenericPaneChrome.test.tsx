@@ -27,7 +27,10 @@ vi.mock("./PaneHeaderTabStrip", () => ({
         return (
             <div data-testid="pane-header-tab-strip">
                 {props.tabs.map((t: any) => (
-                    <span>{props.getLabel(t)}</span>
+                    <span>
+                        {props.getIcon?.(t)}
+                        {props.getLabel(t)}
+                    </span>
                 ))}
             </div>
         );
@@ -40,6 +43,8 @@ vi.mock("@/element/errorboundary", () => ({
 
 vi.mock("@/app/block/blockutil", () => ({
     blockViewToName: (view: string | undefined) => (view ? `View:${view}` : "(No View)"),
+    blockViewToIcon: (view: string | undefined) => (view ? `icon-${view}` : "square"),
+    getBlockHeaderIcon: (icon: string) => <i data-testid="tab-icon">{icon}</i>,
 }));
 
 vi.mock("@/app/block/blockframe", () => ({
@@ -137,11 +142,25 @@ describe("genericRenderPaneChrome — tab derivation", () => {
         render(() => genericRenderPaneChrome(fakeNodeModel(), <div>content</div>) as any);
 
         expect(headerCalls[0].tabs).toEqual([
-            { blockId: "b1", label: "My Title" },
-            { blockId: "b2", label: "View:browser" },
+            expect.objectContaining({ blockId: "b1", label: "My Title" }),
+            expect.objectContaining({ blockId: "b2", label: "View:browser" }),
         ]);
         expect(screen.getByText("My Title")).toBeInTheDocument();
         expect(screen.getByText("View:browser")).toBeInTheDocument();
+    });
+
+    // getBlockHeaderIcon/blockViewToIcon derivation — same icon convention
+    // the plain header iconview uses (blockframe.tsx), computed from the
+    // block's own persisted meta since a background tab's ViewModel isn't
+    // mounted here to read a live icon from.
+    it("derives each tab's icon from frame:icon, falling back to blockViewToIcon(view)", () => {
+        objectValues.set("block:b1", { meta: { "frame:icon": "rocket" } });
+        objectValues.set("block:b2", { meta: { view: "browser" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => genericRenderPaneChrome(fakeNodeModel(), <div>content</div>) as any);
+
+        const icons = screen.getAllByTestId("tab-icon").map((el) => el.textContent);
+        expect(icons).toEqual(["rocket", "icon-browser"]);
     });
 });
 

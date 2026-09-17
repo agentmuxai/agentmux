@@ -58,6 +58,13 @@ export interface PaneTabStripProps<T> {
 
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
+    /** Optional icon rendered to the left of the label, e.g.
+     *  `getBlockHeaderIcon(blockViewToIcon(view), blockData)` — the same
+     *  icon convention the plain (non-tabbed) header iconview already uses
+     *  (blockutil.tsx). Omitted entirely (no reserved space) for a caller
+     *  that doesn't pass it, so existing tab strips (agent/term) are
+     *  visually unchanged. */
+    getIcon?: (tab: T) => JSX.Element;
     /** Full tooltip text; falls back to the label when omitted. */
     getTooltip?: (tab: T) => string;
     /** "Attention" tabs (unsaved changes, needs-review, …) always show
@@ -201,6 +208,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             active={props.activeId === props.getId(tab)}
                             getId={props.getId}
                             getLabel={props.getLabel}
+                            getIcon={props.getIcon}
                             getTooltip={props.getTooltip}
                             getAttention={props.getAttention}
                             getTabClass={props.getTabClass}
@@ -244,6 +252,7 @@ interface PaneTabStripItemProps<T> {
     active: boolean;
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
+    getIcon?: (tab: T) => JSX.Element;
     getTooltip?: (tab: T) => string;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
@@ -303,6 +312,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 onClick={onClick}
                 onDblClick={onDblClick}
             >
+                {props.getIcon && <span class="pane-tab-icon">{props.getIcon(props.tab)}</span>}
                 {props.renderLabel ? (
                     props.renderLabel(props.tab)
                 ) : (
