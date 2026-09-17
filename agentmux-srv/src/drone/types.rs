@@ -12,10 +12,6 @@ use serde::{Deserialize, Serialize};
 /// Router, Subdrone. Stored as `kind` field on `FlowNode.data`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-// ts-rs does not read `serde(rename_all)` on variants, so say it again --
-// without this the generated union is PascalCase and silently matches nothing
-// the server ever writes.
-#[ts(rename_all = "snake_case")]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub enum BlockKind {
     Agent,
@@ -95,7 +91,7 @@ pub struct NodePosition {
 /// `DroneFlowEdge` type without field-name translation.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "camelCase")]
-#[ts(rename = "DroneFlowEdge", rename_all = "camelCase")]
+#[ts(rename = "DroneFlowEdge")]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct FlowEdge {
     pub id: String,
@@ -153,7 +149,6 @@ pub struct DroneDefinition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(rename_all = "snake_case")]
 #[ts(export, export_to = "../../frontend/types/rpc/")]
 pub enum RunStatus {
     Running,
@@ -289,10 +284,12 @@ mod tests {
         }
     }
 
-    /// `BlockKind` and `RunStatus` are snake_case on the wire. ts-rs does not
-    /// read `serde(rename_all)` on variants either, so assert the generated
-    /// union matches what serde actually produces rather than trusting that
-    /// the two attributes stay in step.
+    /// `BlockKind` and `RunStatus` are snake_case on the wire, and ts-rs
+    /// derives that from `serde(rename_all)` by itself -- no `ts(rename_all)`
+    /// needed. This test is what proves that, and is why the redundant
+    /// attribute could be removed: it asserts the generated union against what
+    /// serde actually writes rather than against a second attribute that was
+    /// only ever agreeing with the first.
     #[test]
     fn enum_variants_are_snake_case_in_both_serde_and_the_generated_union() {
         let kind_ts = <BlockKind as ts_rs::TS>::inline();
