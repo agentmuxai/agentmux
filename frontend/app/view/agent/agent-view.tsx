@@ -528,7 +528,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
         // tab like any other pane's. Label/icon it the way every generic
         // pane does rather than through the agent-specific
         // agentName/definitionId path below, which would render a Sysinfo
-        // tab as "New Agent".
+        // tab as "Agent".
         if (view && view !== "agent") {
             const genericLabel = (meta?.["frame:title"] as string | undefined) ?? blockViewToName(view);
             return cachedTab(id, {
@@ -549,7 +549,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
             // the same copied agentName in its own meta.
             return cachedTab(id, { blockId: id, label: "History", isHistoryTab: true });
         }
-        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "New Agent";
+        const label = titleOverrides()[id] ?? (meta?.["agentName"] as string) ?? definitionId ?? "Agent";
         return cachedTab(id, { blockId: id, label, definitionId });
     };
     const stackTabs = createMemo<PaneTab[]>(() => {

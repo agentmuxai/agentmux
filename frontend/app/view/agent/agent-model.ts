@@ -166,11 +166,10 @@ export class AgentViewModel implements ViewModel {
             const name = meta?.["agentName"];
             if (typeof name === "string" && name.length > 0) return name;
             // No agent launched into this pane yet (the picker state) — same
-            // label a newly-"+"-created tab already falls back to
-            // (agent-view.tsx's own `?? "New Agent"`), so a fresh pane and a
-            // fresh tab read identically instead of one saying "Agent" and
-            // the other "New Agent".
-            return "New Agent";
+            // label a newly-"+"-created tab falls back to (agent-view.tsx's
+            // own `?? "Agent"`), so a fresh pane and a fresh tab read
+            // identically.
+            return "Agent";
         };
         this.viewText = (): HeaderElem[] => {
             const elems: HeaderElem[] = [];
