@@ -1042,7 +1042,12 @@ pub fn spawn_background_subsystems(
     // `deploy_scripts` is idempotent (skips if its version marker already
     // matches), so calling it here in addition to the existing call site is
     // safe, not a double-write race.
-    backend::shellintegration::deploy_scripts(&backend::base::get_home_dir().join(".agentmux"));
+    // Two roots, deliberately:
+    //   * the per-instance root the shells actually source (isolation, I6), and
+    //   * the stable `~/.agentmux/shell` path docs/MUXSPECT.md and docs/MUXSH.md
+    //     tell users to invoke directly, which must stay predictable.
+    backend::shellintegration::deploy_scripts(&backend::shellintegration::integration_base());
+    backend::shellintegration::deploy_scripts(&backend::shellintegration::documented_shell_root());
 
     // Config watcher (created before sysinfo loop so it can read telemetry:interval)
     let config_watcher = Arc::new(wconfig::ConfigState::with_config(wconfig::build_default_config()));

@@ -9,7 +9,7 @@
 //! OSC 16162;E commands carrying `AGENTMUX_AGENT_ID`, enabling per-pane title
 //! and color to work.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ─── Embedded scripts ────────────────────────────────────────────────────────
 
@@ -104,11 +104,66 @@ pub fn detect_shell_type(shell_path: &str) -> ShellType {
 
 // ─── Deploy ──────────────────────────────────────────────────────────────────
 
-/// Deploy shell integration scripts to `<mux_data_dir>/shell/<type>/`.
+/// Deploy shell integration scripts into `<shell_root>/<type>/`.
 /// Skips deployment if the version marker is already current.
 /// Errors are logged but not fatal — a missing script just means no integration.
-pub fn deploy_scripts(mux_data_dir: &Path) {
-    let shell_base = mux_data_dir.join("shell");
+/// Root under which this instance's shell-integration scripts are deployed.
+///
+/// Deliberately under the user's home rather than the instance data dir:
+/// MSIX virtualises writes to `%LocalAppData%`, so scripts written there are
+/// invisible to the ConPTY-spawned children that must source them, while `~`
+/// is never virtualised (see `shell/lifecycle.rs`'s spawn path).
+///
+/// Keyed per instance, because the home dir is otherwise machine-global and
+/// every instance of every version writes these same files — on every shell
+/// spawn, not just at boot. Two concurrently-running versions therefore
+/// rewrite each other's scripts indefinitely, and a shell can source an
+/// rcfile another instance is mid-replacement of. That is invariant **I6**
+/// (instances of different `(channel, version)` never share a directory),
+/// and the key mirrors **I5**'s `dir_hash` treatment of named OS objects.
+///
+/// The data dir is the right key: it is `<channel>/versions/<version>/data`
+/// by construction, so it already distinguishes exactly the pairs I6 names.
+pub fn integration_base_for(data_dir: &Path, home_dir: &Path) -> PathBuf {
+    let canonical = data_dir.canonicalize().unwrap_or_else(|_| data_dir.to_path_buf());
+    let key = format!("{:016x}", agentmux_common::runtime_mode::fnv1a_64(
+        canonical.to_string_lossy().to_lowercase().as_bytes(),
+    ));
+    home_dir.join(".agentmux").join("shell").join(key)
+}
+
+/// The stable, user-facing script root: `~/.agentmux/shell`.
+///
+/// `docs/MUXSPECT.md` and `docs/MUXSH.md` document invoking these directly
+/// (`node ~/.agentmux/shell/muxspect.mjs …`) as the fallback when the shell
+/// function isn't defined. That path has to keep working and has to stay
+/// predictable — a user cannot know their instance's hash — so it is still
+/// deployed, shared, last-writer-wins. Nothing sources it at shell startup;
+/// the rcfiles a terminal actually loads come from `integration_base`.
+pub fn documented_shell_root() -> PathBuf {
+    crate::backend::base::get_home_dir().join(".agentmux").join("shell")
+}
+
+/// `integration_base_for` bound to this process's real data dir and home.
+///
+/// Ordering note: `get_mux_data_dir()` reads `AGENTMUX_DATA_HOME`, which
+/// `bootstrap::open_stores_and_migrate` overwrites from the resolved
+/// `config.data_home` (CLI `--wavedata` winning over the launcher's env). Until
+/// that runs, the variable may still hold a value INHERITED from whichever
+/// instance spawned this process — observed live: a dev srv started from a
+/// terminal inside a 0.56.2 instance carried that instance's data dir. Both
+/// call sites (bootstrap's own deploy, and the shell spawn in
+/// `blockcontroller/shell/lifecycle.rs`) run after it, so both see the
+/// corrected value. Do not call this earlier in startup without checking that.
+pub fn integration_base() -> PathBuf {
+    integration_base_for(
+        &crate::backend::base::get_mux_data_dir(),
+        &crate::backend::base::get_home_dir(),
+    )
+}
+
+pub fn deploy_scripts(shell_root: &Path) {
+    let shell_base = shell_root.to_path_buf();
     let version_file = shell_base.join(".version");
     let marker = version_marker();
 
@@ -203,11 +258,11 @@ pub struct ShellStartup {
 /// AgentMux integration. Returns `None` for unknown shell types.
 pub fn get_shell_startup(
     shell_type: ShellType,
-    mux_data_dir: &Path,
+    shell_root: &Path,
 ) -> Option<ShellStartup> {
     match shell_type {
         ShellType::Bash => {
-            let rcfile = mux_data_dir.join("shell").join("bash").join(".bashrc");
+            let rcfile = shell_root.join("bash").join(".bashrc");
             Some(ShellStartup {
                 extra_args: vec![
                     "--rcfile".to_string(),
@@ -217,7 +272,7 @@ pub fn get_shell_startup(
             })
         }
         ShellType::Zsh => {
-            let zdotdir = mux_data_dir.join("shell").join("zsh");
+            let zdotdir = shell_root.join("zsh");
             Some(ShellStartup {
                 extra_args: vec![],
                 env_vars: vec![
@@ -228,8 +283,7 @@ pub fn get_shell_startup(
             })
         }
         ShellType::Pwsh => {
-            let script = mux_data_dir
-                .join("shell")
+            let script = shell_root
                 .join("pwsh")
                 .join("wavepwsh.ps1");
             Some(ShellStartup {
@@ -244,8 +298,7 @@ pub fn get_shell_startup(
             })
         }
         ShellType::Fish => {
-            let script = mux_data_dir
-                .join("shell")
+            let script = shell_root
                 .join("fish")
                 .join("wave.fish");
             Some(ShellStartup {
@@ -330,7 +383,7 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&tmp);
-        deploy_scripts(&tmp);
+        deploy_scripts(&tmp.join("shell"));
 
         let shell_base = tmp.join("shell");
         let muxlog = shell_base.join("muxlog.mjs");
@@ -376,7 +429,7 @@ mod tests {
         std::fs::write(shell_base.join(".version"), env!("CARGO_PKG_VERSION")).unwrap();
         assert!(!shell_base.join("muxspect.mjs").exists(), "precondition: not deployed yet");
 
-        deploy_scripts(&tmp);
+        deploy_scripts(&tmp.join("shell"));
 
         assert!(
             shell_base.join("muxspect.mjs").exists(),
@@ -387,6 +440,70 @@ mod tests {
             version_marker(),
             "marker must be updated to the new content-hashed form"
         );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── Per-instance isolation (I6) ──────────────────────────────────────
+
+    /// THE invariant. Two instances differing only by channel or version must
+    /// never deploy into the same directory — otherwise each shell spawn in
+    /// one rewrites the scripts the other's shells source.
+    #[test]
+    fn two_instances_never_share_a_shell_integration_dir() {
+        let home = Path::new("/home/u");
+        let a = integration_base_for(Path::new("/ch/alpha/versions/0.56.2/data"), home);
+        let b = integration_base_for(Path::new("/ch/alpha/versions/0.56.3/data"), home);
+        let c = integration_base_for(Path::new("/ch/beta/versions/0.56.3/data"), home);
+        assert_ne!(a, b, "same channel, different version must not collide");
+        assert_ne!(b, c, "same version, different channel must not collide");
+        assert_ne!(a, c);
+    }
+
+    /// The path is recomputed on every shell spawn, so an unstable key would
+    /// send a later shell to a directory nothing was deployed into.
+    #[test]
+    fn the_same_instance_always_resolves_to_the_same_dir() {
+        let home = Path::new("/home/u");
+        let d = Path::new("/ch/alpha/versions/0.56.3/data");
+        assert_eq!(integration_base_for(d, home), integration_base_for(d, home));
+    }
+
+    /// Must stay under the home dir: MSIX virtualises `%LocalAppData%`, so a
+    /// data-dir-relative path would be invisible to the shells that source it.
+    #[test]
+    fn deployment_stays_under_the_never_virtualised_home_dir() {
+        let home = Path::new("/home/u");
+        let base = integration_base_for(Path::new("/ch/alpha/versions/0.56.3/data"), home);
+        assert!(base.starts_with(home), "must live under home, got {}", base.display());
+        assert!(!base.starts_with("/ch/alpha"), "must not live under the data dir");
+    }
+
+    /// The coupling that actually matters: whatever `deploy_scripts` writes,
+    /// `get_shell_startup` must point the shell AT. If these two drift apart,
+    /// scripts land where nothing sources them and every terminal silently
+    /// loses shell integration — with no error anywhere. Asserted by resolving
+    /// the startup arg to a real file on disk, not by comparing two strings
+    /// built the same way (which would pass even if both were wrong).
+    #[test]
+    fn the_deployed_rcfile_is_exactly_the_one_the_shell_is_told_to_load() {
+        let tmp = std::env::temp_dir().join(format!("am-si-couple-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let root = tmp.join("shell");
+        deploy_scripts(&root);
+
+        let startup = get_shell_startup(ShellType::Bash, &root).expect("bash startup");
+        assert_eq!(startup.extra_args[0], "--rcfile");
+        let rcfile = Path::new(&startup.extra_args[1]);
+        assert!(
+            rcfile.exists(),
+            "shell is told to load {} but deploy_scripts never wrote it",
+            rcfile.display()
+        );
+
+        // And it must be the real script, not an empty placeholder.
+        let body = std::fs::read_to_string(rcfile).expect("read rcfile");
+        assert!(body.contains("_agentmux_si_prompt_command"), "rcfile is not the integration script");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
