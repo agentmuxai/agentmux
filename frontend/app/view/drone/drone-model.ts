@@ -14,7 +14,7 @@
 //   - draft graph, selection, running button-flag, runs list, errors
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -54,7 +54,7 @@ const BLANK_DRONE = (): DroneDefinition => ({
 
 export class DroneViewModel implements ViewModel {
     viewType = "drone";
-    renderPaneChrome = genericRenderPaneChrome;
+    renderPaneChrome = renderPaneChromeShell;
     // Suppresses BlockFrame's own inline header once chrome is hoisted —
     // required whenever a view type is added to pane-leaf-chrome.tsx's
     // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors

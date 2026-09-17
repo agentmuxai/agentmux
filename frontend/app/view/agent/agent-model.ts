@@ -11,7 +11,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getApi, MOS } from "@/app/store/global";
 import { SignalAtom } from "@/util/util";
 import { AgentBlockContent, buildAgentPaneChromeModel } from "./agent-view";
-import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { buildAgentPaneIcon } from "./components/AgentPaneIcon";
 import { useAgentDefinitions } from "./components/AgentPicker";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
@@ -51,10 +51,9 @@ export class AgentViewModel implements ViewModel {
     /** NOT part of the shared `ViewModel` contract — `AgentBlockContent`
      *  reads this directly off its own concrete `AgentViewModel` instance
      *  to know where to portal the marching-ants progress bar. Populated
-     *  externally by whichever `AgentPaneChrome` instance is currently
-     *  hoisted (via `setProgressBarMount`, tracking `NodeModel.activeViewModel()`
-     *  reactively) — `null` until chrome has mounted and called it at
-     *  least once. */
+     *  externally by the shared pane chrome's `renderBelowHeader` slot
+     *  (this model's own `paneChromeModel`, via `setProgressBarMount`) —
+     *  `null` until chrome has mounted and called it at least once. */
     progressBarMount: () => HTMLDivElement | null;
     /** NOT part of the shared `ViewModel` contract. ReAgent P2 on
      *  SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's PR: owned here
@@ -102,7 +101,7 @@ export class AgentViewModel implements ViewModel {
         // existed to give that component the right reactive owner — the
         // shared chrome calls paneChromeModel in its own scope, which is
         // the same ownership by construction.
-        this.renderPaneChrome = genericRenderPaneChrome;
+        this.renderPaneChrome = renderPaneChromeShell;
         this.paneChromeModel = (leafNodeModel: NodeModel): PaneChromeModel =>
             buildAgentPaneChromeModel(this.blockId, leafNodeModel);
         const [progressBarMountSig, setProgressBarMountSig] = createSignal<HTMLDivElement | null>(null);

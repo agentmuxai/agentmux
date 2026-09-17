@@ -441,7 +441,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
  */
 /**
  * Terminal's opt-in to the ONE shared pane chrome
- * (`genericRenderPaneChrome`) — see `PaneChromeModel` (custom.d.ts).
+ * (`renderPaneChromeShell`) — see `PaneChromeModel` (custom.d.ts).
  * Everything the old `TermPaneChrome` component rendered around the
  * content (root box, focus ring, header row, ErrorBoundary) is the shared
  * chrome's job now; what stays here is only what is genuinely terminal's:

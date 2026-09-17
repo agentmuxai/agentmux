@@ -502,7 +502,7 @@ declare global {
 
     /**
      * What a view type can override or add on the ONE shared pane chrome
-     * (`renderPaneChrome`, GenericPaneChrome.tsx). Every field is optional:
+     * (`renderPaneChrome`, PaneChrome.tsx). Every field is optional:
      * omit the whole thing and a pane gets the default behavior every
      * widget type already had.
      *

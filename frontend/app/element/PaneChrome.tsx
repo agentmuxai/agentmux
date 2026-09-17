@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * GenericPaneChrome — a single, shared `ViewModel.renderPaneChrome`
+ * PaneChrome — a single, shared `ViewModel.renderPaneChrome`
  * implementation for every widget type that does NOT need agent's or
  * term's own richer, domain-specific chrome (fork-lineage tab merging,
  * rename-via-definition-API, per-tab zoom, etc.). Every OTHER widget type
  * (browser, editor, sysinfo, swarm, armory, media, drone, help, warden)
  * registers this SAME function rather than each growing its own
  * near-identical Chrome component — see each ViewModel's own one-line
- * `this.renderPaneChrome = genericRenderPaneChrome` registration.
+ * `this.renderPaneChrome = renderPaneChromeShell` registration.
  *
  * Uses only the already view-agnostic primitives `layoutStack.ts` and
  * `action-widgets-config.ts` already provide: `blockStack` membership for
@@ -30,7 +30,7 @@ import { atoms, MOS } from "@/app/store/global";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, getLayoutModelForStaticTab, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import "./GenericPaneChrome.scss";
+import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 
@@ -40,7 +40,7 @@ interface GenericPaneTab {
     icon: JSX.Element;
 }
 
-export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
+export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element): JSX.Element {
     const layoutModel = getLayoutModelForStaticTab();
     const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
@@ -132,14 +132,14 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
         />
     );
 
-    const contentRegion = <div class={model?.contentClass ?? "generic-pane-stack-content"}>{content}</div>;
+    const contentRegion = <div class={model?.contentClass ?? "pane-stack-content"}>{content}</div>;
 
     return (
         <div
-            class="generic-pane-stack"
+            class="pane-stack"
             classList={{
-                "generic-pane-stack-focused": isFocused() && !isAlone(),
-                "generic-pane-stack-focused-alone": isFocused() && isAlone(),
+                "pane-stack-focused": isFocused() && !isAlone(),
+                "pane-stack-focused-alone": isFocused() && isAlone(),
                 ...(model?.rootClass ? { [model.rootClass]: true } : {}),
             }}
             style={{ "--pane-ring-color": ringBorderColor() }}

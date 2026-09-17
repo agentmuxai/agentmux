@@ -332,7 +332,7 @@ AgentBlockContent.displayName = "AgentBlockContent";
  */
 /**
  * Agent's opt-in to the ONE shared pane chrome
- * (`genericRenderPaneChrome`) — see `PaneChromeModel` (custom.d.ts).
+ * (`renderPaneChromeShell`) — see `PaneChromeModel` (custom.d.ts).
  * Everything the old `AgentPaneChrome` component rendered around the
  * content (root box, focus ring, header row, ErrorBoundary) is the shared
  * chrome's job now; what stays here is only what is genuinely agent's:
@@ -565,7 +565,7 @@ export function buildAgentPaneChromeModel(anchorBlockId: string, nodeModel: Node
     // it on a fresh, unlaunched picker pane (tab-strip-visibility.ts,
     // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md), but that made it the
     // one widget type whose header behaved differently from every other
-    // pane (every GenericPaneChrome-driven type, and term, always show
+    // pane (every PaneChrome-driven type, and term, always show
     // "+"). Repo-owner-confirmed: agent should be no different.
     // Per-pane zoom for the tab strip itself — mirrors
     // AgentPresentationView's own zoomFactor memo (term:zoom block meta +

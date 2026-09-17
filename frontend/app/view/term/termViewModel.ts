@@ -3,7 +3,7 @@
 
 import { Block } from "@/app/block/block";
 import { BlockNodeModel } from "@/app/block/blocktypes";
-import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -355,7 +355,7 @@ class TermViewModel implements ViewModel {
     /** Terminal now renders through the ONE shared chrome like every other
      *  widget type; what used to be `TermPaneChrome`'s bespoke component is
      *  the capability model below (term.tsx's buildTermPaneChromeModel). */
-    renderPaneChrome = genericRenderPaneChrome;
+    renderPaneChrome = renderPaneChromeShell;
 
     /** Called once by the shared chrome at its own mount, in its own
      *  reactive scope — which is exactly the ownership the old
