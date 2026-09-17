@@ -6,6 +6,28 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The blockfile:* shapes are GENERATED from their Rust definitions by ts-rs.
+// The rest of this file is still hand-written: the remaining block commands
+// are a separate slice, and a few of them have shapes ts-rs cannot express
+// (see the note on CommandCreateBlockData in rpc_types/block.rs).
+export type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
+export type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
+export type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfileReadRangeData";
+export type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
+export type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfileReadStateData";
+export type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
+export type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
+export type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
+
+import type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
+import type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
+import type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfileReadRangeData";
+import type { BlockfileReadRangeResult } from "@/types/rpc/BlockfileReadRangeResult";
+import type { CommandBlockfileReadStateData } from "@/types/rpc/CommandBlockfileReadStateData";
+import type { BlockfileReadStateResult } from "@/types/rpc/BlockfileReadStateResult";
+import type { CommandBlockfileWriteStateData } from "@/types/rpc/CommandBlockfileWriteStateData";
+import type { BlockfileWriteStateResult } from "@/types/rpc/BlockfileWriteStateResult";
+
 export const BlockApi = {
     BlockInfoCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<BlockInfoData> {
         return client.rpcCall("blockinfo", data, opts);

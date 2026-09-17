@@ -544,7 +544,8 @@ pub struct PaneOpenResult {
 }
 
 /// Request for blockfile:line_count — count total lines in a blockfile.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileLineCountData {
     pub block_id: String,
@@ -552,27 +553,34 @@ pub struct CommandBlockfileLineCountData {
 }
 
 /// Response from blockfile:line_count.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileLineCountResult {
+    #[ts(type = "number")]
     pub count: u64,
 }
 
 /// Request for blockfile:read_range — read a range of lines from a blockfile.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileReadRangeData {
     pub block_id: String,
     pub filename: String,
+    #[ts(type = "number")]
     pub offset: u64,
+    #[ts(type = "number")]
     pub limit: u64,
 }
 
 /// Response from blockfile:read_range.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileReadRangeResult {
     pub lines: Vec<String>,
+    #[ts(type = "number")]
     pub total: u64,
     /// Receive-time stamps (unix ms) parallel to `lines`, joined from the
     /// `output.tsidx` sidecar; `0` = unknown for that line. Absent entirely
@@ -580,13 +588,15 @@ pub struct BlockfileReadRangeResult {
     /// fast path — old frontends ignore it, new frontends tolerate absence.
     /// Spec: SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number[]")]
     pub stamps: Option<Vec<i64>>,
 }
 
 /// Request for blockfile:read_state — read a sidecar JSON file
 /// (e.g. `output.state.json`) associated with a block.
 /// Spec: docs/specs/SPEC_AGENT_PANE_STATE_PERSISTENCE_2026_05_15.md.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileReadStateData {
     pub block_id: String,
@@ -597,7 +607,8 @@ pub struct CommandBlockfileReadStateData {
 
 /// Response from blockfile:read_state. `content` is the raw file bytes
 /// as a UTF-8 string, or null if the sidecar does not exist.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileReadStateResult {
     pub content: Option<String>,
@@ -606,7 +617,8 @@ pub struct BlockfileReadStateResult {
 /// Request for blockfile:write_state — atomically write a sidecar JSON
 /// file for a block. Uses tmp + fsync + rename to guarantee partial
 /// writes never surface to readers.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct CommandBlockfileWriteStateData {
     pub block_id: String,
@@ -615,9 +627,11 @@ pub struct CommandBlockfileWriteStateData {
 }
 
 /// Response from blockfile:write_state.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub struct BlockfileWriteStateResult {
+    #[ts(type = "number")]
     pub bytes_written: u64,
 }
 
@@ -731,5 +745,98 @@ mod app_api_manifest_contract_tests {
             manifest_fields, struct_fields,
             "docs/specs/app-api-manifest.json's pane.open.responseFields has drifted from PaneOpenResult's real fields"
         );
+    }
+}
+
+// Request-shape tests for the four `blockfile:*` commands.
+//
+// Nothing else catches a Req/payload mismatch: `tsc` only checks the frontend
+// against the GENERATED types, and `scripts/check-rpc-bindings.sh` only checks
+// that a generated type exists per command and is current. Neither ever
+// deserializes a real payload into the Rust struct.
+#[cfg(test)]
+mod blockfile_req_shape_tests {
+    use super::*;
+    use serde_json::json;
+
+    // AgentHistoryView.tsx:165, useHistoryPagination.ts:331
+    #[test]
+    fn line_count_accepts_the_payload_the_stub_sends() {
+        serde_json::from_value::<CommandBlockfileLineCountData>(
+            json!({"block_id": "b1", "filename": "output"}),
+        )
+        .expect("blockfile:line_count must accept block_id and filename");
+    }
+
+    // AgentHistoryView.tsx:178
+    #[test]
+    fn read_range_accepts_the_payload_the_stub_sends() {
+        let r: CommandBlockfileReadRangeData = serde_json::from_value(
+            json!({"block_id": "b1", "filename": "output", "offset": 0, "limit": 500}),
+        )
+        .expect("blockfile:read_range must accept the full range payload");
+        assert_eq!((r.offset, r.limit), (0, 500));
+    }
+
+    // `offset`/`limit` are u64 carrying JS numbers, which is why the generated
+    // binding overrides them to `number` rather than `bigint`. A negative
+    // offset must be rejected rather than wrapping to a huge positive.
+    #[test]
+    fn read_range_rejects_a_negative_offset() {
+        assert!(
+            serde_json::from_value::<CommandBlockfileReadRangeData>(
+                json!({"block_id": "b1", "filename": "output", "offset": -1, "limit": 10}),
+            )
+            .is_err(),
+            "a negative offset must fail loudly, not wrap into a huge u64"
+        );
+    }
+
+    #[test]
+    fn the_state_commands_accept_their_payloads() {
+        serde_json::from_value::<CommandBlockfileReadStateData>(
+            json!({"block_id": "b1", "filename": "output.state.json"}),
+        )
+        .expect("blockfile:read_state");
+        serde_json::from_value::<CommandBlockfileWriteStateData>(
+            json!({"block_id": "b1", "filename": "output.state.json", "content": "{}"}),
+        )
+        .expect("blockfile:write_state");
+    }
+
+    // `stamps` is `skip_serializing_if = "Option::is_none"`, so the key is
+    // OMITTED rather than nulled when absent -- which is why the generated
+    // binding says `stamps?: number[]`. The doc comment on the field promises
+    // old frontends can ignore it and new ones tolerate absence; that promise
+    // only holds while it is genuinely omitted.
+    #[test]
+    fn read_range_result_omits_stamps_rather_than_nulling_them() {
+        let without = serde_json::to_value(BlockfileReadRangeResult {
+            lines: vec!["a".to_string()],
+            total: 1,
+            stamps: None,
+        })
+        .expect("serializable");
+        assert_eq!(without, json!({"lines": ["a"], "total": 1}));
+
+        let with = serde_json::to_value(BlockfileReadRangeResult {
+            lines: vec!["a".to_string()],
+            total: 1,
+            stamps: Some(vec![7]),
+        })
+        .expect("serializable");
+        assert_eq!(with, json!({"lines": ["a"], "total": 1, "stamps": [7]}));
+    }
+
+    // `content` is a plain `Option<String>` with NO skip_serializing_if, so the
+    // key is always present and carries null -- a different shape from
+    // `stamps` above, and the generated binding says `string | null` for
+    // exactly that reason. The two live side by side in one domain, so pin
+    // both rather than assuming they behave alike.
+    #[test]
+    fn read_state_result_nulls_content_rather_than_omitting_it() {
+        let v = serde_json::to_value(BlockfileReadStateResult { content: None })
+            .expect("serializable");
+        assert_eq!(v, json!({"content": null}));
     }
 }

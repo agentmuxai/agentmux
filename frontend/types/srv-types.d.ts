@@ -2283,58 +2283,6 @@ declare global {
         failed: InstallFailure[];
     };
 
-    // wshrpc.CommandBlockfileLineCountData
-    type CommandBlockfileLineCountData = {
-        block_id: string;
-        filename: string;
-    };
-
-    // wshrpc.BlockfileLineCountResult
-    type BlockfileLineCountResult = {
-        count: number;
-    };
-
-    // wshrpc.CommandBlockfileReadRangeData
-    type CommandBlockfileReadRangeData = {
-        block_id: string;
-        filename: string;
-        offset: number;
-        limit: number;
-    };
-
-    // wshrpc.BlockfileReadRangeResult
-    type BlockfileReadRangeResult = {
-        lines: string[];
-        total: number;
-        // Receive-time stamps (unix ms) parallel to `lines`; 0 = unknown.
-        // Absent when no output.tsidx sidecar exists (pre-upgrade history)
-        // or the read skipped the output.idx fast path.
-        stamps?: number[];
-    };
-
-    // wshrpc.CommandBlockfileReadStateData
-    type CommandBlockfileReadStateData = {
-        block_id: string;
-        filename: string;
-    };
-
-    // wshrpc.BlockfileReadStateResult
-    type BlockfileReadStateResult = {
-        content: string | null;
-    };
-
-    // wshrpc.CommandBlockfileWriteStateData
-    type CommandBlockfileWriteStateData = {
-        block_id: string;
-        filename: string;
-        content: string;
-    };
-
-    // wshrpc.BlockfileWriteStateResult
-    type BlockfileWriteStateResult = {
-        bytes_written: number;
-    };
-
     // The ONLY native-memory type still hand-written here; its siblings are now
     // ts-rs-generated under frontend/types/rpc/ and re-exported from
     // app/store/rpc-api/native-memory.ts. This one cannot be generated: `detail`
