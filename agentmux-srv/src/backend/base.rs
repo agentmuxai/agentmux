@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 // ---- Environment variable names ----
 
-pub const WAVE_CONFIG_HOME_ENV: &str = "AGENTMUX_CONFIG_HOME";
+pub const MUX_CONFIG_HOME_ENV: &str = "AGENTMUX_CONFIG_HOME";
 pub const WAVE_DATA_HOME_ENV: &str = "AGENTMUX_DATA_HOME";
 pub const WAVE_APP_PATH_ENV: &str = "AGENTMUX_APP_PATH";
 pub const WAVE_DEV_ENV: &str = "AGENTMUX_DEV";
@@ -23,12 +23,12 @@ pub const WAVE_SWAP_TOKEN_ENV: &str = "AGENTMUX_SWAPTOKEN";
 
 // ---- File/directory constants ----
 
-pub const WAVE_LOCK_FILE: &str = "wave.lock";
+pub const MUX_LOCK_FILE: &str = "wave.lock";
 pub const DOMAIN_SOCKET_BASE_NAME: &str = "wave.sock";
 pub const REMOTE_DOMAIN_SOCKET_BASE_NAME: &str = "wave-remote.sock";
 pub const WAVE_DB_DIR: &str = "db";
 pub const CONFIG_DIR: &str = "config";
-pub const REMOTE_WAVE_HOME_DIR_NAME: &str = ".agentmux";
+pub const REMOTE_MUX_HOME_DIR_NAME: &str = ".agentmux";
 pub const REMOTE_FULL_DOMAIN_SOCKET_PATH: &str = "~/.agentmux/wave-remote.sock";
 
 // ---- Version info (set at startup) ----
@@ -120,7 +120,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
 /// Get the AgentMux config directory.
 /// Uses `AGENTMUX_CONFIG_HOME` env var, or defaults to `~/.agentmux/config`.
 pub fn get_mux_config_dir() -> PathBuf {
-    if let Ok(dir) = env::var(WAVE_CONFIG_HOME_ENV) {
+    if let Ok(dir) = env::var(MUX_CONFIG_HOME_ENV) {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
@@ -150,7 +150,7 @@ pub fn get_domain_socket_name() -> PathBuf {
 
 /// Get the AgentMux lock file path.
 pub fn get_mux_lock_file() -> PathBuf {
-    get_mux_data_dir().join(WAVE_LOCK_FILE)
+    get_mux_data_dir().join(MUX_LOCK_FILE)
 }
 
 // ---- Directory creation ----
@@ -494,14 +494,14 @@ mod tests {
 
     #[test]
     fn test_env_var_constants() {
-        assert_eq!(WAVE_CONFIG_HOME_ENV, "AGENTMUX_CONFIG_HOME");
+        assert_eq!(MUX_CONFIG_HOME_ENV, "AGENTMUX_CONFIG_HOME");
         assert_eq!(WAVE_DATA_HOME_ENV, "AGENTMUX_DATA_HOME");
         assert_eq!(WAVE_DEV_ENV, "AGENTMUX_DEV");
     }
 
     #[test]
     fn test_file_constants() {
-        assert_eq!(WAVE_LOCK_FILE, "wave.lock");
+        assert_eq!(MUX_LOCK_FILE, "wave.lock");
         assert_eq!(DOMAIN_SOCKET_BASE_NAME, "wave.sock");
         assert_eq!(WAVE_DB_DIR, "db");
         assert_eq!(CONFIG_DIR, "config");

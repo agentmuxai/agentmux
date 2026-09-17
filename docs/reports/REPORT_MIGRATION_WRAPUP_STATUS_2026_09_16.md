@@ -220,6 +220,21 @@ This section asked for a schedule-or-close decision. Both halves were answered:
 **Result: zero Wave-derived identifiers remain. Source files containing any `wave`
 reference: 306 → 91**, and every one of those 91 is a deliberate string contract.
 
+*Corrected after review (codex P2 on #3292):* the first version of that claim was made from a
+search that missed two shapes — SCREAMING_SNAKE constants (`WAVE_LOCK_FILE`,
+`EVENT_WAVE_OBJ_UPDATE`, `WS_EVENT_WAVE_OBJ_BATCHED_UPDATES`, `WAVE_CONFIG_HOME_ENV`,
+`REMOTE_WAVE_HOME_DIR_NAME`), which no `Wave[A-Z]`/`wave[A-Z]` pattern matches, and the
+`agentmux-srv/tests/` tree, which sits outside `src/`. All five constants are renamed here
+with **their string values untouched** (`"wave.lock"` is a real lockfile on disk;
+`"waveobj:update"` and `"waveobj:batchedupdates"` are wire events), plus one stale comment
+referencing the renamed `initHostWave`. The claim now holds against a case-insensitive sweep
+over `src/`, `tests/` and `frontend/`.
+
+Still deliberately retained, all string contracts rather than branding: `db_wave_file`,
+`waveobj:*` and the `raw_waveobj_update`/`handle_wps_publish` handlers named after the wire
+events they serve, `__WAVE_SERVER_*_ENDPOINT__` window globals, `getwaveairatelimit`,
+`--wavedata`, and the `WAVEMUX_AGENT_ID` / `~/.waveterm` / `wavepwsh.ps1` legacy trio.
+
 **Phase 2 (the strings) was deliberately NOT done, and the issue is closed saying so.** The
 deciding evidence came from doing phase 3: it shipped a P1 that neither the compiler nor
 2,960 tests caught — the frontend caller kept POSTing to `/agentmux/mps/publish` while srv
