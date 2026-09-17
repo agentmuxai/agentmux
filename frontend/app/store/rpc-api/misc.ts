@@ -8,6 +8,40 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The muxbus and providers shapes are GENERATED from their Rust definitions by
+// ts-rs. They were private structs in the handler files, so the inline types
+// here were hand-maintained against nothing.
+//
+// The rest of this file stays hand-written on purpose:
+//   * `activity` and `recordtevent` have NO backend handler at all (they are
+//     in the contract test's KNOWN_LIVE_UNREGISTERED list -- the frontend calls
+//     them and they fail at run time). There is nothing to generate from, and
+//     wiring or removing them is product work, not a refactor.
+//   * `widget.health` / `widget.api` read their fields straight off a
+//     `serde_json::Value` with lenient defaults (a missing port becomes 0,
+//     which the handler answers with `{healthy:false}` rather than an error).
+//     A typed Req would turn those into deserialization failures -- the same
+//     reasoning that kept `bundle.validate` untyped.
+export type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
+export type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
+export type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
+export type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
+export type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
+export type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
+export type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
+export type { CatalogModel } from "@/types/rpc/CatalogModel";
+
+import type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
+import type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
+import type { MuxBusLoginCancelReq } from "@/types/rpc/MuxBusLoginCancelReq";
+import type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
+import type { MuxBusStatusReq } from "@/types/rpc/MuxBusStatusReq";
+import type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
+import type { MuxBusDisconnectReq } from "@/types/rpc/MuxBusDisconnectReq";
+import type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
+import type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";
+import type { ProvidersModelsResult } from "@/types/rpc/ProvidersModelsResult";
+
 export const MiscApi = {
     ActivityCommand(client: RpcClient, data: ActivityUpdate, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("activity", data, opts);
@@ -19,9 +53,9 @@ export const MiscApi = {
     // the token is absent/expired; the frontend then keeps its static catalog.
     ProvidersModelsCommand(
         client: RpcClient,
-        data: { provider_id: string },
+        data: ProvidersModelsParams,
         opts?: RpcOpts,
-    ): Promise<{ models: Array<{ id: string; display_name: string }> }> {
+    ): Promise<ProvidersModelsResult> {
         return client.rpcCall("providers.models", data, opts);
     },
 
@@ -74,9 +108,9 @@ export const MiscApi = {
     // command "muxbus.login" — PKCE browser flow; blocks until login completes (up to 5 min)
     MuxBusLoginCommand(
         client: RpcClient,
-        data: { cognitoDomain: string; clientId: string },
+        data: MuxBusLoginReq,
         opts?: RpcOpts,
-    ): Promise<{ success: boolean; email: string; error?: string }> {
+    ): Promise<MuxBusLoginResp> {
         return client.rpcCall("muxbus.login", data, { timeout: 360000, ...opts });
     },
 
@@ -86,26 +120,20 @@ export const MiscApi = {
     MuxBusLoginCancelCommand(
         client: RpcClient,
         opts?: RpcOpts,
-    ): Promise<{ cancelled: boolean }> {
-        return client.rpcCall("muxbus.login.cancel", {}, opts);
+    ): Promise<MuxBusLoginCancelResp> {
+        const data: MuxBusLoginCancelReq = {};
+        return client.rpcCall("muxbus.login.cancel", data, opts);
     },
 
     // command "muxbus.status" — current credential state
-    MuxBusStatusCommand(
-        client: RpcClient,
-        opts?: RpcOpts,
-    ): Promise<{
-        connected: boolean;
-        email: string;
-        cognitoDomain: string;
-        expiresAt: number;
-        valid: boolean;
-    }> {
-        return client.rpcCall("muxbus.status", {}, opts);
+    MuxBusStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusStatusResp> {
+        const data: MuxBusStatusReq = {};
+        return client.rpcCall("muxbus.status", data, opts);
     },
 
     // command "muxbus.disconnect" — clear stored credentials
-    MuxBusDisconnectCommand(client: RpcClient, opts?: RpcOpts): Promise<Record<string, never>> {
-        return client.rpcCall("muxbus.disconnect", {}, opts);
+    MuxBusDisconnectCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxBusDisconnectResp> {
+        const data: MuxBusDisconnectReq = {};
+        return client.rpcCall("muxbus.disconnect", data, opts);
     },
 };
