@@ -3,7 +3,6 @@
 
 import { Search, useSearch } from "@/app/element/search";
 import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, useBlockAtom, MOS } from "@/store/global";
-import { ObjectService } from "@/store/services";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/muxutil";
@@ -19,6 +18,7 @@ import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
 import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
+import { openPaneTabWidgetPicker } from "@/app/element/pane-tab-picker";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -27,12 +27,12 @@ import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 import {
     closeBlockInStack,
     getLayoutModelForStaticTab,
-    pushBlockOntoStack,
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
+import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -476,6 +476,10 @@ const TermPaneChrome = (props: {
     interface TermTab {
         blockId: string;
         label: string;
+        /** Only set for a NON-term member of this pane'''s stack (added via
+         *  the generic "+" picker) — terminal tabs keep their existing
+         *  no-icon presentation. */
+        icon?: JSX.Element;
     }
     // Rename overrides, keyed by blockId — set synchronously by
     // handleTermTabRenameConfirm so a just-renamed tab (including a dormant,
@@ -511,12 +515,31 @@ const TermPaneChrome = (props: {
         // mounted; `overrides` is what makes a just-performed rename show up
         // immediately.
         const seen = new Set<string>();
-        const result = stack.map((id, i) => {
+        // Counts only the terminal members, so "Terminal 1/2/…" stays
+        // contiguous when a non-term tab (added via the generic "+" picker)
+        // sits between them rather than numbering around it.
+        let termIndex = 0;
+        const result = stack.map((id) => {
             seen.add(id);
-            const persistedTitle = MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta?.["pane-title"] as
-                | string
-                | undefined;
-            const label = overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}`;
+            const bd = MOS.getObjectValue<Block>(MOS.makeORef("block", id));
+            const view = bd?.meta?.["view"] as string | undefined;
+            // A NON-term member — this pane's own "+" opens the generic
+            // widget picker now, so a terminal pane's stack can hold a
+            // sysinfo/browser/… tab like any other pane's. Label/icon it the
+            // way every generic pane does instead of calling it "Terminal N".
+            if (view && view !== "term") {
+                const genericLabel =
+                    overrides[id] ?? (bd?.meta?.["frame:title"] as string | undefined) ?? blockViewToName(view);
+                const icon = getBlockHeaderIcon((bd?.meta?.["frame:icon"] as string | undefined) ?? blockViewToIcon(view), bd);
+                const cachedGeneric = tabObjectCache.get(id);
+                if (cachedGeneric && cachedGeneric.label === genericLabel) return cachedGeneric;
+                const tab: TermTab = { blockId: id, label: genericLabel, icon };
+                tabObjectCache.set(id, tab);
+                return tab;
+            }
+            termIndex += 1;
+            const persistedTitle = bd?.meta?.["pane-title"] as string | undefined;
+            const label = overrides[id] ?? persistedTitle ?? `Terminal ${termIndex}`;
             const cached = tabObjectCache.get(id);
             if (cached && cached.label === label) return cached;
             const tab: TermTab = { blockId: id, label };
@@ -577,40 +600,6 @@ const TermPaneChrome = (props: {
         if (!node) return;
         void closeBlockInStack(layoutModel, node.id, targetBlockId);
     };
-    const handleTermTabAdd = async () => {
-        const initialNode = getOwnNode();
-        if (!initialNode) return;
-        try {
-            // New tab inherits the CURRENT tab's cwd, matching how a real
-            // terminal's "new tab" usually starts in the same directory.
-            const cwd = activeBlockData()?.meta?.["cmd:cwd"] as string | undefined;
-            const paneOpenResult = (await TabRpcClient.rpcCall(
-                "pane.open",
-                { view: "term", cwd: cwd || undefined, skip_placement: true },
-                {},
-            )) as { block_id: string };
-            // This pane could have closed while the RPC was in flight —
-            // re-resolve rather than trusting a pre-await reference. If it's
-            // gone, delete the skip_placement block instead of leaving an
-            // orphaned, unreachable PTY behind.
-            const node = getOwnNode();
-            if (!node) {
-                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-                return;
-            }
-            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
-        } catch (e: unknown) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "New terminal tab failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-        }
-    };
-
     // Double-click-to-rename — SPEC_PANE_TAB_STRIP_COMPACT_SIZING_AND_RENAME_2026_07_22.md §3.3.
     const [renamingBlockId, setRenamingBlockId] = createSignal<string | null>(null);
     const handleTermTabRenameConfirm = (targetBlockId: string, title: string) => {
@@ -668,6 +657,7 @@ const TermPaneChrome = (props: {
             zoomFactor={tabStripZoomFactor}
             getId={(t) => t.blockId}
             getLabel={(t) => t.label}
+            getIcon={(t) => t.icon}
             onActivate={handleTermTabSwitch}
             onClose={handleTermTabClose}
             onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
@@ -682,8 +672,8 @@ const TermPaneChrome = (props: {
                     <span class="pane-tab-label">{t.label}</span>
                 )
             }
-            onAdd={() => void handleTermTabAdd()}
-            addTitle="New terminal tab"
+            onAdd={(e) => e && openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e)}
+            addTitle="Add tab"
             nodeModel={nodeModel}
             viewModel={viewModel}
             activeBlockId={activeBlockId}
