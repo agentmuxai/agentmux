@@ -85,6 +85,9 @@ vi.mock("@/app/store/global", () => ({
         fullConfigAtom: () => ({ widgets: {}, settings: {} }),
         tabAtom: () => ({ meta: {} }),
     },
+    // pane-tab-picker.ts surfaces a failed add as a toast — unused on the
+    // success paths here, but the module imports it at load time.
+    pushNotification: vi.fn(),
 }));
 
 let capturedOnSelect: ((blockDef: any) => void) | undefined;
@@ -96,7 +99,7 @@ vi.mock("@/app/window/action-widgets-config", () => ({
     buildPaneWidgetMenuItems: (...args: any[]) => (buildPaneWidgetMenuItemsMock as any)(...args),
 }));
 
-const addWidgetAsPaneTab = vi.fn();
+const addWidgetAsPaneTab = vi.fn().mockResolvedValue(undefined); // real one is async — the picker chains .catch() on it
 const closeBlockInStack = vi.fn();
 const setActiveBlockInStack = vi.fn();
 let mockLayoutModel: any;

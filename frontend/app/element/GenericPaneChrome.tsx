@@ -26,13 +26,12 @@
 import { createMemo, type JSX } from "solid-js";
 import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { atoms, MOS } from "@/app/store/global";
-import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { ErrorBoundary } from "@/element/errorboundary";
-import { addWidgetAsPaneTab, closeBlockInStack, getLayoutModelForStaticTab, setActiveBlockInStack, type NodeModel } from "@/layout/index";
+import { closeBlockInStack, getLayoutModelForStaticTab, setActiveBlockInStack, type NodeModel } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
 import "./GenericPaneChrome.scss";
+import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
 
 interface GenericPaneTab {
@@ -88,12 +87,7 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
     const handleClose = (blockId: string) => void closeBlockInStack(layoutModel, nodeModel.nodeId, blockId);
     const handleAdd = (e?: MouseEvent) => {
         if (!e) return;
-        const wmap = atoms.fullConfigAtom()?.widgets ?? {};
-        const settings = atoms.fullConfigAtom()?.settings ?? {};
-        const items = buildPaneWidgetMenuItems(wmap, settings, (blockDef) => {
-            void addWidgetAsPaneTab(layoutModel, nodeModel.nodeId, blockDef);
-        });
-        ContextMenuModel.showContextMenu(items, e);
+        openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e);
     };
 
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;

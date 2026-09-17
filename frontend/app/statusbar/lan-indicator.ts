@@ -17,8 +17,7 @@
  * are different facts the user acts on differently, so each gets its own
  * state here.
  *
- * Pure so the state table can be tested without mounting the status bar —
- * the same extract-and-test pattern as `tab-strip-visibility.ts`.
+ * Pure so the state table can be tested without mounting the status bar.
  */
 export type LanIndicatorState = "peers" | "idle" | "error" | "off";
 
