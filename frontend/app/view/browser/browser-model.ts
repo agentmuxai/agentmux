@@ -21,6 +21,7 @@ import {
     snapshot as bpSnapshot,
     unregisterPane as bpUnregisterPane,
 } from "@/app/store/browser-pane-state-store";
+import { browserStartPageAtom } from "@/store/config-signals";
 import { refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -520,11 +521,30 @@ export class BrowserViewModel implements ViewModel {
         });
 
         // Load URL from block meta on init. An empty/missing `url` falls
-        // back to DEFAULT_BROWSER_URL so fresh panes aren't blank (the
-        // widget definition in widgets.json also ships this URL, but the
-        // fallback covers panes created through the API with no meta.url).
+        // back to the user's configured start page
+        // (`browserStartPageAtom`, "Set as Start Page" in the bookmarks
+        // menu), and only then to DEFAULT_BROWSER_URL so fresh panes are
+        // never blank before anyone has ever set one.
+        //
+        // The generic `defwidget@browser` widget (widgets.json) deliberately
+        // ships NO `meta.url` — it used to bundle this same
+        // "https://agentmux.ai" value directly, which meant `meta.url` was
+        // never empty for the single most common way of opening a browser
+        // pane (the widget bar), so `browserStartPageAtom()` below was dead
+        // code for that path (codex P1, PR #3288). Purpose-specific browser
+        // widgets (Discord/Slack/Telegram/WhatsApp/Teams) keep their own
+        // real `meta.url` — those must always win over a personal start
+        // page, and still do, since `meta.url` is checked first.
+        //
+        // browserStartPageAtom is safe to read synchronously here: it's
+        // derived from fullConfigAtom, which app-init.ts already awaits and
+        // populates before the app renders at all — see
+        // docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.2/§3.3.
         const meta = this.blockAtom()?.meta;
-        const initialUrl = ((meta?.["url"] as string | undefined) ?? "").trim() || DEFAULT_BROWSER_URL;
+        const initialUrl =
+            ((meta?.["url"] as string | undefined) ?? "").trim()
+            || browserStartPageAtom()
+            || DEFAULT_BROWSER_URL;
         // Phase 1A: seed the first tab BEFORE navigate. The reducer's
         // legacy commands (Navigate / LoadStarted / LoadFinished /
         // UrlConfirmed / HistoryUpdated / TitleChanged / FaviconUrlsReceived)

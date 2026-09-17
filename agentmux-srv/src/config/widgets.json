@@ -38,8 +38,7 @@
         "description": "Embedded web browser",
         "blockdef": {
             "meta": {
-                "view": "browser",
-                "url": "https://agentmux.ai"
+                "view": "browser"
             }
         }
     },

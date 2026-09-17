@@ -65,6 +65,16 @@ impl ConfigState {
         new_config.settings = settings;
         *current = Arc::new(new_config);
     }
+
+    /// Update just the browser start page. Mirrors `update_settings` exactly
+    /// — see `backend::browser_start_page` for the load/watch wiring that
+    /// calls this.
+    pub fn update_browser_start_page(&self, url: Option<String>) {
+        let mut current = self.config.write().unwrap();
+        let mut new_config = (**current).clone();
+        new_config.browser_start_page = url;
+        *current = Arc::new(new_config);
+    }
 }
 
 impl Default for ConfigState {

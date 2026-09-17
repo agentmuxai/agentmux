@@ -257,8 +257,18 @@ fn reload_and_broadcast(
 
     config_watcher.update_settings(settings);
     tracing::info!("settings.json reloaded, broadcasting to clients");
+    broadcast_full_config(config_watcher, event_bus);
+}
 
-    // Broadcast updated config to all connected clients (same format as initial config push)
+/// Push the current `FullConfigType` snapshot to every connected client, in
+/// the same wire shape the initial `getfullconfig` RPC response uses.
+///
+/// Factored out of what used to be this file's own `reload_and_broadcast`
+/// tail — the `setconfig` handler (`server/websocket.rs`) duplicated the
+/// same broadcast-construction block verbatim as its own step 4, and
+/// `browser_start_page.rs`'s watcher needs the identical broadcast a third
+/// time. One shared function instead of a third copy.
+pub fn broadcast_full_config(config_watcher: &Arc<ConfigState>, event_bus: &Arc<EventBus>) {
     let config = config_watcher.get_full_config();
     let client_count = event_bus.connection_count();
     if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {

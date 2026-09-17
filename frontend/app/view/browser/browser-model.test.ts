@@ -43,6 +43,7 @@ vi.mock("@/app/store/mos", () => ({
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
+import { setFullConfigAtom } from "@/store/config-signals";
 import { BrowserViewModel } from "./browser-model";
 
 /** Retrieves the handler the model registered for a given event name via
@@ -340,5 +341,33 @@ describe("BrowserViewModel nav-state loading wiring", () => {
             can_go_forward: false,
         });
         expect(vm.loadingAtom()).toBe(true);
+    });
+});
+
+// Every test in this file constructs with a mocked `getMuxObjectAtom` that
+// always returns `{ meta: {} }` (see the module mock above), so `meta.url`
+// is never populated here — these tests exercise only the fallback's other
+// two links: the configured start page, and the hardcoded constant.
+// SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md §3.3.
+describe("BrowserViewModel initial-URL fallback: configured start page", () => {
+    afterEach(() => {
+        // fullConfigAtom is a real, module-level singleton (not mocked) —
+        // reset it so a value set here can't leak into an unrelated test
+        // elsewhere in this file, all of which assume no start page is set.
+        setFullConfigAtom(null);
+    });
+
+    it("navigates to the configured start page when meta.url is empty", () => {
+        setFullConfigAtom({ browserstartpage: "https://start.example" } as never);
+        const vm = new BrowserViewModel("test-block-id", {} as never);
+        expect(vm.urlAtom()).toBe("https://start.example");
+        vm.dispose();
+    });
+
+    it("falls back to DEFAULT_BROWSER_URL when no start page is configured", () => {
+        setFullConfigAtom(null);
+        const vm = new BrowserViewModel("test-block-id", {} as never);
+        expect(vm.urlAtom()).toBe("https://agentmux.ai");
+        vm.dispose();
     });
 });
