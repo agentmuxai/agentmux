@@ -110,8 +110,8 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     // that way, a single-member pane rendered no strip and therefore no
     // "+", so `hasEverBeenMultiMember` could never become true and the
     // whole feature was unreachable. The strip's own visibility rules
-    // (`shouldShowTabStrip` — hidden on a fresh picker pane, "+"-only for
-    // one live conversation, pills once there are 2+) still live inside
+    // ("+"-only for one live conversation, pills once there are 2+; "+" is
+    // always shown, matching every other widget type) still live inside
     // chrome and are unchanged; this only decides whether chrome EXISTS.
     //
     // Latched for the same reason the ViewModel below is: `effectiveViewType()`

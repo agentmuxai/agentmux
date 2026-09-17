@@ -36,7 +36,7 @@ import {
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { BlockService, ObjectService } from "@/app/store/services";
+import { BlockService } from "@/app/store/services";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
@@ -46,11 +46,12 @@ import { ConfirmModal } from "@/element/modal";
 import { useModalLayer } from "@/element/modal-layer";
 import { ModalLayer } from "@/element/ModalLayer";
 import { ErrorBoundary } from "@/element/errorboundary";
+import { openPaneTabWidgetPicker } from "@/element/pane-tab-picker";
 import { computeFocusRingBorderColor } from "@/app/block/blockframe";
+import { blockViewToIcon, blockViewToName, getBlockHeaderIcon } from "@/app/block/blockutil";
 import {
     closeBlockInStack,
     getLayoutModelForStaticTab,
-    pushBlockOntoStack,
     setActiveBlockInStack,
     type NodeModel,
 } from "@/layout/index";
@@ -120,7 +121,6 @@ import { getProvider } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import { createAgentAtoms } from "./state";
-import { shouldShowTabStrip } from "./tab-strip-visibility";
 import type { DocumentNode } from "./types";
 import { useAgentStream } from "./useAgentStream";
 
@@ -477,6 +477,10 @@ export const AgentPaneChrome = (props: {
          *  AgentDefinition, which a history tab must never touch) and
          *  always labeled distinctly from its live sibling tab. */
         isHistoryTab?: boolean;
+        /** Only set for a NON-agent member of this pane's stack (added via
+         *  the generic "+" picker) — agent tabs keep their existing
+         *  no-icon presentation. */
+        icon?: JSX.Element;
     }
     // Rename overrides, keyed by blockId — set synchronously by
     // handleTabRenameConfirm below so a just-renamed tab (including a
@@ -514,6 +518,24 @@ export const AgentPaneChrome = (props: {
         // stack member isn't the active read target — read its
         // last-persisted meta directly, same as term.tsx's termTabs does.
         const meta = id === activeBlockId() ? activeBlockData()?.meta : MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta;
+        const view = meta?.["view"] as string | undefined;
+        // A NON-agent member — this pane's own "+" opens the generic widget
+        // picker now, so an agent pane's stack can hold a sysinfo/browser/…
+        // tab like any other pane's. Label/icon it the way every generic
+        // pane does rather than through the agent-specific
+        // agentName/definitionId path below, which would render a Sysinfo
+        // tab as "New Agent".
+        if (view && view !== "agent") {
+            const genericLabel = (meta?.["frame:title"] as string | undefined) ?? blockViewToName(view);
+            return cachedTab(id, {
+                blockId: id,
+                label: titleOverrides()[id] ?? genericLabel,
+                icon: getBlockHeaderIcon(
+                    (meta?.["frame:icon"] as string | undefined) ?? blockViewToIcon(view),
+                    MOS.getObjectValue<Block>(MOS.makeORef("block", id))
+                ),
+            });
+        }
         const definitionId = meta?.["agentId"] as string | undefined;
         const isHistoryTabFlag = !!meta?.[HISTORY_TAB_FOR_META_KEY];
         if (isHistoryTabFlag) {
@@ -553,17 +575,12 @@ export const AgentPaneChrome = (props: {
     // lone conversation shows just the "+" (no pill for itself). The
     // moment a 2nd tab exists, both (including the first) appear.
     const visibleTabs = createMemo(() => (combinedTabs().length > 1 ? combinedTabs() : []));
-    // Single source of truth for whether the strip renders — read both by
-    // the <Show> that mounts it and by the picker host's strip-clearance
-    // custom property below, so the space reserved for the strip can never
-    // disagree with whether the strip is actually there.
-    const showTabStrip = createMemo(() =>
-        shouldShowTabStrip({
-            visibleTabCount: visibleTabs().length,
-            hasAgent: !!agentId(),
-            isHistoryTab: isHistoryTab(),
-        }),
-    );
+    // Every pane's strip (title + "+") is always shown — agent used to hide
+    // it on a fresh, unlaunched picker pane (tab-strip-visibility.ts,
+    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md), but that made it the
+    // one widget type whose header behaved differently from every other
+    // pane (every GenericPaneChrome-driven type, and term, always show
+    // "+"). Repo-owner-confirmed: agent should be no different.
     // Per-pane zoom for the tab strip itself — mirrors
     // AgentPresentationView's own zoomFactor memo (term:zoom block meta +
     // clamp, further down this file). Simply activeBlockData()?.meta now —
@@ -602,66 +619,6 @@ export const AgentPaneChrome = (props: {
             setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         } else {
             refocusNode(targetBlockId);
-        }
-    };
-    // "+" on the tab strip. Opens a blank agent tab — the same starting-view
-    // picker (`AgentPicker`, "select an existing agent or create a new
-    // one") a brand-new agent pane shows — instead of jumping straight into
-    // the launch/fork modal. Mirrors term.tsx's handleTermTabAdd: allocate
-    // an unplaced block via pane.open (no agentId meta, so this wrapper's
-    // `agentId()` gate falls through to AgentPicker) and push it onto this
-    // pane's own stack. No modal, no implicit fork of the current
-    // conversation.
-    const handleNewAgentTab = async (): Promise<void> => {
-        const initialNode = getOwnNode();
-        if (!initialNode) return;
-        // No leaf reveal gate. It used to hide this pane while the new tab
-        // settled, because pushBlockOntoStack forced a WHOLE-LEAF remount
-        // (chrome included) and the piecemeal repaint of that was the
-        // flicker SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addressed.
-        // That remount no longer happens — pane-leaf-chrome.tsx's inner
-        // <Key> rebuilds only the active member's own <Block>, and this
-        // component (header + strip) stays mounted throughout. Keeping the
-        // gate actively CAUSED the remaining flash the repo owner saw on
-        // "+": gatingNodeIds() hides the whole node, so chrome itself
-        // blinked out and back even though nothing about it was rebuilding.
-        // The content area's own settle is already covered by Block's
-        // ready-gate BrainSpinner cross-fade (block.tsx).
-        try {
-            let paneOpenResult: { block_id: string };
-            try {
-                paneOpenResult = (await TabRpcClient.rpcCall(
-                    "pane.open",
-                    { view: "agent", skip_placement: true, meta: { view: "agent" } },
-                    {}
-                )) as { block_id: string };
-            } catch (e: unknown) {
-                pushNotification({
-                    icon: "fa-triangle-exclamation",
-                    title: "New tab failed",
-                    message: e instanceof Error ? e.message : String(e),
-                    timestamp: new Date().toISOString(),
-                    type: "error",
-                    expiration: Date.now() + 8000,
-                });
-                return;
-            }
-            // This pane could have closed while the RPC above was in flight —
-            // re-resolve the node fresh rather than trusting a pre-await
-            // reference. If it's gone, the skip_placement block we just
-            // created has nowhere to attach to; delete it instead of leaving
-            // an orphaned, unreachable block behind.
-            const node = getOwnNode();
-            if (!node) {
-                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-                return;
-            }
-            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
-        } catch (e: unknown) {
-            // The try/finally this replaced existed only to lift the reveal
-            // gate on every exit path; with no gate to lift, an unexpected
-            // throw would otherwise vanish silently.
-            console.error("handleNewAgentTab failed", e);
         }
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
@@ -755,14 +712,14 @@ export const AgentPaneChrome = (props: {
             vm?.setProgressBarMount?.(null);
         });
     });
-    // Same bridging pattern for the tab-strip-visibility flag AgentBlockContent's
+    // Same bridging pattern for the tab-strip-visible flag AgentBlockContent's
     // picker-host reads for its own strip-clearance padding (see that
     // component's own comment) — chrome and content are separate trees now,
-    // so this can no longer be a plain shared local `showTabStrip()` read.
+    // so this can no longer be a plain shared local read. Always true — see
+    // the strip-visibility comment above.
     createEffect(() => {
         const vm = nodeModel.activeViewModel?.() as AgentViewModel | null;
-        const visible = showTabStrip();
-        vm?.setTabStripVisible?.(visible);
+        vm?.setTabStripVisible?.(true);
         onCleanup(() => {
             vm?.setTabStripVisible?.(false);
         });
@@ -793,8 +750,9 @@ export const AgentPaneChrome = (props: {
                     <span class="pane-tab-label">{t.label}</span>
                 )
             }
-            onAdd={showTabStrip() ? () => void handleNewAgentTab() : undefined}
-            addTitle="New agent"
+            getIcon={(t) => t.icon}
+            onAdd={(e) => e && openPaneTabWidgetPicker(layoutModel, nodeModel.nodeId, e)}
+            addTitle="Add tab"
             nodeModel={nodeModel}
             viewModel={viewModel}
             activeBlockId={activeBlockId}
@@ -855,15 +813,15 @@ export const AgentPaneChrome = (props: {
             {/* Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
                 §4.1) — ONE unified row replaces the old headerElem (full
                 BlockFrame_Header) + separate .agent-pane-stack-content +
-                PaneTabStrip structure. showTabStrip()/visibleTabs() keep
-                their exact pre-existing meaning (SPEC_AGENT_PANE_TAB_STRIP_
-                OVERLAY_2026_08_10.md, tab-strip-visibility.ts) — a lone
-                conversation still shows no self-pill (empty tabs, "+" only);
-                a fresh, unlaunched picker pane still shows neither pills nor
-                "+", just the plain "Agent" identity — this row just always
-                exists as ONE row instead of a full header conditionally
-                topped by a floating strip overlay. Same ErrorBoundary
-                isolation BlockFrame_Default_Component itself uses, so a
+                PaneTabStrip structure. visibleTabs() keeps its exact
+                pre-existing meaning — a lone conversation still shows no
+                self-pill (empty tabs), just the plain "Agent" identity — but
+                "+" is now always shown, even on a fresh/unlaunched picker
+                pane, matching every other pane type (agent no longer has its
+                own tab-strip-visibility gate). This row just always exists
+                as ONE row instead of a full header conditionally topped by a
+                floating strip overlay. Same ErrorBoundary isolation
+                BlockFrame_Default_Component itself uses, so a
                 broken header computation blanks only the header row, not
                 the whole pane. */}
             <ErrorBoundary fallback={renderAgentPaneHeader(null)}>
