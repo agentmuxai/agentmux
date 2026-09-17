@@ -25,6 +25,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { registeredAgentsByBlock, unregisterAgent } from "./termagent";
 import { handleOsc7Command, handleOsc16162Command, handleOscTitleCommand, handleOscMuxCommand } from "./termosc";
 import { markStart, markEnd } from "@/perf";
+import * as wedge from "./parser-wedge";
 import { PredictiveEcho } from "./predictive-echo";
 
 const dlog = debug("wave:termwrap");
@@ -91,6 +92,12 @@ export class TermWrap {
     private toDispose: TermTypes.IDisposable[] = [];
     pasteActive: boolean = false;
     lastUpdated: number;
+    // Liveness of xterm's parser. An uncaught throw inside `parse()` leaves the
+    // terminal mid-state — no render, no input, nothing surfaced. See
+    // ./parser-wedge.ts.
+    private wedge = wedge.newWedgeState(Date.now());
+    private wedgeTimer: ReturnType<typeof setInterval> | null = null;
+
     // Thaw-cycle handles — cleared in dispose() so callbacks don't fire
     // on a disposed Terminal. dispose() doesn't null `this.terminal`, so
     // a null-check guard alone isn't enough.
@@ -361,6 +368,10 @@ export class TermWrap {
         // creates it.
         this.initResyncPromise = this.resyncController("init");
 
+        // Watchdog for a wedged parser. Recovery reuses the same path a crashed
+        // controller takes, so this adds a trigger rather than a mechanism.
+        this.wedgeTimer = setInterval(() => this.checkParserWedge(), 2000);
+
         // One re-fit after first paint to catch any remaining layout shift (slow CSS,
         // late style recalculation, font swap that landed after fonts.ready resolved).
         // If dimensions changed, sendTermSize() issues a SIGWINCH to the PTY so the
@@ -471,6 +482,10 @@ export class TermWrap {
     // ── Phase 3: RUNNING ───────────────────────────────────────────────
 
     dispose() {
+        if (this.wedgeTimer != null) {
+            clearInterval(this.wedgeTimer);
+            this.wedgeTimer = null;
+        }
         this.disposed = true;
         // Cancel pending PSReadLine-thaw callbacks so they don't fire
         // on a disposed Terminal. dispose() doesn't null `this.terminal`
@@ -608,7 +623,9 @@ export class TermWrap {
         let prtn = new Promise<void>((presolve, _) => {
             resolve = presolve;
         });
+        wedge.onWrite(this.wedge, Date.now());
         const settle = () => {
+            wedge.onSettle(this.wedge, Date.now());
             if (setPtyOffset != null) {
                 this.ptyOffset = setPtyOffset;
             } else {
@@ -796,6 +813,38 @@ export class TermWrap {
             termsize: termSize,
         };
         sendWSCommand(wsCommand);
+    }
+
+    /**
+     * Recover a terminal whose parser stopped consuming.
+     *
+     * An uncaught exception inside xterm's `parse()` aborts it mid-chunk and
+     * leaves the pane dead — no render, no input, no error shown. A minifier bug
+     * in xterm 6.0.0's DECRQM handler did exactly that
+     * (docs/retro/retro-xterm-requestmode-minify-freeze-2026-09-17.md). That one
+     * is fixed; this covers the class.
+     *
+     * `terminal.reset()` clears the parser's half-finished state, and the resync
+     * re-reads from the backend, so the scrollback comes back rather than being
+     * lost. Logged loudly: a pane that silently recovers still hides a bug.
+     */
+    private checkParserWedge() {
+        const now = Date.now();
+        if (!wedge.shouldRecover(this.wedge, now)) return;
+        console.error(
+            `[term] parser wedged for block ${this.blockId} — ` +
+            `${this.wedge.pending} write(s) unacknowledged for ` +
+            `${now - this.wedge.lastSettleTs}ms. Resetting and resyncing.`
+        );
+        wedge.markRecovered(this.wedge, now);
+        try {
+            this.terminal.reset();
+        } catch (e) {
+            console.error("[term] reset during wedge recovery failed", e);
+        }
+        this.resyncController("parser-wedge").catch((e) =>
+            console.error("[term] resync during wedge recovery failed", e)
+        );
     }
 
     async resyncController(reason: string) {
