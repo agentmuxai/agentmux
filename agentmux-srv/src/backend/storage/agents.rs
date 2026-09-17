@@ -314,7 +314,8 @@ pub struct InstanceUpdate {
 /// strings on the wire rather than `Option<String>` to match the
 /// existing schema conventions (`NOT NULL DEFAULT ''`). Callers
 /// that need structured absence can use `.is_empty()`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentInstance {
     pub id: String,
     pub definition_id: String,
@@ -328,9 +329,12 @@ pub struct AgentInstance {
     /// JSON-encoded `GitHubContext`, or empty string.
     #[serde(default)]
     pub github_context: String,
+    #[ts(type = "number")]
     pub started_at: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub ended_at: i64,
+    #[ts(type = "number")]
     pub created_at: i64,
     /// Legacy Identity-bundle id column — `db_identity_bundles` was
     /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.

@@ -26,50 +26,52 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Agent instance CRUD ----
 
     let mstore = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_LIST_AGENT_INSTANCES,
-        Box::new(move |data, _ctx| {
+        // `Option<_>` rather than the bare struct, which is what the previous
+        // `unwrap_or_default()` was really buying: both encodings of "no
+        // filter" -- the `{}` the stub sends and the `null` a client that
+        // omits `data` sends -- still mean "no filter". What it no longer
+        // buys is swallowing a MALFORMED filter: `{"status": 5}` used to
+        // return the unfiltered list, which is the wrong answer to give
+        // silently, so it is an error now.
+        move |cmd: Option<CommandListAgentInstancesData>, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandListAgentInstancesData =
-                    serde_json::from_value(data).unwrap_or_default();
+            async move {
+                let cmd = cmd.unwrap_or_default();
                 let rows = mstore
                     .instance_list(cmd.definition_id.as_deref(), cmd.status.as_deref())
                     .map_err(|e| format!("listagentinstances: {e}"))?;
-                Ok(Some(serde_json::to_value(&rows).unwrap_or_default()))
-            })
-        }),
+                Ok(rows)
+            }
+        },
     );
 
     let mstore = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_GET_AGENT_INSTANCE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandGetAgentInstanceData, _ctx| {
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let cmd: CommandGetAgentInstanceData = serde_json::from_value(data)
-                    .map_err(|e| format!("getagentinstance: {e}"))?;
-                match mstore
+            async move {
+                // Not-found stays an Err rather than becoming `Option<..>`:
+                // the stub types this `Promise<AgentInstance>`, so answering
+                // null would be a shape change, not just a typing change.
+                mstore
                     .instance_get(&cmd.id)
                     .map_err(|e| format!("getagentinstance: {e}"))?
-                {
-                    Some(i) => Ok(Some(serde_json::to_value(&i).unwrap_or_default())),
-                    None => Err(format!("getagentinstance: not found id={}", cmd.id)),
-                }
-            })
-        }),
+                    .ok_or_else(|| format!("getagentinstance: not found id={}", cmd.id))
+            }
+        },
     );
 
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_CREATE_AGENT_INSTANCE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandCreateAgentInstanceData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandCreateAgentInstanceData = serde_json::from_value(data)
-                    .map_err(|e| format!("createagentinstance: {e}"))?;
+            async move {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
@@ -155,21 +157,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&created).unwrap_or_default()))
-            })
-        }),
+                Ok(created)
+            }
+        },
     );
 
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_UPDATE_AGENT_INSTANCE,
-        Box::new(move |data, _ctx| {
+        move |cmd: CommandUpdateAgentInstanceData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let cmd: CommandUpdateAgentInstanceData = serde_json::from_value(data)
-                    .map_err(|e| format!("updateagentinstance: {e}"))?;
+            async move {
                 // Partial write — only the fields the command provided.
                 // No fetch-and-merge: this used to `instance_get` the full
                 // row to fill the unspecified fields, which was the sole
@@ -196,9 +196,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&fresh).unwrap_or_default()))
-            })
-        }),
+                Ok(fresh)
+            }
+        },
     );
 
     let mstore = state.mstore.clone();
@@ -254,6 +254,92 @@ mod tests {
     /// `deleteagentinstance` is recorded in the engine's schema with its
     /// exact type names — the property the RPC codegen plan depends on.
     /// `DeleteAgentInstanceResult` didn't exist before this migration; the
+    /// The four CRUD commands record their request and response types, so the
+    /// whole of instance.rs is now in the registry rather than one command of
+    /// five. A command that falls back to `register_handler` disappears from
+    /// here rather than being recorded wrong.
+    #[tokio::test]
+    async fn register_typed_records_the_four_instance_crud_commands() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
+        };
+
+        for (cmd, resp) in [
+            (crate::backend::rpc_types::COMMAND_GET_AGENT_INSTANCE, "AgentInstance"),
+            (crate::backend::rpc_types::COMMAND_CREATE_AGENT_INSTANCE, "AgentInstance"),
+            (crate::backend::rpc_types::COMMAND_UPDATE_AGENT_INSTANCE, "AgentInstance"),
+        ] {
+            assert_eq!(find(cmd)["responseName"], resp, "{cmd} response");
+        }
+        let list = find(crate::backend::rpc_types::COMMAND_LIST_AGENT_INSTANCES);
+        let list_resp = list["responseName"].as_str().unwrap();
+        assert!(
+            list_resp.starts_with("alloc::vec::Vec<") && list_resp.contains("AgentInstance"),
+            "listagentinstances should answer Vec<AgentInstance>, got {list_resp:?}",
+        );
+    }
+
+    /// `listagentinstances` used to `unwrap_or_default()` its payload. That
+    /// bought two different things, and only one of them was wanted.
+    ///
+    /// Wanted: both encodings of "no filter" work -- the `{}` the stub sends
+    /// and the `null` a client that omits `data` sends. `Option<Req>` keeps
+    /// that.
+    ///
+    /// Not wanted: a MALFORMED filter silently became "no filter", so
+    /// `{"status": 5}` returned every row instead of erroring. Answering an
+    /// unfiltered list to a request whose filter failed to parse is the wrong
+    /// answer to give quietly, so it is an error now. This test pins both
+    /// halves so the change is visible rather than incidental.
+    #[tokio::test]
+    async fn listagentinstances_accepts_no_filter_but_rejects_a_malformed_one() {
+        let state = crate::server::tests::test_state();
+        let (engine, mut rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        let call = |payload: serde_json::Value, reqid: &str| {
+            engine.handle_message(crate::backend::rpc_types::RpcMessage {
+                command: crate::backend::rpc_types::COMMAND_LIST_AGENT_INSTANCES.to_string(),
+                reqid: reqid.to_string(),
+                data: Some(payload),
+                ..Default::default()
+            });
+        };
+
+        for (i, payload) in [serde_json::json!({}), serde_json::Value::Null]
+            .into_iter()
+            .enumerate()
+        {
+            call(payload.clone(), &format!("ok-{i}"));
+            let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                resp.error.is_empty(),
+                "{payload} means no filter and must be accepted, got {:?}",
+                resp.error,
+            );
+        }
+
+        call(serde_json::json!({ "status": 5 }), "bad");
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !resp.error.is_empty(),
+            "a malformed filter must not be silently answered with the unfiltered list",
+        );
+    }
+
     /// handler used to answer with an anonymous `json!({"deleted": ..})`.
     #[tokio::test]
     async fn register_typed_records_deleteagentinstance() {
@@ -268,9 +354,13 @@ mod tests {
             .expect("deleteagentinstance missing from the schema");
         assert_eq!(row["requestName"], "CommandDeleteAgentInstanceData");
         assert_eq!(row["responseName"], "DeleteAgentInstanceResult");
-        // The other four instance commands are deliberately NOT migrated —
-        // their responses are the storage-level AgentInstance entity, out
-        // of scope for this batch — and must stay absent from the schema.
+        // The other four instance commands waited for the storage-level
+        // `AgentInstance` entity to be generated, which it now is, so they are
+        // present rather than absent. The property being asserted is the same
+        // one, with the opposite sign --
+        // `register_typed_records_the_four_instance_crud_commands` covers
+        // their exact types; here just assert instance.rs has nothing left
+        // outside the registry.
         for cmd in [
             COMMAND_LIST_AGENT_INSTANCES,
             COMMAND_GET_AGENT_INSTANCE,
@@ -278,8 +368,8 @@ mod tests {
             COMMAND_UPDATE_AGENT_INSTANCE,
         ] {
             assert!(
-                rows.iter().all(|r| r["command"] != cmd),
-                "{cmd} is not migrated and must not appear in the schema",
+                rows.iter().any(|r| r["command"] == cmd),
+                "{cmd} is migrated and must appear in the schema",
             );
         }
     }

@@ -6,6 +6,32 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The agent-instance shapes are GENERATED from their Rust definitions by
+// ts-rs. This covers agent_handlers/instance.rs.
+export type { AgentInstance } from "@/types/rpc/AgentInstance";
+export type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
+export type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
+export type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
+export type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
+
+import type { AgentInstance } from "@/types/rpc/AgentInstance";
+import type { CommandCreateAgentInstanceData } from "@/types/rpc/CommandCreateAgentInstanceData";
+import type { CommandGetAgentInstanceData } from "@/types/rpc/CommandGetAgentInstanceData";
+import type { CommandListAgentInstancesData } from "@/types/rpc/CommandListAgentInstancesData";
+import type { CommandUpdateAgentInstanceData } from "@/types/rpc/CommandUpdateAgentInstanceData";
+
+/**
+ * What a `createagentinstance` caller may send.
+ *
+ * Every field but `definition_id` is `#[serde(default)]` on a non-`Option`
+ * Rust field, so the server accepts them missing -- which ts-rs can only
+ * express for `Option<T>`, so the generated type calls them all required.
+ * Deriving keeps the field names and types authoritative while restoring the
+ * optionality. Same pattern as `BundleUpsertInput`.
+ */
+export type CreateAgentInstanceInput = Pick<CommandCreateAgentInstanceData, "definition_id"> &
+    Partial<Omit<CommandCreateAgentInstanceData, "definition_id">>;
+
 // The Drone pane's wire types are GENERATED from their Rust definitions by
 // ts-rs (agentmux-srv/src/drone/types.rs + server/drone_handlers.rs).
 export type { DroneBlockState } from "@/types/rpc/DroneBlockState";
@@ -344,7 +370,7 @@ export const AgentApi = {
 
     ListAgentInstancesCommand(
         client: RpcClient,
-        data: { definition_id?: string; status?: string } = {},
+        data: CommandListAgentInstancesData = {},
         opts?: RpcOpts,
     ): Promise<AgentInstance[]> {
         return client.rpcCall("listagentinstances", data, opts);
@@ -352,7 +378,7 @@ export const AgentApi = {
 
     GetAgentInstanceCommand(
         client: RpcClient,
-        data: { id: string },
+        data: CommandGetAgentInstanceData,
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
         return client.rpcCall("getagentinstance", data, opts);
@@ -360,22 +386,9 @@ export const AgentApi = {
 
     CreateAgentInstanceCommand(
         client: RpcClient,
-        data: {
-            definition_id: string;
-            block_id?: string;
-            parent_instance_id?: string;
-            /** v7 — Identity bundle FK. Empty = blank singleton (no creds override). */
-            identity_id?: string;
-            /** v7 — Memory bundle FK. Empty = blank singleton. */
-            memory_id?: string;
-            /** v8 — user-chosen instance name; powers the launch modal's
-             * "Continue agent" dropdown. Empty = un-named. */
-            instance_name?: string;
-            /** v8 — resolved absolute working directory from
-             * `WriteAgentConfigCommand`. Stored on the row so the
-             * continue flow can reuse it. */
-            working_directory?: string;
-        },
+        // The per-field notes that used to live here are now doc comments on
+        // the Rust fields, and ts-rs carries them into the generated type.
+        data: CreateAgentInstanceInput,
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
         return client.rpcCall("createagentinstance", data, opts);
@@ -384,14 +397,7 @@ export const AgentApi = {
     // PATCH semantics — absent fields preserve current value.
     UpdateAgentInstanceCommand(
         client: RpcClient,
-        data: {
-            id: string;
-            block_id?: string;
-            session_id?: string;
-            status?: string;
-            github_context?: string;
-            ended_at?: number;
-        },
+        data: CommandUpdateAgentInstanceData,
         opts?: RpcOpts,
     ): Promise<AgentInstance> {
         return client.rpcCall("updateagentinstance", data, opts);
