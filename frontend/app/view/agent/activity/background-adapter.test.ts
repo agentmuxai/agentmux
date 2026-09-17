@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { backgroundTaskActivities, backgroundTaskToActivity } from "./background-adapter";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 function task(overrides: Partial<BackgroundTaskView> = {}): BackgroundTaskView {
     return {

@@ -56,6 +56,7 @@ import { useResumeRetryStream } from "./hooks/useResumeRetryStream";
 import { useBackgroundTaskRegistry } from "./hooks/useBackgroundTaskRegistry";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 const OutputFileName = "output";
 

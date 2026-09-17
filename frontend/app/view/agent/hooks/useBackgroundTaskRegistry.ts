@@ -60,6 +60,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { addWSReconnectHandler } from "@/app/store/ws";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 export interface UseBackgroundTaskRegistryOptions {
     blockId: string;
