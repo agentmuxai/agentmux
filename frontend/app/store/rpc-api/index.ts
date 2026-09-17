@@ -30,6 +30,16 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    BlockfileLineCountResult,
+    BlockfileReadRangeResult,
+    BlockfileReadStateResult,
+    BlockfileWriteStateResult,
+    CommandBlockfileLineCountData,
+    CommandBlockfileReadRangeData,
+    CommandBlockfileReadStateData,
+    CommandBlockfileWriteStateData,
+} from "./block";
+export type {
     Bundle,
     BundleUpsertInput,
     BundleValidateInput,
