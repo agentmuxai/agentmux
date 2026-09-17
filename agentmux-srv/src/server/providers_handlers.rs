@@ -18,32 +18,29 @@ use crate::backend::rpc::engine::WshRpcEngine;
 
 use super::AppState;
 
-#[derive(serde::Deserialize)]
-struct ProvidersModelsParams {
-    provider_id: String,
+#[derive(serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ProvidersModelsParams {
+    pub provider_id: String,
 }
 
-#[derive(serde::Serialize)]
-struct ProvidersModelsResult {
+#[derive(serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ProvidersModelsResult {
     /// `CatalogModel` serializes to `{ id, display_name }`.
-    models: Vec<CatalogModel>,
+    pub models: Vec<CatalogModel>,
 }
 
-fn empty_result() -> Result<Option<serde_json::Value>, String> {
-    serde_json::to_value(ProvidersModelsResult { models: vec![] })
-        .map(Some)
-        .map_err(|e| format!("serialize: {e}"))
+fn empty_result() -> Result<ProvidersModelsResult, String> {
+    Ok(ProvidersModelsResult { models: vec![] })
 }
 
 pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     // providers.models → authoritative model list for a provider (Claude only
     // today). Reads the account-global OAuth token and hits GET /v1/models.
-    engine.register_handler(
+    engine.register_typed(
         "providers.models",
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let params: ProvidersModelsParams = serde_json::from_value(data)
-                    .map_err(|e| format!("providers.models: {e}"))?;
+        move |params: ProvidersModelsParams, _ctx| async move {
 
                 // Only Claude exposes an authoritative Models API; others fall
                 // back to the frontend's static catalog.
@@ -87,10 +84,7 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                 };
 
                 let models = fetch_model_catalog(&token).await.unwrap_or_default();
-                serde_json::to_value(ProvidersModelsResult { models })
-                    .map(Some)
-                    .map_err(|e| format!("serialize: {e}"))
-            })
-        }),
+                Ok(ProvidersModelsResult { models })
+        },
     );
 }
