@@ -14,7 +14,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { Logger } from "@/util/logger";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
-import type { IdentityAccount } from "@/app/store/rpc-api";
+import type { AgentDefinition, IdentityAccount } from "@/app/store/rpc-api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

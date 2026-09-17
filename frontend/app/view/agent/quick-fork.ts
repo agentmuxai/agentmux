@@ -38,6 +38,7 @@ import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { Logger } from "@/util/logger";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 /** Block-meta key the non-Claude fallback banner (`ForkProviderFallbackBanner`,
  *  `agent-view.tsx`) reads. Set once, after a fork lands, when the

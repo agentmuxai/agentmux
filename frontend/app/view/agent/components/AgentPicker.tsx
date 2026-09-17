@@ -52,6 +52,7 @@ import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small

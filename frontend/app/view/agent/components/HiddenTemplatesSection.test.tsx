@@ -33,6 +33,7 @@ vi.mock("@/element/ProviderLogo", () => ({
 }));
 
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 

@@ -45,6 +45,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { ProviderLogo } from "@/element/ProviderLogo";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 export const HiddenTemplatesSection = (): JSX.Element => {
     const [hidden, setHidden] = createSignal<AgentDefinition[]>([]);

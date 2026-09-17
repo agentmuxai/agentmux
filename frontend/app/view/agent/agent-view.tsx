@@ -109,6 +109,7 @@ import { useInSessionSearch } from "./hooks/useInSessionSearch";
 import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
 import { useProcessCount } from "./hooks/useProcessCount";
 import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { injectHistoryLink } from "./inject-history-link";

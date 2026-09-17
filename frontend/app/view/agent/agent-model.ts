@@ -29,6 +29,7 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
+import type { AgentContent, AgentDefinition } from "@/app/store/rpc-api";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";

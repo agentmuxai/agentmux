@@ -281,9 +281,11 @@ pub struct AgentKillResult {
 /// unhiding; the picker proper omits the flag and gets the filtered
 /// default. `include_hidden` only affects templates — user-owned rows
 /// never set `user_hidden`, so the flag is a no-op for them.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandListAgentDefinitionsData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number | null")]
     pub is_seeded: Option<i64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_hidden: bool,
@@ -384,7 +386,8 @@ pub struct AgentDefHideResult {
 }
 
 /// Input for createagent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandCreateAgentDefinitionData {
     pub name: String,
     #[serde(default = "default_agent_icon")]
@@ -399,10 +402,13 @@ pub struct CommandCreateAgentDefinitionData {
     #[serde(default)]
     pub provider_flags: String,
     #[serde(default)]
+    #[ts(type = "number")]
     pub auto_start: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub restart_on_crash: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub idle_timeout_minutes: i64,
     #[serde(default = "default_agent_type")]
     pub agent_type: String,
@@ -425,7 +431,8 @@ fn default_agent_icon() -> String {
 }
 
 /// Input for updateagent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandUpdateAgentDefinitionData {
     pub id: String,
     pub name: String,
@@ -440,10 +447,13 @@ pub struct CommandUpdateAgentDefinitionData {
     #[serde(default)]
     pub provider_flags: String,
     #[serde(default)]
+    #[ts(type = "number")]
     pub auto_start: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub restart_on_crash: i64,
     #[serde(default)]
+    #[ts(type = "number")]
     pub idle_timeout_minutes: i64,
     #[serde(default = "default_agent_type")]
     pub agent_type: String,
@@ -466,6 +476,7 @@ pub struct CommandUpdateAgentDefinitionData {
     /// the stored value — callers that only edit name/icon/accounts don't
     /// carry it. SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub use_ambient_login: Option<i64>,
     /// Per-agent opt-in letting a Warden Supervisor watcher agent
     /// auto-continue this agent's session on turn-end (0/1). `None`
@@ -474,6 +485,7 @@ pub struct CommandUpdateAgentDefinitionData {
     /// Supervisor panel. See
     /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub auto_continue_enabled: Option<i64>,
     /// Custom model vendor base URL override — see
     /// `AgentDefinition.model_vendor_base_url`. `None` (omitted) preserves
@@ -487,20 +499,23 @@ pub struct CommandUpdateAgentDefinitionData {
 }
 
 /// Input for deleteagent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandDeleteAgentDefinitionData {
     pub id: String,
 }
 
 /// Input for getagentcontent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandGetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
 }
 
 /// Input for setagentcontent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandSetAgentContentData {
     pub agent_id: String,
     pub content_type: String,
@@ -508,7 +523,8 @@ pub struct CommandSetAgentContentData {
 }
 
 /// Input for getallagentcontent
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandGetAllAgentContentData {
     pub agent_id: String,
 }
@@ -598,19 +614,22 @@ pub struct CommandSearchAgentHistoryData {
 // ---- Agent Import command data types ----
 
 /// Input for importagentfromclaw
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandImportAgentFromClawData {
     pub workspace_path: String,
     pub agent_name: String,
 }
 
 /// Input for importagents
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandImportAgentDefinitionsData {
     pub agents: Vec<AgentDefinitionImport>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentDefinitionImport {
     pub id: String,
     pub name: String,
@@ -627,7 +646,8 @@ pub struct AgentDefinitionImport {
     pub skills: Vec<AgentSkillImport>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentSkillImport {
     pub name: String,
     pub trigger: String,
@@ -636,7 +656,8 @@ pub struct AgentSkillImport {
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct ImportAgentDefinitionsResult {
     pub imported: Vec<String>,
     pub skipped: Vec<String>,
@@ -707,4 +728,49 @@ pub struct ForkAgentDefinitionSuggestResult {
 pub struct CommandRenameAgentDefinitionTitleData {
     pub id: String,
     pub title: String,
+}
+
+/// Requests for the three payload-ignoring agent commands
+/// (`containerruntimeavailable`, `reseedagents`, `exportagents`).
+///
+/// Structs rather than `()`: the stub calls each with no argument, which the
+/// RPC client sends as `{}`, and serde deserializes `()` only from JSON
+/// `null` -- a unit Req would reject every real call while compiling and
+/// passing every CI gate (the `bookmarks.list` bug).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandContainerRuntimeAvailableData {}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandReseedAgentsData {}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandExportAgentsData {}
+
+/// Result of `containerruntimeavailable`. Was an inline
+/// `json!({ "available": .. })`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ContainerRuntimeAvailableResult {
+    pub available: bool,
+}
+
+/// Result of `reseedagents`. Was an inline
+/// `json!({ "deleted": .., "created": .., "skipped": .. })`.
+///
+/// The hand-written stub typed this command `Promise<void>`, so the counts the
+/// server already returns were invisible to the frontend. Surfacing them rather
+/// than dropping them: whether the UI uses them is a product question, but the
+/// binding should say what the wire carries.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ReseedAgentsResult {
+    #[ts(type = "number")]
+    pub deleted: usize,
+    #[ts(type = "number")]
+    pub created: usize,
+    #[ts(type = "number")]
+    pub skipped: usize,
 }

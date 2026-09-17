@@ -17,6 +17,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 vi.mock("@/app/store/rpc-api", () => {
     const RpcApi = {

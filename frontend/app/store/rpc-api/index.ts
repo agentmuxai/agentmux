@@ -30,6 +30,29 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    AgentContent,
+    AgentDefinition,
+    AgentDefinitionCreateInput,
+    AgentDefinitionUpdateInput,
+    AgentDefinitionImport,
+    AgentSkillImport,
+    CommandContainerRuntimeAvailableData,
+    CommandCreateAgentDefinitionData,
+    CommandDeleteAgentDefinitionData,
+    CommandExportAgentsData,
+    CommandGetAgentContentData,
+    CommandGetAllAgentContentData,
+    CommandImportAgentDefinitionsData,
+    CommandImportAgentFromClawData,
+    CommandListAgentDefinitionsData,
+    CommandReseedAgentsData,
+    CommandSetAgentContentData,
+    CommandUpdateAgentDefinitionData,
+    ContainerRuntimeAvailableResult,
+    ImportAgentDefinitionsResult,
+    ReseedAgentsResult,
+} from "./agent";
+export type {
     AgentDefinitionIdentity,
     AgentIdentityLink,
     IdentityAccount,

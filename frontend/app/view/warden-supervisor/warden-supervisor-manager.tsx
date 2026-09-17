@@ -25,6 +25,7 @@ import { fetchWardenAudit, type AuditEntry } from "@/app/view/warden-audit/warde
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-supervisor-manager.scss";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 export const WardenSupervisorManager = (): JSX.Element => {
     const [agents, setAgents] = createSignal<AgentDefinition[]>([]);

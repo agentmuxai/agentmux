@@ -16,6 +16,7 @@ import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { SystemToolInstallInline } from "@/app/view/toolchain/SystemToolInstallInline";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 interface ResolvedInstallInfo {
     commandPreview: string;

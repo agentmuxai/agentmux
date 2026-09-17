@@ -25,6 +25,7 @@ import {
     PROVIDER_LABELS,
 } from "@/app/view/identity/identity-model";
 import { MuxBusConnectSection } from "@/app/view/accounts/AgentMuxConnectPanel";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 const ALL_PROVIDERS: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom"];
 

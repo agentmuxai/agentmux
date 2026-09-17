@@ -30,6 +30,7 @@ import { AuthFlowController } from "../auth";
 import { refreshAccountCache, subscribeAccountChanges } from "@/app/view/identity/identity-model";
 import { useContinueOrNewMode } from "../hooks/useContinueOrNewMode";
 import { useLaunchAuthGate } from "../hooks/useLaunchAuthGate";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to

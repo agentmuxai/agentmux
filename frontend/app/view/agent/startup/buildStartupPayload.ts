@@ -12,6 +12,7 @@
  */
 
 import type { AccountProvider } from "@/app/view/identity/identity-model";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

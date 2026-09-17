@@ -35,6 +35,7 @@ vi.mock("@/app/store/global", () => ({
 import { checkNodejsForProvider, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig } from "./agent-launch-env";
 import { DEFAULT_RUNTIME_CONFIG } from "./types";
 import type { ProviderModel } from "./providers/types";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 function agentWith(provider: string, memory_id: string): AgentDefinition {
     return { id: "a1", provider, memory_id } as AgentDefinition;
