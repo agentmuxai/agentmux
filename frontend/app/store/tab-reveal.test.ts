@@ -59,14 +59,16 @@ describe("tab-reveal gate", () => {
 
     test("holdRevealGate raises the gate", () => {
         expect(read(tabSwitching)).toBe(false);
-        holdRevealGate();
+        holdRevealGate("tab-x");
         expect(read(tabSwitching)).toBe(true);
     });
 
     // Destination-targeted gate (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
-    // a targeted hold records which tab should hide; an untargeted hold
-    // records null (legacy hide-current-active); every lift path clears
-    // the target so a stale target can't leak into the next transition.
+    // every hold records which tab should hide — no untargeted form
+    // exists anymore (SPEC_TAB_CREATION_REVEAL_ARCHITECTURE_2026_09_16.md
+    // retired it; createTab no longer holds this gate at all until its
+    // destination's content already exists). Every lift path clears the
+    // target so a stale target can't leak into the next transition.
     test("holdRevealGate records the destination target and lifting clears it", () => {
         holdRevealGate("tab-dest");
         expect(read(gateTargetTabId)).toBe("tab-dest");
@@ -77,11 +79,11 @@ describe("tab-reveal gate", () => {
         expect(read(gateTargetTabId)).toBe(null);
     });
 
-    test("untargeted holdRevealGate resets a stale target from a prior hold", () => {
+    test("a new holdRevealGate call replaces a stale target from a prior hold", () => {
         holdRevealGate("tab-a");
         expect(read(gateTargetTabId)).toBe("tab-a");
-        holdRevealGate();
-        expect(read(gateTargetTabId)).toBe(null);
+        holdRevealGate("tab-b");
+        expect(read(gateTargetTabId)).toBe("tab-b");
         expect(read(tabSwitching)).toBe(true);
     });
 
@@ -98,7 +100,7 @@ describe("tab-reveal gate", () => {
         // firing. Under the old code (scheduleRevealLift before await),
         // the fallback timer would lift the gate after 80ms even
         // though the destination tab had not yet mounted.
-        holdRevealGate();
+        holdRevealGate("tab-x");
         vi.advanceTimersByTime(500); // way past SETTLE_MS, still under MAX_GATE_MS
         expect(read(tabSwitching)).toBe(true);
     });
@@ -110,13 +112,13 @@ describe("tab-reveal gate", () => {
         // window blank indefinitely. The safety net inside
         // holdRevealGate prevents this — gate auto-lifts at the hard
         // cap even with no paired schedule.
-        holdRevealGate();
+        holdRevealGate("tab-x");
         vi.advanceTimersByTime(900); // past MAX_GATE_MS=800
         expect(read(tabSwitching)).toBe(false);
     });
 
     test("scheduleRevealLift after holdRevealGate eventually lifts via fallback", () => {
-        holdRevealGate();
+        holdRevealGate("tab-x");
         vi.advanceTimersByTime(500);
         expect(read(tabSwitching)).toBe(true);
         // Pair the hold with a schedule once the simulated async work
@@ -141,7 +143,7 @@ describe("tab-reveal gate", () => {
         // Get well into the original fallback window, then re-enter
         // via holdRevealGate.
         vi.advanceTimersByTime(400);
-        holdRevealGate();
+        holdRevealGate("tab-x");
         // Past where the prior schedule's MAX_GATE_MS would have fired
         // (800ms from the schedule call, i.e. 400ms after the hold).
         // Stay under the hold's OWN safety net so we're verifying the
@@ -154,13 +156,13 @@ describe("tab-reveal gate", () => {
         // setActiveTab spam case: each call holds, awaits, then
         // schedules. A subsequent call must re-hold before the prior
         // call's schedule fallback timer fires.
-        holdRevealGate();
+        holdRevealGate("tab-x");
         vi.advanceTimersByTime(30);
         scheduleRevealLift();
         // Well within MAX_GATE_MS, so the gate is still up.
         vi.advanceTimersByTime(400);
         expect(read(tabSwitching)).toBe(true);
-        holdRevealGate();
+        holdRevealGate("tab-x");
         // Past where the prior schedule's fallback would have fired,
         // but under the hold's own safety net.
         vi.advanceTimersByTime(500);
@@ -265,7 +267,7 @@ describe("tab-reveal leaf-scoped gate", () => {
         // re-held at t=700 to push its own window past the point where
         // the tab gate is checked, proving one lifting doesn't touch the
         // other (rather than both coincidentally expiring together).
-        holdRevealGate();
+        holdRevealGate("tab-x");
         holdLeafRevealGate("node-a");
         expect(read(tabSwitching)).toBe(true);
         expect(read(gatingNodeIds).has("node-a")).toBe(true);
