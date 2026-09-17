@@ -164,4 +164,11 @@ fi
 mkdir -p "$STAGING_ROOT/usr/share/agentmux"
 echo "$VERSION" > "$STAGING_ROOT/usr/share/agentmux/VERSION"
 
+# --- 6c. CHANNEL marker — read by AppRun to compute the same
+#         agentmux-<channel>-<version> app_id/WM_CLASS the compiled binary
+#         advertises to the window manager (window_settings.rs::linux_app_id()),
+#         so the .desktop file AppRun installs actually matches the running
+#         window. Falls back to "stable", same as the Rust-side default. ---
+echo "${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}" > "$STAGING_ROOT/usr/share/agentmux/CHANNEL"
+
 echo "✓ Staged runtime at $STAGING_ROOT/usr/bin"

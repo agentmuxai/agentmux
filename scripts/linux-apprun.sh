@@ -19,9 +19,13 @@
 #     docs/specs/linux-appimage-cold-launch-tax-2026-05-08.md (Phase 2).
 #
 #   - Icon / desktop registration: the agentmux-cef binary sets
-#     xdg_toplevel.app_id="agentmux"; this script registers a matching
-#     ~/.local/share/applications/agentmux.desktop via
-#     install-linux-desktop.sh.
+#     xdg_toplevel.app_id="agentmux-<channel>-<version>" (see
+#     window_settings.rs::linux_app_id()); this script computes the same
+#     string from the CHANNEL/VERSION markers staged alongside the binary
+#     and registers a matching ~/.local/share/applications/<app_id>.desktop
+#     via install-linux-desktop.sh. One file per app_id keeps two
+#     differently-versioned/channeled instances from overwriting each
+#     other's desktop entry (and thus dock icon).
 set -e
 this_dir="$(readlink -f "$(dirname "$0")")"
 
@@ -39,7 +43,12 @@ this_dir="$(readlink -f "$(dirname "$0")")"
 run_normally() {
     export APPDIR="$this_dir"
     if [ -n "$APPIMAGE" ] && [ -x "$this_dir/install-linux-desktop.sh" ]; then
-        bash "$this_dir/install-linux-desktop.sh" "$APPIMAGE" || true
+        # Same resolution order as agentmux_common::DataPaths for
+        # Installed/Portable modes: an explicit AGENTMUX_CHANNEL override
+        # wins, else the channel baked into this build at compile time.
+        CHANNEL="${AGENTMUX_CHANNEL:-$(cat "$this_dir/usr/share/agentmux/CHANNEL" 2>/dev/null || echo stable)}"
+        APP_ID="agentmux-${CHANNEL}-${VERSION}"
+        bash "$this_dir/install-linux-desktop.sh" "$APPIMAGE" "$APP_ID" || true
     fi
     # libcef.so + EGL/GLESv2 sit in usr/bin alongside agentmux-cef. Binary
     # is built without RPATH so we set LD_LIBRARY_PATH explicitly.
