@@ -105,7 +105,14 @@ vi.mock("../providers", () => ({
         if (id === "codex") {
             return {
                 id: "codex",
-                npmPackage: ["@openai/codex-cli"],
+                // A string, matching ProviderDefinition (`npmPackage: string`,
+                // providers/types.ts). This was an ARRAY until #3350 — which
+                // nothing caught, because the only consumer was
+                // `!prov.npmPackage || prov.npmPackage.length === 0` and both
+                // a 1-element array and a non-empty string satisfy that
+                // identically. The moment the value was passed through to an
+                // RPC rather than just length-checked, the lie surfaced.
+                npmPackage: "@openai/codex-cli",
                 cliCommand: "codex",
                 systemPrereqs: [{ tool: "git", label: "Git", installUrls: {}, installLinkText: {} }],
             };
