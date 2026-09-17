@@ -52,7 +52,7 @@
  * -----------------
  * The frontend `EventPublishCommand` RPC has no srv handler (the srv
  * only registers `eventsub` / `eventunsub` / `eventreadhistory`). The
- * auth-gated HTTP endpoint `POST /agentmux/mps/publish` *does* forward
+ * auth-gated HTTP endpoint `POST /agentmux/wps/publish` *does* forward
  * arbitrary `{event, scopes, persist, data}` to the broker — that is the
  * publish path `agentmux-bashwrap` uses, and the one we use here.
  */
@@ -175,7 +175,7 @@ async function publishClaim(payload: ClaimPayload): Promise<void> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (key) headers["X-AuthKey"] = key;
     try {
-        const resp = await fetch(getWebServerEndpoint() + "/agentmux/mps/publish", {
+        const resp = await fetch(getWebServerEndpoint() + "/agentmux/wps/publish", {
             method: "POST",
             headers,
             body: JSON.stringify({
