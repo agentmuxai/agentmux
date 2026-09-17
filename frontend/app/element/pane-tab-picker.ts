@@ -27,7 +27,16 @@ import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { addWidgetAsPaneTab } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 
-export function openPaneTabWidgetPicker(model: LayoutModel, nodeId: string, e: MouseEvent): void {
+export function openPaneTabWidgetPicker(
+    model: LayoutModel,
+    nodeId: string,
+    e: MouseEvent,
+    /** The destination pane's own `PaneChromeModel.newTabParams`, if it has
+     *  one — see that field's doc comment. Passed in rather than read here
+     *  so this stays a pure "open picker, add what's picked" helper with no
+     *  knowledge of any view type. */
+    newTabParams?: (view: string | undefined) => Record<string, unknown> | undefined
+): void {
     const wmap = atoms.fullConfigAtom()?.widgets ?? {};
     const settings = atoms.fullConfigAtom()?.settings ?? {};
     const items = buildPaneWidgetMenuItems(wmap, settings, (blockDef) => {
@@ -35,7 +44,8 @@ export function openPaneTabWidgetPicker(model: LayoutModel, nodeId: string, e: M
         // pane's own former "+") already did this for a failed `pane.open`,
         // and folding it in here means the eight other pane types that
         // previously failed silently get the same feedback.
-        void addWidgetAsPaneTab(model, nodeId, blockDef).catch((err: unknown) => {
+        const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"] as string | undefined;
+        void addWidgetAsPaneTab(model, nodeId, blockDef, newTabParams?.(view)).catch((err: unknown) => {
             pushNotification({
                 icon: "fa-triangle-exclamation",
                 title: "New tab failed",

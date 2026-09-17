@@ -75,11 +75,21 @@ function setActive(data: TabLayoutData, blockId: string, stack: string[]): void 
  * leaving an orphaned, unreachable block behind (same race agent's handler
  * already guards).
  */
-export async function addWidgetAsPaneTab(model: LayoutModel, nodeId: string, blockDef: BlockDef): Promise<void> {
+export async function addWidgetAsPaneTab(
+    model: LayoutModel,
+    nodeId: string,
+    blockDef: BlockDef,
+    /** Extra `pane.open` params the destination pane contributes — context
+     *  carried from the tab you were on into the one being created (today:
+     *  terminal's `cwd`, so a new shell starts where the current one is).
+     *  Supplied by the pane's own `PaneChromeModel.newTabParams`; the
+     *  picker itself stays view-agnostic. */
+    extraParams?: Record<string, unknown>
+): Promise<void> {
     const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"];
     const paneOpenResult = (await TabRpcClient.rpcCall(
         "pane.open",
-        { view, skip_placement: true, meta: blockDef.meta },
+        { view, skip_placement: true, meta: blockDef.meta, ...(extraParams ?? {}) },
         {}
     )) as { block_id: string };
     const node = findNode(model.treeState.rootNode, nodeId);

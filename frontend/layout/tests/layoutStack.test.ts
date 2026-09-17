@@ -667,6 +667,34 @@ describe("addWidgetAsPaneTab", () => {
         expect(data.activeBlockId).toBe("b2");
     });
 
+    it("forwards a destination pane's extra params (terminal's cwd) into pane.open", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        await addWidgetAsPaneTab(model, nodeId, { meta: { view: "term" } } as BlockDef, { cwd: "/tmp/here" });
+
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            { view: "term", skip_placement: true, meta: { view: "term" }, cwd: "/tmp/here" },
+            {}
+        );
+    });
+
+    it("omits extra params entirely when the pane contributes none", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        await addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef, undefined);
+
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            { view: "browser", skip_placement: true, meta: { view: "browser" } },
+            {}
+        );
+    });
+
     it("deletes the orphaned block and does not throw if the target node vanished while the RPC was in flight", async () => {
         const model = createLayoutModel();
         const nodeId = insertRootBlock(model, "b1");
