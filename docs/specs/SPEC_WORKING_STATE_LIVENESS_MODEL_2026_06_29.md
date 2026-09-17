@@ -1,5 +1,8 @@
 # SPEC: "Working…" State — Liveness Model (rethink, not rewrite)
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-06-29
 **Status:** Design note — for review before any code
 **Author:** AgentX

@@ -1,5 +1,8 @@
 # Retro: Activity Dock rows still show-then-disappear on pane reopen after the debounce fix
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-08-24
 **Reported by:** repo owner, on `0.55.23` — "the docked items still show, then
 disappear... it should be the pulsating brain until everything is ready."

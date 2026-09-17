@@ -1,5 +1,8 @@
 # SPEC — `muxspect dock`: diagnose and clear stuck Activity Dock entries
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-08-06
 **Type:** Extension to an existing tool (`muxspect`) — adds its first mutating command
 **Trigger:** Live debugging session, tonight — a Bash tool call was rejected by

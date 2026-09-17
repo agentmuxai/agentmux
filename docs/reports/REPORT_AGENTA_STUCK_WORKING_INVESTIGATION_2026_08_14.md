@@ -1,5 +1,8 @@
 # Report: AgentA stuck showing "Working…" — root cause, rigorously confirmed
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-08-14
 **Author:** Manoz
 **Verified against:** `main` @ `8c30af9a` (pulled fresh this session).

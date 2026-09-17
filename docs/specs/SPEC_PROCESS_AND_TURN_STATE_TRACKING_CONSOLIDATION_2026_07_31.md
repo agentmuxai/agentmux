@@ -1,5 +1,8 @@
 # SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-07-31
 **Type:** Consolidation spec — synthesizes multiple bugs/gaps found in one investigation session, proposes a unified fix direction
 **Status:** Investigation complete for all findings below; two fixes already shipped — the heartbeat pattern (operational, no code change) and `SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md` (merged via PR #2369 on 2026-07-30, **after** this session's initial pass mistakenly reported it as "not yet implemented" — see correction in §5.4). Note: #2369 merged *after* the `v0.54.7` release cut (2026-07-29), so it is not yet in any released/installed build — only a fresh `dev` build off `main` has it. Remainder need design work.

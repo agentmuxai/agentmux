@@ -1,5 +1,8 @@
 # Architecture Analysis: Why the Agent Pane Keeps Regressing (Activity Dock Flicker as a Case Study)
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](../specs/TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **Date:** 2026-08-25
 **Trigger:** repo owner: *"we are regressing on different elements, especially
 regarding the agent pane... it sounds like we may need an architecture rethink
