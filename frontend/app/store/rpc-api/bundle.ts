@@ -40,6 +40,21 @@ import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 // none is ever omitted from a response.)
 export type BundleUpsertInput = Pick<BundleT, "id" | "name"> & Partial<Omit<BundleT, "id" | "name">>;
 
+// `bundle.validate` takes the same payload EXCEPT that `id` is optional too,
+// so an unsaved draft can be checked before it has one. That is not a guess
+// from the method comment: `bundle_validate_impl` runs its input through
+// `normalize_bundle_upsert_input`, which inserts `id: ""` when the key is
+// missing or null, and then branches on `memory.id.is_empty()` to skip the
+// component-binding lookups for a draft.
+//
+// The upsert commands genuinely do NOT share that leniency, which is why this
+// is a separate type rather than one shared "bundle input": `upsertmemory` and
+// `upsertsystemmemory` deserialize `Bundle` straight from the payload with no
+// normalize step, so `id` is required there. (The app_api `bundle.upsert`
+// command does normalize, but that is a different command and not the one this
+// stub calls.)
+export type BundleValidateInput = Pick<BundleT, "name"> & Partial<Omit<BundleT, "name">>;
+
 // Bundle CRUD (db_bundles rows; Rust: Store::bundle_*). The wire command
 // names below (`listmemories`, `getmemory`, ...) are the legacy aliases the
 // backend still registers alongside `bundle.*` — the strings must not change
@@ -153,13 +168,13 @@ export const BundleImportApi = {
     },
 
     // Structural-only check (agentmux-srv/src/backend/bundle_validate.rs) —
-    // read-only, no Store write. Accepts the same payload shape
-    // `UpsertBundleCommand` does, so it can validate an unsaved draft
-    // (including a brand-new bundle with no id yet), not just what's
-    // already persisted.
+    // read-only, no Store write. Takes `BundleValidateInput`, which is
+    // `BundleUpsertInput` minus the `id` requirement, so it can validate an
+    // unsaved draft (including a brand-new bundle with no id yet), not just
+    // what's already persisted.
     ValidateBundleCommand(
         client: RpcClient,
-        data: BundleUpsertInput,
+        data: BundleValidateInput,
         opts?: RpcOpts,
     ): Promise<BundleValidationReport> {
         return client.rpcCall("bundle.validate", data, opts);
