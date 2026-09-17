@@ -97,22 +97,30 @@ path (PR #3323).
 ### 3.3 `task dev` / `task dev:standalone`
 
 These invoke `install-linux-desktop.sh` directly (bypassing `linux-apprun.sh`
-entirely — there's no AppImage, no staged `CHANNEL`/`VERSION` markers) and launch
-the host without any packaging script having set `AGENTMUX_BUILD_CHANNEL_DEFAULT`,
-so `linux_app_id()` would auto-detect via `RuntimeMode`'s normal dev-mode
-detection (`dev-<branch>[-<clone-id>]`, computed by walking up from the exe path to
-find `.git` and hashing the canonicalized clone root — see
-`agentmux-common/src/runtime_mode.rs`). Replicating that exact detection
-(git-branch lookup + clone-root discovery + FNV-1a hash) in bash to keep it in sync
-would be fragile. Instead, `Taskfile.yml`'s Linux `dev:serve`/`dev:standalone:serve`
-blocks compute a simpler `dev-<branch-slug>` string themselves and `export
-AGENTMUX_CHANNEL` with it before the later launcher/host exec in the same script —
-`linux_app_id()` already checks that env var first (same override every packaging
-path uses), so setting it here makes both sides agree by construction rather than
-by parallel re-implementation. This is scoped to the WM app_id only: dev mode's own
-data-dir resolution intentionally ignores `AGENTMUX_CHANNEL`
-(`agentmux-common/src/data_paths.rs`), so it doesn't change which data dir a dev
-instance uses. Caught by ReAgent's second review pass on PR #3323 — the first
+entirely — there's no AppImage, no staged `CHANNEL`/`VERSION` markers), and no
+packaging script sets `AGENTMUX_BUILD_CHANNEL_DEFAULT` before `task dev`'s build
+steps compile the binary. `linux_app_id()` itself never consults `RuntimeMode` —
+it only checks `AGENTMUX_CHANNEL`, else the compile-time `BUILD_CHANNEL_DEFAULT`
+(`agentmux-common/src/runtime_mode.rs`'s dev-mode auto-detection, which *does*
+walk up from the exe path to find `.git` and hash the canonicalized clone root to
+produce `dev-<branch>[-<clone-id>]`, is what the app's *data-dir* resolution
+uses — a separate code path `linux_app_id()` doesn't call at all). So absent a
+fix, a `task dev` binary would advertise the generic `agentmux-stable-<version>`
+(the same string a real installed `stable` release advertises) rather than
+anything dev/branch-specific — exactly the kind of collision this whole spec
+exists to prevent, just reached a different way for `task dev`. Rather than
+teaching `linux_app_id()` to replicate the data-dir side's git-branch/clone-hash
+detection just for this one launch path, `Taskfile.yml`'s Linux
+`dev:serve`/`dev:standalone:serve` blocks compute a simpler `dev-<branch-slug>`
+string themselves and `export AGENTMUX_CHANNEL` with it before the later
+launcher/host exec in the same script — `linux_app_id()` already checks that env
+var first (same override every packaging path uses), so setting it here makes
+both sides agree by construction rather than by parallel re-implementation. This
+is scoped to the WM app_id only: dev mode's own data-dir resolution intentionally
+ignores `AGENTMUX_CHANNEL` (`agentmux-common/src/data_paths.rs`), so it doesn't
+change which data dir a dev instance uses. Caught by ReAgent's second review pass
+on PR #3323 (a third pass then caught this paragraph itself incorrectly
+describing `linux_app_id()` as consulting `RuntimeMode`) — the first
 version of this PR only wired up the packaging-script paths (3.1/3.2) and left
 `task dev` mismatched, which would have broken icon-matching for the single most
 common development workflow.
