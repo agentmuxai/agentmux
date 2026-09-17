@@ -120,3 +120,40 @@ describe("AgentCard other rendering", () => {
         expect(await screen.findByText("Click to install")).toBeTruthy();
     });
 });
+
+describe("AgentCard upgrade badge", () => {
+    const renderWith = (props: { installed?: boolean; drift?: any }) =>
+        render(() => (
+            <AgentCard
+                agent={makeAgent()}
+                launching={false}
+                disabled={false}
+                installed={props.installed}
+                drift={props.drift}
+                onLaunch={() => {}}
+            />
+        ));
+
+    it("shows the badge when the installed CLI is behind the pin", async () => {
+        renderWith({ installed: true, drift: "behind-pin" });
+        expect(await screen.findByText(/Update available/)).toBeTruthy();
+    });
+
+    it("stays silent for every non-actionable drift state", () => {
+        // `ahead-of-pin` is untested-but-working, `unknown` means we never
+        // made the comparison, `current` is fine. None of these is the user's
+        // problem, and a card is a launch affordance, not a version dashboard.
+        for (const drift of ["current", "ahead-of-pin", "unknown", undefined]) {
+            cleanup();
+            renderWith({ installed: true, drift });
+            expect(screen.queryByText(/Update available/)).toBeNull();
+        }
+    });
+
+    it("yields to the install ribbon — never two CTAs on one card", () => {
+        // "Not installed" supersedes "out of date": you cannot be running a
+        // stale CLI if you are not running one at all.
+        renderWith({ installed: false, drift: "behind-pin" });
+        expect(screen.queryByText(/Update available/)).toBeNull();
+    });
+});

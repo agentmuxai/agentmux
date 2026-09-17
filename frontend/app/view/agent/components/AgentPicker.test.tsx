@@ -28,7 +28,7 @@ vi.mock("@/app/store/rpc-api", () => {
         ListAgentDefinitionsCommand: vi.fn().mockResolvedValue([]),
         ListRecentSessionsCommand: vi.fn().mockResolvedValue([]),
         ListNamedAgentsCommand: vi.fn().mockResolvedValue([]),
-        InstallCheckCommand: vi.fn().mockResolvedValue({ installed: true }),
+        InstallCheckCommand: vi.fn().mockResolvedValue({ installed: true, version: null }),
         ResolvePrereqsCommand: vi.fn().mockResolvedValue({ results: [] }),
         // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
         // (#2594) — resolves to `undefined` by default so existing tests
@@ -524,7 +524,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         });
 
         it("marks the just-installed (drifted) agent's own install cache via the resolved provider", async () => {
-            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false });
+            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false, version: null });
             // Explicit no-missing-prereqs default — `vi.clearAllMocks()`
             // in the outer `beforeEach` clears call history but not a
             // prior test's `.mockResolvedValue`, so this can't rely on

@@ -66,6 +66,13 @@ pub struct InstallCancelReq {
 pub struct InstallCheckReq {
     pub provider_id: String,
     pub cli_command: String,
+    /// npm package name, so the check can also report which version is
+    /// installed (read from that package's `package.json` in the per-version
+    /// cache). Optional: callers that only care about presence may omit it,
+    /// and every provider whose catalog entry has no `npmPackage` never had a
+    /// managed install to inspect in the first place.
+    #[serde(default)]
+    pub npm_package: Option<String>,
 }
 
 /// Request for `resolve.prereqs`. Was a function-local anonymous struct.
@@ -89,6 +96,17 @@ pub struct InstallStartResult {
 #[serde(rename_all = "camelCase")]
 pub struct InstallCheckResult {
     pub installed: bool,
+    /// Version of the managed install, when it could be read. `None` means
+    /// "not known" — never "current". The caller compares this against the
+    /// provider's pin (see `frontend/app/view/agent/providers/version-drift.ts`),
+    /// and an absent version must resolve to `unknown` rather than quietly
+    /// looking up to date.
+    ///
+    /// Read from `package.json` rather than by running `<cli> --version`: the
+    /// agent picker calls this once per card, and spawning a process per card
+    /// to answer a question a file read already answers is not a trade worth
+    /// making.
+    pub version: Option<String>,
 }
 
 /// Result of `install.cancel`.
@@ -252,6 +270,35 @@ pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Version of a managed provider install, read from the installed package's
+/// own `package.json`. `None` for anything unreadable — a missing directory, a
+/// partial install, unparseable JSON — all of which mean "we do not know",
+/// which is a distinct answer from "up to date" and must stay distinct.
+///
+/// `npm_package` is used as a path segment, so it is validated the same way
+/// every other externally-supplied path component in this module is: scoped
+/// names (`@scope/name`) are legitimate and produce one nested directory, but
+/// `..` and absolute-path escapes are not.
+fn read_installed_version(provider_id: &str, npm_package: &str) -> Option<String> {
+    if npm_package.is_empty()
+        || npm_package.contains("..")
+        || npm_package.starts_with('/')
+        || npm_package.starts_with('\\')
+        || npm_package.contains('\0')
+    {
+        return None;
+    }
+    let dir = provider_install_dir(provider_id)?;
+    let mut manifest = dir.join("node_modules");
+    for seg in npm_package.split('/') {
+        manifest.push(seg);
+    }
+    manifest.push("package.json");
+    let raw = std::fs::read_to_string(manifest).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    parsed.get("version")?.as_str().map(|s| s.to_string())
+}
+
 fn resolve_installed_bin(provider_id: &str, cli_command: &str) -> Option<std::path::PathBuf> {
     let dir = provider_install_dir(provider_id)?;
     let bin_dir = dir.join("node_modules").join(".bin");
@@ -347,7 +394,17 @@ pub fn register_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     ));
                 }
                 let installed = resolve_installed_bin(&req.provider_id, &req.cli_command).is_some();
-                Ok(InstallCheckResult { installed })
+                // Only meaningful when something is actually installed — a
+                // stale package.json next to a missing binary would otherwise
+                // report a version for a provider that cannot launch.
+                let version = if installed {
+                    req.npm_package
+                        .as_deref()
+                        .and_then(|pkg| read_installed_version(&req.provider_id, pkg))
+                } else {
+                    None
+                };
+                Ok(InstallCheckResult { installed, version })
             }
         },
     );
@@ -773,5 +830,46 @@ mod req_shape_tests {
         })
         .expect("serializable");
         assert_eq!(v, json!({"results": [{"tool": "node", "found": false, "path": null}]}));
+    }
+}
+
+#[cfg(test)]
+mod installed_version_tests {
+    use super::read_installed_version;
+
+    /// The npm package name becomes a path segment, so a hostile or malformed
+    /// one must be rejected BEFORE any filesystem access. These cases return
+    /// early on the validation branch, so they hold regardless of whether a
+    /// data dir exists in the test environment — which is also why they are
+    /// the part worth pinning: the happy path needs a real per-version cache,
+    /// but the rejection path is pure and is the one with teeth.
+    #[test]
+    fn rejects_path_escapes_and_malformed_package_names() {
+        for bad in [
+            "",
+            "..",
+            "../../../etc/passwd",
+            "@scope/../../escape",
+            "/absolute/path",
+            "\\windows\\absolute",
+            "has\0null",
+        ] {
+            assert_eq!(
+                read_installed_version("claude", bad),
+                None,
+                "expected {bad:?} to be rejected"
+            );
+        }
+    }
+
+    /// A legitimate scoped name (`@anthropic-ai/claude-code`) must NOT be
+    /// caught by the escape check — it is the common case, and one nested
+    /// directory is exactly what npm creates for it. Returns None here only
+    /// because no such install exists in the test environment; the assertion
+    /// that matters is that it does not panic and is not rejected for the
+    /// wrong reason.
+    #[test]
+    fn scoped_package_names_are_not_treated_as_escapes() {
+        let _ = read_installed_version("claude", "@anthropic-ai/claude-code");
     }
 }
