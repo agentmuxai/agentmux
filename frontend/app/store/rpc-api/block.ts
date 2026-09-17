@@ -7,9 +7,9 @@
 import { RpcClient } from "../rpc-client";
 
 // The blockfile:* shapes are GENERATED from their Rust definitions by ts-rs.
-// The rest of this file is still hand-written: the remaining block commands
-// are a separate slice, and a few of them have shapes ts-rs cannot express
-// (see the note on CommandCreateBlockData in rpc_types/block.rs).
+// The rest of this file is still hand-written: four commands
+// (controllerinput, controllerresync, agentanswer, createsubblock) have shapes
+// ts-rs cannot express -- see the carve-out notes in rpc_types/block.rs.
 export type { CommandBlockfileLineCountData } from "@/types/rpc/CommandBlockfileLineCountData";
 export type { BlockfileLineCountResult } from "@/types/rpc/BlockfileLineCountResult";
 export type { CommandBlockfileReadRangeData } from "@/types/rpc/CommandBlockfileReadRangeData";
@@ -47,22 +47,6 @@ import type { CommandAgentCancelData } from "@/types/rpc/CommandAgentCancelData"
 import type { BackgroundTaskView } from "@/types/rpc/BackgroundTaskView";
 
 export const BlockApi = {
-    BlockInfoCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<BlockInfoData> {
-        return client.rpcCall("blockinfo", data, opts);
-    },
-
-    BlocksListCommand(client: RpcClient, data: BlocksListRequest, opts?: RpcOpts): Promise<BlocksListEntry[]> {
-        return client.rpcCall("blockslist", data, opts);
-    },
-
-    CaptureBlockScreenshotCommand(client: RpcClient, data: CommandCaptureBlockScreenshotData, opts?: RpcOpts): Promise<string> {
-        return client.rpcCall("captureblockscreenshot", data, opts);
-    },
-
-    ControllerAppendOutputCommand(client: RpcClient, data: CommandControllerAppendOutputData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("controllerappendoutput", data, opts);
-    },
-
     ControllerInputCommand(client: RpcClient, data: CommandBlockInputData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerinput", data, opts);
     },
@@ -129,36 +113,12 @@ export const BlockApi = {
         return client.rpcCall("controllerresync", data, opts);
     },
 
-    ControllerStopCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("controllerstop", data, opts);
-    },
-
-    CreateBlockCommand(client: RpcClient, data: CommandCreateBlockData, opts?: RpcOpts): Promise<ORef> {
-        return client.rpcCall("createblock", data, opts);
-    },
-
     CreateSubBlockCommand(client: RpcClient, data: CommandCreateSubBlockData, opts?: RpcOpts): Promise<ORef> {
         return client.rpcCall("createsubblock", data, opts);
     },
 
-    DeleteBlockCommand(client: RpcClient, data: CommandDeleteBlockData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("deleteblock", data, opts);
-    },
-
     DeleteSubBlockCommand(client: RpcClient, data: CommandDeleteBlockData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("deletesubblock", data, opts);
-    },
-
-    DisposeCommand(client: RpcClient, data: CommandDisposeData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("dispose", data, opts);
-    },
-
-    DisposeSuggestionsCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("disposesuggestions", data, opts);
-    },
-
-    SetViewCommand(client: RpcClient, data: CommandBlockSetViewData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("setview", data, opts);
     },
 
     BlockfileLineCountCommand(client: RpcClient, data: CommandBlockfileLineCountData, opts?: RpcOpts): Promise<BlockfileLineCountResult> {
