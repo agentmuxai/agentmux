@@ -109,15 +109,6 @@ declare global {
         meta?: MetaType;
     };
 
-    // wshrpc.BlockInfoData
-    type BlockInfoData = {
-        blockid: string;
-        tabid: string;
-        workspaceid: string;
-        block: Block;
-        files: FileInfo[];
-    };
-
     // webcmd.BlockInputWSCommand
     type BlockInputWSCommand = {
         wscommand: "blockinput";
@@ -192,21 +183,9 @@ declare global {
         answers: {[key: string]: string | string[]};
     };
 
-    // wshrpc.CommandBlockSetViewData
-    type CommandBlockSetViewData = {
-        blockid: string;
-        view: string;
-    };
-
     // wshrpc.CommandCaptureBlockScreenshotData
     type CommandCaptureBlockScreenshotData = {
         blockid: string;
-    };
-
-    // wshrpc.CommandControllerAppendOutputData
-    type CommandControllerAppendOutputData = {
-        blockid: string;
-        data64: string;
     };
 
     // wshrpc.CommandControllerResyncData
@@ -220,18 +199,6 @@ declare global {
         // to false, i.e. the crash-recovery revive TermResyncHandler wants.
         // See the Rust field's doc comment (rpc_types/block.rs).
         norespawn?: boolean;
-    };
-
-    // wshrpc.CommandCreateBlockData
-    type CommandCreateBlockData = {
-        tabid: string;
-        blockdef: BlockDef;
-        rtopts?: RuntimeOpts;
-        magnified?: boolean;
-        ephemeral?: boolean;
-        focused?: boolean;
-        targetblockid?: string;
-        targetaction?: string;
     };
 
     // wshrpc.CommandCreateSubBlockData
@@ -877,11 +844,6 @@ declare global {
     type CommandDeleteFileData = {
         path: string;
         recursive: boolean;
-    };
-
-    // wshrpc.CommandDisposeData
-    type CommandDisposeData = {
-        routeid: string;
     };
 
     // wshrpc.CommandEventReadHistoryData
