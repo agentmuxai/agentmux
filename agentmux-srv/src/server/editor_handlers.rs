@@ -11,6 +11,7 @@ use crate::backend::rpc_types::{
 use crate::backend::agent_config::BUNDLE_SECTION_HEADING;
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc_types::{
+    UnwatchMediaDirReq, WatchEditorFileReq, WatchMediaDirReq,
     CommandReadEditorFileData, CommandReadEditorFileResult, CommandWriteEditorFileData,
     DirEntry, EditorDrive, EditorRootsReq, GetEditorHomeResult, GetEditorRootsResult,
     ListEditorDirReq, ListEditorDirResult,
@@ -130,20 +131,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Spec: docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md
     {
         let watcher = editor_file_watcher.clone();
-        engine.register_handler(
+        engine.register_typed(
             "watcheditorfile",
-            Box::new(move |data, _ctx| {
+            move |cmd: WatchEditorFileReq, _ctx| {
                 let watcher = watcher.clone();
-                Box::pin(async move {
-                    #[derive(serde::Deserialize)]
-                    struct Cmd { path: String, block_id: String }
-                    let cmd: Cmd = serde_json::from_value(data)
-                        .map_err(|e| format!("watcheditorfile: {e}"))?;
+                async move {
                     let expanded = expand_home_dir_safe(&cmd.path);
                     watcher.watch_path(expanded.as_path(), &cmd.block_id);
-                    Ok(None)
-                })
-            }),
+                    Ok(())
+                }
+            },
         );
     }
 
@@ -151,20 +148,19 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // pair. Called on tab close / pane dispose.
     {
         let watcher = editor_file_watcher.clone();
-        engine.register_handler(
+        engine.register_typed(
             "unwatcheditorfile",
-            Box::new(move |data, _ctx| {
+            // Same Req type as `watcheditorfile`, on purpose -- see
+            // `WatchEditorFileReq`: an unwatch that cannot name exactly what
+            // the watch named leaks a watcher.
+            move |cmd: WatchEditorFileReq, _ctx| {
                 let watcher = watcher.clone();
-                Box::pin(async move {
-                    #[derive(serde::Deserialize)]
-                    struct Cmd { path: String, block_id: String }
-                    let cmd: Cmd = serde_json::from_value(data)
-                        .map_err(|e| format!("unwatcheditorfile: {e}"))?;
+                async move {
                     let expanded = expand_home_dir_safe(&cmd.path);
                     watcher.unwatch_path(expanded.as_path(), &cmd.block_id);
-                    Ok(None)
-                })
-            }),
+                    Ok(())
+                }
+            },
         );
     }
 
@@ -175,20 +171,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
     {
         let watcher = media_file_watcher.clone();
-        engine.register_handler(
+        engine.register_typed(
             "watchmediadir",
-            Box::new(move |data, _ctx| {
+            move |cmd: WatchMediaDirReq, _ctx| {
                 let watcher = watcher.clone();
-                Box::pin(async move {
-                    #[derive(serde::Deserialize)]
-                    struct Cmd { path: String, block_id: String, extensions: Vec<String> }
-                    let cmd: Cmd = serde_json::from_value(data)
-                        .map_err(|e| format!("watchmediadir: {e}"))?;
+                async move {
                     let expanded = expand_home_dir_safe(&cmd.path);
                     watcher.watch_directory(expanded.as_path(), &cmd.block_id, &cmd.extensions);
-                    Ok(None)
-                })
-            }),
+                    Ok(())
+                }
+            },
         );
     }
 
@@ -196,20 +188,16 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // pane's target path changes away from that directory, or on dispose.
     {
         let watcher = media_file_watcher.clone();
-        engine.register_handler(
+        engine.register_typed(
             "unwatchmediadir",
-            Box::new(move |data, _ctx| {
+            move |cmd: UnwatchMediaDirReq, _ctx| {
                 let watcher = watcher.clone();
-                Box::pin(async move {
-                    #[derive(serde::Deserialize)]
-                    struct Cmd { path: String, block_id: String }
-                    let cmd: Cmd = serde_json::from_value(data)
-                        .map_err(|e| format!("unwatchmediadir: {e}"))?;
+                async move {
                     let expanded = expand_home_dir_safe(&cmd.path);
                     watcher.unwatch_directory(expanded.as_path(), &cmd.block_id);
-                    Ok(None)
-                })
-            }),
+                    Ok(())
+                }
+            },
         );
     }
 
@@ -974,6 +962,47 @@ mod tests {
     use crate::backend::rpc_types::{
         CommandReadEditorFileResult, CreateScratchFileReq, DeleteEditorFileReq, DirEntry,
     };
+
+    /// The four watchers record their types too, which leaves `writeagentconfig`
+    /// as the only untyped registration in this file -- and that is not an
+    /// editor command, it is the launch path, so it migrates with its own stub
+    /// in agent.ts rather than here.
+    ///
+    /// `watcheditorfile` and `unwatcheditorfile` share one request type on
+    /// purpose. They are not merely same-shaped: an unwatch that cannot name
+    /// exactly what the watch named leaks a watcher, so sharing makes a future
+    /// divergence a compile error instead. `watchmediadir` and
+    /// `unwatchmediadir` do NOT share, because the extension filter is
+    /// genuinely not part of the registration key.
+    #[tokio::test]
+    async fn register_typed_records_the_four_watchers() {
+        let state = crate::server::tests::test_state();
+        let (engine, _rx) = crate::backend::rpc::engine::WshRpcEngine::new();
+        super::register_editor_handlers(&engine, &state);
+        let schema = engine.schema_json();
+        let rows = schema.as_array().unwrap();
+        let find = |cmd: &str| {
+            rows.iter()
+                .find(|r| r["command"] == cmd)
+                .unwrap_or_else(|| panic!("{cmd} missing from the schema"))
+        };
+
+        for (cmd, req) in [
+            ("watcheditorfile", "WatchEditorFileReq"),
+            ("unwatcheditorfile", "WatchEditorFileReq"),
+            ("watchmediadir", "WatchMediaDirReq"),
+            ("unwatchmediadir", "UnwatchMediaDirReq"),
+        ] {
+            let row = find(cmd);
+            assert_eq!(row["requestName"], req, "{cmd} request");
+            assert_eq!(row["responseName"], "()", "{cmd} answers nothing");
+        }
+
+        assert!(
+            rows.iter().all(|r| r["command"] != crate::backend::rpc_types::COMMAND_WRITE_AGENT_CONFIG),
+            "writeagentconfig is not migrated here; it goes with its agent.ts stub",
+        );
+    }
 
     /// The five read commands record their request and response types too, so
     /// the only thing left untyped in this file is the four watchers (plus
