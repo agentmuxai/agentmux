@@ -217,73 +217,18 @@ const KNOWN_LIVE_UNREGISTERED = [
 /** rpc-api.ts declares these methods, but no backend handler exists. */
 const KNOWN_DECLARED_UNREGISTERED = [
     "activity",
-    "aisendmessage",
-    "authenticate",
-    "authenticatetoken",
     "connconnect",
     "conndisconnect",
     "connensure",
     "connlist",
     "connlistaws",
-    "connstatus",
-    "eventpublish",
-    "eventrecv",
-    "fetchsuggestions",
     "fileappend",
-    "fileappendijson",
-    "filecopy",
-    "filecreate",
-    "filedelete",
-    "fileinfo",
     "filejoin",
-    "filelist",
-    "fileliststream",
-    "filemkdir",
-    "filemove",
-    "fileread",
-    "filereadstream",
-    "filesharecapability",
-    "filestreamtar",
-    "filewrite",
-    "focuswindow",
-    "getrtinfo",
-    "gettab",
-    "getupdatechannel",
-    "getvar",
-    "message",
-    "notify",
-    "path",
     "recordtevent",
-    "remotefilecopy",
-    "remotefiledelete",
-    "remotefileinfo",
-    "remotefilejoin",
-    "remotefilemove",
-    "remotefiletouch",
-    "remotegetinfo",
-    "remoteinstallrcfiles",
-    "remotelistentries",
-    "remotemkdir",
-    "remotestreamcpudata",
-    "remotestreamfile",
-    "remotetarstream",
-    "remotewritefile",
     "resolveids",
-    "sendtelemetry",
-    "setconnectionsconfig",
     "setrtinfo",
-    "setvar",
-    "streamcpudata",
-    "streamtest",
-    "termgetscrollbacklines",
-    "test",
-    "waitforroute",
-    "webselector",
     "workspacelist",
-    "wshactivity",
-    "wsldefaultdistro",
     "wsllist",
-    "wslstatus",
 ];
 
 /**
@@ -336,15 +281,40 @@ describe("RPC frontend↔backend contract (A1)", () => {
         // Guards against a silently-broken regex passing the diff
         // assertions vacuously (empty − empty = empty).
         expect(registered.size).toBeGreaterThan(120);
-        expect(declared.size).toBeGreaterThan(180);
+        // Floor lowered from 180: 55 declared-but-unregistered bindings were
+        // deleted (they had no backend handler and no caller). It is a
+        // sanity floor against a broken extractor, not a target.
+        expect(declared.size).toBeGreaterThan(150);
         expect(liveCommands.size).toBeGreaterThan(80);
         // A known happy-path command must be visible on every axis.
         expect(registered.has("setmeta")).toBe(true);
         expect(declared.has("setmeta")).toBe(true);
         expect(liveCommands.has("setmeta")).toBe(true);
-        // A known `rpcStream` binding must be in the declared surface —
-        // guards the per-method extraction against dropping streams.
-        expect(declared.has("fileliststream")).toBe(true);
+        // Every `rpcStream` binding must be in the declared surface — guards
+        // the per-method extraction against dropping streams (see the long
+        // comment on the extractor: a lazy `…*?rpcCall` regex runs past a
+        // stream-only method into the next one, mismapping commands and
+        // dropping every stream binding, which passes the diff assertions
+        // vacuously).
+        //
+        // This used to pin one known stream command, `fileliststream`. Every
+        // stream binding turned out to be a dead stub with no backend handler
+        // and no caller, so they were all deleted and the canary had nothing
+        // left to point at. Asserting over whatever streams exist keeps the
+        // guard alive at zero and restores it automatically the moment a
+        // stream binding comes back.
+        const streamCmds = fs
+            .readdirSync(path.join(repoRoot(), "frontend", "app", "store", "rpc-api"))
+            .filter((f) => f.endsWith(".ts"))
+            .flatMap((f) => [
+                ...fs
+                    .readFileSync(path.join(repoRoot(), "frontend", "app", "store", "rpc-api", f), "utf8")
+                    .matchAll(/\brpcStream\("([^"]+)"/g),
+            ])
+            .map((m) => m[1]);
+        for (const cmd of streamCmds) {
+            expect(declared.has(cmd), `stream binding ${cmd} missing from declared surface`).toBe(true);
+        }
     });
 
     it("no NEW live FE call resolves to a missing backend handler", () => {

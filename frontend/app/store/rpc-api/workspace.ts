@@ -27,20 +27,8 @@ export const WorkspaceApi = {
         return client.rpcCall("connlistaws", null, opts);
     },
 
-    ConnStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<ConnStatus[]> {
-        return client.rpcCall("connstatus", null, opts);
-    },
-
-    EventPublishCommand(client: RpcClient, data: MuxEvent, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("eventpublish", data, opts);
-    },
-
     EventReadHistoryCommand(client: RpcClient, data: CommandEventReadHistoryData, opts?: RpcOpts): Promise<MuxEvent[]> {
         return client.rpcCall("eventreadhistory", data, opts);
-    },
-
-    EventRecvCommand(client: RpcClient, data: MuxEvent, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("eventrecv", data, opts);
     },
 
     EventSubCommand(client: RpcClient, data: SubscriptionRequest, opts?: RpcOpts): Promise<void> {
@@ -63,26 +51,6 @@ export const WorkspaceApi = {
         return client.rpcCall("getmeta", data, opts);
     },
 
-    GetRTInfoCommand(client: RpcClient, data: CommandGetRTInfoData, opts?: RpcOpts): Promise<ObjRTInfo> {
-        return client.rpcCall("getrtinfo", data, opts);
-    },
-
-    GetTabCommand(client: RpcClient, data: string, opts?: RpcOpts): Promise<Tab> {
-        return client.rpcCall("gettab", data, opts);
-    },
-
-    GetUpdateChannelCommand(client: RpcClient, opts?: RpcOpts): Promise<string> {
-        return client.rpcCall("getupdatechannel", null, opts);
-    },
-
-    GetVarCommand(client: RpcClient, data: CommandVarData, opts?: RpcOpts): Promise<CommandVarResponseData> {
-        return client.rpcCall("getvar", data, opts);
-    },
-
-    PathCommand(client: RpcClient, data: PathCommandData, opts?: RpcOpts): Promise<string> {
-        return client.rpcCall("path", data, opts);
-    },
-
     ResolveIdsCommand(client: RpcClient, data: CommandResolveIdsData, opts?: RpcOpts): Promise<CommandResolveIdsRtnData> {
         return client.rpcCall("resolveids", data, opts);
     },
@@ -99,10 +67,6 @@ export const WorkspaceApi = {
         return client.rpcCall("setconfig", data, opts);
     },
 
-    SetConnectionsConfigCommand(client: RpcClient, data: ConnConfigRequest, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("setconnectionsconfig", data, opts);
-    },
-
     SetMetaCommand(client: RpcClient, data: CommandSetMetaData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("setmeta", data, opts);
     },
@@ -111,28 +75,12 @@ export const WorkspaceApi = {
         return client.rpcCall("setrtinfo", data, opts);
     },
 
-    SetVarCommand(client: RpcClient, data: CommandVarData, opts?: RpcOpts): Promise<void> {
-        return client.rpcCall("setvar", data, opts);
-    },
-
-    WaitForRouteCommand(client: RpcClient, data: CommandWaitForRouteData, opts?: RpcOpts): Promise<boolean> {
-        return client.rpcCall("waitforroute", data, opts);
-    },
-
     WorkspaceListCommand(client: RpcClient, opts?: RpcOpts): Promise<WorkspaceInfoData[]> {
         return client.rpcCall("workspacelist", null, opts);
     },
 
-    WslDefaultDistroCommand(client: RpcClient, opts?: RpcOpts): Promise<string> {
-        return client.rpcCall("wsldefaultdistro", null, opts);
-    },
-
     WslListCommand(client: RpcClient, opts?: RpcOpts): Promise<string[]> {
         return client.rpcCall("wsllist", null, opts);
-    },
-
-    WslStatusCommand(client: RpcClient, opts?: RpcOpts): Promise<ConnStatus[]> {
-        return client.rpcCall("wslstatus", null, opts);
     },
 
     ResolveCliCommand(client: RpcClient, data: CommandResolveCliData, opts?: RpcOpts): Promise<ResolveCliResult> {
