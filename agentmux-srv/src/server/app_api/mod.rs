@@ -808,7 +808,7 @@ pub(crate) fn bundle_validate_impl(
     mstore: &crate::backend::storage::store::Store,
     identity_store: &crate::backend::storage::store::Store,
     data: serde_json::Value,
-) -> Result<serde_json::Value, String> {
+) -> Result<crate::backend::bundle_validate::ValidationReport, String> {
     let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
     let (mcp_entries, resolve_warnings) = if memory.id.is_empty() {
@@ -843,7 +843,7 @@ pub(crate) fn bundle_validate_impl(
         .iter()
         .any(|i| i.severity == crate::backend::bundle_validate::IssueSeverity::Error);
 
-    serde_json::to_value(&report).map_err(|e| e.to_string())
+    Ok(report)
 }
 
 pub(crate) async fn bundle_self_get_impl(
