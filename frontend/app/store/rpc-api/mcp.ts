@@ -10,10 +10,64 @@
 
 import { RpcClient } from "../rpc-client";
 
+// Every request and result shape below is GENERATED from its Rust definition by
+// ts-rs. They were function-local anonymous `struct Req` declarations inside
+// each handler closure -- seventeen of them -- so the inline types here were
+// hand-maintained against types the frontend could not see.
+//
+// Deliberately NOT shared with the `skill` equivalents, even though the shapes
+// rhyme: `{agent_id, mcp_id}` vs `{agent_id, skill_id}` differ in the field
+// NAME, and collapsing them would mean renaming a wire field to serve an
+// abstraction. That matches the 09-06 DRY audit's own recommendation on these
+// twin primitives (cause 4).
+export type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
+export type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
+export type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
+export type { McpBundleBindingData } from "@/types/rpc/McpBundleBindingData";
+export type { McpBundleScopeData } from "@/types/rpc/McpBundleScopeData";
+export type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
+export type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
+export type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
+export type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
+export type { CommandMcpCatalogUpsertForBundleData } from "@/types/rpc/CommandMcpCatalogUpsertForBundleData";
+export type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
+export type { McpBindResult } from "@/types/rpc/McpBindResult";
+export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
+
+import type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
+import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
+import type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
+import type { McpBundleBindingData } from "@/types/rpc/McpBundleBindingData";
+import type { McpBundleScopeData } from "@/types/rpc/McpBundleScopeData";
+import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
+import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
+import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
+import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
+import type { CommandMcpCatalogUpsertForBundleData } from "@/types/rpc/CommandMcpCatalogUpsertForBundleData";
+import type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
+import type { McpBindResult } from "@/types/rpc/McpBindResult";
+import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
+
+// `id`, `transport` and `config` are all `#[serde(default)]` on the Rust side,
+// so they are omittable on the wire, but ts-rs generates them as required (it
+// cannot express an optional property for a non-`Option` field). Derive the
+// accurate shape from the generated type rather than hand-listing the optional
+// fields, so a field added in Rust flows through automatically. Same approach
+// as `BundleUpsertInput` and `SkillUpsertInput`.
+export type McpUpsertInput = Pick<CommandMcpUpsertData, "agent_id" | "name"> &
+    Partial<Omit<CommandMcpUpsertData, "agent_id" | "name">>;
+export type McpCatalogUpsertInput = Pick<CommandMcpCatalogUpsertData, "name"> &
+    Partial<Omit<CommandMcpCatalogUpsertData, "name">>;
+export type McpCatalogUpsertForBundleInput = Pick<
+    CommandMcpCatalogUpsertForBundleData,
+    "bundle_id" | "name"
+> &
+    Partial<Omit<CommandMcpCatalogUpsertForBundleData, "bundle_id" | "name">>;
+
 export const McpApi = {
     McpListCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: McpAgentScopeData,
         opts?: RpcOpts,
     ): Promise<McpServerListItem[]> {
         return client.rpcCall("mcp.list", data, opts);
@@ -21,7 +75,7 @@ export const McpApi = {
 
     McpGetCommand(
         client: RpcClient,
-        data: { agent_id: string; id: string },
+        data: McpAgentItemData,
         opts?: RpcOpts,
     ): Promise<McpServer | null> {
         return client.rpcCall("mcp.get", data, opts);
@@ -29,7 +83,7 @@ export const McpApi = {
 
     McpUpsertCommand(
         client: RpcClient,
-        data: { agent_id: string; id?: string; name: string; transport?: string; config?: string },
+        data: McpUpsertInput,
         opts?: RpcOpts,
     ): Promise<McpServer> {
         return client.rpcCall("mcp.upsert", data, opts);
@@ -37,32 +91,32 @@ export const McpApi = {
 
     McpDeleteCommand(
         client: RpcClient,
-        data: { agent_id: string; id: string },
+        data: McpAgentItemData,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<McpDeleteResult> {
         return client.rpcCall("mcp.delete", data, opts);
     },
 
     McpBindCommand(
         client: RpcClient,
-        data: { agent_id: string; mcp_id: string },
+        data: McpAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ bound: boolean }> {
+    ): Promise<McpBindResult> {
         return client.rpcCall("mcp.bind", data, opts);
     },
 
     McpUnbindCommand(
         client: RpcClient,
-        data: { agent_id: string; mcp_id: string },
+        data: McpAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
+    ): Promise<McpUnbindResult> {
         return client.rpcCall("mcp.unbind", data, opts);
     },
 
     /** Health/prerequisite probe — see McpProbeResult (srv-types.d.ts). */
     McpProbeCommand(
         client: RpcClient,
-        data: { agent_id: string; id: string },
+        data: McpAgentItemData,
         opts?: RpcOpts,
     ): Promise<McpProbeResult> {
         return client.rpcCall("mcp.probe", data, opts);
@@ -72,7 +126,7 @@ export const McpApi = {
 
     McpCatalogListCommand(
         client: RpcClient,
-        data: Record<string, never> = {},
+        data: McpCatalogListData = {},
         opts?: RpcOpts,
     ): Promise<McpServerCatalogItem[]> {
         return client.rpcCall("mcp.catalog.list", data, opts);
@@ -80,7 +134,7 @@ export const McpApi = {
 
     McpCatalogUpsertCommand(
         client: RpcClient,
-        data: { id?: string; name: string; transport?: string; config?: string },
+        data: McpCatalogUpsertInput,
         opts?: RpcOpts,
     ): Promise<McpServer> {
         return client.rpcCall("mcp.catalog.upsert", data, opts);
@@ -88,9 +142,9 @@ export const McpApi = {
 
     McpCatalogDeleteCommand(
         client: RpcClient,
-        data: { id: string },
+        data: McpCatalogItemData,
         opts?: RpcOpts,
-    ): Promise<{ deleted: boolean }> {
+    ): Promise<McpDeleteResult> {
         return client.rpcCall("mcp.catalog.delete", data, opts);
     },
 
@@ -98,7 +152,7 @@ export const McpApi = {
      *  (mirrors mcp.catalog.*'s window-scoped shape). See McpProbeResult. */
     McpCatalogProbeCommand(
         client: RpcClient,
-        data: { id: string },
+        data: McpCatalogItemData,
         opts?: RpcOpts,
     ): Promise<McpProbeResult> {
         return client.rpcCall("mcp.catalog.probe", data, opts);
@@ -110,9 +164,9 @@ export const McpApi = {
     // docs/reports/REPORT_ARMORY_SKILLS_MARKDOWN_AND_BIND_BUG_2026_07_27.md.
     McpCatalogBindCommand(
         client: RpcClient,
-        data: { agent_id: string; mcp_id: string },
+        data: McpAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ bound: boolean }> {
+    ): Promise<McpBindResult> {
         return client.rpcCall("mcp.catalog.bind", data, opts);
     },
 
@@ -124,7 +178,7 @@ export const McpApi = {
     // check_s1.
     McpCatalogListForAgentCommand(
         client: RpcClient,
-        data: { agent_id: string },
+        data: McpAgentScopeData,
         opts?: RpcOpts,
     ): Promise<McpServerListItem[]> {
         return client.rpcCall("mcp.catalog.list_for_agent", data, opts);
@@ -132,9 +186,9 @@ export const McpApi = {
 
     McpCatalogUnbindCommand(
         client: RpcClient,
-        data: { agent_id: string; mcp_id: string },
+        data: McpAgentBindingData,
         opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
+    ): Promise<McpUnbindResult> {
         return client.rpcCall("mcp.catalog.unbind", data, opts);
     },
 
@@ -147,23 +201,23 @@ export const McpApi = {
 
     McpCatalogBindToBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string; mcp_id: string },
+        data: McpBundleBindingData,
         opts?: RpcOpts,
-    ): Promise<{ bound: boolean }> {
+    ): Promise<McpBindResult> {
         return client.rpcCall("mcp.catalog.bind_to_bundle", data, opts);
     },
 
     McpCatalogUnbindFromBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string; mcp_id: string },
+        data: McpBundleBindingData,
         opts?: RpcOpts,
-    ): Promise<{ unbound: boolean }> {
+    ): Promise<McpUnbindResult> {
         return client.rpcCall("mcp.catalog.unbind_from_bundle", data, opts);
     },
 
     McpCatalogListForBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string },
+        data: McpBundleScopeData,
         opts?: RpcOpts,
     ): Promise<McpServerBundleListItem[]> {
         return client.rpcCall("mcp.catalog.list_for_bundle", data, opts);
@@ -176,7 +230,7 @@ export const McpApi = {
     // visible to every agent).
     McpCatalogUpsertForBundleCommand(
         client: RpcClient,
-        data: { bundle_id: string; id?: string; name: string; transport?: string; config?: string },
+        data: McpCatalogUpsertForBundleInput,
         opts?: RpcOpts,
     ): Promise<McpServer> {
         return client.rpcCall("mcp.catalog.upsert_for_bundle", data, opts);
