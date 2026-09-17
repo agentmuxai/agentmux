@@ -528,6 +528,27 @@ pub fn local_channel_id() -> String {
     std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string())
 }
 
+/// This machine's host label — the `hostname` half of an agent's WAN instance
+/// identity (`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §2.1.2), paired with
+/// [`local_channel_id`] to identify *which* AgentMux instance under an account
+/// owns a given agent's WAN keypair.
+///
+/// Lowercased and trimmed so the value a sender binds into its signature and
+/// the value an instance publishes alongside its public key can't differ by
+/// case alone — the same normalization discipline `agent_id` already has, and
+/// for the same reason: a mismatch here doesn't fail loudly, it selects a
+/// different key and renders a valid message as an active forgery.
+///
+/// Falls back to `"unknown"` exactly as `bootstrap.rs` already does for the
+/// LAN advertisement, rather than erroring — an unresolvable hostname must not
+/// block spawning an agent.
+pub fn local_host_label() -> String {
+    whoami::fallible::hostname()
+        .unwrap_or_else(|_| "unknown".to_string())
+        .trim()
+        .to_lowercase()
+}
+
 /// Convenience wrapper over [`write_shared`]: resolves the shared dir and
 /// this process's channel itself, no-op if the shared root can't be
 /// resolved. Exists so call sites outside `server/reactive.rs`'s explicit

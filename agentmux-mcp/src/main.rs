@@ -406,6 +406,7 @@ struct OutgoingJektSignatures {
     source_channel: Option<String>,
     channel_sig: Option<String>,
     wan_sig: Option<String>,
+    wan_source_host: Option<String>,
 }
 
 impl OutgoingJektSignatures {
@@ -423,6 +424,7 @@ impl OutgoingJektSignatures {
             source_channel: self.source_channel,
             channel_sig: self.channel_sig,
             wan_sig: self.wan_sig,
+            wan_source_host: self.wan_source_host,
         }
     }
 }
@@ -461,21 +463,40 @@ fn sign_outgoing_jekt(
         let channel = source_channel.as_deref().unwrap_or("stable");
         agentmux_common::jekt_sign::sign_channel_jekt(key, &msgid, src, channel, target_agent, ts_secs, message)
     })();
-    // Only declare a channel when there's a signature bound to it — a bare
-    // `source_channel` with nothing to verify is noise on the wire.
-    let source_channel = channel_sig
-        .as_ref()
-        .map(|_| source_channel.unwrap_or_else(|| "stable".to_string()));
-    // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.3 — its own key, not
+    // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1/§3.3 — its own key, not
     // AGENTMUX_LAN_KEY. An agent whose `.mcp.json` predates this feature has
     // no AGENTMUX_WAN_KEY and simply sends unsigned, exactly as it does today
     // for every other tier.
+    //
+    // The WAN signature binds this agent's INSTANCE — host and channel — not
+    // just its name (§2.1.2): one account can run the same agent name on
+    // several machines, and on several build channels of one machine, and
+    // each instance mints its own keypair because each has its own database.
+    // The instance is what selects which published key a receiver checks
+    // against, so it has to be inside the signature.
+    let source_host = std::env::var("AGENTMUX_HOST_LABEL").ok().filter(|s| !s.is_empty());
     let wan_sig = (|| {
         let key_b64 = std::env::var("AGENTMUX_WAN_KEY").ok().filter(|s| !s.is_empty())?;
         let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
         let src = source_agent?;
-        agentmux_common::jekt_sign::sign_wan_jekt(&key, &msgid, src, target_agent, ts_secs, message)
+        // Same defaulting discipline as `channel` above: an unset var must
+        // resolve to the identical string srv publishes under, never to a
+        // second spelling of "unknown".
+        let host = source_host.as_deref().unwrap_or("unknown");
+        let channel = source_channel.as_deref().unwrap_or("stable");
+        agentmux_common::jekt_sign::sign_wan_jekt(
+            &key, &msgid, src, host, channel, target_agent, ts_secs, message,
+        )
     })();
+    // Only declare an instance component when some signature is bound to it —
+    // a bare label with nothing to verify is noise on the wire. `wan_sig` now
+    // binds the channel too, so the channel ships when EITHER signature
+    // exists, not only the cross-channel one.
+    let wan_source_host = wan_sig
+        .as_ref()
+        .map(|_| source_host.unwrap_or_else(|| "unknown".to_string()));
+    let source_channel = (channel_sig.is_some() || wan_sig.is_some())
+        .then(|| source_channel.unwrap_or_else(|| "stable".to_string()));
     OutgoingJektSignatures {
         request_id: msgid,
         ts_secs,
@@ -484,6 +505,7 @@ fn sign_outgoing_jekt(
         source_channel,
         channel_sig,
         wan_sig,
+        wan_source_host,
     }
 }
 

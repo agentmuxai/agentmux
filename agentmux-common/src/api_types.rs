@@ -340,6 +340,17 @@ pub struct InjectRequest {
     /// gets a key when it is spawned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wan_sig: Option<String>,
+    /// The sending machine's host label (`AGENTMUX_HOST_LABEL`, injected at
+    /// spawn). With `source_channel` this identifies which AgentMux *instance*
+    /// under the sending account owns the keypair `wan_sig` was made with —
+    /// one account can run the same agent name on several machines, and on
+    /// several build channels of one machine, each with its own database and
+    /// therefore its own key (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md
+    /// §2.1.2). Bound into the signed material, so a wrong value selects a key
+    /// the signature cannot verify under rather than granting anything.
+    /// Absent whenever `wan_sig` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wan_source_host: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
