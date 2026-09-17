@@ -123,7 +123,9 @@ sweep did not follow the lift: 29 files still name `CREATE_NO_WINDOW` locally an
 define their own `fn now_ms`", and called it the same "additive half landed, removing half
 skipped" shape. **That was wrong, and it was my own error repeating the DRY audits metric
 without checking what it counted.** Verified directly: exactly ONE `const CREATE_NO_WINDOW`
-exists in the tree (`agentmux-common/src/win32.rs`), zero files re-declare it, and 24 import
+exists in the tree (`agentmux-common/src/win32.rs`) — after this PR also migrated two
+test-local copies in `agentmux-srv/tests/subprocess_io.rs` that an earlier `agentmux-*/src`
+search had missed, because integration tests live outside `src/` (codex P3 on #3291) — and 24 import
 it correctly. The 23 `fn now_ms` "duplicates" are three-line delegators —
 `fn now_ms() -> i64 { agentmux_common::time::now_ms() }` — so the logic exists once and the
 short local call site is deliberate. Counting usages and delegators as duplication overstates
@@ -241,7 +243,7 @@ causes and raw occurrences rather than actionable duplication.
 
 | Cause | Outcome |
 |---|---|
-| 1. No Rust↔TS codegen | **Loop closed** — #3291. See below. |
+| 1. No Rust↔TS codegen | Loop closed for one command — **#3291, open and approved at time of writing, not yet merged.** See below. |
 | 2. `agentmux-common` underuse | **Done** — #3289. See §2.6's correction. |
 | 3. Platform-forked `zoom.*.ts` | Already done before this report (#3034). |
 | 4. `mcp` ↔ `skill` twin primitives | **Verified real, recommended against.** |
@@ -253,7 +255,7 @@ codegen". In fact `SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.4 step 1 had shi
 were all live with 12 generated types. What had not happened is step 2, and specifically:
 **nothing in the frontend imported a single generated type.** All 12 were generated, gated
 against drift, and unused, while the hand-written stubs kept inline duplicates of the same
-shapes — a pipeline built and never connected at the far end. #3291 connects it end to end
+shapes — a pipeline built and never connected at the far end. #3291 (open, approved) connects it end to end
 for `voice.checkPath` and gives the remaining 16 stub files a template. (That spec's own
 Status still reads "no generator exists yet" — the same stale-status pattern §0 is about.)
 
@@ -367,7 +369,7 @@ a target that was met — the underlying causes (§2.6) are real regardless.
 | 9 | Container agents | 🟡 | 🟡 | `AGENTMUX_LOCAL_URL`; Dockerfile tooling |
 | 10 | Armory foundation consolidation | 🟡 | 🟡 | Naming consolidation Phases 3–4; §3.2/3.3/3.5/3.6 have no follow-up |
 | 11 | Mandatory ABF rethink | 🔴 not started | ✅ **shipped** | step 4 "(if wanted)"; §7 needs a decision |
-| 12 | DRY / modularity | 🔴 1/5 | 🟢 **4/5 closed or dismissed** | causes 1-3 done (#3289, #3291, #3034); 4 recommended against, 5 was never duplication — §5.4a. Remaining: migrate the other 16 RPC stub domains |
+| 12 | DRY / modularity | 🔴 1/5 | 🟢 **4/5 closed or dismissed** | cause 2 merged (#3289), 3 already done (#3034), 1 open in #3291; 4 recommended against, 5 was never duplication — §5.4a. Remaining: migrate the other 16 RPC stub domains |
 | 13 | Wave → Mux (#851) | 🔴 | ✅ **done, #851 closed** | 0 Wave identifiers; 306 → 91 files (#3285, #3287). Strings deliberately out of scope — §5.4 |
 | 14 | Agent working-state unification | 🟡 P1 | 🟡 P1 | Phase 2 investigated-not-attempted; 3 and 4 not started |
 
