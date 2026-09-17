@@ -84,6 +84,72 @@ exercise the OS keyboard pipeline.
 
 Spec: [`docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md`](../../docs/specs/SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) §7.2.
 
+## `pane-load.mjs`
+
+On-demand PTY output load, for reproducing **cross-pane input lag by hand**.
+Run it in one pane, type in another while it floods, and see whether your
+keystrokes stutter. It measures nothing about the other pane — your fingers
+are the instrument — it just produces load heavy and varied enough to provoke
+the symptom, for a window long enough to type in.
+
+```bash
+node tools/tests/pane-load.mjs                       # mixed, 10s
+node tools/tests/pane-load.mjs --mode paint --secs 15
+node tools/tests/pane-load.mjs --mode spinner --throttle-ms 1
+node tools/tests/pane-load.mjs --help
+```
+
+**Recipe:** open two panes → run this in A → move your cursor to B during the
+countdown → type continuously for the whole flood → note stutter, dropped
+characters, or lag between keypress and echo.
+
+**The mode that reproduces is the finding, not a detail.** Each leans on a
+different mechanism, so narrowing tells you where to look:
+
+| mode | shape | implicates |
+|---|---|---|
+| `text` | bulk bytes, moderate writes | WS egress, FileStore write-through, xterm raw parse |
+| `paint` | bulk escape sequences | xterm parser + renderer; real repaint work per frame |
+| `spinner` | many tiny writes | per-write overhead: WS frames, event dispatch, `PTY_COALESCE_WINDOW` — **only past the coalescing window, see below** |
+| `mixed` | rotates all three | default — find out *if* it reproduces, then narrow |
+
+**Spinner's claim needs a caveat at the default pacing.** The backend batches
+PTY reads for up to `PTY_COALESCE_WINDOW` (20ms) or 256 KiB before sending even
+one WS frame downstream. At this script's default auto-paced rate (~6.4 MB/s),
+every mode stays under that byte threshold, so all three end up flushing on the
+same 20ms clock regardless of how many tiny writes spinner made getting there
+— the "many small writes" story is real on the *producer* side but proves
+nothing about downstream WS-frame count unless the write rate is fast enough
+to blow through that window. Use `--unpaced`, or a `--throttle-ms` picked
+deliberately low, if you actually want to isolate that layer.
+
+**Why not just `yes`:** `bench-term-cross-pane.mjs` floods with `yes` — a
+stream of `y
+`, maximal bytes and near-zero terminal work, which xterm parses
+almost for free. Output that actually makes a UI feel bad is escape-sequence
+heavy (cursor jumps, colour churn, in-place redraws). A repro built on `yes`
+can be perfectly green while the thing users complain about is untouched.
+
+**Two defaults worth knowing**, both there because the naive version is a
+footgun:
+
+- **`--max-mb 64`** is a safety valve, not a tuning knob. A pane's terminal
+  output is written through to the FileStore for scrollback persistence, so an
+  unbounded flood is an unbounded write to your disk.
+- **Auto-pacing** spreads that budget across the requested duration
+  (64 MB / 10 s ≈ 6.4 MB/s, sustained). Without it these modes hit the cap in
+  a fraction of a second and the typing window disappears before you can move
+  your hands. `--throttle-ms` or `--unpaced` opts out.
+
+**Scope — this is the xterm path only.** It loads a *terminal* surface: a
+Terminal pane, or an agent pane's shell drawer. The agent pane's own
+conversation rendering (markdown/SolidJS, `MarkdownBlock`/`ChunkList`) is a
+different code path that this cannot touch. To load *that*, have an agent emit
+a large amount of text — e.g. ask it to `cat` a big file so the output streams
+into the conversation. Less controllable, but it is the only way to exercise
+that renderer, and the original cross-pane report was about an *agent* pane
+producing output — so ruling one in does not rule the other out.
+
 ## `term-keyrepeat-hiccups.mjs`
 
 CDP-driven diagnostic for the **"not silky" stutter felt while HOLDING a key**
