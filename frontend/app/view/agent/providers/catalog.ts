@@ -119,7 +119,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
         // .github/workflows/container-image.yml `claude_version` default — enforced by
         // ./pin-consistency.test.ts.
-        pinnedVersion: "2.1.263",
+        pinnedVersion: "2.1.274",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -272,7 +272,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
         npmPackage: "@google/gemini-cli",
-        pinnedVersion: "0.58.0",
+        pinnedVersion: "0.60.0",
         docsUrl: "https://ai.google.dev/gemini-cli",
         windowsInstallCommand: "npm install -g @google/gemini-cli",
         unixInstallCommand: "npm install -g @google/gemini-cli",
@@ -314,7 +314,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth"],
         npmPackage: "@qwen-code/qwen-code",
-        pinnedVersion: "0.23.0",
+        pinnedVersion: "0.24.0",
         docsUrl: "https://qwenlm.github.io/qwen-code-docs",
         windowsInstallCommand: "npm install -g @qwen-code/qwen-code",
         unixInstallCommand: "npm install -g @qwen-code/qwen-code",
@@ -370,7 +370,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // only the args here. Kimi's `["login"]` is the convention.
         authLoginCommand: ["models", "auth", "login", "--provider", "openai-codex"],
         npmPackage: "openclaw",
-        pinnedVersion: "2026.9.2",
+        pinnedVersion: "2026.9.4",
         docsUrl: "https://docs.openclaw.ai",
         windowsInstallCommand: "npm install -g openclaw",
         unixInstallCommand: "npm install -g openclaw",
@@ -438,7 +438,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
         npmPackage: "@github/copilot",
-        pinnedVersion: "1.0.83",
+        pinnedVersion: "1.0.85",
         docsUrl: "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
         windowsInstallCommand: "npm install -g @github/copilot",
         unixInstallCommand: "npm install -g @github/copilot",
