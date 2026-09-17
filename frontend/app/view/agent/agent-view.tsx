@@ -120,7 +120,6 @@ import { getProvider } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import { createAgentAtoms } from "./state";
-import { shouldShowTabStrip } from "./tab-strip-visibility";
 import type { DocumentNode } from "./types";
 import { useAgentStream } from "./useAgentStream";
 
@@ -553,17 +552,12 @@ export const AgentPaneChrome = (props: {
     // lone conversation shows just the "+" (no pill for itself). The
     // moment a 2nd tab exists, both (including the first) appear.
     const visibleTabs = createMemo(() => (combinedTabs().length > 1 ? combinedTabs() : []));
-    // Single source of truth for whether the strip renders — read both by
-    // the <Show> that mounts it and by the picker host's strip-clearance
-    // custom property below, so the space reserved for the strip can never
-    // disagree with whether the strip is actually there.
-    const showTabStrip = createMemo(() =>
-        shouldShowTabStrip({
-            visibleTabCount: visibleTabs().length,
-            hasAgent: !!agentId(),
-            isHistoryTab: isHistoryTab(),
-        }),
-    );
+    // Every pane's strip (title + "+") is always shown — agent used to hide
+    // it on a fresh, unlaunched picker pane (tab-strip-visibility.ts,
+    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md), but that made it the
+    // one widget type whose header behaved differently from every other
+    // pane (every GenericPaneChrome-driven type, and term, always show
+    // "+"). Repo-owner-confirmed: agent should be no different.
     // Per-pane zoom for the tab strip itself — mirrors
     // AgentPresentationView's own zoomFactor memo (term:zoom block meta +
     // clamp, further down this file). Simply activeBlockData()?.meta now —
@@ -755,14 +749,14 @@ export const AgentPaneChrome = (props: {
             vm?.setProgressBarMount?.(null);
         });
     });
-    // Same bridging pattern for the tab-strip-visibility flag AgentBlockContent's
+    // Same bridging pattern for the tab-strip-visible flag AgentBlockContent's
     // picker-host reads for its own strip-clearance padding (see that
     // component's own comment) — chrome and content are separate trees now,
-    // so this can no longer be a plain shared local `showTabStrip()` read.
+    // so this can no longer be a plain shared local read. Always true — see
+    // the strip-visibility comment above.
     createEffect(() => {
         const vm = nodeModel.activeViewModel?.() as AgentViewModel | null;
-        const visible = showTabStrip();
-        vm?.setTabStripVisible?.(visible);
+        vm?.setTabStripVisible?.(true);
         onCleanup(() => {
             vm?.setTabStripVisible?.(false);
         });
@@ -793,7 +787,7 @@ export const AgentPaneChrome = (props: {
                     <span class="pane-tab-label">{t.label}</span>
                 )
             }
-            onAdd={showTabStrip() ? () => void handleNewAgentTab() : undefined}
+            onAdd={() => void handleNewAgentTab()}
             addTitle="New agent"
             nodeModel={nodeModel}
             viewModel={viewModel}
@@ -855,15 +849,15 @@ export const AgentPaneChrome = (props: {
             {/* Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
                 §4.1) — ONE unified row replaces the old headerElem (full
                 BlockFrame_Header) + separate .agent-pane-stack-content +
-                PaneTabStrip structure. showTabStrip()/visibleTabs() keep
-                their exact pre-existing meaning (SPEC_AGENT_PANE_TAB_STRIP_
-                OVERLAY_2026_08_10.md, tab-strip-visibility.ts) — a lone
-                conversation still shows no self-pill (empty tabs, "+" only);
-                a fresh, unlaunched picker pane still shows neither pills nor
-                "+", just the plain "Agent" identity — this row just always
-                exists as ONE row instead of a full header conditionally
-                topped by a floating strip overlay. Same ErrorBoundary
-                isolation BlockFrame_Default_Component itself uses, so a
+                PaneTabStrip structure. visibleTabs() keeps its exact
+                pre-existing meaning — a lone conversation still shows no
+                self-pill (empty tabs), just the plain "Agent" identity — but
+                "+" is now always shown, even on a fresh/unlaunched picker
+                pane, matching every other pane type (agent no longer has its
+                own tab-strip-visibility gate). This row just always exists
+                as ONE row instead of a full header conditionally topped by a
+                floating strip overlay. Same ErrorBoundary isolation
+                BlockFrame_Default_Component itself uses, so a
                 broken header computation blanks only the header row, not
                 the whole pane. */}
             <ErrorBoundary fallback={renderAgentPaneHeader(null)}>
