@@ -1075,8 +1075,24 @@ tasks:
                 # in the taskbar/dock instead of a generic cog. Idempotent —
                 # safe to run on every dev launch. Best-effort: a missing
                 # `convert`/`gtk-update-icon-cache` doesn't fail the launch.
+                #
+                # AGENTMUX_CHANNEL here is exported (not just a local var) so
+                # the launcher/host exec later in this same script inherits
+                # it — window_settings.rs::linux_app_id() reads it directly.
+                # Without this, the dev binary would advertise its normal
+                # auto-detected dev-<branch>[-<clone-id>] app_id/WM_CLASS
+                # while this .desktop file's StartupWMClass stayed at the
+                # legacy "agentmux" default, breaking icon-matching for the
+                # single most common dev workflow (reagent P1 on PR #3323).
+                # This override only affects the WM app_id — dev mode's own
+                # data-dir isolation intentionally ignores AGENTMUX_CHANNEL
+                # (see agentmux-common/src/data_paths.rs), so this has no
+                # effect on which data dir the dev instance actually uses.
                 if [ "{{OS}}" = "linux" ]; then
+                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+                  export AGENTMUX_CHANNEL="dev-${DEV_BRANCH_SLUG:-default}"
                   bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
+                    "agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}" \
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 
@@ -1286,8 +1302,15 @@ tasks:
                 mkdir -p "$DEV_DIR"
                 cp -r dist/cef/* "$DEV_DIR"/
 
+                # See dev:serve's identical block for why AGENTMUX_CHANNEL is
+                # exported here (must match window_settings.rs::linux_app_id()'s
+                # env read so this .desktop's StartupWMClass matches the
+                # dev binary's real app_id/WM_CLASS).
                 if [ "{{OS}}" = "linux" ]; then
+                  DEV_BRANCH_SLUG="$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr -c 'A-Za-z0-9._-' '-' | cut -c1-40)"
+                  export AGENTMUX_CHANNEL="dev-${DEV_BRANCH_SLUG:-default}"
                   bash scripts/install-linux-desktop.sh "$(pwd)/$DEV_DIR/agentmux-cef" \
+                    "agentmux-${AGENTMUX_CHANNEL}-{{.VERSION}}" \
                     || echo "⚠ install-linux-desktop.sh failed; icon may be wrong but launch continues"
                 fi
 

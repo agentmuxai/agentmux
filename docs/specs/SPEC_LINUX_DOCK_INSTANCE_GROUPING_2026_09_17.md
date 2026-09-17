@@ -94,7 +94,30 @@ this desyncs `StartupWMClass` from the real app_id for a local `.deb`/`.rpm`
 build, reintroducing the exact bug this spec fixes for that one packaging
 path (PR #3323).
 
-### 3.3 Non-goals
+### 3.3 `task dev` / `task dev:standalone`
+
+These invoke `install-linux-desktop.sh` directly (bypassing `linux-apprun.sh`
+entirely — there's no AppImage, no staged `CHANNEL`/`VERSION` markers) and launch
+the host without any packaging script having set `AGENTMUX_BUILD_CHANNEL_DEFAULT`,
+so `linux_app_id()` would auto-detect via `RuntimeMode`'s normal dev-mode
+detection (`dev-<branch>[-<clone-id>]`, computed by walking up from the exe path to
+find `.git` and hashing the canonicalized clone root — see
+`agentmux-common/src/runtime_mode.rs`). Replicating that exact detection
+(git-branch lookup + clone-root discovery + FNV-1a hash) in bash to keep it in sync
+would be fragile. Instead, `Taskfile.yml`'s Linux `dev:serve`/`dev:standalone:serve`
+blocks compute a simpler `dev-<branch-slug>` string themselves and `export
+AGENTMUX_CHANNEL` with it before the later launcher/host exec in the same script —
+`linux_app_id()` already checks that env var first (same override every packaging
+path uses), so setting it here makes both sides agree by construction rather than
+by parallel re-implementation. This is scoped to the WM app_id only: dev mode's own
+data-dir resolution intentionally ignores `AGENTMUX_CHANNEL`
+(`agentmux-common/src/data_paths.rs`), so it doesn't change which data dir a dev
+instance uses. Caught by ReAgent's second review pass on PR #3323 — the first
+version of this PR only wired up the packaging-script paths (3.1/3.2) and left
+`task dev` mismatched, which would have broken icon-matching for the single most
+common development workflow.
+
+### 3.4 Non-goals
 
 - Pruning accumulated per-app_id desktop files/icons over time — same open follow-up
   as the existing per-build data-dir accumulation (CLAUDE.md, "Data isolation is
@@ -111,7 +134,8 @@ path (PR #3323).
 | `scripts/linux-apprun.sh` | Resolves the app_id from `CHANNEL`/`VERSION` markers + `AGENTMUX_CHANNEL`, passes it to the installer |
 | `scripts/stage-linux-runtime.sh` | Writes the new `usr/share/agentmux/CHANNEL` marker |
 | `scripts/build-appimage-linux.sh` | Substitutes `__WMCLASS__` in the AppImage's own internal top-level `.desktop` |
-| `scripts/build-deb-linux.sh`, `scripts/build-rpm-linux.sh` | Substitute `__WMCLASS__` with the `stable` fallback app_id |
+| `scripts/build-deb-linux.sh`, `scripts/build-rpm-linux.sh` | Substitute `__WMCLASS__` from `${AGENTMUX_BUILD_CHANNEL_DEFAULT:-stable}` (the same fallback the compiled binary itself uses) |
+| `Taskfile.yml` | `dev:serve`/`dev:standalone:serve` (Linux): export `AGENTMUX_CHANNEL=dev-<branch>` and pass the matching app_id to the installer |
 
 ## 5. Acceptance
 
@@ -120,4 +144,6 @@ path (PR #3323).
   entries.
 - A single instance's icon/taskbar behavior is unchanged from before (still shows the
   AgentMux icon and label, still launches via the same `Exec=` mechanism).
+- `task dev` on Linux installs a `.desktop` whose `StartupWMClass` matches the
+  running dev binary's actual `wayland_app_id`/`WM_CLASS`.
 - `.deb`/`.rpm`/AppImage-internal desktop files never ship a literal `__WMCLASS__`.
