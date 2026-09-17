@@ -36,6 +36,15 @@ export type {
     BundleValidationIssue,
     BundleValidationReport,
     BundleValidationSeverity,
+    BundleImportCommitResponse,
+    BundleImportContextFilePreview,
+    BundleImportMcpServerDisplay,
+    BundleImportMcpServerPreview,
+    BundleImportPreviewResponse,
+    BundleImportProjectInstructionPreview,
+    BundleImportRequirementPreview,
+    BundleImportSkillPreview,
+    BundleImportUnresolvedRequirement,
 } from "./bundle";
 export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
 export type {

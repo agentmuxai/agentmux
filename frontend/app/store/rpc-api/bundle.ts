@@ -20,6 +20,22 @@ export type { Bundle } from "@/types/rpc/Bundle";
 // `register_bundle_validate`), but its response was always the part at risk of
 // drift, and that part is now generated.
 export type { ValidationReport as BundleValidationReport } from "@/types/rpc/ValidationReport";
+
+// The import preview/commit shapes are generated too, as of this change. They
+// previously had NO Rust type at all -- both handlers built their responses as
+// ad-hoc `json!` literals -- so the declarations here were hand-maintained
+// against nothing.
+export type { BundleImportPreviewResponse } from "@/types/rpc/BundleImportPreviewResponse";
+export type { BundleImportCommitResponse } from "@/types/rpc/BundleImportCommitResponse";
+export type { BundleImportContextFilePreview } from "@/types/rpc/BundleImportContextFilePreview";
+export type { BundleImportSkillPreview } from "@/types/rpc/BundleImportSkillPreview";
+export type { BundleImportMcpServerPreview } from "@/types/rpc/BundleImportMcpServerPreview";
+export type { BundleImportMcpServerDisplay } from "@/types/rpc/BundleImportMcpServerDisplay";
+export type { BundleImportRequirementPreview } from "@/types/rpc/BundleImportRequirementPreview";
+export type { BundleImportProjectInstructionPreview } from "@/types/rpc/BundleImportProjectInstructionPreview";
+export type { BundleImportUnresolvedRequirement } from "@/types/rpc/BundleImportUnresolvedRequirement";
+export type { BundleImportFileEntry } from "@/types/rpc/BundleImportFileEntry";
+export type { BundleImportSkillSelection } from "@/types/rpc/BundleImportSkillSelection";
 export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/ValidationIssue";
 export type { IssueSeverity as BundleValidationSeverity } from "@/types/rpc/IssueSeverity";
 
@@ -33,6 +49,10 @@ import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundle
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
 import type { ValidationReport } from "@/types/rpc/ValidationReport";
+import type { CommandBundleImportPreviewData } from "@/types/rpc/CommandBundleImportPreviewData";
+import type { CommandBundleImportCommitData } from "@/types/rpc/CommandBundleImportCommitData";
+import type { BundleImportPreviewResponse as BundleImportPreviewResponseT } from "@/types/rpc/BundleImportPreviewResponse";
+import type { BundleImportCommitResponse as BundleImportCommitResponseT } from "@/types/rpc/BundleImportCommitResponse";
 
 // The accurate request shape for the three upsert/validate commands, DERIVED
 // from the generated `Bundle` rather than hand-listed, so a new Rust field
@@ -153,27 +173,23 @@ export const BundleApi = {
 
 
 export const BundleImportApi = {
+    // `data` takes all three input modes the server actually supports
+    // (`file_path`, `zip_base64`, `files`), which the previous hand-written
+    // `{ file_path: string }` did not -- two of them were unreachable through
+    // this client even though `resolve_import_input` has always accepted them.
     BundleImportPreviewCommand(
         client: RpcClient,
-        data: { file_path: string },
+        data: CommandBundleImportPreviewData,
         opts?: RpcOpts,
-    ): Promise<BundleImportPreviewResponse> {
+    ): Promise<BundleImportPreviewResponseT> {
         return client.rpcCall("bundle.import.preview", data, opts);
     },
 
     BundleImportCommitCommand(
         client: RpcClient,
-        data: {
-            file_path: string;
-            expected_content_digest: string;
-            bundle_name?: string;
-            include_instructions: boolean;
-            include_context_files: number[];
-            include_skills: { source_dir: string; import_as?: string }[];
-            include_mcp_servers: string[];
-        },
+        data: CommandBundleImportCommitData,
         opts?: RpcOpts,
-    ): Promise<BundleImportCommitResponse> {
+    ): Promise<BundleImportCommitResponseT> {
         return client.rpcCall("bundle.import.commit", data, opts);
     },
 

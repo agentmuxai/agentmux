@@ -18,6 +18,7 @@ import { Button } from "@/element/button";
 import { getApi } from "@/app/store/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { BundleImportPreviewResponse } from "@/app/store/rpc-api";
 
 interface BundleImportSelectModalPanelProps {
     onPreviewed: (filePath: string, preview: BundleImportPreviewResponse) => void;

@@ -19,6 +19,7 @@ import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { BundleImportSelectionState } from "@/app/element/modal-layer";
+import type { BundleImportCommitResponse } from "@/app/store/rpc-api";
 
 interface BundleImportConfirmModalPanelProps {
     filePath: string;
