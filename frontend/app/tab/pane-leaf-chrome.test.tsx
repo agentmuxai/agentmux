@@ -186,9 +186,14 @@ afterEach(() => {
 
 describe("PaneLeafChrome — passthrough (not hoisted)", () => {
     it("renders the block directly, with no chrome wrapper, for a view type that doesn't hoist its own chrome", async () => {
-        // "editor", not "term" — term hoists too now (it has its own in-pane
-        // tab strip). See HOISTS_OWN_CHROME in pane-leaf-chrome.tsx.
-        setBlockView("b1", "editor");
+        // "settings" — a system/utility view, not one of the widget-bar's
+        // Pane Tab-eligible types (CLAUDE.md's "Not widgets" table), so it
+        // correctly never hoists. Universal Pane Tabs (SPEC_PANE_TABS_
+        // UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) extended HOISTS_OWN_CHROME
+        // to every REAL widget-bar view type, so this test's original
+        // "editor" example no longer demonstrates the passthrough path —
+        // editor hoists now too.
+        setBlockView("b1", "settings");
         const nodeModel = makeFakeNodeModel({
             activeViewModel: () => fakeChromeViewModel("chrome-root"),
         });

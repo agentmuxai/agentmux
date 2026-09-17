@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { QuickTips } from "@/app/element/quicktips";
+import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
+import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showZoomIndicator } from "@/app/store/zoom";
@@ -21,9 +23,16 @@ const WHEEL_STEP = 0.05;
 class HelpViewModel implements ViewModel {
     viewType: string;
     blockId: string;
+    // Universal Pane Tabs — every registered ViewModel is always
+    // constructed as `new ctor(blockId, nodeModel)` (block.tsx's
+    // `makeViewModel`); previously unused here, now needed for `noHeader`.
+    nodeModel: BlockNodeModel;
+    renderPaneChrome = genericRenderPaneChrome;
+    noHeader = () => this.nodeModel.paneChromeHoisted === true;
 
-    constructor(blockId: string) {
+    constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "help";
+        this.nodeModel = nodeModel;
         this.blockId = blockId;
     }
 

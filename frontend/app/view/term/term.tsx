@@ -18,7 +18,7 @@ import { setTermPaneChromeComponent, setTerminalViewComponent, TermViewModel } f
 import { TermWrap } from "./termwrap";
 import "./xterm.css";
 import { DragOverlay } from "@/app/element/dragoverlay";
-import { PaneTabStrip } from "@/app/element/PaneTabStrip";
+import { PaneHeaderTabStrip } from "@/app/element/PaneHeaderTabStrip";
 import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
 import { detectHost, invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -32,7 +32,7 @@ import {
     type NodeModel,
 } from "@/layout/index";
 import { findNode } from "@/layout/lib/layoutNode";
-import { BlockFrame_Header, computeFocusRingBorderColor } from "@/app/block/blockframe";
+import { computeFocusRingBorderColor } from "@/app/block/blockframe";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -650,23 +650,43 @@ const TermPaneChrome = (props: {
                 return () => holder;
             })(),
     );
+    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+    // §4.1): the old headerElem/headerElemNoView (BlockFrame_Header instances,
+    // constructed inline here) are gone — PaneHeaderTabStrip now wraps
+    // BlockFrame_Header itself (blocktypes.ts's `leadingTabStrip` prop),
+    // still passing connBtnRef/changeConnModalAtom through unchanged, since
+    // BlockFrame_Header's own ConnectionButton slot (manageConnection, real
+    // for term) still renders exactly as before.
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
-    const headerElem = (
-        <BlockFrame_Header
+
+    // Factored out so the ErrorBoundary fallback can render the exact same
+    // header with `viewModel={null}` instead of duplicating every prop twice.
+    const renderTermPaneHeader = (viewModel: ViewModel | null): JSX.Element => (
+        <PaneHeaderTabStrip
+            tabs={visibleTermTabs()}
+            activeId={activeBlockId()}
+            zoomFactor={tabStripZoomFactor}
+            getId={(t) => t.blockId}
+            getLabel={(t) => t.label}
+            onActivate={handleTermTabSwitch}
+            onClose={handleTermTabClose}
+            onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
+            renderLabel={(t) =>
+                renamingBlockId() === t.blockId ? (
+                    <PaneTabRenameInput
+                        initialValue={t.label}
+                        onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
+                        onCancel={() => setRenamingBlockId(null)}
+                    />
+                ) : (
+                    <span class="pane-tab-label">{t.label}</span>
+                )
+            }
+            onAdd={() => void handleTermTabAdd()}
+            addTitle="New terminal tab"
             nodeModel={nodeModel}
-            viewModel={activeViewModelOrUndefined()}
-            preview={false}
-            blockId={activeBlockId}
-            connBtnRef={connBtnRef()}
-            changeConnModalAtom={changeConnModalAtom()}
-        />
-    );
-    const headerElemNoView = (
-        <BlockFrame_Header
-            nodeModel={nodeModel}
-            viewModel={null}
-            preview={false}
-            blockId={activeBlockId}
+            viewModel={viewModel}
+            activeBlockId={activeBlockId}
             connBtnRef={connBtnRef()}
             changeConnModalAtom={changeConnModalAtom()}
         />
@@ -696,47 +716,23 @@ const TermPaneChrome = (props: {
             onClick={() => nodeModel.focusNode()}
             onFocusIn={() => nodeModel.focusNode()}
         >
-            <ErrorBoundary fallback={headerElemNoView}>{headerElem}</ErrorBoundary>
-            {/* Spans the strip AND the terminal, and is the positioned
-                ancestor for both overlays below. Both used to live inside
-                `.view-term`, which contained the strip before it was
-                hoisted; leaving them there would have quietly moved them
-                relative to it (codex P2 x2 on PR #3157) — the background
-                image could no longer paint behind the strip, so the strip's
-                backdrop-filter had nothing of the image to blur, and the
-                runtime badge's `top: 6px` landed on the terminal's first
-                output row instead of on the strip band. */}
+            {/* Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+                §4.1) — ONE unified row replaces the old headerElem (full
+                BlockFrame_Header) + a separate PaneTabStrip row below it.
+                Unlike agent's overlay strip, term's strip always reserved
+                its own normal-flow band above the xterm surface already —
+                this migration only removes the SEPARATE-ROW-FROM-THE-HEADER
+                part, not a from-overlay-to-row change. connBtnRef/
+                changeConnModalAtom are still threaded through — term's
+                ConnectionButton (manageConnection, TermViewModel) is a real,
+                live feature BlockFrame_Header itself still renders. */}
+            <ErrorBoundary fallback={renderTermPaneHeader(null)}>
+                {renderTermPaneHeader(activeViewModelOrUndefined() ?? null)}
+            </ErrorBoundary>
             <div class="term-pane-stack-body">
                 <Show when={termBg()}>
                     <div class="absolute inset-0 z-0 pointer-events-none" style={termBg()} />
                 </Show>
-                {/* Normal-flow row, unlike the agent strip's absolute overlay —
-                    the terminal strip has always reserved its own band above
-                    the xterm surface (term.scss), and keeping that avoids
-                    covering the top line of terminal output. */}
-                <PaneTabStrip
-                    tabs={visibleTermTabs()}
-                    activeId={activeBlockId()}
-                    zoomFactor={tabStripZoomFactor}
-                    getId={(t) => t.blockId}
-                    getLabel={(t) => t.label}
-                    onActivate={handleTermTabSwitch}
-                    onClose={handleTermTabClose}
-                    onTabDoubleClick={(t) => setRenamingBlockId(t.blockId)}
-                    renderLabel={(t) =>
-                        renamingBlockId() === t.blockId ? (
-                            <PaneTabRenameInput
-                                initialValue={t.label}
-                                onConfirm={(title) => handleTermTabRenameConfirm(t.blockId, title)}
-                                onCancel={() => setRenamingBlockId(null)}
-                            />
-                        ) : (
-                            <span class="pane-tab-label">{t.label}</span>
-                        )
-                    }
-                    onAdd={() => void handleTermTabAdd()}
-                    addTitle="New terminal tab"
-                />
                 <Show when={runtimeLabel()}>
                     <div class="agent-runtime-badge" title="Agent running time">
                         {runtimeLabel()}

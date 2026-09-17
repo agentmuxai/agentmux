@@ -58,6 +58,13 @@ export interface PaneTabStripProps<T> {
 
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
+    /** Optional icon rendered to the left of the label, e.g.
+     *  `getBlockHeaderIcon(blockViewToIcon(view), blockData)` — the same
+     *  icon convention the plain (non-tabbed) header iconview already uses
+     *  (blockutil.tsx). Omitted entirely (no reserved space) for a caller
+     *  that doesn't pass it, so existing tab strips (agent/term) are
+     *  visually unchanged. */
+    getIcon?: (tab: T) => JSX.Element;
     /** Full tooltip text; falls back to the label when omitted. */
     getTooltip?: (tab: T) => string;
     /** "Attention" tabs (unsaved changes, needs-review, …) always show
@@ -78,7 +85,11 @@ export interface PaneTabStripProps<T> {
     /** The far-right `+` — omitted entirely when the pane type has no
      *  "add tab" action. Always pinned last regardless of tab count or
      *  strip scroll state. */
-    onAdd?: () => void;
+    /** Optional MouseEvent param (universal Pane Tabs, GenericPaneChrome) —
+     *  lets a caller position a widget picker at the click. Every existing
+     *  caller passes a zero-arg closure, which stays valid since the param
+     *  is optional and simply goes unused there. */
+    onAdd?: (e?: MouseEvent) => void;
     addTitle?: string;
     /** Visible text beside the `+` glyph, e.g. "New Agent". Opt-in per pane:
      *  omitted, the button stays the bare 28×28px glyph the editor and
@@ -197,6 +208,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             active={props.activeId === props.getId(tab)}
                             getId={props.getId}
                             getLabel={props.getLabel}
+                            getIcon={props.getIcon}
                             getTooltip={props.getTooltip}
                             getAttention={props.getAttention}
                             getTabClass={props.getTabClass}
@@ -218,7 +230,7 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                             type="button"
                             class={`pane-tab-strip-add${props.addLabel ? " pane-tab-strip-add-labeled" : ""}`}
                             aria-label={props.addLabel ?? props.addTitle ?? "New tab"}
-                            onClick={() => props.onAdd!()}
+                            onClick={(e) => props.onAdd!(e)}
                         >
                             {/* Wrapped so the glyph itself can be nudged (PaneTabStrip.scss's
                                 .pane-tab-strip-add-glyph) without moving the button's own
@@ -240,6 +252,7 @@ interface PaneTabStripItemProps<T> {
     active: boolean;
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
+    getIcon?: (tab: T) => JSX.Element;
     getTooltip?: (tab: T) => string;
     getAttention?: (tab: T) => boolean;
     getTabClass?: (tab: T) => Record<string, boolean>;
@@ -299,6 +312,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
                 onClick={onClick}
                 onDblClick={onDblClick}
             >
+                {props.getIcon && <span class="pane-tab-icon">{props.getIcon(props.tab)}</span>}
                 {props.renderLabel ? (
                     props.renderLabel(props.tab)
                 ) : (

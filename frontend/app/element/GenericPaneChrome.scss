@@ -1,0 +1,77 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// ReAgent P1 on PR #3309: GenericPaneChrome.tsx's `.generic-pane-stack`
+// wrapper had no corresponding SCSS at all — `BlockFrame_Header` (via
+// `PaneHeaderTabStrip`) renders as a direct child here, OUTSIDE the
+// `.block.block-frame-default .block-frame-default-inner` ancestor chain
+// `block.scss`'s own `.block-frame-default-header` rule requires to match.
+// Without this file, the header rendered as unstyled, vertically-stacked
+// block-level divs instead of a flex row — the EXACT failure mode
+// `mixins.scss`'s own doc comment already documents (found live testing
+// when agent/term first hoisted their headers). Mirrors
+// `agent-view.scss`'s `.agent-pane-stack`/`.agent-pane-stack-content`
+// exactly (same mixin, same focus-ring technique) rather than inventing a
+// new pattern for a 3rd/4th/.../12th consumer of the same underlying
+// "hoisted BlockFrame_Header outside its usual ancestor chain" problem.
+
+@use "../mixins.scss" as mixins;
+
+.generic-pane-stack {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    position: relative;
+
+    // See this file's header comment — required or the header renders
+    // unstyled. `>` (direct child) because ErrorBoundary (block.tsx's
+    // wrapping pattern, mirrored in GenericPaneChrome) renders no DOM
+    // element of its own.
+    > .block-frame-default-header {
+        @include mixins.block-frame-default-header-layout();
+        flex-shrink: 0;
+    }
+
+    // Selection ring for the whole pane (header + content) — mirrors
+    // `.agent-pane-stack`'s own `&::after` treatment exactly; see that
+    // rule's comment (agent-view.scss) for the full reasoning (why a
+    // pseudo-element overlay rather than a real border, why
+    // `--pane-ring-color` is read from an inline custom property, why
+    // `z-index`/`will-change` matter once focused).
+    &::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        border: 2px solid var(--pane-ring-color, var(--border-color));
+        border-radius: var(--block-border-radius);
+        z-index: var(--zindex-block-mask-inner);
+        will-change: transform;
+    }
+
+    &.generic-pane-stack-focused::after {
+        border-color: var(--pane-ring-color, var(--accent-color));
+        z-index: 50;
+    }
+
+    &.generic-pane-stack-focused-alone::after {
+        border-color: transparent;
+    }
+}
+
+.generic-pane-stack-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    position: relative;
+
+    // Neutralizes the nested <Block>'s own `.block-mask` ring so it
+    // doesn't draw a redundant second ring right where the header ends,
+    // now that `.generic-pane-stack`'s own `::after` (above) covers the
+    // whole pane. Mirrors `.agent-pane-stack-content`'s identical rule
+    // (agent-view.scss) exactly — same reasoning, `!important` for the
+    // same specificity-order reason documented there.
+    .block-mask {
+        border-color: transparent !important;
+    }
+}

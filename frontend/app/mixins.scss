@@ -35,6 +35,20 @@
     border-bottom: 1px solid var(--border-color);
     border-radius: var(--block-border-radius) var(--block-border-radius) 0 0;
 
+    // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+    // §4.1) — mirrors .block-frame-default-header-iconview's own flex-item
+    // role exactly (same shrink/overflow behavior), since this replaces it
+    // in the same row when `leadingTabStrip` is set (blockframe.tsx). The
+    // tab strip's own internal layout (PaneTabStrip.scss) is unaffected —
+    // this only governs how the strip behaves as a flex CHILD of the header.
+    .block-frame-default-header-tabstrip {
+        display: flex;
+        flex-shrink: 3;
+        min-width: 17px;
+        align-items: center;
+        overflow-x: hidden;
+    }
+
     .block-frame-default-header-iconview {
         display: flex;
         flex-shrink: 3;

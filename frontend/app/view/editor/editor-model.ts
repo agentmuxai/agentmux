@@ -31,6 +31,7 @@
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
 import { pushNotification, setActiveTab, useBlockAtom, workspace } from "@/app/store/global";
 import {
     EditorPaneEvent,
@@ -107,6 +108,12 @@ function installGlobalSinkOnce(): void {
 
 export class EditorViewModel implements ViewModel {
     viewType = "editor";
+    renderPaneChrome = genericRenderPaneChrome;
+    // Suppresses BlockFrame's own inline header once chrome is hoisted —
+    // required whenever a view type is added to pane-leaf-chrome.tsx's
+    // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors
+    // AgentViewModel's/TermViewModel's identical field exactly.
+    noHeader = () => this.nodeModel.paneChromeHoisted === true;
     blockId: string;
     nodeModel: BlockNodeModel;
 

@@ -105,6 +105,9 @@
         "tab:skipcloseconfirm": {
           "type": "boolean"
         },
+        "pane:tabstrip": {
+          "type": "string"
+        },
         "widget:*": {
           "type": "boolean"
         },

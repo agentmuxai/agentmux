@@ -37,6 +37,8 @@
  * active-member churn — is unaffected and still disposes normally.
  */
 
+import { ObjectService } from "@/app/store/services";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { findNode } from "./layoutNode";
 import type { LayoutModel } from "./layoutModel";
 import { closeNode } from "./layoutMagnify";
@@ -58,6 +60,36 @@ function setActive(data: TabLayoutData, blockId: string, stack: string[]): void 
  *  create the block itself — callers spawn/allocate the block first (e.g.
  *  via a `CreateBlock` RPC that skips layout placement, mirroring
  *  `open_pane_floating`) and pass its id in here. */
+/**
+ * Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
+ * §4.5) — create a fresh block for `blockDef` and push it onto `nodeId`'s
+ * stack as a new Pane Tab. Generalizes the exact create-then-push sequence
+ * agent's own "+" handler already used inline
+ * (`frontend/app/view/agent/agent-view.tsx`'s `handleNewAgentTab`) — `pane.open`
+ * with `skip_placement: true` creates the block without placing it anywhere,
+ * so no backend change is needed to support this for an arbitrary widget type.
+ *
+ * Re-resolves `nodeId` fresh after the RPC rather than trusting a pre-await
+ * reference — the pane can close while the request is in flight. If it has,
+ * the skip_placement block has nowhere to attach to; delete it instead of
+ * leaving an orphaned, unreachable block behind (same race agent's handler
+ * already guards).
+ */
+export async function addWidgetAsPaneTab(model: LayoutModel, nodeId: string, blockDef: BlockDef): Promise<void> {
+    const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"];
+    const paneOpenResult = (await TabRpcClient.rpcCall(
+        "pane.open",
+        { view, skip_placement: true, meta: blockDef.meta },
+        {}
+    )) as { block_id: string };
+    const node = findNode(model.treeState.rootNode, nodeId);
+    if (!node) {
+        await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+        return;
+    }
+    pushBlockOntoStack(model, nodeId, paneOpenResult.block_id);
+}
+
 export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: string): void {
     const node = findNode(model.treeState.rootNode, nodeId);
     if (!node?.data) {
