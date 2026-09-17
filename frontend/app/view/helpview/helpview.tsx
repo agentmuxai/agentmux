@@ -36,7 +36,7 @@ function HelpView({ model }: { model: HelpViewModel }): JSX.Element {
     const [zoom, setZoom] = createSignal(1.0);
 
     onMount(() => {
-        const blockData = WOS.getWaveObjectAtom<Block>(`block:${model.blockId}`)();
+        const blockData = WOS.getMuxObjectAtom<Block>(`block:${model.blockId}`)();
         const saved = blockData?.meta?.["help:zoom"];
         if (typeof saved === "number" && saved >= MIN_ZOOM && saved <= MAX_ZOOM) {
             setZoom(saved);

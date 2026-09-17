@@ -432,7 +432,7 @@ pub fn load_config() -> config::Config {
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var("AGENTMUX_DATA_DIR").ok().filter(|s| !s.is_empty()).map(std::path::PathBuf::from))
             .or_else(|| std::env::var("AGENTMUX_DATA_HOME").ok().map(std::path::PathBuf::from))
-            .unwrap_or_else(|| std::path::PathBuf::from(base::get_wave_data_dir()));
+            .unwrap_or_else(|| std::path::PathBuf::from(base::get_mux_data_dir()));
         let code = migrations::run_migrate_command(&data_dir, *dry_run, *list, *verify);
         std::process::exit(code);
     }
@@ -493,19 +493,19 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         std::env::set_var("AGENTMUX_APP_PATH", &config.app_path);
     }
 
-    base::ensure_wave_data_dir().unwrap_or_else(|e| {
+    base::ensure_mux_data_dir().unwrap_or_else(|e| {
         tracing::error!("Failed to ensure data dir: {}", e);
         std::process::exit(1);
     });
-    base::ensure_wave_db_dir().unwrap_or_else(|e| {
+    base::ensure_mux_db_dir().unwrap_or_else(|e| {
         tracing::error!("Failed to ensure db dir: {}", e);
         std::process::exit(1);
     });
 
     // Startup diagnostics
     tracing::info!(
-        data_dir = %base::get_wave_data_dir().display(),
-        db_dir = %base::get_wave_db_dir().display(),
+        data_dir = %base::get_mux_data_dir().display(),
+        db_dir = %base::get_mux_db_dir().display(),
         app_path = %config.app_path,
         instance_id = %config.instance_id,
         "backend directories initialized"
@@ -521,10 +521,10 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // 0011) succeeds but a later one fails, the shared store is already backfilled
     // and safe to use — falling back to per-channel would strand writes made this
     // session when the later migration succeeds on next boot.
-    let wave_data_dir = base::get_wave_data_dir();
+    let mux_data_dir = base::get_mux_data_dir();
 
     // Open databases
-    let db_dir = base::get_wave_db_dir();
+    let db_dir = base::get_mux_db_dir();
 
     // Pre-migration snapshot (Increment B.2 lean cut from
     // SPEC_DATA_CHANNELS §3.4). Run BEFORE Store::open AND before
@@ -575,7 +575,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     // `SPEC_FAST_STARTUP_UPGRADE_OWNS_MIGRATIONS_AND_UPDATES_2026_09_15.md`
     // invariant S1b requires that gate to fail closed, and a store that
     // cannot be read here is precisely the case it must catch.
-    let pre_migration_count = match migrations::try_count_pending_migrations(&wave_data_dir) {
+    let pre_migration_count = match migrations::try_count_pending_migrations(&mux_data_dir) {
         Ok(n) => n,
         Err(e) => {
             let fallback = e.readable_pending();
@@ -600,7 +600,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
     if pre_migration_count > 0 {
         eprintln!("AGENTMUXSRV-MIGRATING migrations:{}", pre_migration_count);
     }
-    match migrations::run_pending_migrations(&wave_data_dir) {
+    match migrations::run_pending_migrations(&mux_data_dir) {
         Ok(0) => {}
         Ok(n) => tracing::info!(applied = n, "startup: applied pending migrations"),
         Err(e) => {
@@ -1352,7 +1352,7 @@ pub fn spawn_background_subsystems(
     }
 
     // Set up docsite directory
-    if let Some(app_path) = base::get_wave_app_path() {
+    if let Some(app_path) = base::get_mux_app_path() {
         let docsite_dir = app_path.join("docsite");
         docsite::set_docsite_dir(docsite_dir);
     }
@@ -1537,7 +1537,7 @@ pub async fn bind_listeners_and_network(
 
     // Clean up stale cross-instance agent registry entries (entries older than 4h).
     backend::reactive::registry::cleanup_stale(
-        &base::get_wave_data_dir(),
+        &base::get_mux_data_dir(),
         4 * 60 * 60 * 1000,
     );
 
@@ -1578,7 +1578,7 @@ pub async fn bind_listeners_and_network(
             let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
             loop {
                 interval.tick().await;
-                let data_dir = base::get_wave_data_dir();
+                let data_dir = base::get_mux_data_dir();
                 for reg in reactive::get_global_handler().list_agents() {
                     // _with_nonce, not the plain write/write_shared_from_env
                     // — those hardcode registration_nonce: 0, which would
@@ -1651,7 +1651,7 @@ pub struct ReducerPlumbing {
 ///
 /// Bootstraps reducer state from SQLite, spawns the disk writer (forensic
 /// log of every reducer event), the persist subscriber (idempotent SQLite
-/// write-back), the WaveObjUpdate bridge, and the subagent-watcher block-delete
+/// write-back), the MuxObjUpdate bridge, and the subagent-watcher block-delete
 /// cascade backstop.
 pub async fn spawn_reducer_plumbing(
     wstore: &Arc<Store>,
@@ -1663,7 +1663,7 @@ pub async fn spawn_reducer_plumbing(
     let (srv_events_tx, _) =
         tokio::sync::broadcast::channel::<agentmux_common::ipc::Event>(1024);
     let srv_event_log = std::sync::Arc::new(event_log::EventLog::new(Some(
-        base::get_wave_data_dir().join("srv-events.log"),
+        base::get_mux_data_dir().join("srv-events.log"),
     )));
 
     // Bootstrap reducer state from SQLite. Always runs (even in
@@ -1683,7 +1683,7 @@ pub async fn spawn_reducer_plumbing(
         std::sync::Arc::clone(&srv_state),
     );
 
-    // Phase 1 of the WaveObjUpdate bridge: subscribe to srv_events_tx and
+    // Phase 1 of the MuxObjUpdate bridge: subscribe to srv_events_tx and
     // translate workspace mutations into `waveobj:update` WS broadcasts.
     // Fixes the workspace-rename reactivity gap where UpdateWorkspace
     // returned `success_empty()` and the response loop had nothing to
@@ -1696,7 +1696,7 @@ pub async fn spawn_reducer_plumbing(
     // "renaming a workspace stopped propagating" with no log evidence.
     // (Per ReAgent P2 follow-up on PR #852.)
     let bridge_rx = srv_events_tx.subscribe();
-    let bridge_handle = server::wave_obj_bridge::spawn_wave_obj_bridge(
+    let bridge_handle = server::mux_obj_bridge::spawn_mux_obj_bridge(
         bridge_rx,
         std::sync::Arc::clone(&wstore_for_persist),
         std::sync::Arc::clone(event_bus),
@@ -1908,7 +1908,7 @@ pub fn bind_srv_pipe_ipc(
 /// run above. Non-zero causes the status-bar to show a "Migration failed —
 /// restart to retry" message. Zero is the expected steady-state.
 pub fn emit_estart(ws_port: u16, web_port: u16, version: &str, build_time: &str, instance_id: &str) {
-    let pending_migrations = migrations::count_pending_migrations(&base::get_wave_data_dir());
+    let pending_migrations = migrations::count_pending_migrations(&base::get_mux_data_dir());
     eprintln!(
         "AGENTMUXSRV-ESTART ws:127.0.0.1:{} web:127.0.0.1:{} version:{} buildtime:{} instance:{} pending_migrations:{}",
         ws_port, web_port, version, build_time, instance_id, pending_migrations

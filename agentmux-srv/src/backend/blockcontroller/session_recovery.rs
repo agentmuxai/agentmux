@@ -92,11 +92,11 @@ pub fn mark_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
         return;
     };
     if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
-        let update_data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+        let update_data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "block".into(),
             oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+            obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
         })
         .ok();
         bus.broadcast_event(&crate::backend::eventbus::WSEventType {
@@ -161,11 +161,11 @@ pub fn clear_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>
     // staring at the banner right now, so the clear must reach an already-open
     // `blockAtom`, not only the pane's next reload.
     if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
-        let update_data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+        let update_data = serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
             updatetype: "update".into(),
             otype: "block".into(),
             oid: block_id.to_string(),
-            obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+            obj: Some(crate::backend::obj::mux_obj_to_value(&updated_block)),
         })
         .ok();
         bus.broadcast_event(&crate::backend::eventbus::WSEventType {

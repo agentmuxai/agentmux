@@ -23,7 +23,7 @@
 
 import { onCleanup } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 
 export interface UseDockClearStreamOptions {
@@ -32,7 +32,7 @@ export interface UseDockClearStreamOptions {
 }
 
 export function useDockClearStream(opts: UseDockClearStreamOptions): void {
-    const unsub = waveEventSubscribe({
+    const unsub = muxEventSubscribe({
         eventType: WpsEvent.DockClear,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {

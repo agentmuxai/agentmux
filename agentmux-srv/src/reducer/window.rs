@@ -106,7 +106,7 @@ pub(super) fn handle_switch_workspace(
 /// performs the merge against wstore. Same shape as
 /// `handle_update_workspace_meta` — reducer state does NOT track
 /// window meta, the migration property is "every mutation goes
-/// through the reducer's broadcast bus" so the WaveObjUpdate bridge
+/// through the reducer's broadcast bus" so the MuxObjUpdate bridge
 /// can fan out to the frontend.
 ///
 /// Validates the window exists, matching its three sibling meta arms

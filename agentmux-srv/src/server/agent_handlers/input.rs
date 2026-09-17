@@ -375,7 +375,7 @@ pub async fn run_agent_turn(
                 &Some(wstore.clone()),
                 &Some(event_bus_gate.clone()),
             );
-            broker.publish(crate::backend::wps::WaveEvent {
+            broker.publish(crate::backend::wps::MuxEvent {
                 event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
                 scopes: vec![format!("block:{}", block_id)],
                 sender: String::new(),
@@ -760,7 +760,7 @@ pub async fn run_agent_turn(
                 // leaving it permanently unreachable via Tier 2/2b
                 // cross-instance/cross-channel delivery (reagent P1,
                 // third round on PR #2350).
-                let data_dir = crate::backend::base::get_wave_data_dir();
+                let data_dir = crate::backend::base::get_mux_data_dir();
                 crate::backend::reactive::registry::write(
                     &data_dir,
                     &agent_name,
@@ -908,7 +908,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         if let Some(ref name) = agent_name {
                             // Symmetric teardown for the registry writes added
                             // alongside SubprocessSpawn's register_agent call.
-                            let data_dir = crate::backend::base::get_wave_data_dir();
+                            let data_dir = crate::backend::base::get_mux_data_dir();
                             crate::backend::reactive::registry::remove(&data_dir, name);
                             crate::backend::reactive::registry::remove_shared_from_env(name);
                         }

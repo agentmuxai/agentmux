@@ -64,17 +64,17 @@ class ObjectServiceType {
     }
 
     // get wave object by oref
-    GetObject(oref: string): Promise<WaveObj> {
+    GetObject(oref: string): Promise<MuxObj> {
         return WOS.callBackendService("object", "GetObject", Array.from(arguments))
     }
 
     // @returns objects
-    GetObjects(orefs: string[]): Promise<WaveObj[]> {
+    GetObjects(orefs: string[]): Promise<MuxObj[]> {
         return WOS.callBackendService("object", "GetObjects", Array.from(arguments))
     }
 
     // @returns object updates
-    UpdateObject(waveObj: WaveObj, returnUpdates: boolean): Promise<void> {
+    UpdateObject(muxObj: MuxObj, returnUpdates: boolean): Promise<void> {
         return WOS.callBackendService("object", "UpdateObject", Array.from(arguments))
     }
 
@@ -128,10 +128,10 @@ class WindowServiceType {
         restoreIfAvailable?: boolean,
         seedView?: string,
         seedMeta?: Record<string, unknown>
-    ): Promise<WaveWindow> {
+    ): Promise<MuxWindow> {
         return WOS.callBackendService("window", "CreateWindow", Array.from(arguments))
     }
-    GetWindow(windowId: string): Promise<WaveWindow> {
+    GetWindow(windowId: string): Promise<MuxWindow> {
         return WOS.callBackendService("window", "GetWindow", Array.from(arguments))
     }
 

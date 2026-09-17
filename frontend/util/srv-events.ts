@@ -23,7 +23,7 @@
 //
 // **Atom routing (still pending — TODO PR after E.6):** we expose a
 // `subscribeSrvEvent(cb)` API. The first atom-router consumer ships
-// in a follow-up; today the existing RPC + WaveObjUpdate pipeline
+// in a follow-up; today the existing RPC + MuxObjUpdate pipeline
 // remains authoritative.
 //
 // See `docs/specs/SPEC_PHASE_E_SRV_REDUCER_2026_04_29.md` §6.6 + §9

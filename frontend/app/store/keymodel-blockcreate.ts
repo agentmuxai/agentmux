@@ -24,7 +24,7 @@ function getDefaultNewBlockDef(): BlockDef {
     const layoutModel = getLayoutModelForStaticTab();
     const focusedNode = layoutModel.focusedNode?.();
     if (focusedNode != null) {
-        const blockAtom = WOS.getWaveObjectAtom<Block>(WOS.makeORef("block", focusedNode.data?.blockId));
+        const blockAtom = WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", focusedNode.data?.blockId));
         const blockData = blockAtom();
         if (blockData?.meta?.view == "term") {
             if (blockData?.meta?.["cmd:cwd"] != null) {

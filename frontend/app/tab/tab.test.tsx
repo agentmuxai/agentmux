@@ -29,7 +29,7 @@ vi.mock("@/app/store/services", () => ({
 }));
 vi.mock("@/app/store/wos", () => ({
     makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
-    useWaveObjectValue: () => [
+    useMuxObjectValue: () => [
         () => ({ otype: "tab", oid: "tab-1", version: 1, name: "Tab One", meta: {} }),
         () => false,
     ],

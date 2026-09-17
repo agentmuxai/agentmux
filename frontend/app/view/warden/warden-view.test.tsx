@@ -38,7 +38,7 @@ vi.mock("@/app/view/warden-supervisor/warden-supervisor-manager", () => ({
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
 vi.mock("@/app/store/wos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
-    getWaveObjectAtom: () => () => ({ meta: blockMeta() }),
+    getMuxObjectAtom: () => () => ({ meta: blockMeta() }),
     getObjectValue: () => ({}),
 }));
 

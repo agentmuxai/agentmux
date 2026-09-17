@@ -27,11 +27,11 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use super::fs_watch::{FsWatchEventKind, FsWatchPool, Subscription};
-use super::wps::{Broker, WaveEvent};
+use super::wps::{Broker, MuxEvent};
 
 /// WPS event fired when a file matching a Media pane's extension filter is
 /// created/modified inside a directory that pane is watching. Scoped
-/// per-block (`block:<id>`) via `WaveEvent::scopes`, matching
+/// per-block (`block:<id>`) via `MuxEvent::scopes`, matching
 /// `EVENT_EDITOR_FILE_CHANGED`'s pattern. Payload is just the changed file's
 /// path — a wake signal, not content; the frontend re-fetches via
 /// `GET /agentmux/stream-local-file`.
@@ -217,7 +217,7 @@ impl MediaFileWatcher {
 /// `publish_editor_file_changed`'s per-block scoping — never a global
 /// broadcast.
 fn publish_media_file_changed(broker: &Broker, path: &Path, block_ids: &[String]) {
-    broker.publish(WaveEvent {
+    broker.publish(MuxEvent {
         event: EVENT_MEDIA_FILE_CHANGED.to_string(),
         scopes: block_ids.iter().map(|id| format!("block:{id}")).collect(),
         sender: String::new(),
@@ -232,11 +232,11 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     struct TestClient {
-        events: StdMutex<Vec<(String, WaveEvent)>>,
+        events: StdMutex<Vec<(String, MuxEvent)>>,
     }
 
     impl super::super::wps::WpsClient for Arc<TestClient> {
-        fn send_event(&self, route_id: &str, event: WaveEvent) {
+        fn send_event(&self, route_id: &str, event: MuxEvent) {
             self.events.lock().unwrap().push((route_id.to_string(), event));
         }
     }

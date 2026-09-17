@@ -100,7 +100,7 @@ pub struct ShellController {
     /// Event bus (unused for now, reserved for future event routing).
     #[allow(dead_code)]
     pub(super) event_bus: Option<Arc<EventBus>>,
-    /// Wave object store — used to seed cmd:cwd on shell spawn.
+    /// AgentMux object store — used to seed cmd:cwd on shell spawn.
     pub(super) wstore: Option<Arc<Store>>,
     /// FileStore write-through target for PTY output persistence
     /// (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1) — lets

@@ -3,8 +3,8 @@
 //
 // DroneViewModel — owns the per-pane state for the Drone widget.
 //
-// Phase 1.5 PR 4 (`docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md`
-// §6 row 4) routes per-run state through the `drone-run-state` slice
+// Phase 1.5 PR 4 (lineage spec retired in #1928) routes per-run
+// state through the `drone-run-state` slice
 // (#10) — same lifecycle pattern as slice #9 (browser-pane-state).
 //
 // What's reducer-backed (slot store, `recordDispatch` audit ring):
@@ -23,8 +23,8 @@ import {
     type AgentBlockResult,
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
-import { waveEventSubscribe } from "@/app/store/wps";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/wps";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
 
@@ -181,7 +181,7 @@ export class DroneViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.blockAtom = getWaveObjectAtom(makeORef("block", blockId));
+        this.blockAtom = getMuxObjectAtom(makeORef("block", blockId));
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? this.draftAtom().name;
@@ -331,7 +331,7 @@ export class DroneViewModel implements ViewModel {
             this.activeRunUnsub();
             this.activeRunUnsub = null;
         }
-        this.activeRunUnsub = waveEventSubscribe({
+        this.activeRunUnsub = muxEventSubscribe({
             eventType: `dronerun:${runId}`,
             scope: "",
             handler: (event) => {

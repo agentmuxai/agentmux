@@ -20,7 +20,7 @@ import { createEffect, createMemo, createSignal, Index, onCleanup, onMount, Show
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { cpuColor, loadColor } from "./cpu-color";
 
@@ -79,11 +79,11 @@ export const CpuCoresPopover = (props: CpuCoresPopoverProps): JSX.Element => {
     });
 
     onMount(() => {
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
-                const vals = (event as WaveEvent)?.data?.values;
+                const vals = (event as MuxEvent)?.data?.values;
                 if (vals == null) return;
                 const next: Core[] = [];
                 for (const key in vals) {

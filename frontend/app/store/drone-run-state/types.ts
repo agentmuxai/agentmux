@@ -5,8 +5,7 @@
  * Type definitions for the drone-run-state reducer (slice #10 in the
  * frontend reducer roadmap). Pairs with the master reducer-stack
  * status doc and closes the "drone-model.ts is not a reducer"
- * drift item from
- * `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` §5.3.
+ * drift item from the Phase-1.5 lineage spec retired in #1928.
  *
  * Owns the per-drone-pane reactive cells that fold the
  * `dronerun:<id>` event stream (backend

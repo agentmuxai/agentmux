@@ -16,7 +16,7 @@
  */
 
 import { callBackendService } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor } from "solid-js";
 import { mergeSubagentsPreservingIdentity, type ActiveSubagent } from "../../swarm/swarm-model";
 import { createBackfillAwareTrigger } from "./backfill-tracker";
@@ -55,8 +55,8 @@ const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh()
 // should reflect real data as soon as possible, not wait out a debounce
 // window with nothing yet to coalesce against.
 void refresh();
-waveEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
-waveEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
+muxEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
+muxEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
 // Without this, a subagent the backend reconciles from active to abandoned
 // (parent turn already ended — see `reconcile_stale_subagents`, which runs
 // on every pane reopen with a persisted session id, i.e. exactly the app-
@@ -66,10 +66,10 @@ waveEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() }
 // refresh — which, for an otherwise-idle pane, may never happen. Mirrors
 // `dispatch-source.ts`'s identical fix (reagent/codex, PR #2676) for the
 // sibling dispatch-card singleton, which this module predates.
-waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
-waveEventSubscribe({
+muxEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
+muxEventSubscribe({
     eventType: "subagent:named",
-    handler: (event: WaveEvent) => {
+    handler: (event: MuxEvent) => {
         const data = event?.data as { agentId?: string; displayName?: string } | undefined;
         if (!data?.agentId || !data.displayName) return;
         setAllSubagents((prev) =>

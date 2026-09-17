@@ -268,7 +268,7 @@ let started = false;
 
 /**
  * Start the reducer effect. Idempotent. Called once per renderer
- * after `initWaveWrap` so global state is ready before the first
+ * after `initMuxWrap` so global state is ready before the first
  * apply touches atoms.
  */
 export function startLauncherEventReducer(): void {

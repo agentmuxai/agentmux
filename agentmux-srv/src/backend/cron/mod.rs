@@ -23,7 +23,7 @@ use cron::Schedule;
 
 use crate::backend::storage::store::Store;
 use crate::backend::storage::cron::CronJob;
-use crate::backend::wps::{Broker, WaveEvent, EVENT_CRON_CHANGED};
+use crate::backend::wps::{Broker, MuxEvent, EVENT_CRON_CHANGED};
 
 /// Abort handles for every currently scheduled cron task.
 type HandleMap = Mutex<HashMap<String, tokio::task::AbortHandle>>;
@@ -56,7 +56,7 @@ impl CronScheduler {
     }
 
     fn publish_changed(&self) {
-        self.broker.publish(WaveEvent {
+        self.broker.publish(MuxEvent {
             event: EVENT_CRON_CHANGED.to_string(),
             scopes: vec![],
             sender: String::new(),

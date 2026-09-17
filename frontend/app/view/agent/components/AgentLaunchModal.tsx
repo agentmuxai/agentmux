@@ -263,7 +263,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // `identityaccounts:changed` broadcast as of #2474 and refreshes
     // itself, so this modal only needs to mirror cache updates into its
     // flow state — no separate event subscription or second RPC round-trip
-    // (this replaces the hand-rolled `waveEventSubscribe` workaround that
+    // (this replaces the hand-rolled `muxEventSubscribe` workaround that
     // predated the cache's own live sync). Keeps the dropdown + status
     // live when an account is created/verified from another tab or this
     // modal's own OAuth/API-key flows, without a manual reopen.

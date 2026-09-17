@@ -28,19 +28,19 @@ pub(crate) static ISOLATED_AUTH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mute
 #[cfg(test)]
 #[derive(Default)]
 pub(crate) struct RecordingWpsClient {
-    events: std::sync::Mutex<Vec<(String, crate::backend::wps::WaveEvent)>>,
+    events: std::sync::Mutex<Vec<(String, crate::backend::wps::MuxEvent)>>,
 }
 
 #[cfg(test)]
 impl RecordingWpsClient {
-    pub(crate) fn received_events(&self) -> Vec<(String, crate::backend::wps::WaveEvent)> {
+    pub(crate) fn received_events(&self) -> Vec<(String, crate::backend::wps::MuxEvent)> {
         self.events.lock().unwrap().clone()
     }
 }
 
 #[cfg(test)]
 impl crate::backend::wps::WpsClient for std::sync::Arc<RecordingWpsClient> {
-    fn send_event(&self, route_id: &str, event: crate::backend::wps::WaveEvent) {
+    fn send_event(&self, route_id: &str, event: crate::backend::wps::MuxEvent) {
         self.events.lock().unwrap().push((route_id.to_string(), event));
     }
 }

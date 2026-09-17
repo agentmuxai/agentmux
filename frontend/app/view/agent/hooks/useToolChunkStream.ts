@@ -18,7 +18,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -56,7 +56,7 @@ export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
     // frontend to learn the tool_use_id — closes the late-subscribe
     // race that the previous per-tool subscription model could not.
     // See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §6.
-    const blockChunkUnsub = waveEventSubscribe({
+    const blockChunkUnsub = muxEventSubscribe({
         eventType: "tool_chunk",
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {

@@ -27,7 +27,7 @@ import remarkRehype from "remark-rehype";
 import { openLink } from "../store/global";
 import { rehypeLinkify } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
-import { MarkdownImg, MarkdownSource, WaveBlock } from "./markdown-media";
+import { MarkdownImg, MarkdownSource, MuxBlock } from "./markdown-media";
 import { Mermaid, MermaidErrorFallback } from "./markdown-mermaid";
 import "./markdown.scss";
 
@@ -203,7 +203,7 @@ const Markdown = (props: MarkdownProps) => {
                 </td>
             );
         },
-        waveblock: (props: any) => <WaveBlock {...props} blockmap={contentBlocksMap()} />,
+        waveblock: (props: any) => <MuxBlock {...props} blockmap={contentBlocksMap()} />,
         mermaidblock: (props: any) => {
             const getTextContent = (children: any): string => {
                 if (typeof children === "string") return children;

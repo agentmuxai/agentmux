@@ -17,13 +17,13 @@ export function getLayoutStateAtomFromTab(tabAccessor: () => Tab): SignalAtom<La
     const atom = () => {
         const oref = getOref();
         if (!oref) return undefined;
-        return WOS.getWaveObjectAtom<LayoutState>(oref)();
+        return WOS.getMuxObjectAtom<LayoutState>(oref)();
     };
 
     (atom as any)._set = (value: LayoutState | ((prev: LayoutState) => LayoutState)) => {
         const oref = getOref();
         if (!oref) return;
-        const wovAtom = WOS.getWaveObjectAtom<LayoutState>(oref);
+        const wovAtom = WOS.getMuxObjectAtom<LayoutState>(oref);
         const nextValue = typeof value === "function" ? (value as (prev: LayoutState) => LayoutState)(wovAtom()) : value;
         WOS.setObjectValue(nextValue, true);
     };

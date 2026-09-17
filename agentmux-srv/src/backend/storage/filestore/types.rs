@@ -34,9 +34,9 @@ fn is_zero_i32(v: &i32) -> bool {
 /// File metadata. Matches Go's `FileMeta = map[string]any`.
 pub type FileMeta = HashMap<String, serde_json::Value>;
 
-/// A wave file record. Matches Go's `WaveFile`.
+/// A wave file record. Matches Go's `MuxFile`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WaveFile {
+pub struct MuxFile {
     pub zoneid: String,
     pub name: String,
     pub size: i64,
@@ -46,7 +46,7 @@ pub struct WaveFile {
     pub meta: FileMeta,
 }
 
-impl WaveFile {
+impl MuxFile {
     /// Effective data length, accounting for circular files.
     pub fn data_length(&self) -> i64 {
         if self.opts.circular && self.opts.maxsize > 0 && self.size > self.opts.maxsize {

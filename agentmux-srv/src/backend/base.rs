@@ -2,7 +2,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Wave base utilities: directory management, lock files, environment, platform detection.
+//! AgentMux base utilities: directory management, lock files, environment, platform detection.
 //! Port of Go's pkg/base/.
 
 
@@ -63,9 +63,9 @@ pub fn get_home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Get the Wave data directory.
+/// Get the AgentMux data directory.
 /// Uses `AGENTMUX_DATA_HOME` env var, or defaults to `~/.agentmux`.
-pub fn get_wave_data_dir() -> PathBuf {
+pub fn get_mux_data_dir() -> PathBuf {
     if let Ok(dir) = env::var(WAVE_DATA_HOME_ENV) {
         if !dir.is_empty() {
             return PathBuf::from(dir);
@@ -77,7 +77,7 @@ pub fn get_wave_data_dir() -> PathBuf {
 /// Migrate data from `~/.waveterm` to `~/.agentmux` if needed.
 /// Called once at startup. No-op if `~/.agentmux` already exists.
 pub fn migrate_legacy_data_dir() {
-    let new_dir = get_wave_data_dir();
+    let new_dir = get_mux_data_dir();
     if new_dir.exists() {
         return; // already migrated or freshly created
     }
@@ -117,40 +117,40 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Get the Wave config directory.
+/// Get the AgentMux config directory.
 /// Uses `AGENTMUX_CONFIG_HOME` env var, or defaults to `~/.agentmux/config`.
-pub fn get_wave_config_dir() -> PathBuf {
+pub fn get_mux_config_dir() -> PathBuf {
     if let Ok(dir) = env::var(WAVE_CONFIG_HOME_ENV) {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
     }
-    get_wave_data_dir().join(CONFIG_DIR)
+    get_mux_data_dir().join(CONFIG_DIR)
 }
 
-/// Get the Wave DB directory (`~/.agentmux/db`).
-pub fn get_wave_db_dir() -> PathBuf {
-    get_wave_data_dir().join(WAVE_DB_DIR)
+/// Get the AgentMux DB directory (`~/.agentmux/db`).
+pub fn get_mux_db_dir() -> PathBuf {
+    get_mux_data_dir().join(WAVE_DB_DIR)
 }
 
-/// Get the Wave app path from env.
-pub fn get_wave_app_path() -> Option<PathBuf> {
+/// Get the AgentMux app path from env.
+pub fn get_mux_app_path() -> Option<PathBuf> {
     env::var(WAVE_APP_PATH_ENV).ok().map(PathBuf::from)
 }
 
-/// Get the Wave app bin path.
-pub fn get_wave_app_bin_path() -> Option<PathBuf> {
-    get_wave_app_path().map(|p| p.join("bin"))
+/// Get the AgentMux app bin path.
+pub fn get_mux_app_bin_path() -> Option<PathBuf> {
+    get_mux_app_path().map(|p| p.join("bin"))
 }
 
 /// Get the domain socket path.
 pub fn get_domain_socket_name() -> PathBuf {
-    get_wave_data_dir().join(DOMAIN_SOCKET_BASE_NAME)
+    get_mux_data_dir().join(DOMAIN_SOCKET_BASE_NAME)
 }
 
-/// Get the Wave lock file path.
-pub fn get_wave_lock_file() -> PathBuf {
-    get_wave_data_dir().join(WAVE_LOCK_FILE)
+/// Get the AgentMux lock file path.
+pub fn get_mux_lock_file() -> PathBuf {
+    get_mux_data_dir().join(WAVE_LOCK_FILE)
 }
 
 // ---- Directory creation ----
@@ -163,42 +163,42 @@ pub fn ensure_dir(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| format!("cannot create directory {}: {}", dir.display(), e))
 }
 
-/// Ensure the Wave data directory exists.
-pub fn ensure_wave_data_dir() -> Result<(), String> {
-    ensure_dir(&get_wave_data_dir())
+/// Ensure the AgentMux data directory exists.
+pub fn ensure_mux_data_dir() -> Result<(), String> {
+    ensure_dir(&get_mux_data_dir())
 }
 
-/// Ensure the Wave DB directory exists.
-pub fn ensure_wave_db_dir() -> Result<(), String> {
-    ensure_dir(&get_wave_db_dir())
+/// Ensure the AgentMux DB directory exists.
+pub fn ensure_mux_db_dir() -> Result<(), String> {
+    ensure_dir(&get_mux_db_dir())
 }
 
-/// Ensure the Wave config directory exists.
-pub fn ensure_wave_config_dir() -> Result<(), String> {
-    ensure_dir(&get_wave_config_dir())
+/// Ensure the AgentMux config directory exists.
+pub fn ensure_mux_config_dir() -> Result<(), String> {
+    ensure_dir(&get_mux_config_dir())
 }
 
-/// Ensure the Wave presets directory exists.
-pub fn ensure_wave_presets_dir() -> Result<(), String> {
-    ensure_dir(&get_wave_config_dir().join("presets"))
+/// Ensure the AgentMux presets directory exists.
+pub fn ensure_mux_presets_dir() -> Result<(), String> {
+    ensure_dir(&get_mux_config_dir().join("presets"))
 }
 
 // ---- Lock file ----
 
 /// File-based lock for single-instance enforcement.
-pub struct WaveLock {
+pub struct MuxLock {
     #[allow(dead_code)]
     file: fs::File,
 }
 
-impl WaveLock {
-    /// Acquire an exclusive lock on the Wave lock file.
+impl MuxLock {
+    /// Acquire an exclusive lock on the AgentMux lock file.
     /// Returns error if another instance is already running.
     #[cfg(unix)]
     pub fn acquire() -> Result<Self, String> {
         use std::os::unix::io::AsRawFd;
 
-        let lock_path = get_wave_lock_file();
+        let lock_path = get_mux_lock_file();
         ensure_dir(lock_path.parent().unwrap_or(Path::new("/")))?;
 
         let file = fs::OpenOptions::new()
@@ -214,13 +214,13 @@ impl WaveLock {
             return Err("another AgentMux instance is already running".to_string());
         }
 
-        Ok(WaveLock { file })
+        Ok(MuxLock { file })
     }
 
     /// Non-Unix fallback: just check the file can be created.
     #[cfg(not(unix))]
     pub fn acquire() -> Result<Self, String> {
-        let lock_path = get_wave_lock_file();
+        let lock_path = get_mux_lock_file();
         ensure_dir(lock_path.parent().unwrap_or(Path::new("/")))?;
 
         let file = fs::OpenOptions::new()
@@ -230,13 +230,13 @@ impl WaveLock {
             .open(&lock_path)
             .map_err(|e| format!("cannot open lock file {}: {}", lock_path.display(), e))?;
 
-        Ok(WaveLock { file })
+        Ok(MuxLock { file })
     }
 }
 
 // ---- Environment helpers ----
 
-/// Check if Wave is in dev mode.
+/// Check if AgentMux is in dev mode.
 pub fn is_dev_mode() -> bool {
     env::var(WAVE_DEV_ENV)
         .map(|v| !v.is_empty())
@@ -515,21 +515,21 @@ mod tests {
     }
 
     #[test]
-    fn test_wave_data_dir_default() {
+    fn test_mux_data_dir_default() {
         // When env var is not set, should be ~/.agentmux
-        let dir = get_wave_data_dir();
+        let dir = get_mux_data_dir();
         assert!(dir.to_string_lossy().contains(".agentmux") || dir.to_string_lossy().contains("AGENTMUX"));
     }
 
     #[test]
-    fn test_wave_db_dir() {
-        let db_dir = get_wave_db_dir();
+    fn test_mux_db_dir() {
+        let db_dir = get_mux_db_dir();
         assert!(db_dir.to_string_lossy().ends_with("db"));
     }
 
     #[test]
-    fn test_wave_config_dir() {
-        let config_dir = get_wave_config_dir();
+    fn test_mux_config_dir() {
+        let config_dir = get_mux_config_dir();
         assert!(config_dir.to_string_lossy().contains("config") || config_dir.to_string_lossy().contains("AGENTMUX"));
     }
 
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn test_lock_file_path() {
-        let lock = get_wave_lock_file();
+        let lock = get_mux_lock_file();
         assert!(lock.to_string_lossy().ends_with("wave.lock"));
     }
 

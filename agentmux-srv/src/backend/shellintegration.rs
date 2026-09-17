@@ -104,11 +104,11 @@ pub fn detect_shell_type(shell_path: &str) -> ShellType {
 
 // ─── Deploy ──────────────────────────────────────────────────────────────────
 
-/// Deploy shell integration scripts to `<wave_data_dir>/shell/<type>/`.
+/// Deploy shell integration scripts to `<mux_data_dir>/shell/<type>/`.
 /// Skips deployment if the version marker is already current.
 /// Errors are logged but not fatal — a missing script just means no integration.
-pub fn deploy_scripts(wave_data_dir: &Path) {
-    let shell_base = wave_data_dir.join("shell");
+pub fn deploy_scripts(mux_data_dir: &Path) {
+    let shell_base = mux_data_dir.join("shell");
     let version_file = shell_base.join(".version");
     let marker = version_marker();
 
@@ -203,11 +203,11 @@ pub struct ShellStartup {
 /// AgentMux integration. Returns `None` for unknown shell types.
 pub fn get_shell_startup(
     shell_type: ShellType,
-    wave_data_dir: &Path,
+    mux_data_dir: &Path,
 ) -> Option<ShellStartup> {
     match shell_type {
         ShellType::Bash => {
-            let rcfile = wave_data_dir.join("shell").join("bash").join(".bashrc");
+            let rcfile = mux_data_dir.join("shell").join("bash").join(".bashrc");
             Some(ShellStartup {
                 extra_args: vec![
                     "--rcfile".to_string(),
@@ -217,7 +217,7 @@ pub fn get_shell_startup(
             })
         }
         ShellType::Zsh => {
-            let zdotdir = wave_data_dir.join("shell").join("zsh");
+            let zdotdir = mux_data_dir.join("shell").join("zsh");
             Some(ShellStartup {
                 extra_args: vec![],
                 env_vars: vec![
@@ -228,7 +228,7 @@ pub fn get_shell_startup(
             })
         }
         ShellType::Pwsh => {
-            let script = wave_data_dir
+            let script = mux_data_dir
                 .join("shell")
                 .join("pwsh")
                 .join("wavepwsh.ps1");
@@ -244,7 +244,7 @@ pub fn get_shell_startup(
             })
         }
         ShellType::Fish => {
-            let script = wave_data_dir
+            let script = mux_data_dir
                 .join("shell")
                 .join("fish")
                 .join("wave.fish");

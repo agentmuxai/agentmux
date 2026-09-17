@@ -97,7 +97,7 @@ export class AgentViewModel implements ViewModel {
     constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
-        this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
         this.viewComponent = AgentBlockContent as any;
         // createComponent (not a plain `AgentPaneChrome({...})` call) —
         // this file is a plain .ts, so it can't use JSX's `<AgentPaneChrome>`

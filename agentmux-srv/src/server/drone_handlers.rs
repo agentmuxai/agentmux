@@ -27,7 +27,7 @@ use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
     COMMAND_LIST_DRONE_RUNS, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
-use crate::backend::wps::WaveEvent;
+use crate::backend::wps::MuxEvent;
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::drone::executor::{run_drone, RunEvent};
@@ -130,7 +130,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 id_store
                     .drone_upsert(&cmd)
                     .map_err(|e| format!("upsertdrone: {e}"))?;
-                broker.publish(WaveEvent {
+                broker.publish(MuxEvent {
                     event: "drones:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -156,7 +156,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .drone_delete(&cmd.id)
                     .map_err(|e| format!("deletedrone: {e}"))?;
                 if deleted {
-                    broker.publish(WaveEvent {
+                    broker.publish(MuxEvent {
                         event: "drones:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -289,7 +289,7 @@ pub fn register_drone_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 ),
                             }
                         }
-                        broker_for_drain.publish(WaveEvent {
+                        broker_for_drain.publish(MuxEvent {
                             event: format!("dronerun:{}", run_id_for_drain),
                             scopes: vec![],
                             sender: String::new(),

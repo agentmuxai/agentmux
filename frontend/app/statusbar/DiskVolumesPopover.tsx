@@ -17,7 +17,7 @@ import { createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-j
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { diskFreeColor, formatDiskGb, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
 
@@ -41,11 +41,11 @@ export const DiskVolumesPopover = (props: DiskVolumesPopoverProps): JSX.Element 
     const [volumes, setVolumes] = createSignal<DiskVolume[]>(props.initialVolumes ?? []);
 
     onMount(() => {
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
-                const vals = (event as WaveEvent)?.data?.values;
+                const vals = (event as MuxEvent)?.data?.values;
                 if (vals == null) return;
                 setVolumes(parseDiskVolumes(vals));
             },

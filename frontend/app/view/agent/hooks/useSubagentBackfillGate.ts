@@ -78,7 +78,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -226,7 +226,7 @@ export function useSubagentBackfillGate(
             }
         };
 
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.SubagentBackfillStatus,
             scope: `block:${blockId}`,
             handler: (event: any) => {

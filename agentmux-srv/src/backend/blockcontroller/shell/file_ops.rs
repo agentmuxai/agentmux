@@ -190,7 +190,7 @@ pub fn handle_append_block_file(
         offset: start_offset,
     };
 
-    let event = wps::WaveEvent {
+    let event = wps::MuxEvent {
         event: wps::EVENT_BLOCK_FILE.to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
@@ -351,7 +351,7 @@ pub fn handle_truncate_block_file(broker: &wps::Broker, block_id: &str, filename
         offset: None,
     };
 
-    let event = wps::WaveEvent {
+    let event = wps::MuxEvent {
         event: wps::EVENT_BLOCK_FILE.to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),

@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection};
 
 use super::cache::CacheEntry;
-use super::types::{FileMeta, FileOpts, WaveFile};
+use super::types::{FileMeta, FileOpts, MuxFile};
 use crate::backend::storage::error::StoreError;
 use crate::backend::storage::migrations::{
     check_schema_compat, run_filestore_migrations, stamp_version, FILESTORE_SCHEMA_VERSION,
@@ -184,7 +184,7 @@ impl FileStore {
         opts: FileOpts,
     ) -> Result<(), StoreError> {
         let now = Self::now_ms();
-        let file = WaveFile {
+        let file = MuxFile {
             zoneid: zone_id.to_string(),
             name: name.to_string(),
             size: 0,
@@ -296,7 +296,7 @@ impl FileStore {
     }
 
     /// Get file metadata. Returns None if file doesn't exist.
-    pub fn stat(&self, zone_id: &str, name: &str) -> Result<Option<WaveFile>, StoreError> {
+    pub fn stat(&self, zone_id: &str, name: &str) -> Result<Option<MuxFile>, StoreError> {
         // Check cache first
         let key = (zone_id.to_string(), name.to_string());
         {
@@ -315,7 +315,7 @@ impl FileStore {
             |row| {
                 let opts_str: String = row.get(5)?;
                 let meta_str: String = row.get(6)?;
-                Ok(WaveFile {
+                Ok(MuxFile {
                     zoneid: row.get(0)?,
                     name: row.get(1)?,
                     size: row.get(2)?,
@@ -633,7 +633,7 @@ impl FileStore {
 
     /// List all files in a zone.
     #[allow(dead_code)]
-    pub fn list_files(&self, zone_id: &str) -> Result<Vec<WaveFile>, StoreError> {
+    pub fn list_files(&self, zone_id: &str) -> Result<Vec<MuxFile>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT zoneid, name, size, createdts, modts, opts, meta FROM db_wave_file WHERE zoneid = ?1",
@@ -641,7 +641,7 @@ impl FileStore {
         let rows = stmt.query_map(params![zone_id], |row| {
             let opts_str: String = row.get(5)?;
             let meta_str: String = row.get(6)?;
-            Ok(WaveFile {
+            Ok(MuxFile {
                 zoneid: row.get(0)?,
                 name: row.get(1)?,
                 size: row.get(2)?,

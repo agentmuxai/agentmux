@@ -15,11 +15,11 @@ function setKeyUtilPlatform(platform: NodeJS.Platform) {
 }
 
 function keydownWrapper(
-    fn: (waveEvent: WaveKeyboardEvent) => boolean
+    fn: (muxEvent: MuxKeyboardEvent) => boolean
 ): (event: KeyboardEvent) => void {
     return (event: KeyboardEvent) => {
-        const waveEvent = adaptFromReactOrNativeKeyEvent(event);
-        const rtnVal = fn(waveEvent);
+        const muxEvent = adaptFromReactOrNativeKeyEvent(event);
+        const rtnVal = fn(muxEvent);
         if (rtnVal) {
             event.preventDefault();
             event.stopPropagation();
@@ -98,7 +98,7 @@ function notMod(keyPressMod: boolean, eventMod: boolean) {
     return (keyPressMod && !eventMod) || (eventMod && !keyPressMod);
 }
 
-function isCharacterKeyEvent(event: WaveKeyboardEvent): boolean {
+function isCharacterKeyEvent(event: MuxKeyboardEvent): boolean {
     if (event.alt || event.meta || event.control) {
         return false;
     }
@@ -141,7 +141,7 @@ const inputKeyMap = new Map<string, boolean>([
     ["Cmd:Shift:ArrowDown", true],
 ]);
 
-function isInputEvent(event: WaveKeyboardEvent): boolean {
+function isInputEvent(event: MuxKeyboardEvent): boolean {
     if (isCharacterKeyEvent(event)) {
         return true;
     }
@@ -152,7 +152,7 @@ function isInputEvent(event: WaveKeyboardEvent): boolean {
     }
 }
 
-function checkKeyPressed(event: WaveKeyboardEvent, keyDescription: string): boolean {
+function checkKeyPressed(event: MuxKeyboardEvent, keyDescription: string): boolean {
     let keyPress = parseKeyDescription(keyDescription);
     if (notMod(keyPress.mods.Option, event.option)) {
         return false;
@@ -195,8 +195,8 @@ function checkKeyPressed(event: WaveKeyboardEvent, keyDescription: string): bool
     return true;
 }
 
-function adaptFromReactOrNativeKeyEvent(event: KeyboardEvent): WaveKeyboardEvent {
-    let rtn: WaveKeyboardEvent = {} as WaveKeyboardEvent;
+function adaptFromReactOrNativeKeyEvent(event: KeyboardEvent): MuxKeyboardEvent {
+    let rtn: MuxKeyboardEvent = {} as MuxKeyboardEvent;
     rtn.control = event.ctrlKey;
     rtn.shift = event.shiftKey;
     rtn.cmd = PLATFORM == PlatformMacOS ? event.metaKey : event.altKey;

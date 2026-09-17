@@ -157,7 +157,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     content: crate::backend::agent_color::pick_agent_color(&agent.id).to_string(),
                     updated_at: now,
                 });
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -277,7 +277,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !found {
                     return Err(format!("updateagent: agent {} not found", agent.id));
                 }
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -304,7 +304,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("deleteagent: {e}"))?;
                 wstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
                 super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagent");
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -376,7 +376,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     updated_at: now,
                 };
                 wstore.agent_content_set(&content).map_err(|e| format!("setagentcontent: {e}"))?;
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agentcontent:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -509,7 +509,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -538,7 +538,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let report = crate::backend::agent_seed::seed_agents(&wstore)
                     .map_err(|e| format!("reseedagents: seed: {e}"))?;
 
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -669,7 +669,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),

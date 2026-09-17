@@ -7,7 +7,7 @@
 // It must stay up — covering the entire bootstrap + mount cascade — until the
 // content-reveal gate (`tab-reveal.ts`) decides the window has settled, then
 // cross-fade out. The previous behaviour removed it mid-mount (inside
-// `initWave`), which exposed the bare chrome → empty-pane → piecemeal-mount
+// `initMux`), which exposed the bare chrome → empty-pane → piecemeal-mount
 // flashes behind it. This is especially visible on tear-off (a pool window is
 // shown instantly with the brain, then the brain was torn down before the
 // torn-off content had rendered). Now the brain is removed only at the gate's

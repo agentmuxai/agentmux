@@ -190,7 +190,7 @@ impl AgentProcessRegistry {
 
     fn emit(&self, event_name: &str, block_id: &str, data: serde_json::Value) {
         let Some(ref broker) = self.broker else { return };
-        broker.publish(wps::WaveEvent {
+        broker.publish(wps::MuxEvent {
             event: event_name.to_string(),
             scopes: vec![format!("block:{}", block_id)],
             sender: String::new(),

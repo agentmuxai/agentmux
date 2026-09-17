@@ -34,7 +34,7 @@ vi.mock("@/app/store/rpc-util", () => ({
 
 vi.mock("@/app/store/wos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
-    getWaveObjectAtom: () => () => ({ meta: {} }),
+    getMuxObjectAtom: () => () => ({ meta: {} }),
     // global.ts evaluates a `tabAtom` createMemo at module-init that calls
     // WOS.getObjectValue; without this stub the import chain crashes during
     // test setup before any BrowserViewModel test can run.

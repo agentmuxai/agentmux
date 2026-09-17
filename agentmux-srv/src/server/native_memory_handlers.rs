@@ -1188,7 +1188,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // handlers already key by, per `resolve_agent_uuid`'s own
                 // doc comment on why a slug-keyed event here would silently
                 // miss frontend subscribers that only ever have the UUID).
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: format!("agent:memory:changed:{}", agent.id),
                     scopes: vec![],
                     sender: String::new(),
@@ -1394,7 +1394,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 // See the identical comment on write_file's own handler above.
-                broker.publish(crate::backend::wps::WaveEvent {
+                broker.publish(crate::backend::wps::MuxEvent {
                     event: format!("agent:memory:changed:{}", agent.id),
                     scopes: vec![],
                     sender: String::new(),

@@ -29,7 +29,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::backend::rpc::engine::WshRpcEngine;
-use crate::backend::wps::{Broker, WaveEvent};
+use crate::backend::wps::{Broker, MuxEvent};
 use crate::server::AppState;
 
 pub const COMMAND_INSTALL_START: &str = "install.start";
@@ -361,7 +361,7 @@ fn spawn_install_task(
 
         let scope = format!("install:{}", session_id);
         let emit_line = |broker: &Broker, line: String, stream: &'static str| {
-            let event = WaveEvent {
+            let event = MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
                 sender: String::new(),
@@ -379,7 +379,7 @@ fn spawn_install_task(
         // the wire-format `AgentMuxError` object so the frontend can
         // render a friendly `<ErrorBanner />`.
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
-            let event = WaveEvent {
+            let event = MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
                 sender: String::new(),
@@ -394,7 +394,7 @@ fn spawn_install_task(
             broker.publish(event);
         };
         let emit_done_typed = |broker: &Broker, err: agentmux_common::AgentMuxError| {
-            let event = WaveEvent {
+            let event = MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
                 sender: String::new(),
@@ -495,7 +495,7 @@ fn spawn_install_task(
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let event = WaveEvent {
+                let event = MuxEvent {
                     event: "install_chunk".to_string(),
                     scopes: vec![scope_out.clone()],
                     sender: String::new(),
@@ -516,7 +516,7 @@ fn spawn_install_task(
         let stderr_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let event = WaveEvent {
+                let event = MuxEvent {
                     event: "install_chunk".to_string(),
                     scopes: vec![scope_err.clone()],
                     sender: String::new(),

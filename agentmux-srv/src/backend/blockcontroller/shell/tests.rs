@@ -851,7 +851,7 @@ use std::sync::Arc;
     /// Minimal WpsClient that records every event delivered to it, so tests
     /// can assert on the broadcast payload (not just the FileStore side effect).
     struct RecordingClient {
-        events: std::sync::Mutex<Vec<wps::WaveEvent>>,
+        events: std::sync::Mutex<Vec<wps::MuxEvent>>,
     }
 
     impl RecordingClient {
@@ -861,7 +861,7 @@ use std::sync::Arc;
     }
 
     impl wps::WpsClient for Arc<RecordingClient> {
-        fn send_event(&self, _route_id: &str, event: wps::WaveEvent) {
+        fn send_event(&self, _route_id: &str, event: wps::MuxEvent) {
             self.events.lock().unwrap().push(event);
         }
     }

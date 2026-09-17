@@ -31,15 +31,15 @@ export const WorkspaceApi = {
         return client.rpcCall("connstatus", null, opts);
     },
 
-    EventPublishCommand(client: RpcClient, data: WaveEvent, opts?: RpcOpts): Promise<void> {
+    EventPublishCommand(client: RpcClient, data: MuxEvent, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("eventpublish", data, opts);
     },
 
-    EventReadHistoryCommand(client: RpcClient, data: CommandEventReadHistoryData, opts?: RpcOpts): Promise<WaveEvent[]> {
+    EventReadHistoryCommand(client: RpcClient, data: CommandEventReadHistoryData, opts?: RpcOpts): Promise<MuxEvent[]> {
         return client.rpcCall("eventreadhistory", data, opts);
     },
 
-    EventRecvCommand(client: RpcClient, data: WaveEvent, opts?: RpcOpts): Promise<void> {
+    EventRecvCommand(client: RpcClient, data: MuxEvent, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("eventrecv", data, opts);
     },
 

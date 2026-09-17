@@ -20,7 +20,7 @@ use serde::Serialize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::backend::wps::{Broker, WaveEvent, EVENT_SHELL_CHUNK};
+use crate::backend::wps::{Broker, MuxEvent, EVENT_SHELL_CHUNK};
 use agentmux_common::api_types::ShellInputFailure;
 
 fn now_ms() -> u64 {
@@ -110,7 +110,7 @@ impl ShellSessionRegistry {
     // stdin_tx is None when capture_stdin is false (stdin is /dev/null).
     // Returns shell_ids evicted by the prune pass — the caller (which holds
     // the Broker, unlike this registry) purges their `shell:<id>` persisted
-    // WaveEvent history so the broker's persist_map key set stays bounded
+    // MuxEvent history so the broker's persist_map key set stays bounded
     // in step with this registry's own MAX_EXITED_STATUS cap.
     //
     // `pub(crate)` (rather than private) so `server::shell_handlers`'s own
@@ -539,7 +539,7 @@ fn shell_scopes(shell_id: &str) -> Vec<String> {
 }
 
 fn publish_chunk(broker: &Broker, _block_id: &str, shell_id: &str, kind: &str, content: &str, ts: u64) {
-    broker.publish(WaveEvent {
+    broker.publish(MuxEvent {
         event: EVENT_SHELL_CHUNK.to_string(),
         scopes: shell_scopes(shell_id),
         sender: String::new(),
@@ -663,7 +663,7 @@ mod tests {
 }
 
 fn publish_exit(broker: &Broker, _block_id: &str, shell_id: &str, exit_code: i32, stopped: bool, ts: u64) {
-    broker.publish(WaveEvent {
+    broker.publish(MuxEvent {
         event: EVENT_SHELL_CHUNK.to_string(),
         scopes: shell_scopes(shell_id),
         sender: String::new(),

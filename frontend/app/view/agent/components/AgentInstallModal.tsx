@@ -27,7 +27,7 @@ import { atoms, getSettingsKeyAtom } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 
@@ -167,7 +167,7 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
                 return;
             }
             setSessionId(r.sessionId);
-            unsub = waveEventSubscribe({
+            unsub = muxEventSubscribe({
                 eventType: "install_chunk",
                 scope: `install:${r.sessionId}`,
                 handler: (event: any) => {

@@ -20,18 +20,18 @@ import {
 import type { LayoutModel } from "./layoutModel";
 
 /**
- * Initialize the layout tree from the persisted WaveObject state.
+ * Initialize the layout tree from the persisted MuxObject state.
  * @param model The LayoutModel instance.
  */
-export function initializeFromWaveObject(model: LayoutModel) {
-    const waveObjState = model.getter(model.waveObjectAtom);
+export function initializeFromMuxObject(model: LayoutModel) {
+    const muxObjState = model.getter(model.muxObjectAtom);
 
     const initialState: LayoutTreeState = {
-        rootNode: waveObjState?.rootnode,
-        focusedNodeId: waveObjState?.focusednodeid,
-        magnifiedNodeId: waveObjState?.magnifiednodeid,
+        rootNode: muxObjState?.rootnode,
+        focusedNodeId: muxObjState?.focusednodeid,
+        magnifiedNodeId: muxObjState?.magnifiednodeid,
         leafOrder: undefined,
-        pendingBackendActions: waveObjState?.pendingbackendactions,
+        pendingBackendActions: muxObjState?.pendingbackendactions,
     };
 
     model.treeState = initialState;
@@ -53,22 +53,22 @@ export function initializeFromWaveObject(model: LayoutModel) {
 }
 
 /**
- * Handle a WaveObject update notification from the backend.
+ * Handle a MuxObject update notification from the backend.
  * @param model The LayoutModel instance.
  */
 export function onBackendUpdate(model: LayoutModel) {
-    const waveObj = model.getter(model.waveObjectAtom);
-    if (!waveObj) return;
+    const muxObj = model.getter(model.muxObjectAtom);
+    if (!muxObj) return;
 
     // If the model has no rootNode but the backend does, re-initialize.
     // This handles tear-off windows where the LayoutState wasn't loaded
     // when the LayoutModel was first constructed.
-    if (!model.treeState.rootNode && waveObj.rootnode) {
-        initializeFromWaveObject(model);
+    if (!model.treeState.rootNode && muxObj.rootnode) {
+        initializeFromMuxObject(model);
         return;
     }
 
-    const pendingActions = waveObj?.pendingbackendactions;
+    const pendingActions = muxObj?.pendingbackendactions;
     if (pendingActions?.length) {
         fireAndForget(() => processPendingBackendActions(model));
     }
@@ -85,7 +85,7 @@ export function onBackendUpdate(model: LayoutModel) {
 // PR #2105, P1): createBlock/createBlockSplitHorizontally/createBlockSplit-
 // Vertically (global.ts) insert the new leaf into the local tree
 // SYNCHRONOUSLY via treeReducer, but the block's membership in
-// `tab.blockids` only lands later via an async WaveObject push. Any prune
+// `tab.blockids` only lands later via an async MuxObject push. Any prune
 // trigger that fires inside that window would see the fresh leaf as
 // "disowned" and delete + persist the deletion — a real, distinct path to
 // the same class of bug pruneDanglingLeaves exists to fix. Call sites for
@@ -174,12 +174,12 @@ export function pruneDanglingLeaves(model: LayoutModel) {
 }
 
 /**
- * Process all pending backend actions from the WaveObject queue.
+ * Process all pending backend actions from the MuxObject queue.
  * @param model The LayoutModel instance.
  */
 export async function processPendingBackendActions(model: LayoutModel) {
-    const waveObj = model.getter(model.waveObjectAtom);
-    const actions = waveObj?.pendingbackendactions;
+    const muxObj = model.getter(model.muxObjectAtom);
+    const actions = muxObj?.pendingbackendactions;
     if (!actions?.length) return;
 
     model.treeState.pendingBackendActions = undefined;
@@ -385,7 +385,7 @@ async function handleBackendAction(model: LayoutModel, action: LayoutActionData)
 }
 
 /**
- * Persist current tree state to the backend WaveObject (debounced).
+ * Persist current tree state to the backend MuxObject (debounced).
  * @param model The LayoutModel instance.
  */
 export function persistToBackend(model: LayoutModel) {
@@ -394,13 +394,13 @@ export function persistToBackend(model: LayoutModel) {
     }
 
     model.persistDebounceTimer = setTimeout(() => {
-        const waveObj = model.getter(model.waveObjectAtom);
-        if (!waveObj) return;
+        const muxObj = model.getter(model.muxObjectAtom);
+        if (!muxObj) return;
 
-        waveObj.rootnode = model.treeState.rootNode;
-        waveObj.focusednodeid = model.treeState.focusedNodeId;
-        waveObj.magnifiednodeid = model.treeState.magnifiedNodeId;
-        waveObj.leaforder = model.treeState.leafOrder;
+        muxObj.rootnode = model.treeState.rootNode;
+        muxObj.focusednodeid = model.treeState.focusedNodeId;
+        muxObj.magnifiednodeid = model.treeState.magnifiedNodeId;
+        muxObj.leaforder = model.treeState.leafOrder;
         // Persistence Phase A (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.6):
         // the pendingbackendactions queue is BACKEND-owned. Never write our
         // (often stale) local copy — a debounced persist racing a freshly
@@ -409,13 +409,13 @@ export function persistToBackend(model: LayoutModel) {
         // this model has already processed: ordinary persists preserve
         // unseen actions verbatim, and post-processing persists still clear
         // consumed ones.
-        const liveQueue = model.getter(model.waveObjectAtom)?.pendingbackendactions;
+        const liveQueue = model.getter(model.muxObjectAtom)?.pendingbackendactions;
         const unprocessed = liveQueue?.filter(
             (a) => a.actionid && !model.processedActionIds.has(a.actionid)
         );
-        waveObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
+        muxObj.pendingbackendactions = unprocessed?.length ? unprocessed : undefined;
 
-        model.setter(model.waveObjectAtom, waveObj);
+        model.setter(model.muxObjectAtom, muxObj);
         model.persistDebounceTimer = null;
     }, 100);
 }

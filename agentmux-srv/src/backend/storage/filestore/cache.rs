@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use super::types::WaveFile;
+use super::types::MuxFile;
 
 /// Cache entry for file data parts.
 #[derive(Debug, Clone)]
@@ -20,7 +20,7 @@ pub(super) struct DataCacheEntry {
 /// Cache entry for a file + its data parts.
 #[derive(Debug)]
 pub(super) struct CacheEntry {
-    pub(super) file: Option<WaveFile>,
+    pub(super) file: Option<MuxFile>,
     #[allow(dead_code)]
     pub(super) data_entries: HashMap<i32, DataCacheEntry>,
     #[allow(dead_code)]

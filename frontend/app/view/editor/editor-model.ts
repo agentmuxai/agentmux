@@ -47,8 +47,8 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
-import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
@@ -213,7 +213,7 @@ export class EditorViewModel implements ViewModel {
         this.blockId = blockId;
         this.nodeModel = nodeModel;
 
-        this.blockAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
+        this.blockAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
 
         // Register this pane's slot in the slice.
         registerEditorPane(blockId);
@@ -243,7 +243,7 @@ export class EditorViewModel implements ViewModel {
 
         // Live-reload: one subscription per pane, scoped to this block.
         // Fires when a path open in one of this pane's tabs changes on disk.
-        this._unsubFileChanged = waveEventSubscribe({
+        this._unsubFileChanged = muxEventSubscribe({
             eventType: WpsEvent.EditorFileChanged,
             scope: makeORef("block", blockId),
             handler: (event) => {
@@ -259,7 +259,7 @@ export class EditorViewModel implements ViewModel {
         // (createEffect over blockAtom), not a one-shot construction-time
         // check, so it uniformly covers BOTH "this pane wasn't mounted yet
         // when the backend wrote the request" and "already mounted, backend
-        // writes it later" through the same WaveObj sync path this pane
+        // writes it later" through the same MuxObj sync path this pane
         // already reactively depends on for everything else.
         //
         // An earlier version used a SEPARATE live WPS event (fired directly
@@ -267,14 +267,14 @@ export class EditorViewModel implements ViewModel {
         // this same meta update. Reagent (PR #2404) found the race: the WPS
         // event is a direct WS push and arrives essentially synchronously,
         // while the meta write reaches `blockAtom` only after an async
-        // WaveObj DB-refetch — so the live event's handler could run and try
+        // MuxObj DB-refetch — so the live event's handler could run and try
         // to dequeue its own path from `blockAtom()`'s meta BEFORE that same
         // write had actually landed there, reading stale data and no-op'ing,
         // stranding the entry to be wrongly reprocessed on a later remount.
         // Removing the separate live path entirely (rather than patching the
         // race) leaves one delivery mechanism and one reactive consumer —
         // no ordering between two paths to get wrong. Costs a small amount
-        // of latency for the already-mounted case (a real WaveObj round-trip
+        // of latency for the already-mounted case (a real MuxObj round-trip
         // instead of a direct push) in exchange for not being racy.
         createRoot((dispose) => {
             this._disposePendingOpenFilesEffect = dispose;
@@ -1108,7 +1108,7 @@ export class EditorViewModel implements ViewModel {
      *  is replicated individually here:
      *
      *  1. waitForLayoutModel(tabId) before touching the new tab at all. The
-     *     tab's WaveObj + LayoutState propagate via subscription some time
+     *     tab's MuxObj + LayoutState propagate via subscription some time
      *     after CreateTab returns, not synchronously with it.
      *  2. createBlockOnModel(...) — NOT the pane.open RPC used for
      *     openToTheSide above. Confirmed live: pane.open against a freshly

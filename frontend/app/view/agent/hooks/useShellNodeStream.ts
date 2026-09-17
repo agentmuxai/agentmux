@@ -16,7 +16,7 @@
  */
 
 import { onCleanup } from "solid-js";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -153,7 +153,7 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
     const perShellUnsubs = new Map<string, () => void>();
     const subscribeShellScope = (shellId: string) => {
         if (perShellUnsubs.has(shellId)) return;
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: WpsEvent.ShellChunk,
             scope: `shell:${shellId}`,
             handler: handleShellChunk,
@@ -176,7 +176,7 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
     // subscribeShellScope below) and queue it for the next RAF flush. We also
     // subscribe to this shell's per-shell `shell_chunk` ring so its chunks/exit
     // replay on remount even if a sibling shell evicted them from the block ring.
-    const shellNodeCreateUnsub = waveEventSubscribe({
+    const shellNodeCreateUnsub = muxEventSubscribe({
         eventType: WpsEvent.ShellNodeCreate,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {

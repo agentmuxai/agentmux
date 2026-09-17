@@ -511,7 +511,7 @@ pub(crate) async fn generate_definition_activity_summary(
         .unwrap_or(0);
     match wstore.agent_activity_summary_set(definition_id, &summary, now) {
         Ok(()) => {
-            broker.publish(crate::backend::wps::WaveEvent {
+            broker.publish(crate::backend::wps::MuxEvent {
                 event: "agents:changed".to_string(),
                 scopes: vec![],
                 sender: String::new(),

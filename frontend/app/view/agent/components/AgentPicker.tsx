@@ -37,7 +37,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { atoms, refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { waveEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/wps";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import { getPlatform } from "@/util/platformutil";
@@ -121,7 +121,7 @@ export function useAgentDefinitions(): [() => AgentDefinition[], () => boolean] 
 
         load();
 
-        const unsub = waveEventSubscribe({
+        const unsub = muxEventSubscribe({
             eventType: "agents:changed",
             handler: () => load(),
         });
@@ -147,7 +147,7 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     const [openDefinitions, setOpenDefinitions] = createSignal<Map<string, string>>(new Map());
     const refresh = () => setOpenDefinitions(getOpenDefinitionMap());
     onMount(refresh);
-    const unsubAgentsChanged = waveEventSubscribe({
+    const unsubAgentsChanged = muxEventSubscribe({
         eventType: "agents:changed",
         handler: refresh,
     });

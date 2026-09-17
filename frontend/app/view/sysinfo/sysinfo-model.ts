@@ -13,7 +13,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 import { DataItem, DefaultNumPoints, DefaultPlotMeta, PlotTypes } from "./sysinfo-types";
-import { convertWaveEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
+import { convertMuxEventToDataItem, getGapThresholdMs } from "./sysinfo-util";
 
 // ---------------------------------------------------------------------------
 // Sample ring-buffer reducer
@@ -241,7 +241,7 @@ class SysinfoViewModel implements ViewModel {
     constructor(blockId: string, viewType: string) {
         this.viewType = viewType;
         this.blockId = blockId;
-        this.blockAtom = WOS.getWaveObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.loadingAtom = createSignalAtom(true);
@@ -328,7 +328,7 @@ class SysinfoViewModel implements ViewModel {
                 maxitems: numPoints,
             });
             if (initialData == null) return;
-            const initialDataItems: DataItem[] = initialData.map(convertWaveEventToDataItem);
+            const initialDataItems: DataItem[] = initialData.map(convertMuxEventToDataItem);
             this.resetData(initialDataItems);
         } catch (e) {
             console.log("Error loading initial data for sysinfo", e);

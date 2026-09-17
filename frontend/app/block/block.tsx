@@ -20,7 +20,7 @@ import {
     registerBlockComponentModel,
     unregisterBlockComponentModel,
 } from "@/store/global";
-import { getWaveObjectAtom, makeORef, useWaveObjectValue } from "@/store/wos";
+import { getMuxObjectAtom, makeORef, useMuxObjectValue } from "@/store/wos";
 import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
@@ -98,7 +98,7 @@ function getViewElem(
 }
 
 function makeDefaultViewModel(blockId: string, viewType: string): ViewModel {
-    const blockDataAtom = getWaveObjectAtom<Block>(makeORef("block", blockId));
+    const blockDataAtom = getMuxObjectAtom<Block>(makeORef("block", blockId));
     let viewModel: ViewModel = {
         viewType: viewType,
         viewIcon: createMemo(() => {
@@ -117,7 +117,7 @@ function makeDefaultViewModel(blockId: string, viewType: string): ViewModel {
 }
 
 function BlockPreview({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
-    const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
+    const [blockData] = useMuxObjectValue<Block>(makeORef("block", nodeModel.blockId));
     if (!blockData()) {
         return null;
     }
@@ -137,7 +137,7 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
     let blockRef: { current: HTMLDivElement | null } = { current: null };
     let contentRef: { current: HTMLDivElement | null } = { current: null };
     const [blockClicked, setBlockClicked] = createSignal(false);
-    const [blockData] = useWaveObjectValue<Block>(makeORef("block", nodeModel.blockId));
+    const [blockData] = useMuxObjectValue<Block>(makeORef("block", nodeModel.blockId));
     const isFocused = nodeModel.isFocused;
     const disablePointerEvents = nodeModel.disablePointerEvents;
     const innerRect = useDebouncedNodeInnerRect(nodeModel);
@@ -269,7 +269,7 @@ function BlockFull({ nodeModel, viewModel }: FullBlockProps): JSX.Element {
 function Block(props: BlockProps): JSX.Element {
     counterInc("render-Block");
     counterInc("render-Block-" + props.nodeModel?.blockId?.substring(0, 8));
-    const [blockData, loading] = useWaveObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
+    const [blockData, loading] = useMuxObjectValue<Block>(makeORef("block", props.nodeModel.blockId));
 
     // Track only the view type (not the full blockData) so the effect only re-runs
     // when the view changes (e.g. "Replace With..."), not on every meta update.

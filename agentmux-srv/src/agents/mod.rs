@@ -5,8 +5,9 @@
 //! Code (or any future provider) used by BOTH the interactive agent
 //! pane and the headless drone Agent block.
 //!
-//! See `docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md` for the
-//! full design + 5-PR migration plan.
+//! The full design + 5-PR migration plan lived in a Phase-1.5 lineage spec
+//! that was retired in #1928 ("remove legacy pre-Drone Workflows lineage
+//! specs"); this module is what shipped from it.
 //!
 //! This is Phase 1.5 PR 0: types + skeleton. PR 1 wires the agent
 //! pane through this module; PR 2 wires the drone Agent block.

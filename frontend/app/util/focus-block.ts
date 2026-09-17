@@ -48,9 +48,9 @@ export async function focusBlock(blockId: string): Promise<void> {
         const allTabIds = [...(wsData.pinnedtabids ?? []), ...(wsData.tabids ?? [])];
         for (const tabId of allTabIds) {
             const oref = WOS.makeORef("tab", tabId);
-            // Use cached value when available; reloadWaveObject on cache miss.
+            // Use cached value when available; reloadMuxObject on cache miss.
             const cached = WOS.getObjectValue<Tab>(oref);
-            const tab = cached ?? (await WOS.reloadWaveObject<Tab>(oref));
+            const tab = cached ?? (await WOS.reloadMuxObject<Tab>(oref));
             if (!tab?.blockids?.includes(blockId)) continue;
             await WorkspaceService.SetActiveTab(wsData.oid, tabId);
             const instances = await getApi().listWindowInstances();

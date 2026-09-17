@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-use crate::backend::obj::{wave_obj_from_json, wave_obj_to_json, StoreObj};
+use crate::backend::obj::{mux_obj_from_json, mux_obj_to_json, StoreObj};
 use crate::registry::{DefinitionStore, Registry};
 
 use super::error::StoreError;
@@ -392,7 +392,7 @@ impl Store {
 
         match result {
             Ok((version, data)) => {
-                let mut obj: T = wave_obj_from_json(&data)?;
+                let mut obj: T = mux_obj_from_json(&data)?;
                 obj.set_version(version);
                 Ok(Some(obj))
             }
@@ -456,7 +456,7 @@ impl Store {
         }
 
         obj.set_version(1);
-        let data = wave_obj_to_json(obj)?;
+        let data = mux_obj_to_json(obj)?;
 
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
@@ -476,7 +476,7 @@ impl Store {
             return Err(StoreError::EmptyOID);
         }
 
-        let data = wave_obj_to_json(obj)?;
+        let data = mux_obj_to_json(obj)?;
 
         let conn = self.conn.lock().unwrap();
         let table = Self::table_name::<T>();
@@ -557,7 +557,7 @@ impl Store {
         let mut result = Vec::new();
         for row in rows {
             let (version, data) = row?;
-            let mut obj: T = wave_obj_from_json(&data)?;
+            let mut obj: T = mux_obj_from_json(&data)?;
             obj.set_version(version);
             result.push(obj);
         }
@@ -665,7 +665,7 @@ impl<'a> StoreTx<'a> {
 
         match result {
             Ok((version, data)) => {
-                let mut obj: T = wave_obj_from_json(&data)?;
+                let mut obj: T = mux_obj_from_json(&data)?;
                 obj.set_version(version);
                 Ok(Some(obj))
             }
@@ -685,7 +685,7 @@ impl<'a> StoreTx<'a> {
         }
 
         obj.set_version(1);
-        let data = wave_obj_to_json(obj)?;
+        let data = mux_obj_to_json(obj)?;
 
         let table = Self::table_name::<T>();
         self.conn.execute(
@@ -702,7 +702,7 @@ impl<'a> StoreTx<'a> {
             return Err(StoreError::EmptyOID);
         }
 
-        let data = wave_obj_to_json(obj)?;
+        let data = mux_obj_to_json(obj)?;
 
         let table = Self::table_name::<T>();
         let new_version: i64 = self.conn.query_row(
@@ -729,7 +729,7 @@ impl<'a> StoreTx<'a> {
         let mut result = Vec::new();
         for row in rows {
             let (version, data) = row?;
-            let mut obj: T = wave_obj_from_json(&data)?;
+            let mut obj: T = mux_obj_from_json(&data)?;
             obj.set_version(version);
             result.push(obj);
         }

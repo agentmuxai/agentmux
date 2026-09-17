@@ -25,7 +25,7 @@ pub fn get_backend_endpoints(state: &Arc<AppState>) -> Result<serde_json::Value,
 }
 
 /// Get the window initialization options (client/window/tab IDs).
-pub fn get_wave_init_opts(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+pub fn get_mux_init_opts(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     let client_id = state.client_id.lock();
     let window_id = state.window_id.lock();
     let tab_id = state.active_tab_id.lock();

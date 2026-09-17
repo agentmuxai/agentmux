@@ -4,7 +4,7 @@
 //! Tests for FileStore.
 
 use super::core::{PART_DATA_SIZE, CACHE_TTL_SECS, MAX_CACHE_BYTES};
-use super::{FileOpts, FileMeta, FileStore, WaveFile};
+use super::{FileOpts, FileMeta, FileStore, MuxFile};
 use crate::backend::storage::error::StoreError;
 
 fn make_store() -> FileStore {
@@ -192,7 +192,7 @@ fn test_write_to_nonexistent_fails() {
 
 #[test]
 fn test_circular_file_data_length() {
-    let file = WaveFile {
+    let file = MuxFile {
         zoneid: "z1".to_string(),
         name: "circ".to_string(),
         size: 200,
@@ -211,7 +211,7 @@ fn test_circular_file_data_length() {
 
 #[test]
 fn test_circular_file_under_max() {
-    let file = WaveFile {
+    let file = MuxFile {
         zoneid: "z1".to_string(),
         name: "circ".to_string(),
         size: 50,

@@ -101,8 +101,8 @@ function getBlockZoom(blockId: string): number | null {
 // that needs to know the resulting value (the all-panes stepper below)
 // doesn't have to re-read it back — WOS's local cache is NOT updated
 // synchronously by this call. RpcApi.SetMetaCommand is fire-and-forget;
-// the cache only updates later, when the backend pushes a WaveObjUpdate
-// event back (global.ts's initGlobalEventSubs → WOS.updateWaveObject). A
+// the cache only updates later, when the backend pushes a MuxObjUpdate
+// event back (global.ts's initGlobalEventSubs → WOS.updateMuxObject). A
 // getBlockZoom() call immediately after this one would read the STALE
 // pre-write value, not the one just computed here (ReAgent P1, PR #3090).
 function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = true): number {
@@ -182,7 +182,7 @@ function stepAllPanes(step: number, direction: 1 | -1): void {
         // Uses stepZoom's OWN return value, not a getBlockZoom() re-read —
         // the write it just fired is an async RpcApi.SetMetaCommand, and
         // WOS's local cache isn't updated until the backend pushes a
-        // WaveObjUpdate event back. Re-reading here would see the STALE
+        // MuxObjUpdate event back. Re-reading here would see the STALE
         // pre-step value on every call (ReAgent P1, PR #3090).
         const newZoom = stepZoom(blockId, zoom, step, direction, false);
         minZoom = Math.min(minZoom, newZoom);

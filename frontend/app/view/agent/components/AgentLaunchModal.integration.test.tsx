@@ -56,7 +56,7 @@ vi.mock("@/app/view/identity/identity-model", () => ({
 }));
 
 vi.mock("@/app/store/wps", () => ({
-    waveEventSubscribe: vi.fn(() => () => {}),
+    muxEventSubscribe: vi.fn(() => () => {}),
 }));
 
 vi.mock("@/app/store/global", () => ({

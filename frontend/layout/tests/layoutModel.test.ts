@@ -40,7 +40,7 @@ vi.mock("@/app/store/global", () => {
     return {
         WOS: {
             makeORef: (_otype: string, oid: string) => oid,
-            getWaveObjectAtom: (oid: string) => {
+            getMuxObjectAtom: (oid: string) => {
                 if (!layoutStateSignals.has(oid)) {
                     layoutStateSignals.set(oid, makeLayoutStateSignal(oid));
                 }
