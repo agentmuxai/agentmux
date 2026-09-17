@@ -293,52 +293,6 @@ declare global {
      *  McpServerBundleListItem. */
     type SkillBundleListItem = Skill & { bound_to_bundle: boolean };
 
-    /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
-     *  agentmux-srv/src/drone/types.rs. */
-    type DroneDefinition = {
-        id: string;
-        name: string;
-        description: string;
-        graph: { nodes: DroneFlowNode[]; edges: DroneFlowEdge[] };
-        viewport: { x: number; y: number; zoom: number };
-        created_at: number;
-        updated_at: number;
-    };
-
-    type DroneFlowNode = {
-        id: string;
-        position: { x: number; y: number };
-        data: Record<string, unknown> & { kind: string };
-        type?: string;
-    };
-
-    type DroneFlowEdge = {
-        id: string;
-        source: string;
-        target: string;
-        sourceHandle?: string;
-        targetHandle?: string;
-    };
-
-    type DroneRun = {
-        id: string;
-        drone_id: string;
-        status: string;
-        started_at: number;
-        ended_at: number;
-        block_states: Record<string, DroneBlockState>;
-        output: string;
-        error: string;
-    };
-
-    type DroneBlockState = {
-        status: "pending" | "running" | "done" | "error" | "skipped";
-        output?: unknown;
-        error?: string;
-        started_at?: number;
-        completed_at?: number;
-    };
-
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";
 
     type GitHubContext = {

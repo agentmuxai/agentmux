@@ -28,6 +28,8 @@
  *     every subsequent command emits `post-close-command-dropped`.
  */
 
+import type { DroneBlockState } from "@/app/store/rpc-api";
+
 /** What we render in the Agent block inspector for the last run. Mirror
  *  of the wire `AgentRunResult` flattened into the snake_case drone
  *  block-output shape (`response`, `cost_usd`). Errors arrive via
@@ -60,15 +62,17 @@ export const initialState = (): DroneRunState => ({
     error: "",
 });
 
-/** Shape of one backfilled block row from `DroneRun.block_states`,
- *  used by `BackfilledFromRow` for the codex-P2 race recovery on PR
- *  #843. Mirror of `DroneBlockState` in `frontend/types/srv-types.d.ts`. */
-interface BackfilledBlock {
-    blockId: string;
-    status: "pending" | "running" | "done" | "error" | "skipped";
-    output?: unknown;
-    error?: string;
-}
+/** Shape of one backfilled block row from `DroneRun.block_states`, used by
+ *  `BackfilledFromRow` for the codex-P2 race recovery on PR #843.
+ *
+ *  Derived from `DroneBlockState` rather than restated: this was the third
+ *  hand-written copy of that shape (Rust, the ambient global, and here), and
+ *  the ambient one is now generated. `blockId` is the map key the reducer
+ *  folds in alongside the row, which is why it is added rather than picked. */
+type BackfilledBlock = { blockId: string } & Pick<
+    DroneBlockState,
+    "status" | "output" | "error"
+>;
 
 export type DroneRunCommand =
     /**

@@ -90,7 +90,7 @@ mod tests {
             id: "c".to_string(),
             position: NodePosition::default(),
             data: json!({ "kind": "condition", "expr": expr }),
-            node_type: String::new(),
+            node_type: None,
         }
     }
 
