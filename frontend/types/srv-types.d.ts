@@ -165,24 +165,6 @@ declare global {
         token: string;
     };
 
-    // wshrpc.CommandBlockInputData
-    type CommandBlockInputData = {
-        blockid: string;
-        inputdata64?: string;
-        signame?: string;
-        termsize?: TermSize;
-    };
-
-    // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
-    // agent CLI via the Agent SDK control protocol (a control_response carrying
-    // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-    type CommandAgentAnswerData = {
-        blockid: string;
-        tool_use_id: string;
-        // question text → chosen label | label[] (multiSelect) | free-text ("Other")
-        answers: {[key: string]: string | string[]};
-    };
-
     // wshrpc.CommandCaptureBlockScreenshotData
     type CommandCaptureBlockScreenshotData = {
         blockid: string;
@@ -458,13 +440,6 @@ declare global {
     type CommandDeleteFileData = {
         path: string;
         recursive: boolean;
-    };
-
-    // wshrpc.CommandEventReadHistoryData
-    type CommandEventReadHistoryData = {
-        event: string;
-        scope: string;
-        maxitems: number;
     };
 
     // wshrpc.CommandFileCopyData
@@ -1171,13 +1146,6 @@ declare global {
         style: {[key: string]: any};
         clickopts?: StickerClickOptsType;
         display: StickerDisplayOptsType;
-    };
-
-    // mps.SubscriptionRequest
-    type SubscriptionRequest = {
-        event: string;
-        scopes?: string[];
-        allscopes?: boolean;
     };
 
     // wshrpc.SuggestionType

@@ -19,6 +19,12 @@ export type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
 import type { WidgetApiResult } from "@/types/rpc/WidgetApiResult";
 import type { WidgetHealthResult } from "@/types/rpc/WidgetHealthResult";
 
+export type { AiRateLimitResult } from "@/types/rpc/AiRateLimitResult";
+export type { AppInfoResult } from "@/types/rpc/AppInfoResult";
+
+import type { AiRateLimitResult } from "@/types/rpc/AiRateLimitResult";
+import type { AppInfoResult } from "@/types/rpc/AppInfoResult";
+
 // The muxbus and providers shapes are GENERATED from their Rust definitions by
 // ts-rs. They were private structs in the handler files, so the inline types
 // here were hand-maintained against nothing.
@@ -74,7 +80,12 @@ export const MiscApi = {
         return client.rpcCall("recordtevent", data, opts);
     },
 
-    MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<MuxInfoData> {
+    // Answers `{ version }` and nothing else. The hand-written `MuxInfoData`
+    // this used to return also declared `clientid`, `buildtime`, `configdir`
+    // and `datadir` -- four fields the handler has never sent. Nothing reads
+    // them (this command has no caller at all today), so the generated type is
+    // a straight correction rather than a breaking narrowing.
+    MuxInfoCommand(client: RpcClient, opts?: RpcOpts): Promise<AppInfoResult> {
         return client.rpcCall("waveinfo", null, opts);
     },
 
