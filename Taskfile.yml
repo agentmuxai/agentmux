@@ -1079,10 +1079,14 @@ tasks:
                 # AGENTMUX_CHANNEL here is exported (not just a local var) so
                 # the launcher/host exec later in this same script inherits
                 # it — window_settings.rs::linux_app_id() reads it directly.
-                # Without this, the dev binary would advertise its normal
-                # auto-detected dev-<branch>[-<clone-id>] app_id/WM_CLASS
-                # while this .desktop file's StartupWMClass stayed at the
-                # legacy "agentmux" default, breaking icon-matching for the
+                # linux_app_id() never consults RuntimeMode's dev-branch
+                # auto-detection (that's a separate code path used only by
+                # data-dir resolution) — absent this export it falls back to
+                # the compile-time BUILD_CHANNEL_DEFAULT ("stable" for a
+                # plain `task dev`), so the dev binary would advertise the
+                # generic agentmux-stable-<version> while this .desktop
+                # file's StartupWMClass stayed at the legacy "agentmux"
+                # default — a 3-way mismatch breaking icon-matching for the
                 # single most common dev workflow (reagent P1 on PR #3323).
                 # This override only affects the WM app_id — dev mode's own
                 # data-dir isolation intentionally ignores AGENTMUX_CHANNEL
