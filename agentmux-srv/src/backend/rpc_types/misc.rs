@@ -304,3 +304,23 @@ pub struct InstallFailure {
     pub id: String,
     pub error: String,
 }
+
+/// `voice.checkPath` request — the whisper.cpp CLI/model path the Settings →
+/// Recording section wants an existence check for.
+///
+/// Named (rather than an inline `serde_json::from_value` struct in the
+/// handler) so the RPC bindings generator can emit it — see
+/// `docs/specs/SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md` §3.1.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandVoiceCheckPathData {
+    pub path: String,
+}
+
+/// `voice.checkPath` response. Was an anonymous `json!({"exists": ..})`
+/// before this type existed to name it for the generator.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct VoiceCheckPathResult {
+    pub exists: bool,
+}

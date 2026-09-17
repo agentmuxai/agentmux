@@ -21,6 +21,7 @@
             "@/layout/*": ["frontend/layout/*"],
             "@/log/*": ["frontend/log/*"],
             "@/store/*": ["frontend/app/store/*"],
+            "@/types/*": ["frontend/types/*"],
             "@/view/*": ["frontend/app/view/*"],
             "@/element/*": ["frontend/app/element/*"],
             "@/shadcn/*": ["frontend/app/shadcn/*"],
