@@ -167,6 +167,8 @@ async fn main() {
                     serde_json::from_str(GET_AGENT_TRANSCRIPT_TOOL).expect("static json");
                 let list_conversations: Value =
                     serde_json::from_str(LIST_CONVERSATIONS_TOOL).expect("static json");
+                let search_history: Value =
+                    serde_json::from_str(SEARCH_HISTORY_TOOL).expect("static json");
                 let supervisor_nudge: Value =
                     serde_json::from_str(SUPERVISOR_NUDGE_TOOL).expect("static json");
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
@@ -227,7 +229,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, pty_shell, pty_shell_input, pty_shell_resize, pty_shell_read, pty_shell_status, pty_shell_stop, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, search_history, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, close_pane, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, open_agent, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, global_memory_list, global_memory_read, global_memory_write, global_memory_remove, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1569,6 +1571,75 @@ async fn call_tool(
                 .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "SearchHistory" => {
+            // Always this process's own agent id. The tool exposes no `agent`
+            // parameter on purpose — see SEARCH_HISTORY_TOOL's comment — and
+            // `agent_slug()` reads it from the trusted spawn-time env, which
+            // the calling model's own output cannot reach or override.
+            let slug = agent_slug()?;
+            let query = arguments
+                .get("query")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let tool = arguments.get("tool").and_then(|v| v.as_str());
+            if query.trim().is_empty() && tool.is_none() {
+                anyhow::bail!(
+                    "query must be non-empty unless `tool` is given (an empty query with no \
+                     tool filter would match everything and return a truncated firehose)"
+                );
+            }
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!(
+                "{}/agentmux/reactive/history/search",
+                local_url.trim_end_matches('/')
+            );
+            let mut query_params: Vec<(&str, String)> =
+                vec![("agent", slug), ("query", query)];
+            if let Some(t) = tool {
+                query_params.push(("tool", t.to_string()));
+            }
+            if let Some(r) = arguments.get("role").and_then(|v| v.as_str()) {
+                query_params.push(("role", r.to_string()));
+            }
+            for (key, arg) in [
+                ("since", "since"),
+                ("until", "until"),
+                ("max_sessions", "max_sessions"),
+                ("limit", "limit"),
+            ] {
+                if let Some(n) = arguments.get(arg).and_then(|v| v.as_i64()) {
+                    query_params.push((key, n.to_string()));
+                }
+            }
+
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&query_params)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("history search request failed: {e}"))?;
+            let status = resp.status();
+            let body: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            if !status.is_success() {
+                anyhow::bail!(
+                    "history search failed ({status}): {}",
+                    body.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error")
+                );
+            }
+            Ok(serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string()))
         }
         "GetAgentTranscript" => {
             let agent = arguments
