@@ -103,7 +103,25 @@ architectural decision — that needs a repo-owner call before anyone builds it.
 - **A6 — half done.** PR #3054 killed the `AgentAtoms` mirror; `model.state`/`model.document`
   are now the single reactive source, pinned by `agent-pane-view.test.ts`. The remaining half
   (scroll/expansion unification) moved to `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`.
-- **A10** — unchanged, still self-annotated "safe to skip".
+- **A10 — re-verified 2026-09-17, and the issue's own framing is slightly off.** It reads
+  "consolidate data-dir resolution onto `DataPaths`", which implies duplicated resolution
+  logic. There is not much: `agentmux-launcher`'s `DataPaths` is a documented compat shape
+  that *wraps* `agentmux_common::DataPaths` rather than re-resolving, and
+  `get_mux_data_dir()` (29 callers) is a different concept — the **global `~/.agentmux`
+  root**, which the agent registry, transcripts and definitions deliberately use
+  cross-channel (#1387–#1393), not the per-instance dirs `DataPaths` resolves.
+
+  What IS real: **two independent env overrides for the same root, each honoured by only
+  half the code.** `get_mux_data_dir()` reads `AGENTMUX_DATA_HOME`;
+  `DataPaths::resolve_root()` reads `AGENTMUX_HOME_OVERRIDE` (documented test-only). With
+  neither set — the normal case — both resolve to `~/.agentmux` and agree, which is why
+  nothing has broken. Set either one and the two halves disagree about where the root is.
+
+  Checked and NOT a live bug: `registry::write` takes `data_dir` as a parameter, so tests
+  inject a tempdir and do not write through `get_mux_data_dir()` into a real home.
+
+  Still fair to call low priority, but "safe to skip" undersells it — the finding above is
+  the part worth keeping if A10 is closed unfinished.
 
 All four agent-pane state files still exist, and **`agent-view.tsx` is now 3,017 lines** (1,282
 when A6 was filed, 2,730 at the 09-06 audit, 13 commits in the last 10 days). The file is still
