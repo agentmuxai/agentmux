@@ -108,13 +108,30 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_GET, make(state.clone()));
 }
 
+// NOT migrated to `register_typed`, deliberately, unlike the rest of the
+// bundle surface. `bundle_validate_impl` runs its payload through
+// `normalize_bundle_upsert_input` BEFORE deserializing it -- that is what
+// fills a missing `id` with "" so an unsaved draft can be validated, and what
+// coerces array-valued `context_files`/`mcp_servers`/`skills` into the
+// JSON-encoded strings `Bundle` expects.
+//
+// `register_typed` deserializes the payload into `Req` first and hands the
+// handler a typed value, so there is no point at which that normalize step
+// could run. Typing this command would mean re-implementing normalize as
+// custom serde deserializers -- duplicating security-relevant coercion logic
+// to satisfy the generator, which is the wrong trade. The RESPONSE is typed
+// (`ValidationReport`, ts-rs-generated) and that is where the drift risk
+// actually was; the request stays a `Value` on purpose.
 fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let identity_store = state.identity_store.clone();
     let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
         let mstore = mstore.clone();
         let identity_store = identity_store.clone();
-        Box::pin(async move { Ok(Some(bundle_validate_impl(&mstore, &identity_store, data)?)) })
+        Box::pin(async move {
+            let report = bundle_validate_impl(&mstore, &identity_store, data)?;
+            Ok(Some(serde_json::to_value(&report).map_err(|e| e.to_string())?))
+        })
     });
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
@@ -3562,15 +3579,17 @@ mod export_import_for_agent_tests {
         )
         .unwrap();
 
-        assert_eq!(
-            report["is_valid"], json!(false),
-            "a bound component that cannot load must not validate clean: {report}"
-        );
-        let issues = report["issues"].as_array().unwrap();
         assert!(
-            issues.iter().any(|i| i["field"] == "mcp_servers"
-                && i["message"].as_str().unwrap_or("").contains("broken")),
-            "the issue must name the server: {issues:?}"
+            !report.is_valid,
+            "a bound component that cannot load must not validate clean: {report:?}"
+        );
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.field == "mcp_servers" && i.message.contains("broken")),
+            "the issue must name the server: {:?}",
+            report.issues
         );
     }
 

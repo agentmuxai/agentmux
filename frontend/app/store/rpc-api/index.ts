@@ -29,7 +29,14 @@ import { VoiceApi } from "./voice";
 import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
-export type { Bundle, BundleUpsertInput, BundleValidateInput } from "./bundle";
+export type {
+    Bundle,
+    BundleUpsertInput,
+    BundleValidateInput,
+    BundleValidationIssue,
+    BundleValidationReport,
+    BundleValidationSeverity,
+} from "./bundle";
 export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
 export type {
     ReactiveAgentRegistration,

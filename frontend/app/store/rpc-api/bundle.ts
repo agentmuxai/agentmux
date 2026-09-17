@@ -14,6 +14,15 @@ import { RpcClient } from "../rpc-client";
 // need their private `Req` structs promoted out of the handler file first.
 export type { Bundle } from "@/types/rpc/Bundle";
 
+// The validation report shapes are GENERATED too. The validate HANDLER stays
+// on `register_handler` on purpose (it normalizes its payload before
+// deserializing, which `register_typed` cannot express -- see the comment on
+// `register_bundle_validate`), but its response was always the part at risk of
+// drift, and that part is now generated.
+export type { ValidationReport as BundleValidationReport } from "@/types/rpc/ValidationReport";
+export type { ValidationIssue as BundleValidationIssue } from "@/types/rpc/ValidationIssue";
+export type { IssueSeverity as BundleValidationSeverity } from "@/types/rpc/IssueSeverity";
+
 import type { Bundle as BundleT } from "@/types/rpc/Bundle";
 import type { CommandListBundlesData } from "@/types/rpc/CommandListBundlesData";
 import type { CommandGetBundleData } from "@/types/rpc/CommandGetBundleData";
@@ -23,6 +32,7 @@ import type { CommandReorderGlobalBundlesData } from "@/types/rpc/CommandReorder
 import type { ReorderGlobalBundlesResult } from "@/types/rpc/ReorderGlobalBundlesResult";
 import type { CommandGetClaudeGlobalConfigData } from "@/types/rpc/CommandGetClaudeGlobalConfigData";
 import type { ClaudeGlobalConfig } from "@/types/rpc/ClaudeGlobalConfig";
+import type { ValidationReport } from "@/types/rpc/ValidationReport";
 
 // The accurate request shape for the three upsert/validate commands, DERIVED
 // from the generated `Bundle` rather than hand-listed, so a new Rust field
@@ -176,7 +186,7 @@ export const BundleImportApi = {
         client: RpcClient,
         data: BundleValidateInput,
         opts?: RpcOpts,
-    ): Promise<BundleValidationReport> {
+    ): Promise<ValidationReport> {
         return client.rpcCall("bundle.validate", data, opts);
     },
 };

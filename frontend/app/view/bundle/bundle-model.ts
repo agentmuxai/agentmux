@@ -29,7 +29,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
-import type { Bundle, BundleUpsertInput } from "@/app/store/rpc-api";
+import type { Bundle, BundleUpsertInput, BundleValidationReport } from "@/app/store/rpc-api";
 
 /** What the form fields look like in flight. Maps 1:1 to the Memory
  *  shape but with everything optional + JSON-array fields exposed as
