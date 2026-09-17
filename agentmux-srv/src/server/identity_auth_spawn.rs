@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::backend::storage::store::Store;
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 
 use super::identity_auth_persist::persist_oauth_success;
 

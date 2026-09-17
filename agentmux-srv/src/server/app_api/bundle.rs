@@ -267,7 +267,7 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 id_store.bundle_upsert(&memory)
                     .map_err(|e| format!("bundle.upsert: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -301,7 +301,7 @@ fn register_bundle_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Ok(deleted) => {
                         if deleted {
                             purge_bundle_component_refs(&wstore, &req.id);
-                            broker.publish(crate::backend::wps::MuxEvent {
+                            broker.publish(crate::backend::mps::MuxEvent {
                                 event: "memories:changed".to_string(),
                                 scopes: vec![], sender: String::new(), persist: 0, data: None,
                             });
@@ -2067,12 +2067,12 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
                 ));
 
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
                 if !imported_skill_ids.is_empty() {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });
@@ -2462,7 +2462,7 @@ async fn bundle_import_commit_impl(
     id_store: &crate::backend::storage::store::Store,
     identity_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
-    broker: &crate::backend::wps::Broker,
+    broker: &crate::backend::mps::Broker,
     req: CommitReq,
 ) -> Result<serde_json::Value, String> {
     use crate::backend::bundle_import as bi;
@@ -2709,12 +2709,12 @@ async fn bundle_import_commit_impl(
                     &selected_mcp_servers.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
                 ));
 
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
                 if !imported_skill_ids.is_empty() {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "skills:changed".to_string(),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });

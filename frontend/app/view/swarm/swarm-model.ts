@@ -5,8 +5,8 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
@@ -1321,7 +1321,7 @@ export class SwarmViewModel implements ViewModel {
             this.setTrackedBlockIds(ids);
             // Codex P2 on PR #3219: subscribeToBlockStatuses tears down and
             // rebuilds every per-block status subscription (each unsub/sub
-            // flushes its own WPS eventsub command) plus issues a fresh
+            // flushes its own MPS eventsub command) plus issues a fresh
             // GetControllerStatus per block — necessary when membership
             // actually changed, pure overhead when it didn't. With the
             // safety-net poll below calling this every

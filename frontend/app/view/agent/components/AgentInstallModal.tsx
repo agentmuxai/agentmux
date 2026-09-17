@@ -27,7 +27,7 @@ import { atoms, getSettingsKeyAtom } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { computeTermThemeFromSettings } from "@/app/view/term/termutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 

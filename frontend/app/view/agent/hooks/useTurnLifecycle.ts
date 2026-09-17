@@ -21,8 +21,8 @@
  */
 
 import { createEffect, onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
@@ -307,7 +307,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // WHICH `Submitting` episode it's really for — a stale/late accepted
     // event for an EARLIER message, delivered after that episode already
     // timed out and a NEWER, still-genuinely-unacknowledged `TurnStart`
-    // began (e.g. the backend's own retried WPS push, or a reconnect
+    // began (e.g. the backend's own retried MPS push, or a reconnect
     // backlog replay, landing well after the client already gave up and
     // the user retried), would incorrectly disarm the NEWER episode's
     // timer — silently reintroducing the exact stuck-Submitting bug this

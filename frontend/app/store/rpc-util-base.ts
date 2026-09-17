@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { wpsReconnectHandler } from "@/app/store/wps";
+import { wpsReconnectHandler } from "@/app/store/mps";
 
 import { RpcRouter } from "@/app/store/rpc-router";
 import { getWSServerEndpoint } from "@/util/endpoints";

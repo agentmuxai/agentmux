@@ -18,8 +18,8 @@ import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { atoms, staticTabId, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { sendWSCommand } from "@/app/store/ws";
 import { TermWrap } from "@/app/view/term/termwrap";
 import { stringToBase64 } from "@/util/util";
@@ -264,7 +264,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                 // ReAgent P0 on PR #3253: `controllerstatus` is published with
                 // `persist: 1` precisely so a subscriber is replayed the
                 // CURRENT status on first subscribe to a scope
-                // (blockcontroller/mod.rs, wps.rs's `replay_to_route`). So a
+                // (blockcontroller/mod.rs, mps.rs's `replay_to_route`). So a
                 // shell that exited while the drawer was closed — an agent
                 // finishing work in the shared shell, the supported case in
                 // §3.3 of this feature's spec — delivers its old `done`

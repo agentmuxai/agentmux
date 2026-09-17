@@ -22,7 +22,7 @@ pub(crate) const META_SESSION_ID: &str = "agent:sessionid";
 /// Block metadata key for the last classified agent failure.
 /// Written on every non-zero / in-band-error exit; cleared on clean success.
 /// The frontend reads this on pane mount so the recovery banner survives
-/// tab switches and page reloads without requiring the WPS event to be
+/// tab switches and page reloads without requiring the MPS event to be
 /// received in real time.
 pub(crate) const META_LAST_FAILURE: &str = "agent:last_failure";
 
@@ -201,7 +201,7 @@ fn sync_instance_session_id(store: &Arc<Store>, block_id: &str, sid: &str) {
 ///
 /// Pass `Some(failure)` on a failed exit to write `agent:last_failure` into the
 /// block's meta so the pane can recover the recovery banner on any future load
-/// without needing the ephemeral WPS event. Pass `None` on a clean exit to
+/// without needing the ephemeral MPS event. Pass `None` on a clean exit to
 /// remove the key (setting it to JSON null triggers `merge_meta`'s delete path).
 /// Broadcasts a `waveobj:update` so active frontend subscribers see the change
 /// immediately via the block atom, not just on next full load.

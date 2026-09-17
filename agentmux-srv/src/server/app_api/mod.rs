@@ -370,7 +370,7 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 pub(crate) async fn agent_define_core(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
-    broker: Arc<crate::backend::wps::Broker>,
+    broker: Arc<crate::backend::mps::Broker>,
     cmd: CommandAgentDefineData,
 ) -> Result<AgentDefineResult, String> {
     if cmd.name.trim().is_empty() {
@@ -495,7 +495,7 @@ pub(crate) async fn agent_define_core(
                     (None, false)
                 };
                 if stub_new {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "agents:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -569,7 +569,7 @@ pub(crate) async fn agent_define_core(
                 } else {
                     None
                 };
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -613,7 +613,7 @@ pub(crate) async fn agent_define_core(
     } else {
         None
     };
-    broker.publish(crate::backend::wps::MuxEvent {
+    broker.publish(crate::backend::mps::MuxEvent {
         event: "agents:changed".to_string(),
         scopes: vec![],
         sender: String::new(),
@@ -1072,7 +1072,7 @@ pub(crate) fn memory_write_impl(
     // subscriber can ever match — the exact class of bug this file's own
     // `resolve_agent_uuid` doc comment already warns about for version
     // storage; the same reasoning applies to this event.
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1233,7 +1233,7 @@ pub(crate) fn global_memory_write_impl(
         }
     }
 
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: "memories:changed".to_string(),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1304,7 +1304,7 @@ pub(crate) fn global_memory_remove_impl(state: &AppState, id: &str) -> Result<se
     bundle.is_global = false;
     bundle.updated_at = agentmux_common::time::now_ms();
     state.id_store.bundle_upsert(&bundle).map_err(|e| format!("globalmemory.remove: {e}"))?;
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: "memories:changed".to_string(),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -1683,7 +1683,7 @@ pub(crate) fn memory_revert_impl(
 
     // See memory_write_impl's own comment on why this is version_agent_id
     // (canonical UUID), not the raw agent_id slug parameter.
-    state.broker.publish(crate::backend::wps::MuxEvent {
+    state.broker.publish(crate::backend::mps::MuxEvent {
         event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
@@ -2589,7 +2589,7 @@ mod cross_channel_tests {
     fn global_zone_line_count_still_builds_when_no_index_exists() {
         // The one case that must still pay for a build: without it the
         // line_count handler falls through to `session:line_count` (absent for
-        // a zone this channel never wrote) and then the capped WPS ring, so a
+        // a zone this channel never wrote) and then the capped MPS ring, so a
         // fresh cross-channel open would under-report and render a near-empty
         // pane. Paid once per zone, not once per 30-second poll.
         let global = mem_store();

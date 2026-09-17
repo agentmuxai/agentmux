@@ -135,7 +135,7 @@ pub async fn run(
             state.srv_state.lock().await.blocks.contains_key(&block_id);
         if !block_still_in_reducer {
             crate::backend::blockcontroller::delete_controller(&block_id);
-            // WPS persist_map is keyed by (event, scope) and its key set is
+            // MPS persist_map is keyed by (event, scope) and its key set is
             // never otherwise pruned — a deleted block's persisted history
             // (install_progress, block:activity, ...) would linger for the
             // life of the process. Purge it alongside the controller kill.

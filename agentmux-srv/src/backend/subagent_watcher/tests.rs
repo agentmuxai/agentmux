@@ -1617,12 +1617,12 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
     .unwrap();
 
     let watcher = fixture_watcher();
-    let broker = Arc::new(crate::backend::wps::Broker::new());
+    let broker = Arc::new(crate::backend::mps::Broker::new());
     watcher.set_broker(broker.clone());
     watcher.scan_session_subagents("parent-1", "block-status-found", &config_dir, target_session);
 
     let history = broker.read_event_history(
-        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        crate::backend::mps::EVENT_SUBAGENT_BACKFILL_STATUS,
         "block:block-status-found",
         10,
     );
@@ -1646,12 +1646,12 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found(
     std::fs::create_dir_all(config_dir.join("projects")).unwrap();
 
     let watcher = fixture_watcher();
-    let broker = Arc::new(crate::backend::wps::Broker::new());
+    let broker = Arc::new(crate::backend::mps::Broker::new());
     watcher.set_broker(broker.clone());
     watcher.scan_session_subagents("parent-1", "block-status-notfound", &config_dir, "never-existed");
 
     let history = broker.read_event_history(
-        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        crate::backend::mps::EVENT_SUBAGENT_BACKFILL_STATUS,
         "block:block-status-notfound",
         10,
     );

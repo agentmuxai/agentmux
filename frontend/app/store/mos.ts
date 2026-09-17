@@ -3,8 +3,8 @@
 //
 // MuxObjectStore — migrated to SolidJS signals.
 
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { type SignalAtom, fireAndForget } from "@/util/util";

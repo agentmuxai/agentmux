@@ -38,9 +38,9 @@ use super::health::TurnActivityTracker;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps;
+use crate::backend::mps;
 
-/// WPS file subject name for ACP output.
+/// MPS file subject name for ACP output.
 pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
@@ -90,7 +90,7 @@ pub struct AcpController {
     tab_id: String,
     block_id: String,
     inner: Arc<Mutex<AcpInner>>,
-    broker: Option<Arc<wps::Broker>>,
+    broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
@@ -114,7 +114,7 @@ impl AcpController {
     pub fn new(
         tab_id: String,
         block_id: String,
-        broker: Option<Arc<wps::Broker>>,
+        broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
@@ -305,7 +305,7 @@ impl AcpController {
             }
         });
 
-        // Spawn stdout reader task — reads NDJSON lines and broadcasts via WPS
+        // Spawn stdout reader task — reads NDJSON lines and broadcasts via MPS
         let block_id_stdout = self.block_id.clone();
         let broker_clone = self.broker.clone();
         let filestore_clone = self.filestore.clone();
@@ -947,7 +947,7 @@ mod tests {
     /// the same `mark_turn_active_returning_was_active()` call.
     #[tokio::test]
     async fn send_input_publishes_the_turn_active_flip() {
-        let broker = Arc::new(wps::Broker::new());
+        let broker = Arc::new(mps::Broker::new());
         let c = AcpController::new(
             "tab".to_string(),
             "block-acp-publish".to_string(),
@@ -962,7 +962,7 @@ mod tests {
         assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
 
         let history = broker.read_event_history(
-            wps::EVENT_CONTROLLER_STATUS,
+            mps::EVENT_CONTROLLER_STATUS,
             "block:block-acp-publish",
             1,
         );
@@ -987,7 +987,7 @@ mod tests {
     /// work that never happened.
     #[tokio::test]
     async fn send_input_rolls_back_turn_active_when_enqueue_fails() {
-        let broker = Arc::new(wps::Broker::new());
+        let broker = Arc::new(mps::Broker::new());
         let c = AcpController::new(
             "tab".to_string(),
             "block-acp-enqueue-fail".to_string(),
@@ -1010,7 +1010,7 @@ mod tests {
         // LATEST published status must reflect the rollback, not the
         // transient true a live subscriber may have also observed.
         let history = broker.read_event_history(
-            wps::EVENT_CONTROLLER_STATUS,
+            mps::EVENT_CONTROLLER_STATUS,
             "block:block-acp-enqueue-fail",
             1,
         );

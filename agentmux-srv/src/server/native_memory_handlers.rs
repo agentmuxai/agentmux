@@ -1188,7 +1188,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // handlers already key by, per `resolve_agent_uuid`'s own
                 // doc comment on why a slug-keyed event here would silently
                 // miss frontend subscribers that only ever have the UUID).
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agent:memory:changed:{}", agent.id),
                     scopes: vec![],
                     sender: String::new(),
@@ -1394,7 +1394,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 }
 
                 // See the identical comment on write_file's own handler above.
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agent:memory:changed:{}", agent.id),
                     scopes: vec![],
                     sender: String::new(),
@@ -1572,7 +1572,7 @@ mod tests {
             working_directory,
             claude_config_dir,
             id_store,
-            Arc::new(crate::backend::wps::Broker::new()),
+            Arc::new(crate::backend::mps::Broker::new()),
         )
     }
 
@@ -1586,7 +1586,7 @@ mod tests {
         working_directory: &str,
         claude_config_dir: &std::path::Path,
         id_store: Arc<Store>,
-        broker: Arc<crate::backend::wps::Broker>,
+        broker: Arc<crate::backend::mps::Broker>,
     ) -> (Arc<WshRpcEngine>, tokio::sync::mpsc::UnboundedReceiver<RpcMessage>) {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let mut def = agent_def(agent_id, working_directory);

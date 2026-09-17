@@ -437,7 +437,7 @@ async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String>
 pub(crate) async fn generate_definition_activity_summary(
     wstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
-    broker: &Arc<crate::backend::wps::Broker>,
+    broker: &Arc<crate::backend::mps::Broker>,
     definition_id: &str,
     block_id: &str,
     provider_id: &str,
@@ -511,7 +511,7 @@ pub(crate) async fn generate_definition_activity_summary(
         .unwrap_or(0);
     match wstore.agent_activity_summary_set(definition_id, &summary, now) {
         Ok(()) => {
-            broker.publish(crate::backend::wps::MuxEvent {
+            broker.publish(crate::backend::mps::MuxEvent {
                 event: "agents:changed".to_string(),
                 scopes: vec![],
                 sender: String::new(),

@@ -103,7 +103,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .bundle_upsert_with_version(&memory, "armory-ui", "human", "{}")
                     .map_err(|e| format!("upsertmemory: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -138,7 +138,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         &component_store,
                         &cmd.id,
                     );
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "memories:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),
@@ -164,7 +164,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let updated = wstore
                     .bundle_reorder(&cmd.ids)
                     .map_err(|e| format!("reorderglobalbrain: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -221,7 +221,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .bundle_upsert_system_if_changed(&memory, "armory-ui", "human", "{}")
                     .map_err(|e| format!("upsertsystemmemory: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -258,7 +258,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .bundle_delete_system(&cmd.id)
                     .map_err(|e| format!("deletesystemmemory: {e}"))?;
                 if deleted {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "memories:changed".to_string(),
                         scopes: vec![],
                         sender: String::new(),

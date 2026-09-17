@@ -139,7 +139,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md — same hub pattern
 // bundle-mcp-model.test.ts / global-bundle-model.test.ts use.
 const wpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         wpsHub.handlers.set(sub.eventType, sub.handler);
         return () => wpsHub.handlers.delete(sub.eventType);

@@ -5,7 +5,7 @@ import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 
-// Codex P1 on PR #2378: `compaction_started` is a persisted WPS event
+// Codex P1 on PR #2378: `compaction_started` is a persisted MPS event
 // (persist: 1) with no completion tombstone — a late/reconnecting
 // subscriber replays it verbatim even long after the matching
 // compaction finished. These tests cover the staleness guard added to
@@ -15,7 +15,7 @@ const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);
@@ -167,7 +167,7 @@ describe("useCompactionStream — transcript node driven by the `compacting` sig
     it("pushes the transcript node when `compacting` is set by a DIFFERENT dispatch entirely — the promoted-ping path", async () => {
         // Exactly reagent's failure scenario: a pendingCompactionPing gets
         // promoted by ReconcileTurnActive or StreamFlushObserved, neither of
-        // which is this hook's own WPS-triggered dispatch. Simulated here by
+        // which is this hook's own MPS-triggered dispatch. Simulated here by
         // setting `compacting` directly, with no `fireCompactionStarted` call
         // at all — proving the push doesn't depend on this hook having
         // dispatched anything itself.

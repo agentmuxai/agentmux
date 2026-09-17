@@ -16,8 +16,8 @@
  */
 
 import { onCleanup } from "solid-js";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import * as MOS from "@/app/store/mos";
 import { trail } from "@/log/render-trail";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";

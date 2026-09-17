@@ -27,7 +27,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("appendagenthistory: {e}"))?;
                 let entry = wstore.agent_history_append(&cmd.agent_id, &cmd.entry)
                     .map_err(|e| format!("appendagenthistory: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agenthistory:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),

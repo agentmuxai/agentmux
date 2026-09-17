@@ -54,7 +54,7 @@ const wpsHub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((...subs: Array<{ eventType: string; handler: (e: unknown) => void }>) => {
         for (const sub of subs) wpsHub.handlers.set(sub.eventType, sub.handler);
         return () => {

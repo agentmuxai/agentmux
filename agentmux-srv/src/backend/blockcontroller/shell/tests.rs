@@ -20,7 +20,7 @@ use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::{ConnInterface, MockConn};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps;
+use crate::backend::mps;
 
 // Private / non-flat-re-exported helpers reached through their owning submodule.
 use super::file_ops::{handle_truncate_block_file, mirror_append_to_global};
@@ -439,13 +439,13 @@ use std::sync::Arc;
 
     #[test]
     fn test_handle_append_block_file() {
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
 
         // Subscribe to block file events
         broker.subscribe(
             "test-route",
-            wps::SubscriptionRequest {
-                event: wps::EVENT_BLOCK_FILE.to_string(),
+            mps::SubscriptionRequest {
+                event: mps::EVENT_BLOCK_FILE.to_string(),
                 scopes: vec!["block:block-1".to_string()],
                 allscopes: false,
             },
@@ -454,7 +454,7 @@ use std::sync::Arc;
         handle_append_block_file(&broker, "block-1", "term", b"hello world", None, None);
 
         // Check event was published
-        let _history = broker.read_event_history(wps::EVENT_BLOCK_FILE, "block:block-1", 10);
+        let _history = broker.read_event_history(mps::EVENT_BLOCK_FILE, "block:block-1", 10);
         // Note: events are only persisted if persist > 0, so we verify via the publish mechanism
         // The broker successfully processed without panic, which verifies correctness
     }
@@ -533,7 +533,7 @@ use std::sync::Arc;
 
     #[test]
     fn test_handle_truncate_block_file() {
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         // Should not panic
         handle_truncate_block_file(&broker, "block-1", "term");
     }
@@ -666,7 +666,7 @@ use std::sync::Arc;
         use crate::backend::storage::filestore::FileStore;
         use std::sync::Arc;
 
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         let fs = Arc::new(FileStore::open_in_memory().expect("open in-memory filestore"));
 
         let block_id = "test-block-fs";
@@ -693,11 +693,11 @@ use std::sync::Arc;
         let stat = fs.stat(block_id, filename).unwrap().unwrap();
         assert_eq!(stat.size, (line1.len() + line2.len()) as i64);
 
-        // Verify WPS events were also published (broker path still works)
+        // Verify MPS events were also published (broker path still works)
         broker.subscribe(
             "test-route-fs",
-            wps::SubscriptionRequest {
-                event: wps::EVENT_BLOCK_FILE.to_string(),
+            mps::SubscriptionRequest {
+                event: mps::EVENT_BLOCK_FILE.to_string(),
                 scopes: vec![format!("block:{}", block_id)],
                 allscopes: false,
             },
@@ -733,7 +733,7 @@ use std::sync::Arc;
         use crate::backend::storage::filestore::FileStore;
         use std::sync::Arc;
 
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         let fs = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "tsidx-agent-block";
         let line1 = b"{\"a\":1}\n";
@@ -760,7 +760,7 @@ use std::sync::Arc;
         use crate::backend::storage::filestore::FileStore;
         use std::sync::Arc;
 
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         let fs = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "tsidx-term-block";
 
@@ -802,7 +802,7 @@ use std::sync::Arc;
         use crate::backend::storage::filestore::FileStore;
         use std::sync::Arc;
 
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         let fs = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "tsidx-offset-block";
         let lines: [&[u8]; 3] = [b"{\"n\":1}
@@ -851,7 +851,7 @@ use std::sync::Arc;
     /// Minimal WpsClient that records every event delivered to it, so tests
     /// can assert on the broadcast payload (not just the FileStore side effect).
     struct RecordingClient {
-        events: std::sync::Mutex<Vec<wps::MuxEvent>>,
+        events: std::sync::Mutex<Vec<mps::MuxEvent>>,
     }
 
     impl RecordingClient {
@@ -860,8 +860,8 @@ use std::sync::Arc;
         }
     }
 
-    impl wps::WpsClient for Arc<RecordingClient> {
-        fn send_event(&self, _route_id: &str, event: wps::MuxEvent) {
+    impl mps::WpsClient for Arc<RecordingClient> {
+        fn send_event(&self, _route_id: &str, event: mps::MuxEvent) {
             self.events.lock().unwrap().push(event);
         }
     }
@@ -870,13 +870,13 @@ use std::sync::Arc;
     fn test_handle_append_block_file_broadcasts_start_offset() {
         use crate::backend::storage::filestore::FileStore;
 
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         let client = Arc::new(RecordingClient::new());
         broker.set_client(Box::new(Arc::clone(&client)));
         broker.subscribe(
             "test-route-offset",
-            wps::SubscriptionRequest {
-                event: wps::EVENT_BLOCK_FILE.to_string(),
+            mps::SubscriptionRequest {
+                event: mps::EVENT_BLOCK_FILE.to_string(),
                 scopes: vec!["block:offset-block".to_string()],
                 allscopes: false,
             },
@@ -896,7 +896,7 @@ use std::sync::Arc;
         let offsets: Vec<Option<u64>> = events
             .iter()
             .map(|e| {
-                let data: wps::WSFileEventData =
+                let data: mps::WSFileEventData =
                     serde_json::from_value(e.data.clone().unwrap()).unwrap();
                 data.offset
             })
@@ -906,13 +906,13 @@ use std::sync::Arc;
 
     #[test]
     fn test_handle_append_block_file_omits_offset_without_filestore() {
-        let broker = wps::Broker::new();
+        let broker = mps::Broker::new();
         let client = Arc::new(RecordingClient::new());
         broker.set_client(Box::new(Arc::clone(&client)));
         broker.subscribe(
             "test-route-no-fs",
-            wps::SubscriptionRequest {
-                event: wps::EVENT_BLOCK_FILE.to_string(),
+            mps::SubscriptionRequest {
+                event: mps::EVENT_BLOCK_FILE.to_string(),
                 scopes: vec!["block:no-fs-block".to_string()],
                 allscopes: false,
             },
@@ -922,7 +922,7 @@ use std::sync::Arc;
 
         let events = client.events.lock().unwrap();
         assert_eq!(events.len(), 1);
-        let data: wps::WSFileEventData =
+        let data: mps::WSFileEventData =
             serde_json::from_value(events[0].data.clone().unwrap()).unwrap();
         assert_eq!(data.offset, None);
     }

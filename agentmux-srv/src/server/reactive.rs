@@ -30,7 +30,7 @@ const MAX_FORWARD_HOPS: u8 = 3;
 ///
 /// Appends a `{"type":"user",...}` NDJSON line carrying the same
 /// `[JEKT:...]` marker block the receiver got (re-wrapped with identical
-/// fields) to the sender's `output` blockfile — live WPS append (renders
+/// fields) to the sender's `output` blockfile — live MPS append (renders
 /// immediately in an open agent view), persisted history
 /// (`parseHistoryLines` rebuilds on reopen), and global transcript mirror.
 /// The frontend's `tryParseJekt` sees FROM == this pane's agent and renders
@@ -1617,7 +1617,7 @@ pub(super) async fn handle_reactive_register(
             // (which subscribes to agent:process-added / agent:process-exited)
             // doesn't treat this as a phantom OS process and show a spurious ⚙ N
             // badge or trigger the kill-tree modal on pane close.
-            state.broker.publish(crate::backend::wps::MuxEvent {
+            state.broker.publish(crate::backend::mps::MuxEvent {
                 event: "agent:reactive-registered".to_string(),
                 scopes: vec![format!("block:{}", req.block_id)],
                 sender: String::new(),
@@ -1726,7 +1726,7 @@ pub(super) async fn handle_reactive_unregister(
 
     // Symmetric refresh: tell the Swarm view this pane is gone.
     if let Some(bid) = block_id {
-        state.broker.publish(crate::backend::wps::MuxEvent {
+        state.broker.publish(crate::backend::mps::MuxEvent {
             event: "agent:reactive-unregistered".to_string(),
             scopes: vec![format!("block:{}", bid)],
             sender: String::new(),

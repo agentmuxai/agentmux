@@ -97,7 +97,7 @@ export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 
 /**
  * Live "compaction in progress" state — set the instant the `PreCompact`
- * hook's `compaction_started` WPS event lands (Tier 1 of
+ * hook's `compaction_started` MPS event lands (Tier 1 of
  * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`),
  * cleared when the matching `compact_boundary` frame (a real
  * `CompactionBoundary` command) arrives. `startedAt` drives the live
@@ -127,12 +127,12 @@ export interface AttachedTaskState {
 /**
  * Live "controller is recovering from a stale `--resume` session id" state,
  * or `null` — set the instant the backend's stale-resume retry begins
- * (`wps.EVENT_AGENT_RESUME_RETRY`, `{status:"retrying"}`), cleared once the
+ * (`mps.EVENT_AGENT_RESUME_RETRY`, `{status:"retrying"}`), cleared once the
  * retry's outcome (Fresh or Resumed) is actually known
  * (`{status:"resolved"}`). Mirrors `AttachedTaskState`'s shape (a single
  * `startedAt`, no staleness/generation gating needed) — unlike
  * `CompactionState`'s completion signal, both ends of this one travel over
- * the SAME reliable WPS channel, so there's no cross-channel race to guard
+ * the SAME reliable MPS channel, so there's no cross-channel race to guard
  * against. See docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
  */
 export interface ResumeRetryState {
@@ -536,7 +536,7 @@ export type AgentPaneCommand =
      * (backend-verified, from the health monitor wired to the NDJSON
      * stream — see `agentmux-srv/src/backend/blockcontroller/health.rs`),
      * fetched via `GetControllerStatus` at mount AND dispatched on every
-     * live `controllerstatus` WPS event thereafter (useControllerStatusEvents).
+     * live `controllerstatus` MPS event thereafter (useControllerStatusEvents).
      * Bidirectional:
      *   - `active: true`  — promote the mount-default `Idle` to `Streaming`
      *     when the backend reports a turn already in flight. Corrects ONLY
@@ -548,7 +548,7 @@ export type AgentPaneCommand =
      *     (genuine turn-end), so this is authoritative. Normally the frontend
      *     reaches `Done` on its own via `session_end`; this covers the case
      *     where it MISSED that event (pane backgrounded/unmounted across the
-     *     transition, or a dropped WPS event) and would otherwise stay
+     *     transition, or a dropped MPS event) and would otherwise stay
      *     `Streaming` forever — the Agent1 stuck-"Working" / Agent2
      *     stuck-"Queued" class. Only `Streaming` is demoted: `Submitting` is
      *     covered by `SUBMIT_TIMEOUT` (and is where the send-race lives — a
@@ -735,7 +735,7 @@ export type AgentPaneCommand =
     // ── Compaction (SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md) ──
     /**
      * The `PreCompact` hook fired — compaction has begun. Sourced from
-     * the `compaction_started` WPS event (`agentmux-bashwrap precompact`
+     * the `compaction_started` MPS event (`agentmux-bashwrap precompact`
      * → `useCompactionStream.ts`). Sets `compacting` so the view can
      * show a live "Compacting…" status chip + elapsed counter (Tier
      * 1/2). Also bumps `lastEventMs` like `ProviderWaiting` does, so
@@ -793,7 +793,7 @@ export type AgentPaneCommand =
     // ── Stale-`--resume` reconnect axis
     // (STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2) ──
     /**
-     * `wps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed — a
+     * `mps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed — a
      * stale `--resume` was just detected and a retry/recovery attempt is
      * about to fire. No-op (idempotent) if already reconnecting, mirroring
      * `AttachedTaskObserved` — a cascaded second retry must not reset

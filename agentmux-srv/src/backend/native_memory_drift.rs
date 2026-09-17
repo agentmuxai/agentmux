@@ -139,7 +139,7 @@ pub(crate) fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
 pub(crate) fn reconciliation_sweep_once(
     wstore: &Store,
     id_store: &Store,
-    broker: &crate::backend::wps::Broker,
+    broker: &crate::backend::mps::Broker,
     deleted_notified: &mut HashSet<(String, String)>,
 ) -> usize {
     let mut drifted = 0;
@@ -170,7 +170,7 @@ pub(crate) fn reconciliation_sweep_once(
         }
         if deleted_notified.insert(key) {
             tracing::info!(agent_id = %agent_id, filename = %filename, "native_memory_drift: detected an out-of-band deletion");
-            broker.publish(crate::backend::wps::MuxEvent {
+            broker.publish(crate::backend::mps::MuxEvent {
                 event: format!("agent:memory:changed:{agent_id}"),
                 scopes: vec![],
                 sender: String::new(),
@@ -187,7 +187,7 @@ fn sweep_one_agent_dir(
     agent_id: &str,
     memory_dir: &Path,
     detected_via: &str,
-    broker: &crate::backend::wps::Broker,
+    broker: &crate::backend::mps::Broker,
 ) -> usize {
     let entries = match std::fs::read_dir(memory_dir) {
         Ok(e) => e,
@@ -228,7 +228,7 @@ fn sweep_one_agent_dir(
                 // runs once per sweep tick per watched agent, and firing on
                 // every no-op tick would mean an event for every agent every
                 // 30s regardless of whether anything happened.
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agent:memory:changed:{agent_id}"),
                     scopes: vec![],
                     sender: String::new(),
@@ -251,13 +251,13 @@ pub fn spawn(
     fs_watch_pool: Arc<FsWatchPool>,
     wstore: Arc<Store>,
     id_store: Arc<Store>,
-    broker: Arc<crate::backend::wps::Broker>,
+    broker: Arc<crate::backend::mps::Broker>,
 ) {
     spawn_fast_path(fs_watch_pool, wstore.clone(), id_store.clone(), broker.clone());
     spawn_slow_path(wstore, id_store, broker);
 }
 
-fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::wps::Broker>) {
+fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::mps::Broker>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_INTERVAL);
         // Persistent across ticks, same pattern as the fast path's own
@@ -286,7 +286,7 @@ fn spawn_fast_path(
     fs_watch_pool: Arc<FsWatchPool>,
     wstore: Arc<Store>,
     id_store: Arc<Store>,
-    broker: Arc<crate::backend::wps::Broker>,
+    broker: Arc<crate::backend::mps::Broker>,
 ) {
     tokio::spawn(async move {
         let mut events = fs_watch_pool.events();
@@ -342,7 +342,7 @@ fn spawn_fast_path(
                         Ok(true) => {
                             tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
                             // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
-                            broker.publish(crate::backend::wps::MuxEvent {
+                            broker.publish(crate::backend::mps::MuxEvent {
                                 event: format!("agent:memory:changed:{agent_id}"),
                                 scopes: vec![],
                                 sender: String::new(),
@@ -436,7 +436,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("MEMORY.md"), "written outside any RPC").unwrap();
 
-        let broker = crate::backend::wps::Broker::new();
+        let broker = crate::backend::mps::Broker::new();
         let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep", &broker);
         assert_eq!(drifted, 1);
 
@@ -501,7 +501,7 @@ mod tests {
         let oversized = "x".repeat((MAX_MEMORY_FILE_BYTES + 1) as usize);
         std::fs::write(tmp.path().join("MEMORY.md"), &oversized).unwrap();
 
-        let broker = crate::backend::wps::Broker::new();
+        let broker = crate::backend::mps::Broker::new();
         let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep", &broker);
         assert_eq!(drifted, 0, "an oversized file must not be recorded as drift");
 
@@ -537,7 +537,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("notes.txt"), "not a memory file").unwrap();
 
-        let broker = crate::backend::wps::Broker::new();
+        let broker = crate::backend::mps::Broker::new();
         assert_eq!(sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep", &broker), 0);
         assert_eq!(
             sweep_one_agent_dir(&store, "agent-1", &tmp.path().join("does-not-exist"), "reconciliation_sweep", &broker),
@@ -551,7 +551,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("MEMORY.md"), "content").unwrap();
 
-        let broker = crate::backend::wps::Broker::new();
+        let broker = crate::backend::mps::Broker::new();
         sweep_one_agent_dir(&store, "agent-specific", tmp.path(), "reconciliation_sweep", &broker);
 
         assert_eq!(store.agent_native_memory_version_list("agent-specific", "MEMORY.md").unwrap().len(), 1);
@@ -625,7 +625,7 @@ mod tests {
             std::fs::write(memory_dir.join("MEMORY.md"), format!("content for {id}")).unwrap();
         }
 
-        let broker = crate::backend::wps::Broker::new();
+        let broker = crate::backend::mps::Broker::new();
         let mut deleted_notified = HashSet::new();
         let drifted = reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(drifted, 2, "sweep must cover every agent with a working directory");

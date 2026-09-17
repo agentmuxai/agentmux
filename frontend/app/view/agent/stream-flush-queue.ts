@@ -5,7 +5,7 @@
  * createStreamFlushQueue — the single shared RAF-batching mechanism behind
  * useAgentStream's document writes.
  *
- * `tool_chunk` WPS events previously called dispatchDoc(ToolChunkAppend)
+ * `tool_chunk` MPS events previously called dispatchDoc(ToolChunkAppend)
  * directly — one immediate signal write per chunk. During active tool
  * streaming that means many independent signal writes, each triggering its
  * own Solid reactive flush. When a chunk write races with a concurrent RAF
@@ -216,7 +216,7 @@ export function createStreamFlushQueue(model: AgentPaneModel): StreamFlushQueue 
             // updates, and the markdown-content merge. StreamFlush must run
             // BEFORE ToolChunkAppend so that any ToolNode created by this
             // flush exists before we try to append chunks to it. Chunks that
-            // arrive before their ToolNode is created (the WPS late-subscribe
+            // arrive before their ToolNode is created (the MPS late-subscribe
             // case) are dropped by the reducer's findToolIndex guard; ordering
             // StreamFlush first is the narrowest window possible.
             model.dispatchDoc({

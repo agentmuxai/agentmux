@@ -37,7 +37,7 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService, ObjectService } from "@/app/store/services";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
@@ -1696,7 +1696,7 @@ const AgentPresentationView = ({
     // (onControllerStatus above) is one-shot, and the live useControllerStatusEvents
     // subscription only self-heals a missed turn-end if a LATER live event
     // arrives. If the single turn-end push is missed (backgrounded window, a
-    // WPS reconnect gap, a pane remount that doesn't re-trigger the WPS
+    // MPS reconnect gap, a pane remount that doesn't re-trigger the MPS
     // persisted-event replay — see REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
     // §3/§4 item 5) nothing else corrects it until the *next* turn starts.
     // Re-poll on every background→foreground transition to drive the two

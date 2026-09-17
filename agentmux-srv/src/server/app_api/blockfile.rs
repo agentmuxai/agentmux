@@ -78,10 +78,10 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                // Fallback: count from WPS event ring buffer (capped at MAX_PERSIST = 4096).
+                // Fallback: count from MPS event ring buffer (capped at MAX_PERSIST = 4096).
                 let scope = format!("block:{}", cmd.block_id);
                 let events = broker.read_event_history(
-                    crate::backend::wps::EVENT_BLOCK_FILE,
+                    crate::backend::mps::EVENT_BLOCK_FILE,
                     &scope,
                     usize::MAX, // broker clamps to MAX_PERSIST internally
                 );
@@ -322,7 +322,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 }
 
                 // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
-                // WPS broker ring buffer (MAX_PERSIST = 4096 events).
+                // MPS broker ring buffer (MAX_PERSIST = 4096 events).
                 //
                 // If FileStore has the file and it is non-empty, read from disk.
                 // Otherwise fall back to ring buffer for backward compatibility.
@@ -363,12 +363,12 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let all_lines = if let Some(lines) = filestore_lines {
                     lines
                 } else {
-                    // Fallback: reconstruct from WPS event ring buffer.
+                    // Fallback: reconstruct from MPS event ring buffer.
                     // The ring buffer holds at most MAX_PERSIST = 4096 events;
                     // older events are evicted. Offset 0 = oldest retained line.
                     let scope = format!("block:{}", cmd.block_id);
                     let events = broker.read_event_history(
-                        crate::backend::wps::EVENT_BLOCK_FILE,
+                        crate::backend::mps::EVENT_BLOCK_FILE,
                         &scope,
                         usize::MAX, // broker clamps to MAX_PERSIST internally
                     );

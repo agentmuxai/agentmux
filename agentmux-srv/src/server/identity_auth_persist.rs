@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 
 /// Upserts the `IdentityAccount` (`SecretRef::OAuthConfigDir`, status
 /// "valid") on a successful OAuth handshake (CLI exited 0 +
@@ -84,7 +84,7 @@ fn persist_oauth_direct_account(
         );
         return None;
     }
-    broker.publish(crate::backend::wps::MuxEvent {
+    broker.publish(crate::backend::mps::MuxEvent {
         event: "identityaccounts:changed".to_string(),
         scopes: vec![],
         sender: String::new(),
@@ -148,7 +148,7 @@ mod tests {
     fn persist_oauth_direct_account_round_trip() {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let r = persist_oauth_direct_account(
             &wstore,
             &identity_store,
@@ -174,7 +174,7 @@ mod tests {
     fn persist_oauth_direct_account_returns_none_when_dir_unresolved() {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let r = persist_oauth_direct_account(&wstore, &identity_store, &broker, "acc-1", "claude", None, "sess-z");
         assert!(r.is_none());
         assert!(wstore.identity_get("acc-1").unwrap().is_none(), "nothing persisted when dir is unresolved");
@@ -188,7 +188,7 @@ mod tests {
         // (now-vestigial) direct_account/into_bundle_id parameters.
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let (bundle_id, account_id) = persist_oauth_success(
             &wstore,
             &identity_store,
@@ -215,7 +215,7 @@ mod tests {
         // would silently write/overwrite a db_accounts row with id="".
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let identity_store = Arc::new(Store::open_in_memory().unwrap());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let (bundle_id, account_id) = persist_oauth_success(
             &wstore,
             &identity_store,

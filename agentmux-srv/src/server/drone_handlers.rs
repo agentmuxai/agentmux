@@ -15,7 +15,7 @@
 //! Run streaming: the executor emits `RunEvent`s over an mpsc channel.
 //! Phase 1 of this PR drains the channel server-side and stores the
 //! final block-state snapshot in `db_drone_runs`. A future commit
-//! will tee the channel to the renderer via the existing `wps` event
+//! will tee the channel to the renderer via the existing `mps` event
 //! broker so `RunPanel` shows live per-block status.
 
 use std::collections::HashMap;
@@ -27,7 +27,7 @@ use crate::backend::rpc_types::{
     COMMAND_DELETE_DRONE, COMMAND_GET_DRONE, COMMAND_LIST_DRONES,
     COMMAND_LIST_DRONE_RUNS, COMMAND_RUN_DRONE, COMMAND_UPSERT_DRONE,
 };
-use crate::backend::wps::MuxEvent;
+use crate::backend::mps::MuxEvent;
 use crate::server::AppState;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::drone::executor::{run_drone, RunEvent};

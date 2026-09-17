@@ -6,7 +6,7 @@
  *
  * What this proves:
  *   - The session-replay framework loads + validates an NDJSON fixture.
- *   - The replay driver demuxes stream-json + wps + dispatch events to
+ *   - The replay driver demuxes stream-json + mps + dispatch events to
  *     the right reducer commands.
  *   - The agent-document reducer accumulates ToolChunkAppend events on
  *     the matching ToolNode (a smoke test for the live-log feature's
@@ -42,7 +42,7 @@ describe("agent-pane session replay: bash-with-live-log", () => {
         expect(fixture.trailer?.expect).toBeDefined();
     });
 
-    it("applies stream-json + wps events through the real reducers", () => {
+    it("applies stream-json + mps events through the real reducers", () => {
         const fixture = loadFixture(FIXTURE);
         const result = replayInstant(fixture);
 

@@ -22,13 +22,13 @@ const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
-// Only `wps` is mocked (to capture handlers synchronously instead of going
+// Only `mps` is mocked (to capture handlers synchronously instead of going
 // through the real WAVE event bus) — `mos` is NOT module-mocked, mirroring
 // dispatch-source.test.ts: other code reachable from this import graph
 // (window-identity.ts's `tabAtom`) needs mos's other exports (getObjectValue/
 // makeORef) to exist for real. `callBackendService` itself is spied on
 // below instead of the whole module being replaced.
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);

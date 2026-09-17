@@ -64,7 +64,7 @@ use crate::backend::storage::store::Store;
 use crate::backend::history::HistoryService;
 use crate::backend::subagent_watcher::SubagentWatcher;
 use crate::backend::wconfig;
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 use agentmux_common::api_types::{
     PaneTitleRequest, PtyShellCreateRequest, PtyShellCreateResponse, PtyShellInputRequest,
     PtyShellInputResponse, PtyShellReadRequest, PtyShellReadResponse, PtyShellResizeRequest,
@@ -167,7 +167,7 @@ pub struct AppState {
     /// `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
     pub dock_snapshots: Arc<crate::backend::dock_snapshot::DockSnapshotCache>,
     /// Holding pen for a declared-background task's OS pid when it arrives
-    /// (from bashwrap, over WPS) before its `db_background_tasks` row
+    /// (from bashwrap, over MPS) before its `db_background_tasks` row
     /// exists yet — closes the race `background_task_set_pid`'s silent
     /// no-op on a missing row would otherwise lose permanently. See
     /// `docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and the
@@ -248,7 +248,7 @@ pub struct AppState {
     pub auth_session_manager: std::sync::Arc<crate::identity::auth_session::AuthSessionManager>,
 
     /// In-flight `install.start` sessions. Frontend subscribes to
-    /// `install_chunk` WPS events scoped by session id; the registry
+    /// `install_chunk` MPS events scoped by session id; the registry
     /// holds per-session cancel handles so `install.cancel` can abort
     /// an install mid-flight.
     /// See `SPEC_AGENT_INSTALL_STAGE_2026_05_17.md` §9.
@@ -438,7 +438,7 @@ pub fn build_router(state: AppState) -> Router {
         // Streaming-bash wrapper publish endpoint
         // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §4.3). agentmux-bashwrap
         // POSTs `{event, scopes, data}` here while a PreToolUse-rewritten
-        // Bash command is running; we forward to the in-process WPS broker.
+        // Bash command is running; we forward to the in-process MPS broker.
         // Auth-gated like the other reactive routes (PR #801 pattern).
         .route("/agentmux/wps/publish", post(handle_wps_publish))
         // Persistent shell launch endpoint
@@ -873,10 +873,10 @@ async fn stub_501() -> impl IntoResponse {
     )
 }
 
-/// Auth-gated WPS publish endpoint
+/// Auth-gated MPS publish endpoint
 /// (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §3.2). `agentmux-bashwrap`
 /// POSTs here while running a Bash command; we forward to the
-/// in-process WPS broker so subscribed frontends receive the event.
+/// in-process MPS broker so subscribed frontends receive the event.
 async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
@@ -887,10 +887,10 @@ async fn handle_wps_publish(
     // detector itself, see
     // docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md.
     // `agentmux-bashwrap`'s `precompact` POST still lands here and is now
-    // a harmless no-op broadcast like any other WPS event — left as-is
+    // a harmless no-op broadcast like any other MPS event — left as-is
     // rather than removing the route, since deleting it isn't warranted
     // just to avoid one no-op publish.
-    let event = crate::backend::wps::MuxEvent {
+    let event = crate::backend::mps::MuxEvent {
         event: req.event,
         scopes: req.scopes,
         sender: String::new(),
@@ -905,7 +905,7 @@ async fn handle_wps_publish(
 ///
 /// Called by `agentmux-mcp`'s `Shell` tool. Returns immediately with a
 /// `shell_id`; the `ShellNodeRunner` streams stdout/stderr to the frontend
-/// as `shell_chunk` WPS events without blocking the agent.
+/// as `shell_chunk` MPS events without blocking the agent.
 async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,
@@ -985,8 +985,8 @@ async fn handle_shell_create(
     // shells lost their create event while their shell_chunk events at
     // persist: 1024 still replayed, causing the reducer to silently drop
     // orphaned chunks.)
-    state.broker.publish(crate::backend::wps::MuxEvent {
-        event: crate::backend::wps::EVENT_SHELL_NODE_CREATE.to_string(),
+    state.broker.publish(crate::backend::mps::MuxEvent {
+        event: crate::backend::mps::EVENT_SHELL_NODE_CREATE.to_string(),
         scopes: vec![format!("block:{}", req.agent_block_id)],
         sender: String::new(),
         persist: 64,

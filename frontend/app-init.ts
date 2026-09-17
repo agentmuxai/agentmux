@@ -1054,7 +1054,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     window.globalAtoms = atoms;
     tlog("initGlobal", t);
 
-    // Init WPS event handlers
+    // Init MPS event handlers
     t = performance.now();
     const globalWS = initWshrpc(initOpts.tabId);
     window.globalWS = globalWS;

@@ -4,7 +4,7 @@
 //! In-memory holding pen for a declared-background task's OS pid when it
 //! arrives before `db_background_tasks` has a row to attach it to.
 //!
-//! `agentmux-bashwrap` publishes its own pid over WPS essentially at process
+//! `agentmux-bashwrap` publishes its own pid over MPS essentially at process
 //! start (before the wrapped command even begins running) — see
 //! `bash_wrap.rs`. The `db_background_tasks` row, by contrast, is only
 //! created once the FRONTEND observes the tool call as an accepted

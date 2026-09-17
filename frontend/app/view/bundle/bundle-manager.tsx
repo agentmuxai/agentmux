@@ -14,7 +14,7 @@
 //      <BundleManager/>, which owns its own block-free model.
 //
 // Everything here drives purely off the `bundle_*` RPCs (via
-// BundleViewModel) plus the `memories:changed` WPS event, so two live
+// BundleViewModel) plus the `memories:changed` MPS event, so two live
 // instances stay consistent for free.
 
 import { For, onCleanup, Show, type JSX } from "solid-js";

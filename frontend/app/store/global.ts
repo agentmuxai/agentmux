@@ -3,7 +3,7 @@
 //
 // Global app state — migrated from Jotai atoms to SolidJS signals.
 
-import { WpsEvent } from "@/app/store/wps-events";
+import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setPlatform } from "@/util/platformutil";
@@ -19,7 +19,7 @@ import { openModal } from "./modalmodel";
 import { AboutModal } from "@/app/modals/about";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as MOS from "./mos";
-import { getFileSubject, muxEventSubscribe } from "./wps";
+import { getFileSubject, muxEventSubscribe } from "./mps";
 import { getApi } from "./app-api";
 import {
     fullConfigAtom,

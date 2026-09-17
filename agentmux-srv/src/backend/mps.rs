@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! AgentMux Pub/Sub system: event brokering with scoped subscriptions.
-//! Port of Go's pkg/wps/wps.go + wpstypes.go.
+//! Port of Go's pkg/mps/mps.go + wpstypes.go.
 
 //!
 //! The Broker supports:
@@ -52,7 +52,7 @@ pub const EVENT_AGENT_FAILURE: &str = "agentfailure";
 /// Payload: `{ "status": "retrying", "startedAt": "<rfc3339>" }` or
 /// `{ "status": "resolved" }`. `persist: 2` (unlike `compaction_started`'s
 /// `persist: 0`) is deliberate: both ends of this signal travel over this
-/// same WPS channel (there's no separate out-of-band completion marker the
+/// same MPS channel (there's no separate out-of-band completion marker the
 /// way `compact_boundary` is for compaction), so replaying the latest
 /// retrying→resolved pair to a freshly (re)subscribed pane is always the
 /// *correct* current state, not a stale echo — see
@@ -281,7 +281,7 @@ impl Broker {
     /// interleave.
     ///
     /// **Once-per-(route, event, scope).** The frontend
-    /// (`frontend/app/store/wps.ts`) flushes `eventsub` on every
+    /// (`frontend/app/store/mps.ts`) flushes `eventsub` on every
     /// listener add/remove; each WebSocket connection has its own
     /// `conn_id` as the route key (PR #1418). Replaying persisted
     /// history on each of those flushes would re-emit completed bash

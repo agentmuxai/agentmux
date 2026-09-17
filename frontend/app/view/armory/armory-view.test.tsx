@@ -52,7 +52,7 @@ vi.mock("@/app/view/skill/skill-manager", () => ({
 // reading a plain (non-reactive) stub only ever satisfies a memo's *first*
 // (eager, at-construction) computation. Backing the mock with a genuine
 // signal, and having the SetMetaCommand mock write into it, reproduces the
-// real write -> WPS push -> blockAtom update round trip closely enough for
+// real write -> MPS push -> blockAtom update round trip closely enough for
 // clicking a rail item to actually flip the visible/active section here,
 // the same way it does against the real backend.
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});

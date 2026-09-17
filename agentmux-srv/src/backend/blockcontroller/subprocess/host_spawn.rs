@@ -21,7 +21,7 @@ use crate::backend::blockcontroller::{
     core, publish_controller_status,
     session_stats, shell, DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
 };
-use crate::backend::wps;
+use crate::backend::mps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
@@ -29,7 +29,7 @@ impl SubprocessController {
     /// Spawn a single turn of the agent CLI.
     ///
     /// This is the core method — it spawns `claude -p`, writes the user message to stdin,
-    /// reads NDJSON from stdout (publishing WPS events), and waits for exit.
+    /// reads NDJSON from stdout (publishing MPS events), and waits for exit.
     ///
     /// If a session_id exists from a previous turn, `--resume <sid>` is appended to args.
     pub fn spawn_turn(&self, config: SubprocessSpawnConfig) -> Result<(), String> {
@@ -357,7 +357,7 @@ impl SubprocessController {
                             }
                         }
 
-                        // Publish the NDJSON line as a WPS blockfile event on the "output" subject
+                        // Publish the NDJSON line as a MPS blockfile event on the "output" subject
                         // and write-through to FileStore for persistent history (Phase 1.3).
                         if let Some(ref broker) = broker_read {
                             // debug, not info: fires on every NDJSON line, and
@@ -647,7 +647,7 @@ impl SubprocessController {
 
             // Persist or clear agent:last_failure in block meta so the recovery
             // banner survives tab switches and page reloads (P1.1 of
-            // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the WPS
+            // SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20). Done before the MPS
             // publish so the durable state is written first; the event is then
             // a low-latency push to any active subscriber.
             core::persist_last_failure(
@@ -662,8 +662,8 @@ impl SubprocessController {
             // subscribers also receive the last failure without needing a
             // separate meta read (belt-and-suspenders with the meta write above).
             if let (Some(failure), Some(broker)) = (run_failure.as_ref(), broker_wait.as_ref()) {
-                broker.publish(wps::MuxEvent {
-                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                broker.publish(mps::MuxEvent {
+                    event: mps::EVENT_AGENT_FAILURE.to_string(),
                     scopes: vec![format!("block:{}", block_id_wait)],
                     sender: String::new(),
                     persist: 1,

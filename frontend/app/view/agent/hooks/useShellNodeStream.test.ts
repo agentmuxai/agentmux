@@ -23,7 +23,7 @@ const hub = vi.hoisted(() => ({
     shellStatus: vi.fn(),
 }));
 
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; scope: string; handler: (e: unknown) => void }) => {
         const key = `${sub.eventType}:${sub.scope}`;
         hub.handlers.set(key, sub.handler);
@@ -35,7 +35,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
-import { WpsEvent } from "@/app/store/wps-events";
+import { WpsEvent } from "@/app/store/mps-events";
 import { shellStatusCorrection, useShellNodeStream } from "./useShellNodeStream";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 

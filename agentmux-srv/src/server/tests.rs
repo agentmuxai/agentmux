@@ -1227,7 +1227,7 @@ async fn wps_publish_accepts_persist_field() {
     // This test exercises the deserialize + handler-200 path with a
     // 1024-persist body matching what agentmux-bashwrap actually
     // sends. Broker-level persistence semantics are covered by
-    // wps.rs::tests::test_event_persistence.
+    // mps.rs::tests::test_event_persistence.
     let app = test_router();
     let body = serde_json::json!({
         "event": "tool_chunk",

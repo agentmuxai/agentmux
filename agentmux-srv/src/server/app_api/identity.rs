@@ -185,11 +185,11 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     return Err(format!("identity.account.upsert: link: {e}"));
                 }
 
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "identityaccounts:changed".to_string(),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agentidentities:changed:{}", req.agent_id),
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
@@ -305,7 +305,7 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "identity.unlink: self-service provider unlink (identity.self.unlink)"
                 );
                 if unlinked {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: format!("agentidentities:changed:{}", req.agent_id),
                         scopes: vec![], sender: String::new(), persist: 0, data: None,
                     });

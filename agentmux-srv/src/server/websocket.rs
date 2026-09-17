@@ -211,7 +211,7 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             }
 
             // Priority event lane → WebSocket. Two sources feed it:
-            //   1. WPS Broker (via EventBusBridge) — already wrapped as
+            //   1. MPS Broker (via EventBusBridge) — already wrapped as
             //      { eventtype: "rpc", data: { command: "eventrecv", data: MuxEvent } }
             //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
             //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
@@ -314,14 +314,14 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
 /// Forward a queued event-bus value to the WebSocket. Returns `true` if the
 /// send failed (the caller should break the loop).
 ///
-/// Two shapes arrive: already-RPC-wrapped values (from the WPS broker via
+/// Two shapes arrive: already-RPC-wrapped values (from the MPS broker via
 /// EventBusBridge) are forwarded as-is; raw event-bus values (e.g. SetMeta's
 /// `waveobj:update`) are wrapped as an RPC `eventrecv` so the frontend
 /// WshRouter routes them to handleMuxEvent → updateMuxObject. Shared by both
 /// the priority and background egress lanes.
 async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool {
     let msg = if event["eventtype"] == "rpc" {
-        // Already an RPC message (from WPS broker via EventBusBridge)
+        // Already an RPC message (from MPS broker via EventBusBridge)
         serde_json::to_string(&event).unwrap_or_default()
     } else {
         // Raw event bus event — wrap as RPC eventrecv
@@ -343,7 +343,7 @@ async fn forward_event(socket: &mut WebSocket, event: serde_json::Value) -> bool
 }
 
 /// Extract a coalescing key from a background-lane event.
-/// Background events are RPC-wrapped WPS events:
+/// Background events are RPC-wrapped MPS events:
 ///   { "eventtype": "rpc", "data": { "command": "eventrecv", "data": { "event": "sysinfo", "scopes": ["local"] } } }
 /// Key = "<event-name>:<first-scope>", e.g. "sysinfo:local" or "blockstats:block:abc123".
 /// Falls back to "_:_" for events that don't match the expected shape (safe: they coalesce
@@ -420,7 +420,7 @@ fn priority_pane_key(event: &serde_json::Value) -> Option<String> {
     }
     let inner = event.get("data").and_then(|d| d.get("data"));
     let is_blockfile = inner.and_then(|d| d.get("event")).and_then(|e| e.as_str())
-        == Some(crate::backend::wps::EVENT_BLOCK_FILE);
+        == Some(crate::backend::mps::EVENT_BLOCK_FILE);
     if !is_blockfile {
         return Some(NON_PANE_EVENT_KEY.to_string());
     }
@@ -762,8 +762,8 @@ async fn handle_incoming_text(
 /// query is the single source of truth for the actual rows, so there's
 /// nothing to keep in sync between two payload shapes. See
 /// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
-fn publish_background_task_updated(broker: &crate::backend::wps::Broker, block_id: &str) {
-    broker.publish(crate::backend::wps::MuxEvent {
+fn publish_background_task_updated(broker: &crate::backend::mps::Broker, block_id: &str) {
+    broker.publish(crate::backend::mps::MuxEvent {
         event: "background-task-updated".to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
@@ -809,7 +809,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         Box::new(|_data, _ctx| Box::pin(async move { Ok(None) })),
     );
 
-    // eventsub → register subscription with the WPS broker
+    // eventsub → register subscription with the MPS broker
     let broker_sub = state.broker.clone();
     let conn_id_sub = conn_id.clone();
     engine.register_handler(
@@ -818,7 +818,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             let broker = broker_sub.clone();
             let conn_id = conn_id_sub.clone();
             Box::pin(async move {
-                let sub: crate::backend::wps::SubscriptionRequest =
+                let sub: crate::backend::mps::SubscriptionRequest =
                     serde_json::from_value(data).map_err(|e| format!("eventsub: {e}"))?;
                 tracing::debug!("eventsub: event={} scopes={:?} allscopes={}", sub.event, sub.scopes, sub.allscopes);
                 broker.subscribe(&conn_id, sub);
@@ -827,7 +827,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    // eventunsub → unsubscribe from the WPS broker
+    // eventunsub → unsubscribe from the MPS broker
     let broker_unsub = state.broker.clone();
     let conn_id_unsub = conn_id.clone();
     engine.register_handler(
@@ -845,7 +845,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
         }),
     );
 
-    // eventunsuball → unsubscribe all from the WPS broker
+    // eventunsuball → unsubscribe all from the MPS broker
     let broker_unsub_all = state.broker.clone();
     let conn_id_unsub_all = conn_id.clone();
     engine.register_handler(
@@ -1346,7 +1346,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                             }
                         }
                     }
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: "ambient-narration".to_string(),
                         scopes: vec![format!("block:{}", cmd.blockid)],
                         sender: String::new(),
@@ -1489,7 +1489,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     );
 
     // backgroundtaskpid → fire-and-forget push of a declared-background
-    // task's real OS pid, relayed from `agentmux-bashwrap`'s own WPS "pid"
+    // task's real OS pid, relayed from `agentmux-bashwrap`'s own MPS "pid"
     // chunk. Closes the gap where `db_background_tasks.pid` existed but
     // nothing in production ever wrote it (Phase A of
     // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Best-effort,
@@ -1675,7 +1675,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // reactive.registrations → Stash "Registration" tab live status (#2696)
     super::reactive::register_reactive_ws_handlers(engine, &state);
 
-    // eventreadhistory → read persisted event history from the WPS broker
+    // eventreadhistory → read persisted event history from the MPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(
         COMMAND_EVENT_READ_HISTORY,

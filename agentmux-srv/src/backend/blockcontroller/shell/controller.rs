@@ -23,7 +23,7 @@ use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::ConnInterface;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps;
+use crate::backend::mps;
 
 /// Cap on the out-of-order input reorder buffer (`input_seq_buf`).
 ///
@@ -95,8 +95,8 @@ pub struct ShellController {
     pub(super) inner: Arc<Mutex<ShellControllerInner>>,
     /// Optional factory for creating ConnInterface (for testing).
     pub(super) conn_factory: Mutex<Option<ConnFactory>>,
-    /// WPS broker for publishing events (blockfile, controllerstatus).
-    pub(super) broker: Option<Arc<wps::Broker>>,
+    /// MPS broker for publishing events (blockfile, controllerstatus).
+    pub(super) broker: Option<Arc<mps::Broker>>,
     /// Event bus (unused for now, reserved for future event routing).
     #[allow(dead_code)]
     pub(super) event_bus: Option<Arc<EventBus>>,
@@ -116,7 +116,7 @@ impl ShellController {
         controller_type: String,
         tab_id: String,
         block_id: String,
-        broker: Option<Arc<wps::Broker>>,
+        broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
@@ -324,7 +324,7 @@ impl ShellController {
         obj::meta_get_bool(meta, "cmd:interactive", false)
     }
 
-    /// Publish current controller status via the WPS broker.
+    /// Publish current controller status via the MPS broker.
     pub(super) fn publish_status(&self) {
         if let Some(ref broker) = self.broker {
             let status = self.get_status_snapshot();

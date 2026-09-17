@@ -503,7 +503,7 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
 
     // Regression for a live-repro'd bug (2026-08-22): Rust's
     // Path::canonicalize() unconditionally prepends `\\?\` on Windows.
-    // EditorFileWatcher's editor:file_changed WPS event carries that
+    // EditorFileWatcher's editor:file_changed MPS event carries that
     // prefixed path; without stripping it here, it can never compare
     // equal to a tab's own (never-prefixed) filePath, so live-reload
     // silently never fires on Windows at all.

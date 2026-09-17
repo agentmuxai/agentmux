@@ -72,7 +72,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at: now,
                 };
                 wstore.agent_skill_insert(&skill).map_err(|e| format!("createagentskill: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -112,7 +112,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if !found {
                     return Err(format!("updateagentskill: skill {} not found", skill.id));
                 }
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),
@@ -136,7 +136,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let cmd: CommandDeleteAgentSkillData = serde_json::from_value(data)
                     .map_err(|e| format!("deleteagentskill: {e}"))?;
                 wstore.agent_skill_delete(&cmd.id).map_err(|e| format!("deleteagentskill: {e}"))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: "agentskills:changed".to_string(),
                     scopes: vec![],
                     sender: String::new(),

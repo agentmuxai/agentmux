@@ -339,7 +339,7 @@ mod recent_sessions_tests {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let reactive_handler = crate::backend::reactive::get_global_handler();
         let poller = Arc::new(crate::backend::reactive::Poller::new(
             crate::backend::reactive::PollerConfig {
@@ -689,7 +689,7 @@ mod recent_sessions_tests {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let event_bus = Arc::new(crate::backend::eventbus::EventBus::new());
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let reactive_handler = crate::backend::reactive::get_global_handler();
         let poller = Arc::new(crate::backend::reactive::Poller::new(
             crate::backend::reactive::PollerConfig {

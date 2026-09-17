@@ -170,7 +170,7 @@ pub(super) async fn open_pane_floating(
     };
     match window_id {
         Some(win) => {
-            state.broker.publish(crate::backend::wps::MuxEvent {
+            state.broker.publish(crate::backend::mps::MuxEvent {
                 event: "openfloatingpane".to_string(),
                 scopes: vec![win],
                 sender: String::new(),
@@ -259,7 +259,7 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 
 /// Block-meta key carrying an ARRAY of files the reused pane should open —
 /// the sole delivery path (see below for why an earlier version's second,
-/// "live WPS event" path was removed). Drained (all entries, in order)
+/// "live MPS event" path was removed). Drained (all entries, in order)
 /// reactively by `EditorViewModel`'s `createEffect` over its own block meta,
 /// then cleared immediately after — covers both "not yet mounted when this
 /// was written" and "already mounted, reacts as soon as the write lands"
@@ -272,13 +272,13 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// but the final one. Appending to an array and draining all of them at
 /// once fixes that.
 ///
-/// **Sole delivery path — no separate live WPS event** (codex P1 on PR
-/// #2404, found twice): an earlier version ALSO fired a direct WPS event
+/// **Sole delivery path — no separate live MPS event** (codex P1 on PR
+/// #2404, found twice): an earlier version ALSO fired a direct MPS event
 /// (`persist: 0`) alongside this meta write, for immediate delivery when the
 /// pane was already mounted. First finding: the frontend's live handler
 /// didn't clear its own entry from this array, so it could be reprocessed
 /// on a later, unrelated remount. Second, deeper finding after fixing that:
-/// the WPS event is a direct WS push and arrives essentially synchronously,
+/// the MPS event is a direct WS push and arrives essentially synchronously,
 /// while THIS meta write only reaches the frontend's `blockAtom` after an
 /// async MuxObj DB-refetch — so the live handler's own dequeue attempt
 /// could run and read stale data (this exact write not yet reflected)
@@ -289,12 +289,12 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// already-mounted case (a real MuxObj round-trip instead of a direct
 /// push) for not being racy.
 ///
-/// **Superseded relying on WPS `persist > 0` for durability** (codex P1 on
+/// **Superseded relying on MPS `persist > 0` for durability** (codex P1 on
 /// PR #2404, earliest finding on this function): a just-created Editor
 /// block may not have finished mounting its `EditorViewModel` by the time a
 /// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
 /// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
-/// replay marker on disconnect (`agentmux-srv/src/backend/wps.rs:312-323`),
+/// replay marker on disconnect (`agentmux-srv/src/backend/mps.rs:312-323`),
 /// so any later, unrelated reconnect would replay the *entire* persisted
 /// history again — reopening files the user has since closed. The broker
 /// has no ack/consume concept, so nothing marks a persisted event "already
@@ -352,7 +352,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     // posture elsewhere) so a not-yet-mounted (or remounting)
     // EditorViewModel drains every pending file once at construction, then
     // clears the queue — see META_PENDING_OPEN_FILES's doc comment for why
-    // this replaces relying on WPS persist/replay for correctness.
+    // this replaces relying on MPS persist/replay for correctness.
     let mut pending: Vec<String> = existing
         .meta
         .get(META_PENDING_OPEN_FILES)

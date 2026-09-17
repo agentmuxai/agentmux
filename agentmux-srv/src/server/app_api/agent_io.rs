@@ -231,8 +231,8 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             &Some(wstore.clone()),
                             &Some(event_bus.clone()),
                         );
-                        broker.publish(crate::backend::wps::MuxEvent {
-                            event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
+                        broker.publish(crate::backend::mps::MuxEvent {
+                            event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
                             scopes: vec![format!("block:{}", cmd.block_id)],
                             sender: String::new(),
                             persist: 1,
@@ -580,7 +580,7 @@ fn register_agent_output(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let mut all_lines: Vec<String> = Vec::new();
                 {
                     let events = broker.read_event_history(
-                        crate::backend::wps::EVENT_BLOCK_FILE,
+                        crate::backend::mps::EVENT_BLOCK_FILE,
                         &scope,
                         max + after, // read enough to cover offset
                     );

@@ -148,7 +148,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agentinstances:changed:{}", inst.definition_id),
                     scopes: vec![],
                     sender: String::new(),
@@ -189,7 +189,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .instance_update_partial(&cmd.id, &upd)
                     .map_err(|e| format!("updateagentinstance: {e}"))?
                     .ok_or_else(|| format!("updateagentinstance: not found id={}", cmd.id))?;
-                broker.publish(crate::backend::wps::MuxEvent {
+                broker.publish(crate::backend::mps::MuxEvent {
                     event: format!("agentinstances:changed:{}", fresh.definition_id),
                     scopes: vec![],
                     sender: String::new(),
@@ -230,7 +230,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // gate on.
                 super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagentinstance");
                 if let Some(def_id) = definition_id.filter(|_| deleted) {
-                    broker.publish(crate::backend::wps::MuxEvent {
+                    broker.publish(crate::backend::mps::MuxEvent {
                         event: format!("agentinstances:changed:{}", def_id),
                         scopes: vec![],
                         sender: String::new(),

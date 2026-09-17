@@ -28,7 +28,7 @@ use super::{
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps;
+use crate::backend::mps;
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10);
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -47,7 +47,7 @@ pub struct AppServerController {
     tab_id: String,
     block_id: String,
     inner: Arc<Mutex<AppServerInner>>,
-    broker: Option<Arc<wps::Broker>>,
+    broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
@@ -59,7 +59,7 @@ impl AppServerController {
     pub fn new(
         tab_id: String,
         block_id: String,
-        broker: Option<Arc<wps::Broker>>,
+        broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
@@ -153,7 +153,7 @@ impl AppServerController {
     fn publish_protocol_frame(&self, frame: serde_json::Value) {
         let line = format!("{}\n", frame);
         if let Some(broker) = &self.broker {
-            broker.publish(wps::MuxEvent {
+            broker.publish(mps::MuxEvent {
                 event: "output".to_string(),
                 scopes: vec![format!("block:{}", self.block_id)],
                 sender: String::new(),
@@ -599,8 +599,8 @@ mod tests {
     // its own mutex from inside the guard it's still holding, masked in every
     // pre-existing test here because they all use `broker: None`.
 
-    fn controller_with_broker() -> (Arc<AppServerController>, Arc<wps::Broker>) {
-        let broker = Arc::new(wps::Broker::new());
+    fn controller_with_broker() -> (Arc<AppServerController>, Arc<mps::Broker>) {
+        let broker = Arc::new(mps::Broker::new());
         let controller = Arc::new(AppServerController::new(
             "tab-1".to_string(),
             "block-1".to_string(),

@@ -24,7 +24,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::backend::providers::resolve_provider_alias;
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 use crate::backend::storage::StoreError;
-use crate::backend::wps::{Broker, MuxEvent};
+use crate::backend::mps::{Broker, MuxEvent};
 
 use super::errors::SpawnGateError;
 use super::oauth_probe::{oauth_status, probe_oauth_status};

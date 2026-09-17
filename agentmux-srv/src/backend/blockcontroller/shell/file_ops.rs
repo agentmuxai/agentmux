@@ -8,7 +8,7 @@ use std::sync::Arc;
 use base64::Engine as _;
 
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::wps;
+use crate::backend::mps;
 
 /// Current unix time in ms, or 0 if the clock is before the epoch (never in
 /// practice; 0 reads as "unknown" on the consumer side, same as no stamp).
@@ -51,7 +51,7 @@ fn append_tsidx_entry(fs: &Arc<FileStore>, zone: &str, batch_start: u64, now_ms:
 }
 
 /// Persist `data` to the block's output file and the global transcript zone
-/// **without** publishing a WPS event. Used by the persistent controller to
+/// **without** publishing a MPS event. Used by the persistent controller to
 /// record user-message lines for future history loads (so that
 /// `parseHistoryLines` can reconstruct `user_message` nodes on reopen) without
 /// triggering a live-stream append that would produce a duplicate node alongside
@@ -119,7 +119,7 @@ pub fn persist_to_blockfile_silent(
     }
 }
 
-/// Append data to a block's terminal output file, publish a WPS event,
+/// Append data to a block's terminal output file, publish a MPS event,
 /// and write-through to FileStore (if provided).
 ///
 /// Port of Go's `HandleAppendBlockFile`.
@@ -138,7 +138,7 @@ enum ExistingFileStat {
 }
 
 pub fn handle_append_block_file(
-    broker: &wps::Broker,
+    broker: &mps::Broker,
     block_id: &str,
     filename: &str,
     data: &[u8],
@@ -182,16 +182,16 @@ pub fn handle_append_block_file(
         Some(ExistingFileStat::Exists { size }) => Some(*size),
     };
 
-    let event_data = wps::WSFileEventData {
+    let event_data = mps::WSFileEventData {
         zoneid: block_id.to_string(),
         filename: filename.to_string(),
-        fileop: wps::FILE_OP_APPEND.to_string(),
+        fileop: mps::FILE_OP_APPEND.to_string(),
         data64,
         offset: start_offset,
     };
 
-    let event = wps::MuxEvent {
-        event: wps::EVENT_BLOCK_FILE.to_string(),
+    let event = mps::MuxEvent {
+        event: mps::EVENT_BLOCK_FILE.to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
         persist: 0,
@@ -339,20 +339,20 @@ pub(crate) fn resolve_global_output_zone(
     crate::backend::agent_session::agent_zone_for_block_meta(&block.meta)
 }
 
-/// Truncate a block's terminal output file and publish a WPS event.
+/// Truncate a block's terminal output file and publish a MPS event.
 /// Port of Go's `HandleTruncateBlockFile`.
 #[allow(dead_code)]
-pub fn handle_truncate_block_file(broker: &wps::Broker, block_id: &str, filename: &str) {
-    let event_data = wps::WSFileEventData {
+pub fn handle_truncate_block_file(broker: &mps::Broker, block_id: &str, filename: &str) {
+    let event_data = mps::WSFileEventData {
         zoneid: block_id.to_string(),
         filename: filename.to_string(),
-        fileop: wps::FILE_OP_TRUNCATE.to_string(),
+        fileop: mps::FILE_OP_TRUNCATE.to_string(),
         data64: String::new(),
         offset: None,
     };
 
-    let event = wps::MuxEvent {
-        event: wps::EVENT_BLOCK_FILE.to_string(),
+    let event = mps::MuxEvent {
+        event: mps::EVENT_BLOCK_FILE.to_string(),
         scopes: vec![format!("block:{block_id}")],
         sender: String::new(),
         persist: 0,

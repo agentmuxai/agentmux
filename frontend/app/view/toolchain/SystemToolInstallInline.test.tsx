@@ -23,7 +23,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: (sub: { handler: (event: unknown) => void }) => {
         chunkHandler = sub.handler;
         return () => { chunkHandler = null; };

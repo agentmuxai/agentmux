@@ -17,7 +17,7 @@
 //!
 //! I/O model (3 async tasks per session):
 //! 1. stdin_writer: mpsc channel → process stdin (NDJSON lines)
-//! 2. stdout_reader: process stdout → .jsonl persistence + WPS blockfile events
+//! 2. stdout_reader: process stdout → .jsonl persistence + MPS blockfile events
 //! 3. process_waiter: wait for exit, update status
 
 use std::collections::{HashMap, VecDeque};
@@ -38,9 +38,9 @@ use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 use crate::backend::subagent_watcher;
-use crate::backend::wps;
+use crate::backend::mps;
 
-/// WPS file subject name for persistent subprocess output.
+/// MPS file subject name for persistent subprocess output.
 pub const PERSISTENT_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_PERSISTENT: &str = "persistent";
@@ -154,7 +154,7 @@ mod fresh_start_disclosure_tests {
     }
 }
 
-/// Publish a `wps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
+/// Publish a `mps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
 /// (not a method) for the same reason `session_outcome_line` above is one:
 /// callable from the stdout-reader/process-waiter match arms, which only
 /// hold `_read`/`_wait`-suffixed clones, not `&self`. `status` is `"retrying"`
@@ -163,15 +163,15 @@ mod fresh_start_disclosure_tests {
 /// Fresh or Resumed — is actually known). See
 /// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md` §6.2.
 /// No-ops if `broker` is `None` (tests / non-wired controllers), same
-/// posture as every other best-effort WPS publish in this file.
-fn publish_resume_retry_status(broker: &Option<Arc<wps::Broker>>, block_id: &str, status: &str) {
+/// posture as every other best-effort MPS publish in this file.
+fn publish_resume_retry_status(broker: &Option<Arc<mps::Broker>>, block_id: &str, status: &str) {
     let Some(broker) = broker else { return };
     let mut data = serde_json::json!({ "status": status });
     if status == "retrying" {
         data["startedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
     }
-    broker.publish(wps::MuxEvent {
-        event: wps::EVENT_AGENT_RESUME_RETRY.to_string(),
+    broker.publish(mps::MuxEvent {
+        event: mps::EVENT_AGENT_RESUME_RETRY.to_string(),
         scopes: vec![format!("block:{}", block_id)],
         sender: String::new(),
         // `persist: 2`, not 1 — `Broker::persist_event` trims history down
@@ -706,7 +706,7 @@ pub struct PersistentSubprocessController {
     tab_id: String,
     block_id: String,
     inner: Arc<Mutex<PersistentInner>>,
-    broker: Option<Arc<wps::Broker>>,
+    broker: Option<Arc<mps::Broker>>,
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
@@ -822,7 +822,7 @@ impl PersistentSubprocessController {
     pub fn new(
         tab_id: String,
         block_id: String,
-        broker: Option<Arc<wps::Broker>>,
+        broker: Option<Arc<mps::Broker>>,
         event_bus: Option<Arc<EventBus>>,
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
@@ -1519,8 +1519,8 @@ impl PersistentSubprocessController {
     fn emit_message_accepted(&self, message_id: Option<&str>) {
         let Some(id) = message_id else { return };
         let Some(ref broker) = self.broker else { return };
-        let event = crate::backend::wps::MuxEvent {
-            event: crate::backend::wps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
+        let event = crate::backend::mps::MuxEvent {
+            event: crate::backend::mps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
             scopes: vec![format!("block:{}", self.block_id)],
             sender: String::new(),
             persist: 0,
@@ -1539,7 +1539,7 @@ impl PersistentSubprocessController {
 
     /// Persists a formatted stdin JSON line to the blockfile + global zone
     /// so `parseHistoryLines` can reconstruct the `user_message` node on
-    /// the next pane open. No WPS event is published here — the
+    /// the next pane open. No MPS event is published here — the
     /// live-display is handled by the `agent-message-accepted` path (UUID
     /// node), avoiding a duplicate.
     fn persist_message_to_blockfile(&self, json_str: &str) {
@@ -1713,8 +1713,8 @@ impl PersistentSubprocessController {
         // exit code exists for this now-superseded turn.
         if let Some(failure) = classify_exit_line(None, &line) {
             core::persist_last_failure(&self.block_id, Some(&failure), &self.wstore, &self.event_bus);
-            broker.publish(wps::MuxEvent {
-                event: wps::EVENT_AGENT_FAILURE.to_string(),
+            broker.publish(mps::MuxEvent {
+                event: mps::EVENT_AGENT_FAILURE.to_string(),
                 scopes: vec![format!("block:{}", self.block_id)],
                 sender: String::new(),
                 persist: 1,
@@ -3272,8 +3272,8 @@ impl PersistentSubprocessController {
                                             flushed_failure_this_tick = true;
                                             core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
                                             if let Some(ref broker) = broker_read {
-                                                broker.publish(wps::MuxEvent {
-                                                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                                broker.publish(mps::MuxEvent {
+                                                    event: mps::EVENT_AGENT_FAILURE.to_string(),
                                                     scopes: vec![format!("block:{}", block_id_read)],
                                                     sender: String::new(),
                                                     persist: 1,
@@ -3366,8 +3366,8 @@ impl PersistentSubprocessController {
                                             flushed_failure_this_tick = true;
                                             core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
                                             if let Some(ref broker) = broker_read {
-                                                broker.publish(wps::MuxEvent {
-                                                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                                broker.publish(mps::MuxEvent {
+                                                    event: mps::EVENT_AGENT_FAILURE.to_string(),
                                                     scopes: vec![format!("block:{}", block_id_read)],
                                                     sender: String::new(),
                                                     persist: 1,
@@ -3400,8 +3400,8 @@ impl PersistentSubprocessController {
                         let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
                         core::persist_last_failure(&block_id_read, Some(&failure), &wstore_read, &event_bus_read);
                         if let Some(ref broker) = broker_read {
-                            broker.publish(wps::MuxEvent {
-                                event: wps::EVENT_AGENT_FAILURE.to_string(),
+                            broker.publish(mps::MuxEvent {
+                                event: mps::EVENT_AGENT_FAILURE.to_string(),
                                 scopes: vec![format!("block:{}", block_id_read)],
                                 sender: String::new(),
                                 persist: 1,
@@ -3432,7 +3432,7 @@ impl PersistentSubprocessController {
                     continue;
                 }
 
-                // Publish line as WPS blockfile event and write-through to FileStore
+                // Publish line as MPS blockfile event and write-through to FileStore
                 // for persistent history (Phase 1.3).
                 //
                 // debug, not info: fires on EVERY output line a streaming agent
@@ -3472,7 +3472,7 @@ impl PersistentSubprocessController {
         let broker_wait = self.broker.clone();
         let wstore_wait = self.wstore.clone();
         // Needed to persist a classified failure (rate-limit/overloaded/etc.)
-        // into block meta alongside the WPS publish below — mirrors
+        // into block meta alongside the MPS publish below — mirrors
         // `event_bus_read`'s equivalent clone for the stdout-reader task.
         let event_bus_wait = self.event_bus.clone();
         let health_wait = Arc::clone(&self.health_monitor);
@@ -3815,8 +3815,8 @@ impl PersistentSubprocessController {
                                 if let Some(failure) = classify_exit_line(Some(exit_code), &line) {
                                     core::persist_last_failure(&block_id_wait, Some(&failure), &wstore_wait, &event_bus_wait);
                                     if let Some(ref broker) = broker_wait {
-                                        broker.publish(wps::MuxEvent {
-                                            event: wps::EVENT_AGENT_FAILURE.to_string(),
+                                        broker.publish(mps::MuxEvent {
+                                            event: mps::EVENT_AGENT_FAILURE.to_string(),
                                             scopes: vec![format!("block:{}", block_id_wait)],
                                             sender: String::new(),
                                             persist: 1,
@@ -5015,7 +5015,7 @@ mod send_input_tests {
     /// rather than a virtual/paused clock.
     #[tokio::test]
     async fn status_heartbeat_republishes_while_active() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let c = PersistentSubprocessController::new(
             "tab".to_string(),
             "block-heartbeat".to_string(),
@@ -5032,7 +5032,7 @@ mod send_input_tests {
         // (real-time scheduling, not virtual-clock-deterministic).
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         let history = broker.read_event_history(
-            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            crate::backend::mps::EVENT_CONTROLLER_STATUS,
             "block:block-heartbeat",
             1,
         );
@@ -5051,7 +5051,7 @@ mod send_input_tests {
     /// mechanism was built for.
     #[tokio::test]
     async fn status_heartbeat_publishes_final_inactive_status_before_stopping() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let c = PersistentSubprocessController::new(
             "tab".to_string(),
             "block-heartbeat-stop".to_string(),
@@ -5073,7 +5073,7 @@ mod send_input_tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
 
         let history = broker.read_event_history(
-            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            crate::backend::mps::EVENT_CONTROLLER_STATUS,
             "block:block-heartbeat-stop",
             1,
         );
@@ -5779,7 +5779,7 @@ mod send_input_tests {
     /// a specific message).
     #[tokio::test]
     async fn release_spawn_claim_and_drain_queue_falls_back_and_publishes_status_when_stalled() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let c = Arc::new(PersistentSubprocessController::new(
             "tab".to_string(),
             "block-stalled".to_string(),
@@ -5804,7 +5804,7 @@ mod send_input_tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         let history = broker.read_event_history(
-            crate::backend::wps::EVENT_CONTROLLER_STATUS,
+            crate::backend::mps::EVENT_CONTROLLER_STATUS,
             "block:block-stalled",
             1,
         );
@@ -5927,7 +5927,7 @@ mod send_input_tests {
         use std::sync::Arc as StdArc;
 
         for iteration in 0..30 {
-            let broker = StdArc::new(crate::backend::wps::Broker::new());
+            let broker = StdArc::new(crate::backend::mps::Broker::new());
             let block_id = format!("block-race-{iteration}");
             let c = StdArc::new(PersistentSubprocessController::new(
                 "tab".to_string(),
@@ -5963,7 +5963,7 @@ mod send_input_tests {
             let stranded = !inner.spawning_in_progress && !inner.pending_send_messages.is_empty();
             if stranded {
                 let published = !broker
-                    .read_event_history(crate::backend::wps::EVENT_CONTROLLER_STATUS, &format!("block:{block_id}"), 10)
+                    .read_event_history(crate::backend::mps::EVENT_CONTROLLER_STATUS, &format!("block:{block_id}"), 10)
                     .is_empty();
                 assert!(
                     published,
@@ -6237,7 +6237,7 @@ mod send_input_tests {
     /// neither the original error nor a replacement one.
     #[test]
     fn retry_after_resume_failure_flushes_the_held_error_line_when_the_respawn_itself_fails() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-flush-on-failed-retry".to_string();
         let c = PersistentSubprocessController::new(
@@ -6280,7 +6280,7 @@ mod send_input_tests {
     /// state-machine layer was removed.
     #[test]
     fn retry_after_resume_failure_emits_fresh_outcome_immediately_when_no_recovery_found() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-emits-fresh-no-recovery".to_string();
         let c = PersistentSubprocessController::new(
@@ -6332,7 +6332,7 @@ mod send_input_tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
 
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-defers-outcome-on-recovery".to_string();
         let c = PersistentSubprocessController::new(
@@ -6376,7 +6376,7 @@ mod send_input_tests {
     /// pings must land, in order.
     #[test]
     fn retry_after_resume_failure_publishes_retrying_then_resolved_when_no_recovery_found() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-reconnecting-no-recovery".to_string();
         let c = PersistentSubprocessController::new(
@@ -6400,7 +6400,7 @@ mod send_input_tests {
         c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
 
         let history = broker.read_event_history(
-            crate::backend::wps::EVENT_AGENT_RESUME_RETRY,
+            crate::backend::mps::EVENT_AGENT_RESUME_RETRY,
             &format!("block:{block_id}"),
             10,
         );
@@ -6435,7 +6435,7 @@ mod send_input_tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
 
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-reconnecting-with-recovery".to_string();
         let c = PersistentSubprocessController::new(
@@ -6461,7 +6461,7 @@ mod send_input_tests {
         c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "d019e2e4-stale".to_string());
 
         let history = broker.read_event_history(
-            crate::backend::wps::EVENT_AGENT_RESUME_RETRY,
+            crate::backend::mps::EVENT_AGENT_RESUME_RETRY,
             &format!("block:{block_id}"),
             10,
         );
@@ -6492,7 +6492,7 @@ mod send_input_tests {
     /// fail deterministically.
     #[tokio::test]
     async fn retry_after_resume_failure_does_not_flush_the_held_error_line_when_the_deliver_direct_fallback_is_needed() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-flush-on-deliver-direct-fallback".to_string();
         let c = PersistentSubprocessController::new(
@@ -6547,7 +6547,7 @@ mod send_input_tests {
     /// evidence.
     #[tokio::test]
     async fn retry_after_resume_failure_drops_the_held_error_line_when_the_respawn_succeeds() {
-        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let broker = Arc::new(crate::backend::mps::Broker::new());
         let filestore = Arc::new(FileStore::open_in_memory().unwrap());
         let block_id = "block-drop-on-successful-retry".to_string();
         let c = PersistentSubprocessController::new(

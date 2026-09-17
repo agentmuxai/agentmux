@@ -38,7 +38,7 @@ use tokio::time::interval;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
-use crate::backend::wps::{Broker, MuxEvent};
+use crate::backend::mps::{Broker, MuxEvent};
 
 use super::get_global_handler;
 

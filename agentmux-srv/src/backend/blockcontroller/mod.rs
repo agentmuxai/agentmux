@@ -38,7 +38,7 @@ use super::eventbus::EventBus;
 use super::obj::{Block, MetaMapType, TermSize};
 use super::storage::filestore::FileStore;
 use super::storage::store::Store;
-use super::wps::Broker;
+use super::mps::Broker;
 
 // ---- Controller status constants (match Go) ----
 
@@ -786,7 +786,7 @@ pub fn resync_controller(
     }
 }
 
-/// Publish a controller status event via WPS broker. The sole publish point
+/// Publish a controller status event via MPS broker. The sole publish point
 /// for `controllerstatus`, used by every controller type (persistent CLI,
 /// subprocess CLI, ACP agents, plain shell/PTY panes — 13 call sites).
 ///
@@ -800,10 +800,10 @@ pub fn resync_controller(
 /// per-route replay tracking, isn't covered by persist alone — see the
 /// focus-triggered reconcile in `agent-view.tsx` for that case.)
 pub fn publish_controller_status(
-    broker: &super::wps::Broker,
+    broker: &super::mps::Broker,
     status: &BlockControllerRuntimeStatus,
 ) {
-    use super::wps::{MuxEvent, EVENT_CONTROLLER_STATUS};
+    use super::mps::{MuxEvent, EVENT_CONTROLLER_STATUS};
 
     let event = MuxEvent {
         event: EVENT_CONTROLLER_STATUS.to_string(),
@@ -1195,7 +1195,7 @@ mod tests {
     /// item 5.
     #[test]
     fn test_publish_controller_status_persists_for_replay() {
-        let broker = super::super::wps::Broker::new();
+        let broker = super::super::mps::Broker::new();
         let status = BlockControllerRuntimeStatus {
             blockid: "block-persist-test".to_string(),
             turn_active: true,
@@ -1204,7 +1204,7 @@ mod tests {
         publish_controller_status(&broker, &status);
 
         let history = broker.read_event_history(
-            super::super::wps::EVENT_CONTROLLER_STATUS,
+            super::super::mps::EVENT_CONTROLLER_STATUS,
             "block:block-persist-test",
             1,
         );

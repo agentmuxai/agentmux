@@ -216,7 +216,7 @@ export interface ReducerResult {
  *
  * **The `\\?\` strip closes a real live-reload bug**, confirmed by live
  * repro (2026-08-22): `EditorFileWatcher`'s published `editor:file_changed`
- * WPS event carries a path produced by Rust's `Path::canonicalize()`,
+ * MPS event carries a path produced by Rust's `Path::canonicalize()`,
  * which on Windows unconditionally prepends `\\?\` (`\\?\UNC\` for a
  * network share) — well-documented std behavior, and something this
  * backend's own comments already flag in two other places

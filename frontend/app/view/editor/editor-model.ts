@@ -48,8 +48,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { createBlockOnModel, waitForLayoutModel } from "@/app/tab/tab-presets";
 import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
@@ -63,7 +63,7 @@ const META_LEGACY_FILE = "file";
 // Reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
 // Part 2): files pushed by reuse-and-not-yet-mounted OpenEditor calls.
 // Drained (all entries, in order) once at construction, then cleared —
-// deliberately NOT delivered via WPS event replay, which has no ack/consume
+// deliberately NOT delivered via MPS event replay, which has no ack/consume
 // concept and would otherwise re-fire on every future reconnect (codex P1
 // on PR #2404). An array, not a single scalar, so 2+ calls stacking up
 // before the pane mounts don't overwrite/lose each other (codex P1, second
@@ -262,9 +262,9 @@ export class EditorViewModel implements ViewModel {
         // writes it later" through the same MuxObj sync path this pane
         // already reactively depends on for everything else.
         //
-        // An earlier version used a SEPARATE live WPS event (fired directly
+        // An earlier version used a SEPARATE live MPS event (fired directly
         // alongside the meta write) for the already-mounted case, racing
-        // this same meta update. Reagent (PR #2404) found the race: the WPS
+        // this same meta update. Reagent (PR #2404) found the race: the MPS
         // event is a direct WS push and arrives essentially synchronously,
         // while the meta write reaches `blockAtom` only after an async
         // MuxObj DB-refetch — so the live event's handler could run and try
@@ -651,7 +651,7 @@ export class EditorViewModel implements ViewModel {
         }
     }
 
-    /** Handler for `editor:file_changed` WPS events. Reloads every open tab
+    /** Handler for `editor:file_changed` MPS events. Reloads every open tab
      *  in this pane pointing at the changed path — but only if it's clean.
      *  A dirty tab is never auto-clobbered (no dirty-conflict banner exists
      *  yet; see SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md Phase 3 — until

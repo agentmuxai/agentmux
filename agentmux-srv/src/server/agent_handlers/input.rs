@@ -201,7 +201,7 @@ pub struct AgentTurnDeps {
     pub identity_store: Arc<crate::backend::storage::store::Store>,
     /// Streaming-bash wrapper auth key — see SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7.
     pub auth_key: String,
-    pub broker: Arc<crate::backend::wps::Broker>,
+    pub broker: Arc<crate::backend::mps::Broker>,
     pub container_manager: Arc<crate::backend::container::ContainerRuntimeHandle>,
     /// Named `filestore_gate` because the spawn-gate error frame MUST be
     /// persisted through it, not merely live-broadcast (reagent P1, PR #2164).
@@ -375,8 +375,8 @@ pub async fn run_agent_turn(
                 &Some(wstore.clone()),
                 &Some(event_bus_gate.clone()),
             );
-            broker.publish(crate::backend::wps::MuxEvent {
-                event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
+            broker.publish(crate::backend::mps::MuxEvent {
+                event: crate::backend::mps::EVENT_AGENT_FAILURE.to_string(),
                 scopes: vec![format!("block:{}", block_id)],
                 sender: String::new(),
                 persist: 1,
@@ -404,7 +404,7 @@ pub async fn run_agent_turn(
     //    rewrites the command to invoke it. AGENTMUX_LOCAL_URL
     //    is already in the inherited process env (main.rs:498).
     env_vars.insert("AGENTMUX_AUTH_KEY".to_string(), auth_key.clone());
-    // Block id so the wrapper can scope its WPS publishes
+    // Block id so the wrapper can scope its MPS publishes
     // to `block:<id>`. Without this, chunks publish without
     // a scope and the frontend's per-block subscription
     // doesn't receive them.

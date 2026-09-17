@@ -26,7 +26,7 @@ use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::migrations::OBJECT_SCHEMA_VERSION;
 use crate::backend::storage::snapshot::maybe_snapshot_pre_migration;
 use crate::backend::storage::store::Store;
-use crate::backend::wps::Broker;
+use crate::backend::mps::Broker;
 use crate::backend::wconfig;
 use crate::backend::{base, docsite, sysinfo, wcore};
 use crate::config::{self, CliArgs};
@@ -1009,7 +1009,7 @@ pub fn spawn_background_subsystems(
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());
 
-    // Bridge WPS events to WebSocket clients via EventBus
+    // Bridge MPS events to WebSocket clients via EventBus
     let bridge = backend::eventbus::EventBusBridge::new(event_bus.clone());
     broker.set_client(Box::new(bridge));
 
@@ -1367,7 +1367,7 @@ pub fn spawn_background_subsystems(
         id_store.clone(),
         identity_store.clone(),
     );
-    // Wires `subagent:backfill_status` (scoped, persisted WPS event) — see
+    // Wires `subagent:backfill_status` (scoped, persisted MPS event) — see
     // `SubagentWatcher`'s `broker` field doc comment for why this is a
     // post-construction setter rather than a constructor parameter.
     subagent_watcher.set_broker(broker.clone());

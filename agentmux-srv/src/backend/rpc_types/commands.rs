@@ -88,7 +88,7 @@ pub const COMMAND_DOCK_NODE_STATUS: &str = "docknodestatus";
 pub const COMMAND_BACKGROUND_TASK_COMPLETION: &str = "backgroundtaskcompletion";
 
 /// Fire-and-forget push of a declared-background task's real OS pid, relayed
-/// from `agentmux-bashwrap`'s own WPS `"pid"` chunk (published only when
+/// from `agentmux-bashwrap`'s own MPS `"pid"` chunk (published only when
 /// `--declared-background` is set — see `bash_wrap.rs`). Mirrors into
 /// `db_background_tasks.pid` via `background_task_set_pid`, closing the gap
 /// where that column existed but nothing ever wrote it in production. See

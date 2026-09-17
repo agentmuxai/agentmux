@@ -51,12 +51,12 @@ const { blockDataSignals, seedData, wpsHandlers, wpsPersisted, resyncDeferreds, 
 //
 // Crucially it also models `persist: 1` REPLAY: `controllerstatus` is
 // published persisted specifically so a new subscriber is handed the current
-// status synchronously as part of subscribing (wps.ts's `replay_to_route`).
+// status synchronously as part of subscribing (mps.ts's `replay_to_route`).
 // The first version of this mock only delivered events a test emitted AFTER
 // mount, which made the replay path — where ReAgent found a P0 — structurally
 // invisible to all 12 tests. `queuePersistedStatus` puts an event in that
 // replay slot instead.
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: (opts: { eventType: string; scope: string; handler: (event: any) => void }) => {
         const key = `${opts.eventType}|${opts.scope}`;
         wpsHandlers.set(key, [...(wpsHandlers.get(key) ?? []), opts.handler]);
@@ -599,7 +599,7 @@ describe("AgentShellSubblock — shell exit collapses the drawer (SPEC_AGENT_PAN
     });
 
     /**
-     * ReAgent P0 on PR #3253, and the reason this file's wps mock now models
+     * ReAgent P0 on PR #3253, and the reason this file's mps mock now models
      * replay at all.
      *
      * An agent drives the shared drawer shell (a first-class case, spec §3.3)

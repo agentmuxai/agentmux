@@ -46,15 +46,15 @@ use parking_lot::Mutex;
 
 use crate::backend::blockcontroller::{self, BlockControllerRuntimeStatus};
 use crate::backend::process_tracker::{self, TrackedProcess, TrackingConfidence};
-use crate::backend::wps::{Broker as WpsBroker, MuxEvent};
+use crate::backend::mps::{Broker as WpsBroker, MuxEvent};
 
-/// WPS event name for a `ProcessStatus` change. Scoped `block:<id>`, same
+/// MPS event name for a `ProcessStatus` change. Scoped `block:<id>`, same
 /// convention as `agent:process-added`/`controllerstatus`. Consumers that
 /// want the unified signal subscribe to this instead of the two separate
 /// events the old `.chain()`-based discovery relied on.
 pub const EVENT_STATUS_CHANGED: &str = "processbroker:status-changed";
 
-/// WPS event name for "`list()`/`list_agent_panes()` membership may have
+/// MPS event name for "`list()`/`list_agent_panes()` membership may have
 /// changed" — published whenever `blockcontroller::register_controller` or
 /// `delete_controller` runs. Unscoped (no `block:<id>` — see
 /// `emit_tracked_blocks_changed`'s doc comment for why).
@@ -215,14 +215,14 @@ pub struct ProcessBroker {
     /// §3.0.3 point 1 — e.g. a real health-probe round-trip), that phase
     /// should revisit this as an async lock at the same time, not before.
     cache: Mutex<HashMap<String, ProcessStatus>>,
-    wps_broker: Option<Arc<WpsBroker>>,
+    mps_broker: Option<Arc<WpsBroker>>,
 }
 
 impl ProcessBroker {
-    pub fn new(wps_broker: Option<Arc<WpsBroker>>) -> Self {
+    pub fn new(mps_broker: Option<Arc<WpsBroker>>) -> Self {
         Self {
             cache: Mutex::new(HashMap::new()),
-            wps_broker,
+            mps_broker,
         }
     }
 
@@ -326,7 +326,7 @@ impl ProcessBroker {
     }
 
     fn emit_changed(&self, status: &ProcessStatus) {
-        let Some(ref broker) = self.wps_broker else {
+        let Some(ref broker) = self.mps_broker else {
             return;
         };
         broker.publish(MuxEvent {
@@ -358,7 +358,7 @@ impl ProcessBroker {
     /// stale indefinitely for any block whose proxy signal didn't happen to
     /// fire. See docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
     pub fn emit_tracked_blocks_changed(&self) {
-        let Some(ref broker) = self.wps_broker else {
+        let Some(ref broker) = self.mps_broker else {
             return;
         };
         broker.publish(MuxEvent {

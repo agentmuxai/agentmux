@@ -17,7 +17,7 @@
  *    command (new vs update routed by id-presence). Lines that yield
  *    `null` (partial, init, session-end-only) are skipped.
  *
- * 2. `wps` — match `event` + `data.op` to the right reducer command:
+ * 2. `mps` — match `event` + `data.op` to the right reducer command:
  *      - `tool_chunk` + `op: "chunk"` → `dispatchDoc(ToolChunkAppend)`
  *      - `tool_chunk` + `op: "terminal"` → synthesize a system chunk
  *        (the frontend's chunk handler does the same — see
@@ -133,7 +133,7 @@ export function replayInstant(
     for (const ev of fixture.events) {
         if (ev.src === "stream-json") {
             handleStreamLine(ev, parser, nodeIds, applyDoc, stats, warnings);
-        } else if (ev.src === "wps") {
+        } else if (ev.src === "mps") {
             handleWpsEvent(ev, applyDoc, stats, warnings);
         } else if (ev.src === "dispatch") {
             handleDispatch(ev, applyDoc, applyPane, stats, warnings);
@@ -185,7 +185,7 @@ function handleWpsEvent(
         // Recognized but unhandled — extend the demuxer when a test
         // needs controller-status / blockfile replay.
         warnings.push(
-            `wps event "${ev.event}" not handled by replay driver (seq ${ev.seq})`,
+            `mps event "${ev.event}" not handled by replay driver (seq ${ev.seq})`,
         );
         return;
     }

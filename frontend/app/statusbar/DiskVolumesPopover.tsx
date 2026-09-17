@@ -17,15 +17,15 @@ import { createSignal, Index, onCleanup, onMount, Show, type JSX } from "solid-j
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
-import { muxEventSubscribe } from "@/app/store/wps";
-import { WpsEvent } from "@/app/store/wps-events";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 import { diskFreeColor, formatDiskGb, parseDiskVolumes, type DiskVolume } from "./disk-volumes";
 
 interface DiskVolumesPopoverProps {
     anchorRect: DOMRect | null;
     /** Parent's latest parsed snapshot — seeds the list so opening the panel
      *  shows data immediately instead of "Reading drives…" until the next
-     *  sysinfo tick (the WPS route suppresses event replay for this second
+     *  sysinfo tick (the MPS route suppresses event replay for this second
      *  subscription, so a fresh mount would otherwise start empty). */
     initialVolumes?: DiskVolume[];
     ref?: (el: HTMLDivElement) => void;

@@ -16,7 +16,7 @@
  */
 
 import { callBackendService } from "@/app/store/mos";
-import { muxEventSubscribe } from "@/app/store/wps";
+import { muxEventSubscribe } from "@/app/store/mps";
 import { createSignal, type Accessor } from "solid-js";
 import { mergeSubagentsPreservingIdentity, type ActiveSubagent } from "../../swarm/swarm-model";
 import { createBackfillAwareTrigger } from "./backfill-tracker";

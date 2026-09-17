@@ -11,7 +11,7 @@
  * delivery hit the #2695 identity-mismatch guard. See issue #2696.
  *
  * No live-update event exists for registration changes (unlike
- * AgentIdentityLinksPanel's `agentidentities:changed:<id>` WPS event) —
+ * AgentIdentityLinksPanel's `agentidentities:changed:<id>` MPS event) —
  * this is a manual-refresh snapshot, matching the "check occasionally,
  * not a persistent dashboard" way this panel is actually used.
  */

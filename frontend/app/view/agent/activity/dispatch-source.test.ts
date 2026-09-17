@@ -10,9 +10,9 @@ const hub = vi.hoisted(() => ({
 }));
 
 // Mirrors subagent-source.test.ts's mocking pattern exactly — see that
-// file's own comment for why only `wps` is mocked, not the whole `mos`
+// file's own comment for why only `mps` is mocked, not the whole `mos`
 // module.
-vi.mock("@/app/store/wps", () => ({
+vi.mock("@/app/store/mps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
         return () => hub.handlers.delete(sub.eventType);

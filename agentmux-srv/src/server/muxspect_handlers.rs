@@ -712,8 +712,8 @@ pub async fn handle_muxspect_dock_clear(
             .into_response();
     }
 
-    state.broker.publish(crate::backend::wps::MuxEvent {
-        event: crate::backend::wps::EVENT_DOCK_CLEAR.to_string(),
+    state.broker.publish(crate::backend::mps::MuxEvent {
+        event: crate::backend::mps::EVENT_DOCK_CLEAR.to_string(),
         scopes: vec![format!("block:{}", req.block_id)],
         sender: String::new(),
         persist: 0,

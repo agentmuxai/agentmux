@@ -60,7 +60,7 @@ export const BlockApi = {
     },
 
     // Fire-and-forget push of a declared-background task's real OS pid,
-    // relayed from bashwrap's own WPS "pid" chunk. Spec:
+    // relayed from bashwrap's own MPS "pid" chunk. Spec:
     // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
     BackgroundTaskPidCommand(client: RpcClient, data: CommandBackgroundTaskPidData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("backgroundtaskpid", data, opts);
