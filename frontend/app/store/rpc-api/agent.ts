@@ -6,6 +6,62 @@
 
 import { RpcClient } from "../rpc-client";
 
+// The agent-definition and agent-content shapes are GENERATED from their Rust
+// definitions by ts-rs. agent.ts spans twelve handler files and is being
+// migrated one file at a time; this covers agent_handlers/core.rs.
+export type { AgentDefinition } from "@/types/rpc/AgentDefinition";
+export type { AgentContent } from "@/types/rpc/AgentContent";
+export type { AgentDefinitionImport } from "@/types/rpc/AgentDefinitionImport";
+export type { AgentSkillImport } from "@/types/rpc/AgentSkillImport";
+export type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
+export type { CommandListAgentDefinitionsData } from "@/types/rpc/CommandListAgentDefinitionsData";
+export type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
+export type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
+export type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
+export type { CommandGetAgentContentData } from "@/types/rpc/CommandGetAgentContentData";
+export type { CommandSetAgentContentData } from "@/types/rpc/CommandSetAgentContentData";
+export type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAgentContentData";
+export type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
+export type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
+export type { CommandContainerRuntimeAvailableData } from "@/types/rpc/CommandContainerRuntimeAvailableData";
+export type { CommandReseedAgentsData } from "@/types/rpc/CommandReseedAgentsData";
+export type { CommandExportAgentsData } from "@/types/rpc/CommandExportAgentsData";
+export type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
+export type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
+
+import type { AgentDefinition } from "@/types/rpc/AgentDefinition";
+import type { AgentContent } from "@/types/rpc/AgentContent";
+import type { AgentDefinitionImport } from "@/types/rpc/AgentDefinitionImport";
+import type { AgentSkillImport } from "@/types/rpc/AgentSkillImport";
+import type { ImportAgentDefinitionsResult } from "@/types/rpc/ImportAgentDefinitionsResult";
+import type { CommandListAgentDefinitionsData } from "@/types/rpc/CommandListAgentDefinitionsData";
+import type { CommandCreateAgentDefinitionData } from "@/types/rpc/CommandCreateAgentDefinitionData";
+import type { CommandUpdateAgentDefinitionData } from "@/types/rpc/CommandUpdateAgentDefinitionData";
+import type { CommandDeleteAgentDefinitionData } from "@/types/rpc/CommandDeleteAgentDefinitionData";
+import type { CommandGetAgentContentData } from "@/types/rpc/CommandGetAgentContentData";
+import type { CommandSetAgentContentData } from "@/types/rpc/CommandSetAgentContentData";
+import type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAgentContentData";
+import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
+import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
+import type { CommandContainerRuntimeAvailableData } from "@/types/rpc/CommandContainerRuntimeAvailableData";
+import type { CommandReseedAgentsData } from "@/types/rpc/CommandReseedAgentsData";
+import type { CommandExportAgentsData } from "@/types/rpc/CommandExportAgentsData";
+import type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
+import type { ReseedAgentsResult } from "@/types/rpc/ReseedAgentsResult";
+
+// Most fields on the create/update commands are `#[serde(default)]` on
+// non-`Option` Rust fields, so they are omittable on the wire but ts-rs
+// generates them as required. Derive the accurate shape from the generated type
+// rather than hand-listing them -- same approach as BundleUpsertInput and
+// SkillUpsertInput, so a field added in Rust flows through automatically.
+export type AgentDefinitionCreateInput = Pick<CommandCreateAgentDefinitionData, "name" | "provider"> &
+    Partial<Omit<CommandCreateAgentDefinitionData, "name" | "provider">>;
+export type AgentDefinitionUpdateInput = Pick<
+    CommandUpdateAgentDefinitionData,
+    "id" | "name" | "icon" | "provider"
+> &
+    Partial<Omit<CommandUpdateAgentDefinitionData, "id" | "name" | "icon" | "provider">>;
+
 export const AgentApi = {
     //
     // Two-tier picker — Phase 1 (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
@@ -100,11 +156,11 @@ export const AgentApi = {
         return client.rpcCall("containerruntimeavailable", {}, opts);
     },
 
-    CreateAgentDefinitionCommand(client: RpcClient, data: CommandCreateAgentDefinitionData, opts?: RpcOpts): Promise<AgentDefinition> {
+    CreateAgentDefinitionCommand(client: RpcClient, data: AgentDefinitionCreateInput, opts?: RpcOpts): Promise<AgentDefinition> {
         return client.rpcCall("createagent", data, opts);
     },
 
-    UpdateAgentDefinitionCommand(client: RpcClient, data: CommandUpdateAgentDefinitionData, opts?: RpcOpts): Promise<AgentDefinition> {
+    UpdateAgentDefinitionCommand(client: RpcClient, data: AgentDefinitionUpdateInput, opts?: RpcOpts): Promise<AgentDefinition> {
         return client.rpcCall("updateagent", data, opts);
     },
 

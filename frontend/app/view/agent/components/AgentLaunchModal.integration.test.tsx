@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentLaunchModalPanel } from "./AgentLaunchModal";
 import { resetCapabilities } from "@/app/store/toolchain-capabilities";
-import type { Bundle } from "@/app/store/rpc-api";
+import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 
 // ── Module mocks ────────────────────────────────────────────────────
 

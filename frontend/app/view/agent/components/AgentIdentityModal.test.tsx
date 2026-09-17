@@ -24,6 +24,7 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentIdentityModalPanel } from "./AgentIdentityModal";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { UpdateAgentDefinitionCommand: vi.fn() },

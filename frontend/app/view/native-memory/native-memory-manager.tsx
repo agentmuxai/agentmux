@@ -36,7 +36,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
-import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
+import type { AgentDefinition, NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { NativeMemoryHistoryPanel } from "@/app/view/agent/components/NativeMemoryHistoryPanel";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";

@@ -39,6 +39,7 @@ import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 // loads later in the bundle and would override our project-wide
 // terminal theme tweaks.
 import "../../term/xterm.css";
+import type { AgentDefinition } from "@/app/store/rpc-api";
 
 interface AgentInstallModalPanelProps {
     agent: AgentDefinition;
