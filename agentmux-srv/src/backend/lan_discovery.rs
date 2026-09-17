@@ -31,9 +31,44 @@ const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
 /// the same peer re-resolved, and every re-resolution after a `remove()` came
 /// back with a blank TXT record, so deleting on `ServiceRemoved` permanently
 /// wiped a live peer's hostname/instance_id/version/auth_key for no real
-/// disappearance. 300s is comfortably above the observed 1-2 minute re-fire
-/// gaps while still dropping a genuinely departed peer in a reasonable time.
-const LAN_PEER_STALE_TIMEOUT_SECS: u64 = 300;
+/// disappearance.
+///
+/// This is a FLOOR, not the actual timeout — see `peer_staleness_window_secs`.
+/// A fixed 300s (this constant's original, only value — see
+/// docs/retro/retro-lan-peer-stale-timeout-too-short-for-slow-reannounce-peers-2026-09-17.md)
+/// was tuned against one fast-reannouncing peer seen in live logs (1-2 minute
+/// re-fire gaps) and wrongly pruned peers whose own advertised record TTL is
+/// much longer: RFC 6762 §10's recommended (and mdns-sd 0.12's hardcoded,
+/// unconfigurable-from-this-crate-version) default `other_ttl` for PTR/TXT
+/// records is 4500s/75min, and real LAN peers were observed re-announcing on
+/// gaps up to ~46 minutes — comfortably inside that TTL, but 9x past the old
+/// fixed cutoff. 300s remains only as a safety floor against a peer that
+/// somehow advertises an implausibly small TTL.
+const LAN_PEER_STALE_TIMEOUT_FLOOR_SECS: u64 = 300;
+/// Ceiling on `other_ttl_secs`-driven staleness (ReAgent P1, PR #3301):
+/// `other_ttl_secs` is taken directly from a peer's own mDNS advertisement,
+/// which this file already treats as adversarial elsewhere (see
+/// `LAN_AGENT_NAMES_MAX_*` above — "anything that can fake an mDNS
+/// advertisement... makes it into `self.instances`"). Without a cap, a
+/// spoofed peer advertising `other_ttl` near `u32::MAX` (~136 years) would be
+/// honored by both `get_instances()` and the periodic GC, permanently pinning
+/// it as "alive" — defeating the entire self-pruning design this exists for.
+/// 2x the RFC 6762 §10 / mdns-sd 0.12 default (4500s) comfortably covers every
+/// legitimate cadence actually observed on this LAN (narko/starpower's ~46min
+/// gaps) with margin, while bounding attacker-controlled input the same way
+/// the byte/count/length caps above already do.
+const LAN_PEER_STALE_TIMEOUT_CEIL_SECS: u64 = 9000;
+
+/// A peer is stale once `last_seen` exceeds ITS OWN advertised `other_ttl` —
+/// the standards-defined lifetime of the PTR/TXT records that make up an mDNS
+/// announcement — not one fixed cutoff shared by every peer regardless of how
+/// often it actually re-announces. Clamped between
+/// `LAN_PEER_STALE_TIMEOUT_FLOOR_SECS` (guards an implausibly small
+/// advertised TTL) and `LAN_PEER_STALE_TIMEOUT_CEIL_SECS` (guards an
+/// adversarially large one — `other_ttl_secs` is untrusted peer input).
+fn peer_staleness_window_secs(other_ttl_secs: u32) -> u64 {
+    (other_ttl_secs as u64).clamp(LAN_PEER_STALE_TIMEOUT_FLOOR_SECS, LAN_PEER_STALE_TIMEOUT_CEIL_SECS)
+}
 /// How often each known LAN peer is asked for its agent-name list. Peers are
 /// few (one per machine) and the request is a single small GET, so this is
 /// cheap; it's deliberately slower than `LAN_AGENT_CACHE_TTL_SECS` because
@@ -170,6 +205,10 @@ pub struct LanInstance {
     pub agents: Vec<String>,
     pub first_seen: u64,
     pub last_seen: u64,
+    /// This peer's own advertised PTR/TXT record TTL (seconds), captured from
+    /// `ServiceInfo::get_other_ttl()` at the most recent `ServiceResolved`.
+    /// Drives `peer_staleness_window_secs` — see its doc comment.
+    pub other_ttl_secs: u32,
 }
 
 struct LanCacheEntry {
@@ -523,7 +562,7 @@ impl LanDiscovery {
             // Garbage-collect entries `get_instances()` would already hide as
             // stale. This is the only place `self.instances` actually shrinks
             // now that `ServiceRemoved` no longer deletes (see
-            // `LAN_PEER_STALE_TIMEOUT_SECS`) — without it a genuinely departed
+            // `peer_staleness_window_secs`) — without it a genuinely departed
             // peer would sit in the map forever and this very loop would keep
             // polling it every cycle.
             let any_pruned = {
@@ -533,7 +572,9 @@ impl LanDiscovery {
                     .as_secs();
                 let mut instances = self.instances.write();
                 let before = instances.len();
-                instances.retain(|_, inst| now.saturating_sub(inst.last_seen) <= LAN_PEER_STALE_TIMEOUT_SECS);
+                instances.retain(|_, inst| {
+                    now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs)
+                });
                 instances.len() != before
             };
             // A connected frontend only updates `lanInstancesAtom` on a
@@ -933,6 +974,7 @@ impl LanDiscovery {
                     .get_property_val_str("auth_key")
                     .unwrap_or_default()
                     .to_string();
+                let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
                 // Cloned for the log line below: `entry()` takes ownership of
@@ -949,10 +991,15 @@ impl LanDiscovery {
                     agents: Vec::new(),
                     first_seen: now,
                     last_seen: now,
+                    other_ttl_secs,
                 });
                 entry.last_seen = now;
                 entry.address = address;
                 entry.port = info.get_port();
+                // A record TTL, not TXT content — always present on a real
+                // resolution (unlike hostname/version/auth_key below), so it's
+                // safe to overwrite unconditionally the same as address/port.
+                entry.other_ttl_secs = other_ttl_secs;
                 // TXT-derived fields only: `enable_addr_auto()` re-fires
                 // `ServiceResolved` on every interface/address change, and
                 // most of those re-fires resolve with an empty TXT record
@@ -991,7 +1038,7 @@ impl LanDiscovery {
             }
             ServiceEvent::ServiceRemoved(_, fullname) => {
                 // Deliberately NOT deleted from `self.instances` here — see
-                // `LAN_PEER_STALE_TIMEOUT_SECS`. This event is too unreliable
+                // `peer_staleness_window_secs`. This event is too unreliable
                 // to trust as "the peer is actually gone": a real departure
                 // and ordinary TTL/interface churn look identical on the
                 // wire, and eagerly removing throws away last-known-good TXT
@@ -1029,7 +1076,7 @@ impl LanDiscovery {
         self.instances
             .read()
             .values()
-            .filter(|inst| now.saturating_sub(inst.last_seen) <= LAN_PEER_STALE_TIMEOUT_SECS)
+            .filter(|inst| now.saturating_sub(inst.last_seen) <= peer_staleness_window_secs(inst.other_ttl_secs))
             .cloned()
             .collect()
     }
@@ -2088,7 +2135,7 @@ mod handle_event_tests {
     }
 
     #[test]
-    fn get_instances_hides_a_peer_stale_past_the_timeout() {
+    fn get_instances_hides_a_peer_stale_past_its_own_ttl() {
         let discovery = test_discovery("self-id", 56023);
 
         let full_event = test_service_info(
@@ -2099,18 +2146,119 @@ mod handle_event_tests {
         discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
         assert_eq!(discovery.get_instances().len(), 1);
 
-        // Backdate last_seen past the staleness window directly — waiting out
-        // LAN_PEER_STALE_TIMEOUT_SECS in a unit test isn't practical.
+        // mdns-sd 0.12 exposes no way to construct a ServiceInfo with a
+        // custom TTL, so the fixture above always resolves with the crate's
+        // real default (`other_ttl_secs: 4500`) — set it directly to a value
+        // ABOVE `LAN_PEER_STALE_TIMEOUT_FLOOR_SECS` (300) so the boundary
+        // being tested is the peer's own TTL, not the floor underneath it.
         {
             let mut instances = discovery.instances.write();
             for inst in instances.values_mut() {
-                inst.last_seen = inst.last_seen.saturating_sub(super::LAN_PEER_STALE_TIMEOUT_SECS + 1);
+                inst.other_ttl_secs = 1000;
+            }
+        }
+
+        // Backdate past the floor (300s) but still within this peer's own
+        // 1000s TTL: must still be reported — proves the peer's own TTL, not
+        // the floor, is what's controlling visibility here.
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(600);
+            }
+        }
+        assert_eq!(
+            discovery.get_instances().len(),
+            1,
+            "600s of silence is past the old 300s floor but within this peer's own 1000s TTL"
+        );
+
+        // Now push past the peer's own TTL too.
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(401);
+            }
+        }
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a peer with no ServiceResolved in over its own advertised TTL must not be reported"
+        );
+    }
+
+    #[test]
+    fn peer_staleness_window_secs_ceils_an_adversarially_large_advertised_ttl() {
+        // ReAgent P1, PR #3301: other_ttl_secs comes straight from a peer's own
+        // (spoofable) mDNS advertisement — this file already treats that input
+        // as adversarial elsewhere (LAN_AGENT_NAMES_MAX_*). Without a ceiling, a
+        // peer claiming an other_ttl near u32::MAX (~136 years) would be
+        // honored forever, permanently pinning it as "alive" and defeating the
+        // entire staleness design.
+        assert_eq!(
+            super::peer_staleness_window_secs(u32::MAX),
+            super::LAN_PEER_STALE_TIMEOUT_CEIL_SECS,
+            "an implausibly large advertised TTL must be capped, not honored as-is"
+        );
+    }
+
+    #[test]
+    fn get_instances_hides_a_peer_with_an_adversarial_ttl_once_the_ceiling_elapses() {
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.other_ttl_secs = u32::MAX;
+                inst.last_seen = inst.last_seen.saturating_sub(super::LAN_PEER_STALE_TIMEOUT_CEIL_SECS + 1);
             }
         }
 
         assert!(
             discovery.get_instances().is_empty(),
-            "a peer with no ServiceResolved in over LAN_PEER_STALE_TIMEOUT_SECS must not be reported"
+            "a peer claiming an implausibly large TTL must still expire at the ceiling, \
+             not be pinned as permanently alive"
+        );
+    }
+
+    #[test]
+    fn get_instances_does_not_prune_a_slow_reannouncing_peer_within_its_ttl() {
+        // The real bug this guards against (2026-09-17): narko and starpower
+        // re-announce roughly every 40-46 minutes (their actual mDNS `other_ttl`
+        // record cycle), well past the old fixed 300s cutoff but comfortably
+        // inside the real advertised TTL (4500s/75min default — RFC 6762 §10,
+        // mdns-sd 0.12's hardcoded `DNS_OTHER_TTL`). A peer silent for 46
+        // minutes is still alive and must still be reported.
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        const FORTY_SIX_MINUTES_SECS: u64 = 46 * 60;
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.last_seen = inst.last_seen.saturating_sub(FORTY_SIX_MINUTES_SECS);
+            }
+        }
+
+        assert_eq!(
+            discovery.get_instances().len(),
+            1,
+            "a peer silent for less than its own advertised TTL must still be reported, \
+             even though that gap is far past the old fixed 300s cutoff"
         );
     }
 
@@ -2262,6 +2410,7 @@ mod peer_fanout_tests {
             agents: vec![],
             first_seen: 0,
             last_seen: 0,
+            other_ttl_secs: 4500,
         }
     }
 
