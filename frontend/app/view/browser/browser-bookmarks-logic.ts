@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { BrowserBookmark } from "@/types/rpc/BrowserBookmark";
+
 // Pure bookmark list transforms, extracted out of browser-nav-bar.tsx so
 // the toggle/dedupe logic is directly unit-testable without rendering the
 // Solid component. See

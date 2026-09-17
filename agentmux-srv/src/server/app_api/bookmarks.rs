@@ -28,40 +28,29 @@ fn bookmarks_list_impl() -> Result<Vec<BrowserBookmark>, String> {
 }
 
 fn register_bookmarks_list(engine: &Arc<WshRpcEngine>) {
-    engine.register_handler(
-        COMMAND_BOOKMARKS_LIST,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
-                let bookmarks = bookmarks_list_impl()?;
-                Ok(Some(json!({ "bookmarks": bookmarks })))
-            })
-        }),
-    );
-}
-
-#[derive(serde::Deserialize)]
-struct BookmarksSetReq {
-    bookmarks: Vec<BrowserBookmark>,
+    // Typed registration (SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md §3.1) — the
+    // request/response shapes are named types carrying `#[derive(ts_rs::TS)]`,
+    // so the frontend consumes generated bindings and drift fails the build.
+    // `()` is a legal Req for a command that takes no arguments.
+    engine.register_typed(COMMAND_BOOKMARKS_LIST, move |_req: (), _ctx| async move {
+        Ok(BookmarksResult { bookmarks: bookmarks_list_impl()? })
+    });
 }
 
 fn register_bookmarks_set(engine: &Arc<WshRpcEngine>) {
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BOOKMARKS_SET,
-        Box::new(move |data, _ctx| {
-            Box::pin(async move {
-                let req: BookmarksSetReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bookmarks.set: {e}"))?;
-                // Unlike bookmarks.list's best-effort empty fallback, a SET
-                // with nowhere to durably land must fail loudly — silently
-                // no-oping here would tell the caller a bookmark was saved
-                // when it wasn't (see the spec's "shared_dir can't be
-                // resolved" unhappy-path entry).
-                let path = bookmarks_store::bookmarks_file_path()
-                    .ok_or_else(|| "bookmarks.set: could not resolve the shared data directory".to_string())?;
-                bookmarks_store::write_bookmarks(&path, &req.bookmarks)?;
-                Ok(Some(json!({ "bookmarks": req.bookmarks })))
-            })
-        }),
+        move |req: CommandBookmarksSetData, _ctx| async move {
+            // Unlike bookmarks.list's best-effort empty fallback, a SET
+            // with nowhere to durably land must fail loudly — silently
+            // no-oping here would tell the caller a bookmark was saved
+            // when it wasn't (see the spec's "shared_dir can't be
+            // resolved" unhappy-path entry).
+            let path = bookmarks_store::bookmarks_file_path()
+                .ok_or_else(|| "bookmarks.set: could not resolve the shared data directory".to_string())?;
+            bookmarks_store::write_bookmarks(&path, &req.bookmarks)?;
+            Ok(BookmarksResult { bookmarks: req.bookmarks })
+        },
     );
 }
 
@@ -76,7 +65,7 @@ mod tests {
                 {"id": "b1", "title": "T", "url": "https://example.com"}
             ]
         });
-        let req: BookmarksSetReq = serde_json::from_value(data).unwrap();
+        let req: CommandBookmarksSetData = serde_json::from_value(data).unwrap();
         assert_eq!(
             req.bookmarks,
             vec![BrowserBookmark {
@@ -92,7 +81,7 @@ mod tests {
     #[test]
     fn set_req_rejects_missing_bookmarks_field() {
         let data = json!({});
-        let result: Result<BookmarksSetReq, _> = serde_json::from_value(data);
+        let result: Result<CommandBookmarksSetData, _> = serde_json::from_value(data);
         assert!(result.is_err());
     }
 }

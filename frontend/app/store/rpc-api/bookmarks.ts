@@ -7,13 +7,15 @@
 // agentmux-srv/src/server/app_api/bookmarks.rs.
 
 import { RpcClient } from "../rpc-client";
+import type { BookmarksResult } from "@/types/rpc/BookmarksResult";
+import type { CommandBookmarksSetData } from "@/types/rpc/CommandBookmarksSetData";
 
 export const BookmarksApi = {
     ListBookmarksCommand(
         client: RpcClient,
         data: Record<string, never> = {},
         opts?: RpcOpts,
-    ): Promise<{ bookmarks: BrowserBookmark[] }> {
+    ): Promise<BookmarksResult> {
         return client.rpcCall("bookmarks.list", data, opts);
     },
 
@@ -23,9 +25,9 @@ export const BookmarksApi = {
      *  the full list (see the nav bar's toggle/add/remove logic). */
     SetBookmarksCommand(
         client: RpcClient,
-        data: { bookmarks: BrowserBookmark[] },
+        data: CommandBookmarksSetData,
         opts?: RpcOpts,
-    ): Promise<{ bookmarks: BrowserBookmark[] }> {
+    ): Promise<BookmarksResult> {
         return client.rpcCall("bookmarks.set", data, opts);
     },
 };

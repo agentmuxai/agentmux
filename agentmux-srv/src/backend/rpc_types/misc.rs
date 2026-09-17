@@ -324,3 +324,19 @@ pub struct CommandVoiceCheckPathData {
 pub struct VoiceCheckPathResult {
     pub exists: bool,
 }
+
+/// `bookmarks.list` / `bookmarks.set` response — both answer with the full
+/// list, so they share one type. Was an anonymous `json!({"bookmarks": ..})`
+/// before this existed to name it for the RPC bindings generator.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct BookmarksResult {
+    pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
+}
+
+/// `bookmarks.set` request — wholesale replace of the saved list.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct CommandBookmarksSetData {
+    pub bookmarks: Vec<crate::backend::bookmarks_store::BrowserBookmark>,
+}
