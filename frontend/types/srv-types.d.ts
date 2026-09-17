@@ -1567,45 +1567,6 @@ declare global {
         commandtype: string;
     };
 
-    // wshrpc.CommandSubprocessSpawnData
-    type CommandSubprocessSpawnData = {
-        blockid: string;
-        tabid: string;
-        cli_command: string;
-        cli_args?: string[];
-        working_dir?: string;
-        env_vars?: {[key: string]: string};
-        message: string;
-    };
-
-    // wshrpc.CommandAgentInputData
-    type CommandAgentInputData = {
-        blockid: string;
-        message: string;
-        message_id?: string;
-    };
-
-    // wshrpc.CommandAgentStopData
-    type CommandAgentStopData = {
-        blockid: string;
-        force?: boolean;
-    };
-
-    // wshrpc.AgentConfigFile
-    type AgentConfigFile = {
-        path: string;
-        content: string;
-    };
-
-    // wshrpc.CommandWriteAgentConfigData
-    type CommandWriteAgentConfigData = {
-        working_dir: string;
-        files: AgentConfigFile[];
-        // When true, treat working_dir as an auto-generated instance
-        // path eligible for `<base>-N` collision resolution. When
-        // false (user-specified path), write into the path as-is.
-        auto_allocate?: boolean;
-    };
 
     // The ONLY native-memory type still hand-written here; its siblings are now
     // ts-rs-generated under frontend/types/rpc/ and re-exported from

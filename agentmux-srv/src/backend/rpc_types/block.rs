@@ -310,7 +310,8 @@ pub struct CommandAgentCancelData {
 // ---- Subprocess agent command data types ----
 
 /// Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandSubprocessSpawnData {
     pub blockid: String,
     pub tabid: String,
@@ -326,7 +327,8 @@ pub struct CommandSubprocessSpawnData {
 }
 
 /// Data for AgentInputCommand — send a follow-up message (re-spawns with --resume).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAgentInputData {
     pub blockid: String,
     /// The user's JSON message string.
@@ -337,11 +339,13 @@ pub struct CommandAgentInputData {
     /// `PendingMessage` entry and promote it into the conversation
     /// document. Absent for pre-existing callers; treated as no-id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub message_id: Option<String>,
 }
 
 /// Data for AgentStopCommand — stop the running subprocess.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandAgentStopData {
     pub blockid: String,
     #[serde(default)]
@@ -349,7 +353,8 @@ pub struct CommandAgentStopData {
 }
 
 /// Data for ShellExecCommand — run a shell command in the agent's working directory.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandShellExecData {
     pub blockid: String,
     pub command: String,
@@ -358,7 +363,8 @@ pub struct CommandShellExecData {
 }
 
 /// Result of ShellExecCommand.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct ShellExecResult {
     pub exit_code: i32,
     pub stdout: String,
@@ -366,26 +372,62 @@ pub struct ShellExecResult {
 }
 
 /// Data for ShellStopCommand — stop a running persistent shell node by id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandShellStopData {
     pub shell_id: String,
 }
 
+/// Result of `shellstop`. Was an inline `json!({ "stopped": .. })`.
+///
+/// `false` means "no live registry entry for that id", which covers both
+/// "already exited" and "never existed" -- the caller cannot tell them apart,
+/// and does not need to: either way there is nothing left to stop.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ShellStopResult {
+    pub stopped: bool,
+}
+
 /// Data for ShellStatusCommand — query a shell's current running state by id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandShellStatusData {
     pub shell_id: String,
 }
 
+/// Result of `shellstatus`. Was two inline `json!({..})` literals.
+///
+/// `known: false` is NOT the same as `running: false`, and collapsing them is
+/// the bug this shape exists to prevent: a shell that has not finished
+/// registering yet is unknown, not exited, and treating it as exited
+/// misreported live shells as failed (reagent P1 on #2770). Callers must
+/// branch on `known` first.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct ShellStatusResult {
+    pub known: bool,
+    pub running: bool,
+    /// Always present, null while running or when unknown -- NOT an omitted
+    /// key. The hand-written stub said `exit_code?: number`, but both arms of
+    /// the handler write the key unconditionally.
+    #[ts(type = "number | null")]
+    pub exit_code: Option<i32>,
+    #[ts(type = "number")]
+    pub line_count: u64,
+}
+
 /// A file to write as part of agent config.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct AgentConfigFile {
     pub path: String,
     pub content: String,
 }
 
 /// Data for WriteAgentConfigCommand — write config files atomically.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandWriteAgentConfigData {
     /// Agent working directory where files are written.
     pub working_dir: String,
@@ -405,7 +447,8 @@ pub struct CommandWriteAgentConfigData {
 /// directory used; callers should compare against the requested
 /// `working_dir` and patch `cmd:cwd` (via SetMeta) when they differ
 /// so the controller spawns the CLI in the actually-created dir.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandWriteAgentConfigResult {
     pub working_dir: String,
 }
