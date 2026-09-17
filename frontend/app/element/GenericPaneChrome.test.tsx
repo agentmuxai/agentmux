@@ -18,6 +18,7 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const headerCalls: any[] = [];
@@ -56,12 +57,29 @@ vi.mock("@/app/store/contextmenu", () => ({
     ContextMenuModel: { showContextMenu: (...args: any[]) => showContextMenu(...args) },
 }));
 
-const objectValues = new Map<string, any>();
+// Backed by real Solid signals (not a plain Map) — required to actually prove
+// the ReAgent P1 regression fix (every stack member's block data, not just
+// the active one, must be read via the reactive getMuxObjectAtom accessor,
+// not getObjectValue's non-reactive snapshot). A plain-Map-returning mock
+// would pass even with the bug, since it re-reads current state on every
+// call regardless of whether Solid actually tracked a dependency.
+const objectSignals = new Map<string, ReturnType<typeof createSignal<any>>>();
+function signalFor(oref: string) {
+    let sig = objectSignals.get(oref);
+    if (!sig) {
+        sig = createSignal<any>(undefined);
+        objectSignals.set(oref, sig);
+    }
+    return sig;
+}
+function setObjectValue(oref: string, value: any) {
+    signalFor(oref)[1](value);
+}
 vi.mock("@/app/store/global", () => ({
     MOS: {
         makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
-        getMuxObjectAtom: (oref: string) => () => objectValues.get(oref),
-        getObjectValue: (oref: string) => objectValues.get(oref),
+        getMuxObjectAtom: (oref: string) => signalFor(oref)[0],
+        getObjectValue: (oref: string) => signalFor(oref)[0](),
     },
     atoms: {
         fullConfigAtom: () => ({ widgets: {}, settings: {} }),
@@ -115,7 +133,7 @@ function fakeLayoutModel(blockStack: string[]): any {
 }
 
 beforeEach(() => {
-    objectValues.clear();
+    objectSignals.clear();
     headerCalls.length = 0;
     showContextMenu.mockClear();
     buildPaneWidgetMenuItemsMock.mockClear();
@@ -136,8 +154,8 @@ describe("genericRenderPaneChrome — tab derivation", () => {
     });
 
     it("a 2+ member stack yields one tab per member, label from frame:title falling back to blockViewToName", () => {
-        objectValues.set("block:b1", { meta: { "frame:title": "My Title" } });
-        objectValues.set("block:b2", { meta: { view: "browser" } });
+        setObjectValue("block:b1", { meta: { "frame:title": "My Title" } });
+        setObjectValue("block:b2", { meta: { view: "browser" } });
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
         render(() => genericRenderPaneChrome(fakeNodeModel(), <div>content</div>) as any);
 
@@ -154,13 +172,32 @@ describe("genericRenderPaneChrome — tab derivation", () => {
     // block's own persisted meta since a background tab's ViewModel isn't
     // mounted here to read a live icon from.
     it("derives each tab's icon from frame:icon, falling back to blockViewToIcon(view)", () => {
-        objectValues.set("block:b1", { meta: { "frame:icon": "rocket" } });
-        objectValues.set("block:b2", { meta: { view: "browser" } });
+        setObjectValue("block:b1", { meta: { "frame:icon": "rocket" } });
+        setObjectValue("block:b2", { meta: { view: "browser" } });
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
         render(() => genericRenderPaneChrome(fakeNodeModel(), <div>content</div>) as any);
 
         const icons = screen.getAllByTestId("tab-icon").map((el) => el.textContent);
         expect(icons).toEqual(["rocket", "icon-browser"]);
+    });
+
+    // ReAgent P1 regression: a BACKGROUND (non-active) tab's own meta must be
+    // read reactively (getMuxObjectAtom), not via getObjectValue's
+    // non-reactive snapshot — otherwise a rename or icon change on a tab
+    // that isn't currently active never updates its pill. b2 here is never
+    // the active member (activeBlockId stays "b1" throughout).
+    it("reacts to a background tab's own meta changing, without any tree-state change", () => {
+        setObjectValue("block:b1", { meta: { "frame:title": "Active" } });
+        setObjectValue("block:b2", { meta: { "frame:title": "Original" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() => genericRenderPaneChrome(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        expect(screen.getByText("Original")).toBeInTheDocument();
+
+        setObjectValue("block:b2", { meta: { "frame:title": "Renamed" } });
+
+        expect(screen.getByText("Renamed")).toBeInTheDocument();
+        expect(screen.queryByText("Original")).not.toBeInTheDocument();
     });
 });
 

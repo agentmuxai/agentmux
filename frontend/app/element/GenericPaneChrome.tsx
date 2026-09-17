@@ -62,7 +62,12 @@ export function genericRenderPaneChrome(nodeModel: NodeModel, content: JSX.Eleme
         const stack = node?.data?.blockStack?.length ? node.data.blockStack : [];
         if (stack.length <= 1) return [];
         return stack.map((blockId) => {
-            const bd = MOS.getObjectValue(MOS.makeORef("block", blockId)) as Block | undefined;
+            // Reactive read (getMuxObjectAtom, not getObjectValue's plain
+            // snapshot) — matches activeBlockData()'s own convention above.
+            // ReAgent P1: a background tab's own meta (rename, frame:title/
+            // frame:icon update) must re-run this memo too, not just the
+            // active member's.
+            const bd = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))();
             const label = (bd?.meta?.["frame:title"] as string | undefined) ?? blockViewToName(bd?.meta?.view);
             // Same icon convention the plain (non-tabbed) header iconview
             // uses (blockframe.tsx's viewIconElem) — derived from the
