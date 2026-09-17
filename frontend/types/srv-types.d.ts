@@ -182,99 +182,6 @@ declare global {
         termsize?: TermSize;
     };
 
-    // wshrpc.CommandToolDecisionData — per-tool-call permission reply.
-    // Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md §4.3.
-    type CommandToolDecisionData = {
-        blockid: string;
-        request_id: string;
-        outcome: "allow" | "deny";
-        scope: "once" | "session" | "project" | "global";
-        feedback?: string;
-    };
-
-    // wshrpc.CommandAmbientNarrateData — ask the backend to generate a short
-    // user-facing line about something AgentMux just did on its own. The
-    // renderer supplies the context because only it has it: docknodestatus
-    // carries tool_name but not the command text, so the backend knows *a
-    // Bash call* went background and cannot say *what* did.
-    //
-    // Best-effort — no reply is awaited, and no UI state may depend on one.
-    type CommandAmbientNarrateData = {
-        blockid: string;
-        // Selects the prompt server-side; unknown kinds are a no-op.
-        kind: string;
-        context: string;
-        // Unique per narrated event, so a re-observed node narrates once.
-        dedupe_key: string;
-    };
-
-    // wshrpc.CommandDockNodeStatusData — fire-and-forget push whenever a
-    // ToolNode's status changes. Backs `muxspect dock`. Spec:
-    // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
-    type CommandDockNodeStatusData = {
-        blockid: string;
-        node_id: string;
-        tool_name: string;
-        status: string;
-        timestamp?: number;
-        run_in_background?: boolean;
-    };
-
-    // wshrpc.CommandBackgroundTaskCompletionData — fire-and-forget push of a
-    // declared-background task's real terminal outcome, parsed client-side
-    // from its `<task-notification>` message (see
-    // `parseTaskNotification` in tool-adapter.ts). Deliberately a separate
-    // command from `docknodestatus` above rather than overloading it: this
-    // fires for a `user_message` node, which has no `tool_name`/raw
-    // `ToolNode.status` of its own, and `docknodestatus`'s `push_delta` is a
-    // full per-node overwrite — sending a partial payload through it would
-    // blank the original tool node's `run_in_background`/`tool_name`
-    // (the exact bug class #2520 already fixed once for a different call
-    // site). `node_id` here is the ORIGINATING tool call's node_id/
-    // tool_use_id, not this notification message's own id — it's the join
-    // key back to the `db_background_tasks` row `docknodestatus` created.
-    // See docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
-    type CommandBackgroundTaskCompletionData = {
-        blockid: string;
-        node_id: string;
-        status: string;
-        timestamp?: number;
-    };
-
-    // wshrpc.CommandBackgroundTaskPidData — fire-and-forget push of a
-    // declared-background task's real OS pid, relayed from
-    // `agentmux-bashwrap`'s own MPS `"pid"` chunk (op: "pid" on the
-    // `tool_chunk` event this block already subscribes to). `node_id` is
-    // the same join key as `CommandBackgroundTaskCompletionData` above.
-    // See docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
-    type CommandBackgroundTaskPidData = {
-        blockid: string;
-        node_id: string;
-        pid: number;
-    };
-
-    // wshrpc.CommandListBackgroundTasksData — request/response, returns
-    // this block's current db_background_tasks rows (BackgroundTaskView[]
-    // below) so the frontend can seed its attachedTask axis from the
-    // durable registry on mount/reconnect. See
-    // docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
-    type CommandListBackgroundTasksData = {
-        blockid: string;
-    };
-
-    // server::muxspect_handlers::BackgroundTaskView — one db_background_tasks
-    // row, as returned by ListBackgroundTasksCommand.
-    type BackgroundTaskView = {
-        id: string;
-        block_id: string;
-        label: string;
-        pid: number | null;
-        started_at_ms: number;
-        status: "running" | "done" | "error" | "stopped";
-        last_seen_ms: number;
-        ended_at_ms: number | null;
-    };
-
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
     // agent CLI via the Agent SDK control protocol (a control_response carrying
     // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
@@ -283,16 +190,6 @@ declare global {
         tool_use_id: string;
         // question text → chosen label | label[] (multiSelect) | free-text ("Other")
         answers: {[key: string]: string | string[]};
-    };
-
-    // CommandAgentCancelData — a real protocol-level decline of a pending
-    // AskUserQuestion (Cancel button / Escape), delivered as a control_response
-    // carrying behavior: "deny" rather than CommandAgentAnswerData's allow+answers
-    // shape. No answers field — the deny message is a fixed server-owned string.
-    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
-    type CommandAgentCancelData = {
-        blockid: string;
-        tool_use_id: string;
     };
 
     // wshrpc.CommandBlockSetViewData
@@ -974,11 +871,6 @@ declare global {
     type CommandImportAgentFromClawData = {
         workspace_path: string;
         agent_name: string;
-    };
-
-    // wshrpc.CommandDeleteBlockData
-    type CommandDeleteBlockData = {
-        blockid: string;
     };
 
     // wshrpc.CommandDeleteFileData

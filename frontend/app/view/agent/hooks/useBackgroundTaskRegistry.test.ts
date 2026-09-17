@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { resolveAttachedTaskObservation } from "./useBackgroundTaskRegistry";
+import type { BackgroundTaskView } from "@/app/store/rpc-api";
 
 // Phase C of docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md.
 

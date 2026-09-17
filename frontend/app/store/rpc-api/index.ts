@@ -38,6 +38,15 @@ export type {
     CommandBlockfileReadRangeData,
     CommandBlockfileReadStateData,
     CommandBlockfileWriteStateData,
+    BackgroundTaskView,
+    CommandAgentCancelData,
+    CommandAmbientNarrateData,
+    CommandBackgroundTaskCompletionData,
+    CommandBackgroundTaskPidData,
+    CommandDeleteBlockData,
+    CommandDockNodeStatusData,
+    CommandListBackgroundTasksData,
+    CommandToolDecisionData,
 } from "./block";
 export type {
     Bundle,

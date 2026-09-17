@@ -592,15 +592,25 @@ pub struct MuxspectBackgroundTasksQuery {
     pub block_id: Option<String>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct BackgroundTaskView {
     pub id: String,
     pub block_id: String,
     pub label: String,
+    /// Always present, carries null when unknown -- no skip_serializing_if.
+    #[ts(type = "number | null")]
     pub pid: Option<i64>,
+    #[ts(type = "number")]
     pub started_at_ms: i64,
+    /// A closed set the frontend branches on; ts-rs would emit a bare
+    /// `string` for a `&'static str` and drop the union the hand-written
+    /// declaration carried.
+    #[ts(type = "\"running\" | \"done\" | \"error\" | \"stopped\"")]
     pub status: &'static str,
+    #[ts(type = "number")]
     pub last_seen_ms: i64,
+    #[ts(type = "number | null")]
     pub ended_at_ms: Option<i64>,
 }
 
