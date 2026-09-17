@@ -849,6 +849,12 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         return () => holder;
     })();
     const noHeader = util.useAtomValueSafe(props.viewModel?.noHeader);
+    // Terminal-only: "term:showstatsbadge" (Settings → Terminal). Other view
+    // types keep the badge unconditionally, matching prior behavior — this
+    // setting exists specifically for the terminal pane's CPU%/mem overlay.
+    const showStatsBadge = createMemo(
+        () => blockData()?.meta?.view !== "term" || getSettingsKeyAtom("term:showstatsbadge")() !== false,
+    );
     // Captured outer-frame ref for PaneSizeBadge. Live as long as the
     // frame is mounted; cleared on unmount via the callback ref.
     // SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md.
@@ -1055,7 +1061,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     />
                 </Show>
                 {props.preview ? previewElem : props.children}
-                <BlockStatsBadge blockId={nodeModel.blockId} />
+                <Show when={showStatsBadge()}>
+                    <BlockStatsBadge blockId={nodeModel.blockId} noHeader={noHeader} />
+                </Show>
             </div>
             <Show when={!props.preview && props.viewModel != null && connModalOpen()}>
                 <ChangeConnectionBlockModal
