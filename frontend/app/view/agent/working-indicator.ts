@@ -28,20 +28,44 @@
  * predicate, or it goes back to lying about the two non-queueing cases.
  *
  * The queueing half of that is decided by `agent-view.tsx`'s `wasAlreadyWorking`
- * capture on send (`workingFromPhase(...)` on the pane snapshot). If that
- * send-side condition ever changes, THIS FUNCTION MUST CHANGE WITH IT.
+ * capture on send (`workingFromPhase(...)` on the pane snapshot, deliberately
+ * UNCHANGED by §2.3a below — it still gates optimistic `TurnStart`/auth-
+ * failure bookkeeping and must not be redefined). A message that lands in
+ * the HOLD path because of it is not held for long, though:
+ * `useAgentCommands.ts`'s HOLD branch calls THIS function immediately after
+ * queueing and flushes right away when it returns false — i.e. its condition
+ * is literally "the indicator is dark", not a re-derived subset. It must stay
+ * that way: an earlier revision called `turnHeldOnlyByBackgroundWork` alone
+ * and thereby dropped the `compacting`/`reconnecting` terms this function ORs
+ * in, so a compaction running during an otherwise-backgrounded turn kept the
+ * indicator lit while the send path flushed anyway (ReAgent P1 on #3340).
+ * That flush
+ * is load-bearing, not an optimization: without it the indicator goes dark
+ * while the message still sits in the "send now" panel until some later
+ * tool-call boundary, which for a turn whose only remaining work is a detached
+ * process may never come. If that send-side condition (either half) ever
+ * changes, THIS FUNCTION MUST CHANGE WITH IT.
  *
  * `compacting` and `reconnecting` are the terms that phase alone cannot supply:
  * both can be non-null while `turnPhase` is `Idle`, which is exactly how the row
  * (which read them) and the bar (which did not) used to disagree.
  *
  * WHAT IT DOES NOT MEAN: "there is work you would not otherwise see." That is
- * the ActivityDock's job. An indicator must never light for dock-visible work,
- * and — the bug this module exists to kill — must never go dark merely because
- * the dock has picked something up. A promoted dock row does not unblock the
- * turn, so it cannot unblock the indicator.
+ * the ActivityDock's job. An indicator must never light for dock-visible work
+ * that is the ONLY thing keeping the turn nominally open.
  *
- * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md §2.3.
+ * As of 2026-09-17 (repo-owner-confirmed policy reversal — see
+ * docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md
+ * §2.3a, which supersedes that same report's §2.3): once a call has been
+ * accepted as backgrounded (promoted to the dock, or attached via the
+ * harness's background tracker) and no OTHER foreground tool call is still
+ * genuinely blocking, the indicator goes dark and the composer reopens —
+ * the dock row remains as the live indicator of the still-running work. The
+ * turn is still technically `Streaming`, but "streaming with nothing left
+ * that blocks a new message" is no longer treated as busy. Submitting and
+ * Interrupting are NOT covered by this carve-out — see paneBusyForInput.
+ *
+ * See docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md §2.3a.
  */
 
 import { workingFromPhase, type TurnPhase } from "@/app/store/agent-pane-state/types";
@@ -57,13 +81,57 @@ export interface WorkingIndicatorInput {
     compacting: unknown;
     /** Non-null while recovering from a stale resume — the process is dead. */
     reconnecting: unknown;
+    /**
+     * True while ≥1 backgrounded/attached task is live for this block
+     * (`attachedTask != null || registryAttachedTaskSince != null`). Only
+     * consulted when `turnPhase.kind === "Streaming"` — see §2.3a.
+     */
+    hasAttachedBackgroundWork: boolean;
+    /**
+     * True if some OTHER running tool call (not an accepted background
+     * launch) is still genuinely blocking — see
+     * `hasBlockingForegroundToolCall` in `./activity/tool-adapter`. Only
+     * consulted when `hasAttachedBackgroundWork` is true and `turnPhase.kind
+     * === "Streaming"`.
+     */
+    hasBlockingForegroundToolCall: boolean;
+}
+
+/**
+ * True ⇔ this turn is still nominally open, but the ONLY thing keeping it
+ * that way is work that has already been accepted as backgrounded.
+ *
+ * Exported because the send path needs the SAME value, not its own copy.
+ * `paneBusyForInput` renders this to the user as "the agent will answer you
+ * now"; `useAgentCommands.ts`'s HOLD branch has to honour that promise by
+ * actually flushing rather than parking the message until the next tool-call
+ * boundary — which, for a turn whose only remaining work is a detached dev
+ * server, may be minutes away or may never arrive. Two independent
+ * re-derivations of this predicate is exactly how the row and the bar came to
+ * disagree in the first place (§3.1); do not inline a second one.
+ */
+export function turnHeldOnlyByBackgroundWork(input: {
+    turnPhase: TurnPhase;
+    hasAttachedBackgroundWork: boolean;
+    hasBlockingForegroundToolCall: boolean;
+}): boolean {
+    // Submitting/Interrupting are deliberately excluded: Submitting has no
+    // tool-call bookkeeping yet to consult, and Interrupting is already
+    // mid-stop (steering a new message in there would race the interrupt).
+    if (input.turnPhase.kind !== "Streaming") return false;
+    if (!input.hasAttachedBackgroundWork) return false;
+    return !input.hasBlockingForegroundToolCall;
 }
 
 /** True ⇔ a message typed right now would NOT be answered immediately. */
 export function paneBusyForInput(input: WorkingIndicatorInput): boolean {
+    const turnBusy = (() => {
+        if (!workingFromPhase(input.turnPhase)) return false;
+        return !turnHeldOnlyByBackgroundWork(input);
+    })();
     return (
         input.showingLaunchActivity ||
-        workingFromPhase(input.turnPhase) ||
+        turnBusy ||
         input.compacting != null ||
         input.reconnecting != null
     );

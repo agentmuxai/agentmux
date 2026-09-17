@@ -1,6 +1,9 @@
 # Report: auto-detecting long-running tool calls (sleep and beyond) and docking them — status refresh, 2026-07-26
 
-**Status:** Report — audit + design synthesis, all open questions resolved (§4). **Largely implemented since; see the status table below (refreshed 2026-08-30).** This is **not** a from-scratch analysis: it verifies and consolidates two existing same-topic reports against `main` as of today, and updates them with what has (and hasn't) shipped in the 10 days since.
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
+**Status:** Implemented — report: audit + design synthesis, all open questions resolved (§4). **Largely implemented since; see the status table below (refreshed 2026-08-30).** This is **not** a from-scratch analysis: it verifies and consolidates two existing same-topic reports against `main` as of today, and updates them with what has (and hasn't) shipped in the 10 days since.
 
 ### §3 implementation status (verified against `main`, 2026-08-30)
 

@@ -1,5 +1,8 @@
 # SPEC: Pinned Activity Dock — Unified Long-Running Activities
 
+> **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
+> This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
+
 **(shell · cron · subagent · …)**
 
 **Date:** 2026-06-15

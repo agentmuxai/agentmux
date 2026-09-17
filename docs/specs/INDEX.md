@@ -15,6 +15,7 @@ See also:
 
 | Spec | Summary |
 |---|---|
+| [**TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17**](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | **CANONICAL tracking doc** (issue #3338) for the dock / working-indicator / input-gate / auto-backgrounding family — read this before any of the ~22 docs it indexes |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |
@@ -187,6 +188,7 @@ partial list.
 | [`PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01`](PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md) | Docs cleanup — execution plan |
 | [`PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02`](PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md) | Plan — consolidate the agent pane's two (really three) separate login CTAs |
 | [`PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03`](PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md) | Plan — fix MuxBus token persistence on Windows (Credential Manager 2560-byte cap) |
+| [`REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26`](REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) | Report: auto-detecting long-running tool calls (sleep and beyond) and docking them — status refresh, 2026-07-26 |
 | [`SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06`](SPEC_A6_AGENT_PANE_MIRROR_REMOVAL_2026_09_06.md) | SPEC: A6 — remove the agent-pane `AgentAtoms` mirror; render from the reducer stores |
 | [`SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02`](SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md) | Spec: ABF Import UI (Phase 3) — Selective Import + Collision Handling |
 | [`SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01`](SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md) | Spec: ABF v0.1 — Single-File Format + Importer (Phase 2) |
@@ -379,6 +381,7 @@ partial list.
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17`](SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md) | SPEC: Universal Pane Tabs — Every Pane Header Becomes a Tab Strip (cmux-Style Redesign) |
+| [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16`](SPEC_SECRETS_LOCAL_BUCKET_SPLIT_2026_09_16.md) | SPEC: Split local-machine credentials out of `services/infra` into `services/local` |
 | [`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04`](SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md) | Spec: optional system-tray + persistent background service, cross-platform |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
@@ -390,6 +393,7 @@ partial list.
 |---|---|
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17`](PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17.md) | Plan — enforce the same per-agent Claude auth isolation on macOS that already holds on Windows |
+| [`REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26`](REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) | Bashwrap, the Dock, and the Process Broker — a Seventh Mechanism Nobody Wired Up |
 | [`SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05`](SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md) | SPEC — Activity dock: title over-truncates; tail glyph renders wrong near the time |
 | [`SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22`](SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22.md) | Agent Busy Bar (Marching Ants) Refinement |
 | [`SPEC_AGENT_DELETE_2026_09_16`](SPEC_AGENT_DELETE_2026_09_16.md) | SPEC: Agent Row Actions Menu — Delete + Duplicate (My Agents picker) |
@@ -431,6 +435,7 @@ partial list.
 | [`SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22`](SPEC_FLOATING_PANE_DND_RETHINK_2026_06_22.md) | Floating-pane DnD lifecycle — architecture rethink |
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
+| [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03`](SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md) | SPEC — In-app (no-shell) Claude OAuth login, revived, at all three auth surfaces |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
@@ -719,6 +724,7 @@ partial list.
 | [`SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23`](SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md) | SPEC: Restore keyboard focus to the active pane on window re-activation (Windows) |
 | [`SPEC_WINDOW_TITLE_FORMAT_2026-05-13`](SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md) | SPEC: Window Title Format — `Window - Tab - AgentMux` |
 | [`SPEC_WINDOW_TRANSPARENCY`](SPEC_WINDOW_TRANSPARENCY.md) | Spec: Full Window Transparency |
+| [`SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29`](SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) | SPEC: "Working…" State — Liveness Model (rethink, not rewrite) |
 | [`SPEC_WORKSPACE_TAB_SIZING_2026-05-27`](SPEC_WORKSPACE_TAB_SIZING_2026-05-27.md) | Spec: Workspace Tab Sizing — Editor-Tab Parity |
 | [`SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12`](SPEC_WRITE_STATE_NDJSON_RESTORE_2026_06_12.md) | SPEC: write_state Option 4 — NDJSON-Reconstructed Snapshot (Schema v2) |
 | [`agent-pane-document-reducer-2026-05-03`](agent-pane-document-reducer-2026-05-03.md) | Agent Pane Document Reducer — root-cause + architecture spec |
@@ -751,6 +757,7 @@ partial list.
 | [`ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06`](ARCHITECTURE_NETWORK_CREDENTIAL_MAP_2026_09_06.md) | Architecture: network credential → route map |
 | [`SPEC_DECISION_PROMPT_DESIGN_2026_04_25`](SPEC_DECISION_PROMPT_DESIGN_2026_04_25.md) | Decision Prompt — Cohesive Design (Step-Back Doc) |
 | [`SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20`](SPEC_POOL_COVERAGE_AND_ROADMAP_2026_06_20.md) | Pre-warmed Window Pool — Coverage Map and Implementation Roadmap |
+| [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | TRACKING — Agent availability & automatic backgrounding |
 
 ### historical
 
@@ -763,6 +770,7 @@ partial list.
 
 | Spec | Title |
 |---|---|
+| [`REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16`](REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) | Report: detecting blocking/long-running tool calls (sleep and beyond), returning the pane to the user, and dock lifecycle — 2026-07-16 |
 | [`SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09`](SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09.md) | SPEC — Account adoption: piggyback an unlinked agent onto an existing login |
 | [`SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06`](SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md) | Spec: Continuous AgentWorkingRow background through the scrollbar gutter |
 | [`SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24`](SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) | SPEC: Composer strip — balance misc elements across left/right zones |
@@ -1032,12 +1040,6 @@ section above, do not bulk-restamp them.
 |---|---|
 | [`SPEC_TAB_WINDOW_DRAG_CONSOLIDATION_2026_07_13`](SPEC_TAB_WINDOW_DRAG_CONSOLIDATION_2026_07_13.md) | Spec: Tab / Window / Pane Drag — Consolidated Status & Roadmap |
 
-**`decided`**
-
-| Spec | Title |
-|---|---|
-| [`REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26`](REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) | Bashwrap, the Dock, and the Process Broker — a Seventh Mechanism Nobody Wired Up |
-
 **`decision`**
 
 | Spec | Title |
@@ -1059,7 +1061,6 @@ section above, do not bulk-restamp them.
 | [`SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14`](SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md) | Pre-launch auth — complete user stories + state machine |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
 | [`SPEC_STORE_MODULARIZATION_2026_05_27`](SPEC_STORE_MODULARIZATION_2026_05_27.md) | SPEC: `wstore` → `store` rename + modularization |
-| [`SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29`](SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) | SPEC: "Working…" State — Liveness Model (rethink, not rewrite) |
 | [`container-agent-runtime`](container-agent-runtime.md) | Spec: Container Agent Runtime |
 | [`gpu-and-extended-system-metrics`](gpu-and-extended-system-metrics.md) | Spec: GPU Monitoring & Extended System Metrics |
 
@@ -1126,7 +1127,6 @@ section above, do not bulk-restamp them.
 |---|---|
 | [`REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04`](REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md) | Report: agent pane blank-load period + brain-logo loading indicator |
 | [`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md) | Report: agent/swarm pane loading, ambient-call flood, and stale status |
-| [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`agent-pane-icon-debug`](agent-pane-icon-debug.md) | Agent Pane Icon Buttons — Debug Log |
 
 **`no`**
@@ -1286,8 +1286,6 @@ section above, do not bulk-restamp them.
 | [`REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16`](REPORT_AGENT_IDENTITY_HISTORY_FRAGMENTATION_2026_08_16.md) | Agent Identity/History Fragmentation Across Builds — Root Cause and a Fast-Lookup Design |
 | [`REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17`](REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md) | Conversation Continuity Across a Version/Channel Switch — Verification Report |
 | [`REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16`](REPORT_LONGRUNNING_SUBAGENT_SWARM_CONSOLIDATION_2026_07_16.md) | Report: long-running processes, subagents, and the Swarm pane — consolidated state (2026-07-16) |
-| [`REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26`](REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md) | Report: auto-detecting long-running tool calls (sleep and beyond) and docking them — status refresh, 2026-07-26 |
-| [`REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16`](REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md) | Report: detecting blocking/long-running tool calls (sleep and beyond), returning the pane to the user, and dock lifecycle — 2026-07-16 |
 | [`REPORT_REDUCER_STACK_AUDIT_2026_07_26`](REPORT_REDUCER_STACK_AUDIT_2026_07_26.md) | Reducer Stack Audit — Post-Mortem on Duplication, Coupling, and Modularization |
 
 **`research`**
