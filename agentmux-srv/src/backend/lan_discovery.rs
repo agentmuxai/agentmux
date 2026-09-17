@@ -45,14 +45,29 @@ const LAN_PEER_QUERY_TIMEOUT_SECS: u64 = 2;
 /// fixed cutoff. 300s remains only as a safety floor against a peer that
 /// somehow advertises an implausibly small TTL.
 const LAN_PEER_STALE_TIMEOUT_FLOOR_SECS: u64 = 300;
+/// Ceiling on `other_ttl_secs`-driven staleness (ReAgent P1, PR #3301):
+/// `other_ttl_secs` is taken directly from a peer's own mDNS advertisement,
+/// which this file already treats as adversarial elsewhere (see
+/// `LAN_AGENT_NAMES_MAX_*` above — "anything that can fake an mDNS
+/// advertisement... makes it into `self.instances`"). Without a cap, a
+/// spoofed peer advertising `other_ttl` near `u32::MAX` (~136 years) would be
+/// honored by both `get_instances()` and the periodic GC, permanently pinning
+/// it as "alive" — defeating the entire self-pruning design this exists for.
+/// 2x the RFC 6762 §10 / mdns-sd 0.12 default (4500s) comfortably covers every
+/// legitimate cadence actually observed on this LAN (narko/starpower's ~46min
+/// gaps) with margin, while bounding attacker-controlled input the same way
+/// the byte/count/length caps above already do.
+const LAN_PEER_STALE_TIMEOUT_CEIL_SECS: u64 = 9000;
 
 /// A peer is stale once `last_seen` exceeds ITS OWN advertised `other_ttl` —
 /// the standards-defined lifetime of the PTR/TXT records that make up an mDNS
 /// announcement — not one fixed cutoff shared by every peer regardless of how
-/// often it actually re-announces. Falls back to
-/// `LAN_PEER_STALE_TIMEOUT_FLOOR_SECS` only as a floor.
+/// often it actually re-announces. Clamped between
+/// `LAN_PEER_STALE_TIMEOUT_FLOOR_SECS` (guards an implausibly small
+/// advertised TTL) and `LAN_PEER_STALE_TIMEOUT_CEIL_SECS` (guards an
+/// adversarially large one — `other_ttl_secs` is untrusted peer input).
 fn peer_staleness_window_secs(other_ttl_secs: u32) -> u64 {
-    (other_ttl_secs as u64).max(LAN_PEER_STALE_TIMEOUT_FLOOR_SECS)
+    (other_ttl_secs as u64).clamp(LAN_PEER_STALE_TIMEOUT_FLOOR_SECS, LAN_PEER_STALE_TIMEOUT_CEIL_SECS)
 }
 /// How often each known LAN peer is asked for its agent-name list. Peers are
 /// few (one per machine) and the request is a single small GET, so this is
@@ -2168,6 +2183,48 @@ mod handle_event_tests {
         assert!(
             discovery.get_instances().is_empty(),
             "a peer with no ServiceResolved in over its own advertised TTL must not be reported"
+        );
+    }
+
+    #[test]
+    fn peer_staleness_window_secs_ceils_an_adversarially_large_advertised_ttl() {
+        // ReAgent P1, PR #3301: other_ttl_secs comes straight from a peer's own
+        // (spoofable) mDNS advertisement — this file already treats that input
+        // as adversarial elsewhere (LAN_AGENT_NAMES_MAX_*). Without a ceiling, a
+        // peer claiming an other_ttl near u32::MAX (~136 years) would be
+        // honored forever, permanently pinning it as "alive" and defeating the
+        // entire staleness design.
+        assert_eq!(
+            super::peer_staleness_window_secs(u32::MAX),
+            super::LAN_PEER_STALE_TIMEOUT_CEIL_SECS,
+            "an implausibly large advertised TTL must be capped, not honored as-is"
+        );
+    }
+
+    #[test]
+    fn get_instances_hides_a_peer_with_an_adversarial_ttl_once_the_ceiling_elapses() {
+        let discovery = test_discovery("self-id", 56023);
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[("instance_id", "peer-1"), ("hostname", "realhost")],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+        assert_eq!(discovery.get_instances().len(), 1);
+
+        {
+            let mut instances = discovery.instances.write();
+            for inst in instances.values_mut() {
+                inst.other_ttl_secs = u32::MAX;
+                inst.last_seen = inst.last_seen.saturating_sub(super::LAN_PEER_STALE_TIMEOUT_CEIL_SECS + 1);
+            }
+        }
+
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a peer claiming an implausibly large TTL must still expire at the ceiling, \
+             not be pinned as permanently alive"
         );
     }
 

@@ -129,15 +129,27 @@ reason related to the peer's actual availability.
 like `address`/`port` — it's a DNS record TTL, not TXT payload content, so
 it's always present even on the blank-TXT re-resolutions this file already
 works around elsewhere). Staleness is now `peer_staleness_window_secs`, which
-uses **that peer's own advertised TTL**, falling back to the old 300s value
-only as a floor against a peer that somehow advertises an implausibly small
-one:
+uses **that peer's own advertised TTL**, clamped between the old 300s value
+(a floor against a peer advertising an implausibly small TTL) and a new 9000s
+ceiling:
 
 ```rust
 fn peer_staleness_window_secs(other_ttl_secs: u32) -> u64 {
-    (other_ttl_secs as u64).max(LAN_PEER_STALE_TIMEOUT_FLOOR_SECS)
+    (other_ttl_secs as u64).clamp(LAN_PEER_STALE_TIMEOUT_FLOOR_SECS, LAN_PEER_STALE_TIMEOUT_CEIL_SECS)
 }
 ```
+
+**The ceiling was added after review** (ReAgent P1 on PR #3301): the first
+version of this fix only floored `other_ttl_secs`, with no upper bound.
+That field comes directly from a peer's own mDNS advertisement, which this
+file already treats as adversarial input elsewhere (`LAN_AGENT_NAMES_MAX_*`,
+a few lines above). Without a ceiling, a spoofed peer advertising `other_ttl`
+near `u32::MAX` (~136 years) would have been honored by both
+`get_instances()` and the periodic GC, permanently pinning it as "alive" and
+defeating the entire self-pruning design this fix exists to restore. 9000s
+(2x the RFC/mdns-sd default) comfortably covers every legitimate cadence
+observed on this LAN with margin, while bounding untrusted input the same
+way the file's existing byte/count/length caps do.
 
 Both call sites (`get_instances()` and the periodic GC loop) now key off this
 per-peer window instead of the single constant. Since `mdns-sd` 0.12 exposes
