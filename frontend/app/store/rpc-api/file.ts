@@ -37,6 +37,20 @@ import type { OpenInShellReq } from "@/types/rpc/OpenInShellReq";
 import type { RenameEditorFileReq } from "@/types/rpc/RenameEditorFileReq";
 import type { RenameEditorFileResult } from "@/types/rpc/RenameEditorFileResult";
 
+// The LSP wire shapes are GENERATED from their Rust definitions by ts-rs.
+// They used to be function-local `Cmd` structs inside each handler, which is
+// exactly why the frontend restated all three by hand: a type declared inside
+// a closure cannot be named, let alone generated from.
+export type { LspSendReq } from "@/types/rpc/LspSendReq";
+export type { LspStartReq } from "@/types/rpc/LspStartReq";
+export type { LspStartResult } from "@/types/rpc/LspStartResult";
+export type { LspStopReq } from "@/types/rpc/LspStopReq";
+
+import type { LspSendReq } from "@/types/rpc/LspSendReq";
+import type { LspStartReq } from "@/types/rpc/LspStartReq";
+import type { LspStartResult } from "@/types/rpc/LspStartResult";
+import type { LspStopReq } from "@/types/rpc/LspStopReq";
+
 export const FileApi = {
     FileAppendCommand(client: RpcClient, data: FileData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("fileappend", data, opts);
@@ -187,15 +201,15 @@ export const FileApi = {
 
     LspStartCommand(
         client: RpcClient,
-        data: { language: string; file_path: string },
+        data: LspStartReq,
         opts?: RpcOpts,
-    ): Promise<{ server_id: string; workspace_root: string }> {
+    ): Promise<LspStartResult> {
         return client.rpcCall("lspstart", data, opts);
     },
 
     LspSendCommand(
         client: RpcClient,
-        data: { server_id: string; message: unknown },
+        data: LspSendReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("lspsend", data, opts);
@@ -203,7 +217,7 @@ export const FileApi = {
 
     LspStopCommand(
         client: RpcClient,
-        data: { server_id: string },
+        data: LspStopReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("lspstop", data, opts);

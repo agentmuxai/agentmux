@@ -61,6 +61,12 @@ export type {
     RunDroneResp,
 } from "./agent";
 export type {
+    LspSendReq,
+    LspStartReq,
+    LspStartResult,
+    LspStopReq,
+} from "./file";
+export type {
     AgentContent,
     AgentDefinition,
     AgentDefinitionCreateInput,
