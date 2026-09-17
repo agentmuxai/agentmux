@@ -59,6 +59,7 @@ See also:
 | [SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14](SPEC_PERSISTENT_SHELL_PHASE3_STOP_2026_06_14.md) | Stop / teardown for persistent shells |
 | [SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29](SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.md) | Input-latency spec |
 | [SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15](SPEC_TERM_EXIT_RESPAWN_LOOP_2026_09_15.md) | `exit` doesn't close the pane — dead close-on-exit code + `resync_controller` respawns a `STATUS_DONE` shell |
+| [SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17](SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17.md) | Shell-integration scripts deploy per instance — two running versions no longer overwrite each other's rcfiles (I6) |
 
 ## Browser Pane
 
@@ -303,6 +304,7 @@ partial list.
 | [`SPEC_SETTINGS_PANE_COMPLETION_2026_07_14`](SPEC_SETTINGS_PANE_COMPLETION_2026_07_14.md) | SPEC — Settings pane: fill out the remaining sections (completes SPEC_SETTINGS_PANE_2026_06_25) |
 | [`SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19`](SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md) | SPEC — Settings: new "Recording / Input" section (mic setup, engine config, test-your-mic) |
 | [`SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07`](SPEC_SHARED_FS_WATCHER_FRAMEWORK_2026_08_07.md) | SPEC: Shared filesystem-watcher framework — audit + design |
+| [`SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17`](SPEC_SHELL_INTEGRATION_PER_INSTANCE_ISOLATION_2026_09_17.md) | SPEC: Shell-integration scripts must be per-instance, not machine-global |
 | [`SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03`](SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md) | SPEC: Shift+drag group resize — move all sibling panes together on one splitter drag |
 | [`SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17`](SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md) | SPEC: Shift+drag group resize — fix borders that move opposite the drag direction |
 | [`SPEC_SLACK_WIDGET_GET_STARTED_URL_2026_09_16`](SPEC_SLACK_WIDGET_GET_STARTED_URL_2026_09_16.md) | SPEC: Slack widget should open Slack's get-started/create-workspace page, not the generic sign-in page |
