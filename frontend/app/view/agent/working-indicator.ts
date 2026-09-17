@@ -32,9 +32,14 @@
  * UNCHANGED by §2.3a below — it still gates optimistic `TurnStart`/auth-
  * failure bookkeeping and must not be redefined). A message that lands in
  * the HOLD path because of it is not held for long, though:
- * `useAgentCommands.ts`'s HOLD branch calls `turnHeldOnlyByBackgroundWork`
- * (exported below — the SAME function this module renders, not a second copy)
- * immediately after queueing and flushes right away if it applies. That flush
+ * `useAgentCommands.ts`'s HOLD branch calls THIS function immediately after
+ * queueing and flushes right away when it returns false — i.e. its condition
+ * is literally "the indicator is dark", not a re-derived subset. It must stay
+ * that way: an earlier revision called `turnHeldOnlyByBackgroundWork` alone
+ * and thereby dropped the `compacting`/`reconnecting` terms this function ORs
+ * in, so a compaction running during an otherwise-backgrounded turn kept the
+ * indicator lit while the send path flushed anyway (ReAgent P1 on #3340).
+ * That flush
  * is load-bearing, not an optimization: without it the indicator goes dark
  * while the message still sits in the "send now" panel until some later
  * tool-call boundary, which for a turn whose only remaining work is a detached

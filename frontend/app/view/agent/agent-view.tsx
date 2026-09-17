@@ -1997,6 +1997,10 @@ const AgentPresentationView = ({
     // User-message send + /login /clear slash intercepts + back-to-picker.
     // See hooks/useAgentCommands.ts.
     const commands = useAgentCommands({
+        // Threaded in so the hook's §2.3a eager-flush evaluates the same
+        // whole-predicate `paneBusyForInput` this view renders (ReAgent P1 on
+        // PR #3340), rather than a subset that could disagree with it.
+        showingLaunchActivity,
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
         model: paneModel,

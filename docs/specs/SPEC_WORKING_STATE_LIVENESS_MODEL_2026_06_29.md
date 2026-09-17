@@ -4,7 +4,7 @@
 > This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
 
 **Date:** 2026-06-29
-**Status:** Design note — for review before any code
+**Status:** Draft — design note, for review before any code
 **Author:** AgentX
 **Related:** `frontend/app/view/agent/useAgentStream.ts`, `frontend/app/store/agent-pane-state/reducer.ts`, `frontend/app/store/agent-pane-state/types.ts`, `frontend/app/view/agent/stream-parser.ts`
 

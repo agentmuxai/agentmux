@@ -6,7 +6,7 @@
 **Date:** 2026-08-14
 **Author:** Manoz
 **Verified against:** `main` @ `8c30af9a` (pulled fresh this session).
-**Status:** Root cause confirmed via direct log/source/git-history evidence. One residual detail (exact reason the watchdog timer stopped firing) narrowed to a single strong hypothesis, not yet confirmed live — flagged explicitly in §6. **Update:** the two confirmed dispatch-side gaps (§7 items 1 and the `SUBMIT_TIMEOUT_MS`/watchdog-reliability halves of item 1-2) have been fixed and opened as PR [#2575](https://github.com/agentmuxai/agentmux/pull/2575) (branch `manoz/fix-stuck-working-watchdog-gaps`) — see §8.
+**Status:** Implemented — root cause confirmed via direct log/source/git-history evidence. One residual detail (exact reason the watchdog timer stopped firing) narrowed to a single strong hypothesis, not yet confirmed live — flagged explicitly in §6. **Update:** the two confirmed dispatch-side gaps (§7 items 1 and the `SUBMIT_TIMEOUT_MS`/watchdog-reliability halves of item 1-2) have been fixed and opened as PR [#2575](https://github.com/agentmuxai/agentmux/pull/2575) (branch `manoz/fix-stuck-working-watchdog-gaps`) — see §8.
 **Triggered by:** user report — "AgentA in your same instance is stuck in 'Working...'"; user later directed "keep going, don't stop to ask, get to root cause, and write rigorous report to file"; then "push forward, let's get this solid... does it need an architecture rethink?"; then "yes, get to completion, open PRs with work, no need to ask."
 
 ## 0. Tooling / methodology notes (read this before trusting any `muxlog` output)

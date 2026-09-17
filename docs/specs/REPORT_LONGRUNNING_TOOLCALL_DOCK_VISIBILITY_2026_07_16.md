@@ -3,7 +3,10 @@
 > **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
 > This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
 
-**Status:** Report — analysis + design direction, not yet implemented (one adjacent live bug found and fixed en route, see §5).
+**Status:** Superseded
+**Superseded-by:** docs/specs/REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md
+
+Original status — report: analysis + design direction, not yet implemented (one adjacent live bug found and fixed en route, see §5).
 **Author:** Agent2
 **Verified against:** `main` @ `3d1ce73c` (pulled 2026-07-16). The dock subagent-grouping fix referenced in §5 was independently landed twice this session — this report's own version (PR #2201) was closed in favor of AgentY-asaf's more complete PR #2203, which additionally added a full multi-member roster to the expanded view. §5 below is updated to describe #2203's shipped shape.
 **Related:**

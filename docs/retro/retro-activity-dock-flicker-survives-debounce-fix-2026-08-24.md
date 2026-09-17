@@ -6,7 +6,7 @@
 **Date:** 2026-08-24
 **Reported by:** repo owner, on `0.55.23` — "the docked items still show, then
 disappear... it should be the pulsating brain until everything is ready."
-**Status:** root-caused and **fixed**, same day — §5 options 1+2
+**Status:** Implemented — root-caused and **fixed**, same day — §5 options 1+2
 (scoped/persisted `subagent:backfill_status` WPS event + gating
 `block.tsx`'s `ready()`/BrainSpinner on it) implemented in the PR this retro
 shipped alongside (`agenta/subagent-backfill-gate-brainspinner`). §5 option 3

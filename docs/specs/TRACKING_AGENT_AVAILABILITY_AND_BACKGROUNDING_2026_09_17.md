@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-17
 **Type:** Tracking doc — canonical location for this problem family. Not a design spec.
-**Status:** Live. Update this file when anything below changes state.
+**Status:** Living — a continuously maintained tracking reference with no terminal state. Update it when anything below changes.
 **Owner prompt (verbatim, 2026-09-17):**
 
 > anything the agent does that is long running or runs in the background gets a composer dock. if the agent is only working on those composer dock entries (not busy on anything else) if the user types in a message, the agent immediately handles it. it is simply backgrounding anything long-running automatically, keeping the agent available.
@@ -64,27 +64,22 @@ The live predicate distinguishes them correctly (`hasAttachedBackgroundWork` vs 
 | Backgrounded tasks narrated into the conversation | #3169 |
 | Turn-phase timeline logging (`muxlog phases` — the diagnostic for this family) | `SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md` |
 
-### 3.2 Implemented but NOT landed — at risk
+### 3.2 In review
 
-**The 2026-09-17 policy reversal (§2.3a) was uncommitted working-tree WIP** when this doc was written — no branch, no PR, no commit, in one clone only. This is the change that makes §1's invariant true: the composer reopens once only dock work remains. It is the single highest-value unlanded item in this family.
+**The 2026-09-17 policy reversal (§2.3a) is PR #3340.** It was uncommitted working-tree WIP when this doc was written — no branch, no commit, one clone only. This is the change that makes §1's invariant true: the composer reopens once only dock work remains.
 
-- **Its docs half is now preserved** — the §2.3a writeup in `REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md` rode in with this tracking commit.
-- **Its code half is still uncommitted** and deliberately NOT in that commit, because it needs its own review:
+Landing it surfaced two gaps beyond it merely being uncommitted, both worth remembering:
 
-```
-frontend/app/view/agent/activity/tool-adapter.ts
-frontend/app/view/agent/agent-view.tsx
-frontend/app/view/agent/working-indicator.ts
-frontend/app/view/agent/working-indicator.test.ts
-```
+- **It did not typecheck.** `agent-view.tsx` called `hasBlockingForegroundToolCall` without importing it.
+- **The send path was never updated.** `wasAlreadyWorking` reads the raw turn phase, so the indicator would have gone dark while the message still sat in the "send now" queue until a tool-call boundary that, for a turn whose only remaining work is a detached process, may never arrive. Indicator and gate disagreeing is this family's signature bug — it would have shipped inverted. The HOLD branch now flushes via the same exported predicate the indicator renders (`turnHeldOnlyByBackgroundWork`).
 
-Land those four first — everything else in §3.3 assumes them.
+**Local-verification blind spot found en route:** 47 test suites under `frontend/app/view/agent/` fail to *load* in a clean checkout (`ERR_INVALID_ARG_VALUE: ... 'file:///@solid-refresh'`), reproducing on `main` with no local changes. Everything in that directory is effectively CI-only today. Plausibly a contributor to why this area keeps regressing; deserves its own issue.
 
 ### 3.3 Open work
 
 | # | Item | Depends on | Notes |
 |---|---|---|---|
-| 1 | **Land §3.2's WIP** | — | Commit, PR, review, merge. Everything else assumes it. |
+| 1 | **Land §3.2's policy reversal** | — | **In review as PR #3340.** Everything else assumes it. |
 | 2 | **Pre-dispatch auto-backgrounding** | none | The `PreToolUse` hook already exists (`agent_config.rs`, `agent_handlers/input.rs`) and `muxspect.mjs` already *reads* `run_in_background` — but only to print a `bg` column. Making it *write* `run_in_background: true` for obviously-long commands is what makes the owner's sentence true by construction rather than by luck. Needs a false-positive policy first — see `SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md` §5.1. |
 | 3 | **Mid-flight toggle — feasibility spike** | none | **Blocked on an unanswered question, not on design.** Agent panes are hosted via `PersistentSubprocessController`: no PTY, stream-json, `send_input` explicitly rejects raw bytes. Claude Code's `Ctrl+B` is documented interactive-TUI-only. Whether *any* mechanism reaches a stream-json-hosted session is unverified. Time-boxed spike, then scope — or drop. §1 of the same spec. |
 | 4 | **The missing `live`/`replay` wire flag** | none | The root cause behind repeated dock flicker. `subagent_watcher`'s `jsonl.rs` already computes `live: bool` and never puts it on the wire, so two teams independently built two different local workarounds for the same gap (an event-count debounce; a bespoke status-correction RPC). One generic field removes both. `REPORT_..._ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md` §3.3, Tier 1. |

@@ -3002,6 +3002,59 @@ describe("useAgentCommands — §2.3a: background-only turns don't hold messages
         });
     });
 
+    // ReAgent P1 on PR #3340. The first cut of this flush called
+    // turnHeldOnlyByBackgroundWork directly, which omits the compacting /
+    // reconnecting terms paneBusyForInput ORs in on top of the turn check. A
+    // compaction running during an otherwise-backgrounded turn therefore kept
+    // the indicator correctly lit while the send path flushed anyway — the same
+    // indicator/gate divergence, in a new place, and made reproducible by this
+    // very eager-flush in exactly the case (no other tool activity) where
+    // compaction is the only thing running.
+    it("still holds while a compaction is in flight, even with nothing else blocking", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentNodes: () => [],
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            hub.agentInput.mockResolvedValue(undefined);
+            streamingWithBackgroundTask(model);
+            model.dispatchPane(
+                { type: "CompactionStarted", trigger: "auto", at: Date.now() },
+                "system",
+            );
+            expect(paneSnapshot(BLOCK_ID)?.compacting).not.toBeNull();
+            hub.agentInput.mockClear();
+
+            await commands.sendMessage("typed mid-compaction", true);
+
+            expect(commands.hasHeldMessages()).toBe(true);
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
     it("still holds when a genuine second tool call is running", async () => {
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
