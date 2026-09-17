@@ -15,6 +15,7 @@ See also:
 
 | Spec | Summary |
 |---|---|
+| [**TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17**](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) | **CANONICAL tracking doc** (issue #3338) for the dock / working-indicator / input-gate / auto-backgrounding family — read this before any of the ~22 docs it indexes |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |

@@ -66,17 +66,19 @@ The live predicate distinguishes them correctly (`hasAttachedBackgroundWork` vs 
 
 ### 3.2 Implemented but NOT landed — at risk
 
-**The 2026-09-17 policy reversal (§2.3a) is uncommitted working-tree WIP.** No branch, no PR, no commit. It exists only as modified files in one clone:
+**The 2026-09-17 policy reversal (§2.3a) was uncommitted working-tree WIP** when this doc was written — no branch, no PR, no commit, in one clone only. This is the change that makes §1's invariant true: the composer reopens once only dock work remains. It is the single highest-value unlanded item in this family.
+
+- **Its docs half is now preserved** — the §2.3a writeup in `REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md` rode in with this tracking commit.
+- **Its code half is still uncommitted** and deliberately NOT in that commit, because it needs its own review:
 
 ```
-docs/reports/REPORT_AGENT_PANE_PROGRESS_INDICATORS_CONSOLIDATION_2026_09_09.md
 frontend/app/view/agent/activity/tool-adapter.ts
 frontend/app/view/agent/agent-view.tsx
 frontend/app/view/agent/working-indicator.ts
 frontend/app/view/agent/working-indicator.test.ts
 ```
 
-This is the change that makes §1's invariant true — the composer reopens once only dock work remains. **It is the single highest-value unlanded item in this family and it is one `git clean` from gone.** Land it first.
+Land those four first — everything else in §3.3 assumes them.
 
 ### 3.3 Open work
 
