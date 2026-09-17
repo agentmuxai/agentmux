@@ -160,32 +160,74 @@ than silently claimed as fully verified.
 
 ---
 
-## Task Group C — Explicit scope boundary for this pass
+## Task Group C — extended to every remaining widget type (done, 2026-09-17)
 
-**In scope for this pass** (Task Groups A + B only): the new shared component
-exists and is proven correct against the two view types that already had a
-narrower version of this feature. This alone is a real, shippable, testable unit
-of work — it is the "collapse two rows into one" fix the repo owner specifically
-called out, delivered for the two view types where it's most visible today (agent
-and terminal are the most-used panes).
+**Originally scoped as "explicitly deferred" — revised live** after the repo owner
+tested Task Groups A/B locally and asked directly: *"don't all panes need to be
+generalized to this?"* Confirmed yes (that's the design spec's whole point), and
+was asked to keep going rather than stop at agent/term.
 
-**Explicitly deferred to a follow-up plan** (do not attempt in this pass — each of
-these is its own multi-task effort per the design spec's §5 phasing):
-- Onboarding browser/editor (+ the editor files-tabs migration, §7 resolution 3)
-  onto `PaneHeaderTabStrip` — design spec §5 Phase 1's remaining scope.
-- Onboarding sysinfo/swarm/armory/media/drone/help/warden — §5 Phases 2/4.
+**What actually shipped, and how** (materially different from — and cheaper than —
+the "9 bespoke Chrome components" the original Task Group C draft implied):
+instead of writing a separate `XPaneChrome` per remaining widget type (mirroring
+`AgentPaneChrome`/`TermPaneChrome`'s domain-specific richness), built ONE shared
+`genericRenderPaneChrome` (`frontend/app/element/GenericPaneChrome.tsx`) using only
+the already view-agnostic primitives `layoutStack.ts`/`action-widgets-config.ts`
+already provided — `blockStack` for tabs, `setActiveBlockInStack`/
+`closeBlockInStack` for switch/close, `buildPaneWidgetMenuItems` +
+`addWidgetAsPaneTab` (Task A3, reused as originally designed) for "+" (opens the
+SAME native widget picker the widget bar's own right-click menu already builds, at
+the "+" click position — required extending `PaneTabStrip`'s `onAdd` signature to
+optionally receive the `MouseEvent`, a backward-compatible addition every existing
+caller ignores). Every one of browser/editor/sysinfo(+its `cpuplot` alias)/swarm/
+armory/media/drone/help/warden registers this SAME function via a one-line
+`renderPaneChrome = genericRenderPaneChrome` field in its own `ViewModel` class —
+see any of those 9 files for the pattern (3 of them — media/help/sysinfo — also
+needed their constructor extended to actually accept the `nodeModel` param
+`block.tsx`'s `makeViewModel` always passes positionally as arg 2 to EVERY
+registered ViewModel class regardless of its own declared signature; sysinfo's own
+constructor had been silently receiving that NodeModel object into a param
+misnamed/mistyped `viewType: string` the whole time — a real, harmless-in-practice
+pre-existing bug found and fixed as a necessary byproduct, not a gratuitous
+refactor).
+
+Also required (and easy to miss — caught this exact gap on the first `task dev`
+pass, not by reading alone): every newly-hoisted `ViewModel` needs its own
+`noHeader = () => this.nodeModel.paneChromeHoisted === true` field too, mirroring
+`AgentViewModel`'s/`TermViewModel`'s identical existing field — `pane-leaf-chrome.tsx`'s
+own doc comment for `HOISTS_OWN_CHROME` says so explicitly ("MUST also set
+`noHeader`... or its inline BlockFrame header and its hoisted one will both
+render"), and it is genuinely required: without it every one of these 9 panes
+would show a duplicate header. Verified this is NOT happening via `task dev` (a
+`grep` for "paneChromeHoisted" across the running dev log showed one transient
+HMR-staleness false-positive from an old, pre-edit `SysinfoViewModel` instance —
+resolved by a full restart, confirmed clean on fresh launch).
+
+`HOISTS_OWN_CHROME` (`pane-leaf-chrome.tsx`) now lists all 12 keys: `agent`,
+`term`, `browser`, `editor`, `sysinfo`, `cpuplot`, `swarm`, `armory`, `media`,
+`drone`, `help`, `warden`.
+
+**Still genuinely deferred** (unchanged from the original plan, none of this
+shipped in this pass):
 - The new keyboard shortcuts from §4.9's resolved table (`Ctrl:Shift:]`/`[`,
-  `Ctrl:Shift:T`, `Ctrl:Alt:[`/`]`, and `Cmd:w`'s redefinition) — these depend on
-  every onboarded view type behaving consistently under them, so they land
-  alongside Task Group C's next slice, not standalone.
+  `Ctrl:Shift:T`, `Ctrl:Alt:[`/`]`, and `Cmd:w`'s redefinition).
 - Tab reorder (drag + keyboard) and tear-off-from-stack (§7 resolution 5) — both
-  explicitly gated behind broader rollout / the separate drag-session refactor per
-  design spec §4.8.
-
-This boundary exists so Task Groups A/B produce a coherent, mergeable-when-approved
-unit rather than a sprawling, hard-to-review everything-at-once change — consistent
-with the design spec's own §5 phased-rollout reasoning, just applied one level
-more granularly (within Phase 1, not just across phases).
+  explicitly gated behind the separate drag-session refactor per design spec §4.8.
+- Editor's own files-tabs migration onto real `blockStack` semantics (§7
+  resolution 3) — editor now HAS the outer unified header (correctly showing/
+  hiding based on whether OTHER widget types have been pushed onto its Pane's
+  stack via the generic "+"), but its own internal multi-file tab strip
+  (`editor-tab-strip.tsx`, `editor-pane-state-store.ts`) is untouched and remains
+  a structurally separate mechanism, not yet unified into `blockStack` members.
+- **Deep, per-widget-type manual QA.** Verified via `task dev` that nothing
+  crashes and the app launches/HMRs cleanly with all 12 view types hoisted, but did
+  NOT individually click through browser/sysinfo/swarm/armory/media/drone/help/
+  warden's own "+"-opened widget picker, tab-switching, and tab-closing behavior
+  one by one — that is real, still-needed verification work, explicitly flagged
+  rather than claimed as done. A `GenericPaneChrome`-specific automated test (unit
+  tests exist for `PaneHeaderTabStrip` and the hoisting router, but not yet for
+  `genericRenderPaneChrome`'s own tab-derivation/add/close logic) is also a
+  legitimate gap — noted here rather than silently skipped.
 
 ---
 

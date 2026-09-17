@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
+import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -858,6 +859,12 @@ function derivedRunningStatus(
 
 export class SwarmViewModel implements ViewModel {
     viewType = "swarm";
+    renderPaneChrome = genericRenderPaneChrome;
+    // Suppresses BlockFrame's own inline header once chrome is hoisted —
+    // required whenever a view type is added to pane-leaf-chrome.tsx's
+    // HOISTS_OWN_CHROME, see that const's own doc comment. Mirrors
+    // AgentViewModel's/TermViewModel's identical field exactly.
+    noHeader = () => this.nodeModel.paneChromeHoisted === true;
     blockId: string;
     nodeModel: BlockNodeModel;
 

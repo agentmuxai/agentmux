@@ -10,6 +10,7 @@
 // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md
 
 import { getApi } from "@/app/store/app-api";
+import { genericRenderPaneChrome } from "@/app/element/GenericPaneChrome";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -107,9 +108,16 @@ class MediaViewModel implements ViewModel {
     viewType: string;
     blockId: string;
     viewName: Accessor<string>;
+    // Universal Pane Tabs — every registered ViewModel is always
+    // constructed as `new ctor(blockId, nodeModel)` (block.tsx's
+    // `makeViewModel`); previously unused here, now needed for `noHeader`.
+    nodeModel: BlockNodeModel;
+    renderPaneChrome = genericRenderPaneChrome;
+    noHeader = () => this.nodeModel.paneChromeHoisted === true;
 
-    constructor(blockId: string) {
+    constructor(blockId: string, nodeModel: BlockNodeModel) {
         this.viewType = "media";
+        this.nodeModel = nodeModel;
         this.blockId = blockId;
 
         // Header title — file basename of the persisted path, so an
