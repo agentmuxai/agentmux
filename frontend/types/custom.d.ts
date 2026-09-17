@@ -50,6 +50,7 @@ declare global {
         agents: string[];
         first_seen: number;
         last_seen: number;
+        other_ttl_secs: number;
     };
 
     // Editor file-tree row. Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
