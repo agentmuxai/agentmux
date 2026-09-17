@@ -23,7 +23,6 @@ import { For, Show, createSignal, onCleanup, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { NativeMemoryHistoryModel, sourceLabel, sourceWarning } from "../native-memory-history-model";
 import "./NativeMemoryHistoryPanel.scss";
-import type { NativeMemoryDiffResult } from "@/app/store/rpc-api";
 
 interface NativeMemoryHistoryPanelProps {
     agentId: string;

@@ -54,7 +54,6 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/mos", () => ({ makeORef: (kind: string, id: string) => `${kind}:${id}` }));
 
 import { runProviderLogin } from "./run-provider-login";
-import type { IdentityAccount } from "@/app/store/rpc-api";
 
 const claude = {
     id: "claude",

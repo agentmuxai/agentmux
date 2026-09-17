@@ -26,7 +26,6 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import type { IdentityAccount } from "@/app/store/rpc-api";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
