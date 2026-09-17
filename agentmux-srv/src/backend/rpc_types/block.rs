@@ -392,7 +392,8 @@ pub struct CommandWriteAgentConfigResult {
 }
 
 /// Data for ResolveCliCommand — detect or install a CLI tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandResolveCliData {
     /// Provider ID (e.g. "claude", "codex", "gemini")
     pub provider_id: String,
@@ -414,7 +415,8 @@ pub struct CommandResolveCliData {
 }
 
 /// Result from ResolveCliCommand
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct ResolveCliResult {
     /// Absolute path to the CLI binary
     pub cli_path: String,
@@ -425,7 +427,8 @@ pub struct ResolveCliResult {
 }
 
 /// Data for CheckCliAuthCommand — check if CLI is authenticated.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandCheckCliAuthData {
     /// Absolute path to CLI binary
     pub cli_path: String,
@@ -439,7 +442,8 @@ pub struct CommandCheckCliAuthData {
 }
 
 /// Result from CheckCliAuthCommand
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CheckCliAuthResult {
     pub authenticated: bool,
     pub email: Option<String>,
@@ -449,7 +453,8 @@ pub struct CheckCliAuthResult {
 }
 
 /// Input for RunCliLoginCommand — spawns the CLI login flow and extracts the OAuth URL
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct CommandRunCliLoginData {
     pub cli_path: String,
     pub login_args: Vec<String>,
@@ -458,7 +463,8 @@ pub struct CommandRunCliLoginData {
 }
 
 /// Result from RunCliLoginCommand
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
 pub struct RunCliLoginResult {
     /// OAuth URL extracted from the CLI's output (open in browser)
     pub auth_url: Option<String>,
