@@ -7,12 +7,11 @@ populated with the 7 migrated keys plus full
 `$schema_version`/`$changelog`/`$environment`/`$last_updated`/`$updated_by`
 metadata. Originals remain untouched in `services/infra` pending Phase 3/4.
 
-`secrets verify services/local` will fail until `a5af/dev-tools#370` merges
-(the CLI's `$environment` validator only recognized `dev`/`qa`/`prod`/`infra`;
-that PR adds `local`) — not a data problem, a tooling-version gap. Companion
-doc PR: `a5af/shared-infrastructure#475` (documents `services/infra` and
-`services/local` as cross-cutting buckets outside the three-environment
-deployment model).
+`a5af/dev-tools#370` (adds `local` to the CLI's `$environment` enum) has
+merged and published as `@a5af/secrets@1.1.8` — `secrets verify services/local`
+now passes cleanly. Companion doc PR: `a5af/shared-infrastructure#475`
+(documents `services/infra` and `services/local` as cross-cutting buckets
+outside the three-environment deployment model).
 
 ## Problem
 
