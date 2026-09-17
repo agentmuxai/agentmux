@@ -76,6 +76,15 @@ import type { GetEditorRootsResult } from "@/types/rpc/GetEditorRootsResult";
 import type { ListEditorDirReq } from "@/types/rpc/ListEditorDirReq";
 import type { ListEditorDirResult } from "@/types/rpc/ListEditorDirResult";
 
+// The four watcher request shapes, GENERATED like the rest of this file.
+export type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+export type { WatchEditorFileReq } from "@/types/rpc/WatchEditorFileReq";
+export type { WatchMediaDirReq } from "@/types/rpc/WatchMediaDirReq";
+
+import type { UnwatchMediaDirReq } from "@/types/rpc/UnwatchMediaDirReq";
+import type { WatchEditorFileReq } from "@/types/rpc/WatchEditorFileReq";
+import type { WatchMediaDirReq } from "@/types/rpc/WatchMediaDirReq";
+
 export const FileApi = {
     FileAppendCommand(client: RpcClient, data: FileData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("fileappend", data, opts);
@@ -99,7 +108,7 @@ export const FileApi = {
     // docs/specs/SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md.
     WatchEditorFileCommand(
         client: RpcClient,
-        data: { path: string; block_id: string },
+        data: WatchEditorFileReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("watcheditorfile", data, opts);
@@ -107,7 +116,9 @@ export const FileApi = {
 
     UnwatchEditorFileCommand(
         client: RpcClient,
-        data: { path: string; block_id: string },
+        // Same type as the watch: an unwatch that cannot name exactly what the
+        // watch named leaks a watcher.
+        data: WatchEditorFileReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("unwatcheditorfile", data, opts);
@@ -128,7 +139,7 @@ export const FileApi = {
     // `{ path }` when a matching file is created/modified.
     WatchMediaDirCommand(
         client: RpcClient,
-        data: { path: string; block_id: string; extensions: string[] },
+        data: WatchMediaDirReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("watchmediadir", data, opts);
@@ -136,7 +147,7 @@ export const FileApi = {
 
     UnwatchMediaDirCommand(
         client: RpcClient,
-        data: { path: string; block_id: string },
+        data: UnwatchMediaDirReq,
         opts?: RpcOpts,
     ): Promise<void> {
         return client.rpcCall("unwatchmediadir", data, opts);

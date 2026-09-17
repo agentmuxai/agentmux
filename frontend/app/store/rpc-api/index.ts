@@ -30,6 +30,11 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    UnwatchMediaDirReq,
+    WatchEditorFileReq,
+    WatchMediaDirReq,
+} from "./file";
+export type {
     CommandReadEditorFileData,
     CommandReadEditorFileResult,
     CommandWriteEditorFileData,

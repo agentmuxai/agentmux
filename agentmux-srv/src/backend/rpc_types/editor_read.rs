@@ -139,3 +139,43 @@ pub struct GetEditorRootsResult {
     pub home: String,
     pub drives: Vec<EditorDrive>,
 }
+
+/// Request for `watcheditorfile` AND `unwatcheditorfile`.
+///
+/// Deliberately one type for both, unlike `CreateEditorFileReq` /
+/// `CreateEditorDirReq` which are separate despite having identical fields.
+/// The difference is that these two must address the SAME thing: an unwatch
+/// that does not name exactly what the watch named leaks a watcher. Sharing
+/// the type makes that a compile error rather than a leak.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct WatchEditorFileReq {
+    pub path: String,
+    /// Scopes the `editor:file_changed` event to `block:<block_id>`, and is
+    /// half of the watch key -- two panes watching one path each hold their
+    /// own registration.
+    pub block_id: String,
+}
+
+/// Request for `watchmediadir`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct WatchMediaDirReq {
+    pub path: String,
+    pub block_id: String,
+    /// Lowercase, no leading dot. Only files matching one of these raise
+    /// `media:file_changed`.
+    pub extensions: Vec<String>,
+}
+
+/// Request for `unwatchmediadir`.
+///
+/// Separate from `WatchMediaDirReq` rather than shared, because unwatching
+/// really does take fewer fields: the registration is keyed on
+/// (path, block_id) and the extension filter is not part of the key.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../frontend/types/rpc/")]
+pub struct UnwatchMediaDirReq {
+    pub path: String,
+    pub block_id: String,
+}
