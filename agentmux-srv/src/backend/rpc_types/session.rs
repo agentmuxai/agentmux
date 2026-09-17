@@ -3,7 +3,10 @@
 
 //! Session domain: activity summary, session archival, and agent-anchored
 //! session zones (read/write_state/append_output/archive/list_archives).
-//! See docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+//! (This used to cite a SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23
+//! design doc that was never committed — see the same note in
+//! backend/agent_session/mod.rs, which resolved the identical dangling
+//! citation. The zone layout documented there is the contract.)
 
 use serde::{Deserialize, Serialize};
 

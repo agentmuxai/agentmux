@@ -11,7 +11,9 @@
  * back to the per-block NDJSON ring-buffer replay when the read
  * returns no content (or when no `definitionId` is passed).
  *
- * Spec: SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+ * Spec: none — the SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23 doc this
+ * used to name was never committed. The zone layout in
+ * agentmux-srv/src/backend/agent_session/mod.rs is the contract.
  */
 
 import { createRoot, type Owner } from "solid-js";
