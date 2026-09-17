@@ -21,6 +21,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import type { DirEntry } from "@/app/store/rpc-api";
 import { createSignal, type Accessor } from "solid-js";
 
 export interface Root {

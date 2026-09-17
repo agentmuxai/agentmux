@@ -54,6 +54,7 @@ import { WpsEvent } from "@/app/store/mps-events";
 import { fireAndForget } from "@/util/util";
 import { createEffect, createMemo, createRoot, createSignal, type Accessor } from "solid-js";
 import { FileTreeModel } from "./file-tree-model";
+import type { CommandReadEditorFileResult } from "@/app/store/rpc-api";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
