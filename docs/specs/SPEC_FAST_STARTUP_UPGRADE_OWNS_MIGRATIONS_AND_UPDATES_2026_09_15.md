@@ -365,7 +365,8 @@ against these:
 
 | Phase | Scope | Notes |
 |---|---|---|
-| 1 | Launcher-owned maintenance state → quiesce (wait-for-exit) → snapshot → install staged update → `migrate` → relaunch; revive `srv_spawner.rs::run_migrate` | Constraint 2 lives or dies here. Suspending the supervisors' respawn/teardown handling is part of this phase, not an afterthought |
+| 1a | `agentmux-launcher/src/upgrade.rs`: `quiesce_srv` (real wait-for-exit, not a sleep — Constraint 2) + `run_migration_upgrade` (quiesces, then calls the revived `srv_spawner::run_migrate`). No snapshot step needed — `agentmux-srv migrate`'s own `apply_pending` already backs up under the migration lock before applying, so a launcher-side snapshot would be redundant, not a replacement. **Done** — landed standalone, not yet called from anywhere live. |
+| 1b | Wire 1a into an actual caller: the "suspend the supervisors' respawn/teardown handling" half, plus relaunching srv on success. Deliberately deferred until phase 2 decides the boot-gate shape — an upgrade-only srv mode most likely means srv never becomes a respawn-on-exit child of the normal supervised loop in the first place, which changes what "suspend the loop" even means. Wiring into today's 1000+-line `supervisor/{windows,unix}.rs` loops now would be guessing at an integration shape phase 2 gets to actually decide, against surface this repo has no way to exercise end-to-end outside a real multi-process launcher run (CLAUDE.md's I1–I6 isolation invariants). |
 | 2 | Fallible, non-mutating pending check (today's `count_pending_migrations` is neither); upgrade-only srv mode; full-window blocking upgrade screen (§4.2) | The actual "no migrations at startup" change. The backend mode is the gate — the screen alone is not |
 | 3 | Panel rewire: State E reachable *before* any automatic attempt; summarize + scroll per §4.4 | Mostly frontend |
 | 4 | Instrument + relocate 4c–4f; enforce the §6 budget | Independent of 1–3, can run in parallel |
