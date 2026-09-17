@@ -36,12 +36,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Raw `[{path, content}]` entry shape, shared by `bundle.import`'s `files`
-/// input and the Phase 3 `bundle.import.preview`/`.commit` handlers.
-#[derive(serde::Deserialize, Default)]
-struct FileEntry {
-    path: String,
-    content: String,
-}
+/// input and the Phase 3 `bundle.import.preview`/`.commit` handlers. Now one
+/// definition in rpc_types rather than a private copy here, so the generated
+/// bindings and this file cannot disagree about it.
+use crate::backend::rpc_types::BundleImportFileEntry as FileEntry;
 
 /// Normalize a `bundle.upsert` request body into the shape the `Bundle` struct
 /// deserializes from, so the App API accepts the request exactly as documented
@@ -2268,15 +2266,15 @@ fn resolve_import_input(
     Ok(ResolvedImportInput { files: capped_files, intake_warnings, content_digest })
 }
 
-#[derive(serde::Deserialize, Default)]
-struct PreviewReq {
-    #[serde(default)]
-    file_path: Option<String>,
-    #[serde(default)]
-    zip_base64: Option<String>,
-    #[serde(default)]
-    files: Option<Vec<FileEntry>>,
-}
+// `PreviewReq`/`CommitReq`/`SkillSelection` moved to
+// backend::rpc_types::bundle_import so the bindings generator can see them --
+// they were private to this file, which is why the frontend's copies were
+// hand-written and, in preview's case, wrong (it declared only `file_path`).
+use crate::backend::rpc_types::{
+    BundleImportSkillSelection as SkillSelection,
+    CommandBundleImportCommitData as CommitReq,
+    CommandBundleImportPreviewData as PreviewReq,
+};
 
 /// `bundle.import.preview` — Phase 3 of
 /// docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md §3.1. Pure parse plus
@@ -2289,8 +2287,14 @@ async fn bundle_import_preview_impl(
     identity_store: &crate::backend::storage::store::Store,
     mstore: &crate::backend::storage::store::Store,
     req: PreviewReq,
-) -> Result<serde_json::Value, String> {
+) -> Result<crate::backend::rpc_types::BundleImportPreviewResponse, String> {
     use crate::backend::bundle_import as bi;
+    use crate::backend::rpc_types::{
+        BundleImportContextFilePreview, BundleImportMcpServerDisplay,
+        BundleImportMcpServerPreview, BundleImportPreviewResponse,
+        BundleImportProjectInstructionPreview, BundleImportRequirementPreview,
+        BundleImportSkillPreview,
+    };
 
     let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, preview_commit_warning_budget())
         .map_err(|e| format!("bundle.import.preview: {e}"))?;
@@ -2310,53 +2314,63 @@ async fn bundle_import_preview_impl(
         .collect();
     let in_bundle_dupes = bi::duplicate_in_bundle_slugs(&parsed.skills);
 
-    let skills_json: Vec<serde_json::Value> = parsed
+    let skills_json: Vec<BundleImportSkillPreview> = parsed
         .skills
         .iter()
         .map(|skill| {
             let collision = bi::classify_skill_collision(&skill.slug, &global_slugs, &in_bundle_dupes);
-            json!({
-                "source_dir": skill.source_dir,
-                "slug": bounded_display(&skill.slug),
-                "description": bounded_display(&skill.description),
-                "collision": collision,
-            })
+            BundleImportSkillPreview {
+                source_dir: skill.source_dir.clone(),
+                slug: bounded_display(&skill.slug),
+                description: bounded_display(&skill.description),
+                collision: collision.to_string(),
+            }
         })
         .collect();
 
-    let mcp_servers_json: Vec<serde_json::Value> = parsed
+    let mcp_servers_json: Vec<BundleImportMcpServerPreview> = parsed
         .mcp_servers
         .iter()
-        .map(|m| json!({
-            "source_path": m.source_path,
-            "display": bi::mcp_server_display(&m.config),
-        }))
+        .map(|m| {
+            // `mcp_server_display` still returns a Value (it is also used
+            // elsewhere and has its own tests asserting it never leaks the full
+            // config); read its two known keys back into the typed shape rather
+            // than changing that function's contract here.
+            let display = bi::mcp_server_display(&m.config);
+            BundleImportMcpServerPreview {
+                source_path: m.source_path.clone(),
+                display: BundleImportMcpServerDisplay {
+                    name: display.get("name").and_then(|v| v.as_str()).map(str::to_string),
+                    command: display.get("command").and_then(|v| v.as_str()).map(str::to_string),
+                },
+            }
+        })
         .collect();
 
     let (instructions_preview, instructions_truncated, instructions_total_chars) =
         bi::bounded_instructions_preview(&parsed.instructions);
 
-    let context_files_json: Vec<serde_json::Value> = parsed
+    let context_files_json: Vec<BundleImportContextFilePreview> = parsed
         .context_files
         .iter()
-        .map(|cf| json!({
-            "id": cf.id,
-            "display_path": bounded_display(&cf.path),
-            "size_bytes": cf.content.len(),
-        }))
+        .map(|cf| BundleImportContextFilePreview {
+            id: cf.id,
+            display_path: bounded_display(&cf.path),
+            size_bytes: cf.content.len(),
+        })
         .collect();
 
     let resolved_requirements = resolve_account_requirements(id_store, &parsed.requirements)
         .map_err(|e| format!("bundle.import.preview: {e}"))?;
-    let requirements_json: Vec<serde_json::Value> = resolved_requirements
+    let requirements_json: Vec<BundleImportRequirementPreview> = resolved_requirements
         .iter()
-        .map(|r| json!({
-            "id": bounded_display(&r.id),
-            "provider": bounded_display(&r.provider),
-            "env": bounded_display(&r.env),
-            "resolved": r.resolved(),
-            "match_count": r.match_count,
-        }))
+        .map(|r| BundleImportRequirementPreview {
+            id: bounded_display(&r.id),
+            provider: bounded_display(&r.provider),
+            env: bounded_display(&r.env),
+            resolved: r.resolved(),
+            match_count: r.match_count,
+        })
         .collect();
 
     // Bundle name collision -- soft, informational (§2: bundle_upsert
@@ -2376,7 +2390,7 @@ async fn bundle_import_preview_impl(
     // `instructions_preview` is, since a snapshot can be an arbitrarily large
     // repository file and the response carries up to
     // MAX_IMPORTED_PROJECT_INSTRUCTIONS of them.
-    let project_instructions_json: Vec<serde_json::Value> = parsed
+    let project_instructions_json: Vec<BundleImportProjectInstructionPreview> = parsed
         .project_instructions
         .iter()
         .map(|pi| {
@@ -2387,84 +2401,57 @@ async fn bundle_import_preview_impl(
             } else {
                 pi.content.clone()
             };
-            json!({
-                "path": bounded_display(&pi.path),
-                "file": bounded_display(&pi.file),
-                "content_hash": bounded_display(&pi.content_hash),
-                "owner": bounded_display(&pi.owner),
-                "content_preview": preview,
-                "content_truncated": truncated,
-                "content_total_chars": total_chars,
-            })
+            BundleImportProjectInstructionPreview {
+                path: bounded_display(&pi.path),
+                file: bounded_display(&pi.file),
+                content_hash: bounded_display(&pi.content_hash),
+                owner: bounded_display(&pi.owner),
+                content_preview: preview,
+                content_truncated: truncated,
+                content_total_chars: total_chars,
+            }
         })
         .collect();
 
     let (warnings, warnings_truncated) = bound_warnings_for_response(all_warnings);
 
-    Ok(json!({
-        "project_instructions": project_instructions_json,
-        "name": parsed.name,
-        "description": bounded_display(&parsed.description),
-        "instructions_preview": instructions_preview,
-        "instructions_truncated": instructions_truncated,
-        "instructions_total_chars": instructions_total_chars,
-        "context_files": context_files_json,
-        "skills": skills_json,
-        "mcp_servers": mcp_servers_json,
-        "requirements": requirements_json,
-        "warnings": warnings,
-        "warnings_truncated": warnings_truncated,
-        "name_collision": name_collision,
-        "content_digest": resolved.content_digest,
-    }))
+    Ok(BundleImportPreviewResponse {
+        project_instructions: project_instructions_json,
+        name: parsed.name,
+        description: bounded_display(&parsed.description),
+        instructions_preview,
+        instructions_truncated,
+        instructions_total_chars,
+        context_files: context_files_json,
+        skills: skills_json,
+        mcp_servers: mcp_servers_json,
+        requirements: requirements_json,
+        warnings,
+        warnings_truncated,
+        name_collision,
+        content_digest: resolved.content_digest,
+    })
 }
 
 fn register_bundle_import_preview(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let mstore = state.mstore.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_IMPORT_PREVIEW,
-        Box::new(move |data, _ctx| {
+        move |req: PreviewReq, _ctx| {
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
-            Box::pin(async move {
-                let req: PreviewReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.import.preview: {e}"))?;
-                Ok(Some(bundle_import_preview_impl(&id_store, &identity_store, &mstore, req).await?))
-            })
-        }),
+            async move {
+                bundle_import_preview_impl(&id_store, &identity_store, &mstore, req).await
+            }
+        },
     );
 }
 
-#[derive(serde::Deserialize)]
-struct SkillSelection {
-    source_dir: String,
-    #[serde(default)]
-    import_as: Option<String>,
-}
-#[derive(serde::Deserialize, Default)]
-struct CommitReq {
-    #[serde(default)]
-    file_path: Option<String>,
-    #[serde(default)]
-    zip_base64: Option<String>,
-    #[serde(default)]
-    files: Option<Vec<FileEntry>>,
-    #[serde(default)]
-    expected_content_digest: String,
-    #[serde(default)]
-    bundle_name: Option<String>,
-    #[serde(default)]
-    include_instructions: bool,
-    #[serde(default)]
-    include_context_files: Vec<usize>,
-    #[serde(default)]
-    include_skills: Vec<SkillSelection>,
-    #[serde(default)]
-    include_mcp_servers: Vec<String>,
-}
+
+
 
 /// `bundle.import.commit` — Phase 3 §3.2. Re-resolves and re-parses the
 /// same input fresh (never trusts client-supplied preview data for
@@ -2481,8 +2468,9 @@ async fn bundle_import_commit_impl(
     mstore: &crate::backend::storage::store::Store,
     broker: &crate::backend::mps::Broker,
     req: CommitReq,
-) -> Result<serde_json::Value, String> {
+) -> Result<crate::backend::rpc_types::BundleImportCommitResponse, String> {
     use crate::backend::bundle_import as bi;
+    use crate::backend::rpc_types::{BundleImportCommitResponse, BundleImportUnresolvedRequirement};
 
                 let resolved = resolve_import_input(req.file_path, req.zip_base64, req.files, preview_commit_warning_budget())
                     .map_err(|e| format!("bundle.import.commit: {e}"))?;
@@ -2554,15 +2542,15 @@ async fn bundle_import_commit_impl(
                 // equivalent fields use, via the shared bounded_display fn.
                 let resolved_requirement_ids: Vec<String> =
                     resolved_reqs.iter().filter(|r| r.resolved()).map(|r| bounded_display(&r.id)).collect();
-                let unresolved_requirements: Vec<serde_json::Value> = resolved_reqs
+                let unresolved_requirements: Vec<BundleImportUnresolvedRequirement> = resolved_reqs
                     .iter()
                     .filter(|r| !r.resolved())
-                    .map(|r| json!({
-                        "id": bounded_display(&r.id),
-                        "provider": bounded_display(&r.provider),
-                        "env": bounded_display(&r.env),
-                        "match_count": r.match_count,
-                    }))
+                    .map(|r| BundleImportUnresolvedRequirement {
+                        id: bounded_display(&r.id),
+                        provider: bounded_display(&r.provider),
+                        env: bounded_display(&r.env),
+                        match_count: r.match_count,
+                    })
                     .collect();
 
                 // Two-pass skill collision, recomputed server-side --
@@ -2741,15 +2729,15 @@ async fn bundle_import_commit_impl(
                 // response, not left unbounded like today's bundle.import.
                 let (bounded_warnings, warnings_truncated) = bound_warnings_for_response(warnings);
 
-    Ok(json!({
-        "bundle_id": memory.id,
-        "imported_skill_ids": imported_skill_ids,
-        "skipped_skills": skipped_skills,
-        "resolved_requirement_ids": resolved_requirement_ids,
-        "unresolved_requirements": unresolved_requirements,
-        "warnings": bounded_warnings,
-        "warnings_truncated": warnings_truncated,
-    }))
+    Ok(BundleImportCommitResponse {
+        bundle_id: memory.id,
+        imported_skill_ids,
+        skipped_skills,
+        resolved_requirement_ids,
+        unresolved_requirements,
+        warnings: bounded_warnings,
+        warnings_truncated,
+    })
 }
 
 fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -2757,19 +2745,17 @@ fn register_bundle_import_commit(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let identity_store = state.identity_store.clone();
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
-    engine.register_handler(
+    engine.register_typed(
         COMMAND_BUNDLE_IMPORT_COMMIT,
-        Box::new(move |data, _ctx| {
+        move |req: CommitReq, _ctx| {
             let id_store = id_store.clone();
             let identity_store = identity_store.clone();
             let mstore = mstore.clone();
             let broker = broker.clone();
-            Box::pin(async move {
-                let req: CommitReq = serde_json::from_value(data)
-                    .map_err(|e| format!("bundle.import.commit: {e}"))?;
-                Ok(Some(bundle_import_commit_impl(&id_store, &identity_store, &mstore, &broker, req).await?))
-            })
-        }),
+            async move {
+                bundle_import_commit_impl(&id_store, &identity_store, &mstore, &broker, req).await
+            }
+        },
     );
 }
 
@@ -2814,15 +2800,15 @@ mod import_preview_commit_tests {
         let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
         let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.mstore, req).await.unwrap();
 
-        assert_eq!(resp["name"], "test-bundle");
-        assert_eq!(resp["instructions_preview"], "Be concise.");
-        assert_eq!(resp["context_files"][0]["id"], 0);
-        assert_eq!(resp["context_files"][0]["display_path"], "notes.md");
-        assert_eq!(resp["skills"][0]["source_dir"], "skills/deploy");
-        assert_eq!(resp["skills"][0]["slug"], "deploy");
-        assert_eq!(resp["skills"][0]["collision"], "none");
-        assert!(resp["content_digest"].as_str().unwrap().len() > 0);
-        assert_eq!(resp["name_collision"], false);
+        assert_eq!(resp.name, "test-bundle");
+        assert_eq!(resp.instructions_preview, "Be concise.");
+        assert_eq!(resp.context_files[0].id, 0);
+        assert_eq!(resp.context_files[0].display_path, "notes.md");
+        assert_eq!(resp.skills[0].source_dir, "skills/deploy");
+        assert_eq!(resp.skills[0].slug, "deploy");
+        assert_eq!(resp.skills[0].collision, "none");
+        assert!(resp.content_digest.len() > 0);
+        assert_eq!(resp.name_collision, false);
     }
 
     #[tokio::test]
@@ -2850,7 +2836,7 @@ mod import_preview_commit_tests {
         ];
         let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
         let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.mstore, req).await.unwrap();
-        assert_eq!(resp["skills"][0]["collision"], "name_conflict");
+        assert_eq!(resp.skills[0].collision, "name_conflict");
     }
 
     #[tokio::test]
@@ -2868,9 +2854,9 @@ mod import_preview_commit_tests {
         ];
         let req = PreviewReq { file_path: None, zip_base64: None, files: Some(files) };
         let resp = bundle_import_preview_impl(&state.id_store, &state.identity_store, &state.mstore, req).await.unwrap();
-        let skills = resp["skills"].as_array().unwrap();
+        let skills = resp.skills;
         assert_eq!(skills.len(), 2);
-        assert!(skills.iter().all(|s| s["collision"] == "duplicate_in_bundle"));
+        assert!(skills.iter().all(|s| s.collision == "duplicate_in_bundle"));
     }
 
     #[tokio::test]
@@ -2914,8 +2900,8 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
+        let bundle_id = resp.bundle_id;
+        let saved = state.id_store.bundle_get(&bundle_id).unwrap().unwrap();
         assert_eq!(saved.name, "Renamed Bundle");
     }
 
@@ -2940,8 +2926,8 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
+        let bundle_id = resp.bundle_id;
+        let saved = state.id_store.bundle_get(&bundle_id).unwrap().unwrap();
         assert_eq!(saved.name.chars().count(), bi::MAX_BUNDLE_NAME_CHARS);
     }
 
@@ -2973,9 +2959,9 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        let imported = resp["imported_skill_ids"].as_array().unwrap();
+        let imported = resp.imported_skill_ids;
         assert_eq!(imported.len(), 1, "expected only the first occurrence of the repeated source_dir to be written");
-        let saved_skill = state.identity_store.skill_get(imported[0].as_str().unwrap()).unwrap().unwrap();
+        let saved_skill = state.identity_store.skill_get(&imported[0]).unwrap().unwrap();
         assert_eq!(saved_skill.name, "deploy-0");
     }
 
@@ -3023,7 +3009,7 @@ mod import_preview_commit_tests {
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
         assert!(
-            resp["imported_skill_ids"].as_array().unwrap().is_empty(),
+            resp.imported_skill_ids.is_empty(),
             "the three real selections beyond the MAX_IMPORTED_SKILLS boundary must be dropped by the cap, not imported"
         );
     }
@@ -3054,8 +3040,8 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
+        let bundle_id = resp.bundle_id;
+        let saved = state.id_store.bundle_get(&bundle_id).unwrap().unwrap();
         assert!(saved.context_files.contains("content B"));
         assert!(!saved.context_files.contains("content A"));
     }
@@ -3099,8 +3085,8 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        assert!(resp["imported_skill_ids"].as_array().unwrap().is_empty());
-        assert_eq!(resp["skipped_skills"][0], "deploy");
+        assert!(resp.imported_skill_ids.is_empty());
+        assert_eq!(resp.skipped_skills[0], "deploy");
     }
 
     #[tokio::test]
@@ -3143,9 +3129,9 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        assert_eq!(resp["imported_skill_ids"].as_array().unwrap().len(), 1);
-        let imported_id = resp["imported_skill_ids"][0].as_str().unwrap();
-        let saved_skill = state.identity_store.skill_get(imported_id).unwrap().unwrap();
+        assert_eq!(resp.imported_skill_ids.len(), 1);
+        let imported_id = &resp.imported_skill_ids[0];
+        let saved_skill = state.identity_store.skill_get(&imported_id).unwrap().unwrap();
         assert_eq!(saved_skill.name, "deploy-team-x");
     }
 
@@ -3210,18 +3196,18 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec![],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        assert!(resp["imported_skill_ids"].as_array().unwrap().is_empty());
-        let warnings = resp["warnings"].as_array().unwrap();
+        assert!(resp.imported_skill_ids.is_empty());
+        let warnings = resp.warnings;
         assert!(!warnings.is_empty(), "expected an already-exists warning");
         for w in warnings {
-            let s = w.as_str().unwrap();
+            let s = w.as_str();
             assert!(
                 s.chars().count() <= bi::MAX_DISPLAY_FIELD_CHARS + 3 + 40,
                 "warning not bounded ({} chars): {s:?}",
                 s.chars().count()
             );
         }
-        let skipped = resp["skipped_skills"][0].as_str().unwrap();
+        let skipped = &resp.skipped_skills[0];
         assert!(skipped.chars().count() <= bi::MAX_DISPLAY_FIELD_CHARS + 3);
     }
 
@@ -3249,8 +3235,8 @@ mod import_preview_commit_tests {
             include_mcp_servers: vec!["mcp/github.server.json".to_string()],
         };
         let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-        let bundle_id = resp["bundle_id"].as_str().unwrap();
-        let saved = state.id_store.bundle_get(bundle_id).unwrap().unwrap();
+        let bundle_id = resp.bundle_id;
+        let saved = state.id_store.bundle_get(&bundle_id).unwrap().unwrap();
         let mcp_servers: serde_json::Value = serde_json::from_str(&saved.mcp_servers).unwrap();
         assert_eq!(mcp_servers[0]["command"], "npx");
         assert!(mcp_servers[0].get("source_path").is_none(), "must not persist the {{source_path, config}} wrapper");
