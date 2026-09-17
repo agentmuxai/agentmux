@@ -1,7 +1,7 @@
 # Retro: LAN peers vanished from discovery every cycle — a 5-minute staleness cutoff was tuned against one fast peer, not the protocol
 
 **Date:** 2026-09-17
-**Status:** root-caused and fixed here; fix implemented in this same PR.
+**Status:** implemented — root-caused and fixed here; fix shipped in this same PR.
 **Severity:** Low functionally for a single-LAN-peer setup (discovery still
 works, just flickers), Medium for multi-peer LANs — most peers on a real
 network intermittently disappear from `GET /agentmux/discovery`, `SendMessage`
