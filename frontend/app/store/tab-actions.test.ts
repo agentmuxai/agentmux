@@ -21,8 +21,14 @@ vi.mock("./window-identity", () => ({
     activeTabId: () => mockActiveTabId,
 }));
 
-const createTabRpc = vi.fn(async () => "tab-new");
-const setActiveTabRpc = vi.fn(async () => undefined);
+// Typed with an explicit `(...args: unknown[])` signature on the mock
+// itself — vi.fn() otherwise infers a ZERO-argument type from its initial
+// implementation, and spreading an `unknown[]` into that fails tsc's
+// strict tuple check (TS2556) even though vitest's own transform doesn't
+// catch it — always re-run `tsc --noEmit`, not just `vitest run`, after
+// touching a mock like this.
+const createTabRpc = vi.fn(async (..._args: unknown[]) => "tab-new");
+const setActiveTabRpc = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("./services", () => ({
     WorkspaceService: {
         CreateTab: (...args: unknown[]) => createTabRpc(...args),
@@ -35,7 +41,7 @@ vi.mock("./services", () => ({
 // it resolves relative to activeTabId changing.
 let resolveApplyTabPreset: (() => void) | null = null;
 const applyTabPreset = vi.fn(
-    () =>
+    (..._args: unknown[]) =>
         new Promise<void>((resolve) => {
             resolveApplyTabPreset = resolve;
         }),
