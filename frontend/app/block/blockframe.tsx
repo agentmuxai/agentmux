@@ -74,13 +74,7 @@ function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     ];
 }
 
-/**
- * Exported for `PaneHeaderTabStrip` (universal Pane Tabs redesign,
- * SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md §4.1) — the unified
- * strip needs the exact same right-click menu the old two-row chrome's
- * header gave, reused verbatim rather than reimplemented.
- */
-export function handleHeaderContextMenu(
+function handleHeaderContextMenu(
     e: MouseEvent,
     blockData: Block,
     viewModel: ViewModel,
@@ -222,13 +216,7 @@ function FloatingMaximizeButton(props: { label: string; blockId: string }): JSX.
     return <IconButton decl={decl} className="block-frame-magnify" />;
 }
 
-/**
- * Exported for `PaneHeaderTabStrip` (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
- * §4.1) — the unified strip's trailing pane-level control cluster reuses
- * this exact, already-tested component rather than reimplementing
- * minimize/magnify/floating-maximize/close from scratch.
- */
-export function EndIcons(props: {
+function EndIcons(props: {
     viewModel: ViewModel;
     nodeModel: NodeModel;
     onContextMenu: (e: MouseEvent) => void;

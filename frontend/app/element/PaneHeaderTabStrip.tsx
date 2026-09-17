@@ -26,7 +26,7 @@
  */
 
 import type { Accessor, JSX } from "solid-js";
-import { Match, Switch } from "solid-js";
+import { Show } from "solid-js";
 import { BlockFrame_Header } from "@/app/block/blockframe";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { NodeModel } from "@/layout/index";
@@ -49,55 +49,76 @@ export interface PaneHeaderTabStripProps<T> extends PaneTabStripProps<T> {
     changeConnModalAtom?: import("@/util/util").SignalAtom<boolean>;
     error?: Error;
 
-    /** Identity label shown when `tabs` is empty AND `onAdd` is also
-     *  omitted — i.e. genuinely nothing to show (agent's fresh, unlaunched
-     *  picker pane is the only current caller of this branch;
-     *  tab-strip-visibility.ts's `shouldShowTabStrip`). When `tabs` is
-     *  empty but `onAdd` IS set (agent's "launched, lone conversation —
-     *  show just the '+'" state), `PaneTabStrip` already renders that
-     *  correctly on its own; this prop is not consulted in that case. */
+    /** Identity label shown whenever `tabs` is empty, REGARDLESS of
+     *  whether `onAdd` is set — i.e. whenever there is no per-tab pill to
+     *  carry the Pane's identity, something still must (ReAgent P1 on PR
+     *  #3309: an earlier version of this component only showed
+     *  `emptyLabel` when `onAdd` was ALSO unset, so agent's/term's single-
+     *  conversation/single-shell state — `tabs=[]`, `onAdd` set — rendered
+     *  a bare "+" with no title at all, the overwhelmingly common case).
+     *  Rendered ALONGSIDE the tab strip (which still renders its own "+"
+     *  when `onAdd` is set), never as an alternative to it — see
+     *  `leadingContent` below. */
     emptyLabel?: string;
 }
 
 export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.Element {
     // §7 resolution 1: "always" is the default — a single-tab Pane still
     // shows a one-pill strip. "multi-only" is the opt-out: a single-tab
-    // Pane shows a plain title instead, same row either way (never a
-    // second row under either setting).
+    // Pane shows a plain title instead of that one pill.
+    //
+    // For BOTH current callers (agent/term), `multi-only`'s own branch
+    // below is unreachable in practice: `visibleTabs()`/`visibleTermTabs()`
+    // already collapse a real single-tab state down to an EMPTY array
+    // before it ever reaches this component (agent-view.tsx/term.tsx's own
+    // "a lone tab shows no self-pill" convention, predating this redesign)
+    // — so `props.tabs.length` here is only ever 0 or ≥2 for them, never
+    // exactly 1. `multi-only` and `always` therefore render identically for
+    // agent/term today; genuine, forward-looking infrastructure for widget
+    // types that DON'T have that convention (most of §5's later rollout).
+    // Not a bug to "fix" by changing agent/term's existing convention.
     const tabStripSetting = getSettingsKeyAtom("pane:tabstrip");
     const showMultiOnlyPlainTitle = () => (tabStripSetting() ?? "always") === "multi-only" && props.tabs.length === 1;
-    const showEmptyLabel = () => props.tabs.length === 0 && !props.onAdd && !!props.emptyLabel;
+
+    // The identity label to show alongside the strip when there's no pill
+    // to carry it — `tabs.length === 0` (regardless of `onAdd`; ReAgent P1
+    // on PR #3309 — see `emptyLabel`'s own doc comment for the bug this
+    // fixes) or the `multi-only`-suppressed single pill.
+    const identityLabel = () => {
+        if (props.tabs.length === 0 && props.emptyLabel) return props.emptyLabel;
+        if (showMultiOnlyPlainTitle()) return props.getLabel(props.tabs[0]);
+        return null;
+    };
+    // What PaneTabStrip itself renders — suppressed to an empty list (just
+    // its own "+", if `onAdd` is set) whenever `identityLabel` is already
+    // carrying this Pane's one-and-only tab's identity, so the same title
+    // never appears twice.
+    const stripTabs = () => (showMultiOnlyPlainTitle() ? [] : props.tabs);
 
     const leadingTabStrip = (
-        <Switch
-            fallback={
-                <PaneTabStrip
-                    tabs={props.tabs}
-                    activeId={props.activeId}
-                    zoomFactor={props.zoomFactor}
-                    animateWidth={props.animateWidth}
-                    getId={props.getId}
-                    getLabel={props.getLabel}
-                    getTooltip={props.getTooltip}
-                    getAttention={props.getAttention}
-                    getTabClass={props.getTabClass}
-                    onActivate={props.onActivate}
-                    onClose={props.onClose}
-                    onTabDoubleClick={props.onTabDoubleClick}
-                    renderLabel={props.renderLabel}
-                    onAdd={props.onAdd}
-                    addTitle={props.addTitle}
-                    addLabel={props.addLabel}
-                />
-            }
-        >
-            <Match when={showEmptyLabel()}>
-                <div class="block-frame-view-type">{props.emptyLabel}</div>
-            </Match>
-            <Match when={showMultiOnlyPlainTitle()}>
-                <div class="block-frame-view-type">{props.getLabel(props.tabs[0])}</div>
-            </Match>
-        </Switch>
+        <>
+            <Show when={identityLabel()}>
+                <div class="block-frame-view-type">{identityLabel()}</div>
+            </Show>
+            <PaneTabStrip
+                tabs={stripTabs()}
+                activeId={props.activeId}
+                zoomFactor={props.zoomFactor}
+                animateWidth={props.animateWidth}
+                getId={props.getId}
+                getLabel={props.getLabel}
+                getTooltip={props.getTooltip}
+                getAttention={props.getAttention}
+                getTabClass={props.getTabClass}
+                onActivate={props.onActivate}
+                onClose={props.onClose}
+                onTabDoubleClick={props.onTabDoubleClick}
+                renderLabel={props.renderLabel}
+                onAdd={props.onAdd}
+                addTitle={props.addTitle}
+                addLabel={props.addLabel}
+            />
+        </>
     );
 
     return (

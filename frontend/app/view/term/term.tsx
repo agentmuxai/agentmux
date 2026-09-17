@@ -684,6 +684,7 @@ const TermPaneChrome = (props: {
             }
             onAdd={() => void handleTermTabAdd()}
             addTitle="New terminal tab"
+            emptyLabel="Terminal"
             nodeModel={nodeModel}
             viewModel={viewModel}
             activeBlockId={activeBlockId}

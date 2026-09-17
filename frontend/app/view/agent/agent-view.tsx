@@ -424,11 +424,12 @@ export const AgentPaneChrome = (props: {
     // Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
     // §4.1): the old headerElem/headerElemNoView (BlockFrame_Header instances)
     // and their changeConnModalAtom/connBtnRef stand-ins are gone —
-    // PaneHeaderTabStrip renders EndIcons directly instead, which never
-    // consumed connBtnRef/changeConnModalAtom in the first place (those only
-    // fed BlockFrame_Header's own leading-identity ConnectionButton, which
-    // AgentViewModel never rendered anyway — see the comment that used to
-    // sit here about manageConnection never being set for agent panes).
+    // PaneHeaderTabStrip now wraps the whole BlockFrame_Header itself
+    // (blocktypes.ts's `leadingTabStrip` prop), which never needed
+    // connBtnRef/changeConnModalAtom passed in for agent in the first place
+    // (those only feed BlockFrame_Header's own ConnectionButton, which
+    // AgentViewModel never renders since it never sets `manageConnection`
+    // — see the comment that used to sit here about that).
     const activeViewModelOrUndefined = () => nodeModel.activeViewModel?.() ?? undefined;
 
     // In-pane tabs — rendered here (not inside AgentBlockContent) so the

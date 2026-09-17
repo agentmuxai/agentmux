@@ -80,7 +80,7 @@ describe("PaneHeaderTabStrip", () => {
         expect(blockFrameHeaderCalls[0].changeConnModalAtom).toBe(changeConnModalAtom);
     });
 
-    it("shows emptyLabel as plain text when tabs is empty and onAdd is omitted", () => {
+    it("shows emptyLabel as plain text when tabs is empty and onAdd is omitted (fresh/unlaunched pane)", () => {
         render(() => (
             <PaneHeaderTabStrip
                 tabs={[]}
@@ -95,5 +95,32 @@ describe("PaneHeaderTabStrip", () => {
             />
         ));
         expect(screen.getByText("Agent")).toBeInTheDocument();
+    });
+
+    // Regression for ReAgent P1 on PR #3309: agent/term's own
+    // visibleTabs()/visibleTermTabs() collapse a real single-conversation/
+    // single-shell state down to `tabs=[]` with `onAdd` STILL set — an
+    // earlier version of this component only showed `emptyLabel` when
+    // `onAdd` was ALSO unset, so this — the single most common pane state —
+    // rendered a bare "+" with no title/identity at all.
+    it("shows BOTH emptyLabel AND the '+' when tabs is empty but onAdd IS set (the common lone-conversation case)", () => {
+        const onAdd = vi.fn();
+        render(() => (
+            <PaneHeaderTabStrip
+                tabs={[]}
+                activeId={null}
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                nodeModel={fakeNodeModel()}
+                viewModel={null}
+                activeBlockId={() => "b1"}
+                emptyLabel="Agent"
+                onAdd={onAdd}
+                addTitle="New agent"
+            />
+        ));
+        expect(screen.getByText("Agent")).toBeInTheDocument();
+        expect(screen.getByLabelText("New agent")).toBeInTheDocument();
     });
 });
