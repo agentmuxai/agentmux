@@ -8,7 +8,7 @@
  * break every consumer that treats these as JS millisecond timestamps. See
  * the same annotation on `BrowserBookmark::created_at` (PR #3293).
  */
-export type AgentRegistration = { agent_id: string, block_id: string, tab_id: string | null, registered_at: number, last_seen: number, 
+export type AgentRegistration = { agent_id: string, block_id: string, tab_id?: string, registered_at: number, last_seen: number, 
 /**
  * Process-wide unique nonce of the persistent-controller spawn this
  * registration belongs to; 0 = not recorded (HTTP register handler,

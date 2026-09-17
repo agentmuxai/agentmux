@@ -345,7 +345,17 @@ pub struct InjectionResponse {
 pub struct AgentRegistration {
     pub agent_id: String,
     pub block_id: String,
+    // `#[ts(optional)]`: this field carries `skip_serializing_if`, so the key
+    // is OMITTED from the JSON entirely when None — not serialized as null.
+    // Without this ts-rs renders `tab_id: string | null`, which promises the
+    // key is always present, and a consumer narrowing on `!== null` would
+    // still get `undefined` at runtime. Note the contrast with
+    // `MismatchAuditSummary::error_message` in server/reactive.rs: that one is
+    // a plain `Option<String>` with NO skip_serializing_if, so it genuinely is
+    // present-and-null and `string | null` is correct there. Same Option<T>,
+    // two different correct bindings, decided by the serde attribute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub tab_id: Option<String>,
     #[ts(type = "number")]
     pub registered_at: u64,
