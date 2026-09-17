@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import * as identityModel from "./identity-model";
 import { __internal__ } from "./identity-model";
 import type { Account } from "./identity-model";
+import type { IdentityAccount, SecretRef } from "@/app/store/rpc-api";
 
 // The helpers aren't re-exported; we round-trip through the public API
 // using a stub Account shape. The conversion happens inside

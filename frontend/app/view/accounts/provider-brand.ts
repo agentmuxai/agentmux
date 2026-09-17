@@ -18,6 +18,7 @@
  */
 
 import type { AccountProvider } from "@/app/view/identity/identity-model";
+import type { IdentityAccount } from "@/app/store/rpc-api";
 
 /** CLI-OAuth provider id → Armory brand. Only providers whose login
  *  authorizes a brand we show as a tile are mapped; everything else passes

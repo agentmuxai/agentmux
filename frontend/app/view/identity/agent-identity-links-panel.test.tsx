@@ -105,6 +105,7 @@ vi.mock("@/app/view/accounts/ClaudeLoginPanel", () => ({
 }));
 
 import { AgentIdentityLinksPanel } from "./agent-identity-links-panel";
+import type { AgentDefinitionIdentity } from "@/app/store/rpc-api";
 
 function mkLink(overrides: Partial<AgentDefinitionIdentity>): AgentDefinitionIdentity {
     return {

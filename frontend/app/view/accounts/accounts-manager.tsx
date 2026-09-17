@@ -31,6 +31,7 @@ import { AccountsGallery } from "./AccountsGallery";
 import { AgentMuxConnectPanel, useMuxBusStatus } from "./AgentMuxConnectPanel";
 import { ClaudeLoginPanel } from "./ClaudeLoginPanel";
 import "@/app/view/identity/identity-view.scss";
+import type { IdentityAccount } from "@/app/store/rpc-api";
 
 export function AccountsManager(): JSX.Element {
     // Block-free instance. `IdentityViewModel` only uses blockId/nodeModel to

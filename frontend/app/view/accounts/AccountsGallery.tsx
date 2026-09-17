@@ -14,6 +14,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AccountKind, AccountProvider, IdentityViewModel } from "@/app/view/identity/identity-model";
 import { SERVICE_CATALOG, modeLabel, type AuthMode, type ServiceTile } from "./accounts-catalog";
 import "./accounts-gallery.scss";
+import type { IdentityAccount } from "@/app/store/rpc-api";
 
 export function AccountsGallery(props: {
     model: IdentityViewModel;

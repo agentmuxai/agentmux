@@ -9,7 +9,7 @@
  */
 
 import { createContext, useContext, type Accessor } from "solid-js";
-import type { BundleImportCommitResponse, BundleImportPreviewResponse } from "@/app/store/rpc-api";
+import type { BundleImportCommitResponse, BundleImportPreviewResponse, IdentityAccount } from "@/app/store/rpc-api";
 
 // ── Request shape ────────────────────────────────────────────────────────────
 //

@@ -30,6 +30,12 @@ import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type {
+    AgentDefinitionIdentity,
+    AgentIdentityLink,
+    IdentityAccount,
+    SecretRef,
+} from "./identity";
+export type {
     BlockfileLineCountResult,
     BlockfileReadRangeResult,
     BlockfileReadStateResult,
