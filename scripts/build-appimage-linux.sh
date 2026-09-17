@@ -83,6 +83,21 @@ rm -rf "$APPDIR"
 #           the required-artifact checks and the BeginWindowDrag release gate
 #           that used to be inlined here. ---
 bash "$REPO_ROOT/scripts/stage-linux-runtime.sh" "$APPDIR"
+
+# --- Build stamp for the AppRun extract-once cache ---------------------
+# The cache used to be keyed on VERSION alone. `task package` deliberately
+# does NOT bump the version, so every local build of a given version shared
+# one extraction dir and the FIRST one extracted won forever: later builds
+# silently re-exec'd the older binary, taking its baked per-build channel
+# with it. Two local 0.56.3 builds reproduced it — the second launch ran the
+# first's binary and first's channel. Keyed on the build label instead, which
+# is unique per build. Release builds don't set AGENTMUX_BUILD_LABEL, so they
+# fall back to VERSION and keep one cache per released version, as before.
+if [ -n "${AGENTMUX_BUILD_LABEL:-}" ]; then
+    mkdir -p "$APPDIR/usr/share/agentmux"
+    printf '%s' "$AGENTMUX_BUILD_LABEL" | tr -c 'A-Za-z0-9._+-' '_' \
+        > "$APPDIR/usr/share/agentmux/BUILD_ID"
+fi
 mkdir -p "$APPDIR/usr/share/icons/hicolor"
 mkdir -p "$APPDIR/usr/share/applications"
 mkdir -p "$APPDIR/assets"
