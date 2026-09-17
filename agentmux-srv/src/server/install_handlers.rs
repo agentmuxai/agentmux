@@ -275,25 +275,25 @@ pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
 /// partial install, unparseable JSON — all of which mean "we do not know",
 /// which is a distinct answer from "up to date" and must stay distinct.
 ///
-/// `npm_package` is used as a path segment, so it is validated the same way
-/// every other externally-supplied path component in this module is: scoped
-/// names (`@scope/name`) are legitimate and produce one nested directory, but
-/// `..` and absolute-path escapes are not.
+/// `npm_package` becomes a path segment, so the join goes through
+/// [`crate::backend::base::safe_join_within_base`] rather than an ad-hoc
+/// check. An earlier revision hand-rolled the validation (empty / `..` /
+/// leading `/` / leading `\` / NUL) and missed the Windows **drive-letter**
+/// form: `PathBuf::push("C:\\Users\\…")` REPLACES the whole path rather than
+/// appending, so `npm_package = "C:\\Users\\Victim\\AppData"` escaped the
+/// install dir entirely and read an attacker-chosen `package.json`
+/// (ReAgent P1 on #3350). That helper already rejects drive-letter and
+/// drive-relative prefixes, UNC roots, rooted paths and `..`, and accepts
+/// both separators — which is exactly why it exists and why this must not
+/// grow a second copy of the same reasoning.
+///
+/// Scoped names (`@scope/name`) are legitimate and produce one nested
+/// directory; the helper splits on `/` and `\` and handles them.
 fn read_installed_version(provider_id: &str, npm_package: &str) -> Option<String> {
-    if npm_package.is_empty()
-        || npm_package.contains("..")
-        || npm_package.starts_with('/')
-        || npm_package.starts_with('\\')
-        || npm_package.contains('\0')
-    {
-        return None;
-    }
     let dir = provider_install_dir(provider_id)?;
-    let mut manifest = dir.join("node_modules");
-    for seg in npm_package.split('/') {
-        manifest.push(seg);
-    }
-    manifest.push("package.json");
+    let base = dir.join("node_modules");
+    let pkg_dir = crate::backend::base::safe_join_within_base(&base, npm_package).ok()?;
+    let manifest = pkg_dir.join("package.json");
     let raw = std::fs::read_to_string(manifest).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
     parsed.get("version")?.as_str().map(|s| s.to_string())
@@ -843,6 +843,13 @@ mod installed_version_tests {
     /// data dir exists in the test environment — which is also why they are
     /// the part worth pinning: the happy path needs a real per-version cache,
     /// but the rejection path is pure and is the one with teeth.
+    ///
+    /// The drive-letter cases are the ones an earlier revision of this
+    /// function got wrong (ReAgent P1 on #3350): `PathBuf::push` REPLACES the
+    /// path when the pushed component carries a drive prefix, so these escaped
+    /// the install dir entirely while a `starts_with('/')`/`starts_with('\\')`
+    /// check waved them through. They are listed explicitly so a future
+    /// refactor back to a hand-rolled check fails here instead of shipping.
     #[test]
     fn rejects_path_escapes_and_malformed_package_names() {
         for bad in [
@@ -853,6 +860,10 @@ mod installed_version_tests {
             "/absolute/path",
             "\\windows\\absolute",
             "has\0null",
+            "C:\\Users\\Victim\\AppData",
+            "C:/some/dir",
+            "C:payload.txt",
+            "\\\\server\\share\\evil",
         ] {
             assert_eq!(
                 read_installed_version("claude", bad),

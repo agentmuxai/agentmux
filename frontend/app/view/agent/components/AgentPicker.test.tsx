@@ -506,7 +506,15 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
 
             await waitFor(() => expect(RpcApi.InstallCheckCommand).toHaveBeenCalled());
             const call = vi.mocked(RpcApi.InstallCheckCommand).mock.calls[0][1];
-            expect(call).toEqual({ providerId: "codex", cliCommand: "codex" });
+            // npmPackage rides along so the same round-trip can report the
+            // installed version for the card's upgrade hint (#3350). The point
+            // of this assertion is unchanged: every field must resolve from the
+            // EFFECTIVE launch provider (codex), never the drifted column.
+            expect(call).toEqual({
+                providerId: "codex",
+                cliCommand: "codex",
+                npmPackage: "@openai/codex-cli",
+            });
         });
 
         it("probes system prereqs against the bundle's provider, not the drifted column", async () => {
