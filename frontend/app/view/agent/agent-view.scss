@@ -81,51 +81,13 @@
         // by .agent-pane-stack's flex-column sizing.
     }
 
-    // Selection ring for the WHOLE pane (header + progress bar + content) —
-    // docs/retro/RETRO_AGENT_PANE_SELECTED_BORDER_MISSES_HOISTED_HEADER_
-    // 2026_09_15.md. block.scss's `.block-mask` can only ring the nested,
-    // switch-scoped <Block> below (`.agent-pane-stack-content`'s own child)
-    // — it has no way to reach the header/progress-bar row that's hoisted
-    // OUTSIDE that `<Block>` by this component. Painted as an absolute
-    // overlay pseudo-element, the same technique `.block-mask` itself uses
-    // (block.scss), so it never affects this flex column's own box size —
-    // a real `border` here would shift every child by the border width.
-    // Mirrors `.block-mask`'s own states (block.scss:242-334) exactly:
-    // dim by default, accent when focused, transparent only when both
-    // focused AND alone in the tab (`isAlone`, agent-view.tsx — an
-    // unfocused-alone pane keeps the ordinary dim border, same as
-    // `.pane-alone .block-mask`'s own nesting under `.block-focused`).
-    // `--pane-ring-color` (set inline, agent-view.tsx) carries a custom
-    // `frame:activebordercolor`/`frame:hue`/`bg:bordercolor` color when
-    // one applies (computeFocusRingBorderColor, blockframe.tsx — same
-    // resolution `.block-mask` itself uses) so a pane's identity/custom
-    // color still shows on this outer ring instead of always falling back
-    // to plain accent/dim (codex P2, PR #3226). `will-change: transform`
-    // unconditionally, and `z-index: 50` once focused, both match
-    // `.block-mask`'s own treatment exactly — required to composite above
-    // xterm's `overflow-y:scroll` GPU-promoted layer and above in-block
-    // overlays like `.term-stickers` (reagent P1, PR #3226); this ring
-    // sits even further up the ancestor chain than `.block-mask` did, so
-    // it needs the identical treatment just as much.
-    &::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        border: 2px solid var(--pane-ring-color, var(--border-color));
-        border-radius: var(--block-border-radius);
-        z-index: var(--zindex-block-mask-inner);
-        will-change: transform;
-    }
-
-    &.agent-pane-stack-focused::after {
-        border-color: var(--pane-ring-color, var(--accent-color));
-        z-index: 50;
-    }
-
-    &.agent-pane-stack-focused-alone::after {
-        border-color: transparent;
-    }
+    // Selection ring intentionally NOT defined here any more: the shared
+    // pane chrome owns it (.pane-stack::after, PaneChrome.scss) and applies
+    // to this box too, since the chrome puts `pane-stack` on the same root
+    // this class sits on (via PaneChromeModel.rootClass). The rules here
+    // were byte-identical duplicates, and their `-focused`/`-focused-alone`
+    // variants were dead outright — the chrome applies `pane-stack-focused*`,
+    // never the per-view-type names these matched.
 }
 
 .agent-pane-stack-content {
