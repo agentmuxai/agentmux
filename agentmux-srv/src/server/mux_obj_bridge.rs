@@ -11,7 +11,7 @@
 //!
 //! Why this exists: per-RPC handlers were responsible for attaching
 //! `MuxObjUpdate`s to their responses (`success_with_updates(...)`).
-//! Forgetting that call left the frontend WOS cache stale (e.g. workspace
+//! Forgetting that call left the frontend MOS cache stale (e.g. workspace
 //! renames not propagating to the OS title or the InstancePanel — see
 //! `docs/specs/SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md`).
 //!
@@ -122,7 +122,7 @@ async fn emit_fetched<T: StoreObj + Send + 'static>(
 }
 
 /// Broadcast a "delete" `waveobj:update` for the given oid. No fetch
-/// needed — the frontend's `updateMuxObject` (`wos.ts:263-265`) handles
+/// needed — the frontend's `updateMuxObject` (`mos.ts:263-265`) handles
 /// the delete arm with just the oid.
 fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
     let payload = build_update_payload("delete", otype, oid, None);
@@ -323,7 +323,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
         // ----- Tab (Phase 2) -----
         // TabCreated also touches the parent workspace's tab_ids field
         // (reducer mutates both in one dispatch). Broadcast both so the
-        // frontend WOS sees the new Tab AND the updated parent ordering.
+        // frontend MOS sees the new Tab AND the updated parent ordering.
         Event::TabCreated {
             workspace_id,
             tab_id,
@@ -518,7 +518,7 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
 /// panic inside `dispatch_event` is caught and logged, and the loop
 /// continues processing subsequent events. Without this, a single
 /// malformed event could silently kill the entire bridge task and
-/// frontend WOS would stop seeing updates.
+/// frontend MOS would stop seeing updates.
 ///
 /// Subscribe ordering: per `SPEC §11.1` the bridge can subscribe in any
 /// order relative to the persist subscriber. For Phase 1's workspace
@@ -573,7 +573,7 @@ async fn run_mux_obj_bridge(
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
                 // The broadcast channel has 1024 capacity (main.rs:624).
-                // If we lag, frontend WOS state diverges silently — log it
+                // If we lag, frontend MOS state diverges silently — log it
                 // loudly so operators can correlate with user-visible drift
                 // (e.g. the InstancePanel/title showing stale names).
                 // No automatic recovery; the next event resyncs the affected
@@ -581,7 +581,7 @@ async fn run_mux_obj_bridge(
                 tracing::error!(
                     target: "wave-obj-bridge",
                     skipped = n,
-                    "broadcast channel lagged; some waveobj:update events were dropped — frontend WOS may show stale state until the affected object is mutated again"
+                    "broadcast channel lagged; some waveobj:update events were dropped — frontend MOS may show stale state until the affected object is mutated again"
                 );
             }
             Err(broadcast::error::RecvError::Closed) => {

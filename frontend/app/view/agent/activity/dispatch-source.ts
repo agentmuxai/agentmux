@@ -17,7 +17,7 @@
  * unrelated dispatch happens to fire a refresh.
  */
 
-import { callBackendService } from "@/app/store/wos";
+import { callBackendService } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";

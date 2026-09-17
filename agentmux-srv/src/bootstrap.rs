@@ -1709,7 +1709,7 @@ pub async fn spawn_reducer_plumbing(
             ),
             Err(e) if e.is_panic() => tracing::error!(
                 target: "wave-obj-bridge",
-                "bridge task PANICKED at top level — frontend WOS will stop receiving updates until srv restart. Panic: {}",
+                "bridge task PANICKED at top level — frontend MOS will stop receiving updates until srv restart. Panic: {}",
                 e
             ),
             Err(e) => tracing::error!(

@@ -42,7 +42,7 @@ vi.mock("@/app/store/wps", () => ({
         return () => hub.handlers.delete(sub.eventType);
     }),
 }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 vi.mock("@/app/store/global", () => ({
     getBlockMetaKeyAtom: (_blockId: string, _key: string) => () => hub.persistedFailure,
 }));

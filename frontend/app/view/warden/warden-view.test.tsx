@@ -36,7 +36,7 @@ vi.mock("@/app/view/warden-supervisor/warden-supervisor-manager", () => ({
 // clicking a rail item to actually flip the visible/active section here,
 // the same way it does against the real backend. Mirrors armory-view.test.tsx.
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
-vi.mock("@/app/store/wos", () => ({
+vi.mock("@/app/store/mos", () => ({
     makeORef: (type: string, id: string) => `${type}:${id}`,
     getMuxObjectAtom: () => () => ({ meta: blockMeta() }),
     getObjectValue: () => ({}),

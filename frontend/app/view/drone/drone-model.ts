@@ -24,7 +24,7 @@ import {
     type DroneRunStatus,
 } from "@/app/store/drone-run-state-store";
 import { muxEventSubscribe } from "@/app/store/wps";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { createStore, produce, reconcile, type SetStoreFunction } from "solid-js/store";
 

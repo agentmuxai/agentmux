@@ -11,7 +11,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, workspace } from "@/app/store/global";
+import { MOS, workspace } from "@/app/store/global";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { getProvider, resolveProviderAlias } from "@/app/view/agent/providers";
 import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
@@ -119,7 +119,7 @@ function findTabIdForBlock(blockId: string): string | null {
     const ws = workspace();
     if (!ws) return null;
     for (const tabId of [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])]) {
-        const tab = WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabId));
+        const tab = MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabId));
         if (tab?.blockids?.includes(blockId)) return tabId;
     }
     return null;
@@ -192,7 +192,7 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
     const envVar = getProvider(provider)?.authConfigDirEnvVar;
     if (!blockId || !dir || !envVar) return;
     try {
-        const envMeta = WOS.getObjectValue<Block>(WOS.makeORef("block", blockId))?.meta?.["cmd:env"];
+        const envMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", blockId))?.meta?.["cmd:env"];
         const prevEnv: Record<string, string> = {};
         if (envMeta && typeof envMeta === "object") {
             for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
@@ -200,7 +200,7 @@ export async function bindAccountToAgent(account: Account, candidate: BindCandid
             }
         }
         await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", blockId),
+            oref: MOS.makeORef("block", blockId),
             meta: { "cmd:env": { ...prevEnv, [envVar]: dir } },
         });
         const tabId = findTabIdForBlock(blockId);

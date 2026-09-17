@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, WOS } from "@/store/global";
+import { atoms, MOS } from "@/store/global";
 import * as util from "@/util/util";
 import { createMemo } from "solid-js";
 import type { SignalAtom } from "@/util/util";
@@ -241,7 +241,7 @@ class SysinfoViewModel implements ViewModel {
     constructor(blockId: string, viewType: string) {
         this.viewType = viewType;
         this.blockId = blockId;
-        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         this.dataAtom = createSignalAtom<DataItem[]>([]);
         this.loadingAtom = createSignalAtom(true);
@@ -360,7 +360,7 @@ class SysinfoViewModel implements ViewModel {
                     checked: currentlySelected == plotType,
                     click: async () => {
                         await RpcApi.SetMetaCommand(TabRpcClient, {
-                            oref: WOS.makeORef("block", this.blockId),
+                            oref: MOS.makeORef("block", this.blockId),
                             meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
                         });
                     },
@@ -386,7 +386,7 @@ class SysinfoViewModel implements ViewModel {
             click: async () => {
                 const dataTypes = PlotTypes[plotType](plotData[plotData.length - 1]);
                 await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", this.blockId),
+                    oref: MOS.makeORef("block", this.blockId),
                     meta: { "graph:metrics": dataTypes, "sysinfo:type": plotType },
                 });
             },

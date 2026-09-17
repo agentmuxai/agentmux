@@ -27,7 +27,7 @@ import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { trail } from "@/log/render-trail";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
@@ -1326,7 +1326,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             );
             try {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("block", opts.blockId),
+                    oref: MOS.makeORef("block", opts.blockId),
                     meta: { "cmd:args": updatedArgs },
                 });
             } catch (err) {

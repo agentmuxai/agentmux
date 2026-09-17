@@ -68,7 +68,7 @@ pub(crate) async fn setup_torn_off_block_layout(
 /// Why this and not direct rootnode/leaforder writes? The frontend's
 /// LayoutModel maintains its own in-memory tree state and doesn't
 /// auto-sync from external `LayoutState` MuxObj updates — so a
-/// backend `store.update` to the rootnode lands in the WOS cache
+/// backend `store.update` to the rootnode lands in the MOS cache
 /// but the LayoutModel never picks it up, and the next frontend-
 /// initiated `object.UpdateObject` overwrites the backend version
 /// with the LayoutModel's stale tree. The pending-actions queue

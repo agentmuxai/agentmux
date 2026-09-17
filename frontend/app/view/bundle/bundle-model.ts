@@ -26,7 +26,7 @@
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/wps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 

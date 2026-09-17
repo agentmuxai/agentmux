@@ -34,7 +34,7 @@
 import { onCleanup, onMount } from "solid-js";
 import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
-import { makeORef } from "@/app/store/wos";
+import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 

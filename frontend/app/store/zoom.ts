@@ -31,7 +31,7 @@
 // three copies of this file.
 
 import { getAllBlockComponentModelEntries } from "@/app/store/block-component-registry";
-import { getBlockComponentModel, getFocusedBlockId, WOS } from "@/app/store/global";
+import { getBlockComponentModel, getFocusedBlockId, MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { fireAndForget } from "@/util/util";
@@ -64,8 +64,8 @@ function roundZoom(factor: number): number {
 // ── Per-pane zoom (terminal blocks) ───────────────────────────────
 
 function getBaseFontSize(blockId: string): number {
-    const blockOref = WOS.makeORef("block", blockId);
-    const blockData = WOS.getObjectValue<Block>(blockOref);
+    const blockOref = MOS.makeORef("block", blockId);
+    const blockData = MOS.getObjectValue<Block>(blockOref);
     const metaFontSize = blockData?.meta?.["term:fontsize"];
     if (typeof metaFontSize === "number" && !isNaN(metaFontSize) && metaFontSize >= 4 && metaFontSize <= 64) {
         return metaFontSize;
@@ -92,17 +92,17 @@ function getBlockZoom(blockId: string): number | null {
     if (vt !== "term" && vt !== "agent" && vt !== "swarm" && vt !== "editor" && vt !== "armory" && vt !== "warden")
         return null;
 
-    const blockOref = WOS.makeORef("block", blockId);
-    const blockData = WOS.getObjectValue<Block>(blockOref);
+    const blockOref = MOS.makeORef("block", blockId);
+    const blockData = MOS.getObjectValue<Block>(blockOref);
     return blockData?.meta?.["term:zoom"] ?? 1.0;
 }
 
 // Returns the actual clamped/rounded zoom that was written, so a caller
 // that needs to know the resulting value (the all-panes stepper below)
-// doesn't have to re-read it back — WOS's local cache is NOT updated
+// doesn't have to re-read it back — MOS's local cache is NOT updated
 // synchronously by this call. RpcApi.SetMetaCommand is fire-and-forget;
 // the cache only updates later, when the backend pushes a MuxObjUpdate
-// event back (global.ts's initGlobalEventSubs → WOS.updateMuxObject). A
+// event back (global.ts's initGlobalEventSubs → MOS.updateMuxObject). A
 // getBlockZoom() call immediately after this one would read the STALE
 // pre-write value, not the one just computed here (ReAgent P1, PR #3090).
 function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = true): number {
@@ -111,7 +111,7 @@ function setBlockZoom(blockId: string, factor: number, showIndicator: boolean = 
 
     fireAndForget(() =>
         RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", blockId),
+            oref: MOS.makeORef("block", blockId),
             meta: { "term:zoom": metaValue },
         })
     );
@@ -181,7 +181,7 @@ function stepAllPanes(step: number, direction: 1 | -1): void {
         //
         // Uses stepZoom's OWN return value, not a getBlockZoom() re-read —
         // the write it just fired is an async RpcApi.SetMetaCommand, and
-        // WOS's local cache isn't updated until the backend pushes a
+        // MOS's local cache isn't updated until the backend pushes a
         // MuxObjUpdate event back. Re-reading here would see the STALE
         // pre-step value on every call (ReAgent P1, PR #3090).
         const newZoom = stepZoom(blockId, zoom, step, direction, false);

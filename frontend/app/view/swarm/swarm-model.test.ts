@@ -783,7 +783,7 @@ describe("hasRenderableBlock", () => {
         expect(hasRenderableBlock({ oid: "block-a", meta: {} }, false)).toBe(true);
     });
 
-    it("is true for undefined while still loading — a fresh WOS oref reads as null until GetObject resolves, indistinguishable from a phantom by value alone (reagentx P1 on #2438)", () => {
+    it("is true for undefined while still loading — a fresh MOS oref reads as null until GetObject resolves, indistinguishable from a phantom by value alone (reagentx P1 on #2438)", () => {
         expect(hasRenderableBlock(undefined, true)).toBe(true);
     });
 

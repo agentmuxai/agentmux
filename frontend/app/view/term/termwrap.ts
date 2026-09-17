@@ -5,7 +5,7 @@ import { getFileSubject } from "@/app/store/wps";
 import { sendWSCommand } from "@/app/store/ws";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, atoms, fetchMuxFile, getSettingsKeyAtom, openLink, setTermRendererAtom } from "@/app/store/global";
+import { MOS, atoms, fetchMuxFile, getSettingsKeyAtom, openLink, setTermRendererAtom } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { PLATFORM, PlatformMacOS, PlatformWindows } from "@/util/platformutil";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -184,7 +184,7 @@ export class TermWrap {
         );
         const getCwd = (): string | undefined => {
             try {
-                const blockData = WOS.getObjectValue<Block>(WOS.makeORef("block", this.blockId));
+                const blockData = MOS.getObjectValue<Block>(MOS.makeORef("block", this.blockId));
                 return blockData?.meta?.["cmd:cwd"];
             } catch {
                 return undefined;

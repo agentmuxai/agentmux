@@ -9,7 +9,7 @@
 import { createMemo, createRoot } from "solid-js";
 import { deepCompareReturnPrev, getPrefixedSettings } from "@/util/util";
 import { fullConfigAtom, settingsAtom } from "./config-signals";
-import * as WOS from "./wos";
+import * as MOS from "./mos";
 
 // ---------------------------------------------------------------------------
 // Block atom caches (used by per-block derived memos)
@@ -59,7 +59,7 @@ export function getBlockMetaKeyAtom<T extends keyof MetaType>(blockId: string, k
         memo = createRoot((dispose) => {
             addBlockAtomDisposer(blockId, dispose);
             return createMemo(() => {
-                const blockAccessor = WOS.getMuxObjectAtom(WOS.makeORef("block", blockId));
+                const blockAccessor = MOS.getMuxObjectAtom(MOS.makeORef("block", blockId));
                 const blockData = blockAccessor();
                 return blockData?.meta?.[key];
             });

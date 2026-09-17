@@ -23,7 +23,7 @@ vi.mock("@/app/store/wps", () => ({
         };
     }),
 }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ snapshot: () => null }));
 vi.mock("@/store/token-usage", () => ({ recordTurn: () => {} }));
 

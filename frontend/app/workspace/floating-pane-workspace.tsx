@@ -47,7 +47,7 @@ import { ModalsRenderer } from "@/app/modals/modalsrenderer";
 import { TabContent } from "@/app/tab/tabcontent";
 import { WorkspaceService } from "@/store/services";
 import { atoms, getApi } from "@/store/global";
-import * as WOS from "@/store/wos";
+import * as MOS from "@/store/mos";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
 import { createRedockArming } from "./redock-arming";
@@ -100,7 +100,7 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     createEffect(() => {
         const tid = tabId();
         if (!tid) return;
-        const [tab] = WOS.useMuxObjectValue<Tab>(WOS.makeORef("tab", tid));
+        const [tab] = MOS.useMuxObjectValue<Tab>(MOS.makeORef("tab", tid));
         const t = tab();
         if (!t) return;
         const blockids = t.blockids ?? [];
@@ -849,11 +849,11 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // them.
             let targetWs: Workspace;
             try {
-                const targetWindow = await WOS.reloadMuxObject<MuxWindow>(
-                    WOS.makeORef("window", target.window_id),
+                const targetWindow = await MOS.reloadMuxObject<MuxWindow>(
+                    MOS.makeORef("window", target.window_id),
                 );
-                targetWs = await WOS.reloadMuxObject<Workspace>(
-                    WOS.makeORef("workspace", targetWindow.workspaceid),
+                targetWs = await MOS.reloadMuxObject<Workspace>(
+                    MOS.makeORef("workspace", targetWindow.workspaceid),
                 );
             } catch (e) {
                 console.error(
@@ -881,8 +881,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
             // `onCleanup` against the current reactive owner, but we're inside
             // an async mouseup callback with no owner — the refCount would
             // never get decremented and we'd leak a Tab subscription per drop.
-            const sourceTabObj = WOS.getObjectValue<Tab>(
-                WOS.makeORef("tab", sourceTabId),
+            const sourceTabObj = MOS.getObjectValue<Tab>(
+                MOS.makeORef("tab", sourceTabId),
             );
             const sourceBlockId = sourceTabObj?.blockids?.[0];
             if (!sourceBlockId) {

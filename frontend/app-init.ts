@@ -32,7 +32,7 @@ import {
     setUpdaterVersionAtom,
     setFullConfigAtom,
 } from "@/app/store/global";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import {
     DISPLAY_NAME_MAX_LEN,
@@ -69,7 +69,7 @@ import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
 let platform: NodeJS.Platform;
 let savedInitOpts: AgentMuxInitOpts = null;
 
-window.WOS = WOS;
+window.MOS = MOS;
 window.globalAtoms = atoms;
 window.RpcApi = RpcApi;
 window.isFullScreen = false;
@@ -413,7 +413,7 @@ async function initHostMux(): Promise<void> {
         const devTitle = import.meta.env.VITE_DEV_TITLE;
         if (import.meta.env.DEV && devTitle) {
             void ObjectService.UpdateObjectMeta(
-                WOS.makeORef("window", initOpts.windowId),
+                MOS.makeORef("window", initOpts.windowId),
                 { [DISPLAY_NAME_META_KEY]: devTitle.slice(0, DISPLAY_NAME_MAX_LEN) } as MetaType,
             );
         }
@@ -814,11 +814,11 @@ async function reinitMux() {
         }, 100)
     );
 
-    await WOS.reloadMuxObject<Client>(WOS.makeORef("client", savedInitOpts.clientId));
-    const muxWindow = await WOS.reloadMuxObject<MuxWindow>(WOS.makeORef("window", savedInitOpts.windowId));
-    const ws = await WOS.reloadMuxObject<Workspace>(WOS.makeORef("workspace", muxWindow.workspaceid));
-    const initialTab = await WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", savedInitOpts.tabId));
-    await WOS.reloadMuxObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate));
+    await MOS.reloadMuxObject<Client>(MOS.makeORef("client", savedInitOpts.clientId));
+    const muxWindow = await MOS.reloadMuxObject<MuxWindow>(MOS.makeORef("window", savedInitOpts.windowId));
+    const ws = await MOS.reloadMuxObject<Workspace>(MOS.makeORef("workspace", muxWindow.workspaceid));
+    const initialTab = await MOS.reloadMuxObject<Tab>(MOS.makeORef("tab", savedInitOpts.tabId));
+    await MOS.reloadMuxObject<LayoutState>(MOS.makeORef("layout", initialTab.layoutstate));
     reloadAllWorkspaceTabs(ws);
     // Title is driven by installWindowTitleEffect() (set up in initMux)
     // and reacts to atom changes — reinitMux's reloads update the atoms,
@@ -867,9 +867,9 @@ function installWindowTitleEffect(windowId: string): void {
         createEffect(() => {
             const activeTabId = atoms.activeTabId();
             const tab = activeTabId
-                ? WOS.getObjectValue<Tab>(WOS.makeORef("tab", activeTabId))
+                ? MOS.getObjectValue<Tab>(MOS.makeORef("tab", activeTabId))
                 : undefined;
-            const win = WOS.getObjectValue<MuxWindow>(WOS.makeORef("window", windowId));
+            const win = MOS.getObjectValue<MuxWindow>(MOS.makeORef("window", windowId));
             const ws = atoms.workspace();
             const entries = openWindowEntriesAtom();
 
@@ -1015,10 +1015,10 @@ function reloadAllWorkspaceTabs(ws: Workspace) {
         return;
     }
     ws.tabids?.forEach((tabid) => {
-        WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", tabid));
+        MOS.reloadMuxObject<Tab>(MOS.makeORef("tab", tabid));
     });
     ws.pinnedtabids?.forEach((tabid) => {
-        WOS.reloadMuxObject<Tab>(WOS.makeORef("tab", tabid));
+        MOS.reloadMuxObject<Tab>(MOS.makeORef("tab", tabid));
     });
 }
 
@@ -1027,10 +1027,10 @@ function loadAllWorkspaceTabs(ws: Workspace) {
         return;
     }
     ws.tabids?.forEach((tabid) => {
-        WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabid));
+        MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabid));
     });
     ws.pinnedtabids?.forEach((tabid) => {
-        WOS.getObjectValue<Tab>(WOS.makeORef("tab", tabid));
+        MOS.getObjectValue<Tab>(MOS.makeORef("tab", tabid));
     });
 }
 
@@ -1085,9 +1085,9 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     const [client, muxWindow, initialTab] = await withTimeout(
         Promise.all([
-            WOS.loadAndPinMuxObject<Client>(WOS.makeORef("client", initOpts.clientId)),
-            WOS.loadAndPinMuxObject<MuxWindow>(WOS.makeORef("window", initOpts.windowId)),
-            WOS.loadAndPinMuxObject<Tab>(WOS.makeORef("tab", initOpts.tabId)),
+            MOS.loadAndPinMuxObject<Client>(MOS.makeORef("client", initOpts.clientId)),
+            MOS.loadAndPinMuxObject<MuxWindow>(MOS.makeORef("window", initOpts.windowId)),
+            MOS.loadAndPinMuxObject<Tab>(MOS.makeORef("tab", initOpts.tabId)),
         ]),
         RPC_TIMEOUT,
         "loadAndPin client/window/tab"
@@ -1097,8 +1097,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     t = performance.now();
     const [ws, layoutState] = await withTimeout(
         Promise.all([
-            WOS.loadAndPinMuxObject<Workspace>(WOS.makeORef("workspace", muxWindow.workspaceid)),
-            WOS.reloadMuxObject<LayoutState>(WOS.makeORef("layout", initialTab.layoutstate)),
+            MOS.loadAndPinMuxObject<Workspace>(MOS.makeORef("workspace", muxWindow.workspaceid)),
+            MOS.reloadMuxObject<LayoutState>(MOS.makeORef("layout", initialTab.layoutstate)),
         ]),
         RPC_TIMEOUT,
         "loadAndPin workspace/layout"
@@ -1107,7 +1107,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     loadAllWorkspaceTabs(ws);
-    WOS.wpsSubscribeToObject(WOS.makeORef("workspace", muxWindow.workspaceid));
+    MOS.wpsSubscribeToObject(MOS.makeORef("workspace", muxWindow.workspaceid));
     tlog("loadAllWorkspaceTabs", t);
 
     installWindowTitleEffect(initOpts.windowId);

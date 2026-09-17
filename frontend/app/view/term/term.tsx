@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Search, useSearch } from "@/app/element/search";
-import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, useBlockAtom, WOS } from "@/store/global";
+import { atoms, getOverrideConfigAtom, getSettingsKeyAtom, getSettingsPrefixAtom, pushNotification, useBlockAtom, MOS } from "@/store/global";
 import { ObjectService } from "@/store/services";
 import { backendStatusAtom } from "@/store/backendStatus";
 import { fireAndForget } from "@/util/util";
@@ -83,7 +83,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
     let viewRef!: HTMLDivElement;
     let connectElemRef!: HTMLDivElement;
 
-    const [blockData] = WOS.useMuxObjectValue<Block>(WOS.makeORef("block", blockId));
+    const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", blockId));
 
     const termSettingsAtom = getSettingsPrefixAtom("term");
     const termSettings = createMemo(() => termSettingsAtom());
@@ -241,7 +241,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             const delta = ev.deltaY > 0 ? -STEP : STEP; // scroll down = zoom out
             const next = Math.max(0.5, Math.min(2.0, Math.round((currentZoom + delta) * 100) / 100));
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", blockId),
+                oref: MOS.makeORef("block", blockId),
                 meta: { "term:zoom": next === 1.0 ? null : next },
             });
         };
@@ -464,7 +464,7 @@ const TermPaneChrome = (props: {
     // Tracks the CURRENTLY ACTIVE member, not the anchor — getMuxObjectAtom
     // inside a memo (not useMuxObjectValue), the reactive-oref pattern
     // established in #3134 for exactly this kind of switch-surviving reader.
-    const activeBlockData = createMemo(() => WOS.getMuxObjectAtom<Block>(WOS.makeORef("block", activeBlockId()))());
+    const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
 
     // Same per-block/tab color BlockMask (blockframe.tsx) paints onto
     // `.block-mask` — reused so a custom `frame:activebordercolor`/
@@ -513,7 +513,7 @@ const TermPaneChrome = (props: {
         const seen = new Set<string>();
         const result = stack.map((id, i) => {
             seen.add(id);
-            const persistedTitle = WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta?.["pane-title"] as
+            const persistedTitle = MOS.getObjectValue<Block>(MOS.makeORef("block", id))?.meta?.["pane-title"] as
                 | string
                 | undefined;
             const label = overrides[id] ?? persistedTitle ?? `Terminal ${i + 1}`;
@@ -618,7 +618,7 @@ const TermPaneChrome = (props: {
         setTitleOverrides((prev) => ({ ...prev, [targetBlockId]: title }));
         fireAndForget(() =>
             RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", targetBlockId),
+                oref: MOS.makeORef("block", targetBlockId),
                 meta: { "pane-title": title } as any,
             }),
         );

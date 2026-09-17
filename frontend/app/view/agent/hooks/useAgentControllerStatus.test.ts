@@ -50,7 +50,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/services", () => ({
     BlockService: { GetControllerStatus: vi.fn().mockResolvedValue(undefined) },
 }));
-vi.mock("@/app/store/wos", () => ({ makeORef: () => ({}) }));
+vi.mock("@/app/store/mos", () => ({ makeORef: () => ({}) }));
 vi.mock("../flows/launch-flow", () => ({ runLaunchFlow: vi.fn() }));
 vi.mock("../flows/run-provider-login", () => ({
     persistAndLinkAccount: vi.fn(),

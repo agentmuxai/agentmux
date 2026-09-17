@@ -6,12 +6,12 @@
  *
  * Pins the fix: the shell drawer's terminal must be constructed with the
  * FINAL (persisted) font size, not a default followed by a corrective jerk —
- * without triggering a second, redundant WOS fetch to get there (reagentx P1
+ * without triggering a second, redundant MOS fetch to get there (reagentx P1
  * on #2522). Mocks RPC/store/TermWrap at the module boundary (same approach
  * as AgentLaunchModal.integration.test.tsx); SUT is the real
  * AgentShellSubblock.
  *
- * Mock design note: mirrors the REAL wos.ts shape — one signal per oref
+ * Mock design note: mirrors the REAL mos.ts shape — one signal per oref
  * holding `{ value, loading }` together (not two independent signals), with
  * `getMuxObjectAtom` and `getMuxObjectLoadingAtom` both reading from it.
  * The signal starts at `{ value: null, loading: true }` and is only resolved
@@ -125,13 +125,13 @@ vi.mock("@/app/store/global", async () => {
         return sig;
     }
 
-    const WOS = {
+    const MOS = {
         makeORef: (otype: string, oid: string) => `${otype}:${oid}`,
         getMuxObjectAtom: (oref: string) => {
             const [get] = getOrCreateDataSignal(oref);
             return () => get().value;
         },
-        // Mirrors the real wos.ts implementation exactly: null while
+        // Mirrors the real mos.ts implementation exactly: null while
         // loading, false once settled (regardless of resulting value).
         getMuxObjectLoadingAtom: (oref: string) => {
             const [get] = getOrCreateDataSignal(oref);
@@ -140,7 +140,7 @@ vi.mock("@/app/store/global", async () => {
     };
 
     return {
-        WOS,
+        MOS,
         atoms: { prefersReducedMotionAtom: () => false },
         staticTabId: () => "tab-1",
     };
@@ -331,7 +331,7 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
     it("falls back to the default font size if the seed fetch never settles (bounded wait, no infinite hang)", async () => {
         const existingId = "hung-sub-block";
         // Deliberately never call resolveSeedFetch — simulates a genuine
-        // network failure that leaves the loading atom stuck (per wos.ts's
+        // network failure that leaves the loading atom stuck (per mos.ts's
         // own comment on non-"not found" GetObject rejections).
         render(() => (
             <AgentShellSubblock

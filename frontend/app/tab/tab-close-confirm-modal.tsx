@@ -4,7 +4,7 @@
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { ConfirmModal } from "@/element/modal";
-import { getObjectValue, makeORef } from "../store/wos";
+import { getObjectValue, makeORef } from "../store/mos";
 
 export function TabCloseConfirmModal(props: {
     tabId: string;

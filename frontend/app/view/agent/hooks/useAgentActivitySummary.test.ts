@@ -24,7 +24,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (type: string, id: string) => `${type}:${id}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (type: string, id: string) => `${type}:${id}` }));
 vi.mock("@/app/store/services", () => ({
     ObjectService: { UpdateObjectMeta: (...args: unknown[]) => hub.updateMeta(...args) },
 }));

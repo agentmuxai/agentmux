@@ -21,7 +21,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, type Acce
 import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { callBackendService } from "@/app/store/wos";
+import { callBackendService } from "@/app/store/mos";
 import { recordTurn } from "@/app/store/token-usage";
 import { ActivityRow } from "./ActivityRow";
 import { backgroundTaskActivities } from "../activity/background-adapter";

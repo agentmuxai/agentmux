@@ -51,7 +51,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (kind: string, id: string) => `${kind}:${id}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (kind: string, id: string) => `${kind}:${id}` }));
 
 import { runProviderLogin } from "./run-provider-login";
 

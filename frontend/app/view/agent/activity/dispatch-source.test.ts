@@ -3,14 +3,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDispatch } from "../../swarm/swarm-model";
-import * as wos from "@/app/store/wos";
+import * as mos from "@/app/store/mos";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));
 
 // Mirrors subagent-source.test.ts's mocking pattern exactly — see that
-// file's own comment for why only `wps` is mocked, not the whole `wos`
+// file's own comment for why only `wps` is mocked, not the whole `mos`
 // module.
 vi.mock("@/app/store/wps", () => ({
     muxEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
@@ -19,7 +19,7 @@ vi.mock("@/app/store/wps", () => ({
     }),
 }));
 
-const callBackendServiceSpy = vi.spyOn(wos, "callBackendService").mockResolvedValue([]);
+const callBackendServiceSpy = vi.spyOn(mos, "callBackendService").mockResolvedValue([]);
 
 import { allDispatchesAtom, msUntilNextQuietWindowRefresh, refreshDispatchesNow } from "./dispatch-source";
 

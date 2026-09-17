@@ -6,10 +6,10 @@ import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, Active
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import AnsiLine from "@/element/ansiline";
-import { callBackendService } from "@/store/wos";
+import { callBackendService } from "@/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { WOS, atoms } from "@/app/store/global";
+import { MOS, atoms } from "@/app/store/global";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
@@ -25,7 +25,7 @@ import "./swarm-view.scss";
 
 export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Element {
     const model = props.model;
-    const block = WOS.getMuxObjectAtom<Block>(`block:${model.blockId}`);
+    const block = MOS.getMuxObjectAtom<Block>(`block:${model.blockId}`);
 
     const zoomFactor = createMemo(() => {
         const z = block()?.meta?.["term:zoom"];
@@ -35,7 +35,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
     const setZoom = (next: number): void => {
         const clamped = Math.max(0.5, Math.min(2.0, Math.round(next * 100) / 100));
         void RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", model.blockId),
+            oref: MOS.makeORef("block", model.blockId),
             meta: { "term:zoom": clamped === 1.0 ? null : clamped },
         });
     };

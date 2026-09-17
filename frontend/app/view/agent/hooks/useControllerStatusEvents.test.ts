@@ -16,7 +16,7 @@ vi.mock("@/app/store/wps", () => ({
         };
     }),
 }));
-vi.mock("@/app/store/wos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
+vi.mock("@/app/store/mos", () => ({ makeORef: (a: string, b: string) => `${a}:${b}` }));
 
 import { deriveTurnActive, didTurnJustEnd, useControllerStatusEvents } from "./useControllerStatusEvents";
 

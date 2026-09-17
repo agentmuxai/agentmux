@@ -18,7 +18,7 @@
 import { onCleanup } from "solid-js";
 import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { trail } from "@/log/render-trail";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -63,7 +63,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
     // "accepted" transition for the user.
     const acceptedUnsub = muxEventSubscribe({
         eventType: WpsEvent.AgentMessageAccepted,
-        scope: WOS.makeORef("block", opts.blockId),
+        scope: MOS.makeORef("block", opts.blockId),
         handler: (event) => {
             const data = (event as any)?.data;
             if (!data) return;

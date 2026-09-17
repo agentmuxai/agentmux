@@ -37,7 +37,7 @@
 import { createEffect, createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import { getBlockMetaKeyAtom } from "@/app/store/global";
 import { addEventListener as addPaneEventListener } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -217,7 +217,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
         const unsubFailure = muxEventSubscribe({
             eventType: WpsEvent.AgentFailure,
-            scope: WOS.makeORef("block", opts.blockId),
+            scope: MOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;
                 if (!f) return;

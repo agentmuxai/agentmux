@@ -24,7 +24,7 @@ import {
     removeNotificationById,
     setIsTermMultiInput,
     useBlockAtom,
-    WOS,
+    MOS,
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
@@ -98,7 +98,7 @@ class TermViewModel implements ViewModel {
         this.termRpcClient = new TermRpcClient(blockId, this);
         DefaultRouter.registerRoute(makeFeBlockRouteId(blockId), this.termRpcClient);
         this.nodeModel = nodeModel;
-        this.blockAtom = WOS.getMuxObjectAtom<Block>(`block:${blockId}`);
+        this.blockAtom = MOS.getMuxObjectAtom<Block>(`block:${blockId}`);
 
         this.termMode = createMemo(() => {
             const blockData = this.blockAtom();
@@ -332,7 +332,7 @@ class TermViewModel implements ViewModel {
         });
         this.shellProcStatusUnsubFn = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
-            scope: WOS.makeORef("block", blockId),
+            scope: MOS.makeORef("block", blockId),
             handler: (event) => {
                 let bcRTS: BlockControllerRuntimeStatus = event.data;
                 this.updateShellProcStatus(bcRTS);
@@ -575,7 +575,7 @@ class TermViewModel implements ViewModel {
 
     setTerminalTheme(themeName: string) {
         RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", this.blockId),
+            oref: MOS.makeORef("block", this.blockId),
             meta: { "term:theme": themeName },
         });
     }

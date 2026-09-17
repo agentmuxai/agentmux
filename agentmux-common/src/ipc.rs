@@ -194,7 +194,7 @@ pub enum Command {
     /// Phase B.5 (window_id_map step a) — host reports the
     /// frontend's `register_backend_window` call: a window's label
     /// → backend window ID (a srv-side UUID the frontend resolves
-    /// via `WOS.makeORef`). The launcher mirrors it for the same
+    /// via `MOS.makeORef`). The launcher mirrors it for the same
     /// reasons it mirrors `instance_registry`: host's authoritative
     /// copy will be retired through the a→b→c→d→e ratchet.
     ReportBackendWindowIdRegistered {

@@ -12,7 +12,7 @@
 import { onCleanup, onMount } from "solid-js";
 import { muxEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
-import * as WOS from "@/app/store/wos";
+import * as MOS from "@/app/store/mos";
 import type { LogFn } from "./useAgentControllerStatus";
 
 /**
@@ -90,7 +90,7 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
     onMount(() => {
         const unsubStatus = muxEventSubscribe({
             eventType: WpsEvent.ControllerStatus,
-            scope: WOS.makeORef("block", opts.blockId),
+            scope: MOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const data = (event as any)?.data;
                 const status = data?.shellprocstatus;
@@ -123,7 +123,7 @@ export function useControllerStatusEvents(opts: UseControllerStatusEventsOptions
         // just "exited with code N".
         const unsubFailure = muxEventSubscribe({
             eventType: WpsEvent.AgentFailure,
-            scope: WOS.makeORef("block", opts.blockId),
+            scope: MOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;
                 if (!f) return;

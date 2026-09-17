@@ -498,7 +498,7 @@ pub struct CommandPaneOpenData {
     pub meta: Option<MetaMapType>,
     /// `Some(true)` creates the block through the reducer (same as the docked
     /// path) but skips BOTH the layout-placement step AND the floating path's
-    /// `tear_off_block` saga — the block exists (and the frontend's WOS cache
+    /// `tear_off_block` saga — the block exists (and the frontend's MOS cache
     /// knows about it) but isn't rendered anywhere yet. `split_direction` /
     /// `split_reference_block_id` are ignored when set (there's no placement
     /// to direct). Review finding: `floating` is checked BEFORE this field

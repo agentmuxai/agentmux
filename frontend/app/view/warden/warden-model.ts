@@ -3,7 +3,7 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { useBlockAtom } from "@/app/store/global";
-import { getMuxObjectAtom, makeORef } from "@/app/store/wos";
+import { getMuxObjectAtom, makeORef } from "@/app/store/mos";
 import { createMemo, type Accessor } from "solid-js";
 
 export type WardenSection = "host" | "lan" | "internet" | "audit" | "supervisor";

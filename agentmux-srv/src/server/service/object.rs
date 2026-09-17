@@ -375,7 +375,7 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                     }
                 }
             }
-            // Return the updated object so the frontend WOS cache stays in sync.
+            // Return the updated object so the frontend MOS cache stays in sync.
             if oref.otype == OTYPE_BLOCK {
                 if let Ok(block) = store.must_get::<Block>(&oref.oid) {
                     return WebReturnType::success_with_updates(vec![MuxObjUpdate {
@@ -599,7 +599,7 @@ async fn update_layout_via_reducer(
     }
     publish_events(state, &events);
 
-    // Return the committed row (fresh version) so the pusher's WOS cache
+    // Return the committed row (fresh version) so the pusher's MOS cache
     // stays in sync — same response shape as the legacy path.
     match get_object_by_oref(store, &format!("{}:{}", OTYPE_LAYOUT, oid)) {
         Ok(obj_val) => WebReturnType::success_with_updates(vec![MuxObjUpdate {
