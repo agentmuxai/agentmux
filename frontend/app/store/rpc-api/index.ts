@@ -35,6 +35,14 @@ export type {
     WatchMediaDirReq,
 } from "./file";
 export type {
+    AgentHistory,
+    CommandAppendAgentHistoryData,
+    CommandListAgentHistoryData,
+    CommandSearchAgentHistoryData,
+    ListAgentHistoryInput,
+    SearchAgentHistoryInput,
+} from "./agent";
+export type {
     CommandReadEditorFileData,
     CommandReadEditorFileResult,
     CommandWriteEditorFileData,
