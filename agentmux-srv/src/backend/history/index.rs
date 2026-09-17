@@ -9,6 +9,150 @@ use std::sync::Mutex;
 
 use super::adapter::*;
 
+/// Max characters of matched text returned per hit.
+///
+/// A single history message can be hundreds of KB, and this tool must never be
+/// the reason a caller blows its own context window — the problem it exists to
+/// solve is an agent not being able to audit itself, which is made worse, not
+/// better, by an answer too large to read. Not theoretical: the
+/// `GetAgentTranscript` call that motivated
+/// `SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md` returned 112 KB and had to be
+/// spilled to a file.
+const SNIPPET_MAX_CHARS: usize = 400;
+/// Characters of leading context kept before the match inside a snippet.
+const SNIPPET_LEAD_CHARS: usize = 120;
+
+/// Query parameters for [`SessionIndex::search_sessions`].
+#[derive(Debug, Clone, Default)]
+pub struct HistorySearchOptions {
+    /// Case-insensitive substring. Matched against message content, tool
+    /// names, and tool argument summaries.
+    pub query: String,
+    /// Restrict to `"user"` or `"assistant"` messages.
+    pub role: Option<String>,
+    /// Only match tool calls whose name equals this (case-insensitive).
+    ///
+    /// Its own parameter rather than folding into `query` because "find where
+    /// I *called* SendMessage" is a different question from "find where I
+    /// wrote the word SendMessage", and only the structural answer settles an
+    /// audit.
+    pub tool: Option<String>,
+    /// Max hits to return before reporting `truncated`.
+    pub limit: usize,
+}
+
+/// One match.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HistorySearchHit {
+    pub session_id: String,
+    pub file_path: String,
+    pub timestamp: i64,
+    pub role: String,
+    pub snippet: String,
+    /// `Some(name)` when the hit is a tool call rather than message prose.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+}
+
+/// Result of a bounded search.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HistorySearchOutcome {
+    pub hits: Vec<HistorySearchHit>,
+    /// Sessions actually opened and parsed.
+    pub sessions_scanned: u32,
+    /// Candidates offered to the search (after the caller's own filtering).
+    pub total_sessions: u32,
+    /// True when the scan stopped on `limit` rather than exhausting every
+    /// candidate — see `search_sessions`' doc comment for why this must never
+    /// be conflated with "no matches".
+    pub truncated: bool,
+}
+
+/// Bound a matched region to something a caller can actually read, keeping a
+/// little context before the match so the hit is interpretable.
+fn snippet_around(haystack: &str, match_at: usize) -> String {
+    let start = haystack[..match_at]
+        .char_indices()
+        .rev()
+        .take(SNIPPET_LEAD_CHARS)
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(match_at);
+    let tail: String = haystack[start..].chars().take(SNIPPET_MAX_CHARS).collect();
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(&tail);
+    if start + tail.len() < haystack.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// Every match within one message: its prose, plus each tool call.
+fn match_message(
+    meta: &SessionMeta,
+    msg: &HistoryMessage,
+    needle: &str,
+    opts: &HistorySearchOptions,
+) -> Vec<HistorySearchHit> {
+    let mut hits = Vec::new();
+
+    // Tool-call matches. When `tool` is set the search is structural: the
+    // filter is the tool NAME, and an empty query then means "every call to
+    // it" rather than "no matches".
+    for tu in &msg.tool_uses {
+        if let Some(want) = opts.tool.as_deref() {
+            if !tu.name.eq_ignore_ascii_case(want) {
+                continue;
+            }
+            if needle.is_empty() || tu.argument_summary.to_lowercase().contains(needle) {
+                hits.push(HistorySearchHit {
+                    session_id: meta.session_id.clone(),
+                    file_path: meta.file_path.clone(),
+                    timestamp: msg.timestamp,
+                    role: msg.role.clone(),
+                    snippet: snippet_around(&tu.argument_summary, 0),
+                    tool_name: Some(tu.name.clone()),
+                });
+            }
+            continue;
+        }
+        if needle.is_empty() {
+            continue;
+        }
+        let hay = format!("{} {}", tu.name, tu.argument_summary).to_lowercase();
+        if let Some(at) = hay.find(needle) {
+            hits.push(HistorySearchHit {
+                session_id: meta.session_id.clone(),
+                file_path: meta.file_path.clone(),
+                timestamp: msg.timestamp,
+                role: msg.role.clone(),
+                snippet: snippet_around(&tu.argument_summary, at.min(tu.argument_summary.len())),
+                tool_name: Some(tu.name.clone()),
+            });
+        }
+    }
+
+    // Prose match — skipped entirely when the caller asked a structural
+    // tool-only question.
+    if opts.tool.is_none() && !needle.is_empty() {
+        if let Some(at) = msg.content.to_lowercase().find(needle) {
+            hits.push(HistorySearchHit {
+                session_id: meta.session_id.clone(),
+                file_path: meta.file_path.clone(),
+                timestamp: msg.timestamp,
+                role: msg.role.clone(),
+                snippet: snippet_around(&msg.content, at),
+                tool_name: None,
+            });
+        }
+    }
+
+    hits
+}
+
 /// AgentMux-ISOLATED provider-home roots under which delete/clear is permitted:
 /// `<shared>/providers/` and `<shared>/identities/`. Anything outside these
 /// (the user's personal `~/.claude` / `~/.config/claude-*`) is OFF-LIMITS so a
@@ -273,6 +417,72 @@ impl SessionIndex {
             "no adapter for provider: {}",
             meta.provider
         )))
+    }
+
+    /// Search message content and tool calls across a specific, already-chosen
+    /// set of sessions.
+    ///
+    /// `SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md` §3.1/§3.2. The caller picks
+    /// the candidate sessions (normally `HistoryService::search_for_agent`,
+    /// which resolves them from the agent's linked identities and applies the
+    /// `since`/`until` window) — this function only scans what it is handed,
+    /// so the expensive `get_full` parse never touches a session the caller
+    /// already ruled out on cheap indexed metadata.
+    ///
+    /// Bounded deliberately: it stops at `limit` hits and reports whether it
+    /// stopped early. **That signal is load-bearing.** A search that silently
+    /// truncates and returns nothing reproduces the exact failure this whole
+    /// feature exists to prevent — an agent concluding "I never did that" from
+    /// an incomplete audit — so "no matches" and "ran out of budget" must never
+    /// look the same to a caller.
+    pub fn search_sessions(
+        &self,
+        candidates: &[SessionMeta],
+        opts: &HistorySearchOptions,
+    ) -> HistorySearchOutcome {
+        let needle = opts.query.to_lowercase();
+        let mut hits: Vec<HistorySearchHit> = Vec::new();
+        let mut sessions_scanned = 0u32;
+        let mut truncated = false;
+
+        for meta in candidates {
+            if hits.len() >= opts.limit {
+                // More candidates remained that were never opened.
+                truncated = true;
+                break;
+            }
+            sessions_scanned += 1;
+            // A session that fails to parse is skipped, not fatal: one
+            // malformed file must not make the whole audit unanswerable.
+            let Ok(Some(session)) = self.get_full(&meta.session_id) else {
+                continue;
+            };
+            for msg in &session.messages {
+                if let Some(role) = opts.role.as_deref() {
+                    if msg.role != role {
+                        continue;
+                    }
+                }
+                if hits.len() >= opts.limit {
+                    truncated = true;
+                    break;
+                }
+                for hit in match_message(meta, msg, &needle, opts) {
+                    if hits.len() >= opts.limit {
+                        truncated = true;
+                        break;
+                    }
+                    hits.push(hit);
+                }
+            }
+        }
+
+        HistorySearchOutcome {
+            hits,
+            sessions_scanned,
+            total_sessions: candidates.len() as u32,
+            truncated,
+        }
     }
 
     /// Check if the index has been populated.
@@ -621,5 +831,190 @@ mod tests {
         assert_eq!(idx2.list_for_identity("identity-new", 0, 10, "created_at", "desc").1, 1);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── History search (SPEC_AGENT_HISTORY_SEARCH_2026_09_17.md) ──
+
+    /// Adapter serving canned messages, recording which files were actually
+    /// opened — the recording is what lets a test prove the search never
+    /// parses a session the caller already excluded.
+    struct SearchMockAdapter {
+        sessions: HashMap<String, Vec<HistoryMessage>>,
+        parsed: Mutex<Vec<String>>,
+    }
+
+    impl HistoryAdapter for SearchMockAdapter {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            Ok(self
+                .sessions
+                .keys()
+                .map(|id| DiscoveredFile { file_path: format!("/tmp/{id}.jsonl"), mtime_ms: 0 })
+                .collect())
+        }
+        fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            let id = PathBuf::from(file_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(Some(SessionMeta {
+                session_id: id,
+                file_path: file_path.to_string(),
+                provider: "mock".into(),
+                model: String::new(),
+                slug: String::new(),
+                working_directory: "/proj".into(),
+                created_at: 0,
+                modified_at: 0,
+                message_count: 0,
+                first_user_message: String::new(),
+                file_size_bytes: 0,
+                git_branch: String::new(),
+                total_tokens: 0,
+                subagent_count: 0,
+                identity_id: String::new(),
+            }))
+        }
+        fn parse_file(&self, file_path: &str) -> Result<Option<HistorySession>, HistoryError> {
+            self.parsed.lock().unwrap().push(file_path.to_string());
+            let id = PathBuf::from(file_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let Some(messages) = self.sessions.get(&id) else { return Ok(None) };
+            let meta = self.extract_meta(file_path)?.unwrap();
+            Ok(Some(HistorySession { meta, messages: messages.clone() }))
+        }
+    }
+
+    fn msg(role: &str, content: &str, tools: Vec<(&str, &str)>) -> HistoryMessage {
+        HistoryMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+            timestamp: 100,
+            tool_uses: tools
+                .into_iter()
+                .map(|(n, a)| ToolUseSummary { name: n.to_string(), argument_summary: a.to_string() })
+                .collect(),
+        }
+    }
+
+    fn search_index(sessions: Vec<(&str, Vec<HistoryMessage>)>) -> SessionIndex {
+        let map: HashMap<String, Vec<HistoryMessage>> =
+            sessions.into_iter().map(|(id, m)| (id.to_string(), m)).collect();
+        let idx = SessionIndex::new(vec![Box::new(SearchMockAdapter {
+            sessions: map,
+            parsed: Mutex::new(Vec::new()),
+        })]);
+        idx.refresh();
+        idx
+    }
+
+    fn opts(query: &str) -> HistorySearchOptions {
+        HistorySearchOptions { query: query.into(), role: None, tool: None, limit: 50 }
+    }
+
+    #[test]
+    fn search_matches_message_content() {
+        let idx = search_index(vec![("s1", vec![msg("assistant", "I merged the WAN signing PR", vec![])])]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("wan signing"));
+        assert_eq!(out.hits.len(), 1);
+        assert!(out.hits[0].snippet.contains("WAN signing"), "snippet carries the match");
+        assert!(!out.truncated);
+    }
+
+    #[test]
+    fn search_matches_a_tool_call_structurally_not_just_prose() {
+        // The question that motivated this whole feature: "did I call
+        // SendMessage to Agent4" must be answerable even when no prose in the
+        // transcript mentions it.
+        let args = r#"{"to":"Agent4","message":"following up"}"#;
+        let idx = search_index(vec![(
+            "s1",
+            vec![msg("assistant", "sure, sending now", vec![("SendMessage", args)])],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+
+        let mut o = opts("");
+        o.tool = Some("sendmessage".into()); // case-insensitive
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.hits[0].tool_name.as_deref(), Some("SendMessage"));
+        assert!(out.hits[0].snippet.contains("Agent4"));
+
+        // And filtering by argument content within that tool.
+        let mut o2 = opts("agent4");
+        o2.tool = Some("SendMessage".into());
+        assert_eq!(idx.search_sessions(&cands, &o2).hits.len(), 1);
+        let mut o3 = opts("agent9");
+        o3.tool = Some("SendMessage".into());
+        assert_eq!(idx.search_sessions(&cands, &o3).hits.len(), 0);
+    }
+
+    #[test]
+    fn an_exhausted_budget_is_distinguishable_from_no_matches() {
+        // The single most important property here. A search that silently
+        // stops early and returns nothing recreates the exact failure this
+        // feature exists to prevent: an agent concluding "I never did that"
+        // from an incomplete audit.
+        let many: Vec<HistoryMessage> =
+            (0..10).map(|i| msg("assistant", &format!("hit number {i}"), vec![])).collect();
+        let idx = search_index(vec![("s1", many)]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+
+        let mut limited = opts("hit number");
+        limited.limit = 3;
+        let out = idx.search_sessions(&cands, &limited);
+        assert_eq!(out.hits.len(), 3);
+        assert!(out.truncated, "stopping on budget must be reported");
+
+        let absent = idx.search_sessions(&cands, &opts("never appears anywhere"));
+        assert!(absent.hits.is_empty());
+        assert!(!absent.truncated, "genuinely-no-matches must NOT look truncated");
+    }
+
+    #[test]
+    fn search_only_opens_the_sessions_it_is_handed() {
+        // What makes the since/until window cheap: excluded candidates are
+        // never parsed, because the caller filters on indexed metadata first.
+        let idx = search_index(vec![
+            ("keep", vec![msg("assistant", "findme", vec![])]),
+            ("skip", vec![msg("assistant", "findme", vec![])]),
+        ]);
+        let cands = vec![idx.get_meta("keep").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("findme"));
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.sessions_scanned, 1);
+        assert_eq!(out.total_sessions, 1);
+        assert_eq!(out.hits[0].session_id, "keep");
+    }
+
+    #[test]
+    fn role_filter_narrows_to_one_side_of_the_conversation() {
+        let idx = search_index(vec![(
+            "s1",
+            vec![msg("user", "deploy it", vec![]), msg("assistant", "deploy it? confirming first", vec![])],
+        )]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let mut o = opts("deploy it");
+        o.role = Some("user".into());
+        let out = idx.search_sessions(&cands, &o);
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.hits[0].role, "user");
+    }
+
+    #[test]
+    fn a_snippet_is_bounded_even_for_a_pathologically_large_message() {
+        // This tool must never be the reason a caller blows its own context.
+        let huge = format!("{}NEEDLE{}", "x".repeat(50_000), "y".repeat(50_000));
+        let idx = search_index(vec![("s1", vec![msg("assistant", &huge, vec![])])]);
+        let cands = vec![idx.get_meta("s1").unwrap()];
+        let out = idx.search_sessions(&cands, &opts("needle"));
+        assert_eq!(out.hits.len(), 1);
+        assert!(out.hits[0].snippet.chars().count() <= SNIPPET_MAX_CHARS + 2, "snippet stays bounded");
+        assert!(out.hits[0].snippet.contains("NEEDLE"), "and still shows the match");
     }
 }
