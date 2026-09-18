@@ -1,6 +1,6 @@
 # SPEC: Browser Pane Lifecycle & State Machine
 
-Status: draft (analysis only — no code changes)
+**Status:** draft (analysis only — no code changes)
 Date: 2026-04-17
 Owner: AgentA
 Bug: "Close pane → DOM gone, but Chromium content still painted; keystrokes stuck in dead pane."

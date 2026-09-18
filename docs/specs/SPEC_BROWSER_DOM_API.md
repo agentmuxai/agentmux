@@ -1,6 +1,6 @@
 # SPEC: Browser-pane DOM API (`/agentmux/browser/*`)
 
-Status: draft
+**Status:** draft
 Date: 2026-04-19
 Owner: AgentA
 Motivation: pixel-coordinate clicks against browser panes are a flaky

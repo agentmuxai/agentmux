@@ -1,6 +1,6 @@
 # SPEC: Browser Pane Lifecycle — Automated Test Coverage
 
-Status: draft
+**Status:** draft
 Date: 2026-04-18
 Owner: AgentA
 Follows: `SPEC_BROWSER_PANE_LIFECYCLE.md` (lifecycle design)

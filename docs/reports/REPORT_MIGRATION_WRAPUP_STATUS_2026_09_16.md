@@ -12,6 +12,17 @@ P0 that would have broken `bookmarks.list` on every call.
 **The shape of the remaining work changed materially on 2026-09-17** (§5.4b): a quarter of
 the stub surface turned out to be dead code, not un-migrated code. Remaining open items are
 §5.1-5.3 and §5.5-5.9.
+
+**2026-09-18 — docs lifecycle (§2.4, §5.5).** Four PRs landed: #3366, #3367, #3368, #3369.
+Three add enforcement (relative-link resolution, the `docs/README.md` directory map, and
+citations widened from `docs/specs/` to any `docs/<dir>/`), each clearing the backlog it
+exposed — 45 broken links, a map advertising a directory deleted six weeks earlier, and 10
+code comments citing documents that were never committed. One folds an archive directory
+and writes down why the last split is deliberate. A fifth (#3370, this change) folds two singleton directories
+and normalises 17 Status lines. **This does not close the lifecycle and does not organise
+the repo's docs:** 610 of the 1,483 scanned docs are still non-compliant (§5.5a), and most of them are
+non-spec doc types the closed vocabulary was never designed to describe — which needs a
+decision about the *vocabulary*, not another cleanup pass.
 **Date:** 2026-09-16
 **Author:** Manoz (manoz-0803a)
 **Baseline:** `main` @ `65958f84e` (post-v0.56.2)
@@ -79,7 +90,7 @@ Err(e) => {
 
 Phases 0, 1a (#3043, #3047), 1b, 1c (#3065), 2 (#3070), 3 (#3062), 5 (#3066) and 6 all shipped
 2026-09-07. Supporting artifacts verified present: `migrations/phase5_tests.rs`,
-`docs/recovery/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`, `srv_stderr::migration_failed_line`,
+`docs/incident/RUNBOOK_MIGRATION_RECOVERY_2026_09_07.md`, `srv_stderr::migration_failed_line`,
 `runner::doctor_report_for_instance`. **Only Phase 4 remains, and the spec itself calls it a
 product decision, not engineering.**
 
@@ -144,10 +155,63 @@ All four agent-pane state files still exist, and **`agent-view.tsx` is now 3,017
 when A6 was filed, 2,730 at the 09-06 audit, 13 commits in the last 10 days). The file is still
 growing faster than the refactor meant to shrink it — §5.8.
 
-### 2.4 Docs lifecycle hardening — Phase 2 is all that's left ✅ **[verified]**
+### 2.4 Docs lifecycle hardening — three new gates; Phase 2 still partly open 🟡 **[verified]**
 
-Phase 5 shipped 2026-09-07 (#3068). Remaining: Phase 2 (directory consolidation); Phase 4
-partially covered by the reader guardrail in `docs/specs/README.md`.
+Phase 5 shipped 2026-09-07 (#3068).
+
+**Updated 2026-09-18.** This heading previously read *"Phase 2 is all that's left"*, and that
+was wrong in both directions: Part 4 was not finished either, and Phase 2 was further along
+than the spec recorded. Four PRs landed on 2026-09-18 — #3366, #3367, #3368, #3369.
+
+Three of them are Part 4 (enforcement), not Phase 2:
+
+| gate | catches | first-run backlog |
+|---|---|---|
+| `check-doc-links.mjs` (#3366) | relative Markdown links that do not resolve from the file they are written in | **45 broken links across 27 files → 0** |
+| `check-docs-dir-map.mjs` (#3368) | `docs/README.md`'s directory table vs the directories that actually exist | 2 → 0 |
+| `check-spec-citations.sh` widened (#3369) | citations naming any `docs/<dir>/x.md`, not only `docs/specs/` | 10 dangling code citations → 0 |
+
+The gap the first two close is specific and had been open a long time: `check-spec-citations.sh`
+only recognises a path containing `docs/specs/`, so a link written `](specs/archive/Y.md)` in
+`docs/reports/` was invisible to it, and resolved only from files that happened to sit in
+`docs/`. Those have been dead since the top-level `specs/` tree was folded in (#2920).
+
+**The finding that generalises beyond docs:** of the documents cited from source comments,
+five were never committed to this repo at all — no file, no deletion, nothing in history
+(`ANALYSIS_IDLE_SEND_RACE_2026_06_11` alone is cited from five frontend files). This is the
+same shape as `SPEC_APP_API_AUTOMATION_SURFACE.md`, which `perf-baseline-2026-05-09.md`
+described as *"pushed alongside this retro"*. A doc written in a working tree and never
+pushed leaves a citation that no amount of searching can satisfy. Before assuming a cited
+doc merely moved, check `git log --diff-filter=D --all` — for these five it returns nothing.
+
+**Phase 2 (directory consolidation) is partly done, and the rest is deliberate.** The audit
+counted four archive directories; two were already gone (`specs/archive/` left with the
+top-level tree), and #3367 folded `docs/analysis/archive/` into `docs/archive/`, leaving two.
+`docs/specs/archive/` stays on purpose and is documented in `docs/archive/README.md`: it is
+load-bearing tooling, not a folder. `gen-docs-index.sh` scans `docs/specs/` and excludes
+exactly that subtree, `check-docs-lifecycle.mjs` hardcodes the path, and two build scripts
+cite into it — so moving it forces an INDEX.md regeneration, which is not reproducible
+off-CI (a Windows run emits ~21 extra status buckets and a different row order than CI's).
+
+**Singleton directories: two folded, three kept (#3370).** `docs/sessions/` (1 file, no
+inbound references) moved to `docs/status/`, and `docs/recovery/` (3 files) to
+`docs/incident/` — a fold `docs/README.md` already described as one category, so it
+required no new judgement about what those documents are. 18 directories became 17.
+
+`docs/api/`, `docs/cef-patches/` and `docs/providers/` were **kept**, each having a
+distinct audience or purpose (a user-facing App API guide; the vendored CEF patch set with
+its own README; a cross-provider reference cited from five places). The hardening spec only
+asks a singleton to fold when it does not have one.
+
+The constraint in `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §1 — *"If an item requires a
+fresh judgement call about a doc's content, it is out of scope"* — still binds, and it is
+what stops the remaining work: not the directory layout, but the `Status:` vocabulary
+(§5.5a), where 610 docs cannot be made compliant without either distorting their meaning or
+extending the enum for non-spec doc types. That is the decision still owed to a human.
+
+**So: the documentation lifecycle is not complete, and the repo's docs are not organised.**
+What exists now is enforcement that stops the known failure modes recurring, plus the
+backlogs each gate exposed, cleared. The §5.5 backlog below is untouched by design.
 
 ### 2.5 Already fixed by the audit's own follow-up PR ✅ **[verified]**
 
@@ -656,6 +720,97 @@ offenders: `ready` ×35, `spec` ×33, `design` ×13, `approved`/`analysis` ×11.
 the burn-down. Issue **#3216** (`docs-stale-sweep`, auto-updated weekly, backed by
 `scripts/docs-stale-sweep.mjs`) already reports a wider 1,330-doc scan with 453 flagged — the
 instrumentation exists; the burn-down does not.
+
+**Re-measured 2026-09-18.** 912 specs (excluding `archive/`, INDEX, README):
+**134 with no canonical `**Status:**` line, 37 non-canonical — 171 total.**
+
+That is not comparable to the 357 above, and the difference should not be read as a
+burn-down. This scan requires a line matching `^**Status:**`; the method behind the 09-16
+figure is not recorded here, and its named top offenders do not survive re-measurement —
+`ready` x35 is now **zero** files and `spec` x33 is **one**. Either a restamp landed in
+between, or the two counts measure different things. Do not quote a delta until one method
+is written down; that is the same mistake §2.6 corrects in this report.
+
+**A finding that is new, and cheap to act on.** Of the 134 with no canonical Status line,
+**52 do declare a status** — just in a shape `check-doc-status.sh` cannot read:
+
+| form | count |
+|---|---|
+| `- **Status:** …` (list item) | 22 |
+| `Status: …` (unbolded) | 21 |
+| `## Status …` (heading) | 9 |
+| **genuinely no status at all** | **82** |
+
+This matters because the gate deliberately *skips* files with no Status line — adding one
+"requires knowing what the doc's state actually IS, which is a judgement call". That
+reasoning holds for the 82. It does **not** hold for the 52: those authors already made the
+judgement call and wrote it down, and only the formatting keeps it invisible. Normalising
+them is mechanical, needs no new decisions, and would move 52 of the 134 out of the
+untyped bucket — after which the gate could start enforcing on them.
+
+Left undone deliberately: nothing here was auto-fixed. Part 4 of the hardening spec says
+this backlog is surfaced, not repaired, and #3216's weekly sweep already reports it.
+
+#### 5.5a The backlog is three times bigger than this section says, because this section only counted specs
+
+Measured 2026-09-18 across `docs/`: **1,489 tracked `.md`, of which 6 are INDEX/README and
+not themselves documents with a lifecycle — so 1,483 scanned**, not just `docs/specs/`.
+The rows below sum to that 1,483.
+
+| | count |
+|---|---:|
+| canonical `**Status:**` + a vocabulary word | 873 |
+| canonical line, non-vocabulary word | 208 |
+| other format, but the word IS in the vocabulary | 1 |
+| other format, and the word is not | 46 |
+| no status declaration of any kind | 355 |
+| **scanned** | **1,483** |
+| **total non-compliant** | **610** |
+
+The gate is not specs-scoped — its `docs/` filter is applied in awk on the diff destination —
+so all 610 are in its blast radius the moment someone edits one.
+
+**The reason most of them are non-compliant is not neglect.** The top non-vocabulary words are
+`root` x45 (`**Status:** root-caused; fix in ...`), `analysis` x25, `shipped` x11,
+`fixed` x7, `investigation` x6. Those are `docs/retro/` and `docs/analysis/` files, and the
+closed vocabulary — `draft | proposed | active | implemented | living | historical |
+superseded` — was designed for **specs**, which are 974 of the 1,483 scanned. A retro is not
+"implemented"; it is a record of something that happened. Forcing it into a spec's lifecycle
+word makes the field less informative, not more.
+
+So there are two genuinely different problems filed under one number:
+
+1. **Specs that never got a Status, or got a free-text one** — the original backlog, and the
+   one the vocabulary fits.
+2. **Non-spec doc types the vocabulary does not describe** — which needs a decision about
+   whether to extend the enum (e.g. a `record` state for retros/analyses) or exempt those
+   directories, not a restamping campaign.
+
+**What must NOT happen to either:** `PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md` §4 already
+ruled on this — an unverified bulk restamp "replaces *unknown status* with *confidently wrong
+status*", and `check-doc-status.sh` deliberately excludes pure renames for the same reason.
+The 355 with no status declaration at all cannot be fixed mechanically: setting one requires
+reading the doc and knowing what it is.
+
+**Correction, same day.** The first version of this section said 82 docs "already declare a
+status and are merely mis-formatted", and called all 82 safe to normalise. Both halves were
+wrong, and re-measuring strictly gives the table above:
+
+- The 82 counted any line matching `Status` — including `# Status — Lifecycle & Crash
+  Architecture Program` (a document *title*) and a bare `### Status` section heading. Neither
+  declares anything. Requiring a colon and a non-empty value on the same line gives **63**.
+- Of those 63, only **17** carry a word already in the vocabulary. Normalising the other 46
+  would make things **worse**: the gate deliberately skips a file with no readable Status
+  line, so reformatting one whose word is `Root-caused` or `Spec` converts a file the gate
+  ignores into a file the gate fails — without anyone having decided what the doc's state
+  actually is. That is precisely the "confidently wrong status" trade
+  `PLAN_DOCS_CLEANUP_EXECUTION` §4 warns against, arrived at from the other direction.
+
+So the mechanically-safe set was **17 docs**: the format wrong, the word already right, and
+fixing it changing no claim. 16 are normalised in this PR — the 17th keeps its status in
+YAML frontmatter, where rewriting it to `**Status:**` broke the YAML, so it was reverted and
+left outside the gate like its sibling spec. That is why the row above reads 1, not 17.
+Everything else in this table needs a human to read the doc.
 
 ### 5.6 Automate §3's reverse check 🟢 **recommended**
 

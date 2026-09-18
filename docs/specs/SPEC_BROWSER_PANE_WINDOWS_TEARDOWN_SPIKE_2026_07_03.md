@@ -1,6 +1,6 @@
 # SPEC: Windows browser-pane renderer teardown — Phase-0 spike scope
 
-Status: draft (spike scoping — no code changes)
+**Status:** draft (spike scoping — no code changes)
 Date: 2026-07-03
 Owner: Lzop
 Tracking: #1936 (renderer/pagefile commit-charge leak)
