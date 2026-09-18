@@ -1,7 +1,7 @@
 # Spec: Status-Bar Token Usage Indicator + Per-Service Breakdown
 
 **Date:** 2026-04-24
-**Status:** Draft, ready to implement
+**Status:** implemented — #549 (2026-04-24), the PR this doc was added in. `TokenUsageIndicator.tsx`, `TokenBreakdownPopover.tsx` and `SystemStats.tsx` are live in `frontend/app/statusbar/`, with §4.3 cited inline. Its by-agent successor is `SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md` (#2849), which regroups this panel rather than replacing it. §3's non-goals are unchanged.
 **Owner:** AgentA
 **Touches:** `frontend/app/statusbar/StatusBar.tsx` (+ SCSS),
              new `frontend/app/statusbar/TokenUsageIndicator.tsx`,

@@ -1,7 +1,7 @@
 # Spec: LAN Discovery Toggle (HostPopover)
 
 **Branch:** `agenty/governance-widget-spec`
-**Status:** Draft — design
+**Status:** implemented — #1032 (2026-05-25), the PR this doc was added in: the toggle in HostPopover, backed by `agentmux-srv/src/backend/lan_discovery.rs` and `bootstrap.rs`, both citing this spec by path. Making the toggle take effect *without a restart* came later, in #3021 — see `REPORT_NETWORK_ARCHITECTURE_DRYNESS_AND_ROBUST_LAN_2026_09_06.md` and `REPORT_LAN_TOGGLE_WITHOUT_RESTART_2026_09_06.md` for why that was a separate piece of work.
 **Date:** 2026-05-25
 **Author:** AgentY
 **Related:** `specs/lan-awareness-and-embedded-jekt-api.md`, `specs/windows-firewall-fix.md`, `specs/hostname-popover.md`, `specs/SPEC_WARDEN_WIDGET_2026-05-25.md`

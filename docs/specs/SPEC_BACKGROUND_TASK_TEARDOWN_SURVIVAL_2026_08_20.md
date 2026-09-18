@@ -5,7 +5,7 @@
 
 **Date:** 2026-08-20 (revised same day — see §0)
 **Author:** AgentA
-**Status:** Proposed
+**Status:** implemented — #2681 (2026-08-20), the PR this doc was added in, alongside its two siblings (`SPEC_BACKGROUND_TASK_PID_CAPTURE` Phase A and `SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE` Phase C). Survival across teardown is in `agentmux-bashwrap/src/bash_wrap.rs` with a dedicated integration test, `tests/declared_background_session_detach.rs`, and the controller side in `blockcontroller/mod.rs`.
 **Depends on:** `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` (Phase A)
 **Addresses:** Issue #2492, rung 4 of `docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md`
 

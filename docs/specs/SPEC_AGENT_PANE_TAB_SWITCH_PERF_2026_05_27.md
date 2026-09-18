@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27
 **Author:** AgentA
-**Status:** proposed — Design — perf investigation + multi-phase remediation plan.
+**Status:** active — the investigation half is done and load-bearing; the remediation half is not. #1108 (the PR this doc was added in) shipped the fade-in opacity reveal, and this spec's Phase 0 measurements are now cited as authority from `frontend/app/util/settle-detector.ts` and `frontend/app/tab/active-tab-display.ts` ("measured that at…"). **Phase 1's premise needs re-checking before anyone acts on it:** it hypothesises that "there's no cache" for markdown re-parsing, but `frontend/app/element/markdown.tsx` has wrapped its transform in a `createMemo` — essentially Phase 1's own Option B — since the initial commit, i.e. before this spec was written. Phases 2 and 3 are unverified; Phase 4 was always deferred.
 
 ---
 

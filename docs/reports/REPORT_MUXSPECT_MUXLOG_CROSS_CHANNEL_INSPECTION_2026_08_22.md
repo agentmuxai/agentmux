@@ -1,7 +1,7 @@
 # Report: muxspect/muxlog cross-channel inspection gaps
 
 Date: 2026-08-22
-**Status:** draft — findings from a live debugging session, not yet a spec
+**Status:** active — findings from a live debugging session, two of which were acted on the same day. §2.2–§2.3's root cause was fixed in #2738 (srv logs honor `AGENTMUX_LOG_DIR`, so instances stop interleaving into one file), cited from `bootstrap.rs`. §3's Ext 4 shipped in #2745 as `GET /api/v1/muxspect/find`, whose doc comment quotes this report's wording for the query the session needed and had no tool for. **Ext 1 (a structured instance-identity field on every log line — named here as the actual root fix), Ext 2, 3, 5 and 6 have not shipped.**
 
 ## 1. Why this exists
 

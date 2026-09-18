@@ -1,7 +1,7 @@
 # SPEC: Widget bar parent widgets (grouped submenus)
 
 **Date:** 2026-08-12
-**Status:** proposed
+**Status:** implemented — #2633 (2026-08-12), the PR this doc was added in. Parent widgets with grouped submenus live in `frontend/app/window/action-widgets-config.ts` (with tests) and render through `view/launcher/launcher.tsx`. §2's non-goals are unchanged — one of them is cited from the code as a deliberate gap ("this spec doesn't cover this").
 
 ---
 

@@ -1,7 +1,15 @@
 # Report: agent/swarm pane loading, ambient-call flood, and stale status
 
-**Status:** proposed — Investigation complete — no code changed. Written to inform an
-architecture decision before implementation.
+**Status:** active — the investigation was acted on (#2002, #2241), though not all of it.
+Finding 2 (subagent completion keyed off derived text) was fixed the same day in
+#2002, the PR this report was added in. Finding 1's mount-time reconciliation
+shipped in #2241: `reconcileTurnActive` in `agent-view.tsx` seeds `TurnPhase`
+from `turn_active` instead of always defaulting to Idle, and
+`blockcontroller/persistent.rs` has a test pinning that `turn_active` tracks the
+health monitor's flag — both citing "Finding 1" by name. **Finding 3 (no
+cross-pane concurrency cap on ambient-gateway pull RPCs) is still open** —
+nothing in `agentmux-srv/src/ambient/` caps concurrency. Finding 1's "what a fix
+would need to decide" section records the design call that #2241 then made.
 **Author:** AgentX
 **Date:** 2026-07-07
 **Triggered by:** user report — "loading an agent started a flood of subagent

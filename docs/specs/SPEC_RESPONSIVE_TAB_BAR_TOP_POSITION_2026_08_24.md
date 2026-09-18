@@ -1,7 +1,7 @@
 # SPEC: Move the narrow-width responsive tab bar to the top (from the bottom)
 
 **Date:** 2026-08-24
-**Status:** proposed
+**Status:** implemented — #2793 (2026-08-24), the PR this doc was added in. The top-positioned responsive tab bar is live in `armory-view.tsx` and `settings-view.tsx`, both with tests citing this spec. §3's out-of-scope items are unchanged.
 **Scope:** Armory, Warden, Settings — every pane with the rail↔bottom-tab-bar
 responsive pattern.
 

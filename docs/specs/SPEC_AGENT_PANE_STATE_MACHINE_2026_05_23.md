@@ -2,13 +2,13 @@
 
 **Date:** 2026-05-23
 **Author:** AgentA
-**Status:** Draft
+**Status:** implemented — #996 (2026-05-23), the PR this doc was added in, which shipped the Disconnected state and its banner. The state machine lives in `frontend/app/store/agent-pane-state/` (`types.ts`, `reducer.ts`, with tests) and is consumed by `agent-view.tsx`, all citing this spec.
 **Scope:** the agent pane's per-turn lifecycle state in
 `frontend/app/store/agent-pane-state/`, the "working" animation, the
 interrupt path. This spec **builds on** existing work — it is not a
 green-field design.
 **Related (must-read first):**
-`docs/specs/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md` (the audit this
+`docs/analysis/AGENT_PANE_REDUCER_AUDIT_2026_05_12.md` (the audit this
 spec extends), GitHub issue **#728** (the 6 gaps the audit produced),
 `docs/specs/MASTER_REDUCER_STACK_STATUS_2026-05-05.md` (where this
 slice sits in the broader reducer stack), `SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md`

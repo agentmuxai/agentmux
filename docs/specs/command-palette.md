@@ -1,6 +1,6 @@
 # Command Palette — Spec
 
-**Status:** Draft  
+**Status:** implemented — #309 (2026-04-06) shipped the palette itself (Ctrl+P + the `run_command` IPC); this doc was added later in #332 alongside the App API Tier 1 work that extended it. `frontend/app/modals/command-palette.tsx` and its stylesheet are live, wired into the macOS menu via `agentmux-cef/src/macos_menu.rs`. The **Target: v0.35.x** line below is long since passed.  
 **Target:** v0.35.x  
 **Authors:** AgentA
 
