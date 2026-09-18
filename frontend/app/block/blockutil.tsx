@@ -15,6 +15,18 @@ export function blockViewToIcon(view: string): string {
     if (view == "term") {
         return "terminal";
     }
+    if (view == "agent") {
+        return "sparkles";
+    }
+    if (view == "browser") {
+        return "globe";
+    }
+    if (view == "sysinfo") {
+        return "chart-line";
+    }
+    if (view == "editor") {
+        return "file-lines";
+    }
     if (view == "help") {
         return "circle-question";
     }

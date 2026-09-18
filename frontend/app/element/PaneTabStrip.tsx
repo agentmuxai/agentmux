@@ -35,13 +35,10 @@ export interface PaneTabStripProps<T> {
     tabs: T[];
     activeId: string | null;
 
-    /** This pane's own content zoom (term:zoom block meta) — agent's
-     *  zoomFactor memo, editor's model.zoomAtom, terminal's
-     *  model.termZoomAtom. NOT the global chrome-zoom control
-     *  (window-header/status-bar's --zoomfactor) — deliberately per-pane,
-     *  so tabs scale with the content they belong to, not uniformly
-     *  across every pane in the window. Omit for 1 (unzoomed). See
-     *  docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §A. */
+    /** Content zoom for a strip that lives INSIDE a pane's content (the
+     *  editor's file tabs), so it scales with that content. Pane-header
+     *  tabs don't pass it: they scale only with chrome zoom, via the
+     *  header row's own `--zoomfactor`. Omit for 1 (unzoomed). */
     zoomFactor?: Accessor<number>;
 
     /** Opt in to animating this strip's own shrink-to-fit width across a
@@ -58,12 +55,9 @@ export interface PaneTabStripProps<T> {
 
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
-    /** Optional icon rendered to the left of the label, e.g.
-     *  `getBlockHeaderIcon(blockViewToIcon(view), blockData)` — the same
-     *  icon convention the plain (non-tabbed) header iconview already uses
-     *  (blockutil.tsx). Omitted entirely (no reserved space) for a caller
-     *  that doesn't pass it, so existing tab strips (agent/term) are
-     *  visually unchanged. */
+    /** Optional icon rendered to the left of the label, inside a fixed-size
+     *  `.pane-tab-icon` box. Pane headers always pass one (PaneChrome, via
+     *  pane-tab-model.tsx); a strip that omits it reserves no space. */
     getIcon?: (tab: T) => JSX.Element;
     /** Full tooltip text; falls back to the label when omitted. */
     getTooltip?: (tab: T) => string;
