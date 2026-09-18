@@ -33,11 +33,28 @@ door. To exercise it today an agent must:
 5. Frame raw `RpcMessage` envelopes.
 
 That is the verification path used in §9 — useful for testing, wrong as a
-contract. `AGENTMUX_AUTH_KEY` is also *not* a PTY env var for trust reasons
-(`internals/env-vars.md`: "Available In Pane? No"), so an agent doing the raw-WS
-dance only works because this build leaks the key into the shell; the security
-model intends agents to reach privileged surfaces **only** through `agentmux-mcp`,
-which holds the key out-of-band.
+contract: the security model intends agents to reach privileged surfaces
+**only** through `agentmux-mcp`.
+
+> **Correction, 2026-09-18.** This paragraph previously claimed
+> `AGENTMUX_AUTH_KEY` is "*not* a PTY env var for trust reasons", citing
+> `internals/env-vars.md` ("Available In Pane? No"), and called its presence in
+> a shell a leak. Both halves were wrong. No such file exists in this repo. And
+> the code does something more specific than either "yes" or "no":
+> `agentmux-srv/src/config.rs` strips the key from srv's own environment, so it
+> does **not** reach interactive shell panes — but
+> `agentmux-srv/src/server/agent_handlers/input.rs` re-injects it for every
+> agent spawn, and `agentmux-srv/src/backend/pane_env.rs` keeps it on
+> `PANE_ENV_KEEP` deliberately, because `lib/muxclient.mjs` — and therefore
+> every in-pane helper CLI — reads it. So an agent pane and everything it
+> launches holds the key **by design**, not by leak.
+>
+> That is a known, accepted in-instance trust boundary
+> (`agentmux-srv/src/server/service/credential.rs` names it). What was *not*
+> documented anywhere until recently is the cross-instance consequence, and the
+> plan to remove the ambient credential altogether:
+> `docs/retro/retro-env-inheritance-instance-isolation-breach-2026-09-17.md` §2.4
+> and `docs/specs/SPEC_PANE_CREDENTIAL_HANDOFF_2026_09_18.md`.
 
 ## 2. Goal
 
@@ -249,7 +266,8 @@ The handlers are correct; this spec adds the *supported* way to call them.
 
 ## 10. Docs follow-up (separate task)
 
-`agentmux-docs/src/content/docs/internals/agent-app-api.md` currently states that
+The `agentmux-docs` site repo's internals page for the Agent App API
+(`src/content/docs/internals/`, `agent-app-api`) currently states that
 identity/memory are "driven by the frontend and internal tooling over the
 authenticated WebSocket transport." After §8 lands, audit that page to:
 

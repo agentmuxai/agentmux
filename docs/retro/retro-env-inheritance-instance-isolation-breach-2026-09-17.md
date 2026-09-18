@@ -276,7 +276,14 @@ Ranked, and deliberately separable.
    for this one, nor this for it. Auditing against the new invariant immediately
    found two live violations (`util.rs::open_browser`, `editor_handlers.rs`
    reveal-in-file-manager), both fixed in the same PR.
-6. **Reconcile the three contradictory specs** (§7).
+6. **Reconcile the three contradictory specs** (§7). **Done.** Only one of the
+   three was actually wrong: `SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28`
+   claimed the key is "not a PTY env var for trust reasons", sourced to
+   `internals/env-vars.md` — a file that does not exist in this repo.
+   `docs/MUXSH.md` and `docs/agent-identity-bootstrap.md` were both accurate:
+   they describe agent panes, which is exactly where the key is injected. The
+   stale paragraph now carries a dated correction rather than being deleted, so
+   the next reader sees what changed and why.
 
 ## 10. What this does not explain
 

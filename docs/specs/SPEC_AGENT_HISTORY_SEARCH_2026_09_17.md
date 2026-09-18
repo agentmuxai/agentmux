@@ -1,7 +1,12 @@
 # SPEC: agent-facing conversation history search
 
 **Date:** 2026-09-17
-**Status:** proposed — nothing has shipped. Verified against `agentmux` @ `3fa127fbc`.
+**Status:** implemented — Phase 1 shipped in PR #3321 (first released in
+v0.56.4). Re-verified against `agentmux` @ `90aa773` on 2026-09-18:
+`SearchHistory` in `agentmux-mcp/src/tool_schemas.rs`, `SessionIndex::search_sessions`
+and `HistorySearchHit` in `agentmux-srv/src/backend/history/index.rs`. Phase 2
+(cross-agent search, §5) is deliberately out of scope here and still needs its
+own spec.
 **Trigger:** Repo owner, after watching this gap cause three concrete failures
 in one session (§1.1). "do agents have a streamlined way to search their
 history?" — they do not.
