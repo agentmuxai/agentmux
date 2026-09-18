@@ -11,7 +11,7 @@ function formatMem(bytes: number): string {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}G`;
 }
 
-export function BlockStatsBadge(props: { blockId: string }) {
+export function BlockStatsBadge(props: { blockId: string; noHeader?: boolean }) {
     const stats = useBlockStats(props.blockId);
 
     const cpuClass = createMemo(() => {
@@ -25,7 +25,7 @@ export function BlockStatsBadge(props: { blockId: string }) {
     return (
         <Show when={stats()}>
             {(s) => (
-                <div class={`block-stats-badge ${cpuClass()}`}>
+                <div class={`block-stats-badge ${cpuClass()} ${props.noHeader ? "no-header" : ""}`}>
                     <span class="stats-cpu">{s().cpu.toFixed(1)}%</span>
                     <span class="stats-mem">{formatMem(s().mem)}</span>
                 </div>
