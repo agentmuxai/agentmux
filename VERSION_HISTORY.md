@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.56.6 — 2026-09-18
+
+- generate the shell, agent-input and write-agent-config wire types and migrate seven commands
+- generate the websocket connection-scoped wire types and migrate ten commands
+- record the DRY rpc codegen effort's final state, corrections and stopping point
+- nightly CI compiles agentmux-cef's feature-gated authfile tests, which no lane was building
+- fix(build): remove the esbuild >=0.28.2 override — it forced an unsupported esbuild into Vite and broke task dev
+- spec: how panes should obtain API access without holding the instance-wide credential (design only)
+- docs: cite the implementing PR on the esbuild override spec; retro on provider account switches
+- the status bar's Disk pill now renders on Linux and macOS, not just Windows
+- the browser and file-manager launch paths no longer hand a third-party process this instance's identity (invariant I7)
+- fix(composer): land the caret at position 0 after an ArrowUp history recall so repeated ArrowUp steps back continuously
+- gate relative doc links, and clear the 45 broken ones already in the tree
+- fold docs/analysis/archive into docs/archive and document the archive rule
+- gate docs/README.md's directory table against the directories that actually exist
+- widen the citation gate from docs/specs/ to all of docs/, and clear the 10 dangling code citations it finds
+- fix(agent-pane): progress bar matches pane border color and wraps the full perimeter
+
 ## 0.56.5 — 2026-09-17
 
 - shell integration deploys per-instance instead of a machine-global dir, so two running versions stop overwriting each other's scripts
