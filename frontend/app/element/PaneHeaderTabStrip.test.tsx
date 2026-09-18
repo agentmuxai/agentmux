@@ -83,15 +83,12 @@ describe("PaneHeaderTabStrip", () => {
         expect(blockFrameHeaderCalls[0].leadingTabStrip).toBeUndefined();
     });
 
-    // Regression for ReAgent P1 on PR #3309 (round 2): agent/term's own
-    // visibleTabs()/visibleTermTabs() collapse a real single-conversation/
-    // single-shell state down to `tabs=[]` with `onAdd` STILL set. An
-    // earlier version of this component unconditionally overrode the real
-    // iconview with a hardcoded literal in this exact case — silently
-    // losing the real per-agent name, branded icon, and click-to-rename
-    // affordance for the single most common pane state. The fix: never
-    // override the iconview for 0 or 1 tabs; append the "+" separately.
-    it("with 0 tabs and onAdd set (the common lone-conversation/shell case): does NOT override the iconview, but DOES show the add button", () => {
+    // Regression for ReAgent P1 on PR #3309 (round 2): with no tabs to show,
+    // the real iconview must stay (an earlier version replaced it with a
+    // hardcoded literal), with the "+" appended separately. PaneChrome
+    // always passes at least one tab now, but the component still has to
+    // handle an empty list correctly.
+    it("with 0 tabs and onAdd set: does NOT override the iconview, but DOES show the add button", () => {
         const onAdd = vi.fn();
         render(() => (
             <PaneHeaderTabStrip

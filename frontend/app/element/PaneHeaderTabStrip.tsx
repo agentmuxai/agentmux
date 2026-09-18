@@ -12,16 +12,11 @@
  * reimplementation of any part of it. `BlockFrame_Header` gained two props
  * (`blocktypes.ts`) for this:
  *   - `leadingTabStrip` — when set, renders in place of the iconview
- *     (icon+title+blockid). Only set here when there are 2+ real Pane Tabs
- *     to show as pills — see `usePillStrip` below for why 0 or 1 does NOT
- *     take this branch (ReAgent P1 on PR #3309, round 2: an earlier version
- *     unconditionally overrode the iconview with a synthetic literal even
- *     for a lone conversation/shell, silently losing the real per-pane
- *     name, branded icon, and click-to-rename affordance the iconview's
- *     `ViewNameEditor` already provides correctly).
- *   - `trailingAddButton` — rendered right after the iconview ONLY when
- *     `leadingTabStrip` is unset, so a lone conversation/shell still gets
- *     its "add tab" affordance without losing its real identity.
+ *     (icon+title+blockid). Set whenever the pane has tabs, which is always
+ *     (PaneChrome includes a lone tab), unless `pane:tabstrip` is
+ *     "multi-only" and there's just one.
+ *   - `trailingAddButton` — the "+" beside the iconview in that
+ *     "multi-only" lone-tab case.
  * Every other row element (ConnectionButton, header text elems, error
  * boundary, drag handle, context menu, EndIcons) is untouched either way.
  *
@@ -55,20 +50,9 @@ export interface PaneHeaderTabStripProps<T> extends PaneTabStripProps<T> {
 }
 
 export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.Element {
-    // §7 resolution 1: "always" is the default — a single REAL pill still
-    // takes the pill-strip branch below. "multi-only" is the opt-out: a
-    // single tab instead falls through to the real-iconview branch (same
-    // one 0 tabs already uses), showing the ViewModel's own name/icon
-    // rather than a pill.
-    //
-    // For BOTH current callers (agent/term), the `=== 1` half of this is
-    // unreachable in practice: `visibleTabs()`/`visibleTermTabs()` already
-    // collapse a real single-tab state down to an EMPTY array (their own
-    // "a lone tab shows no self-pill" convention, predating this redesign)
-    // — so `props.tabs.length` here is only ever 0 or ≥2 for them. Genuine,
-    // forward-looking infrastructure for widget types that DON'T have that
-    // convention (most of §5's later rollout). Not a bug to "fix" by
-    // changing agent/term's existing convention.
+    // "always" (default): every tab is a pill, including a lone one, so the
+    // header looks the same at one tab as at many. "multi-only" opts a lone
+    // tab back into the plain icon+title header.
     const tabStripSetting = getSettingsKeyAtom("pane:tabstrip");
     const usePillStrip = () =>
         props.tabs.length >= 2 || (props.tabs.length === 1 && (tabStripSetting() ?? "always") !== "multi-only");
@@ -94,7 +78,6 @@ export function PaneHeaderTabStrip<T>(props: PaneHeaderTabStripProps<T>): JSX.El
         <PaneTabStrip
             tabs={props.tabs}
             activeId={props.activeId}
-            zoomFactor={props.zoomFactor}
             animateWidth={props.animateWidth}
             getId={props.getId}
             getLabel={props.getLabel}

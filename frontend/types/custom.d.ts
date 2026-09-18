@@ -512,27 +512,18 @@ declare global {
      * tab-rendering contract rather than a parallel one per pane type.
      */
     interface PaneChromeModel {
-        /** Replaces the default `blockStack`-derived tab list — e.g. to merge
-         *  in tabs that live in OTHER panes (agent's cross-pane fork lineage)
-         *  or to label/order members by view-specific rules. */
-        tabs?: () => any[];
-        getId?: (tab: any) => string;
-        getLabel?: (tab: any) => string;
-        getIcon?: (tab: any) => JSX.Element;
-        getTooltip?: (tab: any) => string;
-        getAttention?: (tab: any) => boolean;
-        getTabClass?: (tab: any) => Record<string, boolean>;
+        /** Tabs appended after this pane's own stack members for blocks that
+         *  live in OTHER panes (agent's cross-pane fork lineage). Each is
+         *  described like any other tab (pane-tab-model.tsx); `label`
+         *  overrides the derived one. Per-view labels/icons belong in a
+         *  registered `PaneTabDescriptor`, not here. */
+        extraTabs?: () => { blockId: string; label?: string }[];
         /** Return true to signal "handled"; the chrome's default
          *  `setActiveBlockInStack` is skipped. Needed when a tab may live in a
          *  different pane (activating it means focusing that pane instead). */
         onActivate?: (id: string) => boolean | void;
         onClose?: (id: string) => boolean | void;
-        onTabDoubleClick?: (tab: any) => void;
-        /** Custom label content — inline rename inputs today. */
-        renderLabel?: (tab: any) => JSX.Element;
         addTitle?: string;
-        /** Per-pane content zoom the strip scales with. */
-        zoomFactor?: () => number;
         connBtnRef?: { current: HTMLDivElement | null };
         changeConnModalAtom?: import("@/util/util").SignalAtom<boolean>;
         /** Rendered between the header row and the content region — a

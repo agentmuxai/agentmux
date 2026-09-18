@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for `renderPaneChromeShell` — the shared `ViewModel.renderPaneChrome`
- * every non-agent/term widget type registers (browser, editor, sysinfo, swarm,
- * armory, media, drone, help, warden). Scoped to THIS file's own wiring —
- * tab-derivation from `blockStack`, and the activate/close/add handlers'
- * delegation to `layoutStack.ts`'s primitives — not re-testing those
+ * Tests for `renderPaneChromeShell` — the ONE `ViewModel.renderPaneChrome`
+ * every pane type uses. Scoped to THIS file's own wiring — the shared tab
+ * model (pane-tab-model.tsx) applied to `blockStack`, rename, and the
+ * activate/close/add handlers' delegation to `layoutStack.ts`'s
+ * primitives — not re-testing those
  * primitives themselves (see `frontend/layout/tests/layoutStack.test.ts`) or
  * `PaneHeaderTabStrip`'s own rendering rules (see that component's own test
  * file), both of which are mocked here.
@@ -22,21 +22,27 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const headerCalls: any[] = [];
-vi.mock("./PaneHeaderTabStrip", () => ({
-    PaneHeaderTabStrip: (props: any) => {
-        headerCalls.push(props);
-        return (
-            <div data-testid="pane-header-tab-strip">
-                {props.tabs.map((t: any) => (
-                    <span>
-                        {props.getIcon?.(t)}
-                        {props.getLabel(t)}
-                    </span>
-                ))}
-            </div>
-        );
-    },
-}));
+// Keyed <For>, like the real PaneTabStrip, so DOM-identity assertions hold.
+vi.mock("./PaneHeaderTabStrip", async () => {
+    const { For } = await import("solid-js");
+    return {
+        PaneHeaderTabStrip: (props: any) => {
+            headerCalls.push(props);
+            return (
+                <div data-testid="pane-header-tab-strip">
+                    <For each={props.tabs}>
+                        {(t: any) => (
+                            <span data-testid={`tab-${props.getId(t)}`}>
+                                {props.getIcon?.(t)}
+                                {props.renderLabel ? props.renderLabel(t) : props.getLabel(t)}
+                            </span>
+                        )}
+                    </For>
+                </div>
+            );
+        },
+    };
+});
 
 vi.mock("@/element/errorboundary", () => ({
     ErrorBoundary: (props: any) => props.children,
@@ -114,7 +120,9 @@ vi.mock("@/layout/lib/layoutNode", () => ({
     findNode: (root: any) => root,
 }));
 
+import { fireEvent } from "@solidjs/testing-library";
 import { renderPaneChromeShell } from "./PaneChrome";
+import { registerPaneTabDescriptor } from "./pane-tab-model";
 
 function fakeNodeModel(overrides: Record<string, any> = {}): any {
     return {
@@ -149,11 +157,26 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("renderPaneChromeShell — tab derivation", () => {
-    it("a 0-or-1-member stack yields no pills (matches the lone-tab-shows-no-pill convention)", () => {
+    function labels() {
+        const h = headerCalls.at(-1);
+        return h.tabs.map((id: string) => h.getLabel(id));
+    }
+    function iconClasses() {
+        return screen.getAllByTestId(/^tab-/).map((el) => el.querySelector("i")?.className ?? "");
+    }
+
+    it("a lone tab is still a pill, so the header looks the same at one tab as at many", () => {
         mockLayoutModel = fakeLayoutModel(["b1"]);
         render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
 
-        expect(headerCalls[0].tabs).toEqual([]);
+        expect(headerCalls[0].tabs).toEqual(["b1"]);
+    });
+
+    it("a pane with no stack yet shows its own active block as the one tab", () => {
+        mockLayoutModel = fakeLayoutModel([]);
+        render(() => renderPaneChromeShell(fakeNodeModel({ activeBlockId: () => "b1" }), <div>content</div>) as any);
+
+        expect(headerCalls[0].tabs).toEqual(["b1"]);
     });
 
     it("a 2+ member stack yields one tab per member, label from frame:title falling back to blockViewToName", () => {
@@ -162,26 +185,80 @@ describe("renderPaneChromeShell — tab derivation", () => {
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
         render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
 
-        expect(headerCalls[0].tabs).toEqual([
-            expect.objectContaining({ blockId: "b1", label: "My Title" }),
-            expect.objectContaining({ blockId: "b2", label: "View:browser" }),
-        ]);
+        expect(headerCalls[0].tabs).toEqual(["b1", "b2"]);
+        expect(labels()).toEqual(["My Title", "View:browser"]);
         expect(screen.getByText("My Title")).toBeInTheDocument();
         expect(screen.getByText("View:browser")).toBeInTheDocument();
     });
 
-    // getBlockHeaderIcon/blockViewToIcon derivation — same icon convention
-    // the plain header iconview uses (blockframe.tsx), computed from the
-    // block's own persisted meta since a background tab's ViewModel isn't
-    // mounted here to read a live icon from.
-    it("derives each tab's icon from frame:icon, falling back to blockViewToIcon(view)", () => {
+    it("gives every tab an icon: frame:icon first, falling back to blockViewToIcon(view)", () => {
         setObjectValue("block:b1", { meta: { "frame:icon": "rocket" } });
         setObjectValue("block:b2", { meta: { view: "browser" } });
         mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
         render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
 
-        const icons = screen.getAllByTestId("tab-icon").map((el) => el.textContent);
-        expect(icons).toEqual(["rocket", "icon-browser"]);
+        const classes = iconClasses();
+        expect(classes[0]).toContain("fa-rocket");
+        expect(classes[1]).toContain("fa-icon-browser");
+    });
+
+    it("keeps each tab's icon when another tab is added", () => {
+        setObjectValue("block:b1", { meta: { view: "browser" } });
+        const [stack, setStack] = createSignal(["b1"]);
+        mockLayoutModel = {
+            localTreeStateAtom: () => stack(),
+            treeState: {
+                get rootNode() {
+                    return { data: { blockStack: stack() } };
+                },
+            },
+        };
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+        const before = screen.getByTestId("tab-b1").querySelector("i");
+        expect(before?.className).toContain("fa-icon-browser");
+
+        setObjectValue("block:b2", { meta: { view: "sysinfo" } });
+        setStack(["b1", "b2"]);
+
+        // Same element, not a rebuilt one: nothing about b1's icon changed.
+        expect(screen.getByTestId("tab-b1").querySelector("i")).toBe(before);
+        expect(screen.getByTestId("tab-b2").querySelector("i")?.className).toContain("fa-icon-sysinfo");
+    });
+
+    it("uses a registered descriptor's label and icon, numbering by position among the same view type", () => {
+        registerPaneTabDescriptor("test-shell", {
+            label: ({ ordinal }) => `Shell ${ordinal}`,
+            icon: () => ({ kind: "fa", name: "terminal" }),
+        });
+        setObjectValue("block:b1", { meta: { view: "test-shell" } });
+        setObjectValue("block:b2", { meta: { view: "browser" } });
+        setObjectValue("block:b3", { meta: { view: "test-shell" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2", "b3"]);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        expect(labels()).toEqual(["Shell 1", "View:browser", "Shell 2"]);
+        expect(iconClasses()[2]).toContain("fa-terminal");
+    });
+
+    it("remembers the active tab's live name once it's no longer active", () => {
+        setObjectValue("block:b1", { meta: { view: "browser" } });
+        setObjectValue("block:b2", { meta: { view: "browser" } });
+        const [active, setActive] = createSignal("b1");
+        mockLayoutModel = fakeLayoutModel(["b1", "b2"]);
+        render(() =>
+            renderPaneChromeShell(
+                fakeNodeModel({
+                    activeBlockId: active,
+                    activeViewModel: () => (active() === "b1" ? { viewName: () => "Example Domain" } : null),
+                }),
+                <div>content</div>
+            ) as any
+        );
+        expect(labels()[0]).toBe("Example Domain");
+
+        setActive("b2");
+
+        expect(labels()[0]).toBe("Example Domain");
     });
 
     // ReAgent P1 regression: a BACKGROUND (non-active) tab's own meta must be
@@ -318,13 +395,19 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
         return { ...res, nodeModel };
     }
 
-    it("a view type supplying `tabs` replaces the blockStack-derived list (cross-pane tabs)", () => {
+    it("extraTabs are appended after the stack, deduped against it, with their own label", () => {
+        setObjectValue("block:b1", { meta: { "frame:title": "One" } });
+        setObjectValue("block:b2", { meta: { "frame:title": "Two" } });
+        setObjectValue("block:x", { meta: { view: "browser" } });
         renderWithModel({
-            tabs: () => [{ id: "x", title: "Elsewhere" }],
-            getId: (t: any) => t.id,
-            getLabel: (t: any) => t.title,
+            extraTabs: () => [
+                { blockId: "b2", label: "Ignored: already in this pane" },
+                { blockId: "x", label: "Elsewhere" },
+            ],
         });
-        expect(headerCalls[0].tabs).toEqual([{ id: "x", title: "Elsewhere" }]);
+        const h = headerCalls.at(-1);
+        expect(h.tabs).toEqual(["b1", "b2", "x"]);
+        expect(h.getLabel("b2")).toBe("Two");
         expect(screen.getByText("Elsewhere")).toBeInTheDocument();
     });
 
@@ -419,9 +502,54 @@ describe("renderPaneChromeShell — PaneChromeModel capabilities", () => {
         render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
 
         expect(headerCalls[0].addTitle).toBe("Add tab");
-        expect(headerCalls[0].tabs).toEqual([
-            expect.objectContaining({ blockId: "b1", label: "One" }),
-            expect.objectContaining({ blockId: "b2", label: "Two" }),
-        ]);
+        expect(headerCalls[0].tabs).toEqual(["b1", "b2"]);
+        expect(screen.getByText("One")).toBeInTheDocument();
+        expect(screen.getByText("Two")).toBeInTheDocument();
+    });
+});
+
+describe("renderPaneChromeShell — rename", () => {
+    function startRename(id: string) {
+        headerCalls.at(-1).onTabDoubleClick(id);
+        return screen.getByTestId(`tab-${id}`).querySelector("input") as HTMLInputElement;
+    }
+
+    it("only tabs whose descriptor offers a renamer can be renamed", () => {
+        setObjectValue("block:b1", { meta: { view: "browser" } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        expect(startRename("b1")).toBeNull();
+    });
+
+    it("shows the new name immediately and calls the descriptor's rename", async () => {
+        const rename = vi.fn().mockResolvedValue(undefined);
+        registerPaneTabDescriptor("test-renamable", { label: () => "Old", renamer: () => rename });
+        setObjectValue("block:b1", { meta: { view: "test-renamable" } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        const input = startRename("b1");
+        fireEvent.input(input, { target: { value: "New" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+
+        expect(rename).toHaveBeenCalledWith("New");
+        expect(headerCalls.at(-1).getLabel("b1")).toBe("New");
+    });
+
+    it("rolls the name back when the rename fails", async () => {
+        const rename = vi.fn().mockRejectedValue(new Error("nope"));
+        registerPaneTabDescriptor("test-failing", { label: () => "Old", renamer: () => rename });
+        setObjectValue("block:b1", { meta: { view: "test-failing" } });
+        mockLayoutModel = fakeLayoutModel(["b1"]);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        const input = startRename("b1");
+        fireEvent.input(input, { target: { value: "New" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(headerCalls.at(-1).getLabel("b1")).toBe("Old");
     });
 });
