@@ -1,7 +1,7 @@
 # SPEC: `x-agentmux-srv-version` response header
 
 **Date:** 2026-08-22
-**Status:** Implemented
+**Status:** Implemented — #2749
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/server/mod.rs`,
 `agentmux-srv/src/backend/shellintegration/muxspect.mjs`)

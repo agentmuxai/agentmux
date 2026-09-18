@@ -1,6 +1,6 @@
 # Browser pane state catalog
 
-**Status:** Analysis (informs reducer migration)
+**Status:** historical — Analysis (informs reducer migration)
 **Owner:** AgentA
 **Date:** 2026-05-07
 

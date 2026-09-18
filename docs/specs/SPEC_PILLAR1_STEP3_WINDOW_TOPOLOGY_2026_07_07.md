@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-07
 **Type:** Sized implementation spec
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 **Builds on:** SPEC_864 (merged), SPEC_PILLAR1_STEP2 (merged) — this spec follows the exact same
 shape as those: a small, host-only fact gets a durable srv counterpart, via a direct RPC, no reducer
 machinery.

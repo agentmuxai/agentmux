@@ -5,6 +5,14 @@
 
 **Status:** Implemented — report: audit + design synthesis, all open questions resolved (§4). **Largely implemented since; see the status table below (refreshed 2026-08-30).** This is **not** a from-scratch analysis: it verifies and consolidates two existing same-topic reports against `main` as of today, and updates them with what has (and hasn't) shipped in the 10 days since.
 
+> **Implementing PR not recoverable (checked 2026-09-17).** `docs/specs/README.md`
+> requires an `implemented` Status to cite its PR. This one cannot, and a guess would
+> be worse than the gap: the only commit that set this Status was a bulk restamp
+> (or predates the PR-squash convention), so git alone does not identify who
+> shipped it. Candidates found in this doc's own body were checked and rejected —
+> they touch no related source. Verify against the code before trusting this line.
+
+
 ### §3 implementation status (verified against `main`, 2026-08-30)
 
 | Step | State | Where |

@@ -1,7 +1,7 @@
 # SPEC: `muxspect find` — cross-instance block/agent lookup
 
 **Date:** 2026-08-22
-**Status:** Implemented
+**Status:** Implemented — #2745
 **Author:** Korp
 **Repos touched:** `agentmux` (`agentmux-srv/src/server/muxspect_handlers.rs`,
 `agentmux-srv/src/server/mod.rs`, `agentmux-srv/src/backend/shellintegration/muxspect.mjs`)

@@ -1,9 +1,9 @@
 # SPEC: Safe unrestricted screen capture for agents
 
-**Status:** **Phase 1 implemented** (tier resolution, `allow` defaults, extended
+**Status:** active — **Phase 1 implemented** (tier resolution, `allow` defaults, extended
 audit). Phases 2–4 not started. Supersedes the own-pane-only capture policy in
 `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` §6 **for capture
-only** — that spec's rules for `UIClick`/`UIQuery` are untouched (see §8).
+only** — that spec's rules for `UIClick`/`UIQuery` are untouched (see §8). — #2845
 **Date:** 2026-08-30
 **Author:** AgentA
 **Directive:** repo owner, this session — *"agents need to be able to screenshot

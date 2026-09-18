@@ -1,7 +1,7 @@
 # Patched libcef.so Bundling for Linux
 
 **Date:** 2026-05-08
-**Status:** Spec / Proposal
+**Status:** proposed — Spec / Proposal
 **Repo state:** main @ `d7dc58c1`, AgentMux v0.33.703
 **Author:** AgentC
 

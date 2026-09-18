@@ -1,7 +1,7 @@
 # SPEC: `muxspect` Phase C — WAN tier enforcement
 
 **Date:** 2026-08-22
-**Status:** Implemented (scoped — see §2 for why this is small)
+**Status:** Implemented (scoped — see §2 for why this is small) — #2765
 **Author:** Korp
 **Repo touched:** `agentmux` (`agentmux-srv`)
 **Related:** `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`

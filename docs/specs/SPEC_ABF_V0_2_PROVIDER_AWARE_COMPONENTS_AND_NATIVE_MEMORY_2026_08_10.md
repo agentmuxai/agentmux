@@ -14,7 +14,7 @@ Revised after Codex review on
 PR #2517 found four real implementability gaps in the first draft (all
 credited inline below, matching this repo's own `Codex P1, PR #NNNN`
 citation convention) — not disputed, all four were correct and are folded
-into the design as shipped in this revision.
+into the design as shipped in this revision. — PRs touching this work, newest first: #3144
 **Relationship to prior work:** builds on
 `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` (the
 original ABF proposal, §5) and

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-06
 **Owner:** AgentA
-**Status:** spec
+**Status:** proposed — spec
 **Related:** [`SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md`](./SPEC_TEAR_OFF_POOL_PATH_2026_05_06.md) (PR #704), [`SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md`](./SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26.md)
 
 ---

@@ -3,7 +3,7 @@
 > **Tracked family — canonical status: [`TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md`](TRACKING_AGENT_AVAILABILITY_AND_BACKGROUNDING_2026_09_17.md) (issue #3338).**
 > This document is accurate as of its own date. Parts may be superseded; check the tracking doc before acting on it.
 
-**Status:** implemented (this PR)
+**Status:** implemented (this PR) — #2773
 **Owner:** AgentX
 **Date:** 2026-08-23
 **Scope:** `frontend/app/view/agent/activity/dispatch-source.ts`,

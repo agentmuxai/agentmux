@@ -1,7 +1,7 @@
 # Swarm Pane Redesign — Active / Retired + Pane-Flip Detail
 
 **Date:** 2026-05-03
-**Status:** Spec — pending product confirmation on open questions
+**Status:** proposed — Spec — pending product confirmation on open questions
 **Scope:** `frontend/app/view/swarm/`
 
 ## Goal

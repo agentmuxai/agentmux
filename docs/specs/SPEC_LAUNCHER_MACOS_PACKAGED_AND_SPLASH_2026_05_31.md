@@ -3,7 +3,7 @@
 **Date:** 2026-05-31
 **Repo state:** branch `agenta/cef-148-bump` (CEF 148 patched framework, notarized DMG #1221), base `main` @ v0.40.x
 **Author:** AgentO-asaf (driven by Claude)
-**Status:** Spec — ready to implement (phased)
+**Status:** proposed — Spec — ready to implement (phased)
 **Motivated by:** a SIGABRT crash tearing off a pane from a 2nd window on the packaged macOS DMG, and the absence of the startup splash.
 **Builds on:** [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md`](./SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) (launcher in macOS **dev**), [`SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`](./SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md), [`SPEC_MACOS_PACKAGING_2026_05_30.md`](./SPEC_MACOS_PACKAGING_2026_05_30.md), [`SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md`](./SPEC_MACOS_TEAROFF_STABILITY_2026_05_29.md).
 

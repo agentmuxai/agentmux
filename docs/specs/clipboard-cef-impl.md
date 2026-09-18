@@ -1,7 +1,7 @@
 # Clipboard for CEF — Implementation Spec
 
 **Date:** 2026-04-02
-**Status:** Spec
+**Status:** proposed — Spec
 **Problem:** Copy/paste doesn't work in CEF host — Ctrl+C/V, context menu copy/paste all fail silently
 
 ## Root Cause

@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-06
 **Owner:** AgentA
-**Status:** spec
+**Status:** proposed — spec
 **Layer:** crosses Layer 1 (launcher) ↔ Layer 2 (host) — see [`MASTER_REDUCER_STACK_STATUS_2026-05-05.md`](./MASTER_REDUCER_STACK_STATUS_2026-05-05.md) §1.
 
 ---

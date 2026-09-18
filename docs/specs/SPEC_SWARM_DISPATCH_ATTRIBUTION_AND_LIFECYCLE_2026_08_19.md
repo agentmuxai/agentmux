@@ -1,6 +1,6 @@
 # SPEC: Robust dispatch attribution + formalized session lifecycle for Swarm
 
-**Status:** Implemented (Phases A, B, C — C's Live/Historical section split descoped as a follow-up, see §3.3).
+**Status:** Implemented (Phases A, B, C — C's Live/Historical section split descoped as a follow-up, see §3.3). — #2677
 **Date:** 2026-08-19
 
 ## 1. Problem statement

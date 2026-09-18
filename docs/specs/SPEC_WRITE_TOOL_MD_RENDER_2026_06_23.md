@@ -1,7 +1,7 @@
 # SPEC: Render `.md` content as markdown in the Write tool overlay
 
 **Date:** 2026-06-23
-**Status:** Planned (implemented — see note below)
+**Status:** implemented — Planned (implemented — see note below) — #1746
 **Author:** clamk
 
 > **2026-08-07 audit note:** Implemented (`isMarkdown` detection in

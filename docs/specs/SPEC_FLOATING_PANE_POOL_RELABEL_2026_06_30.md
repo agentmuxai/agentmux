@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (fully scoped)
-**Status:** Ready to schedule
+**Status:** proposed — Ready to schedule
 **Owner:** asaf
 **Bug:** Status-bar InstancePanel reports **0 floating panes** while a user floating pane is
 visible on Windows.

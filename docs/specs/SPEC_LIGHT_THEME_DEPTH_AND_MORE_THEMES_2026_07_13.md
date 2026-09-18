@@ -1,7 +1,7 @@
 # Spec: Light Theme — Header/Status-Bar Depth Fixes + 3 New Light Themes
 
 **Date:** 2026-07-13
-**Status:** Implemented (this spec documents the change; code is in the same PR)
+**Status:** Implemented (this spec documents the change; code is in the same PR) — #2129
 **Follows:** `docs/specs/SPEC_LIGHT_THEME_AND_DEPTH_FIXES_2026_07_11.md` (the original light theme), the PR #2104 review cycle that fixed `--input-bg-color` and the `*-text-color` triad.
 
 **Trigger:** manual verification of PR #2104 on `task dev` surfaced that the window header (top bar, holding tabs + widgets) and the status bar (bottom) stayed dark under the Light theme, even though every other surface had correctly gone light.

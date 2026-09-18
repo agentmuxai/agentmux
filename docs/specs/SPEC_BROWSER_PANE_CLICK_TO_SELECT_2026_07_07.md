@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-07
 **Type:** Bug fix
-**Status:** Implemented for macOS and manually confirmed; Linux still open (see Scope)
+**Status:** Implemented for macOS and manually confirmed; Linux still open (see Scope) — #2013
 **Scope:** `agentmux-cef` (`ui_tasks/platform_macos.rs`, `ui_tasks/pane_geometry.rs`) —
 macOS only. The new `PANE_OVERLAY_WIN_TO_BLOCK` map, the registration in
 `SetPaneBoundsViewsTask`, and the `sendEvent:` swizzle tap are all

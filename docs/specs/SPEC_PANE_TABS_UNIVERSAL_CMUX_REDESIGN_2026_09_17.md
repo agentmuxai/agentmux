@@ -6,7 +6,7 @@ implementation underway on a dedicated branch. See
 `docs/specs/PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md` for the
 task-level breakdown. Not merged to main until tested locally and explicitly
 approved by the repo owner — this redesign is too far-reaching for the usual
-merge-on-approval default.
+merge-on-approval default. — PRs touching this work, newest first: #3309
 **Companion (direct predecessor — this generalizes it, does not replace it):**
 `SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md` (status: implemented) and its
 polish cluster: `SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`,

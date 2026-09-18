@@ -1,7 +1,7 @@
 # SPEC: Shift+drag group resize — fix borders that move opposite the drag direction
 
 **Date:** 2026-08-17
-**Status:** implemented (this branch)
+**Status:** implemented (this branch) — #2624
 **Author:** Clamk (agent)
 **Tracking discussion:** user report, this session — "if I shift+drag any pane
 to the right, all the pane borders should move to the right... currently,

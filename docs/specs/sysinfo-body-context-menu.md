@@ -1,7 +1,7 @@
 # Spec: Sysinfo Body Context Menu — Metric Selection
 
 **Date:** 2026-03-28
-**Status:** Ready to implement
+**Status:** proposed — Ready to implement
 
 ---
 

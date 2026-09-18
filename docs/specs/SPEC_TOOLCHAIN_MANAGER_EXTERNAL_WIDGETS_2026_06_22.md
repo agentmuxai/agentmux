@@ -1,7 +1,7 @@
 # Toolchain Manager — External Widgets Extension
 
 **Date:** 2026-06-22
-**Status:** Spec / Ready to implement
+**Status:** proposed — Spec / Ready to implement
 **Extends:** `docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md` (P2/P3 phases)
 **Scope:**
 - `frontend/app/view/agent/providers/toolchain-catalog.ts` — add Python + uv

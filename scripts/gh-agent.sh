@@ -46,4 +46,31 @@ if [[ -z "$TOKEN" ]]; then
 fi
 
 echo "gh-agent: authenticating as $AGENTMUX_AGENT_ID via secrets:$USED_KEY" >&2
+
+# On the SHARED account, a `pr create` without the machine-readable body tag
+# gets its review notifications silently dropped. Per
+# SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md the consumer resolves the agent
+# from the PR author's GitHub username FIRST and falls back to the tag only
+# when that username is this shared account -- so on a dedicated PAT the tag
+# is redundant, and here it is the ONLY thing saying which agent opened the PR.
+#
+# This warning exists because the failure is invisible: the PR opens fine, CI
+# runs fine, the review posts fine, and the only symptom is jekts that never
+# arrive -- which reads as "quiet", not "broken". It cost one agent eleven PRs
+# of manual polling before anyone noticed.
+if [[ "$USED_KEY" == "$FALLBACK_KEY" ]]; then
+    for _arg in "$@"; do
+        if [[ "$_arg" == "create" ]]; then
+            {
+                echo "gh-agent: WARNING -- shared identity. A 'pr create' MUST carry"
+                echo "          <!-- agentmux:agent_id=<your-id-lowercased> -->   in the BODY"
+                echo "          (an HTML comment; plain text like 'agent_id: x' is NOT parsed)"
+                echo "          plus a '<Agent>@<host>: ' TITLE prefix."
+                echo "          Without the tag, your review notifications are dropped silently."
+            } >&2
+            break
+        fi
+    done
+fi
+
 GH_TOKEN="$TOKEN" exec gh "$@"

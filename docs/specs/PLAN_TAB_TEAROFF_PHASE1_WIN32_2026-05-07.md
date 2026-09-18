@@ -2,7 +2,7 @@
 
 **Created:** 2026-05-07
 **Owner:** AgentA
-**Status:** READY TO IMPLEMENT
+**Status:** proposed — READY TO IMPLEMENT
 **Predecessors:** [`SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md`](./SPEC_TAB_TEAROFF_NATIVE_DRAG_LOOP_2026-05-07.md), spike on 2026-05-07
 **Effort:** 2-3 days
 **Scope:** Win32 only. macOS / Linux defer to Phase 2.

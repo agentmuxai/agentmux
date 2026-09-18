@@ -1,7 +1,7 @@
 # Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI
 
 **Date:** 2026-08-13
-**Status:** active — the 08-13 instrumentation shipped and paid off (it falsified the AV hypothesis on the very next occurrence); the cold-start fix it pointed to shipped 2026-09-07 as `warm_node()`. Verified 2026-09-07.
+**Status:** active — the 08-13 instrumentation shipped and paid off (it falsified the AV hypothesis on the very next occurrence); the cold-start fix it pointed to shipped 2026-09-07 as `warm_node()`. Verified 2026-09-07. — PRs touching this work, newest first: #3056, #2564
 **Context:** follow-up to
 [retro-nightly-ci-red-windows-not-macos-2026-08-13.md](../retro/retro-nightly-ci-red-windows-not-macos-2026-08-13.md),
 written after that retro concluded "one-off flake, no fix needed unless it

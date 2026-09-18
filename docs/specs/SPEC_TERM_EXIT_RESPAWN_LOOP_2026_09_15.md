@@ -7,7 +7,7 @@ regressions found by live retest — read §12 before §11: it supersedes
 §11's guess about which pane was involved, and adds the 10s
 `FLUSHER_DRAIN_TIMEOUT` half of the reported "hang". §13 takes the close
 from ~4s to immediate; §14 is why the pane still didn't visually
-disappear until the layout bridge gained an arm for it.)
+disappear until the layout bridge gained an arm for it.) — #3225
 **Related:** `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md` (PtyShell attach/reuse semantics),
 `docs/reports/REPORT_RENDERER_CPU_UNBATCHED_PTY_OUTPUT_2026_09_11.md` (PTY output coalescing — ruled out, see §3)
 

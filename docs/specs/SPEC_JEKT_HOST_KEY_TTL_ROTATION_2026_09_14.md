@@ -1,7 +1,7 @@
 # SPEC: 24h TTL / rotation for the host-tier jekt signing key
 
 **Date:** 2026-09-14
-**Status:** Implemented (this spec)
+**Status:** Implemented (this spec) — #3217
 **Closes the gap tracked in:** `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`
 §non-goals ("Key rotation UX, revocation, or a management UI for per-agent
 signing keys — needed eventually, sized separately once the core mechanism is

@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-30
 **Type:** Implementation spec (sized)
-**Status:** Ready to schedule
+**Status:** proposed — Ready to schedule
 **Owner:** asaf
 **Issue:** #864 (retire the wcore-direct layout path)
 **SUPERSEDED IN SCOPE (2026-06-30):** This spec's "single writer" is now **Phase 1** of the committed

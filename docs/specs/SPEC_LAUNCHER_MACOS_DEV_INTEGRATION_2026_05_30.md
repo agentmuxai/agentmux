@@ -3,7 +3,7 @@
 **Date:** 2026-05-30
 **Repo state:** `main` @ `51c3ba56` (v0.40.0)
 **Author:** AgentO-asaf
-**Status:** Spec ready to implement (phased)
+**Status:** proposed — Spec ready to implement (phased)
 **Continues:** [`SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md`](./SPEC_LAUNCHER_DEV_INTEGRATION_2026-05-13.md) — that spec integrated the launcher into **Windows** `task dev` and explicitly deferred Unix to "Phase 2 / Phase 7 cross-platform parity" (§6.2). **This is that Phase.**
 **Related:** `SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md`, `SPEC_TASK_DEV_LAUNCHER_GAPS_2026_05_06.md`, `SPEC_LAUNCHER_SAGA_DURABILITY_2026-05-01.md`
 

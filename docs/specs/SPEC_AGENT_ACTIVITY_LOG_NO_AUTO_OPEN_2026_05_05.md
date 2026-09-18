@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-05
 **Owner:** AgentA
-**Status:** spec
+**Status:** proposed — spec
 **Component:** `frontend/app/view/agent/components/ActivityLogPanel.tsx`
 
 ## Problem

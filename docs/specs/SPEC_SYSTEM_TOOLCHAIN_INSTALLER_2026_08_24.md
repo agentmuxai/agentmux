@@ -16,7 +16,7 @@ other "implemented, live-environment check still pending" PRs. `uv` and
 Docker are intentionally excluded from the executable-install catalog
 (script-based install / interactive GUI installer — different risk
 profile, not requested); their existing link+copy-command rows are
-unchanged.
+unchanged. — #2790
 **Related:** `docs/specs/SPEC_TOOLCHAIN_MANAGER_2026-06-15.md` (shipped
 P0-P1: PATH enrichment + read-only Toolchain modal; **this spec implements
 its deferred P3** — "one-click brew install… P3 add-on, not yet shipped" —

@@ -1,7 +1,7 @@
 # SPEC: Auth Check False Positive — "authenticated as max" on Load
 
 **Date:** 2026-04-15  
-**Status:** Ready for implementation  
+**Status:** proposed — Ready for implementation
 **Priority:** High — user must manually /login every session despite being told they're authenticated
 
 ---
