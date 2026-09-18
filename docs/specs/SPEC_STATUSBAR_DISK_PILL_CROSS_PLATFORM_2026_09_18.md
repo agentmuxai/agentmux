@@ -2,7 +2,7 @@
 
 **Author:** Opaz
 **Date:** 2026-09-18
-**Status:** proposed
+**Status:** implemented — PR #3363
 
 ---
 
