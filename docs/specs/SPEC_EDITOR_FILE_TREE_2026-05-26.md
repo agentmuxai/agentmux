@@ -1,7 +1,7 @@
 # Spec: Editor Pane — File Tree Explorer + Extensions
 
 **Branch:** `agenty/editor-file-tree-spec`
-**Status:** Draft — design
+**Status:** implemented — Phase 1, this spec's stated primary scope, shipped in #1064 (2026-05-26), the PR this doc was added in: `ListEditorDirectory`/`GetEditorHome` in `rpc_types/editor_read.rs`, and `file-tree.tsx` + `file-tree-model.ts` in the editor view, both citing this spec. Phase 2's polish largely followed — hidden-file filtering and keyboard navigation are both in. Phases 3 and 4 remain open by design; each was scoped as independently shippable and outside this spec's primary scope.
 **Date:** 2026-05-26
 **Author:** AgentY
 
