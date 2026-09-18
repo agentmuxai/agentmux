@@ -321,7 +321,7 @@ mod tests {
         let dir = temp_dir("dacl");
         let path = write_dev_auth_file(
             &dir, "k", "127.0.0.1:1", "127.0.0.1:2", "127.0.0.1:3",
-            "t", "v0.0.0", std::process::id(),
+            "t", "v0.0.0", std::process::id(), 9222,
         ).unwrap();
 
         unsafe {
