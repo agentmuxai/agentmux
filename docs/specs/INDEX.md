@@ -657,6 +657,7 @@ partial list.
 | [`PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16`](PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md) | Implementation Plan: Scroll-Driven Tool-Block Collapse |
 | [`REPORT_AGENT_PANE_SYNTHESIZED_TEXT_AUDIT_2026_08_06`](REPORT_AGENT_PANE_SYNTHESIZED_TEXT_AUDIT_2026_08_06.md) | Report: Audit of AgentMux-Synthesized Text in the Agent Pane |
 | [`REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16`](REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md) | Report: Is there a standard for Armory-style agent capability bundles? Research + proposal (2026-07-16) |
+| [`SPEC-explicit-runtime-summary`](SPEC-explicit-runtime-summary.md) | SPEC: Explicit Runtime Summary in Agent Control Bar |
 | [`SPEC_ACP_CONTROLLER_2026_04_16`](SPEC_ACP_CONTROLLER_2026_04_16.md) | SPEC: ACP Controller — Universal Agent Client Protocol Support |
 | [`SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20`](SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20.md) | SPEC: Move Activity Dock to Bottom of Agent Pane |
 | [`SPEC_ADD_PROVIDERS_QWEN_AIDER_2026_06_02`](SPEC_ADD_PROVIDERS_QWEN_AIDER_2026_06_02.md) | SPEC: Add Qwen Code & aider as agent providers |
@@ -708,13 +709,19 @@ partial list.
 | [`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) | SPEC — Armory Phase 5: drop Identities, rename/reorder tabs, seed a starter Skill catalog |
 | [`SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05`](SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05.md) | SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file |
 | [`SPEC_BACKEND_LIFECYCLE`](SPEC_BACKEND_LIFECYCLE.md) | Backend Process Lifecycle — Analysis & Fix Spec |
+| [`SPEC_BROWSER_DOM_API`](SPEC_BROWSER_DOM_API.md) | SPEC: Browser-pane DOM API (`/agentmux/browser/*`) |
 | [`SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22`](SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md) | SPEC — Browser pane: bookmarks (design exploration) + Go-button icon (quick tweak) |
 | [`SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15`](SPEC_BROWSER_PANE_CLICK_DISMISSES_MENUS_2026_08_15.md) | SPEC — Browser pane: clicking inside it should dismiss open menus/popovers |
 | [`SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21`](SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md) | Spec: Browser pane default URL + in-pane popup redirect |
+| [`SPEC_BROWSER_PANE_FOCUS_LOCK`](SPEC_BROWSER_PANE_FOCUS_LOCK.md) | SPEC: Browser Pane Focus Lock |
 | [`SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18`](SPEC_BROWSER_PANE_HTTP_BASIC_AUTH_2026_05_18.md) | SPEC: Browser Pane HTTP Basic / Digest Auth |
+| [`SPEC_BROWSER_PANE_LIFECYCLE`](SPEC_BROWSER_PANE_LIFECYCLE.md) | SPEC: Browser Pane Lifecycle & State Machine |
+| [`SPEC_BROWSER_PANE_LIFECYCLE_TESTS`](SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md) | SPEC: Browser Pane Lifecycle — Automated Test Coverage |
 | [`SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17`](SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md) | SPEC — Browser pane: stop the loading-brain flicker / page-hide flashing |
+| [`SPEC_BROWSER_PANE_MODULARIZATION`](SPEC_BROWSER_PANE_MODULARIZATION.md) | SPEC: Browser Pane Code Modularization |
 | [`SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18`](SPEC_BROWSER_PANE_OPTIMISTIC_HEADER_2026_05_18.md) | SPEC: Optimistic Browser-Pane Header on Navigation |
 | [`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15`](SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) | SPEC — Browser pane: replace Chromium's native right-click menu with the app's own |
+| [`SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03`](SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md) | SPEC: Windows browser-pane renderer teardown — Phase-0 spike scope |
 | [`SPEC_BROWSER_PANE_Z_ORDER_2026_04_21`](SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md) | Spec: Browser pane Z-order fixes |
 | [`SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24`](SPEC_BUILDER_MACOS_LINUX_CI_2026_06_24.md) | SPEC: agentmux-builder — macOS + Linux CI Release Workflows |
 | [`SPEC_CEF_LOG_ROBUSTNESS_2026_06_20`](SPEC_CEF_LOG_ROBUSTNESS_2026_06_20.md) | SPEC: Harden two CEF-init log errors (cache_path + debug-port bind) |
@@ -735,12 +742,15 @@ partial list.
 | [`SPEC_EDITOR_AND_APP_FIND_2026_06_17`](SPEC_EDITOR_AND_APP_FIND_2026_06_17.md) | Find: in-editor & app-wide |
 | [`SPEC_EDITOR_FILE_ENCODINGS_2026_06_17`](SPEC_EDITOR_FILE_ENCODINGS_2026_06_17.md) | Editor file encodings (beyond UTF-8) |
 | [`SPEC_EDITOR_FILE_TREE_2026-05-26`](SPEC_EDITOR_FILE_TREE_2026-05-26.md) | Spec: Editor Pane — File Tree Explorer + Extensions |
+| [`SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12`](SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md) | SPEC: Editor File-Tree "Open" Actions (Open to the Side / Open in New Tab) |
 | [`SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18`](SPEC_EDITOR_LIVE_FILE_RELOAD_2026_07_18.md) | Spec: live-reload for editor/preview panes on external file changes |
 | [`SPEC_EDITOR_LSP_AND_THEMES_2026-05-26`](SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md) | Spec: Editor Pane — LSP integration + VS Code themes |
 | [`SPEC_EDITOR_MARKDOWN_PREVIEW_SCROLLBAR_ALIGNMENT_2026_08_22`](SPEC_EDITOR_MARKDOWN_PREVIEW_SCROLLBAR_ALIGNMENT_2026_08_22.md) | SPEC: Editor pane — align markdown preview's scrollbar with source mode |
+| [`SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14`](SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md) | SPEC: Editor Widget Default UX — Scratch File + Collapsed Tree |
 | [`SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20`](SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20.md) | SPEC: Eliminate Transparent Console Windows on Windows |
 | [`SPEC_ERROR_CATALOG_2026_05_17`](SPEC_ERROR_CATALOG_2026_05_17.md) | SPEC: Global Error Code/Message Catalog |
 | [`SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27`](SPEC_FE_SOURCE_MAP_RESOLVER_2026_05_27.md) | SPEC: Frontend source-map resolver for piped error stacks |
+| [`SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14`](SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md) | SPEC: File Tree Right-Click Context Menu |
 | [`SPEC_FLOATING_PANE_REDOCK_2026-05-27`](SPEC_FLOATING_PANE_REDOCK_2026-05-27.md) | Spec: Floating pane re-dock (with multi-window + drop-target highlighting) |
 | [`SPEC_FORGE_AGENT_IDENTITY_2026_04_13`](SPEC_FORGE_AGENT_IDENTITY_2026_04_13.md) | Spec: Forge Agent Identity — GitHub + AWS + Git |
 | [`SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20`](SPEC_FORGE_IDENTITY_AGENT_INSTANCES_2026_04_20.md) | Spec: Forge + Identity + Agent Instances Refinement |
@@ -760,6 +770,7 @@ partial list.
 | [`SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24`](SPEC_LAUNCH_MODAL_PLAIN_LANGUAGE_2026_04_24.md) | Spec: Launch Modal Plain-Language Rewrite |
 | [`SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18`](SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md) | SPEC: Launch Modal — Profile Section + New Identity/Memory Modals |
 | [`SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19`](SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md) | SPEC: Launch Modal — State Machine Hardening |
+| [`SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN`](SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md) | SPEC: Layout Healer Misses Rootnode-Is-Orphan Case |
 | [`SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15`](SPEC_LINUX_DISTRO_TARGETS_AND_DOWNLOADS_PAGE_2026_09_15.md) | Widening Linux Package Targets + a Dedicated Downloads Page |
 | [`SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23`](SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md) | SPEC: Linux Sandbox — Recover From AppArmor's Unprivileged-Userns Restriction |
 | [`SPEC_LINUX_SPLASH_POLISH_2026_06_20`](SPEC_LINUX_SPLASH_POLISH_2026_06_20.md) | SPEC: Linux splash polish (fade-out, multi-monitor centering, rounded corners) |
@@ -799,6 +810,7 @@ partial list.
 | [`SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23`](SPEC_OS_TASKBAR_AGENT_ACTIVITY_INDICATOR_2026_05_23.md) | SPEC: OS-level activity indicator when an agent is busy |
 | [`SPEC_PANE_DRAG_TO_TAB_2026_07_10`](SPEC_PANE_DRAG_TO_TAB_2026_07_10.md) | Spec: Pane Drag-to-Tab (Cross-Tab Pane Relocation via Drag & Drop) |
 | [`SPEC_PANE_FILE_DROP_2026_05_30`](SPEC_PANE_FILE_DROP_2026_05_30.md) | SPEC: Drag-and-drop files into Terminal and Agent panes |
+| [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30`](SPEC_PANE_ICON_AND_TEXT_VISIBILITY_2026_05_30.md) | SPEC: Pane Icon and Text Visibility Pass |
 | [`SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05`](SPEC_PANE_RESIZE_AND_FLOATER_DRAG_NATIVE_LOOP_2026_06_05.md) | Spec (v2) — Floating-pane drag — host-side manual loop |
 | [`SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26`](SPEC_PANE_RESIZE_DIMENSION_OVERLAY_2026_05_26.md) | SPEC: Pane resize dimension overlay (WxH badge) |
@@ -811,6 +823,7 @@ partial list.
 | [`SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18`](SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md) | SPEC: Provider System-Tool Prerequisites |
 | [`SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14`](SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md) | SPEC: Reactive Workspace + Object Sync (frontend reactivity gap) |
 | [`SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15`](SPEC_REMOVE_NODE_HOVER_STRIP_2026_06_15.md) | SPEC: Remove the per-row hover strip (`NodeHoverStrip`) |
+| [`SPEC_RENAME_DRAG_REGION_ATTR`](SPEC_RENAME_DRAG_REGION_ATTR.md) | SPEC: Rename `data-tauri-drag-region` → `data-drag-region` |
 | [`SPEC_RENAME_WSH_TO_RPC_2026_04_17`](SPEC_RENAME_WSH_TO_RPC_2026_04_17.md) | SPEC: Rename WSH Files to RPC |
 | [`SPEC_RETRO_FOLLOWUPS_2026_04_12`](SPEC_RETRO_FOLLOWUPS_2026_04_12.md) | Spec: Retro Follow-ups — 2026-04-12 |
 | [`SPEC_ROBUST_MODAL_SYSTEM_2026_04_23`](SPEC_ROBUST_MODAL_SYSTEM_2026_04_23.md) | Spec: Robust Modal System |
@@ -851,6 +864,7 @@ partial list.
 | [`SPEC_TERMINAL_FLOW_CONTROL_2026_05_30`](SPEC_TERMINAL_FLOW_CONTROL_2026_05_30.md) | SPEC: Terminal flow control (PTY backpressure) |
 | [`SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31`](SPEC_TERMINAL_PREDICTIVE_LOCAL_ECHO_2026_05_31.md) | SPEC: Terminal Predictive Local Echo |
 | [`SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10`](SPEC_TERM_SCROLLBAR_ZERO_GAP_2026_06_10.md) | SPEC: Zero-Width Terminal Gap at All Zoom Levels |
+| [`SPEC_TEST_API_ACCESS`](SPEC_TEST_API_ACCESS.md) | SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename) |
 | [`SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16`](SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md) | SPEC: Tool Auto-Expand Panel (Replace Portal Overlay) |
 | [`SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13`](SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md) | Spec: Tool Hover Overlay + Scroll-on-Type |
 | [`SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14`](SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md) | Spec: Syntax highlighting inside the tool hover overlay |
@@ -873,9 +887,11 @@ partial list.
 | [`SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03`](SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md) | SPEC: Windows CEF Bundle Version Integrity & Loud Startup Failure |
 | [`SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13`](SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md) | SPEC: Robust DPI Handling for Window-Header Drag |
 | [`SPEC_WINDOW_DRAG_HANDLE_2026_06_06`](SPEC_WINDOW_DRAG_HANDLE_2026_06_06.md) | SPEC: Always-visible window drag handle (grip) in the tab bar |
+| [`SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29`](SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29.md) | Window drag → OS native move loop (Windows) |
 | [`SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14`](SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14.md) | SPEC: Window/Instance Naming Cleanup |
 | [`SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27`](SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) | SPEC: AgentMux Window & Process State Machine |
 | [`SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23`](SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md) | SPEC: Restore keyboard focus to the active pane on window re-activation (Windows) |
+| [`SPEC_WINDOW_RENAME_2026_04_27`](SPEC_WINDOW_RENAME_2026_04_27.md) | Window Rename + Click Behaviors in InstancePanel |
 | [`SPEC_WINDOW_TITLE_FORMAT_2026-05-13`](SPEC_WINDOW_TITLE_FORMAT_2026-05-13.md) | SPEC: Window Title Format — `Window - Tab - AgentMux` |
 | [`SPEC_WINDOW_TRANSPARENCY`](SPEC_WINDOW_TRANSPARENCY.md) | Spec: Full Window Transparency |
 | [`SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29`](SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md) | SPEC: "Working…" State — Liveness Model (rethink, not rewrite) |
@@ -974,7 +990,6 @@ Fix one when you touch it and know its real state.
 | [`PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22`](PLAN_SPLASH_TELEMETRY_OPEN_ITEMS_2026_07_22.md) | PLAN: Splash telemetry — consolidated open-items tracker |
 | [`RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07`](RESEARCH_TAB_TEAROFF_CROSS_PLATFORM_2026-05-07.md) | Tab tear-off — research report on cross-platform best practices |
 | [`SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01`](SAGA_ARCHITECTURE_EXECUTION_PLAN_2026-05-01.md) | Saga Architecture — Execution Plan |
-| [`SPEC-explicit-runtime-summary`](SPEC-explicit-runtime-summary.md) | SPEC: Explicit Runtime Summary in Agent Control Bar |
 | [`SPEC_AGENT_BUSY_ANIMATION_2026_06_21`](SPEC_AGENT_BUSY_ANIMATION_2026_06_21.md) | Agent Busy Animation — Aurora Bar |
 | [`SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20`](SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md) | SPEC: Agent Error Framework — Durable Error State + Global Error Surface |
 | [`SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11`](SPEC_AGENT_FAILURE_DIAGNOSTICS_2026_06_11.md) | SPEC: Agent Failure Diagnostics — Surfacing the "Why" Behind a Non-Zero Exit |
@@ -984,13 +999,7 @@ Fix one when you touch it and know its real state.
 | [`SPEC_ARMORY_MCP_SERVER_DEFAULT_SEED_CATALOG_2026_07_13`](SPEC_ARMORY_MCP_SERVER_DEFAULT_SEED_CATALOG_2026_07_13.md) | Spec: Default Seed Catalog for the Armory's MCP Servers Tab |
 | [`SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12`](SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md) | Spec: Completing Armory Phase 4 — the Storage Rename |
 | [`SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10`](SPEC_ARMORY_PRELOADED_CREATIVE_MCP_CONNECTORS_2026_07_10.md) | Spec: Preloaded MCP Server Connectors for Creative Apps (Ableton Live, TouchDesigner, and Others) |
-| [`SPEC_BROWSER_DOM_API`](SPEC_BROWSER_DOM_API.md) | SPEC: Browser-pane DOM API (`/agentmux/browser/*`) |
-| [`SPEC_BROWSER_PANE_FOCUS_LOCK`](SPEC_BROWSER_PANE_FOCUS_LOCK.md) | SPEC: Browser Pane Focus Lock |
-| [`SPEC_BROWSER_PANE_LIFECYCLE`](SPEC_BROWSER_PANE_LIFECYCLE.md) | SPEC: Browser Pane Lifecycle & State Machine |
-| [`SPEC_BROWSER_PANE_LIFECYCLE_TESTS`](SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md) | SPEC: Browser Pane Lifecycle — Automated Test Coverage |
 | [`SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11`](SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md) | Spec: Loading-Brain Indicator for Browser Panes (Messenger Widgets) |
-| [`SPEC_BROWSER_PANE_MODULARIZATION`](SPEC_BROWSER_PANE_MODULARIZATION.md) | SPEC: Browser Pane Code Modularization |
-| [`SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03`](SPEC_BROWSER_PANE_WINDOWS_TEARDOWN_SPIKE_2026_07_03.md) | SPEC: Windows browser-pane renderer teardown — Phase-0 spike scope |
 | [`SPEC_BULLETPROOF_TERMINALS_2026_05_21`](SPEC_BULLETPROOF_TERMINALS_2026_05_21.md) | SPEC_BULLETPROOF_TERMINALS_2026_05_21.md |
 | [`SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17`](SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md) | SPEC: Bundle-as-container v2 (GH issue #2024, item 3) |
 | [`SPEC_CEF_WINDOWS_PR_FINALIZATION_2026_07_27`](SPEC_CEF_WINDOWS_PR_FINALIZATION_2026_07_27.md) | Spec: Finalize Media pane + CEF Windows codec PRs, confirm CI pulls the real build |
@@ -1004,9 +1013,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_DEV_ENV_ISOLATION.fix-plan`](SPEC_DEV_ENV_ISOLATION.fix-plan.md) | Fix Plan: Dev Environment Isolation — macOS LaunchServices Gap |
 | [`SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05`](SPEC_DRONE_CANVAS_NODE_EDITOR_2026_06_05.md) | SPEC — Drone Canvas: Expansive Node-Graph Editor |
 | [`SPEC_DRONE_INLINE_NODE_PARAMS_2026_06_05`](SPEC_DRONE_INLINE_NODE_PARAMS_2026_06_05.md) | SPEC — Drone: Inline In-Node Parameter Editing |
-| [`SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12`](SPEC_EDITOR_FILE_TREE_OPEN_ACTIONS_2026_07_12.md) | SPEC: Editor File-Tree "Open" Actions (Open to the Side / Open in New Tab) |
-| [`SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14`](SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md) | SPEC: Editor Widget Default UX — Scratch File + Collapsed Tree |
-| [`SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14`](SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md) | SPEC: File Tree Right-Click Context Menu |
 | [`SPEC_FLOATER_DRAG_FIX_PLAN_2026_06_05`](SPEC_FLOATER_DRAG_FIX_PLAN_2026_06_05.md) | Fix Plan — Floater Drag Remaining Issues |
 | [`SPEC_FLOATING_PANE_MULTI_MONITOR_TASKBAR_2026_07_27`](SPEC_FLOATING_PANE_MULTI_MONITOR_TASKBAR_2026_07_27.md) | Spec: taskbar/Dock presence for floating panes dragged to another monitor |
 | [`SPEC_HARD_CORNERS_2026_05_26`](SPEC_HARD_CORNERS_2026_05_26.md) | SPEC: Hard corners on buttons and modals |
@@ -1014,7 +1020,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21`](SPEC_INSTANCE_LIFECYCLE_CONSOLIDATION_2026_06_21.md) | SPEC — Instance Lifecycle Consolidation |
 | [`SPEC_LARGE_TIER_MODULARIZATION_INDEX_2026_07_02`](SPEC_LARGE_TIER_MODULARIZATION_INDEX_2026_07_02.md) | Large-Tier Modularization — Index & Sequencing |
 | [`SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25`](SPEC_LAUNCH_MODAL_PANE_SCOPE_2026_05_25.md) | SPEC: Move launch modal from tab-scope to pane-scope lock |
-| [`SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN`](SPEC_LAYOUT_HEAL_ROOTNODE_ORPHAN.md) | SPEC: Layout Healer Misses Rootnode-Is-Orphan Case |
 | [`SPEC_LINUX_TEAROFF_HEADER_ONLY_2026-06-20`](SPEC_LINUX_TEAROFF_HEADER_ONLY_2026-06-20.md) | Fix Spec: Linux pane tear-off restricted to header only |
 | [`SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18`](SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md) | SPEC: macOS Launch Coherence — Per-Version Bundle ID, Reopen Handler, Unix Window Forward |
 | [`SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22`](SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md) | SPEC: macOS reopen → open a new window (kill "AgentMux is not responding") |
@@ -1027,7 +1032,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_MSIX_PACKAGING_2026_05_30`](SPEC_MSIX_PACKAGING_2026_05_30.md) | SPEC: MSIX Packaging for the Microsoft Store |
 | [`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20`](SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) | SPEC: Multi-Agent Fleet Control — Select, Broadcast, and Bulk-Act on Many Agents at Once |
 | [`SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23`](SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md) | SPEC — Nightly cross-platform CI builds |
-| [`SPEC_PANE_FOCUS_STRESS_TEST`](SPEC_PANE_FOCUS_STRESS_TEST.md) | SPEC: Pane Focus Stress Test |
 | [`SPEC_PANE_REFLOW_ANIMATION_2026_05_29`](SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md) | SPEC: Coordinated Pane Reflow Animation (DOM + native browser panes) |
 | [`SPEC_PARK_AND_BLANK_CLOSE_2026_07_09`](SPEC_PARK_AND_BLANK_CLOSE_2026_07_09.md) | SPEC — Park-and-blank for non-demotable window closes (renderer-zombie commit leak) |
 | [`SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02`](SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md) | Spec: Preset → Bundle internal refactor (Composable Agent Model, Phases 2–4) |
@@ -1036,9 +1040,7 @@ Fix one when you touch it and know its real state.
 | [`SPEC_REDOCK_FRAMEWORK_HARDENING_2026_07_27`](SPEC_REDOCK_FRAMEWORK_HARDENING_2026_07_27.md) | Spec: schedule the deferred redock/floating-pane structural fixes (P3, P6) |
 | [`SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22`](SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md) | SPEC — Reducer single-source-of-truth (SSOT) consolidation |
 | [`SPEC_REMOVE_BOOKMARKS_2026_06_11`](SPEC_REMOVE_BOOKMARKS_2026_06_11.md) | SPEC: Remove Bookmark Feature — 2026-06-11 |
-| [`SPEC_RENAME_DRAG_REGION_ATTR`](SPEC_RENAME_DRAG_REGION_ATTR.md) | SPEC: Rename `data-tauri-drag-region` → `data-drag-region` |
 | [`SPEC_TAB_COLORS`](SPEC_TAB_COLORS.md) | Spec: Tab Color System |
-| [`SPEC_TEST_API_ACCESS`](SPEC_TEST_API_ACCESS.md) | SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename) |
 | [`SPEC_TOOLCHAIN_MANAGER_2026-06-15`](SPEC_TOOLCHAIN_MANAGER_2026-06-15.md) | SPEC: Toolchain Manager + GUI-launch PATH enrichment |
 | [`SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28`](SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28.md) | SPEC: Tool-hover consolidation (2026-05-28) |
 | [`SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22`](SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22.md) | SPEC_TOOL_LOG_INPLACE_ANIMATION_2026_06_22 |
@@ -1048,8 +1050,6 @@ Fix one when you touch it and know its real state.
 | [`SPEC_WAVE_TO_MUX_RENAME_2026-05-14`](SPEC_WAVE_TO_MUX_RENAME_2026-05-14.md) | SPEC: `Wave*` → `Mux*` rename (purge Wave Terminal branding) |
 | [`SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22`](SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md) | SPEC — Stale window count "(N)" after closing a Views window |
 | [`SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29`](SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md) | Window drag — host-side manual native move loop (Windows) |
-| [`SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29`](SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29.md) | Window drag → OS native move loop (Windows) |
-| [`SPEC_WINDOW_RENAME_2026_04_27`](SPEC_WINDOW_RENAME_2026_04_27.md) | Window Rename + Click Behaviors in InstancePanel |
 | [`SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08`](SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md) | SPEC — WRR quit gate fires on a live window (false exit on non-last window close) |
 | [`STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27`](STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md) | Status: macOS codec-enabled patched CEF rebuild (issue #2311) |
 | [`VSCODE_MENUBAR_REFERENCE`](VSCODE_MENUBAR_REFERENCE.md) | VS Code Menu Bar — Reference for AgentMux |
