@@ -249,6 +249,19 @@ jobs:
       - name: Doc links resolve (changed files only)
         run: node scripts/check-doc-links.mjs
 
+      # docs/README.md is the map -- it is what tells a reader where a kind of
+      # doc belongs. A wrong map is worse than none, and this one has gone stale
+      # twice: the 2026-08-03 audit found it stale (the note is still in the
+      # file, about itself), and docs/handoff/ was deleted by a docs cleanup
+      # sweep (#2407) that did not update the table, so the map advertised a
+      # directory that had not existed for six weeks.
+      #
+      # Deliberately NOT changed-files-scoped, unlike the gates above: it reads
+      # one file and its backlog was exactly two, both fixed in the commit that
+      # added it -- so it can be absolute without failing anyone else's PR.
+      - name: docs/ directory map is accurate
+        run: node scripts/check-docs-dir-map.mjs
+
       # The three gates below already existed as Taskfile `check:*` tasks but
       # were wired into nothing — defined, documented, and never run. Each
       # encodes a regression that already happened once (see the spec/retro in
