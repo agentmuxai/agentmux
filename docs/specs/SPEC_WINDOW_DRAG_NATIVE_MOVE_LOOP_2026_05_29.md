@@ -1,6 +1,6 @@
 ---
 title: Window drag — replace per-mousemove IPC with the OS native move loop
-**Status:** Draft / Proposed
+status: Draft / Proposed
 date: 2026-05-29
 author: AgentX
 front: window-drag (UX-latency umbrella #1161)

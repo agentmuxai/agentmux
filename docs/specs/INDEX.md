@@ -887,7 +887,6 @@ partial list.
 | [`SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03`](SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md) | SPEC: Windows CEF Bundle Version Integrity & Loud Startup Failure |
 | [`SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13`](SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md) | SPEC: Robust DPI Handling for Window-Header Drag |
 | [`SPEC_WINDOW_DRAG_HANDLE_2026_06_06`](SPEC_WINDOW_DRAG_HANDLE_2026_06_06.md) | SPEC: Always-visible window drag handle (grip) in the tab bar |
-| [`SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29`](SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29.md) | Window drag → OS native move loop (Windows) |
 | [`SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14`](SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14.md) | SPEC: Window/Instance Naming Cleanup |
 | [`SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27`](SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) | SPEC: AgentMux Window & Process State Machine |
 | [`SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23`](SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md) | SPEC: Restore keyboard focus to the active pane on window re-activation (Windows) |
@@ -1050,6 +1049,7 @@ Fix one when you touch it and know its real state.
 | [`SPEC_WAVE_TO_MUX_RENAME_2026-05-14`](SPEC_WAVE_TO_MUX_RENAME_2026-05-14.md) | SPEC: `Wave*` → `Mux*` rename (purge Wave Terminal branding) |
 | [`SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22`](SPEC_WINDOW_COUNT_STALE_ON_VIEWS_CLOSE_2026_06_22.md) | SPEC — Stale window count "(N)" after closing a Views window |
 | [`SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29`](SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.md) | Window drag — host-side manual native move loop (Windows) |
+| [`SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29`](SPEC_WINDOW_DRAG_NATIVE_MOVE_LOOP_2026_05_29.md) | Window drag → OS native move loop (Windows) |
 | [`SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08`](SPEC_WRR_QUIT_FALSE_POSITIVE_2026_07_08.md) | SPEC — WRR quit gate fires on a live window (false exit on non-last window close) |
 | [`STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27`](STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md) | Status: macOS codec-enabled patched CEF rebuild (issue #2311) |
 | [`VSCODE_MENUBAR_REFERENCE`](VSCODE_MENUBAR_REFERENCE.md) | VS Code Menu Bar — Reference for AgentMux |
