@@ -16,6 +16,23 @@ const CLAUDE_BASE = [
     "--dangerously-skip-permissions",
 ];
 
+// Claude's real persistentLaunchArgs (providers/catalog.ts, kept in sync with
+// `static CLAUDE` in agentmux-srv/src/backend/providers.rs). Note the control-
+// protocol pair at the end — this is what runtime-apply.ts rebuilds on every
+// /model, /effort or permission-mode change to a running persistent agent.
+const CLAUDE_PERSISTENT_BASE = [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-prompt-tool",
+    "stdio",
+    "--permission-mode",
+    "default",
+];
+
 const cfg = (over: Partial<AgentRuntimeConfig> = {}): AgentRuntimeConfig => ({
     permissionMode: "bypass",
     model: "sonnet",
@@ -119,6 +136,54 @@ describe("buildRuntimeArgs", () => {
         it("no --yolo when the permission mode is default", () => {
             const out = buildRuntimeArgs(QWEN_BASE, cfg({ permissionMode: "default" }), "qwen");
             expect(out).not.toContain("--yolo");
+        });
+    });
+
+    // Both provider catalogs state this in capitals: --dangerously-skip-
+    // permissions DISABLES canUseTool routing, so it must never reach a
+    // control-protocol agent. Nothing enforced it, and this function is what
+    // rebuilds a running agent's args on every runtime change — so the FIRST
+    // /model on a persistent Claude agent used to switch the CLI out of the
+    // control protocol and leave AskUserQuestion unanswerable from then on.
+    describe("claude persistent (Agent SDK control protocol)", () => {
+        it("never hands a control-protocol agent the bypass flag", () => {
+            const out = buildRuntimeArgs(CLAUDE_PERSISTENT_BASE, cfg(), "claude");
+            expect(out).not.toContain("--dangerously-skip-permissions");
+        });
+
+        it("keeps the control-protocol transport intact", () => {
+            const out = buildRuntimeArgs(CLAUDE_PERSISTENT_BASE, cfg(), "claude");
+            expect(out).toContain("--permission-prompt-tool");
+            expect(out).toContain("stdio");
+            // bypass maps onto default: srv's ControlChannel auto-allows every
+            // tool but AskUserQuestion, so the yolo UX is unchanged.
+            expect(out).toContain("--permission-mode");
+            expect(out[out.indexOf("--permission-mode") + 1]).toBe("default");
+        });
+
+        it("still honours an explicitly chosen non-bypass mode", () => {
+            const out = buildRuntimeArgs(
+                CLAUDE_PERSISTENT_BASE,
+                cfg({ permissionMode: "plan" }),
+                "claude",
+            );
+            expect(out[out.indexOf("--permission-mode") + 1]).toBe("plan");
+            expect(out).not.toContain("--dangerously-skip-permissions");
+        });
+
+        it("is idempotent — rebuilding its own output does not drift", () => {
+            // runtime-apply.ts writes the result to cmd:args, and the next
+            // change rebuilds from THAT, not from the catalog.
+            const once = buildRuntimeArgs(CLAUDE_PERSISTENT_BASE, cfg(), "claude");
+            const twice = buildRuntimeArgs(once, cfg(), "claude");
+            expect(twice).toEqual(once);
+        });
+
+        it("leaves the non-persistent claude path alone", () => {
+            // CLAUDE_BASE carries --dangerously-skip-permissions and no
+            // control-protocol flag; bypass must still mean bypass there.
+            const out = buildRuntimeArgs(CLAUDE_BASE, cfg(), "claude");
+            expect(out).toContain("--dangerously-skip-permissions");
         });
     });
 });

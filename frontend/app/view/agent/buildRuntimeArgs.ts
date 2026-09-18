@@ -31,6 +31,35 @@ const PERMISSION_STRIP = new Set([
     "--yolo",
 ]);
 
+/**
+ * The flag that says "this agent speaks the Agent SDK control protocol".
+ *
+ * Both provider catalogs state the same invariant in capitals — see
+ * `providers/catalog.ts`'s `claude` entry and `static CLAUDE` in
+ * `agentmux-srv/src/backend/providers.rs`:
+ *
+ * > `--dangerously-skip-permissions` DISABLES that routing (it bypasses
+ * > canUseTool), so it must NOT be in persistent_launch_args.
+ *
+ * Nothing enforced it here, and this function is what rebuilds a running
+ * agent's args on every `/model`, `/effort` or permission-mode change
+ * (`runtime-apply.ts`, `useAgentCommands.ts`). With the default runtime config
+ * — `permissionMode: "bypass"` — it stripped `--permission-mode default` and
+ * appended `--dangerously-skip-permissions`, so the FIRST runtime change on a
+ * persistent Claude agent silently switched the CLI out of the control
+ * protocol. `can_use_tool` then stops arriving, `pending_questions` never
+ * fills, and AskUserQuestion goes unanswerable for that agent from then on —
+ * permanently, because the rebuilt args are written to `cmd:args` block meta
+ * and every later spawn reads them fresh.
+ *
+ * The user-visible "yolo" behaviour does not depend on that flag: the
+ * persistent controller's ControlChannel auto-allows every tool except
+ * AskUserQuestion (`persistent.rs::handle_control_frame`). So a
+ * control-protocol agent maps `bypass` onto `--permission-mode default` and
+ * keeps the transport alive, which is what the catalogs intended all along.
+ */
+const CONTROL_PROTOCOL_FLAG = "--permission-prompt-tool";
+
 // Default codex model. The Claude-named `ModelChoice` (opus/sonnet/haiku) does
 // not apply to codex, and codex 0.116.0's baked default (gpt-5.3-codex) was
 // rejected for ChatGPT-account auth. gpt-5.5 remains valid — re-verified
@@ -95,7 +124,15 @@ export function buildRuntimeArgs(
             args.push("--yolo");
         }
     } else if (providerId !== "codex") {
-        const permFlags = PERMISSION_FLAGS[config.permissionMode] ?? PERMISSION_FLAGS.bypass;
+        // A control-protocol agent must never be handed
+        // `--dangerously-skip-permissions` — see CONTROL_PROTOCOL_FLAG. `bypass`
+        // becomes `default`; srv's auto-allow already provides the yolo UX.
+        const usesControlProtocol = baseLaunchArgs.includes(CONTROL_PROTOCOL_FLAG);
+        const mode =
+            usesControlProtocol && config.permissionMode === "bypass"
+                ? "default"
+                : config.permissionMode;
+        const permFlags = PERMISSION_FLAGS[mode] ?? PERMISSION_FLAGS.bypass;
         args.push(...permFlags);
     }
 
