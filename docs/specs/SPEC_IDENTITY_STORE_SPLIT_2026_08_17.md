@@ -3,7 +3,7 @@
 **Date:** 2026-08-17
 **Author:** AgentY (agent, `~/.agentmux/agents/agenty-0629j`), design confirmed with the human operator
 (robust fix approved; "engineering time is not a factor").
-**Status:** proposed — Approved design — implementation in progress, sequenced as several PRs (§6).
+**Status:** active — approved design, partially built, sequenced as several PRs (§6). §6 step 1 (Store A plumbing + links, `resolve_identity_store_path` / `open_identity_store`, the relaunch/spawn rewiring that fixes the reported continuity bug) and its `m0022_identity_store_links_backfill` migration shipped in #2632, the PR this doc was added in. Steps 1b (bundles/drones/muxbus/native-memory/cron call-site rewiring), 2 (`disposable_test` + Store B split — the flag exists today only as a comment in m0022 marking the deferral), 3, and 5 are still open. This is genuinely mid-flight work, not an unbuilt proposal.
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main`. Every file:line citation below was independently
 verified, not taken from a sub-agent's report on faith.
 **Related:**
